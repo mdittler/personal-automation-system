@@ -7,15 +7,21 @@ import {
 	handleCallbackQuery,
 	handleCommand,
 	handleMessage,
+	handleScheduledJob,
 	init,
 	isGroceryAddIntent,
 	isGroceryGenerateIntent,
 	isGroceryViewIntent,
+	isMealPlanGenerateIntent,
+	isMealPlanViewIntent,
+	isMealSwapIntent,
 	isPantryAddIntent,
 	isPantryRemoveIntent,
 	isPantryViewIntent,
+	isWhatCanIMakeIntent,
+	isWhatsForDinnerIntent,
 } from '../index.js';
-import type { GroceryList, Household, Recipe } from '../types.js';
+import type { GroceryList, Household, MealPlan, Recipe } from '../types.js';
 
 function createMockScopedStore(overrides: Record<string, unknown> = {}) {
 	return {
@@ -209,8 +215,8 @@ describe('Hearthstone App', () => {
 
 	describe('handleCommand — unimplemented', () => {
 		it('shows coming soon for unimplemented commands', async () => {
-			const ctx = createTestMessageContext({ text: '/mealplan', userId: 'user1' });
-			await handleCommand?.('mealplan', [], ctx);
+			const ctx = createTestMessageContext({ text: '/freezer', userId: 'user1' });
+			await handleCommand?.('freezer', [], ctx);
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'user1',
 				expect.stringContaining('not yet implemented'),
@@ -536,7 +542,7 @@ describe('Hearthstone App', () => {
 				id: 'chicken-soup-def',
 				title: 'Chicken Soup',
 			};
-			const callCount = 0;
+			const _callCount = 0;
 			sharedStore.read.mockImplementation(async (path: string) => {
 				if (path === 'household.yaml') return stringify(sampleHousehold);
 				if (path === 'recipes/chicken-stir-fry-abc.yaml') return stringify(sampleRecipe);
@@ -1587,6 +1593,361 @@ describe('Hearthstone App', () => {
 				handleCallbackQuery?.('toggle:0', { userId: 'user1', chatId: 123, messageId: 456 }),
 			).resolves.toBeUndefined();
 			expect(services.logger.error).toHaveBeenCalled();
+		});
+	});
+
+	// ─── Meal Planning (H3) ─────────────────────────────────────────
+
+	describe('Meal Planning (H3)', () => {
+		const samplePlan: MealPlan = {
+			id: 'plan1',
+			startDate: '2026-03-30',
+			endDate: '2026-04-05',
+			meals: [
+				{
+					recipeId: 'chicken-stir-fry-abc',
+					recipeTitle: 'Chicken Stir Fry',
+					date: '2026-03-31',
+					mealType: 'dinner',
+					votes: {},
+					cooked: false,
+					rated: false,
+					isNew: false,
+				},
+				{
+					recipeId: 'new-pasta-suggestion',
+					recipeTitle: 'Lemon Herb Pasta',
+					date: '2026-04-01',
+					mealType: 'dinner',
+					votes: {},
+					cooked: false,
+					rated: false,
+					isNew: true,
+					description: 'A light and refreshing pasta with lemon and herbs.',
+				},
+			],
+			status: 'active',
+			createdAt: '2026-03-29T00:00:00.000Z',
+			updatedAt: '2026-03-29T00:00:00.000Z',
+		};
+
+		describe('intent detection — meal planning', () => {
+			it('detects meal plan view intents', () => {
+				expect(isMealPlanViewIntent('show the meal plan')).toBe(true);
+				expect(isMealPlanViewIntent("what's planned this week")).toBe(true);
+				expect(isMealPlanViewIntent('weekly plan')).toBe(true);
+				expect(isMealPlanViewIntent('meal plan')).toBe(true);
+			});
+
+			it('detects meal plan generate intents', () => {
+				expect(isMealPlanGenerateIntent('plan meals for this week')).toBe(true);
+				expect(isMealPlanGenerateIntent('generate a meal plan')).toBe(true);
+				expect(isMealPlanGenerateIntent('plan my dinners')).toBe(true);
+				expect(isMealPlanGenerateIntent('create a meal plan')).toBe(true);
+			});
+
+			it('detects whats for dinner intents', () => {
+				expect(isWhatsForDinnerIntent("what's for dinner")).toBe(true);
+				expect(isWhatsForDinnerIntent('what are we eating tonight')).toBe(true);
+				expect(isWhatsForDinnerIntent("what's for dinner tonight")).toBe(true);
+				expect(isWhatsForDinnerIntent("what's tonight")).toBe(true);
+			});
+
+			it('detects what can I make intents', () => {
+				expect(isWhatCanIMakeIntent('what can I make')).toBe(true);
+				expect(isWhatCanIMakeIntent('what can I cook with what we have')).toBe(true);
+				expect(isWhatCanIMakeIntent('what can i make tonight')).toBe(true);
+			});
+
+			it('detects meal swap intents', () => {
+				expect(isMealSwapIntent('swap Monday')).toBe(true);
+				expect(isMealSwapIntent("change Tuesday's dinner")).toBe(true);
+				expect(isMealSwapIntent('replace Friday')).toBe(true);
+				expect(isMealSwapIntent('swap today')).toBe(true);
+			});
+
+			it('does not false-positive on unrelated text', () => {
+				expect(isMealPlanViewIntent('find me a recipe')).toBe(false);
+				expect(isMealPlanGenerateIntent('show grocery list')).toBe(false);
+				expect(isWhatsForDinnerIntent('hello there')).toBe(false);
+				expect(isWhatCanIMakeIntent('what is for dinner')).toBe(false);
+				expect(isMealSwapIntent('swap buttermilk for yogurt')).toBe(false);
+			});
+
+			it('"what\'s for dinner" does NOT trigger food question', () => {
+				// This is a routing priority test — whatsForDinner should match before foodQuestion
+				// The food question intent pattern includes "substitute...for" but not "what's for dinner"
+				expect(isWhatsForDinnerIntent("what's for dinner")).toBe(true);
+			});
+		});
+
+		describe('handleCommand — /mealplan', () => {
+			it('shows no-plan message with generate button when no plan exists', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+				const ctx = createTestMessageContext({ text: '/mealplan', userId: 'user1' });
+				await handleCommand?.('mealplan', [], ctx);
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('No meal plan'),
+					expect.any(Array),
+				);
+			});
+
+			it('/mealplan generate calls LLM and sends plan', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+				sharedStore.list.mockResolvedValue([]);
+				vi.mocked(services.llm.complete).mockResolvedValue(
+					JSON.stringify([
+						{
+							recipeId: 'test-recipe',
+							recipeTitle: 'Test Meal',
+							date: '2026-04-06',
+							isNew: false,
+						},
+					]),
+				);
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				const ctx = createTestMessageContext({ text: '/mealplan generate', userId: 'user1' });
+				await handleCommand?.('mealplan', ['generate'], ctx);
+
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('Generating'),
+				);
+				expect(services.llm.complete).toHaveBeenCalled();
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+		});
+
+		describe('handleCommand — /whatsfordinner', () => {
+			it('shows message when no plan exists', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+				const ctx = createTestMessageContext({ text: '/whatsfordinner', userId: 'user1' });
+				await handleCommand?.('whatsfordinner', [], ctx);
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('No meal plan'),
+				);
+			});
+		});
+
+		describe('handleCallbackQuery — meal plan callbacks', () => {
+			it('grocery-from-plan generates grocery list from plan recipes', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path === 'meal-plans/current.yaml') return stringify(samplePlan);
+					if (path.startsWith('recipes/')) return stringify(sampleRecipe);
+					// pantry.yaml and grocery/active.yaml should return empty
+					return '';
+				});
+				sharedStore.list.mockResolvedValue(['chicken-stir-fry-abc.yaml']);
+				// The grocery pipeline calls deduplicateAndAssignDepartments which calls LLM
+				// Return the dedup format: an array of {name, quantity, unit, department}
+				vi.mocked(services.llm.complete).mockResolvedValue(
+					JSON.stringify([
+						{ name: 'chicken breast', quantity: 1, unit: 'lb', department: 'Meat & Seafood' },
+						{ name: 'broccoli', quantity: 2, unit: 'cups', department: 'Produce' },
+					]),
+				);
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				await handleCallbackQuery?.('grocery-from-plan', {
+					userId: 'user1',
+					chatId: 123,
+					messageId: 456,
+				});
+				expect(services.telegram.editMessage).toHaveBeenCalledWith(
+					123,
+					456,
+					expect.stringContaining('Generated grocery list from meal plan'),
+					expect.any(Array),
+				);
+			});
+
+			it('grocery-from-plan shows message when no plan exists', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+				await handleCallbackQuery?.('grocery-from-plan', {
+					userId: 'user1',
+					chatId: 123,
+					messageId: 456,
+				});
+				expect(services.telegram.editMessage).toHaveBeenCalledWith(
+					123,
+					456,
+					expect.stringContaining('No meal plan'),
+				);
+			});
+
+			it('regenerate-plan calls generatePlan and edits message', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path === 'meal-plans/current.yaml') return stringify(samplePlan);
+					return '';
+				});
+				sharedStore.list.mockResolvedValue([]);
+				vi.mocked(services.llm.complete).mockResolvedValue(
+					JSON.stringify([
+						{
+							recipeId: 'new-recipe',
+							recipeTitle: 'New Meal',
+							date: '2026-04-06',
+							isNew: false,
+						},
+					]),
+				);
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				await handleCallbackQuery?.('regenerate-plan', {
+					userId: 'user1',
+					chatId: 123,
+					messageId: 456,
+				});
+				expect(services.llm.complete).toHaveBeenCalled();
+				expect(services.telegram.editMessage).toHaveBeenCalledWith(
+					123,
+					456,
+					expect.stringContaining('Meal Plan'),
+					expect.any(Array),
+				);
+			});
+		});
+
+		describe('handleScheduledJob', () => {
+			it('generates weekly plan and sends to all members', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+				sharedStore.list.mockResolvedValue([]);
+				vi.mocked(services.llm.complete).mockResolvedValue(
+					JSON.stringify([
+						{
+							recipeId: 'test-recipe',
+							recipeTitle: 'Weekly Meal',
+							date: '2026-04-06',
+							isNew: false,
+						},
+					]),
+				);
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				await handleScheduledJob?.('generate-weekly-plan');
+				expect(services.llm.complete).toHaveBeenCalled();
+				// Should send to both members of the household
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledTimes(2);
+			});
+
+			it('skips when no household exists', async () => {
+				sharedStore.read.mockResolvedValue('');
+				await handleScheduledJob?.('generate-weekly-plan');
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+
+			it('skips when plan already exists for upcoming week', async () => {
+				// We need to set up a plan whose startDate matches nextMonday
+				const today = new Date().toISOString().slice(0, 10);
+				const d = new Date(`${today}T00:00:00Z`);
+				const dow = d.getUTCDay();
+				const daysUntilMonday = dow === 0 ? 1 : dow === 1 ? 0 : 8 - dow;
+				d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+				const upcomingMonday = d.toISOString().slice(0, 10);
+
+				const existingPlan: MealPlan = {
+					...samplePlan,
+					startDate: upcomingMonday,
+				};
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path === 'meal-plans/current.yaml') return stringify(existingPlan);
+					return '';
+				});
+				await handleScheduledJob?.('generate-weekly-plan');
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+
+			it('ignores unrelated job IDs', async () => {
+				await handleScheduledJob?.('some-other-job');
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('handleMessage — meal planning intents', () => {
+			beforeEach(() => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+			});
+
+			it('"what\'s for dinner" routes to dinner handler, not food question', async () => {
+				const ctx = createTestMessageContext({
+					text: "what's for dinner",
+					userId: 'user1',
+				});
+				await handleMessage(ctx);
+
+				// Should NOT call LLM (food question would call LLM)
+				expect(services.llm.complete).not.toHaveBeenCalled();
+				// Should show "no meal plan" message
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('No meal plan'),
+				);
+			});
+
+			it('"what can I make" routes to pantry matcher', async () => {
+				const ctx = createTestMessageContext({
+					text: 'what can I make',
+					userId: 'user1',
+				});
+				await handleMessage(ctx);
+
+				// With empty pantry, should show pantry empty message
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('pantry is empty'),
+				);
+			});
+
+			it('"plan meals for this week" routes to generate handler', async () => {
+				sharedStore.list.mockResolvedValue([]);
+				vi.mocked(services.llm.complete).mockResolvedValue(
+					JSON.stringify([
+						{
+							recipeId: 'test',
+							recipeTitle: 'Test',
+							date: '2026-04-06',
+							isNew: false,
+						},
+					]),
+				);
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				const ctx = createTestMessageContext({
+					text: 'plan meals for this week',
+					userId: 'user1',
+				});
+				await handleMessage(ctx);
+
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('Generating'),
+				);
+				expect(services.llm.complete).toHaveBeenCalled();
+			});
 		});
 	});
 });
