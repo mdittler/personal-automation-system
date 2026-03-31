@@ -191,6 +191,29 @@ describe('generatePlan', () => {
 
 		await expect(generatePlan(services, [], [], '2026-03-31', 'America/New_York')).rejects.toThrow();
 	});
+
+	it('handles LLM returning an object with a meals key wrapping the array', async () => {
+		const meals = [
+			{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false },
+			{ recipeId: 'r2', recipeTitle: 'Salmon', date: '2026-04-01', isNew: true, description: 'Fresh salmon' },
+		];
+		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify({ meals }));
+
+		const result = await generatePlan(services, [], [], '2026-03-31', 'America/New_York');
+
+		expect(result.meals).toHaveLength(2);
+		expect(result.meals[0].recipeTitle).toBe('Pasta');
+		expect(result.meals[1].recipeTitle).toBe('Salmon');
+	});
+
+	it('throws when LLM returns a JSON primitive (string) rather than object/array', async () => {
+		// JSON.stringify("not a valid plan") => '"not a valid plan"' — valid JSON but a string, not array/object
+		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify('not a valid plan'));
+
+		await expect(generatePlan(services, [], [], '2026-03-31', 'America/New_York')).rejects.toThrow(
+			'expected a JSON object or array',
+		);
+	});
 });
 
 describe('swapMeal', () => {

@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-hearthstone |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-03-30 |
+| **Last Updated** | 2026-03-31 |
 
 ## Conventions
 
@@ -203,20 +203,20 @@ Users can update any field on a recipe via natural language (e.g., "add the tag 
 Generate a meal plan for the upcoming period respecting configurable meal types, new-to-existing recipe ratio, dietary preferences/restrictions, macro targets, cuisine variety, seasonal produce, and recent cooking history.
 
 **Standard tests:**
-- `meal-planner.test.ts` > `generatePlan` > generates a plan with the correct number of days
-- `meal-planner.test.ts` > `generatePlan` > includes seasonal produce hints in LLM prompt
-- `meal-planner.test.ts` > `generatePlan` > respects new recipe ratio from config
-- `meal-planner.test.ts` > `generatePlan` > includes recent cooking history in prompt
-- `meal-plan-store.test.ts` > `savePlan` > saves generated plan to store
-- `app.test.ts` > `handleCommand — /mealplan generate` > generates and saves a new plan
+- `meal-planner.test.ts` > `generatePlan` > generates a MealPlan from LLM response
+- `meal-planner.test.ts` > `generatePlan` > calls LLM with standard tier
+- `meal-planner.test.ts` > `generatePlan` > includes location in prompt
+- `meal-planner.test.ts` > `generatePlan` > includes dietary preferences in prompt
+- `meal-plan-store.test.ts` > `savePlan` > writes to correct path
+- `app.test.ts` > `handleCommand — /mealplan` > `/mealplan generate calls LLM and sends plan`
 
 **Edge case tests:**
-- `meal-planner.test.ts` > `generatePlan` > handles empty recipe library gracefully
-- `meal-planner.test.ts` > `generatePlan` > handles LLM failure gracefully
-- `meal-planner.test.ts` > `generatePlan` > handles no seasonal produce for month
-- `meal-plan-store.test.ts` > `loadCurrentPlan` > returns null when no plan exists
-- `app.test.ts` > `handleCommand — /mealplan generate` > requires household
-- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > generates plan on schedule
+- `meal-planner.test.ts` > `generatePlan` > throws on LLM failure
+- `meal-planner.test.ts` > `generatePlan` > throws on invalid JSON from LLM
+- `meal-plan-store.test.ts` > `loadCurrentPlan` > returns null for empty content
+- `meal-plan-store.test.ts` > `loadCurrentPlan` > returns null for malformed YAML
+- `app.test.ts` > `handleCommand — /mealplan` > shows no-plan message with generate button when no plan exists
+- `app.test.ts` > `handleScheduledJob` > generates weekly plan and sends to all members
 
 **Fixes:** None
 
@@ -229,15 +229,15 @@ Generate a meal plan for the upcoming period respecting configurable meal types,
 When the plan calls for new recipes, the LLM generates suggestions matching household preferences, dietary needs, and constraints with full recipe details and estimated macros.
 
 **Standard tests:**
-- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > generates a new recipe suggestion via LLM
-- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > includes dietary preferences in prompt
-- `meal-planner.test.ts` > `swapMeal` > suggests a new recipe when swapping a day
-- `app.test.ts` > `handleMessage — swap meal intent` > generates and shows new suggestion on swap
+- `meal-planner.test.ts` > `generateNewRecipeDetails` > returns a ParsedRecipe from LLM response
+- `meal-planner.test.ts` > `generateNewRecipeDetails` > calls LLM with standard tier
+- `meal-planner.test.ts` > `swapMeal` > returns a PlannedMeal from LLM response
+- `app.test.ts` > `handleMessage — meal swap` > swap happy path: replaces Monday meal, saves plan, sends updated plan
 
 **Edge case tests:**
-- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > handles LLM parse failure gracefully
-- `meal-planner.test.ts` > `swapMeal` > returns error when no plan exists
-- `app.test.ts` > `handleMessage — swap meal intent` > handles swap with no current plan
+- `meal-planner.test.ts` > `generateNewRecipeDetails` > throws on LLM failure
+- `meal-planner.test.ts` > `swapMeal` > throws on LLM failure
+- `app.test.ts` > `handleMessage — meal swap` > swap with no current meal plan tells user to generate one
 
 **Fixes:** None
 
@@ -282,14 +282,14 @@ After a planned meal's cooking window passes, send a message to all household me
 Any household member can ask "what's for dinner" and get tonight's planned meal, brief prep summary, who's cooking (if assigned), and any prep steps that should have already happened.
 
 **Standard tests:**
-- `meal-plan-store.test.ts` > `getMealForDate` > returns the planned meal for a given date
-- `app.test.ts` > `handleMessage — whats for dinner intent` > returns tonight's meal from plan
-- `app.test.ts` > `handleMessage — whats for dinner intent` > formats meal name and description
+- `meal-plan-store.test.ts` > `getTonightsMeal` > returns meal matching the given date
+- `meal-plan-store.test.ts` > `getTonightsMeal` > returns the correct meal from multiple options
+- `natural-language.test.ts` > `End-to-end: What's for dinner with plan` > shows tonight's meal from the plan
 
 **Edge case tests:**
-- `meal-plan-store.test.ts` > `getMealForDate` > returns null when no plan exists
-- `meal-plan-store.test.ts` > `getMealForDate` > returns null when date not in plan
-- `app.test.ts` > `handleMessage — whats for dinner intent` > shows friendly message when no plan set
+- `meal-plan-store.test.ts` > `getTonightsMeal` > returns null when no meal matches the date
+- `meal-plan-store.test.ts` > `getTonightsMeal` > returns null for empty meal list
+- `app.test.ts` > `handleCommand — /whatsfordinner` > shows message when no plan exists
 
 **Fixes:** None
 
@@ -318,13 +318,13 @@ Track macro nutrients per planned/cooked meal. Store daily macro logs per user. 
 Expose meal planning configuration as user-configurable settings: meal types, planning period, new recipe ratio, dietary preferences/restrictions, macro targets, plan generation day/time, voting window hours, rating reminder delay.
 
 **Standard tests:**
-- `meal-planner.test.ts` > `generatePlan` > respects planningDays config (default 7)
-- `meal-planner.test.ts` > `generatePlan` > respects newRecipeRatio config
-- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > runs on configured schedule
+- `meal-planner.test.ts` > `generatePlan` > includes dietary preferences in prompt
+- `meal-planner.test.ts` > `generatePlan` > includes dietary restrictions in prompt
+- `app.test.ts` > `handleScheduledJob` > generates weekly plan and sends to all members
 
 **Edge case tests:**
-- `meal-planner.test.ts` > `generatePlan` > uses defaults when config fields are missing
-- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > skips when schedule disabled
+- `meal-planner.test.ts` > `generatePlan` > uses defaults when config keys are missing
+- `app.test.ts` > `handleScheduledJob` > skips when no household exists
 
 **Fixes:** None
 
@@ -603,16 +603,16 @@ Maintain pantry inventory via text input ("add eggs and milk to pantry"), grocer
 Cross-reference pantry inventory against recipe library and return full matches and close matches noting what's missing.
 
 **Standard tests:**
-- `pantry-matcher.test.ts` > `matchRecipes` > returns ready-to-cook recipes when all ingredients present
-- `pantry-matcher.test.ts` > `matchRecipes` > returns almost-there recipes with missing items listed
-- `pantry-matcher.test.ts` > `matchRecipes` > uses pantry substring matching for ingredient comparison
-- `app.test.ts` > `handleMessage — what can I make intent` > returns grouped ready and almost-there results
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > returns full and near matches from LLM response
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > enriches full matches with prepTime from recipe data
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > uses fast tier LLM
+- `app.test.ts` > `handleMessage — meal planning intents` > "what can I make" routes to pantry matcher
 
 **Edge case tests:**
-- `pantry-matcher.test.ts` > `matchRecipes` > returns empty lists when pantry is empty
-- `pantry-matcher.test.ts` > `matchRecipes` > returns empty lists when recipe library is empty
-- `pantry-matcher.test.ts` > `matchRecipes` > excludes recipes missing more than one ingredient from almost-there
-- `app.test.ts` > `handleMessage — what can I make intent` > shows friendly message when no matches
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > returns empty results without calling LLM when pantry is empty
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > returns empty results without calling LLM when recipes is empty
+- `pantry-matcher.test.ts` > `findMatchingRecipes` > returns empty results on LLM error (graceful degradation)
+- `natural-language.test.ts` > `End-to-end: What can I make with pantry and recipes` > calls LLM and sends match results
 
 **Fixes:** None
 
@@ -1096,12 +1096,11 @@ If a meal plan is trending expensive relative to historical average, flag it and
 Maintain static dataset of seasonal produce for configurable region. Use to bias recipe suggestions toward in-season produce.
 
 **Standard tests:**
-- `meal-planner.test.ts` > `getSeasonalProduce` > returns in-season produce for current month and region
-- `meal-planner.test.ts` > `generatePlan` > includes seasonal produce hints in LLM prompt
+- `meal-planner.test.ts` > `generatePlan` > includes location in prompt
+- `meal-plan-store.test.ts` > `formatPlanMessage` > includes location in season note
 
 **Edge case tests:**
-- `meal-planner.test.ts` > `getSeasonalProduce` > returns empty array for unknown region
-- `meal-planner.test.ts` > `getSeasonalProduce` > returns empty array when no produce in season
+- `meal-planner.test.ts` > `generatePlan` > uses defaults when config keys are missing
 
 **Fixes:** None
 
@@ -1130,11 +1129,11 @@ Optionally send seasonal nudges with in-season produce and matching recipes.
 Expose region-related settings: region code, seasonal nudges toggle.
 
 **Standard tests:**
-- `meal-planner.test.ts` > `getSeasonalProduce` > uses region from config to filter produce
-- `meal-planner.test.ts` > `generatePlan` > omits seasonal hints when region not configured
+- `meal-planner.test.ts` > `generatePlan` > includes location in prompt
+- `meal-planner.test.ts` > `generatePlan` > includes dietary preferences in prompt
 
 **Edge case tests:**
-- `meal-planner.test.ts` > `getSeasonalProduce` > falls back to default region when config missing
+- `meal-planner.test.ts` > `generatePlan` > uses defaults when config keys are missing
 
 **Fixes:** None
 
@@ -1559,13 +1558,13 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-RECIPE-004 | recipe-store.test.ts, app.test.ts | 8 | 15 | Implemented |
 | REQ-RECIPE-005 | TBD | 0 | 0 | Planned |
 | REQ-RECIPE-006 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 4 | 8 | Implemented |
-| REQ-MEAL-001 | TBD | 0 | 0 | Planned |
-| REQ-MEAL-002 | TBD | 0 | 0 | Planned |
+| REQ-MEAL-001 | meal-planner.test.ts, meal-plan-store.test.ts, app.test.ts | 6 | 6 | Implemented |
+| REQ-MEAL-002 | meal-planner.test.ts, app.test.ts | 4 | 3 | Implemented |
 | REQ-MEAL-003 | TBD | 0 | 0 | Planned |
 | REQ-MEAL-004 | TBD | 0 | 0 | Planned |
-| REQ-MEAL-005 | TBD | 0 | 0 | Planned |
+| REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
 | REQ-MEAL-006 | TBD | 0 | 0 | Planned |
-| REQ-MEAL-007 | TBD | 0 | 0 | Planned |
+| REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
 | REQ-GROCERY-003 | item-parser.test.ts, app.test.ts | 5 | 5 | Implemented |
@@ -1578,7 +1577,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-010 | TBD | 0 | 0 | Planned |
 | REQ-GROCERY-011 | TBD | 0 | 0 | Planned |
 | REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts | 11 | 8 | Implemented |
-| REQ-PANTRY-002 | TBD | 0 | 0 | Planned |
+| REQ-PANTRY-002 | pantry-matcher.test.ts, app.test.ts, natural-language.test.ts | 4 | 4 | Implemented |
 | REQ-PANTRY-003 | grocery-generator.test.ts, pantry-store.test.ts | 3 | 3 | Implemented |
 | REQ-PANTRY-004 | TBD | 0 | 0 | Planned |
 | REQ-PANTRY-005 | TBD | 0 | 0 | Planned |
@@ -1607,9 +1606,9 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-COST-002 | TBD | 0 | 0 | Planned |
 | REQ-COST-003 | TBD | 0 | 0 | Planned |
 | REQ-COST-004 | TBD | 0 | 0 | Planned |
-| REQ-SEASON-001 | TBD | 0 | 0 | Planned |
+| REQ-SEASON-001 | meal-planner.test.ts, meal-plan-store.test.ts | 2 | 1 | Implemented |
 | REQ-SEASON-002 | TBD | 0 | 0 | Planned |
-| REQ-SEASON-003 | TBD | 0 | 0 | Planned |
+| REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |
 | REQ-NUTR-001 | TBD | 0 | 0 | Planned |
 | REQ-NUTR-002 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
@@ -1630,4 +1629,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **12 test files** | **85** | **147** | **232 tests** |
+| **Totals** | **16 test files** | **109** | **167** | **276 tests** |

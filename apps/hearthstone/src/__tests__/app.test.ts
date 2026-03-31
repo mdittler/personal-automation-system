@@ -1884,6 +1884,76 @@ describe('Hearthstone App', () => {
 			});
 		});
 
+		describe('handleMessage — meal swap', () => {
+			beforeEach(() => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path === 'meal-plans/current.yaml') return stringify(samplePlan);
+					return '';
+				});
+				sharedStore.list.mockResolvedValue(['chicken-stir-fry-abc.yaml']);
+			});
+
+			it('swap happy path: replaces Tuesday meal, saves plan, sends updated plan', async () => {
+				const newMeal = {
+					recipeId: 'veggie-curry-def',
+					recipeTitle: 'Veggie Curry',
+					date: '2026-03-31',
+					isNew: false,
+				};
+				vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(newMeal));
+				vi.mocked(services.config.get).mockResolvedValue(undefined);
+
+				const ctx = createTestMessageContext({ text: 'swap tuesday', userId: 'user1' });
+				await handleMessage(ctx);
+
+				// LLM was called with standard tier
+				expect(services.llm.complete).toHaveBeenCalledWith(
+					expect.any(String),
+					expect.objectContaining({ tier: 'standard' }),
+				);
+				// Plan was saved
+				expect(sharedStore.write).toHaveBeenCalledWith(
+					'meal-plans/current.yaml',
+					expect.any(String),
+				);
+				// User received updated plan
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('Meal Plan'),
+					expect.any(Array),
+				);
+			});
+
+			it('swap with no current meal plan tells user to generate one', async () => {
+				sharedStore.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					return '';
+				});
+
+				const ctx = createTestMessageContext({ text: 'swap monday', userId: 'user1' });
+				await handleMessage(ctx);
+
+				expect(services.llm.complete).not.toHaveBeenCalled();
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('No meal plan'),
+				);
+			});
+
+			it('swap day not in plan tells user it could not find that day', async () => {
+				// Plan only has Mon (2026-03-30) and Tue (2026-04-01); Friday is not in it
+				const ctx = createTestMessageContext({ text: 'swap friday', userId: 'user1' });
+				await handleMessage(ctx);
+
+				expect(services.llm.complete).not.toHaveBeenCalled();
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('friday'),
+				);
+			});
+		});
+
 		describe('handleMessage — meal planning intents', () => {
 			beforeEach(() => {
 				sharedStore.read.mockImplementation(async (path: string) => {

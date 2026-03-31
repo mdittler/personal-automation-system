@@ -357,6 +357,16 @@ describe('formatTonightMessage', () => {
 		// Should not throw and should not show "NaN min"
 		expect(text).not.toContain('NaN');
 	});
+
+	it('handles null recipe for a non-new meal (recipe deleted from library)', () => {
+		const meal = makeMeal({ isNew: false });
+		const text = formatTonightMessage(meal, null);
+		// Should still show the meal title even though recipe is gone
+		expect(text).toContain('Chicken Stir Fry');
+		// Should not throw or show undefined/null noise
+		expect(text).not.toContain('null');
+		expect(text).not.toContain('undefined');
+	});
 });
 
 describe('buildPlanButtons', () => {
