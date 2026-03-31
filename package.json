@@ -1,0 +1,38 @@
+{
+	"name": "personal-automation-system",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "A local-first home automation platform with modular apps, Telegram interface, and LLM integration",
+	"engines": {
+		"node": ">=22.0.0",
+		"pnpm": ">=10.0.0"
+	},
+	"packageManager": "pnpm@10.30.3",
+	"scripts": {
+		"build": "pnpm -r run build",
+		"dev": "tsx watch core/src/bootstrap.ts",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"test": "vitest run",
+		"test:watch": "vitest watch",
+		"register-app": "tsx core/src/cli/register-app.ts",
+		"scaffold-app": "tsx core/src/cli/scaffold-app.ts",
+		"install-app": "tsx core/src/cli/install-app.ts",
+		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",
+		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	},
+	"dependencies": {
+		"cron-parser": "^5.5.0",
+		"cronstrue": "^3.13.0"
+	}
+}

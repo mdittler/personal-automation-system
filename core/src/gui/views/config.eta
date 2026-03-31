@@ -1,0 +1,77 @@
+<div class="page-header">
+  <h1>Configuration</h1>
+</div>
+
+<div class="card">
+  <h2>System Config</h2>
+  <p><small>Edit <code>config/pas.yaml</code> and <code>.env</code> to change system settings. Restart required.</small></p>
+  <table>
+    <tbody>
+      <tr><td><strong>Port</strong></td><td><%= it.systemConfig.port %></td></tr>
+      <tr><td><strong>Log Level</strong></td><td><%= it.systemConfig.logLevel %></td></tr>
+      <tr><td><strong>Timezone</strong></td><td><%= it.systemConfig.timezone %></td></tr>
+      <tr><td><strong>Ollama URL</strong></td><td><%= it.systemConfig.ollamaUrl %></td></tr>
+      <tr><td><strong>Ollama Model</strong></td><td><%= it.systemConfig.ollamaModel %></td></tr>
+      <tr><td><strong>Claude Model</strong></td><td><%= it.systemConfig.claudeModel %></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Registered Users</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>ID</th>
+        <th>Admin</th>
+        <th>Enabled Apps</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const user of it.users) { %>
+        <tr>
+          <td><%= user.name %></td>
+          <td><code><%= user.id %></code></td>
+          <td><%= user.isAdmin ? 'Yes' : 'No' %></td>
+          <td><%= user.enabledApps.join(', ') %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+
+<% if (it.appConfigs.length > 0) { %>
+  <h2>App Configuration</h2>
+
+  <% for (const appCfg of it.appConfigs) { %>
+    <div class="card">
+      <h3><%= appCfg.appName %></h3>
+
+      <% for (const userCfg of appCfg.users) { %>
+        <details>
+          <summary><%= userCfg.userName %></summary>
+          <form method="post" action="/gui/config/<%= appCfg.appId %>/<%= userCfg.userId %>">
+            <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+            <% for (const def of appCfg.configDefs) { %>
+              <label for="<%= appCfg.appId %>-<%= userCfg.userId %>-<%= def.key %>">
+                <%= def.key %>
+                <% if (def.description) { %><small> — <%= def.description %></small><% } %>
+              </label>
+              <input
+                type="text"
+                id="<%= appCfg.appId %>-<%= userCfg.userId %>-<%= def.key %>"
+                name="<%= def.key %>"
+                value="<%= userCfg.values[def.key] !== undefined ? userCfg.values[def.key] : (def.default !== undefined ? def.default : '') %>"
+              />
+            <% } %>
+            <button type="submit">Save</button>
+          </form>
+        </details>
+      <% } %>
+    </div>
+  <% } %>
+<% } else { %>
+  <h2>App Configuration</h2>
+  <p class="empty-state">No apps have user-configurable settings.</p>
+<% } %>

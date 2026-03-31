@@ -1,0 +1,35 @@
+<a href="/gui/alerts/<%= it.alertId %>/edit" class="back-link">&larr; Edit Alert</a> | <a href="/gui/alerts" class="back-link">&larr; All Alerts</a>
+
+<div class="page-header">
+  <h1>Alert History: <%= it.alertName %></h1>
+</div>
+
+<% if (it.files.length === 0) { %>
+  <p class="empty-state">No alert history yet. This alert hasn't fired.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const file of it.files) { %>
+        <tr>
+          <td><%= file.name %></td>
+          <td>
+            <a href="#"
+               hx-get="/gui/alerts/<%= it.alertId %>/history/<%= file.name %>"
+               hx-target="#history-content"
+               hx-swap="innerHTML">View</a>
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+
+  <div id="history-content" style="margin-top:1rem">
+    <p class="empty-state"><em>Select an alert run to view its details.</em></p>
+  </div>
+<% } %>

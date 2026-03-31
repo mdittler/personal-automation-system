@@ -1,0 +1,136 @@
+<% if (!it.app) { %>
+  <h1>App Not Found</h1>
+  <p>No app with ID "<%= it.appId %>" is loaded.</p>
+  <p><a href="/gui/apps" class="back-link">&larr; Back to Apps</a></p>
+<% } else { %>
+  <a href="/gui/apps" class="back-link">&larr; Back to Apps</a>
+
+  <div class="page-header">
+    <h1><%= it.app.name %></h1>
+  </div>
+
+  <div class="card">
+    <table>
+      <tbody>
+        <tr><td><strong>ID</strong></td><td><%= it.app.id %></td></tr>
+        <tr><td><strong>Version</strong></td><td><%= it.app.version %></td></tr>
+        <tr><td><strong>Description</strong></td><td><%= it.app.description || '-' %></td></tr>
+        <tr><td><strong>Author</strong></td><td><%= it.app.author || '-' %></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (it.app.capabilities) { %>
+    <h2>Capabilities</h2>
+
+    <% if (it.app.capabilities.messages?.intents?.length) { %>
+      <h3>Intents</h3>
+      <ul>
+        <% for (const intent of it.app.capabilities.messages.intents) { %>
+          <li><%= intent %></li>
+        <% } %>
+      </ul>
+    <% } %>
+
+    <% if (it.app.capabilities.messages?.commands?.length) { %>
+      <h3>Commands</h3>
+      <table>
+        <thead><tr><th>Name</th><th>Description</th></tr></thead>
+        <tbody>
+          <% for (const cmd of it.app.capabilities.messages.commands) { %>
+            <tr>
+              <td><code><%= cmd.name %></code></td>
+              <td><%= cmd.description || '-' %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    <% } %>
+
+    <% if (it.app.capabilities.schedules?.length) { %>
+      <h3>Schedules</h3>
+      <table>
+        <thead><tr><th>ID</th><th>Cron</th><th>Description</th></tr></thead>
+        <tbody>
+          <% for (const s of it.app.capabilities.schedules) { %>
+            <tr>
+              <td><%= s.id %></td>
+              <td><code><%= s.cron %></code></td>
+              <td><%= s.description || '-' %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    <% } %>
+  <% } %>
+
+  <% if (it.app.requirements) { %>
+    <h2>Requirements</h2>
+
+    <% if (it.app.requirements.services?.length) { %>
+      <h3>Services</h3>
+      <ul>
+        <% for (const svc of it.app.requirements.services) { %>
+          <li><%= svc %></li>
+        <% } %>
+      </ul>
+    <% } %>
+
+    <% if (it.app.requirements.data) { %>
+      <h3>Data Scopes</h3>
+      <% if (it.app.requirements.data.user_scopes?.length) { %>
+        <p><strong>User scopes:</strong></p>
+        <ul>
+          <% for (const scope of it.app.requirements.data.user_scopes) { %>
+            <li><code><%= scope.path %></code> (<%= scope.access %>)</li>
+          <% } %>
+        </ul>
+      <% } %>
+      <% if (it.app.requirements.data.shared_scopes?.length) { %>
+        <p><strong>Shared scopes:</strong></p>
+        <ul>
+          <% for (const scope of it.app.requirements.data.shared_scopes) { %>
+            <li><code><%= scope.path %></code> (<%= scope.access %>)</li>
+          <% } %>
+        </ul>
+      <% } %>
+    <% } %>
+  <% } %>
+
+  <% if (it.app.userConfig?.length && it.userConfigs?.length) { %>
+    <h2>User Config</h2>
+
+    <% for (const userCfg of it.userConfigs) { %>
+      <details>
+        <summary><%= userCfg.userName %></summary>
+        <form method="post" action="/gui/config/<%= it.app.id %>/<%= userCfg.userId %>">
+          <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+          <% for (const def of it.app.userConfig) { %>
+            <label for="<%= it.app.id %>-<%= userCfg.userId %>-<%= def.key %>">
+              <%= def.key %>
+              <% if (def.description) { %><small> — <%= def.description %></small><% } %>
+            </label>
+            <% if (def.type === 'boolean') { %>
+              <select
+                id="<%= it.app.id %>-<%= userCfg.userId %>-<%= def.key %>"
+                name="<%= def.key %>"
+              >
+                <% const curVal = userCfg.values[def.key] !== undefined ? userCfg.values[def.key] : (def.default !== undefined ? def.default : false); %>
+                <option value="true" <%= curVal === true || curVal === 'true' ? 'selected' : '' %>>true</option>
+                <option value="false" <%= curVal === false || curVal === 'false' || curVal === undefined ? 'selected' : '' %>>false</option>
+              </select>
+            <% } else { %>
+              <input
+                type="text"
+                id="<%= it.app.id %>-<%= userCfg.userId %>-<%= def.key %>"
+                name="<%= def.key %>"
+                value="<%= userCfg.values[def.key] !== undefined ? userCfg.values[def.key] : (def.default !== undefined ? def.default : '') %>"
+              />
+            <% } %>
+          <% } %>
+          <button type="submit">Save</button>
+        </form>
+      </details>
+    <% } %>
+  <% } %>
+<% } %>

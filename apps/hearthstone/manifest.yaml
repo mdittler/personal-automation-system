@@ -1,0 +1,259 @@
+app:
+  id: hearthstone
+  name: "Hearthstone"
+  version: "0.1.0"
+  description: "Household food management — recipes, meal planning, grocery lists, pantry tracking, nutrition, and family food intelligence."
+  author: "PAS Team"
+  pas_core_version: ">=0.1.0"
+  license: "MIT"
+  category: home
+  tags:
+    - food
+    - recipes
+    - meal-planning
+    - grocery
+    - cooking
+    - nutrition
+    - family
+    - pantry
+    - meal-prep
+    - kitchen
+
+capabilities:
+  messages:
+    intents:
+      - "user wants to save a recipe"
+      - "user wants to search for a recipe"
+      - "user wants to plan meals for the week"
+      - "user wants to see or modify the grocery list"
+      - "user wants to add items to the grocery list"
+      - "user wants to know what's for dinner"
+      - "user has a food-related question"
+      - "user wants to start cooking a recipe"
+      - "user wants to check or update the pantry"
+      - "user wants to log leftovers"
+      - "user wants to plan for hosting guests"
+      - "user wants to see food spending"
+      - "user wants to see nutrition information"
+      - "user wants to know what they can make with what they have"
+    commands:
+      - name: /recipes
+        description: "Browse and search your recipe library"
+      - name: /mealplan
+        description: "View current meal plan or generate a new one"
+      - name: /grocery
+        description: "View the current grocery list"
+      - name: /addgrocery
+        description: "Quick-add items to the grocery list"
+        args: ["items"]
+      - name: /pantry
+        description: "View or update pantry inventory"
+      - name: /freezer
+        description: "View or update freezer inventory"
+      - name: /cook
+        description: "Start cook mode for a recipe"
+        args: ["recipe"]
+      - name: /leftovers
+        description: "Log or view current leftovers"
+      - name: /hosting
+        description: "Plan a menu for hosting guests"
+      - name: /foodbudget
+        description: "View food cost tracking and reports"
+      - name: /nutrition
+        description: "View nutrition summaries and reports"
+      - name: /whatsfordinner
+        description: "See what's planned for tonight"
+      - name: /household
+        description: "Create, join, or manage your household link"
+    accepts_photos: true
+    photo_intents:
+      - "photo of a recipe to save"
+      - "photo of a grocery receipt"
+      - "photo of pantry or fridge contents"
+
+  schedules:
+    - id: generate-weekly-plan
+      description: "Auto-generate the weekly meal plan and send for voting"
+      cron: "0 9 * * 0"
+      handler: "dist/handlers/generate-plan.js"
+      user_scope: shared
+    - id: perishable-check
+      description: "Check pantry for items approaching expiry"
+      cron: "0 9 * * *"
+      handler: "dist/handlers/perishable-check.js"
+      user_scope: shared
+    - id: freezer-check
+      description: "Check freezer for items that should be used soon"
+      cron: "0 9 * * 1"
+      handler: "dist/handlers/freezer-check.js"
+      user_scope: shared
+    - id: leftover-check
+      description: "Check leftovers approaching expiry"
+      cron: "0 10 * * *"
+      handler: "dist/handlers/leftover-check.js"
+      user_scope: shared
+    - id: seasonal-nudge
+      description: "Suggest in-season recipes"
+      cron: "0 10 1,15 * *"
+      handler: "dist/handlers/seasonal-nudge.js"
+      user_scope: shared
+    - id: weekly-nutrition-summary
+      description: "Send weekly macro/nutrition summary"
+      cron: "0 20 * * 0"
+      handler: "dist/handlers/nutrition-summary.js"
+      user_scope: all
+    - id: cuisine-diversity-check
+      description: "Flag cuisine repetition in recent plans"
+      cron: "0 8 * * 0"
+      handler: "dist/handlers/cuisine-diversity.js"
+      user_scope: shared
+
+  events:
+    emits:
+      - id: "hearthstone:meal-plan-finalized"
+        description: "Fired when a weekly meal plan is finalized after voting"
+      - id: "hearthstone:grocery-list-ready"
+        description: "Fired when a grocery list is generated or updated"
+      - id: "hearthstone:recipe-scheduled"
+        description: "Fired when a recipe is scheduled for a specific date"
+      - id: "hearthstone:meal-cooked"
+        description: "Fired when a meal is marked as cooked"
+      - id: "hearthstone:shopping-completed"
+        description: "Fired when a shopping session is completed"
+    subscribes: []
+
+requirements:
+  services:
+    - telegram
+    - data-store
+    - llm
+    - scheduler
+    - event-bus
+    - audio
+    - context-store
+  data:
+    shared_scopes:
+      - path: "recipes/"
+        access: read-write
+        description: "Recipe library shared across the household"
+      - path: "meal-plans/"
+        access: read-write
+        description: "Weekly meal plans and archives"
+      - path: "grocery/"
+        access: read-write
+        description: "Active and historical grocery lists"
+      - path: "pantry.yaml"
+        access: read-write
+        description: "Pantry inventory"
+      - path: "freezer.yaml"
+        access: read-write
+        description: "Freezer inventory"
+      - path: "leftovers.yaml"
+        access: read-write
+        description: "Leftover tracker"
+      - path: "household.yaml"
+        access: read-write
+        description: "Household membership and shared config"
+      - path: "children/"
+        access: read-write
+        description: "Child food logs and allergen tracking"
+      - path: "guests.yaml"
+        access: read-write
+        description: "Frequent guest dietary profiles"
+      - path: "receipts/"
+        access: read-write
+        description: "Grocery receipt data and photos"
+      - path: "seasonal/"
+        access: read-write
+        description: "Seasonal produce reference data"
+      - path: "waste-log.yaml"
+        access: read-write
+        description: "Food waste tracking"
+    user_scopes:
+      - path: "preferences.yaml"
+        access: read-write
+        description: "Individual dietary preferences and macro targets"
+      - path: "nutrition/"
+        access: read-write
+        description: "Per-user monthly macro intake logs"
+      - path: "shopping-sessions/"
+        access: read-write
+        description: "Shopping mode session history"
+  llm:
+    tier: standard
+    rate_limit:
+      max_requests: 60
+      window_seconds: 3600
+    monthly_cost_cap: 15.00
+
+user_config:
+  - key: meal_types
+    type: string
+    default: "dinners:5,lunches:5"
+    description: "Meal types and counts per planning period (format: type:count,type:count)"
+  - key: planning_period
+    type: select
+    default: "weekly"
+    description: "How often to generate meal plans"
+    options: ["weekly", "biweekly"]
+  - key: new_recipe_ratio
+    type: number
+    default: 40
+    description: "Percentage of meals that should be new recipes (0-100)"
+  - key: dietary_preferences
+    type: string
+    default: ""
+    description: "Comma-separated dietary preferences (e.g., healthy, easy)"
+  - key: dietary_restrictions
+    type: string
+    default: ""
+    description: "Comma-separated dietary restrictions (e.g., no red meat on weekdays)"
+  - key: plan_generation_day
+    type: select
+    default: "Sunday"
+    description: "Day of week to auto-generate the meal plan"
+    options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+  - key: voting_window_hours
+    type: number
+    default: 12
+    description: "Hours household members have to vote on meal plans"
+  - key: rating_reminder_delay
+    type: number
+    default: 120
+    description: "Minutes after expected cook time to ask for ratings"
+  - key: preferred_stores
+    type: string
+    default: ""
+    description: "Comma-separated list of stores for price comparison"
+  - key: default_store
+    type: string
+    default: ""
+    description: "Default store for price estimates"
+  - key: show_price_estimates
+    type: boolean
+    default: false
+    description: "Show estimated prices on grocery lists"
+  - key: staple_items
+    type: string
+    default: "salt,pepper,olive oil,butter,garlic"
+    description: "Comma-separated items assumed to be on hand"
+  - key: shopping_followup_hours
+    type: number
+    default: 24
+    description: "Hours after shopping mode to send follow-up"
+  - key: region
+    type: string
+    default: "NC"
+    description: "Region code for seasonal produce data"
+  - key: seasonal_nudges
+    type: boolean
+    default: true
+    description: "Send seasonal produce suggestions"
+  - key: child_meal_adaptation
+    type: boolean
+    default: true
+    description: "Auto-suggest kid-friendly recipe adaptations"
+  - key: allergen_wait_days
+    type: number
+    default: 3
+    description: "Days to wait between introducing new allergens for babies"

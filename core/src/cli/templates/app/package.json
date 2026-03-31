@@ -1,0 +1,16 @@
+{
+	"name": "@pas/{{APP_ID}}",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "{{APP_DESCRIPTION}}",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc --build",
+		"clean": "rm -rf dist tsconfig.tsbuildinfo"
+	},
+	"dependencies": {
+		"@pas/core": "workspace:*"
+	}
+}

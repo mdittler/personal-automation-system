@@ -1,0 +1,86 @@
+<div class="page-header">
+  <h1>Dashboard</h1>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <h3>Uptime</h3>
+    <div class="value"><%= it.uptime %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Loaded Apps</h3>
+    <div class="value"><%= it.appCount %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Registered Users</h3>
+    <div class="value"><%= it.userCount %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Cron Jobs</h3>
+    <div class="value"><%= it.cronJobCount %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Pending Tasks</h3>
+    <div class="value"><%= it.pendingTaskCount %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Ollama</h3>
+    <div class="value">
+      <% if (it.ollamaStatus === 'connected') { %>
+        <span class="badge badge-ok">Connected</span>
+      <% } else { %>
+        <span class="badge badge-err">Disconnected</span>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<% if (it.appIds.length > 0) { %>
+<div class="card">
+  <h2>Loaded Apps</h2>
+  <ul>
+    <% for (const appId of it.appIds) { %>
+      <li><a href="/gui/apps/<%= appId %>"><%= appId %></a></li>
+    <% } %>
+  </ul>
+</div>
+<% } %>
+
+<div class="card">
+  <h2>System Config</h2>
+  <p><small>Edit <code>config/pas.yaml</code> and <code>.env</code> to change system settings. Restart required.</small></p>
+  <table>
+    <tbody>
+      <tr><td><strong>Port</strong></td><td><%= it.systemConfig.port %></td></tr>
+      <tr><td><strong>Log Level</strong></td><td><%= it.systemConfig.logLevel %></td></tr>
+      <tr><td><strong>Timezone</strong></td><td><%= it.systemConfig.timezone %></td></tr>
+      <tr><td><strong>Ollama URL</strong></td><td><%= it.systemConfig.ollamaUrl %></td></tr>
+      <tr><td><strong>Ollama Model</strong></td><td><%= it.systemConfig.ollamaModel %></td></tr>
+      <tr><td><strong>Claude Model</strong></td><td><%= it.systemConfig.claudeModel %></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Registered Users</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>ID</th>
+        <th>Admin</th>
+        <th>Enabled Apps</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const user of it.users) { %>
+        <tr>
+          <td><%= user.name %></td>
+          <td><code><%= user.id %></code></td>
+          <td><%= user.isAdmin ? 'Yes' : 'No' %></td>
+          <td><%= user.enabledApps.join(', ') %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>

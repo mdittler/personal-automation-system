@@ -1,0 +1,68 @@
+<div class="page-header">
+  <h1><%= it.isNew ? 'Create Space' : 'Edit Space' %></h1>
+</div>
+
+<% if (it.errors.length > 0) { %>
+  <div class="alert-banner alert-banner-error">
+    <ul style="margin:0;padding-left:1rem;">
+      <% for (const err of it.errors) { %>
+        <li><%= err.field %>: <%= err.message %></li>
+      <% } %>
+    </ul>
+  </div>
+<% } %>
+
+<form method="post" action="/gui/spaces">
+  <input type="hidden" name="isNew" value="<%= it.isNew ? 'true' : 'false' %>" />
+  <% if (!it.isNew && it.space) { %>
+    <input type="hidden" name="createdBy" value="<%= it.space.createdBy %>" />
+    <input type="hidden" name="createdAt" value="<%= it.space.createdAt %>" />
+  <% } %>
+
+  <div class="grid">
+    <label>
+      Space ID
+      <input type="text" name="id" value="<%= it.space?.id ?? '' %>"
+             pattern="[a-z][a-z0-9-]*" maxlength="50"
+             placeholder="e.g., family"
+             <%= it.isNew ? '' : 'readonly' %>
+             required />
+      <small>Lowercase letters, numbers, hyphens. Cannot be changed after creation.</small>
+    </label>
+    <label>
+      Display Name
+      <input type="text" name="name" value="<%= it.space?.name ?? '' %>"
+             maxlength="100" placeholder="e.g., Family Shared" required />
+    </label>
+  </div>
+
+  <label>
+    Description
+    <input type="text" name="description" value="<%= it.space?.description ?? '' %>"
+           placeholder="Optional description" />
+  </label>
+
+  <fieldset>
+    <legend>Members</legend>
+    <% const memberSet = new Set(it.space?.members ?? []); %>
+    <% for (const user of it.users) { %>
+      <label style="display:inline-flex;align-items:center;gap:0.25rem;margin-right:1rem;">
+        <input type="checkbox" name="members" value="<%= user.id %>"
+               <%= memberSet.has(user.id) ? 'checked' : '' %> />
+        <%= user.name %>
+      </label>
+    <% } %>
+    <% if (it.users.length === 0) { %>
+      <p><small>No registered users found.</small></p>
+    <% } %>
+  </fieldset>
+
+  <% if (it.isNew) { %>
+    <input type="hidden" name="createdBy" value="<%= it.users[0]?.id ?? '' %>" />
+  <% } %>
+
+  <div style="display:flex;gap:0.5rem;">
+    <button type="submit"><%= it.isNew ? 'Create Space' : 'Save Changes' %></button>
+    <a href="/gui/spaces" role="button" class="outline secondary">Cancel</a>
+  </div>
+</form>

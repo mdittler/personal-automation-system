@@ -1,0 +1,45 @@
+# Dependencies (will be installed fresh in container)
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Data directory (mounted as volume)
+data/
+
+# Environment secrets
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# Claude/IDE config
+.claude/
+.vscode/
+.idea/
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Tests
+**/__tests__/
+vitest.config.ts
+biome.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.swp
+
+# Ollama models (separate service)
+ollama-models/

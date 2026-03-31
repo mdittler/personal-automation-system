@@ -1,0 +1,46 @@
+<div class="page-header">
+  <h1>Spaces</h1>
+  <div class="actions">
+    <a href="/gui/spaces/new" role="button">Create Space</a>
+  </div>
+</div>
+
+<% if (it.spaces.length === 0) { %>
+  <p class="empty-state">No shared spaces yet. Create one to share data with specific people.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>ID</th>
+        <th>Description</th>
+        <th>Members</th>
+        <th>Created By</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const space of it.spaces) { %>
+        <tr>
+          <td><strong><%= space.name %></strong></td>
+          <td><code><%= space.id %></code></td>
+          <td><%= space.description || '—' %></td>
+          <td>
+            <%= space.memberNames.join(', ') %>
+            <br><small><%= space.members.length %> member<%= space.members.length !== 1 ? 's' : '' %></small>
+          </td>
+          <td><%= space.creatorName %></td>
+          <td>
+            <a href="/gui/spaces/<%= space.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <form method="post" action="/gui/spaces/<%= space.id %>/delete" style="display:inline;margin:0">
+              <button type="submit" class="outline secondary toggle-btn"
+                      onclick="return confirm('Delete space &quot;<%= space.name %>&quot;? Data on disk will be preserved.')">
+                Delete
+              </button>
+            </form>
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>

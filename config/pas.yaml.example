@@ -1,0 +1,76 @@
+# PAS System Configuration
+# Copy this file to config/pas.yaml and fill in your details:
+#   cp config/pas.yaml.example config/pas.yaml
+
+# Registered users — identified by Telegram user ID.
+# To find your ID: message @userinfobot on Telegram, or check the bot logs
+# when you send your first message (the unregistered user warning shows your ID).
+# Only registered users can interact with the bot.
+users:
+  - id: "YOUR_TELEGRAM_USER_ID"
+    name: "Your Name"
+    is_admin: true
+    enabled_apps: ["*"]     # ["*"] = all apps, or list specific app IDs
+    shared_scopes: []       # Shared data namespaces (e.g., ["grocery", "family"])
+
+  # Add more users:
+  # - id: "ANOTHER_USER_ID"
+  #   name: "Another Person"
+  #   is_admin: false
+  #   enabled_apps: ["notes", "echo"]
+  #   shared_scopes: ["grocery"]
+
+# Default settings
+defaults:
+  log_level: info
+  timezone: America/New_York   # IANA timezone (e.g., Europe/London, Asia/Tokyo)
+  fallback: chatbot            # 'chatbot' for AI responses, 'notes' for daily notes only
+
+# LLM safeguards (optional — uncomment to customize)
+# llm:
+#   safeguards:
+#     default_rate_limit:
+#       max_requests: 60        # per app, per sliding window
+#       window_seconds: 3600    # 1 hour
+#     default_monthly_cost_cap: 10.00   # USD per app per month
+#     global_monthly_cost_cap: 50.00    # USD total system per month
+#
+#   # Custom OpenAI-compatible providers (optional)
+#   # Add Groq, Together, Mistral, vLLM, or any OpenAI-compatible endpoint.
+#   # API keys go in .env, not here.
+#   providers:
+#     groq:
+#       type: openai-compatible
+#       name: "Groq"
+#       api_key_env: GROQ_API_KEY
+#       base_url: https://api.groq.com/openai/v1
+#       default_model: mixtral-8x7b-32768
+#
+#   # Tier assignments (optional — auto-assigned based on available API keys)
+#   tiers:
+#     fast:
+#       provider: anthropic
+#       model: claude-haiku-4-5-20251001
+#     standard:
+#       provider: anthropic
+#       model: claude-sonnet-4-20250514
+
+# n8n integration (optional — dispatch execution to n8n instead of running internally)
+# When set, PAS cron triggers fire a webhook to n8n, which calls PAS API endpoints.
+# If the dispatch fails, PAS falls back to internal execution automatically.
+# n8n:
+#   dispatch_url: http://localhost:5678/webhook/pas-dispatch
+
+# Outbound webhooks (optional — notify external services when events occur)
+# Useful for triggering n8n workflows on alerts, reports, or data changes.
+# webhooks:
+#   - id: n8n-alerts
+#     url: http://localhost:5678/webhook/pas-alerts
+#     events: ["alert:fired"]
+#     secret: "optional-hmac-secret"    # HMAC-SHA256 signing (X-PAS-Signature header)
+#   - id: n8n-reports
+#     url: http://localhost:5678/webhook/pas-reports
+#     events: ["report:completed"]
+#   - id: n8n-data
+#     url: http://localhost:5678/webhook/pas-data
+#     events: ["data:changed"]

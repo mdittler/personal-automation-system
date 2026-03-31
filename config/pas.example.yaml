@@ -1,0 +1,22 @@
+# PAS System Configuration
+# Copy to config/pas.yaml and edit with your settings.
+
+# Registered users — identified by Telegram user ID.
+# Only registered users can interact with the bot.
+users:
+  - id: "123456789"            # Telegram user ID (find via @userinfobot)
+    name: "Matthew"
+    is_admin: true
+    enabled_apps: ["*"]        # "*" = all apps enabled
+    shared_scopes: ["grocery", "family"]
+
+  - id: "987654321"
+    name: "Partner"
+    is_admin: false
+    enabled_apps: ["grocery", "family", "briefings"]
+    shared_scopes: ["grocery", "family"]
+
+# Default settings (can be overridden by env vars)
+defaults:
+  log_level: info
+  timezone: America/New_York

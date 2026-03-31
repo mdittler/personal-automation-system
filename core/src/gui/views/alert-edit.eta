@@ -1,0 +1,427 @@
+<div class="page-header">
+  <h1><%= it.isNew ? 'Create Alert' : 'Edit Alert' %></h1>
+</div>
+
+<% if (it.errors && it.errors.length > 0) { %>
+  <div class="alert-banner alert-banner-error">
+    <strong>Validation errors:</strong>
+    <ul style="margin-bottom: 0">
+      <% for (const err of it.errors) { %>
+        <li><%= err.field %>: <%= err.message %></li>
+      <% } %>
+    </ul>
+  </div>
+<% } %>
+
+<form method="post" action="/gui/alerts<%= it.isNew ? '' : '/' + it.alert.id %>">
+  <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+
+  <div class="grid">
+    <label>
+      Alert ID
+      <input type="text" name="id" value="<%= it.alert.id || '' %>"
+             pattern="[a-z][a-z0-9-]*" maxlength="50" required
+             <%= it.isNew ? '' : 'readonly' %>
+             placeholder="grocery-check" />
+      <small>Lowercase letters, digits, hyphens. Cannot change after creation.</small>
+    </label>
+    <label>
+      Name
+      <input type="text" name="name" value="<%= it.alert.name || '' %>"
+             maxlength="100" required placeholder="Grocery List Check" />
+    </label>
+  </div>
+
+  <label>
+    Description
+    <input type="text" name="description" value="<%= it.alert.description || '' %>"
+           placeholder="Alert when grocery list has too many items" />
+  </label>
+
+  <h3>Trigger</h3>
+  <% const triggerType = (it.alert.trigger && it.alert.trigger.type) || 'scheduled'; %>
+  <label>
+    Trigger type
+    <select name="trigger_type" id="trigger-type-select" onchange="toggleTriggerFields()">
+      <option value="scheduled" <%= triggerType === 'scheduled' ? 'selected' : '' %>>On a schedule</option>
+      <option value="event" <%= triggerType === 'event' ? 'selected' : '' %>>When an event happens</option>
+    </select>
+  </label>
+
+  <div id="scheduled-trigger-fields">
+    <input type="hidden" name="schedule" value="<%= it.alert.schedule || '' %>" />
+  </div>
+
+  <div id="event-trigger-fields" style="display:none">
+    <label>
+      Event name
+      <input type="text" name="trigger_event_name"
+             value="<%= (it.alert.trigger && it.alert.trigger.event_name) || '' %>"
+             placeholder="data:changed" />
+      <small>e.g., data:changed, schedule:completed, or a custom app event</small>
+    </label>
+  </div>
+
+  <h3>Delivery</h3>
+  <input type="hidden" name="delivery" id="delivery-hidden" value="<%= (it.alert.delivery || []).join(', ') %>" />
+  <% const selectedDelivery = it.alert.delivery || []; %>
+  <% if (it.users && it.users.length > 0) { %>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+      <% for (const user of it.users) { %>
+        <label style="margin-bottom:0">
+          <input type="checkbox" class="delivery-cb" value="<%= user.id %>"
+                 <%= selectedDelivery.includes(user.id) ? 'checked' : '' %>
+                 onchange="syncDelivery()" />
+          <%= user.name %>
+        </label>
+      <% } %>
+    </div>
+  <% } else { %>
+    <p><small>No users available</small></p>
+  <% } %>
+
+  <div class="grid">
+    <label>
+      Cooldown
+      <input type="text" name="cooldown" value="<%= it.alert.cooldown || '24 hours' %>"
+             required placeholder="24 hours" />
+      <small>e.g., "30 minutes", "1 hour", "7 days"</small>
+    </label>
+    <fieldset>
+      <legend>Enabled</legend>
+      <label>
+        <input type="checkbox" name="enabled" value="true"
+               <%= it.alert.enabled ? 'checked' : '' %> />
+        Alert is active
+      </label>
+    </fieldset>
+  </div>
+
+  <h3>Condition</h3>
+  <div class="grid">
+    <label>
+      Type
+      <select name="condition_type" id="condition-type-select" onchange="toggleConditionHelp()">
+        <option value="deterministic" <%= it.alert.condition && it.alert.condition.type === 'deterministic' ? 'selected' : '' %>>Deterministic (exact checks)</option>
+        <option value="fuzzy" <%= it.alert.condition && it.alert.condition.type === 'fuzzy' ? 'selected' : '' %>>Fuzzy (LLM interprets)</option>
+      </select>
+    </label>
+    <label>
+      Expression
+      <input type="text" name="condition_expression" id="condition-expression"
+             value="<%= it.alert.condition ? it.alert.condition.expression : '' %>"
+             required placeholder='not empty' />
+    </label>
+  </div>
+  <div id="deterministic-presets" style="margin-bottom:1rem">
+    <small>Quick presets:</small>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem">
+      <button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem" onclick="setExpression('not empty')">Not empty</button>
+      <button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem" onclick="setExpression('empty')">Is empty</button>
+      <button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem" onclick="setExpression('line count > 5')">Line count > 5</button>
+      <button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem" onclick="setExpression('line count > 10')">Line count > 10</button>
+      <button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem" onclick="setExpression('contains &quot;&quot;')">&quot;Contains...&quot;</button>
+    </div>
+  </div>
+  <div id="fuzzy-help" style="display:none;margin-bottom:1rem">
+    <small>Write a natural language question. The LLM will read the data and answer yes/no.<br/>
+    Examples: "Is the grocery list getting long?", "Are there any urgent items?", "Has spending exceeded the budget?"</small>
+  </div>
+
+  <h4>Data Sources</h4>
+  <p><small>Files to evaluate the condition against. At least one is required.</small></p>
+
+  <div id="ds-container">
+    <% const sources = (it.alert.condition && it.alert.condition.data_sources) || []; %>
+    <% for (let i = 0; i < sources.length; i++) { %>
+      <% const ds = sources[i]; %>
+      <fieldset class="section-fieldset">
+        <div class="grid">
+          <label>
+            App ID
+            <select name="ds_app_id_<%= i %>">
+              <option value="">-- Select app --</option>
+              <% if (it.apps) { for (const app of it.apps) { %>
+                <option value="<%= app.id %>" <%= ds.app_id === app.id ? 'selected' : '' %>><%= app.name %> (<%= app.id %>)</option>
+              <% } } %>
+            </select>
+          </label>
+          <label>
+            User ID
+            <select name="ds_user_id_<%= i %>">
+              <option value="">-- Select user --</option>
+              <% if (it.users) { for (const user of it.users) { %>
+                <option value="<%= user.id %>" <%= ds.user_id === user.id ? 'selected' : '' %>><%= user.name %> (<%= user.id %>)</option>
+              <% } } %>
+            </select>
+          </label>
+          <label>
+            Path
+            <input type="text" name="ds_path_<%= i %>" value="<%= ds.path || '' %>" required placeholder="daily-notes/" />
+            <small>File path or folder (reads most recent file). Supports {today} and {yesterday} tokens.</small>
+          </label>
+        </div>
+        <button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem"
+                onclick="browseFiles('ds_path_<%= i %>','ds_app_id_<%= i %>','ds_user_id_<%= i %>')">Browse files</button>
+        <div id="fb-ds_path_<%= i %>"></div>
+        <button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem"
+                onclick="this.closest('fieldset').remove()">Remove</button>
+      </fieldset>
+    <% } %>
+  </div>
+
+  <button type="button" class="outline" style="padding:0.25rem 0.5rem;margin-bottom:1rem"
+          onclick="addDataSource()">Add Data Source</button>
+
+  <h3>Actions</h3>
+  <p><small>What should happen when the condition is met? You can use these placeholders in text fields:</small></p>
+  <div style="margin-bottom:1rem;font-size:0.85rem">
+    <code>{alert_name}</code> = name of this alert &nbsp;
+    <code>{date}</code> = today's date &nbsp;
+    <code>{data}</code> = the raw data that triggered it &nbsp;
+    <code>{summary}</code> = an AI-generated summary of the data
+  </div>
+
+  <div id="actions-container">
+    <% const actions = it.alert.actions || []; %>
+    <% for (let i = 0; i < actions.length; i++) { %>
+      <% const action = actions[i]; %>
+      <fieldset class="section-fieldset">
+        <label>
+          Type
+          <select name="action_type_<%= i %>" onchange="rebuildActionFields(this)">
+            <option value="telegram_message" <%= action.type === 'telegram_message' ? 'selected' : '' %>>Send a Telegram message</option>
+            <option value="run_report" <%= action.type === 'run_report' ? 'selected' : '' %>>Run a report</option>
+            <option value="webhook" <%= action.type === 'webhook' ? 'selected' : '' %>>Call a webhook URL</option>
+            <option value="write_data" <%= action.type === 'write_data' ? 'selected' : '' %>>Save to a file</option>
+            <option value="audio" <%= action.type === 'audio' ? 'selected' : '' %>>Announce on speaker</option>
+            <option value="dispatch_message" <%= action.type === 'dispatch_message' ? 'selected' : '' %>>Send a message to an app</option>
+          </select>
+        </label>
+        <div class="action-fields" data-index="<%= i %>"></div>
+        <button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem"
+                onclick="this.closest('fieldset').remove()">Remove</button>
+      </fieldset>
+    <% } %>
+  </div>
+
+  <div class="grid" style="margin-bottom:1rem">
+    <select id="new-action-type">
+      <option value="telegram_message">Send a Telegram message</option>
+      <option value="run_report">Run a report</option>
+      <option value="webhook">Call a webhook URL</option>
+      <option value="write_data">Save to a file</option>
+      <option value="audio">Announce on speaker</option>
+      <option value="dispatch_message">Send a message to an app</option>
+    </select>
+    <button type="button" class="outline" style="padding:0.25rem 0.5rem"
+            onclick="addAction()">Add Action</button>
+  </div>
+
+  <div class="grid" style="margin-top:1rem">
+    <button type="submit"><%= it.isNew ? 'Create Alert' : 'Save Changes' %></button>
+    <% if (!it.isNew) { %>
+      <button type="button" class="outline"
+              hx-post="/gui/alerts/<%= it.alert.id %>/test"
+              hx-target="#test-output"
+              hx-swap="innerHTML">Test Condition</button>
+    <% } %>
+  </div>
+</form>
+
+<% if (!it.isNew) { %>
+  <div id="test-output" style="margin-top:1rem"></div>
+
+  <hr />
+  <form method="post" action="/gui/alerts/<%= it.alert.id %>/delete"
+        onsubmit="return confirm('Delete this alert?')">
+    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+    <button type="submit" class="secondary outline">Delete Alert</button>
+  </form>
+<% } %>
+
+<script src="/gui/public/frequency-picker.js"></script>
+<script>
+var PAS_USERS = <%~ JSON.stringify((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
+var PAS_APPS = <%~ JSON.stringify((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
+var PAS_REPORTS = <%~ JSON.stringify((it.reports || []).map(function(r) { return { id: r.id, name: r.name }; })) %>;
+var PAS_N8N_URL = <%~ JSON.stringify(it.n8nUrl || '') %>;
+var PAS_EXISTING_ACTIONS = <%~ JSON.stringify((it.alert.actions || []).map(function(a) { return { type: a.type, config: a.config }; })) %>;
+
+function syncDelivery() {
+  var cbs = document.querySelectorAll('.delivery-cb:checked');
+  var ids = Array.from(cbs).map(function(cb) { return cb.value; });
+  document.getElementById('delivery-hidden').value = ids.join(', ');
+}
+
+function toggleTriggerFields() {
+  var type = document.getElementById('trigger-type-select').value;
+  document.getElementById('scheduled-trigger-fields').style.display = type === 'scheduled' ? '' : 'none';
+  document.getElementById('event-trigger-fields').style.display = type === 'event' ? '' : 'none';
+}
+toggleTriggerFields();
+
+var dsIndex = <%= (it.alert.condition && it.alert.condition.data_sources) ? it.alert.condition.data_sources.length : 0 %>;
+var actionIndex = <%= it.alert.actions ? it.alert.actions.length : 0 %>;
+
+function buildAppSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select app --</option>';
+  PAS_APPS.forEach(function(a) {
+    html += '<option value="' + a.id + '"' + (a.id === selectedVal ? ' selected' : '') + '>' + a.name + ' (' + a.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function buildUserSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select user --</option>';
+  PAS_USERS.forEach(function(u) {
+    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + ' (' + u.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function buildReportSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select report --</option>';
+  PAS_REPORTS.forEach(function(r) {
+    html += '<option value="' + r.id + '"' + (r.id === selectedVal ? ' selected' : '') + '>' + r.name + ' (' + r.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function addDataSource() {
+  var container = document.getElementById('ds-container');
+  var i = dsIndex++;
+  var html = '<fieldset class="section-fieldset">';
+  html += '<div class="grid">';
+  html += '<label>App ID' + buildAppSelect('ds_app_id_' + i, '') + '</label>';
+  html += '<label>User ID' + buildUserSelect('ds_user_id_' + i, '') + '</label>';
+  html += '<label>Path<input type="text" name="ds_path_' + i + '" required placeholder="daily-notes/" /><small>File or folder (reads most recent). Supports {today} and {yesterday}.</small></label>';
+  html += '</div>';
+  html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'ds_path_' + i + '\',\'ds_app_id_' + i + '\',\'ds_user_id_' + i + '\')">Browse files</button>';
+  html += '<div id="fb-ds_path_' + i + '"></div>';
+  html += '<button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem" onclick="this.closest(\'fieldset\').remove()">Remove</button>';
+  html += '</fieldset>';
+  container.insertAdjacentHTML('beforeend', html);
+}
+
+var ALL_ACTION_TYPES = [
+  { value: 'telegram_message', label: 'Send a Telegram message' },
+  { value: 'run_report', label: 'Run a report' },
+  { value: 'webhook', label: 'Call a webhook URL' },
+  { value: 'write_data', label: 'Save to a file' },
+  { value: 'audio', label: 'Announce on speaker' },
+  { value: 'dispatch_message', label: 'Send a message to an app' }
+];
+
+function buildActionTypeSelect(name, selectedVal) {
+  var html = '<select name="' + name + '" onchange="rebuildActionFields(this)">';
+  ALL_ACTION_TYPES.forEach(function(t) {
+    html += '<option value="' + t.value + '"' + (t.value === selectedVal ? ' selected' : '') + '>' + t.label + '</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function escVal(s) { return s ? s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+function buildActionFields(idx, type, cfg) {
+  cfg = cfg || {};
+  var html = '<div class="grid">';
+
+  if (type === 'telegram_message') {
+    html += '<label>Message<input type="text" name="action_message_' + idx + '" value="' + escVal(cfg.message) + '" required placeholder="Heads up! {alert_name} triggered on {date}" /></label>';
+    html += '<label style="margin-bottom:0"><input type="checkbox" name="action_llm_summary_' + idx + '" value="true"' + (cfg.llm_summary && cfg.llm_summary.enabled ? ' checked' : '') + ' /> Include AI summary (use <code>{summary}</code> in your message to insert it)</label>';
+  } else if (type === 'run_report') {
+    html += '<label>Report' + buildReportSelect('action_report_id_' + idx, cfg.report_id || '') + '</label>';
+  } else if (type === 'webhook') {
+    html += '<label>Webhook URL<input type="url" name="action_webhook_url_' + idx + '" value="' + escVal(cfg.url) + '" required placeholder="' + (PAS_N8N_URL ? escVal(PAS_N8N_URL) : 'https://n8n.example.com/webhook/...') + '" /><small>A JSON payload will be POSTed to this URL when the alert fires</small></label>';
+    if (PAS_N8N_URL) {
+      html += '<button type="button" class="outline" style="padding:0.15rem 0.5rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="fillN8nUrl(' + idx + ')">Use n8n webhook URL</button>';
+    }
+    html += '<label style="margin-bottom:0"><input type="checkbox" name="action_webhook_include_data_' + idx + '" value="true"' + (cfg.include_data ? ' checked' : '') + ' /> Include the trigger data in the webhook payload</label>';
+    html += '<small style="display:block;margin-top:0.25rem">Payload format: <code>{ event, alert_name, timestamp, data? }</code></small>';
+  } else if (type === 'write_data') {
+    html += '<label>Save to app' + buildAppSelect('action_wd_app_id_' + idx, cfg.app_id || '') + '</label>';
+    html += '<label>For user' + buildUserSelect('action_wd_user_id_' + idx, cfg.user_id || '') + '</label>';
+    html += '<label>File path<input type="text" name="action_wd_path_' + idx + '" value="' + escVal(cfg.path) + '" required placeholder="alert-log/{date}.md" /><small>Use <code>{date}</code> or <code>{today}</code> for today\'s date</small></label>';
+    html += '<label>What to write<textarea name="action_wd_content_' + idx + '" rows="2" placeholder="Alert: {alert_name} fired on {date}">' + escVal(cfg.content) + '</textarea></label>';
+    var appendSel = (!cfg.mode || cfg.mode === 'append') ? ' selected' : '';
+    var writeSel = cfg.mode === 'write' ? ' selected' : '';
+    html += '<label>Write mode<select name="action_wd_mode_' + idx + '"><option value="append"' + appendSel + '>Add to end of file</option><option value="write"' + writeSel + '>Replace file contents</option></select></label>';
+  } else if (type === 'audio') {
+    html += '<label>What to say<input type="text" name="action_audio_message_' + idx + '" value="' + escVal(cfg.message) + '" required placeholder="Attention! {alert_name} has been triggered." /><small>This text will be spoken aloud on your smart speaker</small></label>';
+    html += '<label>Speaker (optional)<input type="text" name="action_audio_device_' + idx + '" value="' + escVal(cfg.device) + '" placeholder="Leave blank for default speaker" /><small>Chromecast / Google Home device name</small></label>';
+  } else if (type === 'dispatch_message') {
+    html += '<label>Message to send<input type="text" name="action_dispatch_text_' + idx + '" value="' + escVal(cfg.text) + '" required placeholder="/note Alert: {alert_name} fired" /><small>Processed as if the user typed it in Telegram</small></label>';
+    html += '<label>Send as user' + buildUserSelect('action_dispatch_user_id_' + idx, cfg.user_id || '') + '</label>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function rebuildActionFields(sel) {
+  var type = sel.value;
+  var fieldset = sel.closest('fieldset');
+  var container = fieldset.querySelector('.action-fields');
+  var idx = container.dataset.index;
+  container.innerHTML = buildActionFields(idx, type);
+}
+
+function fillN8nUrl(idx) {
+  var input = document.querySelector('[name="action_webhook_url_' + idx + '"]');
+  if (input && PAS_N8N_URL) input.value = PAS_N8N_URL;
+}
+
+function addAction() {
+  var type = document.getElementById('new-action-type').value;
+  var container = document.getElementById('actions-container');
+  var i = actionIndex++;
+  var html = '<fieldset class="section-fieldset">';
+  html += '<label>Type' + buildActionTypeSelect('action_type_' + i, type) + '</label>';
+  html += '<div class="action-fields" data-index="' + i + '">' + buildActionFields(i, type) + '</div>';
+  html += '<button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem" onclick="this.closest(\'fieldset\').remove()">Remove</button>';
+  html += '</fieldset>';
+  container.insertAdjacentHTML('beforeend', html);
+}
+
+function setExpression(expr) {
+  var input = document.getElementById('condition-expression');
+  input.value = expr;
+  if (expr === 'contains ""') {
+    input.setSelectionRange(10, 10);
+    input.focus();
+  }
+}
+
+function toggleConditionHelp() {
+  var type = document.getElementById('condition-type-select').value;
+  document.getElementById('deterministic-presets').style.display = type === 'deterministic' ? '' : 'none';
+  document.getElementById('fuzzy-help').style.display = type === 'fuzzy' ? '' : 'none';
+}
+toggleConditionHelp();
+
+function browseFiles(pathName, appSelect, userSelect) {
+  var appId = document.querySelector('[name="' + appSelect + '"]').value;
+  var userId = document.querySelector('[name="' + userSelect + '"]').value;
+  var target = document.getElementById('fb-' + pathName);
+  if (!appId || !userId) {
+    target.innerHTML = '<small><em>Select an app and user first.</em></small>';
+    return;
+  }
+  htmx.ajax('GET', '/gui/data/files?scope=user&userId=' + encodeURIComponent(userId) + '&appId=' + encodeURIComponent(appId) + '&target=' + encodeURIComponent(pathName), { target: target, swap: 'innerHTML' });
+}
+
+// Populate existing action fields on page load
+PAS_EXISTING_ACTIONS.forEach(function(action, i) {
+  var container = document.querySelector('.action-fields[data-index="' + i + '"]');
+  if (container) {
+    container.innerHTML = buildActionFields(i, action.type, action.config);
+  }
+});
+
+initFrequencyPicker('schedule');
+</script>

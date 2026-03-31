@@ -1,0 +1,478 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pas.local/schemas/app-manifest.json",
+	"title": "PAS App Manifest",
+	"description": "Schema for Personal Automation System app manifest.yaml files",
+	"type": "object",
+	"required": ["app"],
+	"additionalProperties": false,
+	"properties": {
+		"app": {
+			"type": "object",
+			"required": ["id", "name", "version", "description", "author"],
+			"additionalProperties": false,
+			"properties": {
+				"id": {
+					"type": "string",
+					"pattern": "^[a-z][a-z0-9-]*$",
+					"minLength": 1,
+					"description": "Unique app identifier. Lowercase, hyphens allowed."
+				},
+				"name": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Human-readable app name."
+				},
+				"version": {
+					"type": "string",
+					"pattern": "^\\d+\\.\\d+\\.\\d+",
+					"description": "Semver version string."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1,
+					"description": "1-3 sentence description shown in management GUI."
+				},
+				"author": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Author name."
+				},
+				"repository": {
+					"type": "string",
+					"format": "uri",
+					"description": "Optional repository URL."
+				},
+				"pas_core_version": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Required CoreServices API version range (semver). E.g. '>=1.0.0 <2.0.0'."
+				},
+				"license": {
+					"type": "string",
+					"minLength": 1,
+					"description": "SPDX license identifier. E.g. 'MIT', 'Apache-2.0'."
+				},
+				"tags": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 50
+					},
+					"maxItems": 20,
+					"description": "Discovery keywords for app search and categorization."
+				},
+				"category": {
+					"type": "string",
+					"enum": ["productivity", "home", "health", "finance", "social", "utility"],
+					"description": "App category for organization and discovery."
+				},
+				"homepage": {
+					"type": "string",
+					"format": "uri",
+					"pattern": "^https?://",
+					"description": "Project homepage URL (HTTP or HTTPS only)."
+				}
+			}
+		},
+		"capabilities": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"messages": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"intents": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"minLength": 1
+							},
+							"description": "Keywords/phrases for intent classification."
+						},
+						"commands": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/command"
+							},
+							"description": "Explicit /commands this app handles."
+						},
+						"accepts_photos": {
+							"type": "boolean",
+							"description": "Whether this app handles photo messages."
+						},
+						"photo_intents": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"minLength": 1
+							},
+							"description": "Photo classification types this app handles."
+						}
+					}
+				},
+				"schedules": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/schedule"
+					}
+				},
+				"rules": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"files": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"minLength": 1
+							},
+							"description": "Paths to rule files relative to app root."
+						}
+					}
+				},
+				"events": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"emits": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/eventEmit"
+							}
+						},
+						"subscribes": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/eventSubscribe"
+							}
+						}
+					}
+				}
+			}
+		},
+		"requirements": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"services": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"telegram",
+							"llm",
+							"llm:ollama",
+							"llm:claude",
+							"scheduler",
+							"data-store",
+							"condition-eval",
+							"audio",
+							"event-bus",
+							"context-store",
+							"app-metadata",
+							"app-knowledge",
+							"model-journal",
+							"system-info"
+						]
+					},
+					"description": "Infrastructure services this app uses."
+				},
+				"external_apis": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/externalApi"
+					}
+				},
+				"data": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"user_scopes": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/dataScope"
+							}
+						},
+						"shared_scopes": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/dataScope"
+							}
+						},
+						"context_reads": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"minLength": 1
+							},
+							"description": "Context store keys this app reads."
+						}
+					}
+				},
+				"integrations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/integration"
+					}
+				},
+				"llm": {
+					"type": "object",
+					"additionalProperties": false,
+					"description": "LLM usage configuration (per-app safeguard overrides).",
+					"properties": {
+						"tier": {
+							"type": "string",
+							"enum": ["fast", "standard", "reasoning"],
+							"description": "Preferred model tier."
+						},
+						"rate_limit": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": ["max_requests", "window_seconds"],
+							"properties": {
+								"max_requests": {
+									"type": "integer",
+									"minimum": 1,
+									"description": "Maximum requests allowed within the window."
+								},
+								"window_seconds": {
+									"type": "integer",
+									"minimum": 1,
+									"description": "Sliding window duration in seconds."
+								}
+							}
+						},
+						"monthly_cost_cap": {
+							"type": "number",
+							"exclusiveMinimum": 0,
+							"description": "Per-app monthly cost cap in USD."
+						}
+					}
+				}
+			}
+		},
+		"user_config": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/userConfig"
+			}
+		}
+	},
+	"$defs": {
+		"command": {
+			"type": "object",
+			"required": ["name", "description"],
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string",
+					"pattern": "^/[a-z][a-z0-9_]*$",
+					"description": "Command name starting with /."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Shown in /help."
+				},
+				"args": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1
+					},
+					"description": "Named positional arguments."
+				}
+			}
+		},
+		"schedule": {
+			"type": "object",
+			"required": ["id", "description", "cron", "handler", "user_scope"],
+			"additionalProperties": false,
+			"properties": {
+				"id": {
+					"type": "string",
+					"pattern": "^[a-z][a-z0-9-]*$",
+					"description": "Unique job ID within this app."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				},
+				"cron": {
+					"type": "string",
+					"pattern": "^[0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+$",
+					"description": "Standard 5-field cron expression."
+				},
+				"handler": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Handler file path relative to app root."
+				},
+				"user_scope": {
+					"type": "string",
+					"enum": ["all", "shared", "system"]
+				}
+			}
+		},
+		"eventEmit": {
+			"type": "object",
+			"required": ["id", "description"],
+			"additionalProperties": false,
+			"properties": {
+				"id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Event ID, namespaced with app ID."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				},
+				"payload": {
+					"type": "object",
+					"description": "JSON Schema for the event payload."
+				}
+			}
+		},
+		"eventSubscribe": {
+			"type": "object",
+			"required": ["event", "handler"],
+			"additionalProperties": false,
+			"properties": {
+				"event": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Event ID from another app."
+				},
+				"handler": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Handler file path relative to app root."
+				},
+				"required": {
+					"type": "boolean",
+					"default": false,
+					"description": "If false, app works without this event."
+				}
+			}
+		},
+		"externalApi": {
+			"type": "object",
+			"required": ["id", "description", "required", "env_var"],
+			"additionalProperties": false,
+			"properties": {
+				"id": {
+					"type": "string",
+					"minLength": 1
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				},
+				"required": {
+					"type": "boolean"
+				},
+				"env_var": {
+					"type": "string",
+					"pattern": "^[A-Z][A-Z0-9_]*$",
+					"description": "Environment variable name for the credential."
+				},
+				"fallback_behavior": {
+					"type": "string",
+					"description": "What happens when this optional API is unavailable."
+				}
+			}
+		},
+		"dataScope": {
+			"type": "object",
+			"required": ["path", "access", "description"],
+			"additionalProperties": false,
+			"properties": {
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"description": "File or directory path."
+				},
+				"access": {
+					"type": "string",
+					"enum": ["read", "write", "read-write"]
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				}
+			}
+		},
+		"integration": {
+			"type": "object",
+			"required": ["app", "description", "required"],
+			"additionalProperties": false,
+			"properties": {
+				"app": {
+					"type": "string",
+					"minLength": 1,
+					"description": "ID of the other app."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				},
+				"required": {
+					"type": "boolean",
+					"const": false,
+					"description": "Must always be false. Apps must work standalone."
+				}
+			}
+		},
+		"userConfig": {
+			"type": "object",
+			"required": ["key", "type", "default", "description"],
+			"additionalProperties": false,
+			"properties": {
+				"key": {
+					"type": "string",
+					"pattern": "^[a-z][a-z0-9_]*$"
+				},
+				"type": {
+					"type": "string",
+					"enum": ["string", "number", "boolean", "select"]
+				},
+				"default": {},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"minItems": 1,
+					"description": "Required when type is 'select'."
+				}
+			},
+			"if": {
+				"properties": {
+					"type": {
+						"const": "select"
+					}
+				}
+			},
+			"then": {
+				"properties": {
+					"options": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"minItems": 1
+					}
+				},
+				"required": ["options"]
+			}
+		}
+	}
+}

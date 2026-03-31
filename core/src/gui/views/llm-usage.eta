@@ -1,0 +1,161 @@
+<div class="page-header">
+  <h1>LLM</h1>
+</div>
+
+<% if (it.providers.length > 0) { %>
+  <h2>Providers</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Provider ID</th>
+        <th>Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const p of it.providers) { %>
+        <tr>
+          <td><code><%= p.id %></code></td>
+          <td><%= p.type %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>
+
+<h2>Tier Assignments</h2>
+<div class="stat-grid">
+  <div class="stat-card">
+    <h3>Fast (Classification)</h3>
+    <div class="value" style="font-size:0.9rem;word-break:break-all">
+      <code><%= it.fastRef.provider %> / <%= it.fastRef.model %></code>
+    </div>
+  </div>
+  <div class="stat-card">
+    <h3>Standard (Reasoning)</h3>
+    <div class="value" style="font-size:0.9rem;word-break:break-all">
+      <code><%= it.standardRef.provider %> / <%= it.standardRef.model %></code>
+    </div>
+  </div>
+  <div class="stat-card">
+    <h3>Reasoning</h3>
+    <div class="value" style="font-size:0.9rem;word-break:break-all">
+      <% if (it.reasoningRef) { %>
+        <code><%= it.reasoningRef.provider %> / <%= it.reasoningRef.model %></code>
+      <% } else { %>
+        <em>Not configured</em>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<h2>Available Models</h2>
+<p><small>Fetched from configured providers. Click "Set" to assign a model to a tier (no restart needed).</small></p>
+<div id="available-models" hx-get="/gui/llm/available-models" hx-trigger="load" hx-swap="innerHTML">
+  <p aria-busy="true">Loading available models...</p>
+</div>
+
+<h2>Cost Summary</h2>
+<% if (!it.hasData) { %>
+  <p class="empty-state">No LLM API usage recorded yet.</p>
+<% } else { %>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <h3>Today</h3>
+      <div class="value">$<%= it.todayCost %></div>
+    </div>
+    <div class="stat-card">
+      <h3>This Month</h3>
+      <div class="value">$<%= it.monthCost %></div>
+    </div>
+    <div class="stat-card">
+      <h3>All Time</h3>
+      <div class="value">$<%= it.totalCost %></div>
+    </div>
+  </div>
+
+  <% if (it.perModel.length > 0) { %>
+    <h3>Per-Model Breakdown</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Model</th>
+            <th>Calls</th>
+            <th>Input Tokens</th>
+            <th>Output Tokens</th>
+            <th>Total Cost ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const m of it.perModel) { %>
+            <tr>
+              <td><%= m.provider %></td>
+              <td><code><%= m.model %></code></td>
+              <td><%= m.callCount.toLocaleString() %></td>
+              <td><%= m.totalInputTokens.toLocaleString() %></td>
+              <td><%= m.totalOutputTokens.toLocaleString() %></td>
+              <td><%= m.totalCost.toFixed(6) %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (it.perUser.length > 0) { %>
+    <h3>Per-User Breakdown</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Calls</th>
+            <th>Total Cost ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const u of it.perUser) { %>
+            <tr>
+              <td><%= u.userId %></td>
+              <td><%= u.callCount.toLocaleString() %></td>
+              <td><%= u.totalCost.toFixed(6) %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <h2>Usage Log</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Provider</th>
+          <th>Model</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Cost ($)</th>
+          <th>App</th>
+          <th>User</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (const row of it.rows) { %>
+          <tr>
+            <td><small><%= row.timestamp %></small></td>
+            <td><%= row.provider %></td>
+            <td><%= row.model %></td>
+            <td><%= row.inputTokens %></td>
+            <td><%= row.outputTokens %></td>
+            <td><%= row.cost %></td>
+            <td><%= row.app %></td>
+            <td><%= row.user %></td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+<% } %>

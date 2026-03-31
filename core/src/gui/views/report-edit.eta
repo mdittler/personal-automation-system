@@ -1,0 +1,360 @@
+<div class="page-header">
+  <h1><%= it.isNew ? 'Create Report' : 'Edit Report' %></h1>
+</div>
+
+<% if (it.errors && it.errors.length > 0) { %>
+  <div class="alert-banner alert-banner-error">
+    <strong>Validation errors:</strong>
+    <ul style="margin-bottom: 0">
+      <% for (const err of it.errors) { %>
+        <li><%= err.field %>: <%= err.message %></li>
+      <% } %>
+    </ul>
+  </div>
+<% } %>
+
+<% if (it.isNew) { %>
+  <div class="card">
+    <details open>
+      <summary><strong>Start from a template</strong></summary>
+      <div class="grid" style="margin-top:0.5rem">
+        <button type="button" class="outline" onclick="applyTemplate('daily')">Daily Summary</button>
+        <button type="button" class="outline" onclick="applyTemplate('weekly')">Weekly Review</button>
+        <button type="button" class="outline" onclick="applyTemplate('monthly')">Monthly Review</button>
+        <button type="button" class="outline" onclick="applyTemplate('quarterly')">Quarterly Review</button>
+        <button type="button" class="outline" onclick="applyTemplate('yearly')">Year in Review</button>
+      </div>
+    </details>
+  </div>
+<% } %>
+
+<form method="post" action="/gui/reports<%= it.isNew ? '' : '/' + it.report.id %>">
+  <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+
+  <div class="grid">
+    <label>
+      Report ID
+      <input type="text" name="id" value="<%= it.report.id || '' %>"
+             pattern="[a-z][a-z0-9-]*" maxlength="50" required
+             <%= it.isNew ? '' : 'readonly' %>
+             placeholder="weekly-summary" />
+      <small>Lowercase letters, digits, hyphens. Cannot change after creation.</small>
+    </label>
+    <label>
+      Name
+      <input type="text" name="name" value="<%= it.report.name || '' %>"
+             maxlength="100" required placeholder="Weekly Summary" />
+    </label>
+  </div>
+
+  <label>
+    Description
+    <input type="text" name="description" value="<%= it.report.description || '' %>"
+           placeholder="A weekly overview of all activity" />
+  </label>
+
+  <h3>Schedule</h3>
+  <input type="hidden" name="schedule" value="<%= it.report.schedule || '' %>" />
+
+  <h3>Delivery</h3>
+  <input type="hidden" name="delivery" id="delivery-hidden" value="<%= (it.report.delivery || []).join(', ') %>" />
+  <% const selectedDelivery = it.report.delivery || []; %>
+  <% if (it.users && it.users.length > 0) { %>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+      <% for (const user of it.users) { %>
+        <label style="margin-bottom:0">
+          <input type="checkbox" class="delivery-cb" value="<%= user.id %>"
+                 <%= selectedDelivery.includes(user.id) ? 'checked' : '' %>
+                 onchange="syncDelivery()" />
+          <%= user.name %>
+        </label>
+      <% } %>
+    </div>
+  <% } else { %>
+    <p><small>No users available</small></p>
+  <% } %>
+
+  <fieldset>
+    <legend>Enabled</legend>
+    <label>
+      <input type="checkbox" name="enabled" value="true"
+             <%= it.report.enabled ? 'checked' : '' %> />
+      Report is active and will run on schedule
+    </label>
+  </fieldset>
+
+  <h3>Sections</h3>
+  <p><small>Sections define what data is included in the report. At least one section is required.</small></p>
+
+  <div id="sections-container">
+    <% if (it.report.sections && it.report.sections.length > 0) { %>
+      <% for (let i = 0; i < it.report.sections.length; i++) { %>
+        <% const section = it.report.sections[i]; %>
+        <fieldset class="section-fieldset">
+          <div class="grid">
+            <label>
+              Type
+              <select name="section_type_<%= i %>">
+                <option value="changes" <%= section.type === 'changes' ? 'selected' : '' %>>Changes (from change log)</option>
+                <option value="app-data" <%= section.type === 'app-data' ? 'selected' : '' %>>App Data (read file)</option>
+                <option value="context" <%= section.type === 'context' ? 'selected' : '' %>>Context (knowledge base)</option>
+                <option value="custom" <%= section.type === 'custom' ? 'selected' : '' %>>Custom Text</option>
+              </select>
+            </label>
+            <label>
+              Label
+              <input type="text" name="section_label_<%= i %>" value="<%= section.label || '' %>" required />
+            </label>
+          </div>
+          <% if (section.type === 'changes') { %>
+            <label>
+              Lookback hours
+              <input type="number" name="section_lookback_<%= i %>" value="<%= section.config.lookback_hours || 24 %>" min="1" />
+            </label>
+            <label>App filter <small>(empty = all apps)</small></label>
+            <input type="hidden" name="section_app_filter_<%= i %>" id="app-filter-hidden-<%= i %>" value="<%= (section.config.app_filter || []).join(', ') %>" />
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.5rem">
+              <% const selectedFilter = section.config.app_filter || []; %>
+              <% if (it.apps) { for (const app of it.apps) { %>
+                <label style="margin-bottom:0">
+                  <input type="checkbox" class="app-filter-cb-<%= i %>" value="<%= app.id %>"
+                         <%= selectedFilter.includes(app.id) ? 'checked' : '' %>
+                         onchange="syncAppFilter(<%= i %>)" />
+                  <%= app.name %>
+                </label>
+              <% } } %>
+            </div>
+          <% } else if (section.type === 'app-data') { %>
+            <div class="grid">
+              <label>
+                App ID
+                <select name="section_app_id_<%= i %>">
+                  <option value="">-- Select app --</option>
+                  <% if (it.apps) { for (const app of it.apps) { %>
+                    <option value="<%= app.id %>" <%= section.config.app_id === app.id ? 'selected' : '' %>><%= app.name %> (<%= app.id %>)</option>
+                  <% } } %>
+                </select>
+              </label>
+              <label>
+                User ID
+                <select name="section_user_id_<%= i %>">
+                  <option value="">-- Select user --</option>
+                  <% if (it.users) { for (const user of it.users) { %>
+                    <option value="<%= user.id %>" <%= section.config.user_id === user.id ? 'selected' : '' %>><%= user.name %> (<%= user.id %>)</option>
+                  <% } } %>
+                </select>
+              </label>
+              <label>
+                Path
+                <input type="text" name="section_path_<%= i %>" value="<%= section.config.path || '' %>" required
+                       placeholder="daily-notes/{today}.md" />
+                <small>File or folder (reads most recent). Supports {today} and {yesterday} tokens.</small>
+              </label>
+            </div>
+            <button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem"
+                    onclick="browseFiles('section_path_<%= i %>','section_app_id_<%= i %>','section_user_id_<%= i %>')">Browse files</button>
+            <div id="fb-section_path_<%= i %>"></div>
+          <% } else if (section.type === 'context') { %>
+            <label>
+              Key prefix
+              <input type="text" name="section_key_prefix_<%= i %>" value="<%= section.config.key_prefix || '' %>" required />
+            </label>
+          <% } else if (section.type === 'custom') { %>
+            <label>
+              Text
+              <textarea name="section_text_<%= i %>" rows="3" required><%= section.config.text || '' %></textarea>
+            </label>
+          <% } %>
+          <button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem"
+                  onclick="this.closest('fieldset').remove()">Remove Section</button>
+        </fieldset>
+      <% } %>
+    <% } %>
+  </div>
+
+  <div class="grid" style="margin-top:0.5rem;margin-bottom:1rem">
+    <select id="new-section-type">
+      <option value="changes">Changes</option>
+      <option value="app-data">App Data</option>
+      <option value="context">Context</option>
+      <option value="custom">Custom Text</option>
+    </select>
+    <button type="button" class="outline" style="padding:0.25rem 0.5rem"
+            onclick="addSection()">Add Section</button>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <h3 style="margin-top:0">LLM Summarization</h3>
+    <fieldset>
+      <label>
+        <input type="checkbox" name="llm_enabled" value="true"
+               <%= it.report.llm && it.report.llm.enabled ? 'checked' : '' %> />
+        Enable LLM summarization
+      </label>
+      <label>
+        Custom prompt
+        <textarea name="llm_prompt" rows="2" placeholder="Summarize concisely, highlighting key patterns."><%= (it.report.llm && it.report.llm.prompt) || '' %></textarea>
+      </label>
+      <div class="grid">
+        <label>
+          Tier
+          <select name="llm_tier">
+            <option value="fast" <%= it.report.llm && it.report.llm.tier === 'fast' ? 'selected' : '' %>>Fast</option>
+            <option value="standard" <%= !it.report.llm || !it.report.llm.tier || it.report.llm.tier === 'standard' ? 'selected' : '' %>>Standard</option>
+            <option value="reasoning" <%= it.report.llm && it.report.llm.tier === 'reasoning' ? 'selected' : '' %>>Reasoning</option>
+          </select>
+        </label>
+        <label>
+          Max tokens
+          <input type="number" name="llm_max_tokens"
+                 value="<%= (it.report.llm && it.report.llm.max_tokens) || 500 %>"
+                 min="1" max="2000" />
+        </label>
+      </div>
+    </fieldset>
+  </div>
+
+  <div class="grid">
+    <button type="submit"><%= it.isNew ? 'Create Report' : 'Save Changes' %></button>
+    <% if (!it.isNew) { %>
+      <button type="button" class="outline"
+              hx-post="/gui/reports/<%= it.report.id %>/preview"
+              hx-target="#preview-output"
+              hx-swap="innerHTML">Preview</button>
+    <% } %>
+  </div>
+</form>
+
+<% if (!it.isNew) { %>
+  <div id="preview-output" style="margin-top:1rem"></div>
+
+  <hr />
+  <form method="post" action="/gui/reports/<%= it.report.id %>/delete"
+        onsubmit="return confirm('Delete this report?')">
+    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+    <button type="submit" class="secondary outline">Delete Report</button>
+  </form>
+<% } %>
+
+<script src="/gui/public/frequency-picker.js"></script>
+<script>
+var PAS_USERS = <%~ JSON.stringify((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
+var PAS_APPS = <%~ JSON.stringify((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
+
+function syncDelivery() {
+  var cbs = document.querySelectorAll('.delivery-cb:checked');
+  var ids = Array.from(cbs).map(function(cb) { return cb.value; });
+  document.getElementById('delivery-hidden').value = ids.join(', ');
+}
+
+function syncAppFilter(idx) {
+  var cbs = document.querySelectorAll('.app-filter-cb-' + idx + ':checked');
+  var ids = Array.from(cbs).map(function(cb) { return cb.value; });
+  document.getElementById('app-filter-hidden-' + idx).value = ids.join(', ');
+}
+
+var sectionIndex = <%= it.report.sections ? it.report.sections.length : 0 %>;
+
+function buildAppSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select app --</option>';
+  PAS_APPS.forEach(function(a) {
+    html += '<option value="' + a.id + '"' + (a.id === selectedVal ? ' selected' : '') + '>' + a.name + ' (' + a.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function buildUserSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select user --</option>';
+  PAS_USERS.forEach(function(u) {
+    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + ' (' + u.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function addSection() {
+  var type = document.getElementById('new-section-type').value;
+  var container = document.getElementById('sections-container');
+  var i = sectionIndex++;
+  var html = '<fieldset class="section-fieldset">';
+  html += '<div class="grid"><label>Type<select name="section_type_' + i + '">';
+  html += '<option value="changes"' + (type==='changes'?' selected':'') + '>Changes</option>';
+  html += '<option value="app-data"' + (type==='app-data'?' selected':'') + '>App Data</option>';
+  html += '<option value="context"' + (type==='context'?' selected':'') + '>Context</option>';
+  html += '<option value="custom"' + (type==='custom'?' selected':'') + '>Custom Text</option>';
+  html += '</select></label>';
+  html += '<label>Label<input type="text" name="section_label_' + i + '" required /></label></div>';
+  if (type === 'changes') {
+    html += '<label>Lookback hours<input type="number" name="section_lookback_' + i + '" value="24" min="1" /></label>';
+    html += '<label>App filter <small>(empty = all apps)</small></label>';
+    html += '<input type="hidden" name="section_app_filter_' + i + '" id="app-filter-hidden-' + i + '" value="" />';
+    html += '<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.5rem">';
+    PAS_APPS.forEach(function(a) {
+      html += '<label style="margin-bottom:0"><input type="checkbox" class="app-filter-cb-' + i + '" value="' + a.id + '" onchange="syncAppFilter(' + i + ')" /> ' + a.name + '</label>';
+    });
+    html += '</div>';
+  } else if (type === 'app-data') {
+    html += '<div class="grid"><label>App ID' + buildAppSelect('section_app_id_' + i, '') + '</label>';
+    html += '<label>User ID' + buildUserSelect('section_user_id_' + i, '') + '</label>';
+    html += '<label>Path<input type="text" name="section_path_' + i + '" required placeholder="daily-notes/{today}.md" /><small>File or folder (reads most recent). Supports {today} and {yesterday} tokens.</small></label></div>';
+    html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'section_path_' + i + '\',\'section_app_id_' + i + '\',\'section_user_id_' + i + '\')">Browse files</button>';
+    html += '<div id="fb-section_path_' + i + '"></div>';
+  } else if (type === 'context') {
+    html += '<label>Key prefix<input type="text" name="section_key_prefix_' + i + '" required /></label>';
+  } else if (type === 'custom') {
+    html += '<label>Text<textarea name="section_text_' + i + '" rows="3" required></textarea></label>';
+  }
+  html += '<button type="button" class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.85rem" onclick="this.closest(\'fieldset\').remove()">Remove Section</button>';
+  html += '</fieldset>';
+  container.insertAdjacentHTML('beforeend', html);
+}
+
+var TEMPLATES = {
+  daily: { id: 'daily-summary', name: 'Daily Summary', schedule: '0 9 * * *', sections: [{type:'changes',label:'Changes',lookback:24}] },
+  weekly: { id: 'weekly-review', name: 'Weekly Review', schedule: '0 9 * * 1', sections: [{type:'changes',label:'Weekly Changes',lookback:168}] },
+  monthly: { id: 'monthly-review', name: 'Monthly Review', schedule: '0 9 1 * *', sections: [{type:'custom',label:'Introduction',text:'Monthly review report.'},{type:'changes',label:'Monthly Changes',lookback:720}] },
+  quarterly: { id: 'quarterly-review', name: 'Quarterly Review', schedule: '0 9 1 1,4,7,10 *', sections: [{type:'custom',label:'Introduction',text:'Quarterly review report.'},{type:'changes',label:'Quarterly Changes',lookback:2160}] },
+  yearly: { id: 'year-in-review', name: 'Year in Review', schedule: '0 9 1 1 *', sections: [{type:'custom',label:'Introduction',text:'Year in review report.'},{type:'changes',label:'Yearly Changes',lookback:8760}] }
+};
+
+function applyTemplate(name) {
+  var t = TEMPLATES[name];
+  if (!t) return;
+  document.querySelector('input[name="id"]').value = t.id;
+  document.querySelector('input[name="name"]').value = t.name;
+  document.querySelector('input[name="schedule"]').value = t.schedule;
+  var oldPicker = document.querySelector('.frequency-picker');
+  if (oldPicker) oldPicker.remove();
+  initFrequencyPicker('schedule');
+  document.getElementById('sections-container').innerHTML = '';
+  sectionIndex = 0;
+  t.sections.forEach(function(s) {
+    document.getElementById('new-section-type').value = s.type;
+    addSection();
+    var idx = sectionIndex - 1;
+    var label = document.querySelector('input[name="section_label_' + idx + '"]');
+    if (label) label.value = s.label;
+    if (s.type === 'changes') {
+      var lb = document.querySelector('input[name="section_lookback_' + idx + '"]');
+      if (lb) lb.value = s.lookback;
+    } else if (s.type === 'custom') {
+      var tx = document.querySelector('textarea[name="section_text_' + idx + '"]');
+      if (tx) tx.value = s.text;
+    }
+  });
+}
+
+function browseFiles(pathName, appSelect, userSelect) {
+  var appId = document.querySelector('[name="' + appSelect + '"]').value;
+  var userId = document.querySelector('[name="' + userSelect + '"]').value;
+  var target = document.getElementById('fb-' + pathName);
+  if (!appId || !userId) {
+    target.innerHTML = '<small><em>Select an app and user first.</em></small>';
+    return;
+  }
+  htmx.ajax('GET', '/gui/data/files?scope=user&userId=' + encodeURIComponent(userId) + '&appId=' + encodeURIComponent(appId) + '&target=' + encodeURIComponent(pathName), { target: target, swap: 'innerHTML' });
+}
+
+initFrequencyPicker('schedule');
+</script>

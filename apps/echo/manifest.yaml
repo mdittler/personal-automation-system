@@ -1,0 +1,27 @@
+app:
+  id: echo
+  name: "Echo"
+  version: "1.0.0"
+  description: "Echoes your messages back. A minimal example app."
+  author: "PAS Team"
+  pas_core_version: ">=0.1.0"
+  license: "MIT"
+  category: utility
+  tags: ["echo", "example", "starter"]
+
+capabilities:
+  messages:
+    commands:
+      - name: /echo
+        description: "Echo back your message"
+        args: ["message"]
+
+requirements:
+  services:
+    - telegram
+    - data-store
+  data:
+    user_scopes:
+      - path: "echo/log.md"
+        access: read-write
+        description: "Message echo log"

@@ -1,0 +1,35 @@
+<a href="/gui/reports/<%= it.reportId %>/edit" class="back-link">&larr; Edit Report</a> | <a href="/gui/reports" class="back-link">&larr; All Reports</a>
+
+<div class="page-header">
+  <h1>Report History: <%= it.reportName %></h1>
+</div>
+
+<% if (it.files.length === 0) { %>
+  <p class="empty-state">No report history yet. This report hasn't been run.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const file of it.files) { %>
+        <tr>
+          <td><%= file.name %></td>
+          <td>
+            <a href="#"
+               hx-get="/gui/reports/<%= it.reportId %>/history/<%= file.name %>"
+               hx-target="#history-content"
+               hx-swap="innerHTML">View</a>
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+
+  <div id="history-content" style="margin-top:1rem">
+    <p class="empty-state"><em>Select a report run to view its content.</em></p>
+  </div>
+<% } %>

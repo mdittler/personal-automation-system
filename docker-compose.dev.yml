@@ -1,0 +1,24 @@
+# ============================================================
+# Personal Automation System — Docker Compose (Development)
+# ============================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Mounts source code, runs tsx watch, and exposes port 3000.
+# ============================================================
+
+services:
+  core:
+    build:
+      context: .
+      target: builder
+    command: ["npx", "tsx", "watch", "core/src/bootstrap.ts"]
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./core/src:/app/core/src
+      - ./apps:/app/apps
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+    ports:
+      - "3000:3000"

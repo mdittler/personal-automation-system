@@ -1,0 +1,70 @@
+<div class="page-header">
+  <h1>Alerts</h1>
+  <div class="actions">
+    <a href="/gui/alerts/new" role="button">Create Alert</a>
+  </div>
+</div>
+
+<% if (it.alerts.length === 0) { %>
+  <p class="empty-state">No alerts configured yet. Create one to get started.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Condition</th>
+        <th>Schedule</th>
+        <th>Next Run</th>
+        <th>Cooldown</th>
+        <th>Last Fired</th>
+        <th>Enabled</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const alert of it.alerts) { %>
+        <tr>
+          <td>
+            <strong><%= alert.name %></strong>
+            <% if (alert.description) { %>
+              <br><small><%= alert.description %></small>
+            <% } %>
+          </td>
+          <td>
+            <code><%= alert.conditionType %></code>
+            <br><small><%= alert.conditionExpr %></small>
+          </td>
+          <td><%= alert.humanSchedule %></td>
+          <td>
+            <% if (alert.nextRun) { %>
+              <%= alert.nextRun %>
+              <br><small><%= alert.nextRunRelative %></small>
+            <% } else { %>
+              <em><%= alert.enabled ? 'Unknown' : 'Disabled' %></em>
+            <% } %>
+          </td>
+          <td><%= alert.cooldown %></td>
+          <td><%= alert.lastFired %></td>
+          <td>
+            <span id="toggle-<%= alert.id %>">
+              <form method="post"
+                    action="/gui/alerts/<%= alert.id %>/toggle"
+                    hx-post="/gui/alerts/<%= alert.id %>/toggle"
+                    hx-target="#toggle-<%= alert.id %>"
+                    hx-swap="innerHTML"
+                    style="margin:0">
+                <button type="submit" class="toggle-btn outline <%= alert.enabled ? 'secondary' : '' %>">
+                  <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
+                </button>
+              </form>
+            </span>
+          </td>
+          <td>
+            <a href="/gui/alerts/<%= alert.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <a href="/gui/alerts/<%= alert.id %>/history">History</a>
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>

@@ -1,0 +1,60 @@
+<div class="page-header">
+  <h1>Logs</h1>
+</div>
+
+<% if (!it.available) { %>
+  <div class="card">
+    <h4>Log file not available</h4>
+    <p>In development mode, PAS logs to the <strong>console</strong> (your terminal) instead of a file. This page displays file-based logs, which are only available in production.</p>
+    <p>To view logs right now, check your terminal where <code>pnpm dev</code> is running.</p>
+    <details>
+      <summary>How to enable file logging</summary>
+      <p>Set the environment variable <code>NODE_ENV=production</code> before starting PAS. In production mode, logs are written to <code>data/system/logs/</code> and will appear here with level filtering and auto-refresh.</p>
+    </details>
+  </div>
+<% } else { %>
+  <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;">
+    <label for="level-filter" style="margin:0;white-space:nowrap;">Filter by level:</label>
+    <select id="level-filter"
+      hx-get="/gui/logs/entries"
+      hx-target="#log-rows"
+      hx-include="[name='level']"
+      hx-trigger="change"
+      name="level"
+      style="margin:0;width:auto;">
+      <option value="" <%= it.currentLevel === '' ? 'selected' : '' %>>All</option>
+      <option value="info" <%= it.currentLevel === 'info' ? 'selected' : '' %>>Info+</option>
+      <option value="warn" <%= it.currentLevel === 'warn' ? 'selected' : '' %>>Warn+</option>
+      <option value="error" <%= it.currentLevel === 'error' ? 'selected' : '' %>>Error+</option>
+    </select>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Level</th>
+          <th>Source</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody id="log-rows"
+        hx-get="/gui/logs/entries<%= it.currentLevel ? '?level=' + it.currentLevel : '' %>"
+        hx-trigger="every 5s"
+        hx-swap="innerHTML">
+        <% for (const entry of it.entries) { %>
+          <tr class="<%= entry.level >= 50 ? 'status-err' : entry.level >= 40 ? 'status-err' : '' %>">
+            <td><small><%= entry.time %></small></td>
+            <td><kbd><%= entry.levelLabel %></kbd></td>
+            <td><%= entry.service || entry.appId || '-' %></td>
+            <td><%= entry.msg %></td>
+          </tr>
+        <% } %>
+        <% if (it.entries.length === 0) { %>
+          <tr><td colspan="4">No log entries found.</td></tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+<% } %>

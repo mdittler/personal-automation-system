@@ -1,0 +1,41 @@
+<div class="page-header">
+  <h1>Apps</h1>
+</div>
+
+<% if (it.apps.length === 0) { %>
+  <p class="empty-state">No apps are currently loaded.</p>
+<% } else { %>
+  <table>
+    <thead>
+      <tr>
+        <th>App</th>
+        <th>Version</th>
+        <th>Description</th>
+        <% for (const user of it.users) { %>
+          <th><%= user.name %></th>
+        <% } %>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const app of it.apps) { %>
+        <tr>
+          <td><a href="/gui/apps/<%= app.id %>"><%= app.name %></a></td>
+          <td><%= app.version %></td>
+          <td><%= app.description || '-' %></td>
+          <% for (const status of app.userStatuses) { %>
+            <td>
+              <button class="<%= status.enabled ? 'outline' : '' %> toggle-btn"
+                hx-post="/gui/apps/<%= app.id %>/toggle"
+                hx-vals='<%= JSON.stringify({ userId: status.userId, enabled: String(status.enabled) }) %>'
+                hx-swap="outerHTML">
+                <span class="badge <%= status.enabled ? 'badge-ok' : 'badge-err' %>">
+                  <%= status.enabled ? 'Enabled' : 'Disabled' %>
+                </span>
+              </button>
+            </td>
+          <% } %>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>

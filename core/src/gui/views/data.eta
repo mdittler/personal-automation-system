@@ -1,0 +1,133 @@
+<div class="page-header">
+  <h1>Data Browser</h1>
+</div>
+
+<p><small>Data directory: <code><%= it.dataDir %></code></small></p>
+
+<% if (it.vaultPaths && it.vaultPaths.length > 0) { %>
+<div class="card" style="margin-bottom:1rem;">
+  <details>
+    <summary><strong>Obsidian Vault Paths</strong> <small style="color:var(--pas-text-muted);">(point Obsidian at these directories)</small></summary>
+    <ul style="list-style:none;padding-left:0.5rem;margin-top:0.5rem;">
+      <% for (const vault of it.vaultPaths) { %>
+        <li style="margin-bottom:0.25rem;">
+          <strong><%= vault.name %></strong>: <code style="font-size:0.85rem;"><%= vault.path %></code>
+        </li>
+      <% } %>
+    </ul>
+  </details>
+</div>
+<% } %>
+
+<!-- Model Journal section -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <h3 style="margin-top:0;">Model Notes</h3>
+  <p style="margin:0.25rem 0 0.75rem 0;"><small style="color:var(--pas-text-muted);">This space is written by the model. You can read it but not edit it.</small></p>
+  <div id="journal-content"
+       hx-get="/gui/data/journal"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p><em>Loading...</em></p>
+  </div>
+</div>
+
+<div class="data-layout">
+  <!-- Sidebar -->
+  <div class="data-sidebar">
+    <% for (const user of it.userSections) { %>
+    <details open>
+      <summary><strong><%= user.name %></strong> <small>(<%= user.id %>)</small></summary>
+      <ul>
+        <% if (user.apps.length === 0) { %>
+          <li><small><em>No app data yet</em></small></li>
+        <% } %>
+        <% for (const app of user.apps) { %>
+          <li>
+            <a href="#"
+              hx-get="/gui/data/browse?scope=user&userId=<%= user.id %>&appId=<%= app %>"
+              hx-target="#file-listing"
+              hx-swap="innerHTML"><%= app %></a>
+          </li>
+        <% } %>
+      </ul>
+    </details>
+    <% } %>
+
+    <details>
+      <summary><strong>Shared</strong></summary>
+      <ul>
+        <% if (it.sharedApps.length === 0) { %>
+          <li><small><em>No shared data yet</em></small></li>
+        <% } %>
+        <% for (const app of it.sharedApps) { %>
+          <li>
+            <a href="#"
+              hx-get="/gui/data/browse?scope=shared&appId=<%= app %>"
+              hx-target="#file-listing"
+              hx-swap="innerHTML"><%= app %></a>
+          </li>
+        <% } %>
+      </ul>
+    </details>
+
+    <details>
+      <summary><strong>Spaces</strong></summary>
+      <ul>
+        <% if (!it.spaceSections || it.spaceSections.length === 0) { %>
+          <li><small><em>No space data yet</em></small></li>
+        <% } %>
+        <% if (it.spaceSections) { for (const spaceId of it.spaceSections) { %>
+          <li>
+            <a href="#"
+              hx-get="/gui/data/browse?scope=space&userId=<%= spaceId %>"
+              hx-target="#file-listing"
+              hx-swap="innerHTML"><%= spaceId %></a>
+          </li>
+        <% } } %>
+      </ul>
+    </details>
+
+    <details>
+      <summary><strong>System</strong></summary>
+      <ul>
+        <% if (it.systemEntries.length === 0) { %>
+          <li><small><em>No system data yet</em></small></li>
+        <% } %>
+        <% for (const entry of it.systemEntries) { %>
+          <li>
+            <% if (entry.isDirectory) { %>
+              <a href="#"
+                hx-get="/gui/data/browse?scope=system&subpath=<%= entry.name %>"
+                hx-target="#file-listing"
+                hx-swap="innerHTML"><%= entry.name %></a>
+            <% } else { %>
+              <a href="#"
+                hx-get="/gui/data/view?scope=system&subpath=<%= entry.name %>"
+                hx-target="#file-viewer"
+                hx-swap="innerHTML"><%= entry.name %></a>
+            <% } %>
+          </li>
+        <% } %>
+      </ul>
+    </details>
+  </div>
+
+  <!-- File listing + viewer -->
+  <div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Modified</th>
+          </tr>
+        </thead>
+        <tbody id="file-listing">
+          <tr><td colspan="3"><em>Select a directory from the sidebar to browse files.</em></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="file-viewer" style="margin-top:1rem;"></div>
+  </div>
+</div>

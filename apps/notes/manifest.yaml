@@ -1,0 +1,49 @@
+app:
+  id: notes
+  name: "Notes"
+  version: "1.0.0"
+  description: "Quick notes via Telegram. Save, list, and summarize your daily notes."
+  author: "PAS Team"
+  pas_core_version: ">=0.1.0"
+  license: "MIT"
+  category: productivity
+  tags: ["notes", "memo", "daily", "example"]
+
+capabilities:
+  messages:
+    intents:
+      - "note this"
+      - "save a note"
+      - "add to my notes"
+      - "jot down"
+    commands:
+      - name: /note
+        description: "Save a quick note"
+        args: ["text"]
+      - name: /notes
+        description: "List recent notes"
+      - name: /summarize
+        description: "Summarize today's notes using AI"
+
+requirements:
+  services:
+    - telegram
+    - data-store
+    - llm
+  data:
+    user_scopes:
+      - path: "notes/daily-notes/"
+        access: read-write
+        description: "Daily notes organized by date"
+  llm:
+    tier: fast
+    rate_limit:
+      max_requests: 30
+      window_seconds: 3600
+    monthly_cost_cap: 5.00
+
+user_config:
+  - key: notes_per_page
+    type: number
+    default: 10
+    description: "Number of notes to show when listing"

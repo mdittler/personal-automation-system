@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+core/src/**/*.js
+core/src/**/*.d.ts
+core/src/**/*.js.map
+core/src/**/*.d.ts.map
+apps/*/src/**/*.js
+apps/*/src/**/*.d.ts
+apps/*/src/**/*.js.map
+apps/*/src/**/*.d.ts.map
+# Compiled vitest/root configs (should not be committed)
+vitest.config.js
+vitest.config.d.ts
+vitest.config.js.map
+vitest.config.d.ts.map
+core/vitest.config.js
+core/vitest.config.d.ts
+core/vitest.config.js.map
+core/vitest.config.d.ts.map
+apps/*/vitest.config.js
+apps/*/vitest.config.d.ts
+apps/*/vitest.config.js.map
+apps/*/vitest.config.d.ts.map
+apps/*/__tests__/**/*.js
+apps/*/__tests__/**/*.d.ts
+apps/*/__tests__/**/*.js.map
+apps/*/__tests__/**/*.d.ts.map
+
+# Data directory (persistent data, not version controlled)
+data/
+
+# Environment secrets
+.env
+.env.local
+
+# User-specific config (contains Telegram user IDs)
+config/pas.yaml
+
+# Ollama model files
+ollama-models/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Claude Code local settings (but keep commands)
+.claude/*
+!.claude/commands/
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*.swp

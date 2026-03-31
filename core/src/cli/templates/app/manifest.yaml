@@ -1,0 +1,29 @@
+app:
+  id: {{APP_ID}}
+  name: "{{APP_NAME}}"
+  version: "1.0.0"
+  description: "{{APP_DESCRIPTION}}"
+  author: "{{AUTHOR}}"
+  pas_core_version: ">=0.1.0"
+  license: "MIT"
+  category: utility
+  tags: []
+
+capabilities:
+  messages:
+    intents: []
+    commands:
+      - name: /{{APP_COMMAND}}
+        description: "Run {{APP_NAME}}"
+
+requirements:
+  services:
+    - telegram
+    - data-store
+    # - event-bus    # Emit custom events (e.g., for n8n webhook integration)
+  # external_apis:
+  #   - id: my-api
+  #     description: "External API for data"
+  #     required: false
+  #     env_var: MY_API_KEY
+  #     fallback_behavior: "Uses cached data"

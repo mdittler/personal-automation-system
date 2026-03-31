@@ -1,0 +1,16 @@
+{
+	"name": "@pas/echo",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Echo app — echoes messages back (example app)",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc --build",
+		"clean": "rm -rf dist tsconfig.tsbuildinfo"
+	},
+	"dependencies": {
+		"@pas/core": "workspace:*"
+	}
+}

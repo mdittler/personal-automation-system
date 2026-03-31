@@ -1,0 +1,8 @@
+{
+  "name": "pas-workflows",
+  "description": "PAS project-specific workflow skills for testing standards and documentation maintenance",
+  "version": "1.0.0",
+  "author": {
+    "name": "PAS"
+  }
+}
