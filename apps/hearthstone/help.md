@@ -70,6 +70,43 @@ Just paste or describe a recipe and Hearthstone will parse and save it:
 - "remove eggs from pantry"
 - "we're out of milk"
 
+## Meal Planning
+
+### Viewing and Generating Plans
+- `/mealplan` — show the current week's meal plan
+- `/mealplan generate` — generate a new plan for the upcoming week
+- "plan meals for this week" — natural language trigger
+
+### Daily Planning
+- "what's for dinner?" — shows tonight's planned meal with prep summary
+- "swap Monday" — replace Monday's planned meal with a new suggestion
+- "show [recipe name]" — show full details for a newly suggested recipe
+
+### How Plans Are Generated
+The meal planner considers:
+- Your dietary preferences and restrictions
+- In-season produce for your region
+- Recent cooking history (avoids repetition)
+- Cuisine variety across the week
+- New-to-existing recipe ratio (configurable)
+
+Plans auto-generate on a schedule (default: Sunday 9am, configurable in settings).
+
+After a plan is generated, tap **🛒 Grocery List** to create a grocery list for the week's meals.
+
+---
+
+## "What Can I Make?"
+
+Ask "what can I make?" and Hearthstone cross-references your pantry against your recipe library:
+
+- **Ready to Cook** — you have all the ingredients on hand
+- **Almost There** — recipes where you're only missing one or two items
+
+Results are based on your current pantry inventory matched against saved recipes.
+
+---
+
 ## Food Questions
 
 Ask any cooking question:
