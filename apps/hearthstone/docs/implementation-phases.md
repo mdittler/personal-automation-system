@@ -10,9 +10,9 @@ This document tracks the phased implementation of the Hearthstone food managemen
 
 | Phase | Name | Reqs | Key Commands | Est. Tests | Depends On | Status |
 |-------|------|------|----|------------|------------|--------|
-| H1 | Foundation: Types, Household, Recipes | 11 | `/household`, `/recipes` | 70–90 | — | Not Started |
-| H2 | Grocery Lists and Manual Pantry | 9 | `/grocery`, `/addgrocery`, `/pantry` | 65–85 | H1 | Not Started |
-| H3 | Meal Planning | 8 | `/mealplan`, `/whatsfordinner` | 60–80 | H1, H2 | Not Started |
+| H1 | Foundation: Types, Household, Recipes | 11 | `/household`, `/recipes` | 70–90 | — | **Complete** |
+| H2a | Grocery Lists and Manual Pantry | 9 | `/grocery`, `/addgrocery`, `/pantry` | 65–85 | H1 | **Complete** |
+| H3 | Meal Planning + "What Can I Make?" | 8 | `/mealplan` | 60–80 | H1, H2a | Not Started |
 | H4 | Voting, Ratings, Shopping | 6 | Inline keyboards, shopping mode | 55–75 | H2, H3 | Not Started |
 | H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Not Started |
 | H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Not Started |
@@ -102,22 +102,30 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ---
 
-## Phase H3: Meal Planning and "What's for Dinner"
+## Phase H3: Meal Planning, "What's for Dinner", and "What Can I Make?"
 
 **Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
 
-**Requirements:** REQ-MEAL-001, REQ-MEAL-002, REQ-MEAL-005, REQ-MEAL-007, REQ-PANTRY-002, REQ-PANTRY-003, REQ-SEASON-001, REQ-SEASON-003
+**Requirements:** REQ-MEAL-001, REQ-MEAL-002, REQ-MEAL-005, REQ-MEAL-007, REQ-SEASON-001, REQ-SEASON-003
+
+**Also includes (deferred from H2a):**
+- REQ-PANTRY-002 (PI-2): "What can I make?" — LLM-assisted cross-reference of pantry against recipe library, grouped into full matches and near matches (with missing items listed)
+
+**Note:** REQ-PANTRY-003 (auto-exclude from grocery) and REQ-SEASON-001 (seasonal produce) are handled differently than originally planned:
+- PANTRY-003 was already implemented in H2a
+- SEASON-001 uses LLM knowledge + user location instead of a static produce dataset
 
 **What gets built:**
-- Meal planner — AI plan generation with constraints (meal types, ratios, prefs, history, seasonality)
-- Meal plan store — CRUD, archive
-- Seasonal data — static produce calendar by region
-- Pantry matcher — "what can I make" cross-reference
-- Auto-exclude pantry items from generated grocery lists
+- Meal planner — AI plan generation via single standard-tier LLM call with constraints (meal types, ratios, prefs, history, location-based seasonality)
+- Meal plan store — CRUD, archive, tonight resolver
+- Pantry matcher — LLM-assisted "what can I make" cross-reference (fast tier)
+- Meal plan config — user settings for generation schedule, dinners count, new recipe ratio, dietary prefs
+- Location config — `location` field in pas.yaml user config for seasonal awareness
+- Scheduled job — `generate-weekly-plan` cron handler (first Hearthstone scheduled job)
 
-**Key files:** `src/services/meal-planner.ts`, `src/services/meal-plan-store.ts`, `src/services/seasonal-data.ts`, `src/services/pantry-matcher.ts`, `src/handlers/mealplan.ts`
+**Key files:** `src/services/meal-planner.ts`, `src/services/meal-plan-store.ts`, `src/services/pantry-matcher.ts`
 
-**Data:** `shared/meal-plans/current.yaml`, `shared/meal-plans/archive/`, `shared/seasonal/`
+**Data:** `shared/meal-plans/current.yaml`, `shared/meal-plans/archive/YYYY-Www.yaml`
 
 ### Progress
 
@@ -129,10 +137,14 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 **Requirements:** REQ-MEAL-003, REQ-MEAL-004, REQ-RECIPE-003 (full confirmation), REQ-GROCERY-008, REQ-GROCERY-009, REQ-NFR-006
 
+**Also includes (deferred from H2a):**
+- REQ-GROCERY-009 (GL-9): Shopping follow-up — post-shopping summary, missed items prompt, "did you get everything?" flow
+
 **What gets built:**
 - Voting — inline keyboard voting, window management, finalization
 - Ratings — post-meal 1–5 prompts, storage on recipes
 - Shopping mode — interactive numbered checklist state machine
+- Shopping follow-up — post-trip summary, missed item handling (GL-9)
 - Recipe confirmation — draft→confirmed after first successful cook
 - Idempotency guards for scheduled plan generation
 
@@ -167,11 +179,15 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 **Requirements:** REQ-WASTE-001, REQ-WASTE-002, REQ-WASTE-003, REQ-WASTE-004, REQ-PANTRY-004, REQ-PANTRY-005
 
+**Also includes (deferred from H2a):**
+- REQ-PANTRY-004 (PI-4): Perishable expiry alerts — LLM-estimated shelf life, Telegram alerts when items approach expiry, snooze/dismiss
+- REQ-PANTRY-005 (PI-5): Freezer inventory — separate from pantry, track items with frozen date, freezer-burn warnings
+
 **What gets built:**
 - Leftover store — CRUD, LLM expiry estimation, meal suggestions
-- Freezer store — CRUD, date tracking
+- Freezer store — CRUD, date tracking (PI-5)
 - Waste tracker — logging, analytics
-- Expiry checker — shared logic for pantry/freezer/leftovers
+- Expiry checker — shared logic for pantry/freezer/leftovers (PI-4)
 - 3 scheduled jobs: perishable-check, freezer-check, leftover-check
 
 **Key files:** `src/services/leftover-store.ts`, `src/services/freezer-store.ts`, `src/services/waste-tracker.ts`, `src/services/expiry-checker.ts`
@@ -208,11 +224,15 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 **Requirements:** REQ-RECIPE-002, REQ-RECIPE-005, REQ-GROCERY-004, REQ-PANTRY-001 (photo), REQ-COST-001
 
+**Also includes (deferred from H2a):**
+- REQ-GROCERY-004 (GL-4): Photo-to-grocery — photograph a recipe or handwritten list, LLM vision extracts items and adds to grocery list
+
 **What gets built:**
 - Photo handler dispatcher — route by photo intent type
 - Recipe photo parser — LLM vision extraction
 - Receipt parser — LLM vision item/total extraction
 - Pantry photo parser — LLM vision item identification
+- Grocery photo parser — LLM vision list/recipe extraction (GL-4)
 - Photo storage and retrieval
 
 **Key files:** `src/handlers/photo.ts`, `src/services/recipe-photo-parser.ts`, `src/services/receipt-parser.ts`, `src/services/pantry-photo-parser.ts`
@@ -247,9 +267,14 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 **Requirements:** REQ-COST-002, REQ-COST-003, REQ-COST-004, REQ-GROCERY-010, REQ-GROCERY-011 (full)
 
+**Also includes (deferred from H2a):**
+- REQ-GROCERY-010 (GL-10): Store pricing — per-item price estimates, multi-store comparison, user-reported actual prices
+- REQ-GROCERY-011 (GL-11): Store configuration — preferred stores, store-specific department mapping, price history
+
 **What gets built:**
 - Cost tracker — cost-per-meal estimation, spend aggregation
-- Store pricing — multi-store estimates, user-reported actuals
+- Store pricing — multi-store estimates, user-reported actuals (GL-10)
+- Store configuration — preferred stores, department mapping (GL-11)
 - Budget alerts — plan cost trending, swap suggestions
 
 **Key files:** `src/services/cost-tracker.ts`, `src/services/store-pricing.ts`, `src/services/budget-alerts.ts`, `src/handlers/budget.ts`
