@@ -418,6 +418,31 @@ export async function main(): Promise<void> {
 
 	await registry.loadAll(serviceFactory);
 
+	// 9b. Register app cron schedules from manifests
+	for (const entry of registry.getAll()) {
+		const schedules = entry.manifest.capabilities?.schedules ?? [];
+		if (schedules.length > 0 && entry.module.handleScheduledJob) {
+			const appModule = entry.module;
+			const appId = entry.manifest.app.id;
+			for (const schedule of schedules) {
+				scheduler.cron.register(
+					{
+						id: schedule.id,
+						appId,
+						cron: schedule.cron,
+						handler: schedule.handler,
+						description: schedule.description,
+						userScope: schedule.user_scope,
+					},
+					() => async () => {
+						await appModule.handleScheduledJob!(schedule.id);
+					},
+				);
+			}
+			logger.info({ appId, count: schedules.length }, 'Registered %d app cron schedule(s)', schedules.length);
+		}
+	}
+
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
 

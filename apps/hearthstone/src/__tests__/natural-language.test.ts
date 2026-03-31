@@ -25,11 +25,16 @@ import {
 	isGroceryAddIntent,
 	isGroceryGenerateIntent,
 	isGroceryViewIntent,
+	isMealPlanGenerateIntent,
+	isMealPlanViewIntent,
+	isMealSwapIntent,
 	isPantryAddIntent,
 	isPantryRemoveIntent,
 	isPantryViewIntent,
+	isWhatCanIMakeIntent,
+	isWhatsForDinnerIntent,
 } from '../index.js';
-import type { GroceryList, Household, PantryItem, Recipe } from '../types.js';
+import type { GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
 
 // ─── Shared Fixtures ─────────────────────────────────────────────
 
@@ -143,6 +148,48 @@ const pantryItems: PantryItem[] = [
 	},
 ];
 
+const activeMealPlan: MealPlan = {
+	id: 'plan-001',
+	startDate: '2026-03-30',
+	endDate: '2026-04-05',
+	meals: [
+		{
+			recipeId: 'chicken-stir-fry-001',
+			recipeTitle: 'Chicken Stir Fry',
+			date: '2026-03-31',
+			mealType: 'dinner',
+			votes: {},
+			cooked: false,
+			rated: false,
+			isNew: false,
+		},
+		{
+			recipeId: 'pasta-bolognese-002',
+			recipeTitle: 'Pasta Bolognese',
+			date: '2026-04-01',
+			mealType: 'dinner',
+			votes: {},
+			cooked: false,
+			rated: false,
+			isNew: false,
+		},
+		{
+			recipeId: '',
+			recipeTitle: 'Lemon Herb Salmon',
+			date: '2026-04-02',
+			mealType: 'dinner',
+			votes: {},
+			cooked: false,
+			rated: false,
+			isNew: true,
+			description: 'Pan-seared salmon with lemon and dill',
+		},
+	],
+	status: 'active',
+	createdAt: '2026-03-30T09:00:00.000Z',
+	updatedAt: '2026-03-30T09:00:00.000Z',
+};
+
 // ─── Test Setup ──────────────────────────────────────────────────
 
 function createMockStore() {
@@ -168,12 +215,13 @@ describe('Natural Language — Real User Messages', () => {
 		await init(services);
 	});
 
-	/** Helper: set up a household with recipes and optionally a grocery list and pantry. */
+	/** Helper: set up a household with recipes and optionally a grocery list, pantry, and meal plan. */
 	function setupHousehold(
 		opts: {
 			recipes?: Recipe[];
 			grocery?: GroceryList;
 			pantry?: PantryItem[];
+			mealPlan?: MealPlan | null;
 		} = {},
 	) {
 		const recipes = opts.recipes ?? [chickenStirFry, pastaBolognese];
@@ -181,6 +229,8 @@ describe('Natural Language — Real User Messages', () => {
 			if (path === 'household.yaml') return stringify(household);
 			if (path === 'grocery/active.yaml' && opts.grocery) return stringify(opts.grocery);
 			if (path === 'pantry.yaml' && opts.pantry) return stringify({ items: opts.pantry });
+			if (path === 'meal-plans/current.yaml' && opts.mealPlan)
+				return stringify(opts.mealPlan);
 			for (const r of recipes) {
 				if (path === `recipes/${r.id}.yaml`) return stringify(r);
 			}
@@ -795,6 +845,237 @@ describe('Natural Language — Real User Messages', () => {
 			await handleCommand?.('pantry', [], msg('/pantry'));
 			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Rice'));
 			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Eggs'));
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// MEAL PLAN INTENT DETECTION — Natural language coverage
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('Meal plan view intent detection', () => {
+		const viewPhrases = [
+			'show me the meal plan',
+			"what's planned this week",
+			'whats planned for this week',
+			'weekly plan',
+			'meal plan',
+			'view the meal plan',
+			'check the weekly plan',
+			'see the meal plan',
+		];
+		for (const phrase of viewPhrases) {
+			it(`"${phrase}" → meal plan view`, () => {
+				expect(isMealPlanViewIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('Meal plan generate intent detection', () => {
+		const genPhrases = [
+			'plan meals for next week',
+			'generate a meal plan',
+			'plan my dinners',
+			'make a meal plan for this week',
+			'create a weekly plan',
+			'plan our meals for the week',
+			'generate a weekly plan',
+			'plan the meals',
+			'create a meal plan',
+			'make dinners for the week',
+		];
+		for (const phrase of genPhrases) {
+			it(`"${phrase}" → meal plan generate`, () => {
+				expect(isMealPlanGenerateIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('"What\'s for dinner?" intent detection', () => {
+		const dinnerPhrases = [
+			'whats for dinner',
+			"what's for dinner tonight",
+			'what are we having tonight',
+			'what are we eating tonight',
+			"what's tonight",
+			'whats for tonight',
+			"what's for dinner?",
+			'what am i eating tonight',
+			'what am i having for dinner',
+			'what are we cooking tonight',
+		];
+		for (const phrase of dinnerPhrases) {
+			it(`"${phrase}" → what's for dinner`, () => {
+				expect(isWhatsForDinnerIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('"What can I make?" intent detection', () => {
+		const makePhrases = [
+			'what can I make',
+			'what can i cook with what we have',
+			'what can i make for dinner',
+			'what can i cook tonight',
+			'what can we cook with what we have',
+			'what can we make with what we have',
+			'what can i make with whats in the pantry',
+		];
+		for (const phrase of makePhrases) {
+			it(`"${phrase}" → what can I make`, () => {
+				expect(isWhatCanIMakeIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('Meal swap intent detection', () => {
+		const swapPhrases = [
+			'swap monday',
+			'change tuesdays dinner',
+			'replace friday',
+			'swap today',
+			'change tomorrow',
+			"can you change monday's meal",
+			'replace today with something else',
+			'swap wednesday',
+		];
+		for (const phrase of swapPhrases) {
+			it(`"${phrase}" → meal swap`, () => {
+				expect(isMealSwapIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('Messages that should NOT match meal plan intents', () => {
+		it('"plan a party" → NOT meal plan generate (no meals/dinners)', () => {
+			expect(isMealPlanGenerateIntent('plan a party')).toBe(false);
+		});
+
+		it('"what\'s for lunch" → NOT what\'s for dinner', () => {
+			expect(isWhatsForDinnerIntent("what's for lunch")).toBe(false);
+		});
+
+		it('"can I swap the soy sauce for tamari" → NOT meal swap (no day name)', () => {
+			expect(isMealSwapIntent('can I swap the soy sauce for tamari')).toBe(false);
+		});
+
+		it('"make a grocery list" → NOT meal plan generate', () => {
+			expect(isMealPlanGenerateIntent('make a grocery list')).toBe(false);
+		});
+
+		it('"show my recipes" → NOT meal plan view', () => {
+			expect(isMealPlanViewIntent('show my recipes')).toBe(false);
+		});
+
+		it('"what should I buy" → NOT what can I make', () => {
+			expect(isWhatCanIMakeIntent('what should I buy')).toBe(false);
+		});
+
+		it('"plan a trip for next week" → NOT meal plan generate', () => {
+			expect(isMealPlanGenerateIntent('plan a trip for next week')).toBe(false);
+		});
+
+		it('"change the recipe" → NOT meal swap (no day name)', () => {
+			expect(isMealSwapIntent('change the recipe')).toBe(false);
+		});
+
+		it('"show the grocery list" → NOT meal plan view', () => {
+			expect(isMealPlanViewIntent('show the grocery list')).toBe(false);
+		});
+
+		it('"what can I buy at the store" → NOT what can I make', () => {
+			expect(isWhatCanIMakeIntent('what can I buy at the store')).toBe(false);
+		});
+
+		it('"swap the eggs for an alternative" → NOT meal swap (no day)', () => {
+			expect(isMealSwapIntent('swap the eggs for an alternative')).toBe(false);
+		});
+
+		it('"I want to make pasta" → NOT meal plan generate', () => {
+			expect(isMealPlanGenerateIntent('I want to make pasta')).toBe(false);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// END-TO-END MEAL PLAN SCENARIOS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('End-to-end: Meal plan view with no plan', () => {
+		it('offers to generate when no plan exists', async () => {
+			setupHousehold(); // no mealPlan
+			await handleMessage(msg('show me the meal plan'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('No meal plan'),
+				expect.any(Array),
+			);
+		});
+	});
+
+	describe("End-to-end: What's for dinner with plan", () => {
+		it('shows tonight\'s meal from the plan', async () => {
+			// Set fake time to 2026-03-31 so todayDate() matches the fixture
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-03-31T18:00:00Z'));
+			try {
+				setupHousehold({ mealPlan: activeMealPlan });
+				await handleMessage(msg('whats for dinner tonight'));
+				// The handler finds today's meal and calls sendWithButtons with the recipe info
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Chicken Stir Fry'),
+					expect.any(Array),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+	});
+
+	describe('End-to-end: What can I make with pantry and recipes', () => {
+		it('calls LLM and sends match results', async () => {
+			setupHousehold({ pantry: pantryItems, recipes: [chickenStirFry, pastaBolognese] });
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify([
+					{ recipeId: 'chicken-stir-fry-001', matchPercentage: 80, missingIngredients: ['broccoli'] },
+				]),
+			);
+			await handleMessage(msg('what can I make'));
+			// Should send an acknowledgment first
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Checking'),
+			);
+			// Should call LLM with fast tier for matching
+			expect(services.llm.complete).toHaveBeenCalled();
+		});
+	});
+
+	describe('End-to-end: Meal plan generate', () => {
+		it('generates plan with LLM and sends buttons', async () => {
+			setupHousehold({ pantry: pantryItems, recipes: [chickenStirFry, pastaBolognese] });
+			vi.mocked(services.config.get).mockResolvedValue('New York');
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify({
+					meals: [
+						{ recipeTitle: 'Chicken Stir Fry', recipeId: 'chicken-stir-fry-001', isNew: false },
+						{ recipeTitle: 'Pasta Bolognese', recipeId: 'pasta-bolognese-002', isNew: false },
+						{
+							recipeTitle: 'Grilled Salmon',
+							recipeId: '',
+							isNew: true,
+							description: 'Fresh salmon with herbs',
+						},
+					],
+				}),
+			);
+			await handleMessage(msg('plan meals for this week'));
+			// Should send acknowledgment
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Generating'),
+			);
+			// Should call LLM for plan generation
+			expect(services.llm.complete).toHaveBeenCalled();
 		});
 	});
 });

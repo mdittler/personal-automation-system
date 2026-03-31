@@ -10,9 +10,9 @@ This document tracks the phased implementation of the Hearthstone food managemen
 
 | Phase | Name | Reqs | Key Commands | Est. Tests | Depends On | Status |
 |-------|------|------|----|------------|------------|--------|
-| H1 | Foundation: Types, Household, Recipes | 11 | `/household`, `/recipes` | 70–90 | — | **Complete** |
-| H2a | Grocery Lists and Manual Pantry | 9 | `/grocery`, `/addgrocery`, `/pantry` | 65–85 | H1 | **Complete** |
-| H3 | Meal Planning + "What Can I Make?" | 8 | `/mealplan` | 60–80 | H1, H2a | Not Started |
+| H1 | Foundation: Types, Household, Recipes | 11 | `/household`, `/recipes` | 70–90 | — | Complete |
+| H2 | Grocery Lists and Manual Pantry | 9 | `/grocery`, `/addgrocery`, `/pantry` | 65–85 | H1 | Complete |
+| H3 | Meal Planning | 8 | `/mealplan`, `/whatsfordinner` | 60–80 | H1, H2 | Complete |
 | H4 | Voting, Ratings, Shopping | 6 | Inline keyboards, shopping mode | 55–75 | H2, H3 | Not Started |
 | H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Not Started |
 | H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Not Started |
@@ -61,7 +61,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H1: Foundation — Types, Household, Recipe Storage
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~1100 (baseline) | **Started:** 2026-03-30 | **Completed:** 2026-03-30
 
 **Requirements:** REQ-HOUSEHOLD-001, REQ-RECIPE-001, REQ-RECIPE-003 (partial: draft only), REQ-RECIPE-004, REQ-RECIPE-006, REQ-QUERY-002, REQ-NFR-001, REQ-NFR-002, REQ-NFR-003, REQ-NFR-007, REQ-NFR-008
 
@@ -84,7 +84,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H2: Grocery Lists and Manual Pantry
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~2605 (cumulative at H2a completion) | **Started:** 2026-03-30 | **Completed:** 2026-03-30
 
 **Requirements:** REQ-GROCERY-001, REQ-GROCERY-002, REQ-GROCERY-003, REQ-GROCERY-005, REQ-GROCERY-006, REQ-GROCERY-007, REQ-GROCERY-011 (config only), REQ-PANTRY-001 (manual text), REQ-NFR-004
 
@@ -102,30 +102,22 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ---
 
-## Phase H3: Meal Planning, "What's for Dinner", and "What Can I Make?"
+## Phase H3: Meal Planning and "What's for Dinner"
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~104 new (2709 total) | **Started:** 2026-03-31 | **Completed:** 2026-03-31
 
-**Requirements:** REQ-MEAL-001, REQ-MEAL-002, REQ-MEAL-005, REQ-MEAL-007, REQ-SEASON-001, REQ-SEASON-003
-
-**Also includes (deferred from H2a):**
-- REQ-PANTRY-002 (PI-2): "What can I make?" — LLM-assisted cross-reference of pantry against recipe library, grouped into full matches and near matches (with missing items listed)
-
-**Note:** REQ-PANTRY-003 (auto-exclude from grocery) and REQ-SEASON-001 (seasonal produce) are handled differently than originally planned:
-- PANTRY-003 was already implemented in H2a
-- SEASON-001 uses LLM knowledge + user location instead of a static produce dataset
+**Requirements:** REQ-MEAL-001, REQ-MEAL-002, REQ-MEAL-005, REQ-MEAL-007, REQ-PANTRY-002, REQ-PANTRY-003, REQ-SEASON-001, REQ-SEASON-003
 
 **What gets built:**
-- Meal planner — AI plan generation via single standard-tier LLM call with constraints (meal types, ratios, prefs, history, location-based seasonality)
-- Meal plan store — CRUD, archive, tonight resolver
-- Pantry matcher — LLM-assisted "what can I make" cross-reference (fast tier)
-- Meal plan config — user settings for generation schedule, dinners count, new recipe ratio, dietary prefs
-- Location config — `location` field in pas.yaml user config for seasonal awareness
-- Scheduled job — `generate-weekly-plan` cron handler (first Hearthstone scheduled job)
+- Meal planner — AI plan generation with constraints (meal types, ratios, prefs, history, seasonality)
+- Meal plan store — CRUD, archive
+- Seasonal data — static produce calendar by region
+- Pantry matcher — "what can I make" cross-reference
+- Auto-exclude pantry items from generated grocery lists
 
-**Key files:** `src/services/meal-planner.ts`, `src/services/meal-plan-store.ts`, `src/services/pantry-matcher.ts`
+**Key files:** `src/services/meal-planner.ts`, `src/services/meal-plan-store.ts`, `src/services/seasonal-data.ts`, `src/services/pantry-matcher.ts`, `src/handlers/mealplan.ts`
 
-**Data:** `shared/meal-plans/current.yaml`, `shared/meal-plans/archive/YYYY-Www.yaml`
+**Data:** `shared/meal-plans/current.yaml`, `shared/meal-plans/archive/`, `shared/seasonal/`
 
 ### Progress
 
@@ -326,9 +318,9 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 | Phase | Date Started | Date Completed | Tests | Notes |
 |-------|-------------|----------------|-------|-------|
-| H1 | — | — | 0 | — |
-| H2 | — | — | 0 | — |
-| H3 | — | — | 0 | — |
+| H1 | 2026-03-30 | 2026-03-30 | ~1100 (infra baseline) | Foundation: types, household, recipes, recipe parser |
+| H2 | 2026-03-30 | 2026-03-30 | ~2605 (cumulative) | Grocery lists, pantry (H2a complete) |
+| H3 | 2026-03-31 | 2026-03-31 | ~104 new (2709 total) | Meal planning, "what can I make?", seasonal data |
 | H4 | — | — | 0 | — |
 | H5 | — | — | 0 | — |
 | H6 | — | — | 0 | — |

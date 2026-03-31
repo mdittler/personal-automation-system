@@ -3,6 +3,7 @@
  *
  * Phase H1: Foundation — types, household, recipe storage.
  * Phase H2a: Grocery lists + basic pantry.
+ * Phase H3: Meal planning, pantry matching, dinner tonight.
  */
 
 import type { AppModule, CallbackContext, CoreServices, MessageContext } from '@pas/core/types';
@@ -30,6 +31,17 @@ import {
 } from './services/household.js';
 import { parseManualItems } from './services/item-parser.js';
 import {
+	archivePlan,
+	buildPlanButtons,
+	formatPlanMessage,
+	formatTonightMessage,
+	getTonightsMeal,
+	loadCurrentPlan,
+	savePlan,
+} from './services/meal-plan-store.js';
+import { generateNewRecipeDetails, generatePlan, swapMeal } from './services/meal-planner.js';
+import { findMatchingRecipes, formatMatchResults } from './services/pantry-matcher.js';
+import {
 	addPantryItems,
 	formatPantry,
 	groceryToPantryItems,
@@ -50,7 +62,8 @@ import {
 	updateRecipe,
 } from './services/recipe-store.js';
 import type { GroceryItem, Recipe } from './types.js';
-import { requireHousehold } from './utils/household-guard.js';
+import { todayDate } from './utils/date.js';
+import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
 let services: CoreServices;
@@ -101,6 +114,36 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// Recipe edit intent
 	if (isEditRecipeIntent(lower)) {
 		await handleEditRecipe(text, ctx);
+		return;
+	}
+
+	// Meal plan generate intent (before view — "plan meals" vs "show plan")
+	if (isMealPlanGenerateIntent(lower)) {
+		await handleMealPlanGenerate(ctx);
+		return;
+	}
+
+	// Meal plan view intent
+	if (isMealPlanViewIntent(lower)) {
+		await handleMealPlanView(ctx);
+		return;
+	}
+
+	// What's for dinner intent
+	if (isWhatsForDinnerIntent(lower)) {
+		await handleWhatsForDinner(ctx);
+		return;
+	}
+
+	// What can I make intent
+	if (isWhatCanIMakeIntent(lower)) {
+		await handleWhatCanIMake(ctx);
+		return;
+	}
+
+	// Meal swap intent
+	if (isMealSwapIntent(lower)) {
+		await handleMealSwap(text, ctx);
 		return;
 	}
 
@@ -159,6 +202,9 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• "chicken" — search your recipes\n' +
 			'• "what can I substitute for buttermilk?" — cooking questions\n' +
 			'• "add milk and eggs to grocery list" — add grocery items\n' +
+			'• "plan meals for this week" — generate a meal plan\n' +
+			'• "what\'s for dinner?" — see tonight\'s meal\n' +
+			'• "what can I make?" — match pantry to recipes\n' +
 			'• /grocery — view your grocery list\n' +
 			'• /pantry — view your pantry\n' +
 			'• /recipes — browse all recipes\n' +
@@ -188,6 +234,16 @@ export const handleCommand: AppModule['handleCommand'] = async (
 			break;
 		case 'pantry':
 			await handlePantryCommand(args, ctx);
+			break;
+		case 'mealplan':
+			if (args[0] === 'generate') {
+				await handleMealPlanGenerate(ctx);
+			} else {
+				await handleMealPlanView(ctx);
+			}
+			break;
+		case 'whatsfordinner':
+			await handleWhatsForDinner(ctx);
 			break;
 		default:
 			await services.telegram.send(
@@ -344,6 +400,175 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					],
 				],
 			);
+			return;
+		}
+
+		if (data === 'grocery-from-plan') {
+			const plan = await loadCurrentPlan(hh.sharedStore);
+			if (!plan) {
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					'No meal plan found. Generate one first with /mealplan generate.',
+				);
+				return;
+			}
+			// Collect recipe IDs from the plan (skip new suggestions without library recipes)
+			const recipeIds = plan.meals.filter((m) => !m.isNew && m.recipeId).map((m) => m.recipeId);
+			const newCount = plan.meals.filter((m) => m.isNew).length;
+
+			const allRecipes = await loadAllRecipes(hh.sharedStore);
+			const planRecipes = allRecipes.filter((r) => recipeIds.includes(r.id));
+
+			if (!planRecipes.length) {
+				const msg =
+					newCount > 0
+						? 'All meals in this plan are new suggestions — save them as recipes first, then generate a grocery list.'
+						: 'No matching recipes found for this plan.';
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, msg);
+				return;
+			}
+
+			try {
+				const result = await generateGroceryFromRecipes(services, planRecipes, hh.sharedStore);
+				const lines: string[] = [
+					`Generated grocery list from meal plan (${planRecipes.length} recipes).`,
+				];
+				if (newCount > 0) {
+					lines.push(
+						`Note: ${newCount} new suggestion(s) skipped — save them as recipes to include.`,
+					);
+				}
+				if (result.excludedStaples.length) {
+					lines.push(`Skipped staples: ${result.excludedStaples.join(', ')}`);
+				}
+				if (result.excludedPantry.length) {
+					lines.push(`Skipped (in pantry): ${result.excludedPantry.join(', ')}`);
+				}
+				lines.push(`\n${result.list.items.length} items on your list.`);
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					lines.join('\n'),
+					buildGroceryButtons(result.list),
+				);
+			} catch (err) {
+				const { userMessage } = classifyLLMError(err);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, userMessage);
+				services.logger.error('Grocery from plan failed: %s', err);
+			}
+			return;
+		}
+
+		if (data === 'regenerate-plan') {
+			try {
+				const oldPlan = await loadCurrentPlan(hh.sharedStore);
+				if (oldPlan) {
+					await archivePlan(hh.sharedStore, oldPlan);
+				}
+				const recipes = await loadAllRecipes(hh.sharedStore);
+				const pantry = await loadPantry(hh.sharedStore);
+				const startDate = nextMonday(todayDate(services.timezone));
+				const plan = await generatePlan(services, recipes, pantry, startDate, services.timezone);
+				await savePlan(hh.sharedStore, plan);
+				const location =
+					((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					formatPlanMessage(plan, recipes, location),
+					buildPlanButtons(),
+				);
+				services.logger.info('Regenerated meal plan for %s', ctx.userId);
+			} catch (err) {
+				const { userMessage } = classifyLLMError(err);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, userMessage);
+				services.logger.error('Plan regeneration failed: %s', err);
+			}
+			return;
+		}
+
+		if (data.startsWith('show-recipe:')) {
+			const dateStr = data.slice('show-recipe:'.length);
+			const plan = await loadCurrentPlan(hh.sharedStore);
+			if (!plan) {
+				await services.telegram.send(ctx.userId, 'No meal plan found.');
+				return;
+			}
+			const meal = getTonightsMeal(plan, dateStr);
+			if (!meal) {
+				await services.telegram.send(ctx.userId, `No meal found for ${dateStr}.`);
+				return;
+			}
+			if (meal.isNew) {
+				// Generate full recipe details for new suggestion
+				try {
+					await services.telegram.send(
+						ctx.userId,
+						`Generating full recipe for "${meal.recipeTitle}"...`,
+					);
+					const parsed = await generateNewRecipeDetails(
+						services,
+						meal.recipeTitle,
+						meal.description ?? '',
+					);
+					const recipe = await saveRecipe(hh.sharedStore, parsed, ctx.userId);
+					// Update the plan to reference the saved recipe
+					meal.recipeId = recipe.id;
+					meal.isNew = false;
+					await savePlan(hh.sharedStore, plan);
+					await services.telegram.send(ctx.userId, formatRecipe(recipe, true));
+				} catch (err) {
+					const { userMessage } = classifyLLMError(err);
+					await services.telegram.send(ctx.userId, userMessage);
+					services.logger.error('Show new recipe failed: %s', err);
+				}
+			} else {
+				const allRecipes = await loadAllRecipes(hh.sharedStore);
+				const recipe = allRecipes.find((r) => r.id === meal.recipeId);
+				if (recipe) {
+					await services.telegram.send(ctx.userId, formatRecipe(recipe));
+				} else {
+					await services.telegram.send(
+						ctx.userId,
+						`Recipe "${meal.recipeTitle}" not found in library.`,
+					);
+				}
+			}
+			return;
+		}
+
+		if (data.startsWith('swap:')) {
+			const dateStr = data.slice('swap:'.length);
+			const plan = await loadCurrentPlan(hh.sharedStore);
+			if (!plan) {
+				await services.telegram.send(ctx.userId, 'No meal plan found.');
+				return;
+			}
+			try {
+				const recipes = await loadAllRecipes(hh.sharedStore);
+				const newMeal = await swapMeal(services, dateStr, 'suggest something different', recipes);
+				const mealIndex = plan.meals.findIndex((m) => m.date === dateStr);
+				if (mealIndex >= 0) {
+					plan.meals[mealIndex] = newMeal;
+				} else {
+					plan.meals.push(newMeal);
+				}
+				await savePlan(hh.sharedStore, plan);
+				const location =
+					((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					formatPlanMessage(plan, recipes, location),
+					buildPlanButtons(),
+				);
+				services.logger.info('Swapped meal on %s for %s', dateStr, ctx.userId);
+			} catch (err) {
+				const { userMessage } = classifyLLMError(err);
+				await services.telegram.send(ctx.userId, userMessage);
+				services.logger.error('Meal swap callback failed: %s', err);
+			}
 			return;
 		}
 	} catch (err) {
@@ -1032,6 +1257,326 @@ async function handlePantryRemove(text: string, ctx: MessageContext): Promise<vo
 	services.logger.info('Removed pantry item "%s" for %s', itemName, ctx.userId);
 }
 
+// ─── Meal Plan Intent Handlers ──────────────────────────────────
+
+async function handleMealPlanView(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	const plan = await loadCurrentPlan(hh.sharedStore);
+	if (!plan) {
+		await services.telegram.sendWithButtons(
+			ctx.userId,
+			'No meal plan yet. Would you like to generate one?',
+			[[{ text: '📋 Generate Plan', callbackData: 'app:hearthstone:regenerate-plan' }]],
+		);
+		return;
+	}
+
+	const recipes = await loadAllRecipes(hh.sharedStore);
+	const location =
+		((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+	await services.telegram.sendWithButtons(
+		ctx.userId,
+		formatPlanMessage(plan, recipes, location),
+		buildPlanButtons(),
+	);
+	services.logger.info('Showed meal plan to %s', ctx.userId);
+}
+
+async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	await services.telegram.send(ctx.userId, 'Generating your meal plan...');
+
+	try {
+		const oldPlan = await loadCurrentPlan(hh.sharedStore);
+		if (oldPlan) {
+			await archivePlan(hh.sharedStore, oldPlan);
+		}
+
+		const recipes = await loadAllRecipes(hh.sharedStore);
+		const pantry = await loadPantry(hh.sharedStore);
+		const startDate = nextMonday(todayDate(services.timezone));
+		const plan = await generatePlan(services, recipes, pantry, startDate, services.timezone);
+		await savePlan(hh.sharedStore, plan);
+
+		const location =
+			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+		await services.telegram.sendWithButtons(
+			ctx.userId,
+			formatPlanMessage(plan, recipes, location),
+			buildPlanButtons(),
+		);
+		services.logger.info('Generated meal plan for %s', ctx.userId);
+	} catch (err) {
+		const { userMessage } = classifyLLMError(err);
+		await services.telegram.send(ctx.userId, userMessage);
+		services.logger.error('Meal plan generation failed: %s', err);
+	}
+}
+
+async function handleWhatsForDinner(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	const plan = await loadCurrentPlan(hh.sharedStore);
+	if (!plan) {
+		await services.telegram.send(
+			ctx.userId,
+			'No meal plan yet. Try "plan meals for this week" to generate one!',
+		);
+		return;
+	}
+
+	const today = todayDate(services.timezone);
+	const meal = getTonightsMeal(plan, today);
+	if (!meal) {
+		await services.telegram.send(
+			ctx.userId,
+			'Nothing planned for tonight. Try "swap today" to add a meal.',
+		);
+		return;
+	}
+
+	// Look up the full recipe for existing library meals
+	let recipe: Recipe | null = null;
+	if (!meal.isNew && meal.recipeId) {
+		const allRecipes = await loadAllRecipes(hh.sharedStore);
+		recipe = allRecipes.find((r) => r.id === meal.recipeId) ?? null;
+	}
+
+	const buttons = [
+		[
+			{ text: '📖 Full Recipe', callbackData: `app:hearthstone:show-recipe:${today}` },
+			{ text: '🔄 Swap', callbackData: `app:hearthstone:swap:${today}` },
+		],
+	];
+	await services.telegram.sendWithButtons(ctx.userId, formatTonightMessage(meal, recipe), buttons);
+	services.logger.info("Showed tonight's dinner to %s", ctx.userId);
+}
+
+async function handleWhatCanIMake(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	const pantry = await loadPantry(hh.sharedStore);
+	const recipes = await loadAllRecipes(hh.sharedStore);
+
+	if (!pantry.length) {
+		await services.telegram.send(
+			ctx.userId,
+			'Your pantry is empty! Add items with "add [items] to pantry" first.',
+		);
+		return;
+	}
+
+	if (!recipes.length) {
+		await services.telegram.send(
+			ctx.userId,
+			'No recipes saved yet. Save some recipes first so I can match against your pantry!',
+		);
+		return;
+	}
+
+	await services.telegram.send(ctx.userId, 'Checking what you can make...');
+
+	try {
+		const { fullMatches, nearMatches } = await findMatchingRecipes(services, pantry, recipes);
+		const message = formatMatchResults(fullMatches, nearMatches, pantry.length, recipes.length);
+		await services.telegram.send(ctx.userId, message);
+		services.logger.info(
+			'Pantry match for %s: %d full, %d near',
+			ctx.userId,
+			fullMatches.length,
+			nearMatches.length,
+		);
+	} catch (err) {
+		const { userMessage } = classifyLLMError(err);
+		await services.telegram.send(ctx.userId, userMessage);
+		services.logger.error('Pantry match failed: %s', err);
+	}
+}
+
+async function handleMealSwap(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	const plan = await loadCurrentPlan(hh.sharedStore);
+	if (!plan) {
+		await services.telegram.send(
+			ctx.userId,
+			'No meal plan yet. Try "plan meals for this week" to generate one!',
+		);
+		return;
+	}
+
+	// Extract day name from text
+	const dayMatch = text.match(
+		/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b/i,
+	);
+	if (!dayMatch) {
+		await services.telegram.send(
+			ctx.userId,
+			'Which day would you like to swap? Try: "swap Monday" or "swap today"',
+		);
+		return;
+	}
+
+	const dayName = dayMatch[1]?.toLowerCase() ?? '';
+	let targetDate: string | null = null;
+
+	if (dayName === 'today') {
+		targetDate = todayDate(services.timezone);
+	} else if (dayName === 'tomorrow') {
+		const today = new Date(`${todayDate(services.timezone)}T00:00:00Z`);
+		today.setUTCDate(today.getUTCDate() + 1);
+		targetDate = today.toISOString().slice(0, 10);
+	} else {
+		// Find the matching date in the plan
+		const dayOfWeekMap: Record<string, number> = {
+			sunday: 0,
+			monday: 1,
+			tuesday: 2,
+			wednesday: 3,
+			thursday: 4,
+			friday: 5,
+			saturday: 6,
+		};
+		const targetDow = dayOfWeekMap[dayName];
+		const meal = plan.meals.find((m) => {
+			const d = new Date(`${m.date}T00:00:00Z`);
+			return d.getUTCDay() === targetDow;
+		});
+		if (meal) targetDate = meal.date;
+	}
+
+	if (!targetDate) {
+		await services.telegram.send(ctx.userId, `Couldn't find ${dayName} in the current meal plan.`);
+		return;
+	}
+
+	await services.telegram.send(ctx.userId, `Swapping ${dayName}'s meal...`);
+
+	try {
+		const recipes = await loadAllRecipes(hh.sharedStore);
+		const newMeal = await swapMeal(services, targetDate, text, recipes);
+		const mealIndex = plan.meals.findIndex((m) => m.date === targetDate);
+		if (mealIndex >= 0) {
+			plan.meals[mealIndex] = newMeal;
+		} else {
+			plan.meals.push(newMeal);
+		}
+		await savePlan(hh.sharedStore, plan);
+
+		const location =
+			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+		await services.telegram.sendWithButtons(
+			ctx.userId,
+			formatPlanMessage(plan, recipes, location),
+			buildPlanButtons(),
+		);
+		services.logger.info('Swapped meal on %s for %s', targetDate, ctx.userId);
+	} catch (err) {
+		const { userMessage } = classifyLLMError(err);
+		await services.telegram.send(ctx.userId, userMessage);
+		services.logger.error('Meal swap failed: %s', err);
+	}
+}
+
+// ─── Date Helpers ───────────────────────────────────────────────
+
+/** Find the next Monday on or after the given date string (YYYY-MM-DD). */
+function nextMonday(dateStr: string): string {
+	const d = new Date(`${dateStr}T00:00:00Z`);
+	const dow = d.getUTCDay(); // 0=Sun ... 6=Sat
+	const daysUntilMonday = dow === 0 ? 1 : dow === 1 ? 0 : 8 - dow;
+	d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+	return d.toISOString().slice(0, 10);
+}
+
+// ─── Scheduled Job Handler ──────────────────────────────────────
+
+export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId: string) => {
+	if (jobId !== 'generate-weekly-plan') return;
+
+	const sharedStore = services.data.forShared('shared');
+	const household = await loadHousehold(sharedStore);
+	if (!household) {
+		services.logger.info('No household configured — skipping weekly plan generation');
+		return;
+	}
+
+	// Idempotency: check if current plan still covers the upcoming week
+	const existingPlan = await loadCurrentPlan(sharedStore);
+	const today = todayDate(services.timezone);
+	const upcomingMonday = nextMonday(today);
+	if (existingPlan && existingPlan.startDate === upcomingMonday) {
+		services.logger.info('Plan already exists for %s — skipping generation', upcomingMonday);
+		return;
+	}
+
+	// Archive old plan
+	if (existingPlan) {
+		await archivePlan(sharedStore, existingPlan);
+	}
+
+	try {
+		const recipes = await loadAllRecipes(sharedStore);
+		const pantry = await loadPantry(sharedStore);
+		const plan = await generatePlan(services, recipes, pantry, upcomingMonday, services.timezone);
+		await savePlan(sharedStore, plan);
+
+		const location =
+			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+		const message = formatPlanMessage(plan, recipes, location);
+
+		// Send to all household members
+		for (const memberId of household.members) {
+			await services.telegram.sendWithButtons(memberId, message, buildPlanButtons());
+		}
+
+		services.logger.info(
+			'Generated weekly meal plan %s for %d members',
+			plan.id,
+			household.members.length,
+		);
+	} catch (err) {
+		services.logger.error('Scheduled meal plan generation failed: %s', err);
+	}
+};
+
 // ─── Intent Detection Helpers ────────────────────────────────────
 
 function isSaveRecipeIntent(text: string): boolean {
@@ -1073,7 +1618,9 @@ function isFoodQuestionIntent(text: string): boolean {
 
 export function isGroceryViewIntent(text: string): boolean {
 	// Reject if an add/generate verb precedes "grocery list" — those are add/generate intents
-	if (/\b(add|put|get|buy|make|generate|create|build)\b.*\b(grocery|shopping)\s+list\b/i.test(text)) {
+	if (
+		/\b(add|put|get|buy|make|generate|create|build)\b.*\b(grocery|shopping)\s+list\b/i.test(text)
+	) {
 		return false;
 	}
 	return (
@@ -1122,6 +1669,49 @@ export function isPantryRemoveIntent(text: string): boolean {
 		/\bwe're out of\b/i.test(text) ||
 		/\bran out of\b/i.test(text) ||
 		/\bout of\b.*\bpantry\b/i.test(text)
+	);
+}
+
+export function isMealPlanViewIntent(text: string): boolean {
+	return (
+		/\b(show|view|see|check)\b.*\b(meal\s+plan|weekly\s+plan)\b/i.test(text) ||
+		/\b(meal\s+plan|weekly\s+plan)\b/i.test(text) ||
+		/\bwhat'?s\s+planned\b/i.test(text)
+	);
+}
+
+export function isMealPlanGenerateIntent(text: string): boolean {
+	return (
+		/\b(plan|generate|create|make)\b.*\b(meals?|dinners?)\b/i.test(text) ||
+		/\b(generate|create|make)\b.*\b(meal\s+plan|weekly\s+plan)\b/i.test(text) ||
+		/\bplan\s+(my|our|the)\s+(meals?|dinners?|week)\b/i.test(text)
+	);
+}
+
+export function isWhatsForDinnerIntent(text: string): boolean {
+	return (
+		/\bwhat'?s\s+for\s+dinner\b/i.test(text) ||
+		/\bwhat\s+(are\s+we|am\s+i)\s+(eating|having|cooking)\s+(tonight|for\s+dinner)\b/i.test(text) ||
+		/\bwhat'?s\s+(for\s+)?tonight\b/i.test(text)
+	);
+}
+
+export function isWhatCanIMakeIntent(text: string): boolean {
+	return (
+		/\bwhat\s+can\s+i\s+(make|cook)\b/i.test(text) ||
+		/\bwhat\s+can\s+(we|i)\s+(cook|make)\s+with\s+what\s+we\s+have\b/i.test(text)
+	);
+}
+
+export function isMealSwapIntent(text: string): boolean {
+	return (
+		/\b(swap|change|replace)\b.*\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b/i.test(
+			text,
+		) ||
+		(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)'?s?\s+(dinner|meal)\b/i.test(
+			text,
+		) &&
+			/\b(swap|change|replace)\b/i.test(text))
 	);
 }
 

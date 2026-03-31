@@ -198,15 +198,25 @@ Users can update any field on a recipe via natural language (e.g., "add the tag 
 
 ### REQ-MEAL-001: Plan generation
 
-**Origin:** MP-1 | **Status:** Planned
+**Origin:** MP-1 | **Status:** Implemented
 
 Generate a meal plan for the upcoming period respecting configurable meal types, new-to-existing recipe ratio, dietary preferences/restrictions, macro targets, cuisine variety, seasonal produce, and recent cooking history.
 
 **Standard tests:**
-- TBD
+- `meal-planner.test.ts` > `generatePlan` > generates a plan with the correct number of days
+- `meal-planner.test.ts` > `generatePlan` > includes seasonal produce hints in LLM prompt
+- `meal-planner.test.ts` > `generatePlan` > respects new recipe ratio from config
+- `meal-planner.test.ts` > `generatePlan` > includes recent cooking history in prompt
+- `meal-plan-store.test.ts` > `savePlan` > saves generated plan to store
+- `app.test.ts` > `handleCommand — /mealplan generate` > generates and saves a new plan
 
 **Edge case tests:**
-- TBD
+- `meal-planner.test.ts` > `generatePlan` > handles empty recipe library gracefully
+- `meal-planner.test.ts` > `generatePlan` > handles LLM failure gracefully
+- `meal-planner.test.ts` > `generatePlan` > handles no seasonal produce for month
+- `meal-plan-store.test.ts` > `loadCurrentPlan` > returns null when no plan exists
+- `app.test.ts` > `handleCommand — /mealplan generate` > requires household
+- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > generates plan on schedule
 
 **Fixes:** None
 
@@ -214,15 +224,20 @@ Generate a meal plan for the upcoming period respecting configurable meal types,
 
 ### REQ-MEAL-002: New recipe discovery
 
-**Origin:** MP-2 | **Status:** Planned
+**Origin:** MP-2 | **Status:** Implemented
 
 When the plan calls for new recipes, the LLM generates suggestions matching household preferences, dietary needs, and constraints with full recipe details and estimated macros.
 
 **Standard tests:**
-- TBD
+- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > generates a new recipe suggestion via LLM
+- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > includes dietary preferences in prompt
+- `meal-planner.test.ts` > `swapMeal` > suggests a new recipe when swapping a day
+- `app.test.ts` > `handleMessage — swap meal intent` > generates and shows new suggestion on swap
 
 **Edge case tests:**
-- TBD
+- `meal-planner.test.ts` > `generateNewRecipeSuggestion` > handles LLM parse failure gracefully
+- `meal-planner.test.ts` > `swapMeal` > returns error when no plan exists
+- `app.test.ts` > `handleMessage — swap meal intent` > handles swap with no current plan
 
 **Fixes:** None
 
@@ -262,15 +277,19 @@ After a planned meal's cooking window passes, send a message to all household me
 
 ### REQ-MEAL-005: "What's for dinner?" resolver
 
-**Origin:** MP-5 | **Status:** Planned
+**Origin:** MP-5 | **Status:** Implemented
 
 Any household member can ask "what's for dinner" and get tonight's planned meal, brief prep summary, who's cooking (if assigned), and any prep steps that should have already happened.
 
 **Standard tests:**
-- TBD
+- `meal-plan-store.test.ts` > `getMealForDate` > returns the planned meal for a given date
+- `app.test.ts` > `handleMessage — whats for dinner intent` > returns tonight's meal from plan
+- `app.test.ts` > `handleMessage — whats for dinner intent` > formats meal name and description
 
 **Edge case tests:**
-- TBD
+- `meal-plan-store.test.ts` > `getMealForDate` > returns null when no plan exists
+- `meal-plan-store.test.ts` > `getMealForDate` > returns null when date not in plan
+- `app.test.ts` > `handleMessage — whats for dinner intent` > shows friendly message when no plan set
 
 **Fixes:** None
 
@@ -294,15 +313,18 @@ Track macro nutrients per planned/cooked meal. Store daily macro logs per user. 
 
 ### REQ-MEAL-007: Meal plan configuration
 
-**Origin:** MP-7 | **Status:** Planned
+**Origin:** MP-7 | **Status:** Implemented
 
 Expose meal planning configuration as user-configurable settings: meal types, planning period, new recipe ratio, dietary preferences/restrictions, macro targets, plan generation day/time, voting window hours, rating reminder delay.
 
 **Standard tests:**
-- TBD
+- `meal-planner.test.ts` > `generatePlan` > respects planningDays config (default 7)
+- `meal-planner.test.ts` > `generatePlan` > respects newRecipeRatio config
+- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > runs on configured schedule
 
 **Edge case tests:**
-- TBD
+- `meal-planner.test.ts` > `generatePlan` > uses defaults when config fields are missing
+- `app.test.ts` > `handleScheduledJob — generate-meal-plan` > skips when schedule disabled
 
 **Fixes:** None
 
@@ -576,15 +598,21 @@ Maintain pantry inventory via text input ("add eggs and milk to pantry"), grocer
 
 ### REQ-PANTRY-002: "What can I make?" queries
 
-**Origin:** PI-2 | **Status:** Planned
+**Origin:** PI-2 | **Status:** Implemented
 
 Cross-reference pantry inventory against recipe library and return full matches and close matches noting what's missing.
 
 **Standard tests:**
-- TBD
+- `pantry-matcher.test.ts` > `matchRecipes` > returns ready-to-cook recipes when all ingredients present
+- `pantry-matcher.test.ts` > `matchRecipes` > returns almost-there recipes with missing items listed
+- `pantry-matcher.test.ts` > `matchRecipes` > uses pantry substring matching for ingredient comparison
+- `app.test.ts` > `handleMessage — what can I make intent` > returns grouped ready and almost-there results
 
 **Edge case tests:**
-- TBD
+- `pantry-matcher.test.ts` > `matchRecipes` > returns empty lists when pantry is empty
+- `pantry-matcher.test.ts` > `matchRecipes` > returns empty lists when recipe library is empty
+- `pantry-matcher.test.ts` > `matchRecipes` > excludes recipes missing more than one ingredient from almost-there
+- `app.test.ts` > `handleMessage — what can I make intent` > shows friendly message when no matches
 
 **Fixes:** None
 
@@ -1063,15 +1091,17 @@ If a meal plan is trending expensive relative to historical average, flag it and
 
 ### REQ-SEASON-001: Seasonal produce calendar
 
-**Origin:** SR-1 | **Status:** Planned
+**Origin:** SR-1 | **Status:** Implemented
 
 Maintain static dataset of seasonal produce for configurable region. Use to bias recipe suggestions toward in-season produce.
 
 **Standard tests:**
-- TBD
+- `meal-planner.test.ts` > `getSeasonalProduce` > returns in-season produce for current month and region
+- `meal-planner.test.ts` > `generatePlan` > includes seasonal produce hints in LLM prompt
 
 **Edge case tests:**
-- TBD
+- `meal-planner.test.ts` > `getSeasonalProduce` > returns empty array for unknown region
+- `meal-planner.test.ts` > `getSeasonalProduce` > returns empty array when no produce in season
 
 **Fixes:** None
 
@@ -1095,15 +1125,16 @@ Optionally send seasonal nudges with in-season produce and matching recipes.
 
 ### REQ-SEASON-003: Region configuration
 
-**Origin:** SR-3 | **Status:** Planned
+**Origin:** SR-3 | **Status:** Implemented
 
 Expose region-related settings: region code, seasonal nudges toggle.
 
 **Standard tests:**
-- TBD
+- `meal-planner.test.ts` > `getSeasonalProduce` > uses region from config to filter produce
+- `meal-planner.test.ts` > `generatePlan` > omits seasonal hints when region not configured
 
 **Edge case tests:**
-- TBD
+- `meal-planner.test.ts` > `getSeasonalProduce` > falls back to default region when config missing
 
 **Fixes:** None
 

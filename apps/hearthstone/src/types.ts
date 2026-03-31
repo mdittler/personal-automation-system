@@ -86,6 +86,8 @@ export interface PlannedMeal {
 	votes: Record<string, 'up' | 'down' | 'neutral'>;
 	cooked: boolean;
 	rated: boolean;
+	isNew: boolean; // true = LLM suggestion, not from recipe library
+	description?: string; // brief description for new suggestions
 }
 
 export interface MealPlan {
