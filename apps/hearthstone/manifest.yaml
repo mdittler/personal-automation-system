@@ -241,10 +241,10 @@ user_config:
     type: number
     default: 24
     description: "Hours after shopping mode to send follow-up"
-  - key: region
+  - key: location
     type: string
-    default: "NC"
-    description: "Region code for seasonal produce data"
+    default: "Raleigh, NC"
+    description: "Your location for seasonal produce awareness (e.g., 'Boston, MA', 'Portland, OR')"
   - key: seasonal_nudges
     type: boolean
     default: true
