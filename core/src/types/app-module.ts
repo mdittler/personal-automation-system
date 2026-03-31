@@ -65,6 +65,12 @@ export interface AppModule {
 	handleCallbackQuery?(data: string, ctx: CallbackContext): Promise<void>;
 
 	/**
+	 * Called when a manifest-declared cron schedule fires.
+	 * The jobId matches the schedule's `id` field in the manifest.
+	 */
+	handleScheduledJob?(jobId: string): Promise<void>;
+
+	/**
 	 * Called when the system shuts down.
 	 * Close connections, flush caches, etc.
 	 */
