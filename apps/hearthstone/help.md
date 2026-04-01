@@ -94,6 +94,34 @@ Plans auto-generate on a schedule (default: Sunday 9am, configurable in settings
 
 After a plan is generated, tap **🛒 Grocery List** to create a grocery list for the week's meals.
 
+### Voting on Plans
+
+When a household has multiple members, generated plans enter a voting phase:
+
+- Each meal is sent as a separate message with 👍 / 👎 / 😐 buttons
+- All household members can vote on each meal
+- After the voting window (default: 12 hours), the plan is finalized
+- Downvoted meals are automatically replaced with new suggestions
+- If everyone votes before the window expires, finalization happens immediately
+- Not voting counts as neutral — no negative signal
+
+### Rating Meals
+
+Every evening at 8pm, you'll get a "What did you cook tonight?" message:
+
+- Tap the meal you cooked
+- Rate it 👍 or 👎 (or skip)
+- Positive ratings help the planner suggest it again in future weeks
+- New recipes that get a 👍 are automatically confirmed into your recipe library
+- You can also mark meals as cooked from the `/mealplan` view using the ✅ buttons
+
+### Shopping Follow-up
+
+After you clear purchased items from your grocery list, if items remain:
+
+- You'll get a follow-up message after 1 hour
+- Choose "Clear remaining" to empty the list, or "Keep for next trip" to leave items
+
 ---
 
 ## "What Can I Make?"

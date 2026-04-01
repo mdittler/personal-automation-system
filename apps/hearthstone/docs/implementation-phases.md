@@ -125,24 +125,41 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H4: Voting, Ratings, and Interactive Shopping
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~105 new (~750 cumulative) | **Started:** 2026-03-31 | **Completed:** 2026-03-31
 
-**Requirements:** REQ-MEAL-003, REQ-MEAL-004, REQ-RECIPE-003 (full confirmation), REQ-GROCERY-008, REQ-GROCERY-009, REQ-NFR-006
+**Requirements:** REQ-MEAL-003, REQ-MEAL-004, REQ-RECIPE-003 (full confirmation), REQ-GROCERY-009, REQ-NFR-006
 
 **Also includes (deferred from H2a):**
-- REQ-GROCERY-009 (GL-9): Shopping follow-up — post-shopping summary, missed items prompt, "did you get everything?" flow
+- REQ-GROCERY-009 (GL-9): Shopping follow-up — 1-hour timed follow-up after clearing purchased items when items remain
 
 **What gets built:**
-- Voting — inline keyboard voting, window management, finalization
-- Ratings — post-meal 1–5 prompts, storage on recipes
-- Shopping mode — interactive numbered checklist state machine
-- Shopping follow-up — post-trip summary, missed item handling (GL-9)
-- Recipe confirmation — draft→confirmed after first successful cook
-- Idempotency guards for scheduled plan generation
+- Voting — per-meal inline keyboard voting (👍/👎/😐), configurable window, hourly finalization, LLM replacement for downvoted meals, early finalization when all voted
+- Ratings — nightly 8pm "What did you cook?" prompt, 👍/👎/skip per meal, ratings stored on recipes
+- Recipe confirmation — draft→confirmed on positive rating (REQ-RECIPE-003)
+- Shopping follow-up — 1-hour setTimeout after clear with remaining items, clear/keep buttons
+- Cooked buttons — `/mealplan` view shows "✅ Cooked!" button per uncooked meal
+- Handler extraction — new `handlers/` directory for H4 code (voting, rating, shopping-followup)
+- Idempotency — finalize-votes job checks plan status, nightly prompt uses lastRatingPromptDate
 
-**Key files:** `src/services/voting.ts`, `src/services/rating.ts`, `src/services/shopping-mode.ts`, `src/services/recipe-confirmation.ts`, `src/handlers/scheduled/generate-plan.ts`
+**Key files:** `src/services/voting.ts`, `src/services/rating.ts`, `src/handlers/voting.ts`, `src/handlers/rating.ts`, `src/handlers/shopping-followup.ts`
+
+**Scheduled jobs added:** `finalize-votes` (hourly), `nightly-rating-prompt` (daily 8pm)
+
+**Config fields used:** `voting_window_hours` (default 12)
 
 ### Progress
+
+- [x] Type additions (votingStartedAt, lastRatingPromptDate on MealPlan)
+- [x] Voting service (pure logic: recordVote, netScore, isVotingExpired, allMembersVoted)
+- [x] Voting handler (sendVotingMessages, handleVoteCallback, handleFinalizeVotesJob)
+- [x] Rating service (getUncookedMeals, createRating, hasRatingPromptBeenSentToday)
+- [x] Rating handler (handleCookedCallback, handleRateCallback, handleNightlyRatingPromptJob)
+- [x] Shopping follow-up handler (scheduleShoppingFollowup, clear/keep callbacks)
+- [x] buildPlanButtons updated to include Cooked buttons
+- [x] Index.ts integration (new callback routes, job routes, voting flow for multi-member)
+- [x] Manifest updates (2 new scheduled jobs)
+- [x] Integration tests
+- [x] Documentation updates
 
 ---
 
