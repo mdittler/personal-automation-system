@@ -98,6 +98,8 @@ export interface MealPlan {
 	status: 'draft' | 'voting' | 'active' | 'completed';
 	createdAt: string;
 	updatedAt: string;
+	votingStartedAt?: string; // ISO datetime — set when plan enters voting status
+	lastRatingPromptDate?: string; // ISO date (YYYY-MM-DD) — idempotency for nightly prompt
 }
 
 // ─── Grocery Types ───────────────────────────────────────────────
