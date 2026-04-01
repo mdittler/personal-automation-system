@@ -96,6 +96,9 @@ export async function handleRateCallback(
 	const direction = data.slice(0, colonIdx);
 	const mealDate = data.slice(colonIdx + 1);
 
+	// Validate direction before processing
+	if (direction !== 'up' && direction !== 'down' && direction !== 'skip') return;
+
 	const sharedStore = services.data.forShared('shared');
 
 	const household = await loadHousehold(sharedStore);

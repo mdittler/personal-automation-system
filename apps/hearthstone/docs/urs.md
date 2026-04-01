@@ -104,10 +104,11 @@ When a user sends a photo of a recipe (cookbook page, handwritten card, screensh
 New recipes start as `draft`. When rated 👍 after cooking, auto-promoted to `confirmed`. When rated 👎, stay as `draft` with rating attached. Confirmation is integrated into the H4 rating flow — no separate confirmation step needed.
 
 **Standard tests:**
-- `rating-handler.test.ts` > handleRateCallback > records positive rating and confirms draft recipe
+- `rating-handler.test.ts` > handleRateCallback > thumbs-up adds rating score 5 and confirms a draft recipe
 
 **Edge case tests:**
-- `rating-handler.test.ts` > handleRateCallback > records negative rating without changing draft status
+- `rating-handler.test.ts` > handleRateCallback > thumbs-down adds rating score 1 and does not change draft status
+- `rating-handler.test.ts` > handleRateCallback > thumbs-up on confirmed recipe does not re-confirm
 
 **Fixes:** None
 
@@ -250,22 +251,24 @@ When the plan calls for new recipes, the LLM generates suggestions matching hous
 All linked household members receive the proposed plan with Telegram inline buttons for upvote/downvote/neutral. After configurable voting window (default 12 hours), finalize plan based on votes. Downvoted recipes get replacement suggestions.
 
 **Standard tests:**
-- `voting.test.ts` > recordVote > sets a vote on a meal and returns true
-- `voting.test.ts` > allMembersVoted > returns true when all members voted on all meals
-- `voting.test.ts` > isVotingExpired > returns true when past window
-- `voting-handler.test.ts` > sendVotingMessages > sends one message per meal per household member
-- `voting-handler.test.ts` > handleVoteCallback > records vote and edits message with confirmation
-- `voting-handler.test.ts` > handleFinalizeVotesJob > finalizes when voting window has expired
+- `voting.test.ts` > recordVote > returns true and records vote when no prior vote exists
+- `voting.test.ts` > allMembersVoted > returns true when all members have voted on all meals
+- `voting.test.ts` > isVotingExpired > returns true when outside the voting window
+- `voting-handler.test.ts` > sendVotingMessages > sends one message per meal per member (2 meals × 2 members = 4 calls)
+- `voting-handler.test.ts` > handleVoteCallback > records the vote and edits the message with a confirmation
+- `voting-handler.test.ts` > handleFinalizeVotesJob > finalizes plan when voting window has expired
 
 **Edge case tests:**
-- `voting.test.ts` > recordVote > returns false when setting the same vote again
-- `voting.test.ts` > isVotingExpired > returns false when votingStartedAt is missing
+- `voting.test.ts` > recordVote > returns false when vote is unchanged
+- `voting.test.ts` > isVotingExpired > returns false when votingStartedAt is not set
 - `voting.test.ts` > allMembersVoted > returns false when a member has not voted on a meal
-- `voting-handler.test.ts` > handleVoteCallback > rejects vote when plan is not in voting status
-- `voting-handler.test.ts` > handleVoteCallback > ignores vote for nonexistent meal date
+- `voting-handler.test.ts` > handleVoteCallback > rejects vote with "Voting has ended" when plan not in voting status
+- `voting-handler.test.ts` > handleVoteCallback > returns early without editing message when meal date not found
+- `voting-handler.test.ts` > handleVoteCallback > ignores invalid vote type
 - `voting-handler.test.ts` > handleFinalizeVotesJob > does nothing when no plan exists
 - `voting-handler.test.ts` > handleFinalizeVotesJob > does nothing when plan is not in voting status
-- `voting-handler.test.ts` > handleFinalizeVotesJob > calls LLM swap for net-negative meals during finalization
+- `voting-handler.test.ts` > handleFinalizeVotesJob > calls LLM swap for net-negative meals before finalizing
+- `voting-handler.test.ts` > handleFinalizeVotesJob > uses default 12-hour window when config not set
 
 **Fixes:** None
 
@@ -278,20 +281,22 @@ All linked household members receive the proposed plan with Telegram inline butt
 After a planned meal's cooking window passes, send a message to all household members asking for 👍/👎/skip rating. Store ratings on the recipe object. Use ratings to inform future plan generation.
 
 **Standard tests:**
-- `rating.test.ts` > getUncookedMeals > returns past meals that are not yet cooked
-- `rating.test.ts` > createRating > returns a Rating with correct shape
+- `rating.test.ts` > getUncookedMeals > returns meals on or before today that are not cooked
+- `rating.test.ts` > createRating > creates a Rating with userId and score
 - `rating-handler.test.ts` > handleCookedCallback > marks meal as cooked and shows rate buttons
-- `rating-handler.test.ts` > handleRateCallback > records positive rating and confirms draft recipe
-- `rating-handler.test.ts` > handleNightlyRatingPromptJob > sends prompt to all household members
+- `rating-handler.test.ts` > handleRateCallback > thumbs-up adds rating score 5 and confirms a draft recipe
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > sends prompt to all household members for uncooked meals
 
 **Edge case tests:**
-- `rating.test.ts` > getUncookedMeals > returns empty when all meals are cooked
-- `rating.test.ts` > hasRatingPromptBeenSentToday > returns false when lastRatingPromptDate is undefined
-- `rating-handler.test.ts` > handleCookedCallback > ignores nonexistent meal date
-- `rating-handler.test.ts` > handleRateCallback > handles skip without storing a rating
-- `rating-handler.test.ts` > handleRateCallback > records negative rating without changing draft status
-- `rating-handler.test.ts` > handleNightlyRatingPromptJob > skips when already sent today (idempotent)
-- `rating-handler.test.ts` > handleNightlyRatingPromptJob > skips when all meals already cooked
+- `rating.test.ts` > getUncookedMeals > returns empty array when all past meals are cooked
+- `rating.test.ts` > hasRatingPromptBeenSentToday > returns false when lastRatingPromptDate is not set
+- `rating-handler.test.ts` > handleCookedCallback > does nothing when meal date is not found in plan
+- `rating-handler.test.ts` > handleCookedCallback > shows "already rated" when meal was already rated
+- `rating-handler.test.ts` > handleRateCallback > skip marks rated=true with no rating stored
+- `rating-handler.test.ts` > handleRateCallback > thumbs-down adds rating score 1 and does not change draft status
+- `rating-handler.test.ts` > handleRateCallback > handles missing recipe gracefully (still marks meal rated)
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > is idempotent — skips if already sent today
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > skips when all meals are already cooked
 
 **Fixes:** None
 
@@ -542,14 +547,16 @@ Tap-to-toggle inline keyboard buttons. Each item tap toggles purchased status an
 After clearing purchased items, if items remain on the grocery list, a 1-hour follow-up is scheduled. The follow-up asks "Done shopping?" with options to clear remaining items or keep them for the next trip.
 
 **Standard tests:**
-- `shopping-followup.test.ts` > handleShoppingFollowupJob > sends follow-up message when items remain
-- `shopping-followup.test.ts` > handleShopFollowupClearCallback > clears remaining grocery items and edits message
-- `shopping-followup.test.ts` > handleShopFollowupKeepCallback > dismisses follow-up and edits message
+- `shopping-followup.test.ts` > handleShoppingFollowupJob > sends follow-up message when unpurchased items remain
+- `shopping-followup.test.ts` > handleShopFollowupClearCallback > archives remaining items and saves empty list
+- `shopping-followup.test.ts` > handleShopFollowupKeepCallback > edits the message to confirm items are kept
 
 **Edge case tests:**
-- `shopping-followup.test.ts` > scheduleShoppingFollowup > cancels previous timer when re-scheduling
-- `shopping-followup.test.ts` > handleShoppingFollowupJob > does nothing when no pending follow-up
-- `shopping-followup.test.ts` > cancelShoppingFollowup > clears timer and pending state
+- `shopping-followup.test.ts` > re-scheduling > cancels the previous timer and starts a fresh one
+- `shopping-followup.test.ts` > handleShoppingFollowupJob > does nothing when no pending data
+- `shopping-followup.test.ts` > cancelShoppingFollowup > prevents the timer from firing
+- `shopping-followup.test.ts` > handleShoppingFollowupJob > shows max 10 items and adds "...and X more"
+- `shopping-followup.test.ts` > handleShopFollowupClearCallback > edits message even when grocery list is missing
 
 **Fixes:** None
 
@@ -1415,9 +1422,12 @@ Health data stays local. No data leaves the PAS instance. All LLM calls through 
 Scheduled jobs must be idempotent. File existence checks and timestamps guard against duplicate processing. Finalize-votes checks plan status (voting→active is terminal). Nightly rating prompt checks lastRatingPromptDate. Generate-weekly-plan checks existing plan start date.
 
 **Standard tests:**
-- `voting-handler.test.ts` > handleFinalizeVotesJob > does nothing when plan is not in voting status
-- `rating-handler.test.ts` > handleNightlyRatingPromptJob > skips when already sent today (idempotent)
 - `app.test.ts` > handleScheduledJob > skips when plan already exists for upcoming week
+
+**Edge case tests:**
+- `voting-handler.test.ts` > handleFinalizeVotesJob > does nothing when plan is not in voting status
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > is idempotent — skips if already sent today
+- `voting-handler.test.ts` > handleFinalizeVotesJob > uses default 12-hour window when config not set
 
 **Edge case tests:**
 - TBD
@@ -1582,14 +1592,14 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 |----------------|-----------|----------------|------------|--------|
 | REQ-RECIPE-001 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 5 | 16 | Implemented |
 | REQ-RECIPE-002 | TBD | 0 | 0 | Planned |
-| REQ-RECIPE-003 | rating-handler.test.ts | 1 | 1 | Implemented |
+| REQ-RECIPE-003 | rating-handler.test.ts | 1 | 2 | Implemented |
 | REQ-RECIPE-004 | recipe-store.test.ts, app.test.ts | 8 | 15 | Implemented |
 | REQ-RECIPE-005 | TBD | 0 | 0 | Planned |
 | REQ-RECIPE-006 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 4 | 8 | Implemented |
 | REQ-MEAL-001 | meal-planner.test.ts, meal-plan-store.test.ts, app.test.ts | 6 | 6 | Implemented |
 | REQ-MEAL-002 | meal-planner.test.ts, app.test.ts | 4 | 3 | Implemented |
-| REQ-MEAL-003 | voting.test.ts, voting-handler.test.ts, app.test.ts | 6 | 8 | Implemented |
-| REQ-MEAL-004 | rating.test.ts, rating-handler.test.ts, app.test.ts | 5 | 7 | Implemented |
+| REQ-MEAL-003 | voting.test.ts, voting-handler.test.ts, app.test.ts | 6 | 10 | Implemented |
+| REQ-MEAL-004 | rating.test.ts, rating-handler.test.ts, app.test.ts | 5 | 9 | Implemented |
 | REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
 | REQ-MEAL-006 | TBD | 0 | 0 | Planned |
 | REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
@@ -1601,7 +1611,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-006 | grocery-store.test.ts, grocery-dedup.test.ts | 4 | 6 | Implemented |
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
 | REQ-GROCERY-008 | grocery-store.test.ts, app.test.ts, telegram-buttons.test.ts | 6 | 14 | Implemented |
-| REQ-GROCERY-009 | shopping-followup.test.ts, app.test.ts | 3 | 3 | Implemented |
+| REQ-GROCERY-009 | shopping-followup.test.ts, app.test.ts | 3 | 5 | Implemented |
 | REQ-GROCERY-010 | TBD | 0 | 0 | Planned |
 | REQ-GROCERY-011 | TBD | 0 | 0 | Planned |
 | REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts | 11 | 8 | Implemented |
@@ -1649,7 +1659,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-NFR-003 | TBD | 0 | 0 | Planned |
 | REQ-NFR-004 | recipe-parser.test.ts, app.test.ts | 3 | 0 | Implemented |
 | REQ-NFR-005 | TBD | 0 | 0 | Planned |
-| REQ-NFR-006 | voting-handler.test.ts, rating-handler.test.ts, app.test.ts | 3 | 2 | Implemented |
+| REQ-NFR-006 | voting-handler.test.ts, rating-handler.test.ts, app.test.ts | 1 | 3 | Implemented |
 | REQ-NFR-007 | date-utils.test.ts | 3 | 5 | Implemented |
 | REQ-NFR-008 | N/A | 0 | 0 | Implemented |
 | REQ-SEC-001 | recipe-parser.test.ts, app.test.ts | 2 | 1 | Implemented |
@@ -1657,4 +1667,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **16 test files** | **109** | **167** | **276 tests** |
+| **Totals** | **20 test files** | **132** | **199** | **331 tests** |
