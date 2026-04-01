@@ -1722,7 +1722,11 @@ describe('Hearthstone App', () => {
 					expect.stringContaining('Generating'),
 				);
 				expect(services.llm.complete).toHaveBeenCalled();
-				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+				// H4: multi-member household → voting flow; confirmation message sent to user
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'user1',
+					expect.stringContaining('Voting messages sent'),
+				);
 			});
 		});
 
@@ -1816,19 +1820,25 @@ describe('Hearthstone App', () => {
 					messageId: 456,
 				});
 				expect(services.llm.complete).toHaveBeenCalled();
+				// H4: multi-member household → voting flow; confirmation edit sent
 				expect(services.telegram.editMessage).toHaveBeenCalledWith(
 					123,
 					456,
-					expect.stringContaining('Meal Plan'),
-					expect.any(Array),
+					expect.stringContaining('Voting messages sent'),
 				);
 			});
 		});
 
 		describe('handleScheduledJob', () => {
 			it('generates weekly plan and sends to all members', async () => {
+				// Track write calls so the plan is available for sendVotingMessages
+				let savedPlanYaml = '';
+				sharedStore.write.mockImplementation(async (path: string, content: string) => {
+					if (path === 'meal-plans/current.yaml') savedPlanYaml = content;
+				});
 				sharedStore.read.mockImplementation(async (path: string) => {
 					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path === 'meal-plans/current.yaml') return savedPlanYaml;
 					return '';
 				});
 				sharedStore.list.mockResolvedValue([]);
@@ -1846,7 +1856,7 @@ describe('Hearthstone App', () => {
 
 				await handleScheduledJob?.('generate-weekly-plan');
 				expect(services.llm.complete).toHaveBeenCalled();
-				// Should send to both members of the household
+				// H4: multi-member household → voting flow; one message per meal per member
 				expect(services.telegram.sendWithButtons).toHaveBeenCalledTimes(2);
 			});
 

@@ -61,8 +61,11 @@ import {
 	searchRecipes,
 	updateRecipe,
 } from './services/recipe-store.js';
+import { handleVoteCallback, handleFinalizeVotesJob, sendVotingMessages } from './handlers/voting.js';
+import { handleCookedCallback, handleRateCallback, handleNightlyRatingPromptJob } from './handlers/rating.js';
+import { scheduleShoppingFollowup, cancelShoppingFollowup, handleShopFollowupClearCallback, handleShopFollowupKeepCallback } from './handlers/shopping-followup.js';
 import type { GroceryItem, Recipe } from './types.js';
-import { todayDate } from './utils/date.js';
+import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
@@ -304,6 +307,12 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const { updated, purchased } = clearPurchased(list);
 			await archivePurchased(hh.sharedStore, purchased, services.timezone);
 			await saveGroceryList(hh.sharedStore, updated);
+			// H4: Schedule shopping follow-up if items remain
+			if (updated.items.length > 0) {
+				scheduleShoppingFollowup(services, ctx.userId, updated.items.length);
+			} else {
+				cancelShoppingFollowup();
+			}
 			if (purchased.length > 0) {
 				// Ask about adding to pantry
 				await services.telegram.editMessage(
@@ -471,15 +480,26 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				const startDate = nextMonday(todayDate(services.timezone));
 				const plan = await generatePlan(services, recipes, pantry, startDate, services.timezone);
 				await savePlan(hh.sharedStore, plan);
-				const location =
-					((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
-				await services.telegram.editMessage(
-					ctx.chatId,
-					ctx.messageId,
-					formatPlanMessage(plan, recipes, location),
-					buildPlanButtons(),
-				);
-				services.logger.info('Regenerated meal plan for %s', ctx.userId);
+				// H4: Multi-member households enter voting flow
+				if (hh.household.members.length > 1) {
+					await sendVotingMessages(services, hh.sharedStore, hh.household);
+					await services.telegram.editMessage(
+						ctx.chatId,
+						ctx.messageId,
+						'🗳 Meal plan regenerated! Voting messages sent to all household members.',
+					);
+					services.logger.info('Regenerated meal plan %s with voting for %d members', plan.id, hh.household.members.length);
+				} else {
+					const location =
+						((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+					await services.telegram.editMessage(
+						ctx.chatId,
+						ctx.messageId,
+						formatPlanMessage(plan, recipes, location),
+						buildPlanButtons(plan),
+					);
+					services.logger.info('Regenerated meal plan for %s', ctx.userId);
+				}
 			} catch (err) {
 				const { userMessage } = classifyLLMError(err);
 				await services.telegram.editMessage(ctx.chatId, ctx.messageId, userMessage);
@@ -561,7 +581,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					ctx.chatId,
 					ctx.messageId,
 					formatPlanMessage(plan, recipes, location),
-					buildPlanButtons(),
+					buildPlanButtons(plan),
 				);
 				services.logger.info('Swapped meal on %s for %s', dateStr, ctx.userId);
 			} catch (err) {
@@ -569,6 +589,32 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				await services.telegram.send(ctx.userId, userMessage);
 				services.logger.error('Meal swap callback failed: %s', err);
 			}
+			return;
+		}
+
+		// ─── H4: Voting callbacks ───────────────────────────
+		if (data.startsWith('vote:')) {
+			await handleVoteCallback(services, data.slice(5), ctx.userId, ctx.chatId, ctx.messageId);
+			return;
+		}
+
+		// ─── H4: Rating callbacks ───────────────────────────
+		if (data.startsWith('cooked:')) {
+			await handleCookedCallback(services, data.slice(7), ctx.userId, ctx.chatId, ctx.messageId);
+			return;
+		}
+		if (data.startsWith('rate:')) {
+			await handleRateCallback(services, data.slice(5), ctx.userId, ctx.chatId, ctx.messageId);
+			return;
+		}
+
+		// ─── H4: Shopping follow-up callbacks ────────────────
+		if (data === 'shop-followup:clear') {
+			await handleShopFollowupClearCallback(services, ctx.userId, ctx.chatId, ctx.messageId);
+			return;
+		}
+		if (data === 'shop-followup:keep') {
+			await handleShopFollowupKeepCallback(services, ctx.userId, ctx.chatId, ctx.messageId);
 			return;
 		}
 	} catch (err) {
@@ -1285,7 +1331,7 @@ async function handleMealPlanView(ctx: MessageContext): Promise<void> {
 	await services.telegram.sendWithButtons(
 		ctx.userId,
 		formatPlanMessage(plan, recipes, location),
-		buildPlanButtons(),
+		buildPlanButtons(plan),
 	);
 	services.logger.info('Showed meal plan to %s', ctx.userId);
 }
@@ -1314,14 +1360,24 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 		const plan = await generatePlan(services, recipes, pantry, startDate, services.timezone);
 		await savePlan(hh.sharedStore, plan);
 
-		const location =
-			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
-		await services.telegram.sendWithButtons(
-			ctx.userId,
-			formatPlanMessage(plan, recipes, location),
-			buildPlanButtons(),
-		);
-		services.logger.info('Generated meal plan for %s', ctx.userId);
+		// H4: Multi-member households enter voting flow
+		if (hh.household.members.length > 1) {
+			await sendVotingMessages(services, hh.sharedStore, hh.household);
+			await services.telegram.send(
+				ctx.userId,
+				'🗳 Meal plan generated! Voting messages sent to all household members.',
+			);
+			services.logger.info('Generated meal plan %s with voting for %d members', plan.id, hh.household.members.length);
+		} else {
+			const location =
+				((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+			await services.telegram.sendWithButtons(
+				ctx.userId,
+				formatPlanMessage(plan, recipes, location),
+				buildPlanButtons(plan),
+			);
+			services.logger.info('Generated meal plan for %s (single member)', ctx.userId);
+		}
 	} catch (err) {
 		const { userMessage } = classifyLLMError(err);
 		await services.telegram.send(ctx.userId, userMessage);
@@ -1505,7 +1561,7 @@ async function handleMealSwap(text: string, ctx: MessageContext): Promise<void> 
 		await services.telegram.sendWithButtons(
 			ctx.userId,
 			formatPlanMessage(plan, recipes, location),
-			buildPlanButtons(),
+			buildPlanButtons(plan),
 		);
 		services.logger.info('Swapped meal on %s for %s', targetDate, ctx.userId);
 	} catch (err) {
@@ -1529,6 +1585,18 @@ function nextMonday(dateStr: string): string {
 // ─── Scheduled Job Handler ──────────────────────────────────────
 
 export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId: string) => {
+	// H4: Finalize votes hourly
+	if (jobId === 'finalize-votes') {
+		await handleFinalizeVotesJob(services);
+		return;
+	}
+
+	// H4: Nightly rating prompt at 8pm
+	if (jobId === 'nightly-rating-prompt') {
+		await handleNightlyRatingPromptJob(services);
+		return;
+	}
+
 	if (jobId !== 'generate-weekly-plan') return;
 
 	const sharedStore = services.data.forShared('shared');
@@ -1558,13 +1626,16 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 		const plan = await generatePlan(services, recipes, pantry, upcomingMonday, services.timezone);
 		await savePlan(sharedStore, plan);
 
-		const location =
-			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
-		const message = formatPlanMessage(plan, recipes, location);
-
-		// Send to all household members
-		for (const memberId of household.members) {
-			await services.telegram.sendWithButtons(memberId, message, buildPlanButtons());
+		// H4: Multi-member households enter voting flow
+		if (household.members.length > 1) {
+			await sendVotingMessages(services, sharedStore, household);
+		} else {
+			const location =
+				((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+			const message = formatPlanMessage(plan, recipes, location);
+			for (const memberId of household.members) {
+				await services.telegram.sendWithButtons(memberId, message, buildPlanButtons(plan));
+			}
 		}
 
 		services.logger.info(
