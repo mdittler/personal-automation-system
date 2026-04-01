@@ -77,6 +77,16 @@ capabilities:
       cron: "0 9 * * 0"
       handler: "dist/handlers/generate-plan.js"
       user_scope: shared
+    - id: finalize-votes
+      description: "Check voting windows and finalize expired meal plan votes"
+      cron: "0 * * * *"
+      handler: "dist/handlers/voting.js"
+      user_scope: shared
+    - id: nightly-rating-prompt
+      description: "Send nightly 'What did you cook?' rating prompts at 8pm"
+      cron: "0 20 * * *"
+      handler: "dist/handlers/rating.js"
+      user_scope: shared
     - id: perishable-check
       description: "Check pantry for items approaching expiry"
       cron: "0 9 * * *"
