@@ -402,4 +402,99 @@ describe('buildPlanButtons', () => {
 			}
 		}
 	});
+
+	it('returns only control buttons when no plan provided', () => {
+		const buttons = buildPlanButtons();
+		expect(buttons).toHaveLength(1);
+		expect(buttons[0]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ text: expect.stringContaining('Grocery') }),
+			]),
+		);
+	});
+
+	it('includes Cooked buttons for uncooked meals when plan is provided', () => {
+		const plan: MealPlan = {
+			id: 'p1',
+			startDate: '2026-03-31',
+			endDate: '2026-04-06',
+			meals: [
+				{
+					recipeId: 'r1',
+					recipeTitle: 'Chicken Stir Fry',
+					date: '2026-03-31',
+					mealType: 'dinner',
+					votes: {},
+					cooked: false,
+					rated: false,
+					isNew: false,
+				},
+				{
+					recipeId: 'r2',
+					recipeTitle: 'Pasta',
+					date: '2026-04-01',
+					mealType: 'dinner',
+					votes: {},
+					cooked: true,
+					rated: true,
+					isNew: false,
+				},
+			],
+			status: 'active',
+			createdAt: '',
+			updatedAt: '',
+		};
+		const buttons = buildPlanButtons(plan);
+		expect(buttons).toHaveLength(2); // 1 uncooked meal + 1 control row
+		expect(buttons[0][0].text).toContain('Chicken Stir Fry');
+		expect(buttons[0][0].callbackData).toBe('app:hearthstone:cooked:2026-03-31');
+		// Cooked meal should NOT appear
+		expect(buttons.flat().every((b) => !b.text.includes('Pasta'))).toBe(true);
+	});
+
+	it('skips cooked meals', () => {
+		const plan: MealPlan = {
+			id: 'p1',
+			startDate: '2026-03-31',
+			endDate: '2026-04-06',
+			meals: [
+				{
+					recipeId: 'r1',
+					recipeTitle: 'Meal 1',
+					date: '2026-03-31',
+					mealType: 'dinner',
+					votes: {},
+					cooked: true,
+					rated: true,
+					isNew: false,
+				},
+			],
+			status: 'active',
+			createdAt: '',
+			updatedAt: '',
+		};
+		const buttons = buildPlanButtons(plan);
+		expect(buttons).toHaveLength(1); // only control row
+	});
+
+	it('cooked button callbackData includes date for routing', () => {
+		const plan = makePlan({
+			meals: [makeMeal({ date: '2026-03-31', cooked: false, recipeTitle: 'Tacos' })],
+		});
+		const buttons = buildPlanButtons(plan);
+		const cookedBtn = buttons.flat().find((b) => b.callbackData.startsWith('app:hearthstone:cooked:'));
+		expect(cookedBtn).toBeDefined();
+		expect(cookedBtn?.callbackData).toBe('app:hearthstone:cooked:2026-03-31');
+	});
+
+	it('shows day abbreviation in cooked button text', () => {
+		const plan = makePlan({
+			meals: [makeMeal({ date: '2026-03-31', cooked: false, recipeTitle: 'Tacos' })],
+		});
+		const buttons = buildPlanButtons(plan);
+		const cookedBtn = buttons.flat().find((b) => b.callbackData.startsWith('app:hearthstone:cooked:'));
+		// 2026-03-31 is a Tuesday
+		expect(cookedBtn?.text).toContain('Tue');
+		expect(cookedBtn?.text).toContain('Tacos');
+	});
 });

@@ -221,12 +221,30 @@ export function formatTonightMessage(meal: PlannedMeal, recipe: Recipe | null): 
 
 // ─── Buttons ─────────────────────────────────────────────────────────────────
 
-/** Return inline buttons for the meal plan message. */
-export function buildPlanButtons(): InlineButton[][] {
-	return [
-		[
-			{ text: '🛒 Grocery List', callbackData: 'app:hearthstone:grocery-from-plan' },
-			{ text: '🔄 Regenerate', callbackData: 'app:hearthstone:regenerate-plan' },
-		],
-	];
+/** Return inline buttons for the meal plan message. Includes Cooked buttons when plan is provided. */
+export function buildPlanButtons(plan?: MealPlan): InlineButton[][] {
+	const buttons: InlineButton[][] = [];
+
+	// H4: Add "✅ Cooked!" button for each uncooked meal
+	if (plan) {
+		for (const meal of plan.meals) {
+			if (!meal.cooked) {
+				const day = dayAbbrev(meal.date);
+				buttons.push([
+					{
+						text: `✅ ${day} — ${meal.recipeTitle}`,
+						callbackData: `app:hearthstone:cooked:${meal.date}`,
+					},
+				]);
+			}
+		}
+	}
+
+	// Control row
+	buttons.push([
+		{ text: '🛒 Grocery List', callbackData: 'app:hearthstone:grocery-from-plan' },
+		{ text: '🔄 Regenerate', callbackData: 'app:hearthstone:regenerate-plan' },
+	]);
+
+	return buttons;
 }
