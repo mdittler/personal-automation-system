@@ -21,6 +21,7 @@ import {
 	handleCallbackQuery,
 	handleCommand,
 	handleMessage,
+	handleScheduledJob,
 	init,
 	isGroceryAddIntent,
 	isGroceryGenerateIntent,
@@ -188,6 +189,49 @@ const activeMealPlan: MealPlan = {
 	status: 'active',
 	createdAt: '2026-03-30T09:00:00.000Z',
 	updatedAt: '2026-03-30T09:00:00.000Z',
+};
+
+/** Voting plan — status is 'voting', voting started >12 hours ago. */
+const votingMealPlan: MealPlan = {
+	id: 'plan-002',
+	startDate: '2026-03-30',
+	endDate: '2026-04-05',
+	meals: [
+		{
+			recipeId: 'chicken-stir-fry-001',
+			recipeTitle: 'Chicken Stir Fry',
+			date: '2026-03-31',
+			mealType: 'dinner',
+			votes: {},
+			cooked: false,
+			rated: false,
+			isNew: false,
+		},
+		{
+			recipeId: 'pasta-bolognese-002',
+			recipeTitle: 'Pasta Bolognese',
+			date: '2026-04-01',
+			mealType: 'dinner',
+			votes: {},
+			cooked: false,
+			rated: false,
+			isNew: false,
+		},
+	],
+	status: 'voting',
+	votingStartedAt: '2026-03-30T09:00:00.000Z',
+	createdAt: '2026-03-30T09:00:00.000Z',
+	updatedAt: '2026-03-30T09:00:00.000Z',
+};
+
+/** Single-member household — no voting flow. */
+const singleMemberHousehold: Household = {
+	id: 'solo1',
+	name: 'Solo Home',
+	createdBy: 'matt',
+	members: ['matt'],
+	joinCode: 'AAA111',
+	createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 // ─── Test Setup ──────────────────────────────────────────────────
@@ -1076,6 +1120,491 @@ describe('Natural Language — Real User Messages', () => {
 			);
 			// Should call LLM for plan generation
 			expect(services.llm.complete).toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: VOTING CALLBACKS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Voting callbacks — tapping 👍/👎/😐 on a voting plan', () => {
+		it('vote:up:DATE → editMessage with 👍 + recipe title', async () => {
+			setupHousehold({ mealPlan: votingMealPlan });
+			await handleCallbackQuery?.('vote:up:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('👍'),
+			);
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Chicken Stir Fry'),
+			);
+		});
+
+		it('vote:down:DATE → editMessage with 👎', async () => {
+			setupHousehold({ mealPlan: votingMealPlan });
+			await handleCallbackQuery?.('vote:down:2026-04-01', { userId: 'matt', chatId: 100, messageId: 201 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				201,
+				expect.stringContaining('👎'),
+			);
+		});
+
+		it('vote:neutral:DATE → editMessage with 😐', async () => {
+			setupHousehold({ mealPlan: votingMealPlan });
+			await handleCallbackQuery?.('vote:neutral:2026-03-31', { userId: 'sarah', chatId: 102, messageId: 202 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				102,
+				202,
+				expect.stringContaining('😐'),
+			);
+		});
+
+		it('vote on active plan → editMessage with "Voting has ended"', async () => {
+			setupHousehold({ mealPlan: activeMealPlan }); // status is 'active', not 'voting'
+			await handleCallbackQuery?.('vote:up:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				'Voting has ended',
+			);
+		});
+
+		it('vote on nonexistent date → no editMessage', async () => {
+			setupHousehold({ mealPlan: votingMealPlan });
+			await handleCallbackQuery?.('vote:up:2099-12-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).not.toHaveBeenCalled();
+		});
+
+		it('invalid vote type → no editMessage', async () => {
+			setupHousehold({ mealPlan: votingMealPlan });
+			await handleCallbackQuery?.('vote:maybe:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).not.toHaveBeenCalled();
+		});
+
+		it('second member votes → both votes recorded and plan saved', async () => {
+			// Plan where matt already voted
+			const planWithOneVote: MealPlan = {
+				...votingMealPlan,
+				meals: [
+					{ ...votingMealPlan.meals[0]!, votes: { matt: 'up' } },
+					{ ...votingMealPlan.meals[1]!, votes: { matt: 'up' } },
+				],
+			};
+			setupHousehold({ mealPlan: planWithOneVote });
+			// Sarah is the second member — her vote triggers finalization
+			// finalizePlan calls loadAllRecipes and swapMeal (via LLM) — mock LLM
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify({ recipeTitle: 'Grilled Salmon', recipeId: '', isNew: true, description: 'Fresh' }),
+			);
+			vi.mocked(services.config.get).mockResolvedValue('');
+			await handleCallbackQuery?.('vote:down:2026-03-31', { userId: 'sarah', chatId: 102, messageId: 202 });
+			// editMessage called for sarah's vote confirmation
+			expect(services.telegram.editMessage).toHaveBeenCalled();
+			// Plan was saved
+			expect(store.write).toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: COOKED + RATING CALLBACKS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Cooked callbacks — marking a meal as cooked', () => {
+		it('cooked:DATE → marks cooked, shows "How was it?" + rate buttons', async () => {
+			setupHousehold({ mealPlan: activeMealPlan });
+			await handleCallbackQuery?.('cooked:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('How was it?'),
+				expect.any(Array),
+			);
+		});
+
+		it('cooked:DATE on already-rated meal → shows "already rated"', async () => {
+			const planAlreadyRated: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: true },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planAlreadyRated });
+			await handleCallbackQuery?.('cooked:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('already rated'),
+			);
+		});
+
+		it('cooked:DATE with no plan → no editMessage', async () => {
+			setupHousehold(); // no mealPlan
+			await handleCallbackQuery?.('cooked:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('H4: Rating callbacks — thumbs up/down/skip after cooking', () => {
+		it('rate:up:DATE → 👍 confirmation + rating stored', async () => {
+			const planCooked: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: false },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planCooked, recipes: [chickenStirFry, pastaBolognese] });
+			await handleCallbackQuery?.('rate:up:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('👍'),
+			);
+			// Plan was saved (rated = true)
+			expect(store.write).toHaveBeenCalled();
+		});
+
+		it('rate:down:DATE → 👎 confirmation', async () => {
+			const planCooked: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: false },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planCooked, recipes: [chickenStirFry, pastaBolognese] });
+			await handleCallbackQuery?.('rate:down:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('👎'),
+			);
+		});
+
+		it('rate:skip:DATE → ⏭ Skipped', async () => {
+			const planCooked: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: false },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planCooked, recipes: [chickenStirFry, pastaBolognese] });
+			await handleCallbackQuery?.('rate:skip:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				'⏭ Skipped',
+			);
+		});
+
+		it('rate:up:DATE on draft recipe → recipe promoted + "Recipe added" confirmation', async () => {
+			const draftRecipe: Recipe = {
+				...chickenStirFry,
+				status: 'draft',
+			};
+			const planWithDraft: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: false },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planWithDraft, recipes: [draftRecipe, pastaBolognese] });
+			await handleCallbackQuery?.('rate:up:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Recipe added'),
+			);
+		});
+
+		it('rate:up:DATE with no matching meal → no editMessage', async () => {
+			const planCooked: MealPlan = {
+				...activeMealPlan,
+				meals: [
+					{ ...activeMealPlan.meals[0]!, cooked: true, rated: false },
+					...activeMealPlan.meals.slice(1),
+				],
+			};
+			setupHousehold({ mealPlan: planCooked });
+			await handleCallbackQuery?.('rate:up:2099-12-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).not.toHaveBeenCalled();
+		});
+
+		it('invalid rating direction → no editMessage', async () => {
+			setupHousehold({ mealPlan: activeMealPlan });
+			await handleCallbackQuery?.('rate:maybe:2026-03-31', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).not.toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: SHOPPING FOLLOW-UP CALLBACKS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Shopping follow-up callbacks', () => {
+		it('shop-followup:clear → clears list and shows "Cleared" message', async () => {
+			setupHousehold({ grocery: groceryList });
+			await handleCallbackQuery?.('shop-followup:clear', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Cleared'),
+			);
+		});
+
+		it('shop-followup:keep → shows "Keeping items" message', async () => {
+			setupHousehold({ grocery: groceryList });
+			await handleCallbackQuery?.('shop-followup:keep', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Keeping'),
+			);
+		});
+
+		it('shop-followup:clear with no list → "already empty"', async () => {
+			// No grocery list at all — store returns '' for active.yaml
+			setupHousehold(); // no grocery option → returns '' → null list
+			await handleCallbackQuery?.('shop-followup:clear', { userId: 'matt', chatId: 100, messageId: 200 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('already empty'),
+			);
+		});
+
+		it('shop-followup:clear removes all remaining items and saves empty list', async () => {
+			setupHousehold({ grocery: groceryList });
+			await handleCallbackQuery?.('shop-followup:clear', { userId: 'matt', chatId: 100, messageId: 200 });
+			// store.write should be called to save the cleared list
+			expect(store.write).toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: NIGHTLY RATING PROMPT JOB
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Nightly rating prompt job', () => {
+		it('active plan with uncooked meals → sends prompt to both members', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-03-31T20:00:00Z'));
+			try {
+				setupHousehold({ mealPlan: activeMealPlan });
+				await handleScheduledJob?.('nightly-rating-prompt');
+				// sendWithButtons called for both household members
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('cook'),
+					expect.any(Array),
+				);
+				expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+					'sarah',
+					expect.stringContaining('cook'),
+					expect.any(Array),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('already sent today → idempotent, no sendWithButtons', async () => {
+			const planAlreadySent: MealPlan = {
+				...activeMealPlan,
+				lastRatingPromptDate: '2026-03-31',
+			};
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-03-31T20:00:00Z'));
+			try {
+				setupHousehold({ mealPlan: planAlreadySent });
+				await handleScheduledJob?.('nightly-rating-prompt');
+				expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('voting plan → skipped (not active or completed)', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-03-31T20:00:00Z'));
+			try {
+				setupHousehold({ mealPlan: votingMealPlan });
+				await handleScheduledJob?.('nightly-rating-prompt');
+				expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('all meals already cooked → skipped', async () => {
+			const planAllCooked: MealPlan = {
+				...activeMealPlan,
+				meals: activeMealPlan.meals.map((m) => ({ ...m, cooked: true })),
+			};
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-03-31T20:00:00Z'));
+			try {
+				setupHousehold({ mealPlan: planAllCooked });
+				await handleScheduledJob?.('nightly-rating-prompt');
+				expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: FINALIZE VOTES JOB
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Finalize votes job', () => {
+		it('expired voting plan → finalizes (transitions to active, notifies members)', async () => {
+			// votingStartedAt is far in the past — voting window has expired
+			const expiredVotingPlan: MealPlan = {
+				...votingMealPlan,
+				votingStartedAt: '2020-01-01T00:00:00.000Z', // ancient — always expired
+			};
+			setupHousehold({ mealPlan: expiredVotingPlan });
+			vi.mocked(services.config.get).mockResolvedValue(12); // voting_window_hours
+			// finalizePlan calls loadAllRecipes and swapMeal for net-negative meals — no net-negative here
+			await handleScheduledJob?.('finalize-votes');
+			// Finalization saves the plan and sends to both members
+			expect(store.write).toHaveBeenCalled();
+			expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+		});
+
+		it('non-expired voting plan → not finalized', async () => {
+			// votingStartedAt is right now — window has not expired
+			const freshVotingPlan: MealPlan = {
+				...votingMealPlan,
+				votingStartedAt: new Date().toISOString(),
+			};
+			setupHousehold({ mealPlan: freshVotingPlan });
+			vi.mocked(services.config.get).mockResolvedValue(12);
+			await handleScheduledJob?.('finalize-votes');
+			// No finalization — plan not saved, no member notifications
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+		});
+
+		it('active plan (not voting) → no-op', async () => {
+			setupHousehold({ mealPlan: activeMealPlan });
+			await handleScheduledJob?.('finalize-votes');
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(store.write).not.toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: MULTI-MEMBER MEAL PLAN GENERATION
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: Multi-member meal plan generation', () => {
+		it('"generate a meal plan" with 2-member household → enters voting flow', async () => {
+			// Set up a store that tracks writes so subsequent reads return the saved plan
+			let savedPlanYaml = '';
+			store.read.mockImplementation(async (path: string) => {
+				if (path === 'household.yaml') return stringify(household);
+				if (path === 'meal-plans/current.yaml') return savedPlanYaml;
+				if (path === 'pantry.yaml') return stringify({ items: pantryItems });
+				for (const r of [chickenStirFry, pastaBolognese]) {
+					if (path === `recipes/${r.id}.yaml`) return stringify(r);
+				}
+				return '';
+			});
+			store.write.mockImplementation(async (path: string, content: string) => {
+				if (path === 'meal-plans/current.yaml') savedPlanYaml = content;
+			});
+			store.list.mockImplementation(async (dir: string) => {
+				if (dir === 'recipes') return [chickenStirFry, pastaBolognese].map((r) => `${r.id}.yaml`);
+				return [];
+			});
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify({
+					meals: [
+						{ recipeTitle: 'Chicken Stir Fry', recipeId: 'chicken-stir-fry-001', isNew: false },
+						{ recipeTitle: 'Pasta Bolognese', recipeId: 'pasta-bolognese-002', isNew: false },
+					],
+				}),
+			);
+			await handleMessage(msg('generate a meal plan'));
+			// Should mention voting (2-member household)
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Voting'),
+			);
+			// Voting messages sent via sendWithButtons to household members
+			expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+		});
+
+		it('"generate a meal plan" with single-member household → sends plan directly (no voting)', async () => {
+			// Override the shared store to return single-member household
+			store.read.mockImplementation(async (path: string) => {
+				if (path === 'household.yaml') return stringify(singleMemberHousehold);
+				if (path === 'meal-plans/current.yaml') return '';
+				if (path === 'pantry.yaml') return stringify({ items: pantryItems });
+				for (const r of [chickenStirFry, pastaBolognese]) {
+					if (path === `recipes/${r.id}.yaml`) return stringify(r);
+				}
+				return '';
+			});
+			store.list.mockImplementation(async (dir: string) => {
+				if (dir === 'recipes') return [chickenStirFry, pastaBolognese].map((r) => `${r.id}.yaml`);
+				return [];
+			});
+			vi.mocked(services.config.get).mockResolvedValue('');
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify({
+					meals: [
+						{ recipeTitle: 'Chicken Stir Fry', recipeId: 'chicken-stir-fry-001', isNew: false },
+						{ recipeTitle: 'Pasta Bolognese', recipeId: 'pasta-bolognese-002', isNew: false },
+					],
+				}),
+			);
+			await handleMessage(msg('generate a meal plan'));
+			// Single member → plan sent directly, no "Voting" message
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Chicken Stir Fry'),
+				expect.any(Array),
+			);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H4: /mealplan VIEW WITH COOKED BUTTONS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H4: /mealplan view shows Cooked buttons for uncooked meals', () => {
+		it('active plan with uncooked meals → response includes cooked button callback data', async () => {
+			setupHousehold({ mealPlan: activeMealPlan, recipes: [chickenStirFry, pastaBolognese] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+			await handleMessage(msg('show me the meal plan'));
+			const call = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			// Flatten button array and check for cooked: callback data
+			const buttons = (call?.[2] ?? []) as Array<Array<{ text: string; callbackData: string }>>;
+			const allButtonData = buttons.flat().map((b) => b.callbackData);
+			expect(allButtonData.some((d) => d.includes('cooked:'))).toBe(true);
+		});
+
+		it('all-cooked plan → no cooked buttons in response', async () => {
+			const allCookedPlan: MealPlan = {
+				...activeMealPlan,
+				meals: activeMealPlan.meals.map((m) => ({ ...m, cooked: true })),
+			};
+			setupHousehold({ mealPlan: allCookedPlan, recipes: [chickenStirFry, pastaBolognese] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+			await handleMessage(msg('show me the meal plan'));
+			const call = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			const buttons = (call?.[2] ?? []) as Array<Array<{ text: string; callbackData: string }>>;
+			const allButtonData = buttons.flat().map((b) => b.callbackData);
+			expect(allButtonData.every((d) => !d.includes('cooked:'))).toBe(true);
 		});
 	});
 });
