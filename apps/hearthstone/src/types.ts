@@ -37,6 +37,32 @@ export interface CookEvent {
 	notes?: string;
 }
 
+// ─── Cook Mode Types ────────────────────────────────────────────
+
+export interface ScaledIngredient extends Ingredient {
+	originalQuantity: number | null;
+	scaledQuantity: number | null;
+}
+
+export interface CookSession {
+	userId: string;
+	recipeId: string;
+	recipeTitle: string;
+	currentStep: number; // 0-based index into instructions
+	totalSteps: number;
+	targetServings: number;
+	originalServings: number;
+	scaledIngredients: ScaledIngredient[];
+	scalingNotes: string | null;
+	instructions: string[];
+	startedAt: number; // Date.now()
+	lastActivityAt: number; // for 24h inactivity timeout
+	lastMessageId: number | null; // for editMessage on button taps
+	lastChatId: number | null;
+}
+
+export type CookAction = 'next' | 'back' | 'repeat' | 'done';
+
 export type RecipeStatus = 'draft' | 'confirmed' | 'archived';
 
 export interface Recipe {

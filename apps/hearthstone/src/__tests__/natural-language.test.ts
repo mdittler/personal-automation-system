@@ -15,7 +15,7 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import {
 	handleCallbackQuery,
@@ -32,9 +32,11 @@ import {
 	isPantryAddIntent,
 	isPantryRemoveIntent,
 	isPantryViewIntent,
+	isCookIntent,
 	isWhatCanIMakeIntent,
 	isWhatsForDinnerIntent,
 } from '../index.js';
+import { endSession, hasActiveSession } from '../services/cook-session.js';
 import type { GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
 
 // ─── Shared Fixtures ─────────────────────────────────────────────
@@ -1605,6 +1607,355 @@ describe('Natural Language — Real User Messages', () => {
 			const buttons = (call?.[2] ?? []) as Array<Array<{ text: string; callbackData: string }>>;
 			const allButtonData = buttons.flat().map((b) => b.callbackData);
 			expect(allButtonData.every((d) => !d.includes('cooked:'))).toBe(true);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5a: COOK MODE — "Let's make dinner!"
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5a: Cook mode intent detection', () => {
+		// --- Messages that SHOULD trigger cook intent ---
+
+		it.each([
+			'start cooking the chicken stir fry',
+			'begin cooking the pasta bolognese',
+			"let's cook the chicken stir fry",
+			"let's make the pasta bolognese",
+			'cook the chicken stir fry',
+			'cook my pasta bolognese',
+			'cook our chicken stir fry',
+			'cook a quick pasta',
+			'start making the pasta',
+			'begin making dinner',
+			'time to cook',
+			'time to make dinner',
+			'I want to cook the chicken stir fry',
+			'i want to make the pasta bolognese',
+			'can we make the chicken stir fry',
+			'ready to cook dinner',
+			"let's prepare the chicken stir fry",
+			'prepare the pasta bolognese',
+			'prepare my dinner',
+		])('recognizes "%s" as cook intent', (message) => {
+			expect(isCookIntent(message.toLowerCase())).toBe(true);
+		});
+
+		// --- Messages that should NOT trigger cook intent ---
+
+		it.each([
+			'what should we cook this week',
+			'how long does chicken cook for',
+			'cooking tips for pasta',
+			'can you find a recipe',
+			'save this recipe',
+			'the chicken is overcooked',
+			'we cooked that last week',
+			'add cooking oil to the list',
+			'what temperature to cook salmon',
+			'I love cooking Italian food',
+			'check the pantry',
+		])('does NOT match "%s" as cook intent', (message) => {
+			expect(isCookIntent(message.toLowerCase())).toBe(false);
+		});
+	});
+
+	describe('H5a: /cook command flow', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('"start cooking the chicken stir fry" → prompts for servings', async () => {
+			setupHousehold();
+			await handleMessage(msg('start cooking the chicken stir fry'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('servings'),
+			);
+		});
+
+		it('/cook with no args → shows recipe selection buttons', async () => {
+			setupHousehold();
+			await handleCommand!('cook', [], msg(''));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Which recipe'),
+				expect.any(Array),
+			);
+		});
+
+		it('/cook chicken → finds recipe and prompts for servings', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('servings'),
+			);
+		});
+
+		it('/cook nonexistent → shows search results or no-match', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['zzzzzz'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("couldn't find"),
+			);
+		});
+
+		it('/cook ambiguous term → shows matching recipes as buttons', async () => {
+			const chicken2: Recipe = {
+				...chickenStirFry,
+				id: 'chicken-parm-003',
+				title: 'Chicken Parmesan',
+			};
+			setupHousehold({ recipes: [chickenStirFry, chicken2, pastaBolognese] });
+			// "chicken" partial-matches "Chicken Stir Fry" via findRecipeByTitle
+			// so it will find the first match and prompt servings
+			await handleCommand!('cook', ['chicken'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('servings'),
+			);
+		});
+	});
+
+	describe('H5a: Cook mode servings input', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('user replies "4" → starts cook mode with 4 servings', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('user replies "double" → starts cook mode with doubled servings', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('double'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		it('user replies "half" → starts cook mode with halved servings', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('half'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		it('user replies garbage → gets friendly error and can retry', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('uhh what'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("didn't understand"),
+			);
+			expect(hasActiveSession('matt')).toBe(false);
+			// Can retry
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+	});
+
+	describe('H5a: Cook mode navigation via text', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		async function startCookMode() {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+		}
+
+		it('"next" → advances to next step', async () => {
+			await startCookMode();
+			await handleMessage(msg('next'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 2'),
+				expect.any(Array),
+			);
+		});
+
+		it('"back" → goes back to previous step', async () => {
+			await startCookMode();
+			await handleMessage(msg('next'));
+			await handleMessage(msg('back'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('"repeat" → re-sends current step', async () => {
+			await startCookMode();
+			await handleMessage(msg('repeat'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('"done" → ends cook mode', async () => {
+			await startCookMode();
+			await handleMessage(msg('done'));
+			expect(hasActiveSession('matt')).toBe(false);
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Finished cooking'),
+			);
+		});
+
+		it('"exit" → ends cook mode', async () => {
+			await startCookMode();
+			await handleMessage(msg('exit'));
+			expect(hasActiveSession('matt')).toBe(false);
+		});
+
+		it('"previous" → works as alias for back', async () => {
+			await startCookMode();
+			await handleMessage(msg('next'));
+			await handleMessage(msg('previous'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('"stop" → ends cook mode', async () => {
+			await startCookMode();
+			await handleMessage(msg('stop'));
+			expect(hasActiveSession('matt')).toBe(false);
+		});
+
+		it('non-cook text during cook mode → falls through to other intents', async () => {
+			await startCookMode();
+			// "what's in the pantry" should NOT be consumed by cook mode
+			await handleMessage(msg("what's in the pantry"));
+			// Cook mode should still be active
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		it('navigates through all steps to completion', async () => {
+			await startCookMode();
+			// chickenStirFry has 3 steps
+			await handleMessage(msg('next')); // step 2
+			await handleMessage(msg('next')); // step 3
+			await handleMessage(msg('next')); // completed
+			expect(hasActiveSession('matt')).toBe(false);
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('All done'),
+			);
+		});
+	});
+
+	describe('H5a: Cook mode callback navigation', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		async function startCookMode() {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+		}
+
+		it('ck:n → advances step', async () => {
+			await startCookMode();
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				456,
+				expect.stringContaining('Step 2'),
+				expect.any(Array),
+			);
+		});
+
+		it('ck:b on step 1 → friendly message', async () => {
+			await startCookMode();
+			await handleCallbackQuery?.('ck:b', { userId: 'matt', chatId: 100, messageId: 456 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				456,
+				expect.stringContaining('first step'),
+				expect.any(Array),
+			);
+		});
+
+		it('ck:r → repeats current step', async () => {
+			await startCookMode();
+			await handleCallbackQuery?.('ck:r', { userId: 'matt', chatId: 100, messageId: 456 });
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				456,
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('ck:d → ends session', async () => {
+			await startCookMode();
+			await handleCallbackQuery?.('ck:d', { userId: 'matt', chatId: 100, messageId: 456 });
+			expect(hasActiveSession('matt')).toBe(false);
+		});
+
+		it('ck:sel:<id> → selects recipe and prompts servings', async () => {
+			setupHousehold();
+			await handleCallbackQuery?.(`ck:sel:${chickenStirFry.id}`, {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 456,
+			});
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('servings'),
+			);
+		});
+	});
+
+	describe('H5a: Recipe scaling — user messages', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('sends scaled ingredients before first step', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			// Scale to 8 (double) — should trigger ingredient display
+			await handleMessage(msg('8'));
+			// Should see ingredients message AND step 1
+			const sendCalls = vi.mocked(services.telegram.send).mock.calls;
+			const ingredientMsg = sendCalls.find(
+				(c) => typeof c[1] === 'string' && c[1].includes('chicken breast'),
+			);
+			expect(ingredientMsg).toBeDefined();
+		});
+
+		it('"3 servings" → parses and starts', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['pasta', 'bolognese'], msg(''));
+			await handleMessage(msg('3 servings'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		it('"quarter" → scales to 1/4', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('quarter'));
+			expect(hasActiveSession('matt')).toBe(true);
 		});
 	});
 });

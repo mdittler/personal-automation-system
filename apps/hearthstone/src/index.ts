@@ -64,6 +64,7 @@ import {
 import { handleVoteCallback, handleFinalizeVotesJob, sendVotingMessages } from './handlers/voting.js';
 import { handleCookedCallback, handleRateCallback, handleNightlyRatingPromptJob } from './handlers/rating.js';
 import { scheduleShoppingFollowup, cancelShoppingFollowup, handleShopFollowupClearCallback, handleShopFollowupKeepCallback } from './handlers/shopping-followup.js';
+import { handleCookCommand, handleCookIntent, handleCookCallback, handleCookTextAction, handleServingsReply, hasPendingCookRecipe, isCookModeActive } from './handlers/cook-mode.js';
 import type { GroceryItem, Recipe } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
@@ -97,6 +98,18 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 				return;
 			}
 		}
+	}
+
+	// H5: Cook mode text intercept — handle "next", "back", etc. during active session
+	if (isCookModeActive(ctx.userId)) {
+		const handled = await handleCookTextAction(services, text, ctx);
+		if (handled) return;
+	}
+
+	// H5: Servings reply — handle number/text response after /cook recipe selection
+	if (hasPendingCookRecipe(ctx.userId)) {
+		await handleServingsReply(services, text, ctx);
+		return;
 	}
 
 	// Try to detect intent from the message
@@ -192,6 +205,12 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
+	// H5: Cook mode intent
+	if (isCookIntent(lower)) {
+		await handleCookIntent(services, text, ctx);
+		return;
+	}
+
 	// Fallback: try to interpret as a recipe save if it looks like recipe text
 	if (looksLikeRecipe(text)) {
 		await handleSaveRecipe(text, ctx);
@@ -208,9 +227,11 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• "plan meals for this week" — generate a meal plan\n' +
 			'• "what\'s for dinner?" — see tonight\'s meal\n' +
 			'• "what can I make?" — match pantry to recipes\n' +
+			'• "start cooking the lasagna" — step-by-step cook mode\n' +
 			'• /grocery — view your grocery list\n' +
 			'• /pantry — view your pantry\n' +
 			'• /recipes — browse all recipes\n' +
+			'• /cook <recipe> — cook step-by-step\n' +
 			'• /household — manage your household',
 	);
 };
@@ -247,6 +268,9 @@ export const handleCommand: AppModule['handleCommand'] = async (
 			break;
 		case 'whatsfordinner':
 			await handleWhatsForDinner(ctx);
+			break;
+		case 'cook':
+			await handleCookCommand(services, args, ctx);
 			break;
 		default:
 			await services.telegram.send(
@@ -615,6 +639,12 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		}
 		if (data === 'shop-followup:keep') {
 			await handleShopFollowupKeepCallback(services, ctx.userId, ctx.chatId, ctx.messageId);
+			return;
+		}
+
+		// ─── H5: Cook mode callbacks ─────────────────────────
+		if (data.startsWith('ck:')) {
+			await handleCookCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId);
 			return;
 		}
 	} catch (err) {
@@ -1783,6 +1813,17 @@ export function isMealSwapIntent(text: string): boolean {
 			text,
 		) &&
 			/\b(swap|change|replace)\b/i.test(text))
+	);
+}
+
+export function isCookIntent(text: string): boolean {
+	return (
+		/\b(start|begin)\s+(cook(ing)?|mak(e|ing))\b/i.test(text) ||
+		/\blet'?s\s+(cook|make|prepare)\b/i.test(text) ||
+		/\bcook\s+(the|my|our|a)\b/i.test(text) ||
+		/\btime\s+to\s+(cook|make)\b/i.test(text) ||
+		/\b(i\s+want\s+to|can\s+we|ready\s+to)\s+(cook|make|prepare)\b/i.test(text) ||
+		/\bprepare\s+(the|my|our|a)\b/i.test(text)
 	);
 }
 

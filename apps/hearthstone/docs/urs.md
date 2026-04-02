@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-hearthstone |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-03-31 |
+| **Last Updated** | 2026-04-01 |
 
 ## Conventions
 
@@ -905,15 +905,60 @@ When meal plan includes frozen ingredients, send reminder the night before to de
 
 ### REQ-COOK-001: Cook mode
 
-**Origin:** CE-1 | **Status:** Planned
+**Origin:** CE-1 | **Status:** Implemented (Phase H5a)
 
-Step-by-step cooking guidance via Telegram: send first step, advance with "next"/"n"/button, go back with "back"/"previous", repeat current step, show progress indicator.
+Step-by-step cooking guidance via Telegram: send first step, advance with "next"/"n"/button, go back with "back"/"previous", repeat current step, show progress indicator. Recipe selection via search buttons when not found. 24h inactivity timeout.
 
 **Standard tests:**
-- TBD
+- `cook-session.test.ts` > `createSession` > creates a session with correct fields
+- `cook-session.test.ts` > `createSession` > stores the session in the map
+- `cook-session.test.ts` > `getSession` > returns the session for an active user
+- `cook-session.test.ts` > `advanceStep` > advances from step 0 to step 1
+- `cook-session.test.ts` > `advanceStep` > advances through all steps sequentially
+- `cook-session.test.ts` > `goBack` > goes back from step 2 to step 1
+- `cook-session.test.ts` > `endSession` > removes the session from the map
+- `cook-session.test.ts` > `formatStepMessage` > shows 1-indexed step number and progress
+- `cook-session.test.ts` > `formatStepMessage` > shows correct step after advancing
+- `cook-session.test.ts` > `buildStepButtons` > returns a row with 4 buttons
+- `cook-session.test.ts` > `buildStepButtons` > uses ck: callback data prefix
+- `cook-session.test.ts` > `formatCompletionMessage` > includes recipe title
+- `cook-mode-handler.test.ts` > `handleCookCommand` > sends servings prompt when recipe found
+- `cook-mode-handler.test.ts` > `handleCookCallback` > advances step on ck:n
+- `cook-mode-handler.test.ts` > `handleCookCallback` > goes back on ck:b
+- `cook-mode-handler.test.ts` > `handleCookCallback` > repeats current step on ck:r
+- `cook-mode-handler.test.ts` > `handleCookCallback` > ends session on ck:d
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and advances on "next"
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and goes back on "back"
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and goes back on "previous"
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and repeats on "repeat"
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and ends on "done"
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns true and ends on "exit"
 
 **Edge case tests:**
-- TBD
+- `cook-session.test.ts` > `getSession` > returns null for a user with no session
+- `cook-session.test.ts` > `advanceStep` > returns completed when advancing past last step
+- `cook-session.test.ts` > `goBack` > returns at_start when already at step 0
+- `cook-session.test.ts` > `endSession` > does not error when ending a non-existent session
+- `cook-session.test.ts` > `touchSession` > updates lastActivityAt
+- `cook-session.test.ts` > `isSessionExpired` > returns false for a fresh session
+- `cook-session.test.ts` > `isSessionExpired` > returns true for a session inactive for 25 hours
+- `cook-session.test.ts` > `cleanExpiredSessions` > removes expired sessions and keeps active ones
+- `cook-session.test.ts` > `cleanExpiredSessions` > returns 0 when no sessions are expired
+- `cook-session.test.ts` > `multi-user isolation` > maintains independent sessions for different users
+- `cook-session.test.ts` > `single-step recipe` > completes immediately on advance
+- `cook-session.test.ts` > `getSessionCount` > returns the number of active sessions
+- `cook-mode-handler.test.ts` > `handleCookCommand` > shows search results as buttons when recipe not found by title but has search matches
+- `cook-mode-handler.test.ts` > `handleCookCommand` > shows no-match message when no search results
+- `cook-mode-handler.test.ts` > `handleCookCommand` > sends error when no household exists
+- `cook-mode-handler.test.ts` > `handleCookCommand` > warns when already in cook mode
+- `cook-mode-handler.test.ts` > `handleCookCommand` > shows recipe selection buttons when no recipe name given
+- `cook-mode-handler.test.ts` > `handleCookCommand` > handles recipe selection callback
+- `cook-mode-handler.test.ts` > `handleCookCallback` > shows completion when advancing past last step
+- `cook-mode-handler.test.ts` > `handleCookCallback` > sends friendly message when going back from step 1
+- `cook-mode-handler.test.ts` > `handleCookCallback` > ignores callback when no active session
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns false for non-cook text
+- `cook-mode-handler.test.ts` > `handleCookTextAction` > returns false when no active session
+- `cook-mode-handler.test.ts` > `single-step recipe` > completes immediately on next
 
 **Fixes:** None
 
@@ -953,15 +998,44 @@ Push current cooking step to Chromecast audio via TTS for hands-free cooking. Us
 
 ### REQ-COOK-004: Recipe scaling in cook mode
 
-**Origin:** CE-4 | **Status:** Planned
+**Origin:** CE-4 | **Status:** Implemented (Phase H5a)
 
-Before starting cook mode, ask serving count. Scale ingredients if different from default. Use LLM for non-linear scaling (spices, baking chemistry, timing).
+Before starting cook mode, ask serving count. Parse "4", "double", "half", "quarter", "triple", "N servings". Scale ingredients linearly. Use LLM for non-linear scaling notes (spices, baking chemistry, timing).
 
 **Standard tests:**
-- TBD
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses a bare number
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses "double"
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses "half"
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses "triple"
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses "quarter"
+- `recipe-scaler.test.ts` > `parseServingsInput` > parses "3 servings"
+- `recipe-scaler.test.ts` > `scaleIngredients` > doubles quantities when scaling 2x
+- `recipe-scaler.test.ts` > `scaleIngredients` > halves quantities when scaling 0.5x
+- `recipe-scaler.test.ts` > `scaleIngredients` > returns unchanged quantities when scaling 1x
+- `recipe-scaler.test.ts` > `scaleIngredients` > preserves all other ingredient fields
+- `recipe-scaler.test.ts` > `scaleIngredients` > handles multiple ingredients
+- `recipe-scaler.test.ts` > `formatScaledIngredients` > formats scaled ingredients with original quantities shown
+- `recipe-scaler.test.ts` > `formatScaledIngredients` > includes scaling notes when provided
+- `recipe-scaler.test.ts` > `generateScalingNotes` > calls LLM with recipe details and returns notes
+- `recipe-scaler.test.ts` > `generateScalingNotes` > includes recipe title and ingredients in the LLM prompt
+- `recipe-scaler.test.ts` > `generateScalingNotes` > uses standard tier
+- `cook-mode-handler.test.ts` > `handleServingsReply` > creates session and sends first step for valid servings
+- `cook-mode-handler.test.ts` > `handleServingsReply` > scales when user says "double"
 
 **Edge case tests:**
-- TBD
+- `recipe-scaler.test.ts` > `parseServingsInput` > returns null for zero
+- `recipe-scaler.test.ts` > `parseServingsInput` > returns null for negative
+- `recipe-scaler.test.ts` > `parseServingsInput` > returns null for unparseable text
+- `recipe-scaler.test.ts` > `parseServingsInput` > returns null for empty string
+- `recipe-scaler.test.ts` > `scaleIngredients` > passes through null quantities unchanged
+- `recipe-scaler.test.ts` > `scaleIngredients` > rounds to 2 decimal places
+- `recipe-scaler.test.ts` > `formatScaledIngredients` > omits scaling notes section when null
+- `cook-mode-handler.test.ts` > `handleServingsReply` > sends error for invalid servings input
+- `cook-mode-handler.test.ts` > `handleServingsReply` > allows retry after invalid input
+- `cook-mode-handler.test.ts` > `handleServingsReply` > does nothing when no pending recipe
+
+**Security tests:**
+- `recipe-scaler.test.ts` > `generateScalingNotes` > sanitizes recipe title and ingredients to neutralize backtick injection
 
 **Fixes:** None
 
@@ -1631,10 +1705,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-BATCH-002 | TBD | 0 | 0 | Planned |
 | REQ-BATCH-003 | TBD | 0 | 0 | Planned |
 | REQ-BATCH-004 | TBD | 0 | 0 | Planned |
-| REQ-COOK-001 | TBD | 0 | 0 | Planned |
+| REQ-COOK-001 | cook-session.test.ts, cook-mode-handler.test.ts | 23 | 24 | Implemented |
 | REQ-COOK-002 | TBD | 0 | 0 | Planned |
 | REQ-COOK-003 | TBD | 0 | 0 | Planned |
-| REQ-COOK-004 | TBD | 0 | 0 | Planned |
+| REQ-COOK-004 | recipe-scaler.test.ts, cook-mode-handler.test.ts | 18 | 11 | Implemented |
 | REQ-QUERY-001 | app.test.ts | 1 | 2 | Partial |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
 | REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
@@ -1667,4 +1741,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **20 test files** | **132** | **199** | **331 tests** |
+| **Totals** | **23 test files** | **173** | **234** | **407 tests** |
