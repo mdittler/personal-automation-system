@@ -131,7 +131,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-27A) and Hearthstone phases (H1, H2a, H3, H4) are complete. **2953 tests passing across 141 test files.**
+All infrastructure phases (0-27A) and Hearthstone phases (H1, H2a, H3, H4, H5a) are complete. **3086 tests passing across 144 test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 
