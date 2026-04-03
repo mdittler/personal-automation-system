@@ -389,7 +389,7 @@ export async function handleCookCallback(
 				userId,
 				`Any leftovers from ${recipeTitle}?`,
 				[[
-					{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+					{ text: 'Yes, log leftovers', callbackData: `app:hearthstone:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}` },
 					{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
 				]],
 			);
@@ -537,7 +537,7 @@ export async function handleCookTextAction(
 				ctx.userId,
 				`Any leftovers from ${recipeTitle}?`,
 				[[
-					{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+					{ text: 'Yes, log leftovers', callbackData: `app:hearthstone:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}` },
 					{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
 				]],
 			);

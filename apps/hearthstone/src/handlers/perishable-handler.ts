@@ -55,12 +55,11 @@ export async function handlePerishableCallback(
 	messageId: number,
 	store: ScopedDataStore,
 ): Promise<void> {
-	const colonIdx = action.indexOf(':');
-	if (colonIdx === -1) return;
-
-	const verb = action.slice(0, colonIdx);
-	const idxStr = action.slice(colonIdx + 1);
-	const idx = parseInt(idxStr, 10);
+	const parts = action.split(':');
+	const verb = parts[0];
+	const idx = parseInt(parts[1] ?? '', 10);
+	const expectedName = parts.slice(2).join(':');
+	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
 	if (verb === 'ok') {
 		await services.telegram.editMessage(chatId, messageId, '👍 Still good — noted!');
@@ -71,6 +70,12 @@ export async function handlePerishableCallback(
 		const pantry = await loadPantry(store);
 		const item = pantry[idx];
 		if (!item) return;
+
+		// Guard: verify name matches (prevents wrong-item after list mutation)
+		if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+			await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
+			return;
+		}
 
 		// Remove from pantry
 		const updatedPantry = pantry.filter((_, i) => i !== idx);
@@ -96,6 +101,12 @@ export async function handlePerishableCallback(
 		const pantry = await loadPantry(store);
 		const item = pantry[idx];
 		if (!item) return;
+
+		// Guard: verify name matches
+		if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+			await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
+			return;
+		}
 
 		// Remove from pantry
 		const updatedPantry = pantry.filter((_, i) => i !== idx);
@@ -162,29 +173,28 @@ export async function handlePerishableCheckJob(
 	const buttons: Array<Array<{ text: string; callbackData: string }>> = [];
 	for (const { item, idx, daysLeft } of expiringItems) {
 		const row: Array<{ text: string; callbackData: string }> = [];
+		const enc = encodeURIComponent(item.name);
 		if (daysLeft <= 0) {
-			// Expired or expires today: show full action set
 			row.push({
 				text: `🧊 Freeze: ${item.name}`,
-				callbackData: `app:hearthstone:pa:freeze:${idx}`,
+				callbackData: `app:hearthstone:pa:freeze:${idx}:${enc}`,
 			});
 			row.push({
 				text: `🗑 Toss: ${item.name}`,
-				callbackData: `app:hearthstone:pa:toss:${idx}`,
+				callbackData: `app:hearthstone:pa:toss:${idx}:${enc}`,
 			});
 			row.push({
 				text: `👍 Still good`,
-				callbackData: `app:hearthstone:pa:ok:${idx}`,
+				callbackData: `app:hearthstone:pa:ok:${idx}:${enc}`,
 			});
 		} else {
-			// Expiring soon: move to freezer or acknowledge
 			row.push({
 				text: `🧊 Move to Freezer: ${item.name}`,
-				callbackData: `app:hearthstone:pa:freeze:${idx}`,
+				callbackData: `app:hearthstone:pa:freeze:${idx}:${enc}`,
 			});
 			row.push({
 				text: `👍 Still good`,
-				callbackData: `app:hearthstone:pa:ok:${idx}`,
+				callbackData: `app:hearthstone:pa:ok:${idx}:${enc}`,
 			});
 		}
 		buttons.push(row);

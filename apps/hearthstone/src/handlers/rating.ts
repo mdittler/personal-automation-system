@@ -151,7 +151,7 @@ export async function handleRateCallback(
 			userId,
 			`Any leftovers from ${meal.recipeTitle}?`,
 			[[
-				{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+				{ text: 'Yes, log leftovers', callbackData: `app:hearthstone:lo:post-meal:yes:${encodeURIComponent(meal.recipeTitle)}` },
 				{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
 			]],
 		);

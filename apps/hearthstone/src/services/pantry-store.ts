@@ -10,6 +10,7 @@ import { parse, stringify } from 'yaml';
 import type { GroceryItem, PantryItem } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
 import { DEPARTMENT_EMOJI, assignDepartment } from './item-parser.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 const PANTRY_PATH = 'pantry.yaml';
 
@@ -189,7 +190,7 @@ export async function enrichWithExpiry(
 
 		try {
 			const daysStr = await services.llm.complete(
-				`How many days does ${item.name} last in the fridge after purchase? Reply with just a number.`,
+				`How many days does ${sanitizeInput(item.name)} last in the fridge after purchase? Reply with just a number.`,
 				{ tier: 'fast' },
 			);
 			const days = Number.parseInt(daysStr.trim(), 10);

@@ -392,9 +392,9 @@ describe('leftover-store', () => {
 			const useBtn = itemRows[0].find((b) => b.text.includes('Use'));
 			const freezeBtn = itemRows[0].find((b) => b.text.includes('Freeze'));
 			const tossBtn = itemRows[0].find((b) => b.text.includes('Toss'));
-			expect(useBtn?.callbackData).toBe('app:hearthstone:lo:use:0');
-			expect(freezeBtn?.callbackData).toBe('app:hearthstone:lo:freeze:0');
-			expect(tossBtn?.callbackData).toBe('app:hearthstone:lo:toss:0');
+			expect(useBtn?.callbackData).toBe('app:hearthstone:lo:use:0:Chili');
+			expect(freezeBtn?.callbackData).toBe('app:hearthstone:lo:freeze:0:Chili');
+			expect(tossBtn?.callbackData).toBe('app:hearthstone:lo:toss:0:Chili');
 		});
 
 		it('skips non-active items for action buttons', () => {

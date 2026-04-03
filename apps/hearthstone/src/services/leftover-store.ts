@@ -125,10 +125,11 @@ export function buildLeftoverButtons(
 
 	items.forEach((item, idx) => {
 		if (item.status !== 'active') return;
+		const enc = encodeURIComponent(item.name);
 		rows.push([
-			{ text: `✅ Use ${item.name}`, callbackData: `app:hearthstone:lo:use:${idx}` },
-			{ text: `🧊 Freeze ${item.name}`, callbackData: `app:hearthstone:lo:freeze:${idx}` },
-			{ text: `🗑️ Toss ${item.name}`, callbackData: `app:hearthstone:lo:toss:${idx}` },
+			{ text: `✅ Use ${item.name}`, callbackData: `app:hearthstone:lo:use:${idx}:${enc}` },
+			{ text: `🧊 Freeze ${item.name}`, callbackData: `app:hearthstone:lo:freeze:${idx}:${enc}` },
+			{ text: `🗑️ Toss ${item.name}`, callbackData: `app:hearthstone:lo:toss:${idx}:${enc}` },
 		]);
 	});
 

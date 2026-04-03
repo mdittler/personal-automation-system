@@ -728,9 +728,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "chili, about 3 servings")');
 				return;
 			}
-			if (data === 'lo:post-meal:yes') {
-				// Set pending for next text — user will describe leftovers
-				setPendingLeftoverAdd(ctx.userId);
+			if (data.startsWith('lo:post-meal:yes')) {
+				// Extract recipe name from callback data: "lo:post-meal:yes:Recipe%20Name"
+				const encoded = data.slice('lo:post-meal:yes:'.length);
+				const fromRecipe = encoded ? decodeURIComponent(encoded) : undefined;
+				setPendingLeftoverAdd(ctx.userId, fromRecipe);
 				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "about 3 servings of chili")');
 				return;
 			}
@@ -2089,6 +2091,24 @@ async function handleLeftoversView(ctx: MessageContext): Promise<void> {
 	);
 }
 
+/** Estimate fridge shelf life via LLM, defaulting to 3 days on failure. */
+async function estimateLeftoverExpiry(storedDate: string, foodName: string): Promise<string> {
+	try {
+		const daysStr = await services.llm.complete(
+			`How many days does ${sanitizeInput(foodName)} last in the fridge? Reply with just a number.`,
+			{ tier: 'fast' },
+		);
+		const days = Number.parseInt(daysStr.trim(), 10);
+		const expiry = new Date(`${storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) || days <= 0 ? 3 : days));
+		return expiry.toISOString().slice(0, 10);
+	} catch {
+		const expiry = new Date(`${storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + 3);
+		return expiry.toISOString().slice(0, 10);
+	}
+}
+
 async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
@@ -2096,7 +2116,6 @@ async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promi
 		return;
 	}
 
-	// Extract leftover description from NL text
 	const itemText = text
 		.replace(/^(we\s+)?have\s+(some\s+)?/i, '')
 		.replace(/\b(leftover|left over|remaining)\b/gi, '')
@@ -2110,24 +2129,7 @@ async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promi
 	}
 
 	const parsed = parseLeftoverInput(itemText, undefined, services.timezone);
-
-	// Estimate expiry via LLM
-	let expiryEstimate: string;
-	try {
-		const daysStr = await services.llm.complete(
-			`How many days does ${sanitizeInput(parsed.name)} last in the fridge? Reply with just a number.`,
-			{ tier: 'fast' },
-		);
-		const days = Number.parseInt(daysStr.trim(), 10);
-		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
-		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) ? 3 : days));
-		expiryEstimate = expiry.toISOString().slice(0, 10);
-	} catch {
-		// Default to 3 days
-		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
-		expiry.setUTCDate(expiry.getUTCDate() + 3);
-		expiryEstimate = expiry.toISOString().slice(0, 10);
-	}
+	const expiryEstimate = await estimateLeftoverExpiry(parsed.storedDate, parsed.name);
 
 	const leftover: Leftover = { ...parsed, expiryEstimate };
 	const existing = await loadLeftovers(hh.sharedStore);
@@ -2149,23 +2151,7 @@ async function handlePendingLeftoverAdd(text: string, ctx: MessageContext): Prom
 	if (!hh) return;
 
 	const parsed = parseLeftoverInput(text, pending.fromRecipe, services.timezone);
-
-	// Estimate expiry via LLM
-	let expiryEstimate: string;
-	try {
-		const daysStr = await services.llm.complete(
-			`How many days does ${sanitizeInput(parsed.name)} last in the fridge? Reply with just a number.`,
-			{ tier: 'fast' },
-		);
-		const days = Number.parseInt(daysStr.trim(), 10);
-		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
-		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) ? 3 : days));
-		expiryEstimate = expiry.toISOString().slice(0, 10);
-	} catch {
-		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
-		expiry.setUTCDate(expiry.getUTCDate() + 3);
-		expiryEstimate = expiry.toISOString().slice(0, 10);
-	}
+	const expiryEstimate = await estimateLeftoverExpiry(parsed.storedDate, parsed.name);
 
 	const leftover: Leftover = { ...parsed, expiryEstimate };
 	const existing = await loadLeftovers(hh.sharedStore);
@@ -2265,7 +2251,7 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 	const reason: WasteLogEntry['reason'] = /\b(spoil|mold|rotten)\b/i.test(text) ? 'spoiled' : 'expired';
 
 	const entry: WasteLogEntry = {
-		name: itemText,
+		name: sanitizeInput(itemText),
 		quantity: 'some',
 		reason,
 		source: 'pantry',

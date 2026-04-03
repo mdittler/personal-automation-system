@@ -34,8 +34,11 @@ export async function handleFreezerCallback(
 	messageId: number,
 	store: ScopedDataStore,
 ): Promise<void> {
-	const [verb, idxStr] = action.split(':') as [string, string | undefined];
-	const index = idxStr !== undefined ? parseInt(idxStr, 10) : NaN;
+	const parts = action.split(':');
+	const verb = parts[0];
+	const index = parseInt(parts[1] ?? '', 10);
+	const expectedName = parts.slice(2).join(':');
+	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
 	if ((verb !== 'thaw' && verb !== 'toss') || isNaN(index)) {
 		return;
@@ -44,6 +47,12 @@ export async function handleFreezerCallback(
 	const items = await loadFreezer(store);
 	const item = items[index];
 	if (!item) return;
+
+	// Guard: verify name matches (prevents wrong-item after list mutation)
+	if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+		await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
+		return;
+	}
 
 	const updated = removeFreezerItem(items, index);
 	await saveFreezer(store, updated);

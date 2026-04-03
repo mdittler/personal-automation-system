@@ -317,13 +317,13 @@ describe('freezer-store', () => {
 		it('uses correct callback data format for thaw', () => {
 			const items = [makeFreezerItem({ name: 'Chicken' })];
 			const buttons = buildFreezerButtons(items);
-			expect(buttons[1]![0].callbackData).toBe('app:hearthstone:fz:thaw:0');
+			expect(buttons[1]![0].callbackData).toBe('app:hearthstone:fz:thaw:0:Chicken');
 		});
 
 		it('uses correct callback data format for toss', () => {
 			const items = [makeFreezerItem({ name: 'Chicken' })];
 			const buttons = buildFreezerButtons(items);
-			expect(buttons[1]![1].callbackData).toBe('app:hearthstone:fz:toss:0');
+			expect(buttons[1]![1].callbackData).toBe('app:hearthstone:fz:toss:0:Chicken');
 		});
 
 		it('uses correct indices for multiple items', () => {
@@ -332,10 +332,10 @@ describe('freezer-store', () => {
 				makeFreezerItem({ name: 'Salmon' }),
 			];
 			const buttons = buildFreezerButtons(items);
-			expect(buttons[1]![0].callbackData).toBe('app:hearthstone:fz:thaw:0');
-			expect(buttons[1]![1].callbackData).toBe('app:hearthstone:fz:toss:0');
-			expect(buttons[2]![0].callbackData).toBe('app:hearthstone:fz:thaw:1');
-			expect(buttons[2]![1].callbackData).toBe('app:hearthstone:fz:toss:1');
+			expect(buttons[1]![0].callbackData).toBe('app:hearthstone:fz:thaw:0:Chicken');
+			expect(buttons[1]![1].callbackData).toBe('app:hearthstone:fz:toss:0:Chicken');
+			expect(buttons[2]![0].callbackData).toBe('app:hearthstone:fz:thaw:1:Salmon');
+			expect(buttons[2]![1].callbackData).toBe('app:hearthstone:fz:toss:1:Salmon');
 		});
 
 		it('includes item name in button text', () => {

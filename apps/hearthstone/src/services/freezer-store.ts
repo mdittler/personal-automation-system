@@ -126,9 +126,10 @@ export function buildFreezerButtons(
 	// Per-item Thaw / Toss buttons
 	for (let i = 0; i < items.length; i++) {
 		const item = items[i]!;
+		const enc = encodeURIComponent(item.name);
 		rows.push([
-			{ text: `🫧 Thaw: ${item.name}`, callbackData: `app:hearthstone:fz:thaw:${i}` },
-			{ text: `🗑️ Toss: ${item.name}`, callbackData: `app:hearthstone:fz:toss:${i}` },
+			{ text: `🫧 Thaw: ${item.name}`, callbackData: `app:hearthstone:fz:thaw:${i}:${enc}` },
+			{ text: `🗑️ Toss: ${item.name}`, callbackData: `app:hearthstone:fz:toss:${i}:${enc}` },
 		]);
 	}
 

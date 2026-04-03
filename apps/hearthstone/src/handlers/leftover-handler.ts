@@ -45,17 +45,30 @@ export async function handleLeftoverCallback(
 		return;
 	}
 
-	const colonIdx = action.lastIndexOf(':');
-	if (colonIdx < 0) return;
+	// Parse "verb:idx:encodedName" format
+	const parts = action.split(':');
+	const verb = parts[0];
+	const idx = parseInt(parts[1] ?? '', 10);
+	const expectedName = parts.slice(2).join(':'); // rejoin in case name had colons
+	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
-	const verb = action.slice(0, colonIdx);
-	const idx = parseInt(action.slice(colonIdx + 1), 10);
-
-	if (isNaN(idx)) return;
+	if (!verb || isNaN(idx)) return;
 
 	const items = await loadLeftovers(store);
 	const item = items[idx];
 	if (!item) return;
+
+	// Guard: verify name matches (prevents wrong-item after list mutation)
+	if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+		await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+		return;
+	}
+
+	// Guard: prevent double-action on non-active items
+	if (item.status !== 'active' && verb !== 'keep') {
+		await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+		return;
+	}
 
 	const today = todayDate(services.timezone);
 
@@ -230,31 +243,33 @@ export async function handleLeftoverCheckJob(
 	const buttons: Array<Array<{ text: string; callbackData: string }>> = [];
 
 	for (const { item, originalIdx } of expiringToday) {
+		const enc = encodeURIComponent(item.name);
 		buttons.push([
 			{
 				text: `🧊 Freeze ${item.name}`,
-				callbackData: `app:hearthstone:lo:freeze:${originalIdx}`,
+				callbackData: `app:hearthstone:lo:freeze:${originalIdx}:${enc}`,
 			},
 			{
 				text: `✅ Eat ${item.name}`,
-				callbackData: `app:hearthstone:lo:use:${originalIdx}`,
+				callbackData: `app:hearthstone:lo:use:${originalIdx}:${enc}`,
 			},
 			{
 				text: `🗑 Toss ${item.name}`,
-				callbackData: `app:hearthstone:lo:toss:${originalIdx}`,
+				callbackData: `app:hearthstone:lo:toss:${originalIdx}:${enc}`,
 			},
 		]);
 	}
 
 	for (const { item, originalIdx } of expiringTomorrow) {
+		const enc = encodeURIComponent(item.name);
 		buttons.push([
 			{
 				text: `🧊 Freeze ${item.name}`,
-				callbackData: `app:hearthstone:lo:freeze:${originalIdx}`,
+				callbackData: `app:hearthstone:lo:freeze:${originalIdx}:${enc}`,
 			},
 			{
 				text: `✅ Got it`,
-				callbackData: `app:hearthstone:lo:keep:${originalIdx}`,
+				callbackData: `app:hearthstone:lo:keep:${originalIdx}:${enc}`,
 			},
 		]);
 	}
