@@ -25,8 +25,13 @@ import {
 	scaleIngredients,
 } from '../services/recipe-scaler.js';
 import { findRecipeByTitle, loadAllRecipes, searchRecipes } from '../services/recipe-store.js';
-import type { Recipe } from '../types.js';
+import { formatDuration, parseStepTimer } from '../services/timer-parser.js';
+import type { CookSession, Recipe } from '../types.js';
 import { requireHousehold } from '../utils/household-guard.js';
+
+// Node timer globals — not in ES2024 lib, so we declare them here.
+declare function setTimeout(callback: () => void, ms: number): unknown;
+declare function clearTimeout(id: unknown): void;
 
 // ─── Pending recipe state (TTL map) ─────────────────────────────────
 
@@ -212,14 +217,25 @@ export async function handleServingsReply(
 	await services.telegram.send(ctx.userId, ingredientMsg);
 
 	// Send first step with buttons
+	const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 	const stepMsg = formatStepMessage(session);
 	const sent = await services.telegram.sendWithButtons(
 		ctx.userId,
 		stepMsg,
-		buildStepButtons(session),
+		buildStepButtons(session, timer),
 	);
 	session.lastMessageId = sent.messageId;
 	session.lastChatId = sent.chatId;
+}
+
+// ─── Timer helpers ──────────────────────────────────────────────────
+
+function cancelSessionTimer(session: CookSession): void {
+	if (session.timerHandle !== undefined) {
+		clearTimeout(session.timerHandle);
+		session.timerHandle = undefined;
+		session.timerStepIndex = undefined;
+	}
 }
 
 // ─── Callback handler ──────────────────────────────────────────────
@@ -257,6 +273,7 @@ export async function handleCookCallback(
 
 	switch (action) {
 		case 'n': {
+			cancelSessionTimer(session);
 			const result = advanceStep(session);
 			if (result === 'completed') {
 				await services.telegram.editMessage(
@@ -268,44 +285,49 @@ export async function handleCookCallback(
 				await services.telegram.send(userId, formatCompletionMessage(session));
 				endSession(userId);
 			} else {
+				const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 				await services.telegram.editMessage(
 					chatId,
 					messageId,
 					formatStepMessage(session),
-					buildStepButtons(session),
+					buildStepButtons(session, timer),
 				);
 			}
 			break;
 		}
 		case 'b': {
+			cancelSessionTimer(session);
 			const result = goBack(session);
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 			if (result === 'at_start') {
 				await services.telegram.editMessage(
 					chatId,
 					messageId,
 					`You're already on the first step.\n\n${formatStepMessage(session)}`,
-					buildStepButtons(session),
+					buildStepButtons(session, timer),
 				);
 			} else {
 				await services.telegram.editMessage(
 					chatId,
 					messageId,
 					formatStepMessage(session),
-					buildStepButtons(session),
+					buildStepButtons(session, timer),
 				);
 			}
 			break;
 		}
 		case 'r': {
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 			await services.telegram.editMessage(
 				chatId,
 				messageId,
 				formatStepMessage(session),
-				buildStepButtons(session),
+				buildStepButtons(session, timer),
 			);
 			break;
 		}
 		case 'd': {
+			cancelSessionTimer(session);
 			await services.telegram.editMessage(
 				chatId,
 				messageId,
@@ -313,6 +335,50 @@ export async function handleCookCallback(
 				[],
 			);
 			endSession(userId);
+			break;
+		}
+		case 't': {
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
+			if (!timer) break;
+			cancelSessionTimer(session);
+			const durationMs = timer.durationMinutes * 60 * 1000;
+			session.timerStepIndex = session.currentStep;
+			session.timerHandle = setTimeout(() => {
+				const activeSession = getSession(userId);
+				if (!activeSession) return;
+				activeSession.timerHandle = undefined;
+				activeSession.timerStepIndex = undefined;
+				const stepNum = session.currentStep + 1;
+				const stepText = session.instructions[session.currentStep] ?? '';
+				const brief = stepText.length > 80 ? stepText.slice(0, 77) + '...' : stepText;
+				const msg = `⏰ Timer done! Step ${stepNum}: ${brief}\n\nReady for the next step?`;
+				void services.telegram.sendWithButtons(userId, msg, [
+					[{ text: 'Next >', callbackData: 'app:hearthstone:ck:n' }],
+				]);
+				if (activeSession.ttsEnabled && services.audio) {
+					const speakText = `Timer done! Step ${stepNum}: ${brief}`;
+					void services.config.get('cooking_speaker_device').then((device) => {
+						services.audio.speak(speakText, (device as string) || undefined).catch(() => {});
+					}).catch(() => {});
+				}
+			}, durationMs) as ReturnType<typeof setTimeout>;
+			await services.telegram.editMessage(
+				chatId,
+				messageId,
+				`${formatStepMessage(session)}\n\n⏱ Timer set for ${formatDuration(timer.durationMinutes)}`,
+				buildStepButtons(session, timer),
+			);
+			break;
+		}
+		case 'tc': {
+			cancelSessionTimer(session);
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
+			await services.telegram.editMessage(
+				chatId,
+				messageId,
+				formatStepMessage(session),
+				buildStepButtons(session, timer),
+			);
 			break;
 		}
 	}
@@ -351,6 +417,7 @@ export async function handleCookTextAction(
 
 	switch (action) {
 		case 'next': {
+			cancelSessionTimer(session);
 			const result = advanceStep(session);
 			if (result === 'completed') {
 				// Edit old button message to remove buttons
@@ -365,33 +432,38 @@ export async function handleCookTextAction(
 				await services.telegram.send(ctx.userId, formatCompletionMessage(session));
 				endSession(ctx.userId);
 			} else {
+				const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 				await services.telegram.sendWithButtons(
 					ctx.userId,
 					formatStepMessage(session),
-					buildStepButtons(session),
+					buildStepButtons(session, timer),
 				);
 			}
 			break;
 		}
 		case 'back': {
+			cancelSessionTimer(session);
 			const result = goBack(session);
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 			const prefix = result === 'at_start' ? "You're already on the first step.\n\n" : '';
 			await services.telegram.sendWithButtons(
 				ctx.userId,
 				`${prefix}${formatStepMessage(session)}`,
-				buildStepButtons(session),
+				buildStepButtons(session, timer),
 			);
 			break;
 		}
 		case 'repeat': {
+			const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 			await services.telegram.sendWithButtons(
 				ctx.userId,
 				formatStepMessage(session),
-				buildStepButtons(session),
+				buildStepButtons(session, timer),
 			);
 			break;
 		}
 		case 'done': {
+			cancelSessionTimer(session);
 			await services.telegram.send(
 				ctx.userId,
 				`Finished cooking ${session.recipeTitle}. All done!`,
