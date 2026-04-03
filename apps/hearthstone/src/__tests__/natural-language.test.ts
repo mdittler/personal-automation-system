@@ -1960,4 +1960,626 @@ describe('Natural Language — Real User Messages', () => {
 			expect(hasActiveSession('matt')).toBe(true);
 		});
 	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: FOOD QUESTIONS — "Can I use honey instead of sugar?"
+	// Real user messages testing contextual food question handling.
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Food question intent — natural language', () => {
+		beforeEach(() => {
+			setupHousehold();
+		});
+
+		// ─── Substitution questions ─────────────────────────────────
+
+		it.each([
+			'can I substitute yogurt for sour cream',
+			'what can I use instead of buttermilk',
+			'is there a good swap for eggs in baking',
+			'what can I use instead of fish sauce',
+			'any substitute for heavy cream',
+		])('"%s" → triggers food question LLM call', async (text) => {
+			await handleMessage(msg(text));
+			expect(services.llm.complete).toHaveBeenCalled();
+		});
+
+		// ─── Cooking time/technique questions ───────────────────────
+
+		it.each([
+			'how long should I cook chicken thighs',
+			'how long do you bake salmon at 400',
+			'how long to boil eggs for hard boiled',
+			'how do I roast a whole chicken',
+			'how should I store leftover rice',
+		])('"%s" → triggers food question LLM call', async (text) => {
+			await handleMessage(msg(text));
+			expect(services.llm.complete).toHaveBeenCalled();
+		});
+
+		// ─── Food safety questions ──────────────────────────────────
+
+		it.each([
+			'is it safe to eat raw salmon',
+			'what temperature should chicken be cooked to',
+			'is undercooked pork safe to eat',
+			'can you eat raw fish when pregnant',
+		])('"%s" → triggers food question LLM call', async (text) => {
+			await handleMessage(msg(text));
+			expect(services.llm.complete).toHaveBeenCalled();
+		});
+
+		// ─── Pairing questions ──────────────────────────────────────
+
+		it.each([
+			'what goes well with salmon',
+			'what should I serve with steak',
+			'what goes well with roasted chicken',
+			'what goes with pasta',
+		])('"%s" → triggers food question LLM call', async (text) => {
+			await handleMessage(msg(text));
+			expect(services.llm.complete).toHaveBeenCalled();
+		});
+
+		// ─── Should NOT match food questions ────────────────────────
+
+		it.each([
+			'add chicken to the grocery list',
+			'whats in the pantry',
+			'show me the meal plan',
+			'I made the pasta last night',
+			'the steak was great',
+		])('"%s" → does NOT trigger food question LLM', async (text) => {
+			await handleMessage(msg(text));
+			// These should either match other intents or fall through to chatbot,
+			// but NOT call LLM via food question handler specifically
+			const llmCalls = vi.mocked(services.llm.complete).mock.calls;
+			const foodQuestionCall = llmCalls.find(
+				(c) => typeof c[0] === 'string' && c[0].includes('cooking assistant'),
+			);
+			expect(foodQuestionCall).toBeUndefined();
+		});
+	});
+
+	describe('H5b: Food question with context — end-to-end', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('includes dietary context when user has preferences stored', async () => {
+			setupHousehold();
+			vi.mocked(services.contextStore.searchForUser).mockResolvedValue([
+				{ key: 'dietary', content: 'Matt is allergic to shellfish. Sarah is vegetarian on weekdays.', lastUpdated: new Date() },
+			]);
+
+			await handleMessage(msg('what can I use instead of shrimp'));
+
+			const [prompt] = vi.mocked(services.llm.complete).mock.calls[0];
+			expect(prompt).toContain('allergic to shellfish');
+			expect(prompt).toContain('vegetarian');
+		});
+
+		it('includes active cook session context when asking mid-cook', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+			vi.mocked(services.contextStore.searchForUser).mockResolvedValue([]);
+
+			// Start cooking
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+
+			// Now ask a food question while cooking
+			vi.mocked(services.llm.complete).mockClear();
+			await handleMessage(msg('what temperature should I cook chicken to'));
+
+			const [prompt] = vi.mocked(services.llm.complete).mock.calls[0];
+			expect(prompt).toContain('currently cooking');
+			expect(prompt).toContain('Chicken Stir Fry');
+		});
+
+		it('answers food question without context when no preferences stored', async () => {
+			setupHousehold();
+			vi.mocked(services.contextStore.searchForUser).mockResolvedValue([]);
+
+			await handleMessage(msg('how long to boil an egg'));
+
+			const [prompt] = vi.mocked(services.llm.complete).mock.calls[0];
+			expect(prompt).toContain('cooking assistant');
+			expect(prompt).not.toContain('User context');
+			// Should still get a response
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.any(String));
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: COOK MODE TIMERS — "How much longer?"
+	// Tests for timer button behavior during active cook sessions.
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Cook mode timers', () => {
+		// Recipe with timed steps for timer testing
+		const timedRecipe: Recipe = {
+			id: 'roast-chicken-003',
+			title: 'Roast Chicken',
+			source: 'homemade',
+			ingredients: [
+				{ name: 'whole chicken', quantity: 1, unit: null },
+				{ name: 'butter', quantity: 2, unit: 'tbsp' },
+				{ name: 'salt', quantity: 1, unit: 'tsp' },
+			],
+			instructions: [
+				'Preheat oven to 425°F.',
+				'Season chicken with salt and butter.',
+				'Roast for 1 hour 15 minutes until golden.',
+				'Let rest for 10 minutes before carving.',
+			],
+			servings: 4,
+			tags: ['roast', 'dinner'],
+			ratings: [],
+			history: [],
+			allergens: ['dairy'],
+			status: 'confirmed',
+			createdAt: '2026-03-01',
+			updatedAt: '2026-03-01',
+		};
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		async function startCookingTimedRecipe() {
+			setupHousehold({ recipes: [timedRecipe] });
+			(services as any).audio = undefined;
+			await handleCommand!('cook', ['roast', 'chicken'], msg(''));
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+		}
+
+		it('shows timer button on step with timing ("Roast for 1 hour 15 minutes")', async () => {
+			await startCookingTimedRecipe();
+			// Navigate to step 3 (index 2): "Roast for 1 hour 15 minutes"
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// The editMessage should include a timer button row
+			const editCalls = vi.mocked(services.telegram.editMessage).mock.calls;
+			const lastCall = editCalls[editCalls.length - 1];
+			const buttons = lastCall?.[3] as any[][];
+			// Should have 2 rows: nav + timer
+			expect(buttons?.length).toBe(2);
+			expect(buttons?.[1]?.[0]?.text).toContain('Timer');
+			expect(buttons?.[1]?.[0]?.text).toContain('1 hr 15 min');
+		});
+
+		it('does NOT show timer button on step without timing ("Preheat oven")', async () => {
+			await startCookingTimedRecipe();
+			// Step 1 (index 0): "Preheat oven to 425°F." — no timing, just temperature
+
+			const sendCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+			const firstStepCall = sendCalls.find(
+				(c) => typeof c[1] === 'string' && c[1].includes('Step 1'),
+			);
+			const buttons = firstStepCall?.[2] as any[][];
+			// Should have only 1 row (nav), no timer
+			expect(buttons?.length).toBe(1);
+		});
+
+		it('timer fires after duration and shows notification', async () => {
+			await startCookingTimedRecipe();
+			// Navigate to step 4 (index 3): "Let rest for 10 minutes"
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Set the timer
+			await handleCallbackQuery?.('ck:t', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			vi.mocked(services.telegram.sendWithButtons).mockClear();
+			// Advance past 10 minutes
+			await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+
+			// Should send timer done notification
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Timer done'),
+				expect.any(Array),
+			);
+		});
+
+		it('timer auto-cancels when user taps Next', async () => {
+			await startCookingTimedRecipe();
+			// Navigate to step 3: "Roast for 1 hour 15 minutes"
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Set timer
+			await handleCallbackQuery?.('ck:t', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// User taps Next before timer fires
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			vi.mocked(services.telegram.sendWithButtons).mockClear();
+			// Timer should not fire
+			await vi.advanceTimersByTimeAsync(75 * 60 * 1000);
+			const timerCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls.filter(
+				(c) => typeof c[1] === 'string' && c[1].includes('Timer done'),
+			);
+			expect(timerCalls).toHaveLength(0);
+		});
+
+		it('user can cancel timer with Cancel button', async () => {
+			await startCookingTimedRecipe();
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Set then cancel
+			await handleCallbackQuery?.('ck:t', { userId: 'matt', chatId: 100, messageId: 456 });
+			await handleCallbackQuery?.('ck:tc', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			vi.mocked(services.telegram.sendWithButtons).mockClear();
+			await vi.advanceTimersByTimeAsync(75 * 60 * 1000);
+
+			const timerCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls.filter(
+				(c) => typeof c[1] === 'string' && c[1].includes('Timer done'),
+			);
+			expect(timerCalls).toHaveLength(0);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: HANDS-FREE MODE — "Read it to me!"
+	// Tests for TTS prompt and voice output during cook mode.
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Hands-free / TTS mode', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('shows hands-free prompt when audio is available', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+
+			// Should offer hands-free mode
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('hands-free'),
+				expect.arrayContaining([
+					expect.arrayContaining([
+						expect.objectContaining({ text: 'Yes, hands-free' }),
+						expect.objectContaining({ text: 'No thanks' }),
+					]),
+				]),
+			);
+		});
+
+		it('skips hands-free prompt when audio unavailable', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+
+			// Should NOT show hands-free prompt
+			const sendCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+			const handsFreeCall = sendCalls.find(
+				(c) => typeof c[1] === 'string' && (c[1] as string).includes('hands-free'),
+			);
+			expect(handsFreeCall).toBeUndefined();
+			// Should go straight to step 1
+			const stepCall = sendCalls.find(
+				(c) => typeof c[1] === 'string' && (c[1] as string).includes('Step 1'),
+			);
+			expect(stepCall).toBeDefined();
+		});
+
+		it('tapping "Yes, hands-free" enables TTS and sends first step', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+
+			await handleCallbackQuery?.('ck:hf:y', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Should speak the first step
+			expect(services.audio.speak).toHaveBeenCalledWith(
+				expect.stringContaining('Cut chicken'),
+				expect.toSatisfy((v: unknown) => v === undefined || typeof v === 'string'),
+			);
+			// And display it
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('tapping "No thanks" sends first step without TTS', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+
+			vi.mocked(services.audio.speak).mockClear();
+			await handleCallbackQuery?.('ck:hf:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Should NOT speak
+			expect(services.audio.speak).not.toHaveBeenCalled();
+			// But should display step
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Step 1'),
+				expect.any(Array),
+			);
+		});
+
+		it('speaks each step when navigating with TTS enabled', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+			// Re-enable audio and manually set TTS on the session
+			(services as any).audio = createMockCoreServices().audio;
+			const session = (await import('../services/cook-session.js')).getSession('matt');
+			if (session) session.ttsEnabled = true;
+
+			vi.mocked(services.audio.speak).mockClear();
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Should speak step 2 text
+			expect(services.audio.speak).toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: COOK MODE TEXT NAVIGATION DURING COOKING
+	// Testing that casual text works while actively cooking.
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Cook mode text actions — casual language', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		async function startCooking() {
+			setupHousehold();
+			(services as any).audio = undefined;
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+		}
+
+		// ─── "next" variations ──────────────────────────────────────
+
+		it.each([
+			'next',
+			'n',
+			'Next',
+			'NEXT',
+		])('"%s" → advances to next step', async (text) => {
+			await startCooking();
+			await handleMessage(msg(text));
+			// Should still be active (recipe has 3 steps)
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		// ─── "back" variations ──────────────────────────────────────
+
+		it.each([
+			'back',
+			'previous',
+			'prev',
+		])('"%s" → goes back a step', async (text) => {
+			await startCooking();
+			// Advance first so we can go back
+			await handleMessage(msg('next'));
+			await handleMessage(msg(text));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		// ─── "repeat" variations ────────────────────────────────────
+
+		it.each([
+			'repeat',
+			'again',
+		])('"%s" → repeats current step', async (text) => {
+			await startCooking();
+			await handleMessage(msg(text));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		// ─── "done" variations ──────────────────────────────────────
+
+		it.each([
+			'done',
+			'finished',
+			'exit',
+			'stop',
+			'quit',
+		])('"%s" → ends cook session', async (text) => {
+			await startCooking();
+			await handleMessage(msg(text));
+			expect(hasActiveSession('matt')).toBe(false);
+		});
+
+		// ─── Messages that should NOT be intercepted ────────────────
+
+		it.each([
+			'whats in the pantry',
+			'add milk to the grocery list',
+			'what goes well with chicken',
+			'this looks delicious',
+			'thanks',
+			'hello',
+			'how about something else',
+		])('"%s" during cook mode → falls through, session stays active', async (text) => {
+			await startCooking();
+			await handleMessage(msg(text));
+			// Cook session should NOT be ended by unrelated text
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: COOK INTENT DETECTION — should/should NOT match
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Cook intent — natural language boundary tests', () => {
+		// ─── Should match cook intent ───────────────────────────────
+
+		it.each([
+			'lets cook dinner',
+			"let's make the pasta tonight",
+			'time to cook',
+			'time to make dinner',
+			'I want to cook the stir fry',
+			'can we make the chicken tonight',
+			'ready to prepare dinner',
+			'start cooking',
+			'begin making the bolognese',
+			'cook the chicken stir fry',
+			'prepare the pasta',
+			"let's prepare something",
+		])('"%s" → matches cook intent', (text) => {
+			expect(isCookIntent(text.toLowerCase())).toBe(true);
+		});
+
+		// ─── Should NOT match cook intent ───────────────────────────
+
+		it.each([
+			'how long should I cook chicken',
+			'we cooked pasta last night',
+			'the cooking was great',
+			'I love cooking shows',
+			'whats for dinner',
+			'show me a recipe',
+			'add chicken to the list',
+			'what can I make',
+			'check the pantry',
+			'meal plan',
+			'cooking tips please',
+		])('"%s" → does NOT match cook intent', (text) => {
+			expect(isCookIntent(text.toLowerCase())).toBe(false);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H5b: MULTI-STEP USER SCENARIOS — full conversation flows
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H5b: Full cooking scenario — start to finish', () => {
+		afterEach(() => {
+			if (hasActiveSession('matt')) endSession('matt');
+		});
+
+		it('complete cook flow: search → select → servings → navigate → done', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+
+			// 1. User says they want to cook
+			await handleMessage(msg("let's cook the chicken stir fry"));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('servings'),
+			);
+
+			// 2. User replies with serving count
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+
+			// 3. User navigates through all steps via text
+			await handleMessage(msg('next'));
+			await handleMessage(msg('next'));
+			// On last step — next should complete
+			await handleMessage(msg('next'));
+
+			expect(hasActiveSession('matt')).toBe(false);
+		});
+
+		it('cook flow with hands-free: accept TTS → navigate with voice', async () => {
+			setupHousehold();
+
+			// 1. Start cooking
+			await handleCommand!('cook', ['pasta', 'bolognese'], msg(''));
+			await handleMessage(msg('6'));
+
+			// 2. Accept hands-free
+			await handleCallbackQuery?.('ck:hf:y', { userId: 'matt', chatId: 100, messageId: 456 });
+
+			// Should have spoken step 1
+			expect(services.audio.speak).toHaveBeenCalled();
+
+			// 3. Navigate — each step should be spoken
+			vi.mocked(services.audio.speak).mockClear();
+			await handleCallbackQuery?.('ck:n', { userId: 'matt', chatId: 100, messageId: 456 });
+			expect(services.audio.speak).toHaveBeenCalled();
+		});
+
+		it('cook flow: ask food question mid-cook gets recipe context', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+			vi.mocked(services.contextStore.searchForUser).mockResolvedValue([]);
+
+			// Start cooking
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('4'));
+			vi.mocked(services.llm.complete).mockClear();
+
+			// Ask a food question while cooking
+			await handleMessage(msg('what temperature should I cook chicken to'));
+
+			// LLM prompt should include cook session context
+			const [prompt] = vi.mocked(services.llm.complete).mock.calls[0];
+			expect(prompt).toContain('Chicken Stir Fry');
+			expect(prompt).toContain('currently cooking');
+		});
+
+		it('servings input: casual language variations', async () => {
+			setupHousehold();
+			(services as any).audio = undefined;
+
+			// "double" should work
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('double'));
+			expect(hasActiveSession('matt')).toBe(true);
+			endSession('matt');
+
+			// "half" should work
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('half'));
+			expect(hasActiveSession('matt')).toBe(true);
+			endSession('matt');
+
+			// "triple" should work
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('triple'));
+			expect(hasActiveSession('matt')).toBe(true);
+			endSession('matt');
+
+			// Plain number should work
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+			await handleMessage(msg('2'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+
+		it('invalid servings input gets friendly retry message', async () => {
+			setupHousehold();
+			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
+
+			// Gibberish should get a friendly error
+			await handleMessage(msg('asdf'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("didn't understand"),
+			);
+			// User should still be able to retry
+			(services as any).audio = undefined;
+			await handleMessage(msg('4'));
+			expect(hasActiveSession('matt')).toBe(true);
+		});
+	});
 });
