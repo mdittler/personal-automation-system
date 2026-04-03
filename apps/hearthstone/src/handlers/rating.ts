@@ -144,6 +144,18 @@ export async function handleRateCallback(
 	const emoji = direction === 'up' ? '👍' : '👎';
 	const confirmNote = promoted ? '\n\n✅ Recipe added to your collection!' : '';
 	await services.telegram.editMessage(chatId, messageId, `${emoji} Rated${confirmNote}`);
+
+	// H6: Ask about leftovers after rating
+	if (direction !== 'skip' && meal.recipeTitle) {
+		await services.telegram.sendWithButtons(
+			userId,
+			`Any leftovers from ${meal.recipeTitle}?`,
+			[[
+				{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+				{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
+			]],
+		);
+	}
 }
 
 /**

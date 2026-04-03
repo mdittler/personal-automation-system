@@ -376,13 +376,23 @@ export async function handleCookCallback(
 		}
 		case 'd': {
 			cancelSessionTimer(session);
+			const recipeTitle = session.recipeTitle; // save before endSession destroys it
 			await services.telegram.editMessage(
 				chatId,
 				messageId,
-				`Finished cooking ${session.recipeTitle}. All done!`,
+				`Finished cooking ${recipeTitle}. All done!`,
 				[],
 			);
 			endSession(userId);
+			// H6: Ask about leftovers
+			await services.telegram.sendWithButtons(
+				userId,
+				`Any leftovers from ${recipeTitle}?`,
+				[[
+					{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+					{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
+				]],
+			);
 			break;
 		}
 		case 't': {
@@ -516,11 +526,21 @@ export async function handleCookTextAction(
 		}
 		case 'done': {
 			cancelSessionTimer(session);
+			const recipeTitle = session.recipeTitle;
 			await services.telegram.send(
 				ctx.userId,
-				`Finished cooking ${session.recipeTitle}. All done!`,
+				`Finished cooking ${recipeTitle}. All done!`,
 			);
 			endSession(ctx.userId);
+			// H6: Ask about leftovers
+			await services.telegram.sendWithButtons(
+				ctx.userId,
+				`Any leftovers from ${recipeTitle}?`,
+				[[
+					{ text: 'Yes, log leftovers', callbackData: 'app:hearthstone:lo:post-meal:yes' },
+					{ text: 'No leftovers', callbackData: 'app:hearthstone:lo:post-meal:no' },
+				]],
+			);
 			break;
 		}
 	}
