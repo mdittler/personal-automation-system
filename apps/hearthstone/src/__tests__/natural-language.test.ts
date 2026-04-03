@@ -2582,4 +2582,283 @@ describe('Natural Language — Real User Messages', () => {
 			expect(hasActiveSession('matt')).toBe(true);
 		});
 	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H6: LEFTOVER, FREEZER, AND WASTE INTENTS
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H6: leftover, freezer, and waste intents', () => {
+		// ─── Leftover add intents ─────────────────────────────────────
+
+		describe('Leftover add — logging what was saved', () => {
+			beforeEach(() => {
+				// Leftover add calls LLM to estimate fridge life — return a number
+				vi.mocked(services.llm.complete).mockResolvedValue('3');
+			});
+
+			it('"we have leftover chili" → logs leftover and confirms', async () => {
+				setupHousehold();
+				await handleMessage(msg('we have leftover chili'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"there\'s leftover soup from last night" → logs leftover', async () => {
+				setupHousehold();
+				await handleMessage(msg("there's leftover soup from last night"));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"got leftover pasta in the fridge" → logs leftover', async () => {
+				setupHousehold();
+				await handleMessage(msg('got leftover pasta in the fridge'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('LLM is called to estimate expiry days', async () => {
+				setupHousehold();
+				await handleMessage(msg('we have leftover chili'));
+				expect(services.llm.complete).toHaveBeenCalledWith(
+					expect.stringContaining('How many days'),
+					expect.objectContaining({ tier: 'fast' }),
+				);
+			});
+
+			it('LLM failure falls back to 3-day expiry (no throw)', async () => {
+				setupHousehold();
+				vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
+				// Should not throw — fallback to 3 days
+				await expect(handleMessage(msg('we have leftover chili'))).resolves.not.toThrow();
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged'),
+				);
+			});
+
+			it('no household → prompts setup instead of logging', async () => {
+				// No household setup — store returns '' for household.yaml
+				await handleMessage(msg('we have leftover chili'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('household'),
+				);
+				expect(store.write).not.toHaveBeenCalled();
+			});
+		});
+
+		// ─── Leftover view intents ────────────────────────────────────
+
+		describe('Leftover view — seeing what is stored', () => {
+			it('"any leftovers?" → shows leftover list (with active items)', async () => {
+				setupHousehold();
+				// Simulate a saved leftover in the store
+				const leftoverYaml = `items:\n  - name: chili\n    quantity: 2 servings\n    storedDate: '2026-04-01'\n    expiryEstimate: '2026-04-04'\n    status: active\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'leftovers.yaml') return leftoverYaml;
+					return '';
+				});
+				await handleMessage(msg('any leftovers?'));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"show leftovers" → shows leftover list', async () => {
+				setupHousehold();
+				const leftoverYaml = `items:\n  - name: soup\n    quantity: 3 cups\n    storedDate: '2026-04-01'\n    expiryEstimate: '2026-04-04'\n    status: active\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'leftovers.yaml') return leftoverYaml;
+					return '';
+				});
+				await handleMessage(msg('show leftovers'));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"what\'s left over?" → shows leftover list', async () => {
+				setupHousehold();
+				const leftoverYaml = `items:\n  - name: pasta\n    quantity: 2 servings\n    storedDate: '2026-04-01'\n    expiryEstimate: '2026-04-04'\n    status: active\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'leftovers.yaml') return leftoverYaml;
+					return '';
+				});
+				await handleMessage(msg("what's left over?"));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"any leftovers?" with no items → sends empty message', async () => {
+				setupHousehold();
+				// No leftovers.yaml or empty
+				await handleMessage(msg('any leftovers?'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('no leftovers'),
+				);
+			});
+		});
+
+		// ─── Freezer add intents ──────────────────────────────────────
+
+		describe('Freezer add — storing items in the freezer', () => {
+			it('"add chicken to the freezer" → adds item and confirms', async () => {
+				setupHousehold();
+				await handleMessage(msg('add chicken to the freezer'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Added to freezer'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"freeze the chili" → adds chili to freezer', async () => {
+				setupHousehold();
+				await handleMessage(msg('freeze the chili'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Added to freezer'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"put the soup in the freezer" → adds soup to freezer', async () => {
+				setupHousehold();
+				await handleMessage(msg('put the soup in the freezer'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Added to freezer'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('no household → prompts setup instead of adding', async () => {
+				// No household setup
+				await handleMessage(msg('add chicken to the freezer'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('household'),
+				);
+				expect(store.write).not.toHaveBeenCalled();
+			});
+		});
+
+		// ─── Freezer view intents ─────────────────────────────────────
+
+		describe('Freezer view — seeing what is frozen', () => {
+			it('"what\'s in the freezer?" → shows freezer list (with items)', async () => {
+				setupHousehold();
+				const freezerYaml = `items:\n  - name: chicken\n    quantity: 2 lbs\n    frozenDate: '2026-04-01'\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'freezer.yaml') return freezerYaml;
+					return '';
+				});
+				await handleMessage(msg("what's in the freezer?"));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"show freezer" → shows freezer list', async () => {
+				setupHousehold();
+				const freezerYaml = `items:\n  - name: soup\n    quantity: 1 container\n    frozenDate: '2026-04-01'\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'freezer.yaml') return freezerYaml;
+					return '';
+				});
+				await handleMessage(msg('show freezer'));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"check the freezer" → shows freezer list', async () => {
+				setupHousehold();
+				const freezerYaml = `items:\n  - name: chili\n    quantity: 4 cups\n    frozenDate: '2026-04-01'\n    source: manual\n`;
+				store.read.mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(household);
+					if (path === 'freezer.yaml') return freezerYaml;
+					return '';
+				});
+				await handleMessage(msg('check the freezer'));
+				expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			});
+
+			it('"what\'s in the freezer?" with empty freezer → sends empty message', async () => {
+				setupHousehold();
+				// No freezer.yaml — store returns ''
+				await handleMessage(msg("what's in the freezer?"));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('empty'),
+				);
+			});
+		});
+
+		// ─── Waste intents ────────────────────────────────────────────
+
+		describe('Waste — logging food that went bad', () => {
+			it('"the milk went bad" → logs waste and confirms', async () => {
+				setupHousehold();
+				await handleMessage(msg('the milk went bad'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged waste'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"threw out the old rice" → logs waste', async () => {
+				setupHousehold();
+				await handleMessage(msg('threw out the old rice'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged waste'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('"the bread has gone bad" → logs waste', async () => {
+				setupHousehold();
+				await handleMessage(msg('the bread has gone bad'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('Logged waste'),
+				);
+				expect(store.write).toHaveBeenCalled();
+			});
+
+			it('no household → prompts setup instead of logging', async () => {
+				// No household setup — store returns '' for household.yaml
+				await handleMessage(msg('the milk went bad'));
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('household'),
+				);
+				// waste-log.yaml should NOT be written
+				const writeToWaste = vi.mocked(store.write).mock.calls.find(
+					(c) => typeof c[0] === 'string' && (c[0] as string).includes('waste'),
+				);
+				expect(writeToWaste).toBeUndefined();
+			});
+
+			it('also removes wasted item from pantry if it exists', async () => {
+				setupHousehold({ pantry: pantryItems }); // pantryItems includes Rice
+				// "threw out rice" → itemText becomes "rice" after stripping, matches "Rice" case-insensitively
+				await handleMessage(msg('threw out rice'));
+				// pantry.yaml should be written (item removed)
+				expect(store.write).toHaveBeenCalledWith(
+					'pantry.yaml',
+					expect.any(String),
+				);
+			});
+		});
+	});
 });
