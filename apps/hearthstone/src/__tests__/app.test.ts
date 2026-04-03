@@ -215,8 +215,8 @@ describe('Hearthstone App', () => {
 
 	describe('handleCommand — unimplemented', () => {
 		it('shows coming soon for unimplemented commands', async () => {
-			const ctx = createTestMessageContext({ text: '/freezer', userId: 'user1' });
-			await handleCommand?.('freezer', [], ctx);
+			const ctx = createTestMessageContext({ text: '/somefuturecommand', userId: 'user1' });
+			await handleCommand?.('somefuturecommand', [], ctx);
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'user1',
 				expect.stringContaining('not yet implemented'),

@@ -65,8 +65,28 @@ import { handleVoteCallback, handleFinalizeVotesJob, sendVotingMessages } from '
 import { handleCookedCallback, handleRateCallback, handleNightlyRatingPromptJob } from './handlers/rating.js';
 import { scheduleShoppingFollowup, cancelShoppingFollowup, handleShopFollowupClearCallback, handleShopFollowupKeepCallback } from './handlers/shopping-followup.js';
 import { handleCookCommand, handleCookIntent, handleCookCallback, handleCookTextAction, handleServingsReply, hasPendingCookRecipe, isCookModeActive } from './handlers/cook-mode.js';
+import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/leftover-handler.js';
+import { handleFreezerCallback, handleFreezerCheckJob } from './handlers/freezer-handler.js';
+import { handlePerishableCallback, handlePerishableCheckJob } from './handlers/perishable-handler.js';
 import { getSession } from './services/cook-session.js';
-import type { GroceryItem, Recipe } from './types.js';
+import {
+	addLeftover,
+	buildLeftoverButtons,
+	formatLeftoverList,
+	loadLeftovers,
+	parseLeftoverInput,
+	saveLeftovers,
+} from './services/leftover-store.js';
+import {
+	addFreezerItem,
+	buildFreezerButtons,
+	formatFreezerList,
+	loadFreezer,
+	parseFreezerInput,
+	saveFreezer,
+} from './services/freezer-store.js';
+import { appendWaste } from './services/waste-store.js';
+import type { GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
@@ -110,6 +130,18 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H5: Servings reply — handle number/text response after /cook recipe selection
 	if (hasPendingCookRecipe(ctx.userId)) {
 		await handleServingsReply(services, text, ctx);
+		return;
+	}
+
+	// H6: Pending leftover add — next text message after "Yes, log leftovers"
+	if (hasPendingLeftoverAdd(ctx.userId)) {
+		await handlePendingLeftoverAdd(text, ctx);
+		return;
+	}
+
+	// H6: Pending freezer add — next text message after "Add to freezer" button
+	if (hasPendingFreezerAdd(ctx.userId)) {
+		await handlePendingFreezerAdd(text, ctx);
 		return;
 	}
 
@@ -161,6 +193,34 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// Meal swap intent
 	if (isMealSwapIntent(lower)) {
 		await handleMealSwap(text, ctx);
+		return;
+	}
+
+	// H6: Leftover intents
+	if (isLeftoverAddIntent(lower)) {
+		await handleLeftoverAddIntent(text, ctx);
+		return;
+	}
+
+	if (isLeftoverViewIntent(lower)) {
+		await handleLeftoversView(ctx);
+		return;
+	}
+
+	// H6: Freezer intents
+	if (isFreezerAddIntent(lower)) {
+		await handleFreezerAddIntent(text, ctx);
+		return;
+	}
+
+	if (isFreezerViewIntent(lower)) {
+		await handleFreezerView(ctx);
+		return;
+	}
+
+	// H6: Waste intent
+	if (isWasteIntent(lower)) {
+		await handleWasteIntent(text, ctx);
 		return;
 	}
 
@@ -229,6 +289,9 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• "what\'s for dinner?" — see tonight\'s meal\n' +
 			'• "what can I make?" — match pantry to recipes\n' +
 			'• "start cooking the lasagna" — step-by-step cook mode\n' +
+			'• "we have leftover chili" — log leftovers\n' +
+			'• /leftovers — view and manage leftovers\n' +
+			'• /freezer — view and manage freezer\n' +
 			'• /grocery — view your grocery list\n' +
 			'• /pantry — view your pantry\n' +
 			'• /recipes — browse all recipes\n' +
@@ -272,6 +335,12 @@ export const handleCommand: AppModule['handleCommand'] = async (
 			break;
 		case 'cook':
 			await handleCookCommand(services, args, ctx);
+			break;
+		case 'leftovers':
+			await handleLeftoversCommand(args, ctx);
+			break;
+		case 'freezer':
+			await handleFreezerCommand(args, ctx);
 			break;
 		default:
 			await services.telegram.send(
@@ -648,6 +717,40 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			await handleCookCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId);
 			return;
 		}
+
+		// ─── H6: Leftover callbacks ─────────────────────────
+		if (data.startsWith('lo:')) {
+			if (data === 'lo:add') {
+				setPendingLeftoverAdd(ctx.userId);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "chili, about 3 servings")');
+				return;
+			}
+			if (data === 'lo:post-meal:yes') {
+				// Set pending for next text — user will describe leftovers
+				setPendingLeftoverAdd(ctx.userId);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "about 3 servings of chili")');
+				return;
+			}
+			await handleLeftoverCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H6: Freezer callbacks ──────────────────────────
+		if (data.startsWith('fz:')) {
+			if (data === 'fz:add') {
+				setPendingFreezerAdd(ctx.userId);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")');
+				return;
+			}
+			await handleFreezerCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H6: Perishable alert callbacks ─────────────────
+		if (data.startsWith('pa:')) {
+			await handlePerishableCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
 	} catch (err) {
 		services.logger.error('Callback handling failed: %s', err);
 	}
@@ -672,6 +775,60 @@ function getPendingPantryItems(userId: string): GroceryItem[] | undefined {
 	if (!entry) return undefined;
 	if (Date.now() > entry.expiresAt) return undefined;
 	return entry.items;
+}
+
+// ─── H6: Pending leftover/freezer add state ────────────────────
+const pendingLeftoverAdd = new Map<string, { fromRecipe?: string; expiresAt: number }>();
+const pendingFreezerAdd = new Map<string, { expiresAt: number }>();
+
+function setPendingLeftoverAdd(userId: string, fromRecipe?: string): void {
+	pendingLeftoverAdd.set(userId, { fromRecipe, expiresAt: Date.now() + PENDING_TTL_MS });
+	if (pendingLeftoverAdd.size > 100) {
+		const oldest = pendingLeftoverAdd.keys().next().value;
+		if (oldest) pendingLeftoverAdd.delete(oldest);
+	}
+}
+
+function consumePendingLeftoverAdd(userId: string): { fromRecipe?: string } | undefined {
+	const entry = pendingLeftoverAdd.get(userId);
+	pendingLeftoverAdd.delete(userId);
+	if (!entry || Date.now() > entry.expiresAt) return undefined;
+	return { fromRecipe: entry.fromRecipe };
+}
+
+export function hasPendingLeftoverAdd(userId: string): boolean {
+	const entry = pendingLeftoverAdd.get(userId);
+	if (!entry) return false;
+	if (Date.now() > entry.expiresAt) {
+		pendingLeftoverAdd.delete(userId);
+		return false;
+	}
+	return true;
+}
+
+function setPendingFreezerAdd(userId: string): void {
+	pendingFreezerAdd.set(userId, { expiresAt: Date.now() + PENDING_TTL_MS });
+	if (pendingFreezerAdd.size > 100) {
+		const oldest = pendingFreezerAdd.keys().next().value;
+		if (oldest) pendingFreezerAdd.delete(oldest);
+	}
+}
+
+function consumePendingFreezerAdd(userId: string): boolean {
+	const entry = pendingFreezerAdd.get(userId);
+	pendingFreezerAdd.delete(userId);
+	if (!entry || Date.now() > entry.expiresAt) return false;
+	return true;
+}
+
+function hasPendingFreezerAdd(userId: string): boolean {
+	const entry = pendingFreezerAdd.get(userId);
+	if (!entry) return false;
+	if (Date.now() > entry.expiresAt) {
+		pendingFreezerAdd.delete(userId);
+		return false;
+	}
+	return true;
 }
 
 // ─── Household Command ───────────────────────────────────────────
@@ -1653,6 +1810,24 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 		return;
 	}
 
+	// H6: Perishable check daily 9am
+	if (jobId === 'perishable-check') {
+		await handlePerishableCheckJob(services);
+		return;
+	}
+
+	// H6: Leftover check daily 10am
+	if (jobId === 'leftover-check') {
+		await handleLeftoverCheckJob(services);
+		return;
+	}
+
+	// H6: Freezer check Mondays 9am
+	if (jobId === 'freezer-check') {
+		await handleFreezerCheckJob(services);
+		return;
+	}
+
 	if (jobId !== 'generate-weekly-plan') return;
 
 	const sharedStore = services.data.forShared('shared');
@@ -1851,6 +2026,298 @@ export function isCookIntent(text: string): boolean {
 		/\b(i\s+want\s+to|can\s+we|ready\s+to)\s+(cook|make|prepare)\b/i.test(text) ||
 		/\bprepare\s+(the|my|our|a)\b/i.test(text)
 	);
+}
+
+// ─── H6: Intent Detection ──────────────────────────────────────
+
+function isLeftoverAddIntent(lower: string): boolean {
+	return (
+		/\b(leftover|left over)\b/i.test(lower) && /\b(have|got|save|store|put|log)\b/i.test(lower)
+	) || /\b(there'?s|we'?ve got)\b.*\b(left over|leftover|remaining)\b/i.test(lower);
+}
+
+function isLeftoverViewIntent(lower: string): boolean {
+	return (
+		/\b(show|view|see|check|list|what)\b.*\bleftovers?\b/i.test(lower) ||
+		/\bany\s+leftovers?\b/i.test(lower) ||
+		/\bwhat'?s\s+left\s+over\b/i.test(lower)
+	);
+}
+
+function isFreezerAddIntent(lower: string): boolean {
+	return (
+		/\b(add|put|store|move)\b.*\b(to|in)\s+(the\s+)?freezer\b/i.test(lower) ||
+		/\bfreeze\s+(the|some|this|my|our)\b/i.test(lower)
+	);
+}
+
+function isFreezerViewIntent(lower: string): boolean {
+	return (
+		/\b(show|view|see|check|list)\b.*\bfreezer\b/i.test(lower) ||
+		/\bwhat'?s\s+in\s+(the\s+)?freezer\b/i.test(lower)
+	);
+}
+
+function isWasteIntent(lower: string): boolean {
+	return (
+		/\b(throw|threw|toss|tossed|discard|dump)\b.*\b(out|away)\b/i.test(lower) ||
+		/\b(went bad|gone bad|spoiled|expired|moldy|rotten)\b/i.test(lower)
+	);
+}
+
+// ─── H6: Leftover Intent Handlers ──────────────────────────────
+
+async function handleLeftoversView(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+	const items = await loadLeftovers(hh.sharedStore);
+	const active = items.filter((l) => l.status === 'active');
+	if (!active.length) {
+		await services.telegram.send(ctx.userId, '🥘 You have no leftovers tracked.');
+		return;
+	}
+	await services.telegram.sendWithButtons(
+		ctx.userId,
+		formatLeftoverList(items, todayDate(services.timezone)),
+		buildLeftoverButtons(items),
+	);
+}
+
+async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	// Extract leftover description from NL text
+	const itemText = text
+		.replace(/^(we\s+)?have\s+(some\s+)?/i, '')
+		.replace(/\b(leftover|left over|remaining)\b/gi, '')
+		.replace(/\b(from\s+(last\s+)?night|from\s+tonight|from\s+dinner|from\s+lunch)\b/gi, '')
+		.trim();
+
+	if (!itemText) {
+		setPendingLeftoverAdd(ctx.userId);
+		await services.telegram.send(ctx.userId, 'What leftovers do you have? (e.g., "chili, about 3 servings")');
+		return;
+	}
+
+	const parsed = parseLeftoverInput(itemText, undefined, services.timezone);
+
+	// Estimate expiry via LLM
+	let expiryEstimate: string;
+	try {
+		const daysStr = await services.llm.complete(
+			`How many days does ${sanitizeInput(parsed.name)} last in the fridge? Reply with just a number.`,
+			{ tier: 'fast' },
+		);
+		const days = Number.parseInt(daysStr.trim(), 10);
+		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) ? 3 : days));
+		expiryEstimate = expiry.toISOString().slice(0, 10);
+	} catch {
+		// Default to 3 days
+		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + 3);
+		expiryEstimate = expiry.toISOString().slice(0, 10);
+	}
+
+	const leftover: Leftover = { ...parsed, expiryEstimate };
+	const existing = await loadLeftovers(hh.sharedStore);
+	const updated = addLeftover(existing, leftover);
+	await saveLeftovers(hh.sharedStore, updated);
+
+	await services.telegram.send(
+		ctx.userId,
+		`🥘 Logged: ${leftover.name} — ${leftover.quantity} (use by ${expiryEstimate})`,
+	);
+	services.logger.info('Logged leftover "%s" for %s', leftover.name, ctx.userId);
+}
+
+async function handlePendingLeftoverAdd(text: string, ctx: MessageContext): Promise<void> {
+	const pending = consumePendingLeftoverAdd(ctx.userId);
+	if (!pending) return;
+
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) return;
+
+	const parsed = parseLeftoverInput(text, pending.fromRecipe, services.timezone);
+
+	// Estimate expiry via LLM
+	let expiryEstimate: string;
+	try {
+		const daysStr = await services.llm.complete(
+			`How many days does ${sanitizeInput(parsed.name)} last in the fridge? Reply with just a number.`,
+			{ tier: 'fast' },
+		);
+		const days = Number.parseInt(daysStr.trim(), 10);
+		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) ? 3 : days));
+		expiryEstimate = expiry.toISOString().slice(0, 10);
+	} catch {
+		const expiry = new Date(`${parsed.storedDate}T00:00:00Z`);
+		expiry.setUTCDate(expiry.getUTCDate() + 3);
+		expiryEstimate = expiry.toISOString().slice(0, 10);
+	}
+
+	const leftover: Leftover = { ...parsed, expiryEstimate };
+	const existing = await loadLeftovers(hh.sharedStore);
+	const updated = addLeftover(existing, leftover);
+	await saveLeftovers(hh.sharedStore, updated);
+
+	await services.telegram.send(
+		ctx.userId,
+		`🥘 Logged: ${leftover.name} — ${leftover.quantity} (use by ${expiryEstimate})`,
+	);
+}
+
+// ─── H6: Freezer Intent Handlers ───────────────────────────────
+
+async function handleFreezerView(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+	const items = await loadFreezer(hh.sharedStore);
+	if (!items.length) {
+		await services.telegram.send(ctx.userId, '🧊 Your freezer is empty.');
+		return;
+	}
+	await services.telegram.sendWithButtons(
+		ctx.userId,
+		formatFreezerList(items, todayDate(services.timezone)),
+		buildFreezerButtons(items),
+	);
+}
+
+async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	const itemText = text
+		.replace(/^(add|put|store|move)\s+/i, '')
+		.replace(/\s*(to|in)\s+(the\s+)?freezer/i, '')
+		.replace(/^(some|the|a|an)\s+/i, '')
+		.replace(/\bfreeze\s+(the|some|this|my|our)\s+/i, '')
+		.trim();
+
+	if (!itemText) {
+		setPendingFreezerAdd(ctx.userId);
+		await services.telegram.send(ctx.userId, 'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")');
+		return;
+	}
+
+	const item = parseFreezerInput(itemText, 'manual', services.timezone);
+	const existing = await loadFreezer(hh.sharedStore);
+	const updated = addFreezerItem(existing, item);
+	await saveFreezer(hh.sharedStore, updated);
+
+	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${item.name} — ${item.quantity}`);
+	services.logger.info('Added freezer item "%s" for %s', item.name, ctx.userId);
+}
+
+async function handlePendingFreezerAdd(text: string, ctx: MessageContext): Promise<void> {
+	if (!consumePendingFreezerAdd(ctx.userId)) return;
+
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) return;
+
+	const item = parseFreezerInput(text, 'manual', services.timezone);
+	const existing = await loadFreezer(hh.sharedStore);
+	const updated = addFreezerItem(existing, item);
+	await saveFreezer(hh.sharedStore, updated);
+
+	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${item.name} — ${item.quantity}`);
+}
+
+// ─── H6: Waste Intent Handler ──────────────────────────────────
+
+async function handleWasteIntent(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	const itemText = text
+		.replace(/\b(throw|threw|toss|tossed|discard|dump)(ed)?\b/gi, '')
+		.replace(/\b(out|away)\b/gi, '')
+		.replace(/\b(the|some|it|went bad|gone bad|spoiled|expired|moldy|rotten)\b/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+
+	if (!itemText) {
+		await services.telegram.send(ctx.userId, 'What went bad? (e.g., "the milk spoiled")');
+		return;
+	}
+
+	const reason: WasteLogEntry['reason'] = /\b(spoil|mold|rotten)\b/i.test(text) ? 'spoiled' : 'expired';
+
+	const entry: WasteLogEntry = {
+		name: itemText,
+		quantity: 'some',
+		reason,
+		source: 'pantry',
+		date: todayDate(services.timezone),
+	};
+	await appendWaste(hh.sharedStore, entry);
+
+	// Try to remove from pantry if it exists
+	const pantry = await loadPantry(hh.sharedStore);
+	const pantryIdx = pantry.findIndex((p) => p.name.toLowerCase() === itemText.toLowerCase());
+	if (pantryIdx >= 0) {
+		const updated = [...pantry.slice(0, pantryIdx), ...pantry.slice(pantryIdx + 1)];
+		await savePantry(hh.sharedStore, updated);
+	}
+
+	await services.telegram.send(ctx.userId, `🗑 Logged waste: ${itemText}. Sorry about that!`);
+	services.logger.info('Logged food waste "%s" for %s', itemText, ctx.userId);
+}
+
+// ─── H6: Leftover/Freezer Commands ─────────────────────────────
+
+async function handleLeftoversCommand(args: string[], ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	const text = args.join(' ').trim();
+	if (text) {
+		// Direct add: /leftovers chili, 3 servings
+		await handleLeftoverAddIntent(text, ctx);
+		return;
+	}
+
+	// View mode
+	await handleLeftoversView(ctx);
+}
+
+async function handleFreezerCommand(args: string[], ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	const text = args.join(' ').trim();
+	if (text) {
+		// Direct add: /freezer 2 lbs chicken breasts
+		await handleFreezerAddIntent(text, ctx);
+		return;
+	}
+
+	// View mode
+	await handleFreezerView(ctx);
 }
 
 function looksLikeRecipe(text: string): boolean {
