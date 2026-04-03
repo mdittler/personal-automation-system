@@ -7,6 +7,11 @@
 
 import type { InlineButton } from '@pas/core/types';
 import type { CookSession, Recipe, ScaledIngredient } from '../types.js';
+import type { ParsedTimer } from './timer-parser.js';
+import { formatDuration } from './timer-parser.js';
+
+// Node timer globals — not in ES2024 lib, so we declare them here.
+declare function clearTimeout(id: unknown): void;
 
 const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -50,6 +55,10 @@ export function hasActiveSession(userId: string): boolean {
 }
 
 export function endSession(userId: string): void {
+	const session = activeSessions.get(userId);
+	if (session?.timerHandle !== undefined) {
+		clearTimeout(session.timerHandle);
+	}
 	activeSessions.delete(userId);
 }
 
@@ -106,15 +115,35 @@ export function formatStepMessage(session: CookSession): string {
 	return `Step ${stepNum} of ${session.totalSteps}\n\n${instruction}`;
 }
 
-export function buildStepButtons(_session: CookSession): InlineButton[][] {
-	return [
-		[
-			{ text: '< Back', callbackData: 'app:hearthstone:ck:b' },
-			{ text: 'Repeat', callbackData: 'app:hearthstone:ck:r' },
-			{ text: 'Next >', callbackData: 'app:hearthstone:ck:n' },
-			{ text: 'Done ✓', callbackData: 'app:hearthstone:ck:d' },
-		],
+export function buildStepButtons(session: CookSession, timer?: ParsedTimer | null): InlineButton[][] {
+	const navRow: InlineButton[] = [
+		{ text: '< Back', callbackData: 'app:hearthstone:ck:b' },
+		{ text: 'Repeat', callbackData: 'app:hearthstone:ck:r' },
+		{ text: 'Next >', callbackData: 'app:hearthstone:ck:n' },
+		{ text: 'Done ✓', callbackData: 'app:hearthstone:ck:d' },
 	];
+
+	const rows: InlineButton[][] = [navRow];
+
+	if (timer) {
+		const hasActiveTimerOnThisStep =
+			session.timerHandle !== undefined && session.timerStepIndex === session.currentStep;
+
+		if (hasActiveTimerOnThisStep) {
+			rows.push([
+				{ text: '⏱ Cancel Timer', callbackData: 'app:hearthstone:ck:tc' },
+			]);
+		} else {
+			rows.push([
+				{
+					text: `⏱ Set Timer (${formatDuration(timer.durationMinutes)})`,
+					callbackData: 'app:hearthstone:ck:t',
+				},
+			]);
+		}
+	}
+
+	return rows;
 }
 
 export function formatCompletionMessage(session: CookSession): string {

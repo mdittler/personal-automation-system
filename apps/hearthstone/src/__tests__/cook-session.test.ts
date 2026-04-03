@@ -320,3 +320,87 @@ describe('getSessionCount', () => {
 		expect(getSessionCount()).toBe(2);
 	});
 });
+
+// ─── Timer fields on CookSession ───────────────────────────────────
+
+describe('CookSession timer fields', () => {
+	it('new session has no timer fields set', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		expect(session.timerHandle).toBeUndefined();
+		expect(session.timerStepIndex).toBeUndefined();
+		expect(session.ttsEnabled).toBeUndefined();
+	});
+
+	it('allows setting timer fields on session', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		session.timerHandle = setTimeout(() => {}, 1000) as ReturnType<typeof setTimeout>;
+		session.timerStepIndex = 2;
+		session.ttsEnabled = true;
+		expect(session.timerStepIndex).toBe(2);
+		expect(session.ttsEnabled).toBe(true);
+		clearTimeout(session.timerHandle);
+	});
+});
+
+// ─── endSession clears timer ───────────────────────────────────────
+
+describe('endSession with timer', () => {
+	it('clears timerHandle when ending a session with active timer', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		let fired = false;
+		session.timerHandle = setTimeout(() => { fired = true; }, 100000) as ReturnType<typeof setTimeout>;
+		session.timerStepIndex = 0;
+		endSession('user1');
+		expect(getSession('user1')).toBeNull();
+	});
+});
+
+// ─── buildStepButtons with timer ───────────────────────────────────
+
+describe('buildStepButtons with timer', () => {
+	it('returns 1 row when no timer provided', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		const buttons = buildStepButtons(session);
+		expect(buttons).toHaveLength(1);
+		expect(buttons[0]).toHaveLength(4);
+	});
+
+	it('returns 2 rows when timer is provided', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		const buttons = buildStepButtons(session, { durationMinutes: 25, originalText: '25 minutes' });
+		expect(buttons).toHaveLength(2);
+		expect(buttons[0]).toHaveLength(4); // nav row
+		expect(buttons[1]).toHaveLength(1); // timer row
+		expect(buttons[1][0].text).toContain('Timer');
+		expect(buttons[1][0].text).toContain('25 min');
+		expect(buttons[1][0].callbackData).toBe('app:hearthstone:ck:t');
+	});
+
+	it('shows cancel button when session has active timer on current step', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		session.timerHandle = setTimeout(() => {}, 100000) as ReturnType<typeof setTimeout>;
+		session.timerStepIndex = 0;
+		const buttons = buildStepButtons(session, { durationMinutes: 25, originalText: '25 minutes' });
+		expect(buttons).toHaveLength(2);
+		expect(buttons[1][0].text).toContain('Cancel');
+		expect(buttons[1][0].callbackData).toBe('app:hearthstone:ck:tc');
+		clearTimeout(session.timerHandle);
+	});
+
+	it('shows set button when timer is for different step', () => {
+		const recipe = makeRecipe();
+		const session = createSession('user1', recipe, 4, [], null);
+		session.timerHandle = setTimeout(() => {}, 100000) as ReturnType<typeof setTimeout>;
+		session.timerStepIndex = 1; // timer on step 1, but we're on step 0
+		const buttons = buildStepButtons(session, { durationMinutes: 25, originalText: '25 minutes' });
+		expect(buttons[1][0].text).toContain('Timer');
+		expect(buttons[1][0].callbackData).toBe('app:hearthstone:ck:t');
+		clearTimeout(session.timerHandle);
+	});
+});

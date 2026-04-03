@@ -6,6 +6,9 @@
  * are implemented.
  */
 
+// Node timer globals — not in ES2024 lib, so we declare them here.
+declare function setTimeout(handler: (...args: unknown[]) => void, timeout?: number): unknown;
+
 // ─── Recipe Types ────────────────────────────────────────────────
 
 export interface Ingredient {
@@ -59,6 +62,9 @@ export interface CookSession {
 	lastActivityAt: number; // for 24h inactivity timeout
 	lastMessageId: number | null; // for editMessage on button taps
 	lastChatId: number | null;
+	timerHandle?: ReturnType<typeof setTimeout>; // active setTimeout handle
+	timerStepIndex?: number; // which step the timer was set for
+	ttsEnabled?: boolean; // hands-free mode active
 }
 
 export type CookAction = 'next' | 'back' | 'repeat' | 'done';
