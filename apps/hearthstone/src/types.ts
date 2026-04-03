@@ -181,6 +181,16 @@ export interface Leftover {
 	status: 'active' | 'used' | 'frozen' | 'wasted';
 }
 
+// ─── Waste Log Types ────────────────────────────────────────────
+
+export interface WasteLogEntry {
+	name: string;
+	quantity: string;
+	reason: 'expired' | 'spoiled' | 'discarded';
+	source: 'leftover' | 'pantry' | 'freezer';
+	date: string; // ISO date
+}
+
 // ─── Recipe Search Types ─────────────────────────────────────────
 
 export interface RecipeSearchQuery {
