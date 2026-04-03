@@ -3,8 +3,10 @@ import { stringify } from 'yaml';
 import type { GroceryItem, PantryItem } from '../types.js';
 import {
 	addPantryItems,
+	enrichWithExpiry,
 	formatPantry,
 	groceryToPantryItems,
+	isPerishableCategory,
 	loadPantry,
 	pantryContains,
 	parsePantryItems,
@@ -445,6 +447,65 @@ describe('pantry-store', () => {
 		it('assigns Other for unknown items', () => {
 			const result = parsePantryItems('xylophone', 'UTC');
 			expect(result[0].category).toBe('Other');
+		});
+	});
+
+	// ── expiry estimation ───────────────────────────────────────
+
+	describe('expiry estimation', () => {
+		it('isPerishableCategory returns true for perishable categories', () => {
+			expect(isPerishableCategory('Produce')).toBe(true);
+			expect(isPerishableCategory('Dairy & Eggs')).toBe(true);
+			expect(isPerishableCategory('Meat & Seafood')).toBe(true);
+			expect(isPerishableCategory('Bakery')).toBe(true);
+		});
+
+		it('isPerishableCategory returns false for shelf-stable categories', () => {
+			expect(isPerishableCategory('Pantry & Dry Goods')).toBe(false);
+			expect(isPerishableCategory('Beverages')).toBe(false);
+			expect(isPerishableCategory('Snacks')).toBe(false);
+		});
+
+		it('enrichWithExpiry adds expiryEstimate to perishable items', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood', addedDate: '2026-04-01' }),
+				makePantryItem({ name: 'Rice', category: 'Pantry & Dry Goods' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('3') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBe('2026-04-04');
+			expect(result[1]?.expiryEstimate).toBeUndefined();
+		});
+
+		it('enrichWithExpiry skips items that already have expiryEstimate', async () => {
+			const items = [
+				makePantryItem({ name: 'Milk', category: 'Dairy & Eggs', expiryEstimate: '2026-04-05' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn() },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBe('2026-04-05');
+			expect(mockServices.llm.complete).not.toHaveBeenCalled();
+		});
+
+		it('enrichWithExpiry defaults to no expiry on LLM failure', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockRejectedValue(new Error('fail')) },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBeUndefined();
 		});
 	});
 });

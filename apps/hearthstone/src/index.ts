@@ -43,6 +43,7 @@ import { generateNewRecipeDetails, generatePlan, swapMeal } from './services/mea
 import { findMatchingRecipes, formatMatchResults } from './services/pantry-matcher.js';
 import {
 	addPantryItems,
+	enrichWithExpiry,
 	formatPantry,
 	groceryToPantryItems,
 	loadPantry,
@@ -436,7 +437,9 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data === 'pantry-all') {
 			const purchased = getPendingPantryItems(ctx.userId);
 			if (purchased?.length) {
-				const pantryItems = groceryToPantryItems(purchased, services.timezone);
+				const rawPantryItems = groceryToPantryItems(purchased, services.timezone);
+				// H6: Estimate expiry for perishable items
+				const pantryItems = await enrichWithExpiry(services, rawPantryItems);
 				const existing = await loadPantry(hh.sharedStore);
 				const updated = addPantryItems(existing, pantryItems);
 				await savePantry(hh.sharedStore, updated);

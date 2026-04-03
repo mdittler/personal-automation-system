@@ -160,6 +160,51 @@ export function formatPantry(items: PantryItem[]): string {
 	return lines.join('\n').trimEnd();
 }
 
+/** Perishable categories that should get LLM-estimated expiry. */
+const PERISHABLE_CATEGORIES = new Set([
+	'Produce',
+	'Dairy & Eggs',
+	'Meat & Seafood',
+	'Bakery',
+]);
+
+/** Check if a pantry item's category is perishable. */
+export function isPerishableCategory(category: string): boolean {
+	return PERISHABLE_CATEGORIES.has(category);
+}
+
+/**
+ * Enrich perishable pantry items with LLM-estimated expiry dates.
+ * Only estimates for items that don't already have an expiryEstimate
+ * and are in perishable categories.
+ */
+export async function enrichWithExpiry(
+	services: { llm: { complete: (prompt: string, opts: { tier: string }) => Promise<string> }; timezone: string },
+	items: PantryItem[],
+): Promise<PantryItem[]> {
+	const result = [...items];
+	for (let i = 0; i < result.length; i++) {
+		const item = result[i]!;
+		if (item.expiryEstimate || !isPerishableCategory(item.category)) continue;
+
+		try {
+			const daysStr = await services.llm.complete(
+				`How many days does ${item.name} last in the fridge after purchase? Reply with just a number.`,
+				{ tier: 'fast' },
+			);
+			const days = Number.parseInt(daysStr.trim(), 10);
+			if (!Number.isNaN(days) && days > 0) {
+				const expiry = new Date(`${item.addedDate}T00:00:00Z`);
+				expiry.setUTCDate(expiry.getUTCDate() + days);
+				result[i] = { ...item, expiryEstimate: expiry.toISOString().slice(0, 10) };
+			}
+		} catch {
+			// Skip estimation on failure — item remains without expiryEstimate
+		}
+	}
+	return result;
+}
+
 /** Regex to extract quantity+unit prefix from pantry items. */
 const PANTRY_QTY_REGEX =
 	/^(\d+(?:\.\d+)?)\s*(lbs?|oz|cups?|tbsp|tsp|dozen|cans?|bunch(?:es)?|bags?|boxes?|bottles?|packs?|pieces?|heads?|stalks?|cloves?|sticks?|jars?|containers?)?\s*/i;
