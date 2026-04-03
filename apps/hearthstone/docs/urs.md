@@ -1733,10 +1733,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-BATCH-003 | TBD | 0 | 0 | Planned |
 | REQ-BATCH-004 | TBD | 0 | 0 | Planned |
 | REQ-COOK-001 | cook-session.test.ts, cook-mode-handler.test.ts | 23 | 24 | Implemented |
-| REQ-COOK-002 | cook-timer.test.ts, cook-session.test.ts | 17 | 8 | Implemented |
-| REQ-COOK-003 | cook-tts.test.ts | 15 | 0 | Implemented |
+| REQ-COOK-002 | timer-parser.test.ts, cook-timer.test.ts, cook-session.test.ts | 30 | 18 | Implemented |
+| REQ-COOK-003 | cook-tts.test.ts | 10 | 5 | Implemented |
 | REQ-COOK-004 | recipe-scaler.test.ts, cook-mode-handler.test.ts | 18 | 11 | Implemented |
-| REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 14 | 2 | Implemented |
+| REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 10 | 6 | Implemented |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
 | REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |

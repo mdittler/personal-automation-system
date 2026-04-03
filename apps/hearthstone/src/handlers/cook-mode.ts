@@ -33,6 +33,17 @@ import { requireHousehold } from '../utils/household-guard.js';
 declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(id: unknown): void;
 
+/** Speak the current step text via TTS if hands-free mode is active. Fire-and-forget. */
+function speakCurrentStep(services: CoreServices, session: CookSession): void {
+	if (!session.ttsEnabled || !services.audio) return;
+	void services.config.get('cooking_speaker_device').then((device) => {
+		services.audio.speak(
+			session.instructions[session.currentStep] ?? '',
+			(device as string) || undefined,
+		).catch(() => {});
+	}).catch(() => {});
+}
+
 // ─── Pending recipe state (TTL map) ─────────────────────────────────
 
 const PENDING_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -246,10 +257,7 @@ async function sendFirstStep(services: CoreServices, session: CookSession, userI
 	session.lastMessageId = sent.messageId;
 	session.lastChatId = sent.chatId;
 
-	if (session.ttsEnabled && services.audio) {
-		const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-		services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-	}
+	speakCurrentStep(services, session);
 }
 
 // ─── Timer helpers ──────────────────────────────────────────────────
@@ -329,10 +337,7 @@ export async function handleCookCallback(
 					formatStepMessage(session),
 					buildStepButtons(session, timer),
 				);
-				if (session.ttsEnabled && services.audio) {
-					const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-					services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-				}
+				speakCurrentStep(services, session);
 			}
 			break;
 		}
@@ -355,10 +360,7 @@ export async function handleCookCallback(
 					buildStepButtons(session, timer),
 				);
 			}
-			if (session.ttsEnabled && services.audio) {
-				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-			}
+			speakCurrentStep(services, session);
 			break;
 		}
 		case 'r': {
@@ -369,10 +371,7 @@ export async function handleCookCallback(
 				formatStepMessage(session),
 				buildStepButtons(session, timer),
 			);
-			if (session.ttsEnabled && services.audio) {
-				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-			}
+			speakCurrentStep(services, session);
 			break;
 		}
 		case 'd': {
@@ -395,10 +394,11 @@ export async function handleCookCallback(
 			session.timerHandle = setTimeout(() => {
 				const activeSession = getSession(userId);
 				if (!activeSession) return;
+				const firedStepIndex = activeSession.timerStepIndex ?? activeSession.currentStep;
 				activeSession.timerHandle = undefined;
 				activeSession.timerStepIndex = undefined;
-				const stepNum = session.currentStep + 1;
-				const stepText = session.instructions[session.currentStep] ?? '';
+				const stepNum = firedStepIndex + 1;
+				const stepText = activeSession.instructions[firedStepIndex] ?? '';
 				const brief = stepText.length > 80 ? stepText.slice(0, 77) + '...' : stepText;
 				const msg = `⏰ Timer done! Step ${stepNum}: ${brief}\n\nReady for the next step?`;
 				void services.telegram.sendWithButtons(userId, msg, [
@@ -487,10 +487,7 @@ export async function handleCookTextAction(
 					formatStepMessage(session),
 					buildStepButtons(session, timer),
 				);
-				if (session.ttsEnabled && services.audio) {
-					const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-					services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-				}
+				speakCurrentStep(services, session);
 			}
 			break;
 		}
@@ -504,10 +501,7 @@ export async function handleCookTextAction(
 				`${prefix}${formatStepMessage(session)}`,
 				buildStepButtons(session, timer),
 			);
-			if (session.ttsEnabled && services.audio) {
-				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-			}
+			speakCurrentStep(services, session);
 			break;
 		}
 		case 'repeat': {
@@ -517,10 +511,7 @@ export async function handleCookTextAction(
 				formatStepMessage(session),
 				buildStepButtons(session, timer),
 			);
-			if (session.ttsEnabled && services.audio) {
-				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
-				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
-			}
+			speakCurrentStep(services, session);
 			break;
 		}
 		case 'done': {

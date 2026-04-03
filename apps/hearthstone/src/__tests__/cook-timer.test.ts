@@ -443,6 +443,24 @@ describe('timer fire with TTS', () => {
 		);
 	});
 
+	it('timer fire gracefully no-ops when session has been ended', async () => {
+		await startCookingSession(services);
+		await handleCookCallback(services, 'n', 'user1', 100, 456);
+		await handleCookCallback(services, 'n', 'user1', 100, 456);
+
+		await handleCookCallback(services, 't', 'user1', 100, 456);
+
+		// End the session before timer fires (simulates 24h expiry or /done)
+		endSession('user1');
+		expect(getSession('user1')).toBeNull();
+
+		vi.mocked(services.telegram.sendWithButtons).mockClear();
+		await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
+
+		// Timer should not send any notification since session is gone
+		expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
 	it('does not call audio.speak when ttsEnabled is false', async () => {
 		await startCookingSession(services);
 		await handleCookCallback(services, 'n', 'user1', 100, 456);
