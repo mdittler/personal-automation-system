@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-hearthstone |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-01 |
+| **Last Updated** | 2026-04-03 |
 
 ## Conventions
 
@@ -673,15 +673,29 @@ When generating grocery list, pantry items excluded with 60%+ length-ratio match
 
 ### REQ-PANTRY-004: Perishable expiry alerts
 
-**Origin:** PI-4 | **Status:** Planned
+**Origin:** PI-4 | **Status:** Implemented
 
-Track rough expiry windows for perishable items. Send alerts when approaching expiry. Expiry estimates use LLM knowledge. Users can snooze or dismiss.
+Daily 9am check for pantry items with `expiryEstimate` within 2 days. Alerts sent to all household members with Freeze/Toss/Still Good action buttons. "Move to Freezer" performs cross-store operation (removes from pantry, adds to freezer). LLM estimates expiry for perishable categories (Produce, Dairy & Eggs, Meat & Seafood, Bakery) when items are added to pantry via the grocery-to-pantry flow. Name verification in callback data prevents wrong-item mutations from concurrent use.
 
 **Standard tests:**
-- TBD
+- `perishable-handler.test.ts` > handlePerishableCallback > freeze removes item from pantry and adds to freezer
+- `perishable-handler.test.ts` > handlePerishableCallback > ok just edits message with no data change
+- `perishable-handler.test.ts` > handlePerishableCallback > toss removes from pantry and logs waste
+- `perishable-handler.test.ts` > handlePerishableCheckJob > sends alert for items expiring within 2 days
+- `perishable-handler.test.ts` > handlePerishableCheckJob > sends to all household members
+- `pantry-store.test.ts` > expiry estimation > enrichWithExpiry adds expiryEstimate to perishable items
+- `pantry-store.test.ts` > expiry estimation > isPerishableCategory returns true for perishable categories
 
 **Edge case tests:**
-- TBD
+- `perishable-handler.test.ts` > handlePerishableCheckJob > skips items without expiryEstimate
+- `perishable-handler.test.ts` > handlePerishableCheckJob > sends nothing when no items expiring
+- `perishable-handler.test.ts` > handlePerishableCheckJob > skips when no household
+- `perishable-handler.test.ts` > handlePerishableCheckJob > uses pantry index for callback data
+- `perishable-handler.test.ts` > security > rejects freeze when item name does not match
+- `perishable-handler.test.ts` > security > rejects toss when item name does not match
+- `pantry-store.test.ts` > expiry estimation > skips items that already have expiryEstimate
+- `pantry-store.test.ts` > expiry estimation > defaults to no expiry on LLM failure
+- `pantry-store.test.ts` > expiry estimation > isPerishableCategory returns false for shelf-stable
 
 **Fixes:** None
 
@@ -689,15 +703,32 @@ Track rough expiry windows for perishable items. Send alerts when approaching ex
 
 ### REQ-PANTRY-005: Freezer inventory
 
-**Origin:** PI-5 | **Status:** Planned
+**Origin:** PI-5 | **Status:** Implemented
 
-Track freezer items with date frozen. Surface items before freezer burn. Pairs with batch cooking module for frozen portion logging.
+`/freezer` command shows inventory with age warnings (3+ months). Items added via command, natural language ("add chicken to freezer"), or transferred from leftovers/pantry. Thaw/Toss inline buttons per item with name verification to prevent wrong-item mutations. Monday 9am check job alerts household on aging items (3+ months). Waste logging on toss. YAML storage at `freezer.yaml` in shared scope.
 
 **Standard tests:**
-- TBD
+- `freezer-store.test.ts` > loadFreezer > parses { items: [...] } format
+- `freezer-store.test.ts` > saveFreezer > writes YAML with frontmatter
+- `freezer-store.test.ts` > addFreezerItem > adds new item
+- `freezer-store.test.ts` > removeFreezerItem > removes item by index
+- `freezer-store.test.ts` > formatFreezerList > formats items with source info
+- `freezer-store.test.ts` > buildFreezerButtons > creates thaw and toss buttons with name
+- `freezer-store.test.ts` > parseFreezerInput > extracts name and quantity
+- `freezer-handler.test.ts` > handleFreezerCallback > thaw removes item, confirms
+- `freezer-handler.test.ts` > handleFreezerCallback > toss removes item and logs waste
+- `freezer-handler.test.ts` > handleFreezerCheckJob > sends reminder for 3+ month items
+- `natural-language.test.ts` > H6 > routes "add chicken to the freezer" to freezer add
+- `natural-language.test.ts` > H6 > routes "what's in the freezer?" to freezer view
 
 **Edge case tests:**
-- TBD
+- `freezer-store.test.ts` > loadFreezer > returns empty for null, malformed YAML
+- `freezer-store.test.ts` > addFreezerItem > updates existing with same name
+- `freezer-store.test.ts` > removeFreezerItem > returns unchanged for invalid index
+- `freezer-store.test.ts` > getAgingFreezerItems > inclusive boundary at threshold
+- `freezer-store.test.ts` > formatFreezerList > returns empty message for no items
+- `freezer-handler.test.ts` > handleFreezerCheckJob > sends nothing when no aging items
+- `freezer-handler.test.ts` > handleFreezerCheckJob > skips when no household
 
 **Fixes:** None
 
@@ -707,15 +738,35 @@ Track freezer items with date frozen. Surface items before freezer burn. Pairs w
 
 ### REQ-WASTE-001: Leftover tracking
 
-**Origin:** LW-1 | **Status:** Planned
+**Origin:** LW-1 | **Status:** Implemented
 
-After meal is cooked, ask about leftovers. Log leftover item, quantity, and LLM-estimated expiry window.
+Log leftovers via `/leftovers` command, natural language ("we have leftover chili"), or post-meal prompt after rating/cooking. LLM estimates fridge shelf life (defaults to 3 days on failure). Use/Freeze/Toss inline buttons per item. Status transitions: active → used/frozen/wasted. Post-rating and post-cook leftover prompts pass recipe title through callback data for `fromRecipe` tracking. Name verification in callbacks prevents double-action and wrong-item mutations. YAML storage at `leftovers.yaml` in shared scope.
 
 **Standard tests:**
-- TBD
+- `leftover-store.test.ts` > loadLeftovers > parses { items: [...] } format
+- `leftover-store.test.ts` > saveLeftovers > writes YAML with frontmatter
+- `leftover-store.test.ts` > addLeftover > adds new leftover
+- `leftover-store.test.ts` > updateLeftoverStatus > transitions status at index
+- `leftover-store.test.ts` > getActiveLeftovers > filters to active only
+- `leftover-store.test.ts` > formatLeftoverList > formats with expiry indicators
+- `leftover-store.test.ts` > buildLeftoverButtons > creates Use/Freeze/Toss buttons
+- `leftover-store.test.ts` > parseLeftoverInput > extracts name and quantity
+- `leftover-handler.test.ts` > handleLeftoverCallback > use marks used
+- `leftover-handler.test.ts` > handleLeftoverCallback > freeze marks frozen and creates freezer item
+- `leftover-handler.test.ts` > handleLeftoverCallback > toss marks wasted and logs waste
+- `natural-language.test.ts` > H6 > routes "we have leftover chili" to leftover add
+- `natural-language.test.ts` > H6 > routes "any leftovers?" to leftover view
 
 **Edge case tests:**
-- TBD
+- `leftover-store.test.ts` > loadLeftovers > returns empty for null, malformed YAML, frontmatter
+- `leftover-store.test.ts` > addLeftover > dedup by name case-insensitive
+- `leftover-store.test.ts` > updateLeftoverStatus > returns unchanged for invalid index
+- `leftover-store.test.ts` > getExpiringLeftovers > includes already-expired items
+- `leftover-store.test.ts` > formatLeftoverList > shows ⚠️ for tomorrow, ❌ for today/past
+- `leftover-handler.test.ts` > security > rejects callback with name mismatch
+- `leftover-handler.test.ts` > security > rejects double-action on used/frozen/wasted items
+- `leftover-handler.test.ts` > state transitions > freeze creates freezer item with fromRecipe
+- `leftover-handler.test.ts` > state transitions > auto-expire creates waste log entry
 
 **Fixes:** None
 
@@ -739,15 +790,20 @@ Proactively suggest meals that use tracked leftovers. Suggestions sent as schedu
 
 ### REQ-WASTE-003: Use-or-freeze nudges
 
-**Origin:** LW-3 | **Status:** Planned
+**Origin:** LW-3 | **Status:** Implemented
 
-Before a leftover item hits expiry window, send a nudge to eat or freeze it.
+Daily 10am leftover check job auto-wastes expired leftovers and sends "freeze it or lose it" alerts for items expiring today/tomorrow. Action buttons: Freeze/Eat/Toss for today, Freeze/Got it for tomorrow. Expired items logged to waste log automatically. Alerts sent to all household members.
 
 **Standard tests:**
-- TBD
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > auto-wastes expired items
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > sends alert for expiring items
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > handles mix of expired, today, tomorrow
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > sends to all household members
 
 **Edge case tests:**
-- TBD
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > sends nothing when no active leftovers
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > skips when no household
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > no-op when nothing expiring
 
 **Fixes:** None
 
@@ -755,15 +811,23 @@ Before a leftover item hits expiry window, send a nudge to eat or freeze it.
 
 ### REQ-WASTE-004: Waste tracking
 
-**Origin:** LW-4 | **Status:** Planned
+**Origin:** LW-4 | **Status:** Implemented
 
-If leftover expires without being used, prompt user. Build data on what gets wasted most to inform future planning.
+Append-only waste log at `waste-log.yaml`. Automatic logging when leftovers expire (daily check job) or items are tossed via buttons. Natural language waste logging ("the milk went bad") with pantry auto-removal. Input sanitized before storage. Each entry tracks name, quantity, reason (expired/spoiled/discarded), source (leftover/pantry/freezer), and date.
 
 **Standard tests:**
-- TBD
+- `waste-store.test.ts` > loadWasteLog > parses { entries: [...] } format
+- `waste-store.test.ts` > appendWaste > adds entry to empty log
+- `waste-store.test.ts` > appendWaste > appends to existing entries
+- `waste-store.test.ts` > formatWasteSummary > formats entries with reason emojis
+- `natural-language.test.ts` > H6 > routes "the milk went bad" to waste logging
+- `natural-language.test.ts` > H6 > routes "threw out the old rice" to waste logging
 
 **Edge case tests:**
-- TBD
+- `waste-store.test.ts` > loadWasteLog > returns empty for null, malformed YAML
+- `waste-store.test.ts` > loadWasteLog > strips frontmatter
+- `waste-store.test.ts` > formatWasteSummary > returns empty message for no entries
+- `natural-language.test.ts` > H6 > waste intent removes matching item from pantry
 
 **Fixes:** None
 
@@ -1718,12 +1782,12 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts | 11 | 8 | Implemented |
 | REQ-PANTRY-002 | pantry-matcher.test.ts, app.test.ts, natural-language.test.ts | 4 | 4 | Implemented |
 | REQ-PANTRY-003 | grocery-generator.test.ts, pantry-store.test.ts | 3 | 3 | Implemented |
-| REQ-PANTRY-004 | TBD | 0 | 0 | Planned |
-| REQ-PANTRY-005 | TBD | 0 | 0 | Planned |
-| REQ-WASTE-001 | TBD | 0 | 0 | Planned |
+| REQ-PANTRY-004 | perishable-handler.test.ts, pantry-store.test.ts | 7 | 9 | Implemented |
+| REQ-PANTRY-005 | freezer-store.test.ts, freezer-handler.test.ts, natural-language.test.ts | 12 | 7 | Implemented |
+| REQ-WASTE-001 | leftover-store.test.ts, leftover-handler.test.ts, natural-language.test.ts | 13 | 9 | Implemented |
 | REQ-WASTE-002 | TBD | 0 | 0 | Planned |
-| REQ-WASTE-003 | TBD | 0 | 0 | Planned |
-| REQ-WASTE-004 | TBD | 0 | 0 | Planned |
+| REQ-WASTE-003 | leftover-handler.test.ts | 4 | 3 | Implemented |
+| REQ-WASTE-004 | waste-store.test.ts, natural-language.test.ts | 6 | 4 | Implemented |
 | REQ-FAMILY-001 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-002 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-003 | TBD | 0 | 0 | Planned |
@@ -1768,4 +1832,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **23 test files** | **173** | **234** | **407 tests** |
+| **Totals** | **29 test files** | **215** | **266** | **481 tests** |
