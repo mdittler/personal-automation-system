@@ -563,3 +563,49 @@ describe('handlePerishableCheckJob', () => {
 		expect(message).toContain('Berries');
 	});
 });
+
+// ─── Security Tests ──────────────────────────────────────────────
+
+describe('security: perishable callback guards', () => {
+	let services: CoreServices;
+
+	function setupServices(storeData: Record<string, string>) {
+		services = createMockCoreServices();
+		const storage = new Map(Object.entries(storeData));
+		const store = {
+			read: vi.fn(async (path: string) => storage.get(path) ?? null),
+			write: vi.fn(async (path: string, content: string) => { storage.set(path, content); }),
+			append: vi.fn(), list: vi.fn(), exists: vi.fn(), archive: vi.fn(),
+		};
+		return store;
+	}
+
+	it('rejects freeze when item name does not match (index shifted)', async () => {
+		const store = setupServices({
+			'pantry.yaml': pantryYaml([makePantryItem({ name: 'Yogurt' })]),
+			'freezer.yaml': stringify({ items: [] }),
+		});
+
+		// Callback says "Spinach" at index 0, but pantry[0] is now "Yogurt"
+		await handlePerishableCallback(services, 'freeze:0:Spinach', 'user1', 1, 1, store as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This item was already handled.',
+		);
+		// Pantry should NOT have been modified
+		expect(store.write).not.toHaveBeenCalled();
+	});
+
+	it('rejects toss when item name does not match (index shifted)', async () => {
+		const store = setupServices({
+			'pantry.yaml': pantryYaml([makePantryItem({ name: 'Milk' })]),
+		});
+
+		await handlePerishableCallback(services, 'toss:0:Chicken', 'user1', 1, 1, store as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This item was already handled.',
+		);
+		expect(store.write).not.toHaveBeenCalled();
+	});
+});

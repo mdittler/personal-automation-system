@@ -524,3 +524,114 @@ describe('handleLeftoverCheckJob', () => {
 		expect(userIds).toContain('user3');
 	});
 });
+
+// ─── Security Tests ──────────────────────────────────────────────
+
+describe('security: callback guards', () => {
+	let services: CoreServices;
+	let sharedStore: ReturnType<typeof mockStore>;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+	});
+
+	it('rejects callback when item name does not match (prevents wrong-item after mutation)', async () => {
+		const items = [makeLeftover({ name: 'Chili', status: 'active' })];
+		sharedStore = mockStore({ 'leftovers.yaml': stringify({ items }) });
+
+		// Try to "use" index 0 but with a different name (simulates shifted list)
+		await handleLeftoverCallback(services, 'use:0:Soup', 'user1', 1, 1, sharedStore as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This leftover was already handled.',
+		);
+		// Data should NOT have been modified
+		expect(sharedStore.write).not.toHaveBeenCalled();
+	});
+
+	it('rejects double-action on already-used leftover', async () => {
+		const items = [makeLeftover({ name: 'Chili', status: 'used' })];
+		sharedStore = mockStore({ 'leftovers.yaml': stringify({ items }) });
+
+		await handleLeftoverCallback(services, 'toss:0:Chili', 'user1', 1, 1, sharedStore as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This leftover was already handled.',
+		);
+		expect(sharedStore.write).not.toHaveBeenCalled();
+	});
+
+	it('rejects freeze on already-frozen leftover', async () => {
+		const items = [makeLeftover({ name: 'Rice', status: 'frozen' })];
+		sharedStore = mockStore({ 'leftovers.yaml': stringify({ items }) });
+
+		await handleLeftoverCallback(services, 'freeze:0:Rice', 'user1', 1, 1, sharedStore as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This leftover was already handled.',
+		);
+	});
+
+	it('rejects toss on already-wasted leftover', async () => {
+		const items = [makeLeftover({ name: 'Soup', status: 'wasted' })];
+		sharedStore = mockStore({ 'leftovers.yaml': stringify({ items }) });
+
+		await handleLeftoverCallback(services, 'toss:0:Soup', 'user1', 1, 1, sharedStore as any);
+
+		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
+			1, 1, 'This leftover was already handled.',
+		);
+	});
+});
+
+// ─── State Transition Tests ──────────────────────────────────────
+
+describe('state transitions', () => {
+	let services: CoreServices;
+	let sharedStore: ReturnType<typeof mockStore>;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+	});
+
+	it('freeze lifecycle: leftover marked frozen AND freezer item created', async () => {
+		const items = [makeLeftover({ name: 'Chili', quantity: '3 servings', fromRecipe: 'Beef Chili', status: 'active' })];
+		sharedStore = mockStore({
+			'leftovers.yaml': stringify({ items }),
+			'freezer.yaml': stringify({ items: [] }),
+		});
+
+		await handleLeftoverCallback(services, 'freeze:0:Chili', 'user1', 1, 1, sharedStore as any);
+
+		// Leftover should be marked frozen
+		const leftoverData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'leftovers.yaml')?.[1] as string;
+		expect(leftoverData).toContain('frozen');
+
+		// Freezer should have the item
+		const freezerData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'freezer.yaml')?.[1] as string;
+		expect(freezerData).toContain('Chili');
+		expect(freezerData).toContain('Beef Chili'); // source = fromRecipe
+	});
+
+	it('auto-expire lifecycle: expired leftover wasted AND waste log entry created', async () => {
+		const household = makeHousehold({ members: ['user1'] });
+		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		sharedStore = mockStore({
+			'household.yaml': stringify(household),
+			'leftovers.yaml': stringify({ items: [expired] }),
+			'waste-log.yaml': stringify({ entries: [] }),
+		});
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+		await handleLeftoverCheckJob(services, '2026-04-02');
+
+		// Leftover should be marked wasted
+		const leftoverData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'leftovers.yaml')?.[1] as string;
+		expect(leftoverData).toContain('wasted');
+
+		// Waste log should have entry
+		const wasteData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'waste-log.yaml')?.[1] as string;
+		expect(wasteData).toContain('Old Soup');
+		expect(wasteData).toContain('expired');
+	});
+});
