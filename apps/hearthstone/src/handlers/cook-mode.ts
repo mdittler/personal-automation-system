@@ -216,16 +216,40 @@ export async function handleServingsReply(
 	);
 	await services.telegram.send(ctx.userId, ingredientMsg);
 
-	// Send first step with buttons
+	// Check if TTS/hands-free should be offered
+	const audioAvailable = services.audio != null;
+	const handsFreeDefault = audioAvailable ? await services.config.get('hands_free_default') : false;
+
+	if (audioAvailable && handsFreeDefault) {
+		session.ttsEnabled = true;
+		await sendFirstStep(services, session, ctx.userId);
+	} else if (audioAvailable) {
+		await services.telegram.sendWithButtons(
+			ctx.userId,
+			'🔊 Want hands-free mode? I\'ll read each step aloud on your speaker.',
+			[[
+				{ text: 'Yes, hands-free', callbackData: 'app:hearthstone:ck:hf:y' },
+				{ text: 'No thanks', callbackData: 'app:hearthstone:ck:hf:n' },
+			]],
+		);
+	} else {
+		await sendFirstStep(services, session, ctx.userId);
+	}
+}
+
+// ─── sendFirstStep helper ───────────────────────────────────────────
+
+async function sendFirstStep(services: CoreServices, session: CookSession, userId: string): Promise<void> {
 	const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 	const stepMsg = formatStepMessage(session);
-	const sent = await services.telegram.sendWithButtons(
-		ctx.userId,
-		stepMsg,
-		buildStepButtons(session, timer),
-	);
+	const sent = await services.telegram.sendWithButtons(userId, stepMsg, buildStepButtons(session, timer));
 	session.lastMessageId = sent.messageId;
 	session.lastChatId = sent.chatId;
+
+	if (session.ttsEnabled && services.audio) {
+		const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+		services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+	}
 }
 
 // ─── Timer helpers ──────────────────────────────────────────────────
@@ -263,6 +287,19 @@ export async function handleCookCallback(
 		return;
 	}
 
+	if (action === 'hf:y' || action === 'hf:n') {
+		const session = getSession(userId);
+		if (!session) {
+			await services.telegram.send(userId, 'No active cook session. Start one with /cook.');
+			return;
+		}
+		session.ttsEnabled = action === 'hf:y';
+		const choice = action === 'hf:y' ? '🔊 Hands-free mode enabled!' : 'Text-only mode.';
+		await services.telegram.editMessage(chatId, messageId, choice, []);
+		await sendFirstStep(services, session, userId);
+		return;
+	}
+
 	const session = getSession(userId);
 	if (!session) {
 		await services.telegram.send(userId, 'No active cook session. Start one with /cook.');
@@ -292,6 +329,10 @@ export async function handleCookCallback(
 					formatStepMessage(session),
 					buildStepButtons(session, timer),
 				);
+				if (session.ttsEnabled && services.audio) {
+					const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+					services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+				}
 			}
 			break;
 		}
@@ -314,6 +355,10 @@ export async function handleCookCallback(
 					buildStepButtons(session, timer),
 				);
 			}
+			if (session.ttsEnabled && services.audio) {
+				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+			}
 			break;
 		}
 		case 'r': {
@@ -324,6 +369,10 @@ export async function handleCookCallback(
 				formatStepMessage(session),
 				buildStepButtons(session, timer),
 			);
+			if (session.ttsEnabled && services.audio) {
+				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+			}
 			break;
 		}
 		case 'd': {
@@ -438,6 +487,10 @@ export async function handleCookTextAction(
 					formatStepMessage(session),
 					buildStepButtons(session, timer),
 				);
+				if (session.ttsEnabled && services.audio) {
+					const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+					services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+				}
 			}
 			break;
 		}
@@ -451,6 +504,10 @@ export async function handleCookTextAction(
 				`${prefix}${formatStepMessage(session)}`,
 				buildStepButtons(session, timer),
 			);
+			if (session.ttsEnabled && services.audio) {
+				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+			}
 			break;
 		}
 		case 'repeat': {
@@ -460,6 +517,10 @@ export async function handleCookTextAction(
 				formatStepMessage(session),
 				buildStepButtons(session, timer),
 			);
+			if (session.ttsEnabled && services.audio) {
+				const device = (await services.config.get('cooking_speaker_device')) as string | undefined;
+				services.audio.speak(session.instructions[session.currentStep] ?? '', device || undefined).catch(() => {});
+			}
 			break;
 		}
 		case 'done': {

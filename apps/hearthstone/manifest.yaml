@@ -267,3 +267,11 @@ user_config:
     type: number
     default: 3
     description: "Days to wait between introducing new allergens for babies"
+  - key: cooking_speaker_device
+    type: string
+    default: ""
+    description: "Chromecast/Google Home device name for hands-free cooking. Leave empty for system default."
+  - key: hands_free_default
+    type: boolean
+    default: false
+    description: "Automatically enable voice output when starting cook mode (skip the prompt)."
