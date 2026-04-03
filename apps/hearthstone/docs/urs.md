@@ -966,15 +966,30 @@ Step-by-step cooking guidance via Telegram: send first step, advance with "next"
 
 ### REQ-COOK-002: Timer integration
 
-**Origin:** CE-2 | **Status:** Planned
+**Origin:** CE-2 | **Status:** Implemented (Phase H5b)
 
-If a step involves a time, offer to set a timer. When timer fires, send Telegram notification with next instruction.
+Regex-based time detection in recipe steps (compound, range, approximate, simple, seconds). "Set Timer" button appears when timing detected. setTimeout-based timer with auto-cancel on step navigation. Timer fire sends Telegram notification with Next button. One timer per session, new replaces old. TTS announcement on fire when hands-free enabled.
 
 **Standard tests:**
-- TBD
+- `timer-parser.test.ts` > `parseStepTimer` > parses "bake for 25 minutes"
+- `timer-parser.test.ts` > `parseStepTimer` > parses compound "1 hour 30 minutes"
+- `timer-parser.test.ts` > `parseStepTimer` > parses range "5-7 minutes" as midpoint
+- `timer-parser.test.ts` > `parseStepTimer` > parses "about 20 minutes"
+- `timer-parser.test.ts` > `parseStepTimer` > parses "30 sec" as fractional minutes
+- `timer-parser.test.ts` > `formatDuration` > formats minutes, hours, seconds
+- `cook-timer.test.ts` > timer set > sets timer and sends confirmation
+- `cook-timer.test.ts` > timer set > fires notification after duration
+- `cook-timer.test.ts` > timer cancel > cancels and restores buttons
+- `cook-timer.test.ts` > auto-cancel > cancels on next/back/done navigation
+- `cook-session.test.ts` > buildStepButtons with timer > returns 2 rows when timer provided
+- `cook-session.test.ts` > buildStepButtons with timer > shows cancel button when active timer
 
 **Edge case tests:**
-- TBD
+- `timer-parser.test.ts` > `parseStepTimer` > returns null for step without timing
+- `timer-parser.test.ts` > `parseStepTimer` > ignores temperature references
+- `cook-timer.test.ts` > timer set > does nothing when step has no timing
+- `cook-timer.test.ts` > timer set > replaces existing timer
+- `cook-timer.test.ts` > timer fire with TTS > speaks when enabled, skips when disabled
 
 **Fixes:** None
 
@@ -982,15 +997,20 @@ If a step involves a time, offer to set a timer. When timer fires, send Telegram
 
 ### REQ-COOK-003: TTS / Chromecast support
 
-**Origin:** CE-3 | **Status:** Planned
+**Origin:** CE-3 | **Status:** Implemented (Phase H5b)
 
-Push current cooking step to Chromecast audio via TTS for hands-free cooking. User advances via Telegram.
+Hands-free mode prompt after ingredients shown. Yes/No buttons (ck:hf:y/n). Each step spoken via AudioService.speak(). Device from user config cooking_speaker_device. Best-effort non-blocking: audio failure logged, text continues. Auto-enable when hands_free_default config is true. Graceful skip when audio service unavailable.
 
 **Standard tests:**
-- TBD
+- `cook-tts.test.ts` > hands-free prompt > shows prompt when audio available
+- `cook-tts.test.ts` > hands-free prompt > skips prompt when hands_free_default true
+- `cook-tts.test.ts` > hands-free prompt > skips prompt when audio unavailable
+- `cook-tts.test.ts` > hands-free callbacks > ck:hf:y enables TTS and speaks first step
+- `cook-tts.test.ts` > hands-free callbacks > ck:hf:n disables TTS
+- `cook-tts.test.ts` > hands-free callbacks > uses configured speaker device
+- `cook-tts.test.ts` > hands-free callbacks > TTS failure does not prevent step display
 
-**Edge case tests:**
-- TBD
+**Edge case tests:** None
 
 **Fixes:** None
 
@@ -1045,19 +1065,26 @@ Before starting cook mode, ask serving count. Parse "4", "double", "half", "quar
 
 ### REQ-QUERY-001: Contextual food questions
 
-**Origin:** QA-1 | **Status:** Partially Implemented (Phase H1: basic food questions via LLM, no context store integration yet)
+**Origin:** QA-1 | **Status:** Implemented (Phase H5b)
 
-Handle free-text questions about food safety, substitutions, and cooking knowledge using household context from context store.
+Handle free-text questions about food safety, substitutions, and cooking knowledge. Enhanced with user context from context store (dietary preferences, allergies, restrictions) and active cook session context (current recipe and step). Graceful fallback when context store unavailable or empty.
 
 **Standard tests:**
 - `app.test.ts` > `handleMessage — food question intent` > answers food questions
+- `contextual-food-question.test.ts` > food question with user context in prompt
+- `contextual-food-question.test.ts` > food question with active cook session context
+- `contextual-food-question.test.ts` > food question with both context and session
+- `contextual-food-question.test.ts` > food question without context (basic prompt)
 
 **Edge case tests:**
 - `app.test.ts` > `handleMessage — food question intent` > handles food question LLM failure
 - `app.test.ts` > `handleMessage — security` > sanitizes food question text for LLM
+- `contextual-food-question.test.ts` > context store throws — graceful degradation
+- `contextual-food-question.test.ts` > context store returns empty — no context section
 
 **Fixes:**
 - 2026-03-31: Added sanitizeInput() + anti-instruction framing to food question prompt
+- 2026-04-02: Added context store integration + active cook session context (H5b)
 
 ---
 
@@ -1706,10 +1733,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-BATCH-003 | TBD | 0 | 0 | Planned |
 | REQ-BATCH-004 | TBD | 0 | 0 | Planned |
 | REQ-COOK-001 | cook-session.test.ts, cook-mode-handler.test.ts | 23 | 24 | Implemented |
-| REQ-COOK-002 | TBD | 0 | 0 | Planned |
-| REQ-COOK-003 | TBD | 0 | 0 | Planned |
+| REQ-COOK-002 | cook-timer.test.ts, cook-session.test.ts | 17 | 8 | Implemented |
+| REQ-COOK-003 | cook-tts.test.ts | 15 | 0 | Implemented |
 | REQ-COOK-004 | recipe-scaler.test.ts, cook-mode-handler.test.ts | 18 | 11 | Implemented |
-| REQ-QUERY-001 | app.test.ts | 1 | 2 | Partial |
+| REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 14 | 2 | Implemented |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
 | REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
