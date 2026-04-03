@@ -218,12 +218,12 @@ describe('freezer-store', () => {
 			expect(result).toHaveLength(0);
 		});
 
-		it('includes item frozen exactly at threshold boundary (exclusive)', () => {
+		it('includes item frozen exactly at threshold boundary (inclusive)', () => {
 			// Frozen exactly 3 months ago from 2026-04-02 is 2026-01-02
-			// olderThanMonths = 3 means more than 3 months, so exactly 3 months should NOT be included
+			// olderThanMonths = 3 means 3+ months, so exactly 3 months IS included (aligns with display)
 			const items = [makeFreezerItem({ name: 'Edge Case', frozenDate: '2026-01-02' })];
 			const result = getAgingFreezerItems(items, 3, '2026-04-02');
-			expect(result).toHaveLength(0);
+			expect(result).toHaveLength(1);
 		});
 
 		it('includes item frozen one day past threshold', () => {

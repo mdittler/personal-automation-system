@@ -2103,6 +2103,7 @@ async function estimateLeftoverExpiry(storedDate: string, foodName: string): Pro
 		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) || days <= 0 ? 3 : days));
 		return expiry.toISOString().slice(0, 10);
 	} catch {
+		services.logger.warn('LLM expiry estimation failed for "%s", defaulting to 3 days', foodName);
 		const expiry = new Date(`${storedDate}T00:00:00Z`);
 		expiry.setUTCDate(expiry.getUTCDate() + 3);
 		return expiry.toISOString().slice(0, 10);
@@ -2239,7 +2240,9 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 	const itemText = text
 		.replace(/\b(throw|threw|toss|tossed|discard|dump)(ed)?\b/gi, '')
 		.replace(/\b(out|away)\b/gi, '')
-		.replace(/\b(the|some|it|went bad|gone bad|spoiled|expired|moldy|rotten)\b/gi, '')
+		.replace(/\b(the|some|it|all|that|this|those|these)\b/gi, '')
+		.replace(/\b(went bad|gone bad|spoiled|expired|moldy|rotten|off)\b/gi, '')
+		.replace(/\b(is|are|was|were|has|have|had|got|gotten)\b/gi, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 

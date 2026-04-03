@@ -81,8 +81,8 @@ export function getAgingFreezerItems(
 		const wholeMonths = (ty - fy) * 12 + (tm - fm);
 		if (wholeMonths > olderThanMonths) return true;
 		if (wholeMonths < olderThanMonths) return false;
-		// wholeMonths === olderThanMonths: include only if the day-of-month has advanced past frozen day
-		return td > fd;
+		// wholeMonths === olderThanMonths: include on exact boundary day (inclusive)
+		return td >= fd;
 	});
 }
 
