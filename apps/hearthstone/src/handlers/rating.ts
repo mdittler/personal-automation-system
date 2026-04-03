@@ -146,7 +146,7 @@ export async function handleRateCallback(
 	await services.telegram.editMessage(chatId, messageId, `${emoji} Rated${confirmNote}`);
 
 	// H6: Ask about leftovers after rating
-	if (direction !== 'skip' && meal.recipeTitle) {
+	if (meal.recipeTitle) {
 		await services.telegram.sendWithButtons(
 			userId,
 			`Any leftovers from ${meal.recipeTitle}?`,

@@ -179,7 +179,7 @@ export function isPerishableCategory(category: string): boolean {
  * and are in perishable categories.
  */
 export async function enrichWithExpiry(
-	services: { llm: { complete: (prompt: string, opts: { tier: string }) => Promise<string> }; timezone: string },
+	services: { llm: { complete: (prompt: string, opts: { tier: 'fast' | 'standard' | 'reasoning' }) => Promise<string> }; timezone: string },
 	items: PantryItem[],
 ): Promise<PantryItem[]> {
 	const result = [...items];
