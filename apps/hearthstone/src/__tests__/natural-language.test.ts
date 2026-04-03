@@ -1726,6 +1726,8 @@ describe('Natural Language — Real User Messages', () => {
 
 		it('user replies "4" → starts cook mode with 4 servings', async () => {
 			setupHousehold();
+			// Disable audio to skip hands-free prompt and go straight to step 1
+			(services as any).audio = undefined;
 			await handleCommand!('cook', ['chicken', 'stir', 'fry'], msg(''));
 			await handleMessage(msg('4'));
 			expect(hasActiveSession('matt')).toBe(true);
