@@ -119,8 +119,30 @@ export function formatBatchPrepMessage(analysis: BatchAnalysis): string {
 }
 
 /**
+ * Check whether two food terms match using word-boundary-aware substring matching.
+ * Both directions are checked (a contains b, or b contains a). When the shorter
+ * term appears inside the longer, we verify its start is at a word boundary to
+ * avoid false positives like "ice" matching "rice" or "oil" matching "foil".
+ * The end is allowed to extend into suffixes (e.g., "breast" matches "breasts").
+ */
+function foodTermsMatch(a: string, b: string): boolean {
+	const shorter = a.length <= b.length ? a : b;
+	const longer = a.length <= b.length ? b : a;
+
+	if (shorter.length < 2) return false;
+
+	const idx = longer.indexOf(shorter);
+	if (idx === -1) return false;
+
+	// The match must START at a word boundary (start-of-string or preceded by non-letter).
+	// This prevents "ice" matching "rice" while allowing "breast" to match "breasts".
+	return idx === 0 || !/[a-z]/.test(longer[idx - 1]!);
+}
+
+/**
  * Match freezer items to recipe ingredients for a set of meals.
- * Uses case-insensitive substring matching in both directions.
+ * Uses case-insensitive substring matching in both directions,
+ * with a minimum term length guard to avoid false positives.
  */
 export function matchFreezerToRecipes(
 	freezer: FreezerItem[],
@@ -140,7 +162,7 @@ export function matchFreezerToRecipes(
 			const freezerName = freezerItem.name.toLowerCase();
 			const hasMatch = recipe.ingredients.some((ing) => {
 				const ingName = ing.name.toLowerCase();
-				return ingName.includes(freezerName) || freezerName.includes(ingName);
+				return foodTermsMatch(ingName, freezerName);
 			});
 
 			if (hasMatch) {
@@ -176,13 +198,17 @@ export function formatDefrostMessage(matches: DefrostMatch[]): string {
 /**
  * Build inline keyboard buttons for freezer-friendly recipes in batch prep message.
  * Returns one row per recipe with a "Double & freeze" button.
+ *
+ * Uses numeric index instead of recipe name in callback data to stay within
+ * Telegram's 64-byte callback data limit. The caller must store the recipe
+ * list to resolve the index when the callback fires.
  */
 export function buildBatchFreezeButtons(
 	freezerFriendlyRecipes: string[],
 ): Array<Array<{ text: string; callbackData: string }>> {
-	return freezerFriendlyRecipes.map((recipe) => [{
+	return freezerFriendlyRecipes.map((recipe, index) => [{
 		text: `🧊 Double & freeze: ${recipe}`,
-		callbackData: `app:hearthstone:batch:freeze:${encodeURIComponent(recipe)}`,
+		callbackData: `app:hearthstone:batch:freeze:${index}`,
 	}]);
 }
 

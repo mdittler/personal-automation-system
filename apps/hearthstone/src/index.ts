@@ -607,11 +607,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 						const batchMsg = formatBatchPrepMessage(batchResult);
 						const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 						for (const memberId of hh.household.members) {
-							if (batchButtons.length > 0) {
-								await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
-							} else {
-								await services.telegram.send(memberId, batchMsg);
-							}
+							await sendBatchPrepToMember(memberId, batchMsg, batchButtons, batchResult.freezerFriendlyRecipes);
 						}
 					}
 				} catch (batchErr) {
@@ -779,7 +775,16 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 
 		// ─── H7: Batch freeze callback ──────────────────────
 		if (data.startsWith('batch:freeze:')) {
-			const recipeName = decodeURIComponent(data.slice('batch:freeze:'.length));
+			const indexStr = data.slice('batch:freeze:'.length);
+			const index = Number.parseInt(indexStr, 10);
+			if (Number.isNaN(index) || index < 0) return;
+
+			const recipeName = getBatchFreezeRecipe(ctx.chatId, ctx.messageId, index);
+			if (!recipeName) {
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'This freeze suggestion has expired. Generate a new meal plan to try again.');
+				return;
+			}
+
 			const today = todayDate(services.timezone);
 			const freezerItem: FreezerItem = {
 				name: `${recipeName} (doubled batch)`,
@@ -871,6 +876,50 @@ function hasPendingFreezerAdd(userId: string): boolean {
 		return false;
 	}
 	return true;
+}
+
+// ─── H7: Pending batch freeze recipe lists ──────────────────────
+// Maps a composite key (chatId:messageId) to the list of freezer-friendly recipe
+// names, so the callback handler can resolve the numeric index back to a name.
+// Uses the same TTL as other pending maps (5 minutes).
+const pendingBatchFreezeRecipes = new Map<string, { recipes: string[]; expiresAt: number }>();
+
+function setBatchFreezeRecipes(chatId: number, messageId: number, recipes: string[]): void {
+	const key = `${chatId}:${messageId}`;
+	pendingBatchFreezeRecipes.set(key, { recipes, expiresAt: Date.now() + PENDING_TTL_MS });
+	if (pendingBatchFreezeRecipes.size > 100) {
+		const oldest = pendingBatchFreezeRecipes.keys().next().value;
+		if (oldest) pendingBatchFreezeRecipes.delete(oldest);
+	}
+}
+
+function getBatchFreezeRecipe(chatId: number, messageId: number, index: number): string | undefined {
+	const key = `${chatId}:${messageId}`;
+	const entry = pendingBatchFreezeRecipes.get(key);
+	if (!entry || Date.now() > entry.expiresAt) {
+		pendingBatchFreezeRecipes.delete(key);
+		return undefined;
+	}
+	return entry.recipes[index];
+}
+
+/**
+ * Send a batch prep analysis message to a household member.
+ * When freeze buttons are present, stores the recipe list so the callback
+ * handler can resolve the numeric index back to a recipe name.
+ */
+async function sendBatchPrepToMember(
+	memberId: string,
+	batchMsg: string,
+	batchButtons: Array<Array<{ text: string; callbackData: string }>>,
+	freezerFriendlyRecipes: string[],
+): Promise<void> {
+	if (batchButtons.length > 0) {
+		const sent = await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
+		setBatchFreezeRecipes(sent.chatId, sent.messageId, freezerFriendlyRecipes);
+	} else {
+		await services.telegram.send(memberId, batchMsg);
+	}
 }
 
 // ─── Household Command ───────────────────────────────────────────
@@ -1642,11 +1691,7 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 				const batchMessage = formatBatchPrepMessage(batchAnalysis);
 				const batchButtons = buildBatchFreezeButtons(batchAnalysis.freezerFriendlyRecipes);
 				for (const memberId of hh.household.members) {
-					if (batchButtons.length > 0) {
-						await services.telegram.sendWithButtons(memberId, batchMessage, batchButtons);
-					} else {
-						await services.telegram.send(memberId, batchMessage);
-					}
+					await sendBatchPrepToMember(memberId, batchMessage, batchButtons, batchAnalysis.freezerFriendlyRecipes);
 				}
 			}
 		} catch (batchErr) {
@@ -1876,11 +1921,7 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 						const household = await loadHousehold(sharedStore);
 						if (household) {
 							for (const memberId of household.members) {
-								if (batchButtons.length > 0) {
-									await services.telegram.sendWithButtons(memberId, batchMessage, batchButtons);
-								} else {
-									await services.telegram.send(memberId, batchMessage);
-								}
+								await sendBatchPrepToMember(memberId, batchMessage, batchButtons, batchAnalysis.freezerFriendlyRecipes);
 							}
 						}
 					}
@@ -1992,11 +2033,7 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 				const batchMsg = formatBatchPrepMessage(batchResult);
 				const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 				for (const memberId of household.members) {
-					if (batchButtons.length > 0) {
-						await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
-					} else {
-						await services.telegram.send(memberId, batchMsg);
-					}
+					await sendBatchPrepToMember(memberId, batchMsg, batchButtons, batchResult.freezerFriendlyRecipes);
 				}
 			}
 		} catch (batchErr) {

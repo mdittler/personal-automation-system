@@ -366,6 +366,36 @@ describe('matchFreezerToRecipes', () => {
 
 		expect(matches).toHaveLength(2);
 	});
+
+	it('does not match when term appears mid-word (no word boundary)', () => {
+		// "ice" should NOT match "rice" — "ice" is not at a word boundary in "rice"
+		const freezer: FreezerItem[] = [
+			{ name: 'ice', quantity: '1 bag', frozenDate: '2026-03-20' },
+		];
+		const meals = [makeMeal()];
+		const recipes = [makeRecipe({
+			ingredients: [{ name: 'rice', quantity: 1, unit: 'cup' }],
+		})];
+
+		const matches = matchFreezerToRecipes(freezer, meals, recipes);
+
+		expect(matches).toHaveLength(0);
+	});
+
+	it('matches when term is at a word boundary', () => {
+		// "ham" should match "smoked ham" — "ham" is at a word boundary
+		const freezer: FreezerItem[] = [
+			{ name: 'ham', quantity: '1 lb', frozenDate: '2026-03-20' },
+		];
+		const meals = [makeMeal()];
+		const recipes = [makeRecipe({
+			ingredients: [{ name: 'smoked ham', quantity: 1, unit: 'lb' }],
+		})];
+
+		const matches = matchFreezerToRecipes(freezer, meals, recipes);
+
+		expect(matches).toHaveLength(1);
+	});
 });
 
 // ─── formatDefrostMessage ────────────────────────────────────────────
@@ -545,13 +575,14 @@ describe('checkDefrostNeeded', () => {
 // ─── buildBatchFreezeButtons ─────────────────────────────────────────────────
 
 describe('buildBatchFreezeButtons', () => {
-	it('builds one button row per freezer-friendly recipe', () => {
+	it('builds one button row per freezer-friendly recipe using numeric index', () => {
 		const buttons = buildBatchFreezeButtons(['Bolognese', 'Chili']);
 
 		expect(buttons).toHaveLength(2);
 		expect(buttons[0]![0]!.text).toContain('Bolognese');
-		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:Bolognese');
+		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:0');
 		expect(buttons[1]![0]!.text).toContain('Chili');
+		expect(buttons[1]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:1');
 	});
 
 	it('returns empty array when no recipes', () => {
@@ -559,8 +590,13 @@ describe('buildBatchFreezeButtons', () => {
 		expect(buttons).toHaveLength(0);
 	});
 
-	it('URL-encodes recipe names with special characters', () => {
-		const buttons = buildBatchFreezeButtons(['Mac & Cheese']);
-		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:Mac%20%26%20Cheese');
+	it('callback data stays within Telegram 64-byte limit even with long recipe names', () => {
+		const longName = 'Grandma\'s Famous Southern Fried Chicken with Buttermilk Biscuits and Honey Drizzle';
+		const buttons = buildBatchFreezeButtons([longName]);
+		// Callback data uses index, not name — always fits in 64 bytes
+		expect(Buffer.byteLength(buttons[0]![0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);
+		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:0');
+		// Display text still shows the full name
+		expect(buttons[0]![0]!.text).toContain(longName);
 	});
 });

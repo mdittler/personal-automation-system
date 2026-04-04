@@ -908,12 +908,19 @@ Expose family-related settings: children profiles, child meal adaptation toggle,
 Analyze finalized meal plan for shared prep components across recipes and suggest batch preparation.
 
 **Standard tests:**
-- LLM called with recipe details and returns parsed batch analysis
-- Handles new/external recipe suggestions (title only, no ingredients)
+- `batch-cooking.test.ts` > `analyzeBatchPrep` > calls LLM with recipe details and returns parsed analysis
+- `batch-cooking.test.ts` > `analyzeBatchPrep` > includes new/external suggestions with just title, no ingredients
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "plan meals for the week" → sends batch prep analysis after the plan
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "create a new meal plan" → batch prep message includes shared tasks
 
 **Edge case tests:**
-- Returns null when LLM fails
-- Returns null when LLM returns invalid JSON
+- `batch-cooking.test.ts` > `analyzeBatchPrep` > returns null when LLM fails
+- `batch-cooking.test.ts` > `analyzeBatchPrep` > returns null when LLM returns invalid JSON
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "make a meal plan" → still delivers plan even if batch prep LLM fails
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "plan our dinners" → batch prep not sent when LLM returns invalid JSON
+
+**Security tests:**
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "plan meals for next week" → batch prep sanitizes recipe content in LLM prompt
 
 **Fixes:** None
 
@@ -926,12 +933,13 @@ Analyze finalized meal plan for shared prep components across recipes and sugges
 Generate prep plan for configurable prep day that consolidates shared work, orders by timing, and estimates total prep time.
 
 **Standard tests:**
-- Formats shared tasks with recipes and time estimates
-- Includes freezer-friendly suggestions when present
+- `batch-cooking.test.ts` > `formatBatchPrepMessage` > formats shared tasks with recipes and time savings
+- `batch-cooking.test.ts` > `formatBatchPrepMessage` > includes freezer-friendly suggestions when present
+- `natural-language.test.ts` > `H7: Batch prep analysis` > "generate meal plan" → batch prep includes "double & freeze" suggestion
 
 **Edge case tests:**
-- Omits freezer-friendly section when empty
-- Handles empty shared tasks gracefully
+- `batch-cooking.test.ts` > `formatBatchPrepMessage` > omits freezer-friendly section when empty
+- `batch-cooking.test.ts` > `formatBatchPrepMessage` > handles empty shared tasks gracefully
 
 **Fixes:** None
 
@@ -941,18 +949,31 @@ Generate prep plan for configurable prep day that consolidates shared work, orde
 
 **Origin:** BC-3 | **Status:** Implemented (Phase H7)
 
-Flag freezer-friendly recipes, suggest doubling and freezing extra, log frozen portion in freezer inventory.
+Flag freezer-friendly recipes, suggest doubling and freezing extra, log frozen portion in freezer inventory via inline keyboard buttons.
 
 **Standard tests:**
-- Matches freezer items to recipe ingredients (case-insensitive)
-- Matches substring (ingredient contains freezer item name)
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > matches freezer items to recipe ingredients (case-insensitive)
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > matches substring (ingredient name contains freezer item name)
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > matches when freezer item name contains ingredient name
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > handles multiple matches across meals
+- `batch-cooking.test.ts` > `buildBatchFreezeButtons` > builds one button row per freezer-friendly recipe using numeric index
+- `natural-language.test.ts` > `H7: Batch freeze callback` > tapping "Double & freeze: Pasta Bolognese" → logs frozen batch in freezer
+- `natural-language.test.ts` > `H7: Batch freeze callback` > tapping freeze button saves item with source and "doubled batch" label
 
 **Edge case tests:**
-- Returns empty when no matches found
-- Returns empty when freezer is empty
-- Skips meals with no matching recipe in library
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > returns empty when no matches found
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > returns empty when freezer is empty
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > skips meals with no matching recipe in library
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > does not match when term appears mid-word (no word boundary)
+- `batch-cooking.test.ts` > `matchFreezerToRecipes` > matches when term is at a word boundary
+- `batch-cooking.test.ts` > `buildBatchFreezeButtons` > returns empty array when no recipes
+- `batch-cooking.test.ts` > `buildBatchFreezeButtons` > callback data stays within Telegram 64-byte limit even with long recipe names
+- `natural-language.test.ts` > `H7: Batch freeze callback` > expired or unknown index shows friendly expiry message
+- `natural-language.test.ts` > `H7: Batch freeze callback` > non-household member cannot use batch freeze button
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-03: Switched callback data from URL-encoded recipe names to numeric indices to stay within Telegram's 64-byte callback data limit
+- 2026-04-03: Added word-boundary matching to prevent false positives (e.g., "ice" no longer matches "rice")
 
 ---
 
@@ -963,13 +984,23 @@ Flag freezer-friendly recipes, suggest doubling and freezing extra, log frozen p
 When meal plan includes frozen ingredients, send reminder the night before to defrost.
 
 **Standard tests:**
-- Sends defrost reminder when tomorrow's meal uses frozen ingredient
-- Consolidates multiple frozen items into one message
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > sends reminder when tomorrow's meal uses frozen ingredient
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > consolidates multiple frozen items into one message
+- `batch-cooking.test.ts` > `formatDefrostMessage` > formats single defrost item
+- `batch-cooking.test.ts` > `formatDefrostMessage` > formats multiple defrost items
+- `natural-language.test.ts` > `H7: Defrost check` > sends defrost reminder when tomorrow dinner uses a frozen item
+- `natural-language.test.ts` > `H7: Defrost check` > defrost message tells you which meal the frozen item is for
+- `natural-language.test.ts` > `H7: Defrost check` > multiple frozen items matching same meal are consolidated into one message
 
 **Edge case tests:**
-- Does not send when no frozen ingredients match
-- Does not send when freezer is empty
-- Does not send when no meals planned for tomorrow
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > does not send when no frozen ingredients match
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > does not send when freezer is empty
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > does not send when no meals planned for tomorrow
+- `batch-cooking.test.ts` > `checkDefrostNeeded` > does not send when household is null
+- `natural-language.test.ts` > `H7: Defrost check` > does not send defrost reminder when no frozen items match tomorrow
+- `natural-language.test.ts` > `H7: Defrost check` > does not send when freezer is empty
+- `natural-language.test.ts` > `H7: Defrost check` > does not send when no meal plan exists
+- `natural-language.test.ts` > `H7: Defrost check` > does not crash when no household is set up
 
 **Fixes:** None
 
@@ -1424,14 +1455,29 @@ Subscribe to relevant events from health/fitness apps via PAS event bus.
 Track cuisine distribution of recent meal plans. Suggest branching out if defaulting to same cuisine for 2+ weeks.
 
 **Standard tests:**
-- Classifies recipes by cuisine type via LLM
-- Flags cuisine appearing 3+ times
-- Sends diversity alert to all household members
+- `cuisine-tracker.test.ts` > `classifyCuisines` > calls LLM with fast tier and returns parsed classifications
+- `cuisine-tracker.test.ts` > `findRepetition` > flags cuisine appearing 3+ times
+- `cuisine-tracker.test.ts` > `checkCuisineDiversity` > sends diversity alert to all household members
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > flags repetition when 3+ meals share a cuisine
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > uses fast LLM tier for cuisine classification
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > message suggests mixing in variety
 
 **Edge case tests:**
-- Returns empty when no cuisine appears 3+ times
-- Case-insensitive cuisine counting
-- Skips silently when no plan, no household, or LLM fails
+- `cuisine-tracker.test.ts` > `findRepetition` > returns empty when no cuisine appears 3+ times
+- `cuisine-tracker.test.ts` > `findRepetition` > case-insensitive cuisine counting
+- `cuisine-tracker.test.ts` > `classifyCuisines` > returns null when LLM fails
+- `cuisine-tracker.test.ts` > `classifyCuisines` > returns null when LLM returns invalid JSON
+- `cuisine-tracker.test.ts` > `checkCuisineDiversity` > skips silently when no plan exists
+- `cuisine-tracker.test.ts` > `checkCuisineDiversity` > skips silently when no household
+- `cuisine-tracker.test.ts` > `checkCuisineDiversity` > skips silently when LLM fails
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > stays quiet when meals are diverse
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > stays quiet when no meal plan exists
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > stays quiet when LLM classification fails
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > stays quiet when LLM returns garbage instead of JSON
+- `natural-language.test.ts` > `H7: Cuisine diversity check` > does not crash when no household is set up
+
+**Security tests:**
+- `natural-language.test.ts` > `H7: Cuisine diversity — security` > recipe titles with injection attempts are sanitized in LLM prompt
 
 **Fixes:** None
 
@@ -1806,10 +1852,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-FAMILY-002 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-003 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-004 | TBD | 0 | 0 | Planned |
-| REQ-BATCH-001 | batch-cooking.test.ts | 4 | 4 | Implemented |
-| REQ-BATCH-002 | batch-cooking.test.ts | 4 | 2 | Implemented |
-| REQ-BATCH-003 | batch-cooking.test.ts | 7 | 2 | Implemented |
-| REQ-BATCH-004 | batch-cooking.test.ts | 6 | 2 | Implemented |
+| REQ-BATCH-001 | batch-cooking.test.ts, natural-language.test.ts | 4 | 5 | Implemented |
+| REQ-BATCH-002 | batch-cooking.test.ts, natural-language.test.ts | 3 | 2 | Implemented |
+| REQ-BATCH-003 | batch-cooking.test.ts, natural-language.test.ts | 7 | 9 | Implemented |
+| REQ-BATCH-004 | batch-cooking.test.ts, natural-language.test.ts | 7 | 8 | Implemented |
 | REQ-COOK-001 | cook-session.test.ts, cook-mode-handler.test.ts | 23 | 24 | Implemented |
 | REQ-COOK-002 | timer-parser.test.ts, cook-timer.test.ts, cook-session.test.ts | 30 | 18 | Implemented |
 | REQ-COOK-003 | cook-tts.test.ts | 10 | 5 | Implemented |
@@ -1830,7 +1876,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-NUTR-002 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
-| REQ-CULTURE-001 | cuisine-tracker.test.ts | 14 | 0 | Implemented |
+| REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
 | REQ-CULTURE-002 | TBD | 0 | 0 | Planned |
 | REQ-HOUSEHOLD-001 | household.test.ts, household-guard.test.ts, app.test.ts | 7 | 31 | Implemented |
 | REQ-NFR-001 | app.test.ts | 1 | 0 | Implemented |
@@ -1846,4 +1892,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **31 test files** | **250** | **276** | **526 tests** |
+| **Totals** | **31 test files** | **242** | **303** | **545 tests** |
