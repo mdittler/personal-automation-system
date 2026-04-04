@@ -87,6 +87,7 @@ import {
 	saveFreezer,
 } from './services/freezer-store.js';
 import { appendWaste } from './services/waste-store.js';
+import { analyzeBatchPrep, formatBatchPrepMessage } from './services/batch-cooking.js';
 import type { GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
@@ -596,6 +597,19 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 						buildPlanButtons(plan),
 					);
 					services.logger.info('Regenerated meal plan for %s', ctx.userId);
+				}
+				// H7: Batch prep analysis (non-blocking)
+				try {
+					const allRecipesForBatch = await loadAllRecipes(hh.sharedStore);
+					const batchResult = await analyzeBatchPrep(services, plan, allRecipesForBatch);
+					if (batchResult) {
+						const batchMsg = formatBatchPrepMessage(batchResult);
+						for (const memberId of hh.household.members) {
+							await services.telegram.send(memberId, batchMsg);
+						}
+					}
+				} catch (batchErr) {
+					services.logger.error('Batch prep analysis failed: %s', batchErr);
 				}
 			} catch (err) {
 				const { userMessage } = classifyLLMError(err);
@@ -1596,6 +1610,20 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 			);
 			services.logger.info('Generated meal plan for %s (single member)', ctx.userId);
 		}
+
+		// H7: Batch prep analysis (non-blocking)
+		try {
+			const allRecipes = await loadAllRecipes(hh.sharedStore);
+			const batchAnalysis = await analyzeBatchPrep(services, plan, allRecipes);
+			if (batchAnalysis) {
+				const batchMessage = formatBatchPrepMessage(batchAnalysis);
+				for (const memberId of hh.household.members) {
+					await services.telegram.send(memberId, batchMessage);
+				}
+			}
+		} catch (batchErr) {
+			services.logger.error('Batch prep analysis failed: %s', batchErr);
+		}
 	} catch (err) {
 		const { userMessage } = classifyLLMError(err);
 		await services.telegram.send(ctx.userId, userMessage);
@@ -1879,6 +1907,20 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 			plan.id,
 			household.members.length,
 		);
+
+		// H7: Batch prep analysis (non-blocking)
+		try {
+			const allRecipesForBatch = await loadAllRecipes(sharedStore);
+			const batchResult = await analyzeBatchPrep(services, plan, allRecipesForBatch);
+			if (batchResult) {
+				const batchMsg = formatBatchPrepMessage(batchResult);
+				for (const memberId of household.members) {
+					await services.telegram.send(memberId, batchMsg);
+				}
+			}
+		} catch (batchErr) {
+			services.logger.error('Batch prep analysis failed: %s', batchErr);
+		}
 	} catch (err) {
 		services.logger.error('Scheduled meal plan generation failed: %s', err);
 	}
