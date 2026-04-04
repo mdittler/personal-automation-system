@@ -1892,6 +1892,20 @@ describe('Hearthstone App', () => {
 				await handleScheduledJob?.('some-other-job');
 				expect(services.llm.complete).not.toHaveBeenCalled();
 			});
+
+			describe('defrost-check job', () => {
+				it('does not crash when no household exists', async () => {
+					await handleScheduledJob?.('defrost-check');
+					// Should not throw
+				});
+			});
+
+			describe('cuisine-diversity-check job', () => {
+				it('does not crash when no household exists', async () => {
+					await handleScheduledJob?.('cuisine-diversity-check');
+					// Should not throw
+				});
+			});
 		});
 
 		describe('handleMessage — meal swap', () => {
