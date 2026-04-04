@@ -87,9 +87,9 @@ import {
 	saveFreezer,
 } from './services/freezer-store.js';
 import { appendWaste } from './services/waste-store.js';
-import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded } from './services/batch-cooking.js';
+import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded, buildBatchFreezeButtons } from './services/batch-cooking.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
-import type { GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
+import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
@@ -605,8 +605,13 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					const batchResult = await analyzeBatchPrep(services, plan, allRecipesForBatch);
 					if (batchResult) {
 						const batchMsg = formatBatchPrepMessage(batchResult);
+						const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 						for (const memberId of hh.household.members) {
-							await services.telegram.send(memberId, batchMsg);
+							if (batchButtons.length > 0) {
+								await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
+							} else {
+								await services.telegram.send(memberId, batchMsg);
+							}
 						}
 					}
 				} catch (batchErr) {
@@ -769,6 +774,23 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		// ─── H6: Perishable alert callbacks ─────────────────
 		if (data.startsWith('pa:')) {
 			await handlePerishableCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H7: Batch freeze callback ──────────────────────
+		if (data.startsWith('batch:freeze:')) {
+			const recipeName = decodeURIComponent(data.slice('batch:freeze:'.length));
+			const today = todayDate(services.timezone);
+			const freezerItem: FreezerItem = {
+				name: `${recipeName} (doubled batch)`,
+				quantity: 'batch portion',
+				frozenDate: today,
+				source: recipeName,
+			};
+			const existingFreezer = await loadFreezer(hh.sharedStore);
+			const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
+			await saveFreezer(hh.sharedStore, updatedFreezer);
+			await services.telegram.editMessage(ctx.chatId, ctx.messageId, `🧊 Logged frozen batch: ${recipeName}`);
 			return;
 		}
 	} catch (err) {
@@ -1618,8 +1640,13 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 			const batchAnalysis = await analyzeBatchPrep(services, plan, allRecipes);
 			if (batchAnalysis) {
 				const batchMessage = formatBatchPrepMessage(batchAnalysis);
+				const batchButtons = buildBatchFreezeButtons(batchAnalysis.freezerFriendlyRecipes);
 				for (const memberId of hh.household.members) {
-					await services.telegram.send(memberId, batchMessage);
+					if (batchButtons.length > 0) {
+						await services.telegram.sendWithButtons(memberId, batchMessage, batchButtons);
+					} else {
+						await services.telegram.send(memberId, batchMessage);
+					}
 				}
 			}
 		} catch (batchErr) {
@@ -1834,7 +1861,34 @@ function nextMonday(dateStr: string): string {
 export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId: string) => {
 	// H4: Finalize votes hourly
 	if (jobId === 'finalize-votes') {
-		await handleFinalizeVotesJob(services);
+		const finalized = await handleFinalizeVotesJob(services);
+		if (finalized) {
+			// H7: Batch prep analysis after vote finalization
+			try {
+				const sharedStore = services.data.forShared('shared');
+				const plan = await loadCurrentPlan(sharedStore);
+				if (plan) {
+					const recipes = await loadAllRecipes(sharedStore);
+					const batchAnalysis = await analyzeBatchPrep(services, plan, recipes);
+					if (batchAnalysis) {
+						const batchMessage = formatBatchPrepMessage(batchAnalysis);
+						const batchButtons = buildBatchFreezeButtons(batchAnalysis.freezerFriendlyRecipes);
+						const household = await loadHousehold(sharedStore);
+						if (household) {
+							for (const memberId of household.members) {
+								if (batchButtons.length > 0) {
+									await services.telegram.sendWithButtons(memberId, batchMessage, batchButtons);
+								} else {
+									await services.telegram.send(memberId, batchMessage);
+								}
+							}
+						}
+					}
+				}
+			} catch (batchErr) {
+				services.logger.error('Batch prep analysis after vote finalization failed: %s', batchErr);
+			}
+		}
 		return;
 	}
 
@@ -1936,8 +1990,13 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 			const batchResult = await analyzeBatchPrep(services, plan, allRecipesForBatch);
 			if (batchResult) {
 				const batchMsg = formatBatchPrepMessage(batchResult);
+				const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 				for (const memberId of household.members) {
-					await services.telegram.send(memberId, batchMsg);
+					if (batchButtons.length > 0) {
+						await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
+					} else {
+						await services.telegram.send(memberId, batchMsg);
+					}
 				}
 			}
 		} catch (batchErr) {

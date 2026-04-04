@@ -173,6 +173,19 @@ export function formatDefrostMessage(matches: DefrostMatch[]): string {
  * Check if any of tomorrow's meals require frozen ingredients,
  * and send defrost reminders to all household members.
  */
+/**
+ * Build inline keyboard buttons for freezer-friendly recipes in batch prep message.
+ * Returns one row per recipe with a "Double & freeze" button.
+ */
+export function buildBatchFreezeButtons(
+	freezerFriendlyRecipes: string[],
+): Array<Array<{ text: string; callbackData: string }>> {
+	return freezerFriendlyRecipes.map((recipe) => [{
+		text: `🧊 Double & freeze: ${recipe}`,
+		callbackData: `app:hearthstone:batch:freeze:${encodeURIComponent(recipe)}`,
+	}]);
+}
+
 export async function checkDefrostNeeded(
 	services: CoreServices,
 	store: ScopedDataStore,

@@ -172,19 +172,21 @@ export async function handleVoteCallback(
  * Hourly cron job: check if the voting window has expired, finalize if so.
  * Idempotent — safe to call multiple times.
  */
-export async function handleFinalizeVotesJob(services: CoreServices): Promise<void> {
+export async function handleFinalizeVotesJob(services: CoreServices): Promise<boolean> {
 	const sharedStore = services.data.forShared('shared');
 
 	const household = await loadHousehold(sharedStore);
-	if (!household) return;
+	if (!household) return false;
 
 	const plan = await loadCurrentPlan(sharedStore);
-	if (!plan || plan.status !== 'voting') return;
+	if (!plan || plan.status !== 'voting') return false;
 
 	const windowHours =
 		((await services.config.get<number>('voting_window_hours')) as number | undefined) ?? 12;
 
 	if (isVotingExpired(plan, windowHours)) {
 		await finalizePlan(services, sharedStore, household.members);
+		return true;
 	}
+	return false;
 }

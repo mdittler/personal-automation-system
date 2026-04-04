@@ -18,6 +18,7 @@ import type {
 } from '../types.js';
 import {
 	analyzeBatchPrep,
+	buildBatchFreezeButtons,
 	checkDefrostNeeded,
 	formatBatchPrepMessage,
 	formatDefrostMessage,
@@ -538,5 +539,28 @@ describe('checkDefrostNeeded', () => {
 		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
+	});
+});
+
+// ─── buildBatchFreezeButtons ─────────────────────────────────────────────────
+
+describe('buildBatchFreezeButtons', () => {
+	it('builds one button row per freezer-friendly recipe', () => {
+		const buttons = buildBatchFreezeButtons(['Bolognese', 'Chili']);
+
+		expect(buttons).toHaveLength(2);
+		expect(buttons[0]![0]!.text).toContain('Bolognese');
+		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:Bolognese');
+		expect(buttons[1]![0]!.text).toContain('Chili');
+	});
+
+	it('returns empty array when no recipes', () => {
+		const buttons = buildBatchFreezeButtons([]);
+		expect(buttons).toHaveLength(0);
+	});
+
+	it('URL-encodes recipe names with special characters', () => {
+		const buttons = buildBatchFreezeButtons(['Mac & Cheese']);
+		expect(buttons[0]![0]!.callbackData).toBe('app:hearthstone:batch:freeze:Mac%20%26%20Cheese');
 	});
 });
