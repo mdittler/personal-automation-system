@@ -229,3 +229,23 @@ export interface RecipeEditRequest {
 	value: unknown;
 	description: string;
 }
+
+// ─── Batch Cooking Types (H7) ───────────────────────────────────
+
+export interface SharedPrepTask {
+	task: string;
+	recipes: string[];
+	estimatedMinutes: number;
+}
+
+export interface BatchAnalysis {
+	sharedTasks: SharedPrepTask[];
+	totalPrepMinutes: number;
+	estimatedSavingsMinutes: number;
+	freezerFriendlyRecipes: string[];
+}
+
+export interface CuisineClassification {
+	recipe: string;
+	cuisine: string;
+}
