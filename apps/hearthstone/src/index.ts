@@ -87,7 +87,8 @@ import {
 	saveFreezer,
 } from './services/freezer-store.js';
 import { appendWaste } from './services/waste-store.js';
-import { analyzeBatchPrep, formatBatchPrepMessage } from './services/batch-cooking.js';
+import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded } from './services/batch-cooking.js';
+import { checkCuisineDiversity } from './services/cuisine-tracker.js';
 import type { GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
@@ -1858,6 +1859,27 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId:
 	// H6: Freezer check Mondays 9am
 	if (jobId === 'freezer-check') {
 		await handleFreezerCheckJob(services);
+		return;
+	}
+
+	// H7: Defrost check daily 7pm
+	if (jobId === 'defrost-check') {
+		const sharedStore = services.data.forShared('shared');
+		const household = await loadHousehold(sharedStore);
+		if (!household) return;
+
+		const plan = await loadCurrentPlan(sharedStore);
+		if (!plan) return;
+
+		const recipes = await loadAllRecipes(sharedStore);
+		await checkDefrostNeeded(services, sharedStore, plan, recipes);
+		return;
+	}
+
+	// H7: Cuisine diversity check Sunday 8am
+	if (jobId === 'cuisine-diversity-check') {
+		const sharedStore = services.data.forShared('shared');
+		await checkCuisineDiversity(services, sharedStore);
 		return;
 	}
 

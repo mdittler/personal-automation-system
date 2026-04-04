@@ -117,6 +117,11 @@ capabilities:
       cron: "0 8 * * 0"
       handler: "dist/handlers/cuisine-diversity.js"
       user_scope: shared
+    - id: defrost-check
+      description: "Check if tomorrow's meals need frozen ingredients defrosted"
+      cron: "0 19 * * *"
+      handler: "dist/handlers/defrost-check.js"
+      user_scope: shared
 
   events:
     emits:
