@@ -903,15 +903,17 @@ Expose family-related settings: children profiles, child meal adaptation toggle,
 
 ### REQ-BATCH-001: Shared prep component detection
 
-**Origin:** BC-1 | **Status:** Planned
+**Origin:** BC-1 | **Status:** Implemented (Phase H7)
 
 Analyze finalized meal plan for shared prep components across recipes and suggest batch preparation.
 
 **Standard tests:**
-- TBD
+- LLM called with recipe details and returns parsed batch analysis
+- Handles new/external recipe suggestions (title only, no ingredients)
 
 **Edge case tests:**
-- TBD
+- Returns null when LLM fails
+- Returns null when LLM returns invalid JSON
 
 **Fixes:** None
 
@@ -919,15 +921,17 @@ Analyze finalized meal plan for shared prep components across recipes and sugges
 
 ### REQ-BATCH-002: Consolidated prep plan
 
-**Origin:** BC-2 | **Status:** Planned
+**Origin:** BC-2 | **Status:** Implemented (Phase H7)
 
 Generate prep plan for configurable prep day that consolidates shared work, orders by timing, and estimates total prep time.
 
 **Standard tests:**
-- TBD
+- Formats shared tasks with recipes and time estimates
+- Includes freezer-friendly suggestions when present
 
 **Edge case tests:**
-- TBD
+- Omits freezer-friendly section when empty
+- Handles empty shared tasks gracefully
 
 **Fixes:** None
 
@@ -935,15 +939,18 @@ Generate prep plan for configurable prep day that consolidates shared work, orde
 
 ### REQ-BATCH-003: Freezer-friendly flagging
 
-**Origin:** BC-3 | **Status:** Planned
+**Origin:** BC-3 | **Status:** Implemented (Phase H7)
 
 Flag freezer-friendly recipes, suggest doubling and freezing extra, log frozen portion in freezer inventory.
 
 **Standard tests:**
-- TBD
+- Matches freezer items to recipe ingredients (case-insensitive)
+- Matches substring (ingredient contains freezer item name)
 
 **Edge case tests:**
-- TBD
+- Returns empty when no matches found
+- Returns empty when freezer is empty
+- Skips meals with no matching recipe in library
 
 **Fixes:** None
 
@@ -951,15 +958,18 @@ Flag freezer-friendly recipes, suggest doubling and freezing extra, log frozen p
 
 ### REQ-BATCH-004: Defrost reminders
 
-**Origin:** BC-4 | **Status:** Planned
+**Origin:** BC-4 | **Status:** Implemented (Phase H7)
 
 When meal plan includes frozen ingredients, send reminder the night before to defrost.
 
 **Standard tests:**
-- TBD
+- Sends defrost reminder when tomorrow's meal uses frozen ingredient
+- Consolidates multiple frozen items into one message
 
 **Edge case tests:**
-- TBD
+- Does not send when no frozen ingredients match
+- Does not send when freezer is empty
+- Does not send when no meals planned for tomorrow
 
 **Fixes:** None
 
@@ -1409,15 +1419,19 @@ Subscribe to relevant events from health/fitness apps via PAS event bus.
 
 ### REQ-CULTURE-001: Cuisine diversity tracking
 
-**Origin:** CR-1 | **Status:** Planned
+**Origin:** CR-1 | **Status:** Implemented (Phase H7)
 
 Track cuisine distribution of recent meal plans. Suggest branching out if defaulting to same cuisine for 2+ weeks.
 
 **Standard tests:**
-- TBD
+- Classifies recipes by cuisine type via LLM
+- Flags cuisine appearing 3+ times
+- Sends diversity alert to all household members
 
 **Edge case tests:**
-- TBD
+- Returns empty when no cuisine appears 3+ times
+- Case-insensitive cuisine counting
+- Skips silently when no plan, no household, or LLM fails
 
 **Fixes:** None
 
@@ -1792,10 +1806,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-FAMILY-002 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-003 | TBD | 0 | 0 | Planned |
 | REQ-FAMILY-004 | TBD | 0 | 0 | Planned |
-| REQ-BATCH-001 | TBD | 0 | 0 | Planned |
-| REQ-BATCH-002 | TBD | 0 | 0 | Planned |
-| REQ-BATCH-003 | TBD | 0 | 0 | Planned |
-| REQ-BATCH-004 | TBD | 0 | 0 | Planned |
+| REQ-BATCH-001 | batch-cooking.test.ts | 4 | 4 | Implemented |
+| REQ-BATCH-002 | batch-cooking.test.ts | 4 | 2 | Implemented |
+| REQ-BATCH-003 | batch-cooking.test.ts | 7 | 2 | Implemented |
+| REQ-BATCH-004 | batch-cooking.test.ts | 6 | 2 | Implemented |
 | REQ-COOK-001 | cook-session.test.ts, cook-mode-handler.test.ts | 23 | 24 | Implemented |
 | REQ-COOK-002 | timer-parser.test.ts, cook-timer.test.ts, cook-session.test.ts | 30 | 18 | Implemented |
 | REQ-COOK-003 | cook-tts.test.ts | 10 | 5 | Implemented |
@@ -1816,7 +1830,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-NUTR-002 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
-| REQ-CULTURE-001 | TBD | 0 | 0 | Planned |
+| REQ-CULTURE-001 | cuisine-tracker.test.ts | 14 | 0 | Implemented |
 | REQ-CULTURE-002 | TBD | 0 | 0 | Planned |
 | REQ-HOUSEHOLD-001 | household.test.ts, household-guard.test.ts, app.test.ts | 7 | 31 | Implemented |
 | REQ-NFR-001 | app.test.ts | 1 | 0 | Implemented |
@@ -1832,4 +1846,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **29 test files** | **215** | **266** | **481 tests** |
+| **Totals** | **31 test files** | **250** | **276** | **526 tests** |

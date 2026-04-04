@@ -16,7 +16,7 @@ This document tracks the phased implementation of the Hearthstone food managemen
 | H4 | Voting, Ratings, Shopping | 6 | Inline keyboards, shopping mode | 55–75 | H2, H3 | Not Started |
 | H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Not Started |
 | H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Not Started |
-| H7 | Batch Cooking and Cuisine | 5 | Prep plan, defrost, cuisine cron | 40–55 | H3, H6 | Not Started |
+| H7 | Batch Cooking and Cuisine | 5 | Prep plan, defrost, cuisine cron | 39 | H3, H6 | Complete |
 | H8 | Vision: Photos | 5 | 3 photo intents | 45–60 | H1, H2, *infra* | Not Started |
 | H9 | Family Features | 4 | Kid adaptations, baby tracker | 40–55 | H1 | Not Started |
 | H10 | Cost Tracking | 5 | `/foodbudget` | 40–55 | H3, H8 | Not Started |
@@ -209,7 +209,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H7: Batch Cooking and Cuisine Tracking
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** 39 | **Started:** 2026-04-03 | **Completed:** 2026-04-03
 
 **Requirements:** REQ-BATCH-001, REQ-BATCH-002, REQ-BATCH-003, REQ-BATCH-004, REQ-CULTURE-001
 
@@ -341,7 +341,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 | H4 | — | — | 0 | — |
 | H5 | — | — | 0 | — |
 | H6 | — | — | 0 | — |
-| H7 | — | — | 0 | — |
+| H7 | 2026-04-03 | 2026-04-03 | ~39 new (~3579 cumulative) | Batch cooking, cuisine tracking |
 | H8 | — | — | 0 | — |
 | H9 | — | — | 0 | — |
 | H10 | — | — | 0 | — |
