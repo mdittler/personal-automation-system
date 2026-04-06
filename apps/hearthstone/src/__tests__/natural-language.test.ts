@@ -33,6 +33,7 @@ import {
 	isPantryRemoveIntent,
 	isPantryViewIntent,
 	isCookIntent,
+	isRecipePhotoIntent,
 	isWhatCanIMakeIntent,
 	isWhatsForDinnerIntent,
 } from '../index.js';
@@ -4497,6 +4498,30 @@ describe('Natural Language — Real User Messages', () => {
 				expect.stringContaining('Chicken Stir Fry'),
 				expect.any(Array),
 			);
+		});
+	});
+
+	// ─── H8: Vision / Photo Intent Detection ───────────────────────
+
+	describe('H8 — Recipe photo intent detection', () => {
+		it.each([
+			'show me the photo of the lasagna recipe',
+			'see the picture of the carbonara',
+			'get the original photo for chicken stir fry',
+			'view the source image of pasta bolognese',
+			'send me the recipe photo',
+		])('detects recipe photo intent: "%s"', (text) => {
+			expect(isRecipePhotoIntent(text.toLowerCase())).toBe(true);
+		});
+
+		it.each([
+			'show me the lasagna recipe',
+			'search for chicken recipes',
+			'save this recipe',
+			'photo of a recipe to save',
+			'take a photo',
+		])('does NOT match non-photo-retrieval: "%s"', (text) => {
+			expect(isRecipePhotoIntent(text.toLowerCase())).toBe(false);
 		});
 	});
 });

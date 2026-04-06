@@ -135,6 +135,36 @@ Results are based on your current pantry inventory matched against saved recipes
 
 ---
 
+## Photos
+
+Send a photo to Hearthstone and it will automatically detect what it is:
+
+### Recipe Photos
+- Send a photo of a cookbook page, handwritten recipe card, or recipe screenshot
+- Add a caption like "save this recipe" for faster processing
+- Hearthstone extracts the full recipe (ingredients, instructions, servings, etc.)
+- Both the original photo and parsed recipe are saved
+- "show me the photo of the lasagna" — retrieve the original photo
+
+### Grocery Receipt Photos
+- Send a photo of your grocery receipt
+- Add a caption like "receipt" or "grocery receipt"
+- Hearthstone extracts the store name, line items, and total
+- Receipt data is stored for future cost tracking
+
+### Pantry Photos
+- Send a photo of your pantry, fridge, or freezer contents
+- Add a caption like "what's in my fridge"
+- Hearthstone identifies items and adds them to your pantry inventory
+
+### Grocery List Photos
+- Send a photo of a handwritten shopping list or recipe
+- Add a caption like "add these to grocery list"
+- Items are extracted and added to your grocery list
+- If it's a recipe photo, Hearthstone offers to save the recipe too
+
+---
+
 ## Food Questions
 
 Ask any cooking question:

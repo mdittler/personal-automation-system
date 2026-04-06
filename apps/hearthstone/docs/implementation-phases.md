@@ -17,7 +17,7 @@ This document tracks the phased implementation of the Hearthstone food managemen
 | H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Not Started |
 | H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Not Started |
 | H7 | Batch Cooking and Cuisine | 5 | Prep plan, defrost, cuisine cron | 39 | H3, H6 | Complete |
-| H8 | Vision: Photos | 5 | 3 photo intents | 45–60 | H1, H2, *infra* | Not Started |
+| H8 | Vision: Photos | 5 | 3 photo intents | 47 | H1, H2, *infra* | Complete |
 | H9 | Family Features | 4 | Kid adaptations, baby tracker | 40–55 | H1 | Not Started |
 | H10 | Cost Tracking | 5 | `/foodbudget` | 40–55 | H3, H8 | Not Started |
 | H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 55–70 | H3, H9 | Not Started |
@@ -227,9 +227,9 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H8: Vision — Photos
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** 47 new (~3660 cumulative) | **Started:** 2026-04-06 | **Completed:** 2026-04-06
 
-**⚠️ Infrastructure prerequisite:** `LLMService` needs vision support (image input). Must be added to core before this phase.
+**Infrastructure prerequisite:** Added LLM vision support (image input) to core types, base provider, and all cloud providers (Anthropic, Google, OpenAI-compatible).
 
 **Requirements:** REQ-RECIPE-002, REQ-RECIPE-005, REQ-GROCERY-004, REQ-PANTRY-001 (photo), REQ-COST-001
 
@@ -342,7 +342,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 | H5 | — | — | 0 | — |
 | H6 | — | — | 0 | — |
 | H7 | 2026-04-03 | 2026-04-03 | ~39 new (~3579 cumulative) | Batch cooking, cuisine tracking |
-| H8 | — | — | 0 | — |
+| H8 | 2026-04-06 | 2026-04-06 | ~47 new (~3660 cumulative) | Vision: LLM image support, photo parsers, receipt capture |
 | H9 | — | — | 0 | — |
 | H10 | — | — | 0 | — |
 | H11 | — | — | 0 | — |

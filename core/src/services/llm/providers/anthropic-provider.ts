@@ -15,6 +15,7 @@ import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 export class AnthropicProvider extends BaseProvider {
+	override readonly supportsVision = true;
 	private readonly client: Anthropic;
 
 	constructor(options: Omit<BaseProviderOptions, 'providerType'>) {
@@ -36,10 +37,28 @@ export class AnthropicProvider extends BaseProvider {
 	): Promise<LLMCompletionResult> {
 		const model = this.resolveModel(options);
 
+		// Build multimodal content when images are provided
+		let content: string | Anthropic.MessageCreateParams['messages'][0]['content'] = prompt;
+		if (options?.images?.length) {
+			const blocks: Anthropic.ContentBlockParam[] = [];
+			for (const img of options.images) {
+				blocks.push({
+					type: 'image',
+					source: {
+						type: 'base64',
+						media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+						data: img.data.toString('base64'),
+					},
+				});
+			}
+			blocks.push({ type: 'text', text: prompt });
+			content = blocks;
+		}
+
 		const response = await this.client.messages.create({
 			model,
 			max_tokens: options?.maxTokens ?? 1024,
-			messages: [{ role: 'user', content: prompt }],
+			messages: [{ role: 'user', content }],
 			temperature: options?.temperature,
 			...(options?.systemPrompt ? { system: options.systemPrompt } : {}),
 		});

@@ -178,6 +178,9 @@ requirements:
       - path: "receipts/"
         access: read-write
         description: "Grocery receipt data and photos"
+      - path: "photos/"
+        access: read-write
+        description: "Original photos from recipe and pantry captures"
       - path: "seasonal/"
         access: read-write
         description: "Seasonal produce reference data"

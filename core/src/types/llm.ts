@@ -35,6 +35,18 @@ export interface ModelRef {
 export type LLMProvider = 'local' | 'claude';
 
 // ---------------------------------------------------------------------------
+// Vision (multimodal image input)
+// ---------------------------------------------------------------------------
+
+/** An image to include in a multimodal completion request. */
+export interface LLMImage {
+	/** Raw image data. */
+	data: Buffer;
+	/** MIME type (e.g. 'image/jpeg', 'image/png'). */
+	mimeType: string;
+}
+
+// ---------------------------------------------------------------------------
 // Completion options
 // ---------------------------------------------------------------------------
 
@@ -64,6 +76,9 @@ export interface LLMCompletionOptions {
 
 	/** System prompt / instructions (supported by providers that accept it). */
 	systemPrompt?: string;
+
+	/** Images to include in the completion request (multimodal vision). */
+	images?: LLMImage[];
 
 	/** App ID for cost attribution. Injected by LLMGuard — apps should not set this. */
 	_appId?: string;
@@ -127,6 +142,8 @@ export interface LLMProviderClient extends LLMClient {
 	readonly providerId: string;
 	/** Provider backend type. */
 	readonly providerType: ProviderType;
+	/** Whether this provider supports vision (image input). */
+	readonly supportsVision: boolean;
 	/** Complete with full result including usage data. */
 	completeWithUsage(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionResult>;
 	/** List models available from this provider. */

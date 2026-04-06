@@ -4,9 +4,10 @@
  * Phase H1: Foundation — types, household, recipe storage.
  * Phase H2a: Grocery lists + basic pantry.
  * Phase H3: Meal planning, pantry matching, dinner tonight.
+ * Phase H8: Vision — photo-based recipe/receipt/pantry/grocery capture.
  */
 
-import type { AppModule, CallbackContext, CoreServices, MessageContext } from '@pas/core/types';
+import type { AppModule, CallbackContext, CoreServices, MessageContext, PhotoContext } from '@pas/core/types';
 import type { ScopedDataStore } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { stringify } from 'yaml';
@@ -88,6 +89,8 @@ import {
 } from './services/freezer-store.js';
 import { appendWaste } from './services/waste-store.js';
 import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded, buildBatchFreezeButtons } from './services/batch-cooking.js';
+import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
+import { loadPhoto } from './services/photo-store.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
@@ -103,6 +106,12 @@ const lastSearchResults = new Map<string, Recipe[]>();
 
 export const init: AppModule['init'] = async (s: CoreServices) => {
 	services = s;
+};
+
+// ─── Photo Handler (H8: Vision) ────────────────────────────────
+
+export const handlePhoto: AppModule['handlePhoto'] = async (ctx: PhotoContext) => {
+	await handlePhotoDispatch(services, ctx);
 };
 
 // ─── Message Handler (Intent-Routed) ─────────────────────────────
@@ -160,6 +169,12 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// Recipe search intent
 	if (isSearchRecipeIntent(lower)) {
 		await handleSearchRecipe(text, ctx);
+		return;
+	}
+
+	// H8: Recipe photo retrieval intent
+	if (isRecipePhotoIntent(lower)) {
+		await handleRecipePhotoRetrieval(text, ctx);
 		return;
 	}
 
@@ -292,6 +307,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• "what\'s for dinner?" — see tonight\'s meal\n' +
 			'• "what can I make?" — match pantry to recipes\n' +
 			'• "start cooking the lasagna" — step-by-step cook mode\n' +
+			'• Send a photo — save recipes, receipts, or pantry contents\n' +
 			'• "we have leftover chili" — log leftovers\n' +
 			'• /leftovers — view and manage leftovers\n' +
 			'• /freezer — view and manage freezer\n' +
@@ -1179,6 +1195,54 @@ async function handleSearchRecipe(text: string, ctx: MessageContext): Promise<vo
 	}
 }
 
+// H8: Recipe photo retrieval (REQ-RECIPE-005)
+async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	// Strip common phrases to get the recipe name
+	const query = text
+		.replace(/\b(show|see|view|get|send)\b.*\b(photo|picture|image)\b\s*(of|for)?\s*/i, '')
+		.replace(/\b(original|source)\s+(photo|picture|image)\b\s*(of|for)?\s*/i, '')
+		.replace(/\brecipe\b\s*/i, '')
+		.trim();
+
+	try {
+		const recipes = await loadAllRecipes(hh.sharedStore);
+		const recipe = findRecipeByTitle(recipes, query);
+
+		if (!recipe) {
+			await services.telegram.send(ctx.userId, `Couldn't find a recipe matching "${query}".`);
+			return;
+		}
+
+		if (!recipe.sourcePhoto) {
+			await services.telegram.send(
+				ctx.userId,
+				`"${recipe.title}" wasn't saved from a photo, so there's no original photo to show.`,
+			);
+			return;
+		}
+
+		const photo = await loadPhoto(hh.sharedStore, recipe.sourcePhoto);
+		if (!photo) {
+			await services.telegram.send(
+				ctx.userId,
+				`The photo for "${recipe.title}" could not be found. It may have been removed.`,
+			);
+			return;
+		}
+
+		await services.telegram.sendPhoto(ctx.userId, photo, `Original photo: ${recipe.title}`);
+	} catch (err) {
+		await services.telegram.send(ctx.userId, 'Something went wrong retrieving the recipe photo.');
+		services.logger.error('Recipe photo retrieval failed: %s', err);
+	}
+}
+
 async function handleEditRecipe(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
@@ -2060,6 +2124,14 @@ function isSearchRecipeIntent(text: string): boolean {
 		/\b(search|find)\b\s+(for|me)\b/i.test(text) ||
 		/\brecipes?\b.*\b(search|find|show)\b/i.test(text) ||
 		/\bwhat.*recipes?\b.*\bhave\b/i.test(text)
+	);
+}
+
+export function isRecipePhotoIntent(text: string): boolean {
+	return (
+		/\b(show|see|view|get|send)\b.*\b(photo|picture|image)\b/i.test(text) ||
+		/\brecipe\b.*\b(photo|picture|image)\b/i.test(text) ||
+		/\b(original|source)\s+(photo|picture|image)\b/i.test(text)
 	);
 }
 

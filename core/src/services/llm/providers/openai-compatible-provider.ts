@@ -16,6 +16,7 @@ import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 export class OpenAICompatibleProvider extends BaseProvider {
+	override readonly supportsVision = true;
 	private readonly client: OpenAI;
 
 	constructor(options: Omit<BaseProviderOptions, 'providerType'>) {
@@ -42,7 +43,23 @@ export class OpenAICompatibleProvider extends BaseProvider {
 		if (options?.systemPrompt) {
 			messages.push({ role: 'system', content: options.systemPrompt });
 		}
-		messages.push({ role: 'user', content: prompt });
+
+		// Build multimodal content when images are provided
+		if (options?.images?.length) {
+			const contentParts: OpenAI.ChatCompletionContentPart[] = [];
+			for (const img of options.images) {
+				contentParts.push({
+					type: 'image_url',
+					image_url: {
+						url: `data:${img.mimeType};base64,${img.data.toString('base64')}`,
+					},
+				});
+			}
+			contentParts.push({ type: 'text', text: prompt });
+			messages.push({ role: 'user', content: contentParts });
+		} else {
+			messages.push({ role: 'user', content: prompt });
+		}
 
 		const response = await this.client.chat.completions.create({
 			model,

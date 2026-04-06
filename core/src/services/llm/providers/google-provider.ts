@@ -14,6 +14,7 @@ import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 export class GoogleProvider extends BaseProvider {
+	override readonly supportsVision = true;
 	private readonly client: GoogleGenAI;
 
 	constructor(options: Omit<BaseProviderOptions, 'providerType'>) {
@@ -35,9 +36,25 @@ export class GoogleProvider extends BaseProvider {
 	): Promise<LLMCompletionResult> {
 		const model = this.resolveModel(options);
 
+		// Build multimodal content when images are provided
+		let contents: string | Array<{ role: string; parts: Array<Record<string, unknown>> }> = prompt;
+		if (options?.images?.length) {
+			const parts: Array<Record<string, unknown>> = [];
+			for (const img of options.images) {
+				parts.push({
+					inlineData: {
+						data: img.data.toString('base64'),
+						mimeType: img.mimeType,
+					},
+				});
+			}
+			parts.push({ text: prompt });
+			contents = [{ role: 'user', parts }];
+		}
+
 		const response = await this.client.models.generateContent({
 			model,
-			contents: prompt,
+			contents,
 			config: {
 				temperature: options?.temperature,
 				maxOutputTokens: options?.maxTokens ?? 1024,

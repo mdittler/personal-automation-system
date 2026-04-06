@@ -37,6 +37,7 @@ export interface BaseProviderOptions {
 export abstract class BaseProvider implements LLMProviderClient {
 	readonly providerId: string;
 	readonly providerType: ProviderType;
+	readonly supportsVision: boolean = false;
 	protected readonly apiKey: string;
 	protected readonly defaultModel: string;
 	protected readonly logger: Logger;
@@ -70,6 +71,12 @@ export abstract class BaseProvider implements LLMProviderClient {
 		prompt: string,
 		options?: LLMCompletionOptions,
 	): Promise<LLMCompletionResult> {
+		if (options?.images?.length && !this.supportsVision) {
+			throw new Error(
+				`Provider ${this.providerId} does not support vision (image input)`,
+			);
+		}
+
 		const result = await withRetry(() => this.doComplete(prompt, options), this.getRetryOptions());
 
 		// Record cost (async, don't block on it)

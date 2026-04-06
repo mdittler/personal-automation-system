@@ -230,6 +230,27 @@ export interface RecipeEditRequest {
 	description: string;
 }
 
+// ─── Receipt / Cost Types (H8) ──────────────────────────────────
+
+export interface ReceiptLineItem {
+	name: string;
+	quantity: number;
+	unitPrice: number | null;
+	totalPrice: number;
+}
+
+export interface Receipt {
+	id: string;
+	store: string;
+	date: string; // ISO date
+	lineItems: ReceiptLineItem[];
+	subtotal: number | null;
+	tax: number | null;
+	total: number;
+	photoPath: string; // path to original photo in data store
+	capturedAt: string; // ISO datetime
+}
+
 // ─── Batch Cooking Types (H7) ───────────────────────────────────
 
 export interface SharedPrepTask {

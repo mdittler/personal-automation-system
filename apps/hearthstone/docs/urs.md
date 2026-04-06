@@ -83,15 +83,21 @@ When a user sends a recipe (pasted text, URL, or describes it), use the LLM to p
 
 ### REQ-RECIPE-002: Save recipes from photos
 
-**Origin:** RS-2 | **Status:** Planned
+**Origin:** RS-2 | **Status:** Implemented
 
 When a user sends a photo of a recipe (cookbook page, handwritten card, screenshot), use the LLM vision tier to extract the recipe. Save both the original photo file and the parsed structured recipe. Both must be independently retrievable.
 
 **Standard tests:**
-- TBD
+- `photo-parsers.test.ts` > Recipe Photo Parser > extracts structured recipe from photo via LLM vision
+- `photo-parsers.test.ts` > Recipe Photo Parser > passes image to LLM with standard tier
+- `photo-handler.test.ts` > caption-based routing > routes recipe caption to recipe parser
+- `photo-handler.test.ts` > recipe photo — storage > saves photo and recipe to data store
 
 **Edge case tests:**
-- TBD
+- `photo-parsers.test.ts` > Recipe Photo Parser > throws on missing required fields
+- `photo-parsers.test.ts` > Recipe Photo Parser > throws on invalid JSON from LLM
+- `photo-parsers.test.ts` > Recipe Photo Parser > includes caption context when provided
+- `photo-handler.test.ts` > error handling > sends friendly error on LLM failure
 
 **Fixes:** None
 
@@ -153,15 +159,17 @@ Users can search recipes by free text (title, ingredients, cuisine), tags, cuisi
 
 ### REQ-RECIPE-005: Recipe photo retrieval
 
-**Origin:** RS-5 | **Status:** Planned
+**Origin:** RS-5 | **Status:** Implemented
 
 If a recipe was saved from a photo, the user can request the original photo and receive it via Telegram.
 
 **Standard tests:**
-- TBD
+- `natural-language.test.ts` > H8 > detects recipe photo intent (5 variants)
+- `photo-store.test.ts` > loadPhoto > loads base64 and returns Buffer
 
 **Edge case tests:**
-- TBD
+- `natural-language.test.ts` > H8 > does NOT match non-photo-retrieval (5 variants)
+- `photo-store.test.ts` > loadPhoto > returns null for missing file
 
 **Fixes:** None
 
@@ -425,15 +433,18 @@ Users add items via `/addgrocery` command or natural language ("add milk and egg
 
 ### REQ-GROCERY-004: Photo-to-grocery-list
 
-**Origin:** GL-4 | **Status:** Planned
+**Origin:** GL-4 | **Status:** Implemented
 
 Extract ingredients from a photo of a recipe via LLM vision and generate a grocery list. Offer to save the recipe as well.
 
 **Standard tests:**
-- TBD
+- `photo-parsers.test.ts` > Grocery Photo Parser > extracts grocery items from photo via LLM vision
+- `photo-parsers.test.ts` > Grocery Photo Parser > passes image to LLM with standard tier
+- `photo-parsers.test.ts` > Grocery Photo Parser > detects recipe photos and extracts recipe data
+- `photo-handler.test.ts` > caption-based routing > routes grocery list caption to grocery parser
 
 **Edge case tests:**
-- TBD
+- `photo-parsers.test.ts` > Grocery Photo Parser > returns empty items on parse failure
 
 **Fixes:** None
 
@@ -614,6 +625,9 @@ Maintain pantry inventory via text input ("add eggs and milk to pantry"), grocer
 - `pantry-store.test.ts` > parsePantryItems > comma/and separated
 - `app.test.ts` > handleCommand — /pantry > shows pantry contents
 - `app.test.ts` > intent detection — pantry > detects pantry view/add/remove intents
+- `photo-parsers.test.ts` > Pantry Photo Parser > identifies pantry items from photo via LLM vision
+- `photo-parsers.test.ts` > Pantry Photo Parser > passes image to LLM with standard tier
+- `photo-handler.test.ts` > caption-based routing > routes pantry caption to pantry parser
 
 **Edge case tests:**
 - `pantry-store.test.ts` > loadPantry > empty store returns []
@@ -624,6 +638,8 @@ Maintain pantry inventory via text input ("add eggs and milk to pantry"), grocer
 - `pantry-store.test.ts` > pantryContains > matches close-length substrings
 - `pantry-store.test.ts` > pantryContains > returns false for empty pantry
 - `app.test.ts` > handleCommand — /pantry > requires household
+- `photo-parsers.test.ts` > Pantry Photo Parser > returns empty array for empty/unclear photo
+- `photo-parsers.test.ts` > Pantry Photo Parser > normalizes items with missing category
 
 **Fixes:** None
 
@@ -1264,15 +1280,19 @@ Expose guest-related settings: frequent guest profiles.
 
 ### REQ-COST-001: Receipt capture
 
-**Origin:** CT-1 | **Status:** Planned
+**Origin:** CT-1 | **Status:** Implemented
 
 User sends photo of grocery receipt. LLM vision extracts total and key line items. Log with date and store.
 
 **Standard tests:**
-- TBD
+- `photo-parsers.test.ts` > Receipt Parser > extracts receipt data from photo via LLM vision
+- `photo-parsers.test.ts` > Receipt Parser > passes image to LLM with standard tier
+- `photo-handler.test.ts` > caption-based routing > routes receipt caption to receipt parser
+- `photo-handler.test.ts` > receipt photo — storage > saves receipt data to data store
 
 **Edge case tests:**
-- TBD
+- `photo-parsers.test.ts` > Receipt Parser > throws when total is missing
+- `photo-parsers.test.ts` > Receipt Parser > defaults missing subtotal and tax to null
 
 **Fixes:** None
 
@@ -1816,10 +1836,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | Requirement ID | Test File | Standard Count | Edge Count | Status |
 |----------------|-----------|----------------|------------|--------|
 | REQ-RECIPE-001 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 5 | 16 | Implemented |
-| REQ-RECIPE-002 | TBD | 0 | 0 | Planned |
+| REQ-RECIPE-002 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 4 | Implemented |
 | REQ-RECIPE-003 | rating-handler.test.ts | 1 | 2 | Implemented |
 | REQ-RECIPE-004 | recipe-store.test.ts, app.test.ts | 8 | 15 | Implemented |
-| REQ-RECIPE-005 | TBD | 0 | 0 | Planned |
+| REQ-RECIPE-005 | natural-language.test.ts, photo-store.test.ts | 7 | 6 | Implemented |
 | REQ-RECIPE-006 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 4 | 8 | Implemented |
 | REQ-MEAL-001 | meal-planner.test.ts, meal-plan-store.test.ts, app.test.ts | 6 | 6 | Implemented |
 | REQ-MEAL-002 | meal-planner.test.ts, app.test.ts | 4 | 3 | Implemented |
@@ -1831,7 +1851,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
 | REQ-GROCERY-003 | item-parser.test.ts, app.test.ts | 5 | 5 | Implemented |
-| REQ-GROCERY-004 | TBD | 0 | 0 | Planned |
+| REQ-GROCERY-004 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 1 | Implemented |
 | REQ-GROCERY-005 | grocery-store.test.ts, app.test.ts | 3 | 3 | Implemented |
 | REQ-GROCERY-006 | grocery-store.test.ts, grocery-dedup.test.ts | 4 | 6 | Implemented |
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
@@ -1839,7 +1859,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-009 | shopping-followup.test.ts, app.test.ts | 3 | 5 | Implemented |
 | REQ-GROCERY-010 | TBD | 0 | 0 | Planned |
 | REQ-GROCERY-011 | TBD | 0 | 0 | Planned |
-| REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts | 11 | 8 | Implemented |
+| REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts, photo-parsers.test.ts, photo-handler.test.ts | 14 | 10 | Implemented |
 | REQ-PANTRY-002 | pantry-matcher.test.ts, app.test.ts, natural-language.test.ts | 4 | 4 | Implemented |
 | REQ-PANTRY-003 | grocery-generator.test.ts, pantry-store.test.ts | 3 | 3 | Implemented |
 | REQ-PANTRY-004 | perishable-handler.test.ts, pantry-store.test.ts | 7 | 9 | Implemented |
@@ -1865,7 +1885,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-003 | TBD | 0 | 0 | Planned |
-| REQ-COST-001 | TBD | 0 | 0 | Planned |
+| REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 2 | Implemented |
 | REQ-COST-002 | TBD | 0 | 0 | Planned |
 | REQ-COST-003 | TBD | 0 | 0 | Planned |
 | REQ-COST-004 | TBD | 0 | 0 | Planned |
@@ -1892,4 +1912,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **31 test files** | **242** | **303** | **545 tests** |
+| **Totals** | **35 test files** | **264** | **318** | **582 tests** |

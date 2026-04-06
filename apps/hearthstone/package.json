@@ -13,5 +13,8 @@
 	"dependencies": {
 		"@pas/core": "workspace:*",
 		"yaml": "^2.8.2"
+	},
+	"devDependencies": {
+		"@types/node": "^25.3.2"
 	}
 }
