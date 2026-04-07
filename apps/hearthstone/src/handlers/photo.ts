@@ -22,14 +22,18 @@ type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
 
 // ─── Caption-based classification ──────────────────────────────
 
-const RECIPE_KEYWORDS = /\b(recipe|save|cookbook|card)\b/i;
+const RECIPE_KEYWORDS = /\b(recipe|cookbook|recipe\s+card)\b/i;
+const RECIPE_SAVE = /\bsave\b/i;
 const RECEIPT_KEYWORDS = /\b(receipt|bill|checkout|total|spent)\b/i;
 const PANTRY_KEYWORDS = /\b(pantry|fridge|freezer|shelf|what.?s in|contents)\b/i;
 const GROCERY_KEYWORDS = /\b(grocery|shopping|list|buy|add.+to.+(list|grocery))\b/i;
 
 function classifyByCaption(caption: string): PhotoType | null {
-	if (RECIPE_KEYWORDS.test(caption)) return 'recipe';
+	// Check receipt before recipe — "save this bill" should be receipt, not recipe
 	if (RECEIPT_KEYWORDS.test(caption)) return 'receipt';
+	if (RECIPE_KEYWORDS.test(caption)) return 'recipe';
+	// "save" alone implies recipe (user wants to save a recipe from a photo)
+	if (RECIPE_SAVE.test(caption)) return 'recipe';
 	if (PANTRY_KEYWORDS.test(caption)) return 'pantry';
 	if (GROCERY_KEYWORDS.test(caption)) return 'grocery';
 	return null;
