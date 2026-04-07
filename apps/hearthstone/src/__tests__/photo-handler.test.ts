@@ -192,6 +192,62 @@ describe('Photo Handler', () => {
 		});
 	});
 
+	describe('vision classification — unrecognized photo', () => {
+		it('asks user for caption when vision classification is unclear', async () => {
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce('I see a photo but I am not sure what category it falls into.');
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			const ctx = createPhotoCtx(); // no caption
+
+			await handlePhoto(services, ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('not sure what kind of photo'),
+			);
+			// Should only call LLM once (classification), not a second time for parsing
+			expect(completeFn).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('pantry photo — correction hint', () => {
+		it('includes removal hint in pantry photo response', async () => {
+			const { services } = createMockServices(validPantryJson);
+			const ctx = createPhotoCtx('what is in my fridge');
+
+			await handlePhoto(services, ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('remove'),
+			);
+		});
+	});
+
+	describe('caption pass-through', () => {
+		it('passes caption to receipt parser', async () => {
+			const { services } = createMockServices(validReceiptJson);
+			const ctx = createPhotoCtx('Whole Foods receipt');
+
+			await handlePhoto(services, ctx);
+
+			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+			expect(prompt).toContain('Whole Foods');
+		});
+
+		it('passes caption to grocery parser', async () => {
+			const { services } = createMockServices(validGroceryJson);
+			const ctx = createPhotoCtx('add these groceries to my list');
+
+			await handlePhoto(services, ctx);
+
+			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+			expect(prompt).toContain('add these groceries to my list');
+		});
+	});
+
 	describe('error handling', () => {
 		it('sends friendly error on LLM failure', async () => {
 			const { services } = createMockServices('');

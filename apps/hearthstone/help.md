@@ -144,7 +144,8 @@ Send a photo to Hearthstone and it will automatically detect what it is:
 - Add a caption like "save this recipe" for faster processing
 - Hearthstone extracts the full recipe (ingredients, instructions, servings, etc.)
 - Both the original photo and parsed recipe are saved
-- "show me the photo of the lasagna" — retrieve the original photo
+- "show me the photo of the lasagna" — retrieve a specific recipe's original photo
+- "show me recipe photos" — see a list of all recipes with photos to choose from
 
 ### Grocery Receipt Photos
 - Send a photo of your grocery receipt

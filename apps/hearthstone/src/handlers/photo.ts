@@ -49,7 +49,7 @@ async function classifyByVision(
 	services: CoreServices,
 	photo: Buffer,
 	mimeType: string,
-): Promise<PhotoType> {
+): Promise<PhotoType | null> {
 	const result = await services.llm.complete(CLASSIFY_PROMPT, {
 		tier: 'standard',
 		images: [{ data: photo, mimeType }],
@@ -61,8 +61,7 @@ async function classifyByVision(
 	if (lower.includes('pantry') || lower.includes('fridge') || lower.includes('freezer')) return 'pantry';
 	if (lower.includes('grocery') || lower.includes('list') || lower.includes('shopping')) return 'grocery';
 
-	// Default to recipe if unclear
-	return 'recipe';
+	return null;
 }
 
 // ─── Main handler ───────────────────────────────────────────────
@@ -73,12 +72,24 @@ export async function handlePhoto(
 ): Promise<void> {
 	try {
 		// Classify the photo type
-		let photoType: PhotoType;
+		let photoType: PhotoType | null;
 		if (ctx.caption) {
 			const captionType = classifyByCaption(ctx.caption);
 			photoType = captionType ?? await classifyByVision(services, ctx.photo, ctx.mimeType);
 		} else {
 			photoType = await classifyByVision(services, ctx.photo, ctx.mimeType);
+		}
+
+		if (!photoType) {
+			await services.telegram.send(
+				ctx.userId,
+				'I\'m not sure what kind of photo this is. Please add a caption:\n' +
+				'• "save this recipe" for recipe photos\n' +
+				'• "receipt" for grocery receipts\n' +
+				'• "what\'s in my fridge" for pantry photos\n' +
+				'• "add to grocery list" for shopping lists',
+			);
+			return;
 		}
 
 		const sharedStore = services.data.forShared('shared');
@@ -141,7 +152,7 @@ async function handleReceiptPhoto(
 	ctx: PhotoContext,
 	store: ReturnType<CoreServices['data']['forShared']>,
 ): Promise<void> {
-	const parsed = await parseReceiptFromPhoto(services, ctx.photo, ctx.mimeType);
+	const parsed = await parseReceiptFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	// Save photo
 	const photoPath = await savePhoto(store, ctx.photo, 'receipt');
@@ -202,7 +213,8 @@ async function handlePantryPhoto(
 	const itemNames = items.map((i) => `• ${i.name} (${i.quantity})`).join('\n');
 	await services.telegram.send(
 		ctx.userId,
-		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}`,
+		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}\n\n` +
+		'Not quite right? Say "remove [item] from pantry" to fix.',
 	);
 }
 
@@ -211,7 +223,7 @@ async function handleGroceryPhoto(
 	ctx: PhotoContext,
 	store: ReturnType<CoreServices['data']['forShared']>,
 ): Promise<void> {
-	const result = await parseGroceryFromPhoto(services, ctx.photo, ctx.mimeType);
+	const result = await parseGroceryFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	if (result.items.length === 0) {
 		await services.telegram.send(

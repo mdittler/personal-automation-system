@@ -227,7 +227,7 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H8: Vision — Photos
 
-**Status:** Complete | **Tests:** 47 new (~3660 cumulative) | **Started:** 2026-04-06 | **Completed:** 2026-04-06
+**Status:** Complete | **Tests:** 60 new (~3673 cumulative) | **Started:** 2026-04-06 | **Completed:** 2026-04-07
 
 **Infrastructure prerequisite:** Added LLM vision support (image input) to core types, base provider, and all cloud providers (Anthropic, Google, OpenAI-compatible).
 
@@ -246,7 +246,15 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 **Key files:** `src/handlers/photo.ts`, `src/services/recipe-photo-parser.ts`, `src/services/receipt-parser.ts`, `src/services/pantry-photo-parser.ts`
 
-### Progress
+### Completion Log
+
+- Core LLM vision support: `LLMImage` type, `images` option on `complete()`, `supportsVision` provider flag with MIME type validation (`VALID_IMAGE_MIME_TYPES`)
+- Provider implementations: Anthropic (ImageBlockParam), Google (inlineData), OpenAI (image_url data URI)
+- Photo store: base64 storage/retrieval via ScopedDataStore
+- 4 photo parsers: recipe, receipt, pantry, grocery — all with sanitized caption pass-through
+- Photo handler dispatcher: caption keyword routing + LLM vision fallback (returns null for unclear, asks user for caption)
+- Recipe photo retrieval: extracts recipe name from query, shows numbered selection when no name given
+- Review fixes (2026-04-07): caption prompt injection fix (sanitizeInput), MIME type whitelist validation, vision classification null-instead-of-default, pantry correction hint, caption pass-through to receipt/grocery parsers
 
 ---
 

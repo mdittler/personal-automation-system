@@ -5,6 +5,7 @@
 import type { CoreServices } from '@pas/core/types';
 import type { ReceiptLineItem } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 /** Parsed receipt data (before ID/path assignment). */
 export interface ParsedReceipt {
@@ -45,9 +46,12 @@ export async function parseReceiptFromPhoto(
 	services: CoreServices,
 	photo: Buffer,
 	mimeType: string,
+	caption?: string,
 ): Promise<ParsedReceipt> {
+	const safeCaption = caption ? sanitizeInput(caption, 200) : '';
+	const captionContext = safeCaption ? `\n\nThe user provided this caption: "${safeCaption}"` : '';
 	const result = await services.llm.complete(
-		`${RECEIPT_PROMPT}\n\nExtract the receipt data from the attached photo.`,
+		`${RECEIPT_PROMPT}${captionContext}\n\nExtract the receipt data from the attached photo.`,
 		{
 			tier: 'standard',
 			images: [{ data: photo, mimeType }],

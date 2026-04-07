@@ -5,6 +5,7 @@
 import type { CoreServices } from '@pas/core/types';
 import type { ParsedRecipe } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 const PHOTO_RECIPE_PROMPT = `You are a recipe parser. Extract the recipe from this photo into a structured JSON format.
 The photo may be a cookbook page, a handwritten recipe card, or a screenshot.
@@ -44,7 +45,8 @@ export async function parseRecipeFromPhoto(
 	mimeType: string,
 	caption?: string,
 ): Promise<ParsedRecipe> {
-	const captionContext = caption ? `\n\nThe user provided this caption: "${caption}"` : '';
+	const safeCaption = caption ? sanitizeInput(caption, 200) : '';
+	const captionContext = safeCaption ? `\n\nThe user provided this caption: "${safeCaption}"` : '';
 	const prompt = `${PHOTO_RECIPE_PROMPT}${captionContext}\n\nExtract the recipe from the attached photo.`;
 
 	const result = await services.llm.complete(prompt, {

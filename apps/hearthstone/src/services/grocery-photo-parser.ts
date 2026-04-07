@@ -6,6 +6,7 @@
 import type { CoreServices } from '@pas/core/types';
 import type { ParsedRecipe } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 /** Result of parsing a grocery photo. */
 export interface GroceryPhotoResult {
@@ -57,9 +58,12 @@ export async function parseGroceryFromPhoto(
 	services: CoreServices,
 	photo: Buffer,
 	mimeType: string,
+	caption?: string,
 ): Promise<GroceryPhotoResult> {
+	const safeCaption = caption ? sanitizeInput(caption, 200) : '';
+	const captionContext = safeCaption ? `\n\nThe user provided this caption: "${safeCaption}"` : '';
 	const result = await services.llm.complete(
-		`${GROCERY_PHOTO_PROMPT}\n\nExtract grocery items from the attached photo.`,
+		`${GROCERY_PHOTO_PROMPT}${captionContext}\n\nExtract grocery items from the attached photo.`,
 		{
 			tier: 'standard',
 			images: [{ data: photo, mimeType }],

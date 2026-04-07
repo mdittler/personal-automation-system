@@ -164,6 +164,35 @@ describe('LLM Vision Support', () => {
 			const provider = new TextOnlyProvider(baseOpts());
 			expect(provider.supportsVision).toBe(false);
 		});
+
+		it('throws on invalid MIME type', async () => {
+			const provider = new VisionProvider(baseOpts());
+			const badImage = { data: Buffer.from('data'), mimeType: 'text/html' };
+
+			await expect(
+				provider.complete('describe this', { images: [badImage] }),
+			).rejects.toThrow(/unsupported image mime type/i);
+		});
+
+		it('throws on empty MIME type', async () => {
+			const provider = new VisionProvider(baseOpts());
+			const badImage = { data: Buffer.from('data'), mimeType: '' };
+
+			await expect(
+				provider.complete('describe this', { images: [badImage] }),
+			).rejects.toThrow(/unsupported image mime type/i);
+		});
+
+		it.each(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])(
+			'accepts valid MIME type %s',
+			async (mimeType) => {
+				const provider = new VisionProvider(baseOpts());
+				const image = { data: Buffer.from('data'), mimeType };
+
+				const result = await provider.complete('describe this', { images: [image] });
+				expect(result).toBe('vision response');
+			},
+		);
 	});
 
 	describe('LLMGuard — vision pass-through', () => {

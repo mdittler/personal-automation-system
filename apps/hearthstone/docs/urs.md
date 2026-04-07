@@ -97,9 +97,11 @@ When a user sends a photo of a recipe (cookbook page, handwritten card, screensh
 - `photo-parsers.test.ts` > Recipe Photo Parser > throws on missing required fields
 - `photo-parsers.test.ts` > Recipe Photo Parser > throws on invalid JSON from LLM
 - `photo-parsers.test.ts` > Recipe Photo Parser > includes caption context when provided
+- `photo-parsers.test.ts` > Recipe Photo Parser > sanitizes caption before including in prompt
 - `photo-handler.test.ts` > error handling > sends friendly error on LLM failure
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-07: Caption text now sanitized via `sanitizeInput()` before interpolation into LLM prompt (prompt injection fix)
 
 ---
 
@@ -161,7 +163,7 @@ Users can search recipes by free text (title, ingredients, cuisine), tags, cuisi
 
 **Origin:** RS-5 | **Status:** Implemented
 
-If a recipe was saved from a photo, the user can request the original photo and receive it via Telegram.
+If a recipe was saved from a photo, the user can request the original photo and receive it via Telegram. When no specific recipe is named, shows a numbered selection list of recipes with photos.
 
 **Standard tests:**
 - `natural-language.test.ts` > H8 > detects recipe photo intent (5 variants)
@@ -171,7 +173,8 @@ If a recipe was saved from a photo, the user can request the original photo and 
 - `natural-language.test.ts` > H8 > does NOT match non-photo-retrieval (5 variants)
 - `photo-store.test.ts` > loadPhoto > returns null for missing file
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-07: Empty query now shows numbered selection list of recipes with photos instead of returning confusing empty-string match error
 
 ---
 
@@ -444,9 +447,11 @@ Extract ingredients from a photo of a recipe via LLM vision and generate a groce
 - `photo-handler.test.ts` > caption-based routing > routes grocery list caption to grocery parser
 
 **Edge case tests:**
+- `photo-parsers.test.ts` > Grocery Photo Parser > includes caption context when provided
 - `photo-parsers.test.ts` > Grocery Photo Parser > returns empty items on parse failure
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-07: Caption now passed through to grocery photo parser for LLM context (sanitized)
 
 ---
 
@@ -1291,10 +1296,12 @@ User sends photo of grocery receipt. LLM vision extracts total and key line item
 - `photo-handler.test.ts` > receipt photo — storage > saves receipt data to data store
 
 **Edge case tests:**
+- `photo-parsers.test.ts` > Receipt Parser > includes caption context when provided
 - `photo-parsers.test.ts` > Receipt Parser > throws when total is missing
 - `photo-parsers.test.ts` > Receipt Parser > defaults missing subtotal and tax to null
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-07: Caption now passed through to receipt parser for LLM context (sanitized)
 
 ---
 
@@ -1836,7 +1843,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | Requirement ID | Test File | Standard Count | Edge Count | Status |
 |----------------|-----------|----------------|------------|--------|
 | REQ-RECIPE-001 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 5 | 16 | Implemented |
-| REQ-RECIPE-002 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 4 | Implemented |
+| REQ-RECIPE-002 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 5 | Implemented |
 | REQ-RECIPE-003 | rating-handler.test.ts | 1 | 2 | Implemented |
 | REQ-RECIPE-004 | recipe-store.test.ts, app.test.ts | 8 | 15 | Implemented |
 | REQ-RECIPE-005 | natural-language.test.ts, photo-store.test.ts | 7 | 6 | Implemented |
@@ -1851,7 +1858,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
 | REQ-GROCERY-003 | item-parser.test.ts, app.test.ts | 5 | 5 | Implemented |
-| REQ-GROCERY-004 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 1 | Implemented |
+| REQ-GROCERY-004 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 2 | Implemented |
 | REQ-GROCERY-005 | grocery-store.test.ts, app.test.ts | 3 | 3 | Implemented |
 | REQ-GROCERY-006 | grocery-store.test.ts, grocery-dedup.test.ts | 4 | 6 | Implemented |
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
@@ -1885,7 +1892,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-003 | TBD | 0 | 0 | Planned |
-| REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 2 | Implemented |
+| REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
 | REQ-COST-002 | TBD | 0 | 0 | Planned |
 | REQ-COST-003 | TBD | 0 | 0 | Planned |
 | REQ-COST-004 | TBD | 0 | 0 | Planned |
@@ -1912,4 +1919,4 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **35 test files** | **264** | **318** | **582 tests** |
+| **Totals** | **35 test files** | **264** | **321** | **585 tests** |

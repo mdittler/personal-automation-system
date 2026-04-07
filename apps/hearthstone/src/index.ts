@@ -1212,6 +1212,29 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 
 	try {
 		const recipes = await loadAllRecipes(hh.sharedStore);
+
+		// If no specific recipe mentioned, show selection of recipes with photos
+		if (!query) {
+			const photoRecipes = recipes.filter((r) => r.sourcePhoto);
+			if (photoRecipes.length === 0) {
+				await services.telegram.send(ctx.userId, 'No recipes with photos found.');
+				return;
+			}
+			if (photoRecipes.length === 1) {
+				const photo = await loadPhoto(hh.sharedStore, photoRecipes[0]!.sourcePhoto!);
+				if (photo) {
+					await services.telegram.sendPhoto(ctx.userId, photo, `Original photo: ${photoRecipes[0]!.title}`);
+				} else {
+					await services.telegram.send(ctx.userId, `The photo for "${photoRecipes[0]!.title}" could not be found.`);
+				}
+				return;
+			}
+			lastSearchResults.set(ctx.userId, photoRecipes);
+			const list = photoRecipes.map((r, i) => `${i + 1}. ${r.title}`).join('\n');
+			await services.telegram.send(ctx.userId, `Which recipe photo?\n\n${list}\n\nReply with a number.`);
+			return;
+		}
+
 		const recipe = findRecipeByTitle(recipes, query);
 
 		if (!recipe) {

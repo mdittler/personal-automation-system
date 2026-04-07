@@ -6,12 +6,13 @@
  */
 
 import type { Logger } from 'pino';
-import type {
-	LLMCompletionOptions,
-	LLMCompletionResult,
-	LLMProviderClient,
-	ProviderModel,
-	ProviderType,
+import {
+	VALID_IMAGE_MIME_TYPES,
+	type LLMCompletionOptions,
+	type LLMCompletionResult,
+	type LLMProviderClient,
+	type ProviderModel,
+	type ProviderType,
 } from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
 import { getCurrentUserId } from '../llm-context.js';
@@ -75,6 +76,16 @@ export abstract class BaseProvider implements LLMProviderClient {
 			throw new Error(
 				`Provider ${this.providerId} does not support vision (image input)`,
 			);
+		}
+
+		if (options?.images?.length) {
+			for (const img of options.images) {
+				if (!(VALID_IMAGE_MIME_TYPES as readonly string[]).includes(img.mimeType)) {
+					throw new Error(
+						`Unsupported image MIME type: ${img.mimeType}. Supported: ${VALID_IMAGE_MIME_TYPES.join(', ')}`,
+					);
+				}
+			}
 		}
 
 		const result = await withRetry(() => this.doComplete(prompt, options), this.getRetryOptions());

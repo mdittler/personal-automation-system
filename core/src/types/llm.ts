@@ -38,6 +38,9 @@ export type LLMProvider = 'local' | 'claude';
 // Vision (multimodal image input)
 // ---------------------------------------------------------------------------
 
+/** Allowed image MIME types for vision requests. */
+export const VALID_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+
 /** An image to include in a multimodal completion request. */
 export interface LLMImage {
 	/** Raw image data. */
