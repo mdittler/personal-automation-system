@@ -11,7 +11,6 @@
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
-import { ensureDir } from '../../utils/file.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
 
 export interface InviteCode {
@@ -146,7 +145,6 @@ export class InviteService {
 	}
 
 	private async writeStore(store: InviteStore): Promise<void> {
-		await ensureDir(join(this.invitesPath, '..'));
 		await writeYamlFile(this.invitesPath, store);
 	}
 }
