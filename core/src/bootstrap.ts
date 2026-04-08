@@ -47,6 +47,9 @@ import { N8nDispatcherImpl } from './services/n8n/index.js';
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
 import { Router } from './services/router/index.js';
+import { PendingVerificationStore } from './services/router/pending-verification-store.js';
+import { RouteVerifier } from './services/router/route-verifier.js';
+import { VerificationLogger } from './services/router/verification-logger.js';
 import { SchedulerServiceImpl } from './services/scheduler/index.js';
 import { SecretsServiceImpl } from './services/secrets/index.js';
 import { SpaceService } from './services/spaces/index.js';
@@ -465,6 +468,26 @@ export async function main(): Promise<void> {
 		);
 	}
 
+	// 9b. Route verification (optional)
+	let routeVerifier: RouteVerifier | undefined;
+	const verificationConfig = config.routing?.verification;
+	if (verificationConfig?.enabled) {
+		const pendingStore = new PendingVerificationStore();
+		const verificationLogger = new VerificationLogger(resolve(config.dataDir, 'system'));
+
+		routeVerifier = new RouteVerifier({
+			llm: systemLlm,
+			telegram: telegramService,
+			registry,
+			pendingStore,
+			verificationLogger,
+			logger: createChildLogger(logger, { service: 'route-verifier' }),
+			photoDir: resolve(config.dataDir, 'system', 'route-verification', 'photos'),
+		});
+
+		logger.info('Route verification enabled');
+	}
+
 	// 10. Router
 	const router = new Router({
 		registry,
@@ -477,6 +500,8 @@ export async function main(): Promise<void> {
 		appToggle,
 		spaceService,
 		userManager,
+		routeVerifier,
+		verificationUpperBound: verificationConfig?.upperBound,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
@@ -542,6 +567,40 @@ export async function main(): Promise<void> {
 
 				const data = ctx.callbackQuery.data;
 				if (!data) return;
+
+				// Route verification callback (user chose an app from inline buttons)
+				if (data.startsWith('rv:') && routeVerifier) {
+					const parts = data.split(':');
+					const pendingId = parts[1];
+					const chosenAppId = parts[2];
+					if (!pendingId || !chosenAppId) return;
+
+					const resolved = await routeVerifier.resolveCallback(pendingId, chosenAppId);
+					if (!resolved) return;
+
+					const { entry } = resolved;
+					const appEntry = registry.getApp(chosenAppId);
+
+					// Dispatch to chosen app (wrap in LLM context for cost tracking)
+					await llmContext.run({ userId }, async () => {
+						if (chosenAppId === 'chatbot' && chatbotApp) {
+							await chatbotApp.module.handleMessage(
+								entry.ctx as import('./types/telegram.js').MessageContext,
+							);
+						} else if (appEntry) {
+							if (entry.isPhoto && appEntry.module.handlePhoto) {
+								await appEntry.module.handlePhoto(
+									entry.ctx as import('./types/telegram.js').PhotoContext,
+								);
+							} else {
+								await appEntry.module.handleMessage(
+									entry.ctx as import('./types/telegram.js').MessageContext,
+								);
+							}
+						}
+					});
+					return;
+				}
 
 				// Route app-specific callback queries
 				if (data.startsWith('app:')) {
