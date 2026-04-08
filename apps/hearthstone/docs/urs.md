@@ -611,6 +611,13 @@ Grocery lists configurable by store. Show estimated prices per item and total pe
 - `price-store.test.ts` > updatePricesFromReceipt > handles LLM failure gracefully
 - `price-store.test.ts` > updatePricesFromReceipt > skips line items with zero or negative prices
 
+**Natural language tests:**
+- `natural-language.test.ts` > H10 — Telling the bot about a price > "eggs are $3.50 at costco" → updates price database
+- `natural-language.test.ts` > H10 — Telling the bot about a price > "chicken breast is now $17.99 at costco" → updates existing price
+- `natural-language.test.ts` > H10 — Telling the bot about a price > LLM failure → graceful error
+- `natural-language.test.ts` > H10 — Telling the bot about a price > no household → asks to create
+- `natural-language.test.ts` > H10 — Security > SQL injection attempt → sanitized, no crash
+
 **Fixes:** None
 
 ---
@@ -635,6 +642,14 @@ Expose store-related settings: preferred stores, default store, show price estim
 - `price-store.test.ts` > parsePriceUpdateText > returns null on LLM failure
 - `price-store.test.ts` > parsePriceUpdateText > returns null when LLM returns invalid JSON
 - `price-store.test.ts` > parsePriceUpdateText > returns null when LLM returns JSON with missing fields
+
+**Natural language tests:**
+- `natural-language.test.ts` > H10 — Price update intent detection > detects real price updates (4 variants)
+- `natural-language.test.ts` > H10 — Price update intent detection > rejects non-price messages (6 variants)
+- `natural-language.test.ts` > H10 — Budget view intent detection > detects budget queries (6 variants)
+- `natural-language.test.ts` > H10 — Budget view intent detection > rejects non-budget messages (5 variants)
+- `natural-language.test.ts` > H10 — Intent priority > "food costs $50 this week" → NOT a price update
+- `natural-language.test.ts` > H10 — Intent priority > "we need milk and eggs" → grocery add, NOT price/budget
 
 **Fixes:** None
 
@@ -1435,6 +1450,11 @@ Estimate cost-per-meal based on ingredient costs from receipts and recipe ingred
 **Security tests:**
 - `cost-estimator.test.ts` > estimateRecipeCost > handles LLM failure gracefully (returns 0 cost)
 
+**Natural language tests:**
+- `natural-language.test.ts` > H10 — Meal plan cost annotations > single member + prices → shows cost annotation
+- `natural-language.test.ts` > H10 — Meal plan cost annotations > single member, NO prices → no cost annotation
+- `natural-language.test.ts` > H10 — Grocery list price annotations > show_price_estimates=true and prices → shows cost total
+
 **Fixes:** None
 
 ---
@@ -1466,6 +1486,12 @@ Generate food spend summary on request or schedule: total spend, cost-per-meal a
 - `budget-reporter.test.ts` > loadWeeklyHistory > returns null when file does not exist
 - `budget-reporter.test.ts` > listWeeklyHistories > returns empty array when no history files
 - `budget-handler.test.ts` > handleBudgetCommand — integration > handles invalid subcommand gracefully
+
+**Natural language tests:**
+- `natural-language.test.ts` > H10 — Asking about food spending > "how much did we spend on food" → shows weekly budget
+- `natural-language.test.ts` > H10 — Asking about food spending > "what's our food budget" with no meal plan → helpful message
+- `natural-language.test.ts` > H10 — Asking about food spending > "show food costs" with no price data → helpful message
+- `natural-language.test.ts` > H10 — /foodbudget command > weekly, month, year, no history, no household (5 tests)
 
 **Fixes:** None
 
@@ -2005,8 +2031,8 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
 | REQ-GROCERY-008 | grocery-store.test.ts, app.test.ts, telegram-buttons.test.ts | 6 | 14 | Implemented |
 | REQ-GROCERY-009 | shopping-followup.test.ts, app.test.ts | 3 | 5 | Implemented |
-| REQ-GROCERY-010 | price-store.test.ts, cost-estimator.test.ts | 9 | 12 | Implemented |
-| REQ-GROCERY-011 | budget-handler.test.ts, price-store.test.ts | 3 | 6 | Implemented |
+| REQ-GROCERY-010 | price-store.test.ts, cost-estimator.test.ts, natural-language.test.ts | 9 | 12 | Implemented |
+| REQ-GROCERY-011 | budget-handler.test.ts, price-store.test.ts, natural-language.test.ts | 3 | 6 | Implemented |
 | REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts, photo-parsers.test.ts, photo-handler.test.ts | 14 | 10 | Implemented |
 | REQ-PANTRY-002 | pantry-matcher.test.ts, app.test.ts, natural-language.test.ts | 4 | 4 | Implemented |
 | REQ-PANTRY-003 | grocery-generator.test.ts, pantry-store.test.ts | 3 | 3 | Implemented |
@@ -2034,9 +2060,9 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-003 | TBD | 0 | 0 | Planned |
 | REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
-| REQ-COST-002 | cost-estimator.test.ts | 3 | 5 | Implemented |
-| REQ-COST-003 | budget-reporter.test.ts, budget-handler.test.ts | 11 | 7 | Implemented |
-| REQ-COST-004 | budget-reporter.test.ts | 5 | 4 | Implemented |
+| REQ-COST-002 | cost-estimator.test.ts, natural-language.test.ts | 3 | 5 | Implemented |
+| REQ-COST-003 | budget-reporter.test.ts, budget-handler.test.ts, natural-language.test.ts | 11 | 7 | Implemented |
+| REQ-COST-004 | budget-reporter.test.ts, natural-language.test.ts | 5 | 4 | Implemented |
 | REQ-SEASON-001 | meal-planner.test.ts, meal-plan-store.test.ts | 2 | 1 | Implemented |
 | REQ-SEASON-002 | TBD | 0 | 0 | Planned |
 | REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |
