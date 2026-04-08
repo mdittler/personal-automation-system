@@ -159,18 +159,10 @@
   <text x="740" y="542" text-anchor="middle" font-size="10" fill="#7e22ce">Ingest external data, trigger automations,</text>
   <text x="740" y="553" text-anchor="middle" font-size="10" fill="#7e22ce">connect 400+ services into PAS</text>
 
-  <text x="630" y="578" font-size="11" fill="#7e22ce">Webhooks (HMAC-signed)</text>
-  <text x="630" y="594" font-size="11" fill="#7e22ce">REST API (Bearer auth)</text>
-
-  <!-- n8n bidirectional explanation arrows to left -->
-  <line x1="610" y1="530" x2="520" y2="530" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-purple)"/>
-  <line x1="520" y1="540" x2="610" y2="540" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-purple)"/>
-  <text x="535" y="525" font-size="9" fill="#a855f7">write data</text>
-  <text x="535" y="552" font-size="9" fill="#a855f7">read data</text>
-
-  <!-- n8n arrow to Telegram (send messages) -->
-  <line x1="620" y1="508" x2="510" y2="77" stroke="#a855f7" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-purple)"/>
-  <text x="545" y="260" font-size="9" fill="#a855f7" transform="rotate(-62, 545, 260)">send messages</text>
+  <!-- n8n capabilities (text labels instead of overlapping connector lines) -->
+  <text x="630" y="574" font-size="10" fill="#7e22ce">REST API + Webhooks (HMAC-signed):</text>
+  <text x="630" y="588" font-size="10" fill="#7e22ce">read/write data, send messages,</text>
+  <text x="630" y="602" font-size="10" fill="#7e22ce">trigger reports, dispatch alerts, call LLM</text>
 
   <!-- Single process note -->
   <rect x="50" y="628" width="820" height="36" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
