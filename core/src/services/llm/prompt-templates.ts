@@ -82,19 +82,26 @@ export function buildVerificationPrompt(input: VerificationPromptInput): string 
 	const candidateList = candidateApps
 		.map((app, i) => {
 			const intentList =
-				app.intents.length > 0 ? app.intents.join(', ') : '(none)';
-			return `${i + 1}. ${app.appName} (id: ${app.appId})\n   Description: ${app.appDescription}\n   Intents: ${intentList}`;
+				app.intents.length > 0
+					? app.intents.map((intent) => sanitizeInput(intent, 200)).join(', ')
+					: '(none)';
+			const safeDesc = sanitizeInput(app.appDescription, 500);
+			const safeName = sanitizeInput(app.appName, 100);
+			return `${i + 1}. ${safeName} (id: ${app.appId})\n   Description: ${safeDesc}\n   Intents: ${intentList}`;
 		})
 		.join('\n');
+
+	const safeClassifierName = sanitizeInput(classifierResult.appName, 100);
+	const safeClassifierIntent = sanitizeInput(classifierResult.intent, 200);
 
 	return [
 		'You are verifying a routing decision for a message sent to a personal automation system.',
 		'A classifier has already chosen which app and intent should handle the user\'s message.',
 		'Your job is to decide whether that routing decision is correct.',
 		'',
-		`Classifier decision:`,
-		`  App: ${classifierResult.appName} (id: ${classifierResult.appId})`,
-		`  Intent: ${classifierResult.intent}`,
+		'Classifier decision:',
+		`  App: ${safeClassifierName} (id: ${classifierResult.appId})`,
+		`  Intent: ${safeClassifierIntent}`,
 		`  Confidence: ${classifierResult.confidence}`,
 		'',
 		'Candidate apps (all apps that were considered):',

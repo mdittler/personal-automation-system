@@ -35,7 +35,7 @@ A local-first home automation platform where users interact through a single Tel
 - **Distribution** — apps are standalone git repos. `pas install <git-url>` clones, validates, scans for banned imports, checks `pas_core_version` compatibility
 - **Trust model** — install-time static analysis catches accidental violations. No runtime sandbox (honest about this). DI enforces undeclared services are `undefined`, scoped data prevents path traversal
 - **Message routing priority**: 1) `/command` exact match → 2) Photo classification → 3) Free text LLM classification (with "none" escape) → 4) Chatbot fallback
-- **Route verification** — grey-zone classifications (confidence 0.4–0.7) trigger a second LLM call (standard tier) with app descriptions for verification. On disagreement, inline Telegram buttons let the user choose. Configurable via `routing.verification` in pas.yaml
+- **Route verification** — enabled by default. Grey-zone classifications (confidence 0.4–0.7) trigger a second LLM call (standard tier) with app descriptions for verification. On disagreement, inline Telegram buttons let the user choose. Disable via `routing.verification.enabled: false` in pas.yaml
 
 ### Chatbot & App Awareness
 - **Chatbot app** — full conversational AI fallback. Per-user conversation history (20 turns), context store integration, graceful LLM failure degradation
@@ -135,7 +135,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-27A) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4140 tests passing across 169 test files.**
+All infrastructure phases (0-28) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4200+ tests passing across 170+ test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 

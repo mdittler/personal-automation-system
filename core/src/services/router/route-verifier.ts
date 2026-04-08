@@ -124,6 +124,13 @@ export class RouteVerifier {
 		}
 
 		const allApps = this.registry.getAll();
+
+		// Skip verification when there's 0–1 candidate apps (no alternatives to verify against)
+		if (allApps.length <= 1) {
+			this.logger.debug('RouteVerifier: skipping verification — 1 or fewer apps installed');
+			return { action: 'route', appId: classifierResult.appId };
+		}
+
 		const candidateApps = allApps.map((app) => ({
 			appId: app.manifest.app.id,
 			appName: app.manifest.app.name,
@@ -176,9 +183,20 @@ export class RouteVerifier {
 			return { action: 'route', appId: classifierResult.appId };
 		}
 
-		// Verifier disagrees — present inline buttons to the user
-		const suggestedAppId = verifierResponse.suggestedAppId ?? 'chatbot';
-		const suggestedApp = allApps.find((a) => a.manifest.app.id === suggestedAppId);
+		// Verifier disagrees — validate suggested appId exists in registry
+		const rawSuggestedId = verifierResponse.suggestedAppId ?? 'chatbot';
+		const suggestedApp = allApps.find((a) => a.manifest.app.id === rawSuggestedId);
+
+		// If the LLM hallucinated an appId that doesn't exist, fall back to classifier's pick
+		if (!suggestedApp && rawSuggestedId !== 'chatbot') {
+			this.logger.warn(
+				{ suggestedAppId: rawSuggestedId },
+				'RouteVerifier: LLM suggested non-existent app — falling back to classifier',
+			);
+			return { action: 'route', appId: classifierResult.appId };
+		}
+
+		const suggestedAppId = rawSuggestedId;
 		const suggestedAppName = suggestedApp?.manifest.app.name ?? suggestedAppId;
 
 		// Add with placeholder sent IDs to get pendingId for callback data
@@ -192,15 +210,26 @@ export class RouteVerifier {
 			photoPath: resolvedPhotoPath,
 		});
 
+		// Build deduplicated button list — classifier pick + verifier suggestion (no chatbot)
+		const buttonEntries = new Map<string, string>(); // appId → display name
+		buttonEntries.set(classifierResult.appId, classifierAppName);
+		if (suggestedAppId !== classifierResult.appId && suggestedAppId !== 'chatbot') {
+			buttonEntries.set(suggestedAppId, suggestedAppName);
+		}
+
 		const buttons = [
-			[
-				{ text: classifierAppName, callbackData: `rv:${pendingId}:${classifierResult.appId}` },
-				{ text: suggestedAppName, callbackData: `rv:${pendingId}:${suggestedAppId}` },
-				{ text: 'Chatbot', callbackData: `rv:${pendingId}:chatbot` },
-			],
+			[...buttonEntries.entries()].map(([appId, name]) => ({
+				text: name,
+				callbackData: `rv:${pendingId}:${appId}`,
+			})),
 		];
 
-		const promptText = "I'm not sure where to send this. Which app should handle it?";
+		const promptText =
+			`I'm not sure which app should handle your message. ` +
+			`Did you mean *${escapeMarkdown(classifierAppName)}*` +
+			(buttonEntries.size > 1
+				? ` or *${escapeMarkdown(suggestedAppName)}*?`
+				: `? Tap to confirm or I'll keep waiting.`);
 
 		let sent: SentMessage;
 		try {
@@ -223,8 +252,8 @@ export class RouteVerifier {
 			verifierAgrees: false,
 			verifierSuggestedAppId: suggestedAppId,
 			verifierSuggestedIntent: verifierResponse.suggestedIntent,
-			outcome: 'auto',
-			routedTo: classifierResult.appId,
+			outcome: 'pending',
+			routedTo: 'pending',
 		});
 
 		return { action: 'held' };
@@ -318,7 +347,7 @@ export class RouteVerifier {
 		verifierSuggestedAppId?: string;
 		verifierSuggestedIntent?: string;
 		userChoice?: string;
-		outcome: 'auto' | 'user override';
+		outcome: 'auto' | 'user override' | 'pending';
 		routedTo: string;
 	}): void {
 		this.verificationLogger

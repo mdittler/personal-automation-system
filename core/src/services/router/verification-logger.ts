@@ -22,7 +22,7 @@ export interface VerificationLogEntry {
 	verifierSuggestedAppId?: string;
 	verifierSuggestedIntent?: string;
 	userChoice?: string;
-	outcome: 'auto' | 'user override';
+	outcome: 'auto' | 'user override' | 'pending';
 	routedTo: string;
 }
 

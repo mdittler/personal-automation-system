@@ -207,9 +207,9 @@ describe('RouteVerifier', () => {
 			{ text: string; callbackData: string }[][],
 		];
 		const row = buttons[0]!;
+		expect(row).toHaveLength(2);
 		expect(row[0]!.text).toBe('Food');
 		expect(row[1]!.text).toBe('Notes');
-		expect(row[2]!.text).toBe('Chatbot');
 	});
 
 	it('stores pending entry when message is held', async () => {
@@ -230,14 +230,14 @@ describe('RouteVerifier', () => {
 			{ text: string; callbackData: string }[][],
 		];
 		const row = buttons[0]!;
-		// All three callback data strings should start with 'rv:<pendingId>:'
+		// All callback data strings should start with 'rv:<pendingId>:'
 		for (const btn of row) {
 			expect(btn.callbackData).toMatch(/^rv:pending-\d+:/);
 		}
-		// Each button should have a different app ID suffix
+		// Deduplicated: classifier + verifier (no chatbot)
+		expect(row).toHaveLength(2);
 		expect(row[0]!.callbackData).toMatch(/:food$/);
 		expect(row[1]!.callbackData).toMatch(/:notes$/);
-		expect(row[2]!.callbackData).toMatch(/:chatbot$/);
 	});
 
 	it('uses standard tier for the verification LLM call', async () => {
@@ -503,5 +503,177 @@ describe('RouteVerifier', () => {
 		expect(logArg['outcome']).toBe('user override');
 		expect(logArg['userChoice']).toBe('notes');
 		expect(logArg['routedTo']).toBe('notes');
+	});
+
+	// -------------------------------------------------------------------------
+	// appId validation
+	// -------------------------------------------------------------------------
+
+	it('falls back to classifier pick when verifier suggests non-existent appId', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "hallucinated-app", "reasoning": "made up"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ suggestedAppId: 'hallucinated-app' }),
+			expect.stringContaining('non-existent app'),
+		);
+	});
+
+	it('allows chatbot as a suggested appId even when not in registry', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "chatbot"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		// chatbot is a valid suggestion — message should be held
+		expect(result).toEqual({ action: 'held' });
+	});
+
+	// -------------------------------------------------------------------------
+	// edge cases
+	// -------------------------------------------------------------------------
+
+	it('skips verification when only 1 app is installed', async () => {
+		const singleAppRegistry = {
+			getAll: vi.fn().mockReturnValue([
+				{
+					manifest: {
+						app: { id: 'food', name: 'Food', description: 'Food management' },
+						capabilities: { messages: { intents: ['grocery'] } },
+					},
+					module: {},
+					appDir: '/apps/food',
+				},
+			]),
+			getApp: vi.fn(),
+			getManifestCache: vi.fn(),
+			getLoadedAppIds: vi.fn(),
+		} as unknown as AppRegistry;
+
+		const llm = createMockLLM('should not be called');
+		const verifier = new RouteVerifier({
+			llm,
+			telegram,
+			registry: singleAppRegistry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('skips verification when zero apps are installed', async () => {
+		const emptyRegistry = {
+			getAll: vi.fn().mockReturnValue([]),
+			getApp: vi.fn(),
+			getManifestCache: vi.fn(),
+			getLoadedAppIds: vi.fn(),
+		} as unknown as AppRegistry;
+
+		const llm = createMockLLM('should not be called');
+		const verifier = new RouteVerifier({
+			llm,
+			telegram,
+			registry: emptyRegistry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(llm.complete).not.toHaveBeenCalled();
+	});
+
+	// -------------------------------------------------------------------------
+	// button deduplication
+	// -------------------------------------------------------------------------
+
+	it('deduplicates buttons when verifier suggests same app as classifier', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "food", "reasoning": "same app but wrong intent"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
+			string,
+			string,
+			{ text: string; callbackData: string }[][],
+		];
+		const row = buttons[0]!;
+		// Should only have one button since both suggest the same app
+		expect(row).toHaveLength(1);
+		expect(row[0]!.text).toBe('Food');
+	});
+
+	it('does not show chatbot as a button option when verifier suggests chatbot', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "chatbot"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
+			string,
+			string,
+			{ text: string; callbackData: string }[][],
+		];
+		const row = buttons[0]!;
+		// Should only show the classifier pick, chatbot excluded from buttons
+		expect(row).toHaveLength(1);
+		expect(row[0]!.text).toBe('Food');
+	});
+
+	// -------------------------------------------------------------------------
+	// held message log entry
+	// -------------------------------------------------------------------------
+
+	it('logs pending outcome when message is held', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(verificationLogger.log).toHaveBeenCalledOnce();
+		const logArg = (verificationLogger.log as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
+		expect(logArg['outcome']).toBe('pending');
+		expect(logArg['routedTo']).toBe('pending');
+	});
+
+	// -------------------------------------------------------------------------
+	// natural language prompt message
+	// -------------------------------------------------------------------------
+
+	it('sends a natural language prompt mentioning both app names', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "notes"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const [, promptText] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
+			string,
+			string,
+		];
+		expect(promptText).toContain('Food');
+		expect(promptText).toContain('Notes');
+		expect(promptText).toContain('not sure');
 	});
 });

@@ -21,8 +21,9 @@ defaults:
   log_level: info
   timezone: America/New_York
 
-# Route verification (optional — confirm grey-zone classifications with a second LLM call)
+# Route verification — confirms grey-zone classifications with a second LLM call.
+# Enabled by default. Uncomment to customize or disable:
 # routing:
 #   verification:
-#     enabled: true
-#     upper_bound: 0.7
+#     enabled: false      # set to false to disable verification
+#     upper_bound: 0.7    # confidence above this skips verification (0.0–1.0)

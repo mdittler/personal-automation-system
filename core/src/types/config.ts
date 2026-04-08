@@ -136,7 +136,7 @@ export interface SystemConfig {
 		dispatchUrl: string;
 	};
 
-	/** Routing configuration (optional — verification disabled by default). */
+	/** Routing configuration (optional in type for test compat — loader always populates with defaults). */
 	routing?: {
 		verification?: RoutingVerificationConfig;
 	};

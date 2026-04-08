@@ -485,7 +485,12 @@ export async function main(): Promise<void> {
 			photoDir: resolve(config.dataDir, 'system', 'route-verification', 'photos'),
 		});
 
-		logger.info('Route verification enabled');
+		logger.info(
+			{ upperBound: verificationConfig.upperBound },
+			'Route verification enabled',
+		);
+	} else {
+		logger.info('Route verification disabled');
 	}
 
 	// 10. Router

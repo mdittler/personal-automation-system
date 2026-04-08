@@ -1004,6 +1004,72 @@ When no app matches a message, the fallback handler must append the message to a
 
 **Fixes:** None
 
+### REQ-ROUTE-006: Route verification (grey-zone disambiguation)
+
+**Phase:** 28 | **Status:** Implemented
+
+When intent classification confidence falls in the grey zone (>= 0.4 and < upperBound, default 0.7), a second LLM call (standard tier) verifies the routing decision using full app descriptions and all intents. On agreement, route immediately. On disagreement, hold the message and present inline Telegram buttons for user disambiguation. Enabled by default. Graceful degradation on LLM failure (fall back to classifier's pick). Verification skipped when only 0–1 apps installed. Verification log written to `data/system/route-verification-log.md`.
+
+**Standard tests:**
+- `route-verifier.test.ts` > returns route action when verifier agrees
+- `route-verifier.test.ts` > does not send buttons when verifier agrees
+- `route-verifier.test.ts` > returns held action and sends buttons when verifier disagrees
+- `route-verifier.test.ts` > sends correct button labels when verifier disagrees
+- `route-verifier.test.ts` > stores pending entry when message is held
+- `route-verifier.test.ts` > uses standard tier for the verification LLM call
+- `route-verifier.test.ts` > resolveCallback resolves pending entry and edits message
+- `route-verifier.test.ts` > resolveCallback logs the user override to verificationLogger
+- `route-verifier.test.ts` > handles photo context correctly — uses caption as message text
+- `route-verifier.test.ts` > sends a natural language prompt mentioning both app names
+- `router-verification.test.ts` > grey-zone triggers verifier
+- `router-verification.test.ts` > high confidence skips verifier
+- `router-verification.test.ts` > held message is not dispatched
+- `prompt-templates.test.ts` > buildVerificationPrompt > contains classifier info
+- `prompt-templates.test.ts` > buildVerificationPrompt > contains candidate apps
+- `prompt-templates.test.ts` > buildVerificationPrompt > requests JSON response
+- `pending-verification-store.test.ts` > add and get
+- `pending-verification-store.test.ts` > resolve removes entry
+- `verification-logger.test.ts` > creates log file with frontmatter on first write
+- `verification-logger.test.ts` > appends entries to existing file
+- `config.test.ts` > enables route verification by default when section is absent
+- `config.test.ts` > respects explicit enabled: false for route verification
+
+**Edge case tests:**
+- `route-verifier.test.ts` > degrades gracefully when LLM call fails
+- `route-verifier.test.ts` > degrades gracefully when LLM returns unparseable response
+- `route-verifier.test.ts` > degrades gracefully when LLM response is valid JSON but missing agrees field
+- `route-verifier.test.ts` > falls back to classifier pick when verifier suggests non-existent appId
+- `route-verifier.test.ts` > allows chatbot as a suggested appId even when not in registry
+- `route-verifier.test.ts` > skips verification when only 1 app is installed
+- `route-verifier.test.ts` > skips verification when zero apps are installed
+- `route-verifier.test.ts` > deduplicates buttons when verifier suggests same app as classifier
+- `route-verifier.test.ts` > does not show chatbot as a button option when verifier suggests chatbot
+- `route-verifier.test.ts` > logs pending outcome when message is held
+- `route-verifier.test.ts` > resolveCallback returns undefined for unknown pending ID
+- `router-verification.test.ts` > backward compatible — no verifier means no verification
+- `router-verification.test.ts` > photo grey-zone triggers verifier
+- `pending-verification-store.test.ts` > callback data fits Telegram 64-byte limit
+- `pending-verification-store.test.ts` > IDs are unique across calls
+- `verification-logger.test.ts` > includes photo path in entry
+- `verification-logger.test.ts` > creates missing directory
+- `config.test.ts` > enables route verification by default when routing section exists but enabled is omitted
+- `config.test.ts` > clamps upper_bound to [0, 1] range
+- `config.test.ts` > clamps negative upper_bound to 0
+
+**Security tests:**
+- `prompt-templates.test.ts` > buildVerificationPrompt > sanitizes backtick injection in app descriptions
+- `prompt-templates.test.ts` > buildVerificationPrompt > sanitizes backtick injection in classifier intent
+- `prompt-templates.test.ts` > buildVerificationPrompt > truncates excessively long app descriptions
+- `prompt-templates.test.ts` > buildVerificationPrompt > sanitizes app names with backtick sequences
+
+**Photo tests:**
+- `route-verifier.test.ts` > photo saving > saves photo to photoDir when verifier disagrees and message is held
+- `route-verifier.test.ts` > photo saving > saves photo to photoDir when verifier agrees
+- `route-verifier.test.ts` > photo saving > does not save photo when photoDir is not configured
+- `route-verifier.test.ts` > photo saving > includes saved photo path in the pending entry
+
+**Fixes:** None
+
 ---
 
 ## 10. Telegram Gateway
@@ -4429,6 +4495,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
 | REQ-SERVER-003 | server.test.ts | 2 | 2 | Implemented |
 | REQ-ROUTE-005 | router.test.ts, chatbot.test.ts | 7 | 14 | Implemented |
+| REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 24 | Implemented |
 | REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
 | REQ-CHATBOT-002 | chatbot.test.ts | 4 | 6 | Implemented |
 | REQ-CHATBOT-003 | chatbot.test.ts | 1 | 1 | Implemented |

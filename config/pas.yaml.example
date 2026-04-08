@@ -55,13 +55,14 @@ defaults:
 #       provider: anthropic
 #       model: claude-sonnet-4-20250514
 
-# Route verification (optional — confirm grey-zone classifications with a second LLM call)
-# When enabled, messages with moderate confidence (0.4–0.7) trigger a verification step
-# before routing. On disagreement, the user chooses the correct app via inline buttons.
+# Route verification — confirms grey-zone classifications with a second LLM call.
+# Enabled by default. Messages with moderate confidence (0.4–0.7) trigger a verification
+# step before routing. On disagreement, the user chooses the correct app via inline buttons.
+# Uncomment to customize or disable:
 # routing:
 #   verification:
-#     enabled: true
-#     upper_bound: 0.7   # confidence above this skips verification
+#     enabled: false      # set to false to disable verification
+#     upper_bound: 0.7    # confidence above this skips verification (0.0–1.0)
 
 # n8n integration (optional — dispatch execution to n8n instead of running internally)
 # When set, PAS cron triggers fire a webhook to n8n, which calls PAS API endpoints.
