@@ -276,6 +276,91 @@ describe('UserGuard', () => {
 			expect(inviteService.redeemCode).toHaveBeenCalled();
 		});
 
+		it('redeems valid code when sent as /start <code> from unregistered user', async () => {
+			const userManager = createMockUserManager([]);
+			const telegram = createMockTelegram();
+			const inviteService = createMockInviteService({
+				invite: {
+					name: 'Alice',
+					createdBy: 'admin',
+					createdAt: new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 3600000).toISOString(),
+					usedBy: null,
+					usedAt: null,
+				} as never,
+			});
+			const userMutationService = createMockUserMutationService();
+
+			const guard = new UserGuard({
+				userManager,
+				telegram,
+				logger: mockLogger,
+				inviteService,
+				userMutationService,
+			});
+
+			const result = await guard.checkUser('999', '/start a1b2c3d4');
+			expect(result).toBe(true);
+			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(userMutationService.registerUser).toHaveBeenCalledWith(
+				expect.objectContaining({ id: '999', name: 'Alice', isAdmin: false }),
+			);
+			expect(inviteService.redeemCode).toHaveBeenCalledWith('a1b2c3d4', '999');
+		});
+
+		it('sends invite error when /start <code> has expired code', async () => {
+			const userManager = createMockUserManager([]);
+			const telegram = createMockTelegram();
+			const inviteService = createMockInviteService({
+				error: 'This invite code has expired. Ask the admin for a new one.',
+			});
+			const userMutationService = createMockUserMutationService();
+
+			const guard = new UserGuard({
+				userManager,
+				telegram,
+				logger: mockLogger,
+				inviteService,
+				userMutationService,
+			});
+
+			const result = await guard.checkUser('999', '/start deadbeef');
+			expect(result).toBe(false);
+			expect(inviteService.validateCode).toHaveBeenCalledWith('deadbeef');
+			expect(telegram.send).toHaveBeenCalledWith(
+				'999',
+				'This invite code has expired. Ask the admin for a new one.',
+			);
+		});
+
+		it('handles /start with extra whitespace before code', async () => {
+			const userManager = createMockUserManager([]);
+			const telegram = createMockTelegram();
+			const inviteService = createMockInviteService({
+				invite: {
+					name: 'Bob',
+					createdBy: 'admin',
+					createdAt: new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 3600000).toISOString(),
+					usedBy: null,
+					usedAt: null,
+				} as never,
+			});
+			const userMutationService = createMockUserMutationService();
+
+			const guard = new UserGuard({
+				userManager,
+				telegram,
+				logger: mockLogger,
+				inviteService,
+				userMutationService,
+			});
+
+			const result = await guard.checkUser('999', '/start  a1b2c3d4');
+			expect(result).toBe(true);
+			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+		});
+
 		it('does not attempt invite redemption for registered users', async () => {
 			const userManager = createMockUserManager(['111']);
 			const telegram = createMockTelegram();

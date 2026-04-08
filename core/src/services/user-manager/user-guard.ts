@@ -51,11 +51,24 @@ export class UserGuard {
 			return true;
 		}
 
-		// If unregistered and text looks like an invite code, try to redeem
+		// If unregistered and text looks like an invite code, try to redeem.
+		// Supports both raw codes ("a1b2c3d4") and Telegram deep links ("/start a1b2c3d4").
 		if (messageText && this.inviteService && this.userMutationService) {
 			const trimmed = messageText.trim();
+
+			// Extract potential code from raw hex or /start <hex>
+			let potentialCode: string | null = null;
 			if (/^[a-f0-9]{8}$/.test(trimmed)) {
-				const result = await this.inviteService.validateCode(trimmed);
+				potentialCode = trimmed;
+			} else {
+				const startMatch = trimmed.match(/^\/start\s+([a-f0-9]{8})$/);
+				if (startMatch) {
+					potentialCode = startMatch[1];
+				}
+			}
+
+			if (potentialCode) {
+				const result = await this.inviteService.validateCode(potentialCode);
 				if ('invite' in result) {
 					// Valid code — register the user
 					const newUser = {
@@ -66,10 +79,10 @@ export class UserGuard {
 						sharedScopes: [] as string[],
 					};
 					await this.userMutationService.registerUser(newUser);
-					await this.inviteService.redeemCode(trimmed, userId);
+					await this.inviteService.redeemCode(potentialCode, userId);
 					this.logger.info(
 						{ userId, name: result.invite.name },
-						'User registered via raw invite code',
+						'User registered via invite code',
 					);
 					try {
 						await this.telegram.send(
