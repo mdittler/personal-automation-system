@@ -16,8 +16,10 @@ import type { MessageContext, PhotoContext, TelegramService } from '../../types/
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import type { InviteService } from '../invite/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
+import type { UserMutationService } from '../user-manager/user-mutation-service.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -53,6 +55,10 @@ export interface RouterOptions {
 	routeVerifier?: RouteVerifier;
 	/** Confidence upper bound for verification (default: 0.7). */
 	verificationUpperBound?: number;
+	/** Invite service for /invite command and /start code redemption. */
+	inviteService?: InviteService;
+	/** User mutation service for registering users via invite codes. */
+	userMutationService?: UserMutationService;
 }
 
 export class Router {
@@ -71,6 +77,8 @@ export class Router {
 	private readonly userManager?: UserManager;
 	private readonly routeVerifier?: RouteVerifier;
 	private readonly verificationUpperBound: number;
+	private readonly inviteService?: InviteService;
+	private readonly userMutationService?: UserMutationService;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -90,6 +98,8 @@ export class Router {
 		this.userManager = options.userManager;
 		this.routeVerifier = options.routeVerifier;
 		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
+		this.inviteService = options.inviteService;
+		this.userMutationService = options.userMutationService;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -123,6 +133,17 @@ export class Router {
 	 * This is the main entry point from the bot middleware.
 	 */
 	async routeMessage(ctx: MessageContext): Promise<void> {
+		// Parse command once for use throughout the method
+		const parsed = parseCommand(ctx.text);
+
+		// Handle /start <code> for unregistered users (invite redemption)
+		if (parsed?.command === '/start' && parsed.rawArgs.trim() && this.inviteService && this.userMutationService) {
+			if (!this.findUser(ctx.userId)) {
+				await this.handleInviteRedemption(parsed.rawArgs.trim(), ctx.userId);
+				return;
+			}
+		}
+
 		// 1. Check user authorization
 		const user = this.findUser(ctx.userId);
 		if (!user) {
@@ -132,11 +153,15 @@ export class Router {
 		}
 
 		// 2. Check for /command
-		const parsed = parseCommand(ctx.text);
 		if (parsed) {
 			// Handle built-in /space command before active space injection
 			if (parsed.command === '/space') {
 				await this.handleSpaceCommand(parsed.rawArgs, ctx);
+				return;
+			}
+			// Handle built-in /invite command
+			if (parsed.command === '/invite') {
+				await this.handleInviteCommand(parsed.rawArgs, ctx);
 				return;
 			}
 			// Inject active space context for all other commands
@@ -276,6 +301,10 @@ export class Router {
 
 		// Built-in /start command (Telegram sends this when a user first opens the bot)
 		if (parsed.command === '/start') {
+			if (parsed.rawArgs.trim() && this.inviteService) {
+				await this.trySend(ctx.userId, "You're already registered\\! Type /help to get started\\.");
+				return;
+			}
 			await this.trySend(ctx.userId, 'Welcome to PAS! Type /help to see available commands.');
 			return;
 		}
@@ -349,6 +378,16 @@ export class Router {
 			lines.push('  /space off — Return to personal mode');
 			lines.push('  /space create <id> <name> — Create a new space');
 			lines.push('');
+		}
+
+		// Admin-only invite command
+		if (this.inviteService) {
+			const caller = this.findUser(userId);
+			if (caller?.isAdmin) {
+				lines.push('*Admin*');
+				lines.push('  /invite <name> — Generate an invite code for a new user');
+				lines.push('');
+			}
 		}
 
 		// Group commands by app
@@ -663,9 +702,58 @@ export class Router {
 		await this.trySend(ctx.userId, lines.join('\n'));
 	}
 
+	/** Handle the built-in /invite command. */
+	private async handleInviteCommand(args: string, ctx: MessageContext): Promise<void> {
+		if (!this.inviteService) {
+			await this.trySend(ctx.userId, 'Invite system is not configured.');
+			return;
+		}
+
+		const user = this.findUser(ctx.userId);
+		if (!user?.isAdmin) {
+			await this.trySend(ctx.userId, 'Only admins can create invites.');
+			return;
+		}
+
+		const name = args.trim();
+		if (!name) {
+			await this.trySend(ctx.userId, 'Usage: `/invite <name>`');
+			return;
+		}
+
+		const code = await this.inviteService.createInvite(name, ctx.userId);
+		await this.trySend(
+			ctx.userId,
+			`Invite code for *${escapeMarkdown(name)}*: \`${code}\`\n\nShare this code\\. They should send \`/start ${code}\` to the bot\\. Expires in 24 hours\\.`,
+		);
+	}
+
+	/** Handle invite code redemption for unregistered users via /start <code>. */
+	private async handleInviteRedemption(code: string, userId: string): Promise<void> {
+		if (!this.inviteService || !this.userMutationService) return;
+
+		const result = await this.inviteService.validateCode(code);
+		if ('error' in result) {
+			await this.trySend(userId, result.error);
+			return;
+		}
+
+		const newUser = {
+			id: userId,
+			name: result.invite.name,
+			isAdmin: false,
+			enabledApps: ['*'] as string[],
+			sharedScopes: [] as string[],
+		};
+
+		await this.userMutationService.registerUser(newUser);
+		await this.inviteService.redeemCode(code, userId);
+		await this.trySend(userId, `Welcome to PAS, ${escapeMarkdown(result.invite.name)}\\! Type /help to see available commands\\.`);
+	}
+
 	/** Find a registered user by Telegram user ID. */
 	private findUser(userId: string) {
-		return this.config.users.find((u) => u.id === userId);
+		return this.config.users.find((u) => u.id === userId) ?? this.userManager?.getUser(userId) ?? null;
 	}
 
 	/** Check if an app is enabled for a user, considering toggle overrides. */
