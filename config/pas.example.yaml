@@ -20,3 +20,9 @@ users:
 defaults:
   log_level: info
   timezone: America/New_York
+
+# Route verification (optional — confirm grey-zone classifications with a second LLM call)
+# routing:
+#   verification:
+#     enabled: true
+#     upper_bound: 0.7

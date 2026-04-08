@@ -1,0 +1,342 @@
+/**
+ * Router verification tests — grey-zone confidence disambiguation.
+ *
+ * Tests the optional RouteVerifier integration added to the Router.
+ * Covers text and photo routing with and without a verifier configured.
+ */
+
+import type { Logger } from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppModule } from '../../../types/app-module.js';
+import type { SystemConfig } from '../../../types/config.js';
+import type { ClassifyResult, LLMService } from '../../../types/llm.js';
+import type { AppManifest } from '../../../types/manifest.js';
+import type { MessageContext, PhotoContext, TelegramService } from '../../../types/telegram.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
+import type { FallbackHandler } from '../fallback.js';
+import { Router } from '../index.js';
+import type { RouteVerifier, VerifyAction } from '../route-verifier.js';
+
+// ---------------------------------------------------------------------------
+// Mock factories
+// ---------------------------------------------------------------------------
+
+function createMockLogger(): Logger {
+	return {
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		trace: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
+	} as unknown as Logger;
+}
+
+function createMockTelegram(): TelegramService {
+	return {
+		send: vi.fn().mockResolvedValue(undefined),
+		sendPhoto: vi.fn().mockResolvedValue(undefined),
+		sendOptions: vi.fn().mockResolvedValue(''),
+	};
+}
+
+function createMockLLM(classifyResult?: ClassifyResult): LLMService {
+	return {
+		complete: vi.fn(),
+		classify: vi.fn().mockResolvedValue(classifyResult ?? { category: 'unknown', confidence: 0.1 }),
+		extractStructured: vi.fn(),
+	};
+}
+
+function createMockConfig(users: SystemConfig['users'] = []): SystemConfig {
+	return {
+		port: 3000,
+		dataDir: '/tmp/data',
+		logLevel: 'info',
+		timezone: 'UTC',
+		fallback: 'chatbot',
+		telegram: { botToken: 'test' },
+		claude: { apiKey: 'test', model: 'test' },
+		gui: { authToken: 'test' },
+		api: { token: 'test' },
+		cloudflare: {},
+		webhooks: [],
+		n8n: { dispatchUrl: '' },
+		routing: { verification: { enabled: true, upperBound: 0.7 } },
+		users,
+	};
+}
+
+function createMockModule(): AppModule {
+	return {
+		init: vi.fn().mockResolvedValue(undefined),
+		handleMessage: vi.fn().mockResolvedValue(undefined),
+		handleCommand: vi.fn().mockResolvedValue(undefined),
+		handlePhoto: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
+function createMockFallback(): FallbackHandler {
+	return {
+		handleUnrecognized: vi.fn().mockResolvedValue(undefined),
+	} as unknown as FallbackHandler;
+}
+
+function createMockVerifier(result: VerifyAction): RouteVerifier {
+	return { verify: vi.fn().mockResolvedValue(result) } as unknown as RouteVerifier;
+}
+
+// ---------------------------------------------------------------------------
+// Test manifests
+// ---------------------------------------------------------------------------
+
+const echoManifest: AppManifest = {
+	app: { id: 'echo', name: 'Echo', version: '1.0.0', description: 'Echo app', author: 'Test' },
+	capabilities: {
+		messages: {
+			intents: ['echo', 'repeat'],
+		},
+	},
+};
+
+const groceryManifest: AppManifest = {
+	app: {
+		id: 'grocery',
+		name: 'Grocery',
+		version: '1.0.0',
+		description: 'Grocery app',
+		author: 'Test',
+	},
+	capabilities: {
+		messages: {
+			intents: ['add grocery', 'shopping'],
+			accepts_photos: true,
+			photo_intents: ['receipt'],
+		},
+	},
+};
+
+// ---------------------------------------------------------------------------
+// Context helpers
+// ---------------------------------------------------------------------------
+
+function createTextCtx(text: string, userId = '123'): MessageContext {
+	return { userId, text, timestamp: new Date(), chatId: 1, messageId: 1 };
+}
+
+function createPhotoCtx(caption?: string, userId = '123'): PhotoContext {
+	return {
+		userId,
+		photo: Buffer.from('fake'),
+		caption,
+		mimeType: 'image/jpeg',
+		timestamp: new Date(),
+		chatId: 1,
+		messageId: 1,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Router builder
+// ---------------------------------------------------------------------------
+
+const testUser = {
+	id: '123',
+	name: 'test',
+	isAdmin: false,
+	enabledApps: ['*'] as string[],
+	sharedScopes: [] as string[],
+};
+
+function buildRouter(
+	apps: Array<{ manifest: AppManifest; module: AppModule }>,
+	llm: LLMService,
+	verifier?: RouteVerifier,
+	verificationUpperBound?: number,
+): Router {
+	const config = createMockConfig([testUser]);
+	const cache = new ManifestCache();
+	for (const app of apps) {
+		cache.add(app.manifest, `/apps/${app.manifest.app.id}`);
+	}
+
+	const registry = {
+		getApp: (id: string) => {
+			const app = apps.find((a) => a.manifest.app.id === id);
+			if (!app) return undefined;
+			return {
+				manifest: app.manifest,
+				module: app.module,
+				appDir: `/apps/${id}`,
+			} as RegisteredApp;
+		},
+		getManifestCache: () => cache,
+		getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+	} as unknown as AppRegistry;
+
+	const router = new Router({
+		registry,
+		llm,
+		telegram: createMockTelegram(),
+		fallback: createMockFallback(),
+		config,
+		logger: createMockLogger(),
+		confidenceThreshold: 0.4,
+		routeVerifier: verifier,
+		verificationUpperBound,
+	});
+	router.buildRoutingTables();
+	return router;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('Router — grey-zone verification', () => {
+	let echoModule: AppModule;
+
+	beforeEach(() => {
+		echoModule = createMockModule();
+	});
+
+	describe('routeMessage', () => {
+		it('calls verifier when confidence is in grey zone (0.4–0.7)', async () => {
+			// Confidence 0.55 — above threshold (0.4) but below upper bound (0.7)
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+		});
+
+		it('skips verifier when confidence is above upper bound (0.85)', async () => {
+			// Confidence 0.85 — above upper bound (0.7), should skip verification
+			const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
+			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				highConfLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('echo this clearly'));
+
+			expect(verifier.verify).not.toHaveBeenCalled();
+			expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+		});
+
+		it('does not dispatch when verifier returns held', async () => {
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			const verifier = createMockVerifier({ action: 'held' });
+
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('ambiguous message'));
+
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			expect(echoModule.handleMessage).not.toHaveBeenCalled();
+		});
+
+		it('works normally without a verifier configured (backward compatibility)', async () => {
+			// High confidence, no verifier — should dispatch directly
+			const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
+
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				highConfLlm,
+				// no verifier
+			);
+
+			await router.routeMessage(createTextCtx('echo this'));
+
+			expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+		});
+
+		it('works normally without a verifier at grey-zone confidence (backward compatibility)', async () => {
+			// Grey-zone confidence but no verifier — should still dispatch
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				greyZoneLlm,
+				// no verifier
+			);
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+		});
+	});
+
+	describe('routePhoto', () => {
+		let groceryModule: AppModule;
+
+		beforeEach(() => {
+			groceryModule = createMockModule();
+		});
+
+		it('calls verifier when photo confidence is in grey zone', async () => {
+			// Confidence 0.55 — above threshold but below upper bound
+			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
+			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+
+			const router = buildRouter(
+				[{ manifest: groceryManifest, module: groceryModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routePhoto(createPhotoCtx('grocery receipt here'));
+
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
+		});
+
+		it('skips verifier for photo when confidence is above upper bound', async () => {
+			const highConfLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
+			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+
+			const router = buildRouter(
+				[{ manifest: groceryManifest, module: groceryModule }],
+				highConfLlm,
+				verifier,
+			);
+
+			await router.routePhoto(createPhotoCtx('grocery receipt'));
+
+			expect(verifier.verify).not.toHaveBeenCalled();
+			expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
+		});
+
+		it('does not dispatch photo when verifier returns held', async () => {
+			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
+			const verifier = createMockVerifier({ action: 'held' });
+
+			const router = buildRouter(
+				[{ manifest: groceryManifest, module: groceryModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routePhoto(createPhotoCtx('some receipt'));
+
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			expect(groceryModule.handlePhoto).not.toHaveBeenCalled();
+		});
+	});
+});
