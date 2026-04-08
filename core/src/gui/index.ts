@@ -37,6 +37,7 @@ import { registerLogsRoutes } from './routes/logs.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
+import { registerUserRoutes } from './routes/users.js';
 
 export interface GuiOptions {
 	registry: AppRegistry;
@@ -77,6 +78,7 @@ export async function registerGuiRoutes(
 		reportService,
 		alertService,
 		userManager,
+		userMutationService,
 		contextStore,
 		spaceService,
 		dataDir,
@@ -141,6 +143,14 @@ export async function registerGuiRoutes(
 				registerSpaceRoutes(gui, {
 					spaceService,
 					userManager,
+					logger,
+				});
+			}
+			if (userManager && userMutationService) {
+				registerUserRoutes(gui, {
+					userManager,
+					userMutationService,
+					registry,
 					logger,
 				});
 			}
