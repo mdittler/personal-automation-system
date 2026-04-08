@@ -75,6 +75,12 @@ interface PasYamlConfig {
 	n8n?: {
 		dispatch_url?: string;
 	};
+	routing?: {
+		verification?: {
+			enabled?: boolean;
+			upper_bound?: number;
+		};
+	};
 }
 
 /**
@@ -176,6 +182,14 @@ export async function loadSystemConfig(options?: {
 		n8n: {
 			dispatchUrl: yamlConfig?.n8n?.dispatch_url ?? '',
 		},
+		routing: yamlConfig?.routing?.verification
+			? {
+					verification: {
+						enabled: yamlConfig.routing.verification.enabled ?? false,
+						upperBound: yamlConfig.routing.verification.upper_bound ?? 0.7,
+					},
+				}
+			: undefined,
 		users,
 	};
 
