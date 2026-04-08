@@ -63,7 +63,7 @@ export class UserGuard {
 			} else {
 				const startMatch = trimmed.match(/^\/start\s+([a-f0-9]{8})$/);
 				if (startMatch) {
-					potentialCode = startMatch[1];
+					potentialCode = startMatch[1] ?? null;
 				}
 			}
 
