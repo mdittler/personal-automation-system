@@ -39,6 +39,8 @@ import {
 	isKidAdaptIntent,
 	isFoodIntroIntent,
 	isChildApprovalIntent,
+	isPriceUpdateIntent,
+	isBudgetViewIntent,
 } from '../index.js';
 import { endSession, hasActiveSession } from '../services/cook-session.js';
 import type { ChildFoodLog, FreezerItem, GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
@@ -304,6 +306,71 @@ const kidAdaptLLMResponse = JSON.stringify({
 	generalNotes: 'Good finger food once chicken is cut small enough',
 });
 
+// ─── H10: Cost Tracking Fixtures ───────────────────────────────────
+
+const costcoPriceFile = [
+	'---',
+	'store: Costco',
+	'slug: costco',
+	'last_updated: "2026-04-07"',
+	'item_count: 5',
+	'tags:',
+	'  - hearthstone',
+	'  - prices',
+	'app: hearthstone',
+	'---',
+	'',
+	'## Dairy',
+	'- Eggs (60ct): $7.99 <!-- updated: 2026-04-05 -->',
+	'- Milk, whole (1 gal): $3.89 <!-- updated: 2026-04-01 -->',
+	'## Meat',
+	'- Chicken breast (6 lb): $17.99 <!-- updated: 2026-04-05 -->',
+	'## Pantry',
+	'- Rice, jasmine (25 lb): $18.99 <!-- updated: 2026-03-15 -->',
+	'- AP flour (25 lb): $8.99 <!-- updated: 2026-02-20 -->',
+].join('\n');
+
+const weeklyHistoryW14 = stringify({
+	weekId: '2026-W14',
+	startDate: '2026-04-01',
+	endDate: '2026-04-07',
+	meals: [
+		{ date: '2026-04-01', recipeTitle: 'Chicken Stir Fry', cost: 4.20, perServing: 1.05 },
+		{ date: '2026-04-02', recipeTitle: 'Pasta Bolognese', cost: 3.85, perServing: 0.96 },
+		{ date: '2026-04-03', recipeTitle: 'Tacos', cost: 5.10, perServing: 1.28 },
+		{ date: '2026-04-04', recipeTitle: 'Salmon', cost: 7.20, perServing: 1.80 },
+		{ date: '2026-04-05', recipeTitle: 'Mac and Cheese', cost: 2.50, perServing: 0.63 },
+		{ date: '2026-04-06', recipeTitle: 'Chicken Stir Fry', cost: 4.20, perServing: 1.05 },
+		{ date: '2026-04-07', recipeTitle: 'Pizza', cost: 8.45, perServing: 2.11 },
+	],
+	totalCost: 35.50,
+	avgPerMeal: 5.07,
+	avgPerServing: 1.27,
+	mealCount: 7,
+});
+
+const priceUpdateLLM = JSON.stringify({
+	item: 'Eggs (60ct)',
+	price: 3.50,
+	store: 'Costco',
+	unit: '60ct',
+	department: 'Dairy',
+});
+
+const costEstimateLLM = JSON.stringify([
+	{ ingredientName: 'chicken breast', matchedItem: 'Chicken breast (6 lb)', portionCost: 3.00, isEstimate: false },
+	{ ingredientName: 'soy sauce', matchedItem: null, portionCost: 0.50, isEstimate: true },
+	{ ingredientName: 'broccoli', matchedItem: null, portionCost: 1.00, isEstimate: true },
+	{ ingredientName: 'garlic', matchedItem: null, portionCost: 0.10, isEstimate: true },
+	{ ingredientName: 'rice', matchedItem: 'Rice, jasmine (25 lb)', portionCost: 0.30, isEstimate: false },
+	{ ingredientName: 'salt', matchedItem: null, portionCost: 0.01, isEstimate: true },
+]);
+
+const groceryCostLLM = JSON.stringify([
+	{ name: 'Milk', matchedItem: 'Milk, whole (1 gal)', estimatedCost: 3.89 },
+	{ name: 'Chicken breast', matchedItem: 'Chicken breast (6 lb)', estimatedCost: 17.99 },
+]);
+
 // ─── Test Setup ──────────────────────────────────────────────────
 
 function createMockStore() {
@@ -338,6 +405,8 @@ describe('Natural Language — Real User Messages', () => {
 			mealPlan?: MealPlan | null;
 			children?: ChildFoodLog[];
 			hhOverride?: Household;
+			priceFiles?: Record<string, string>;
+			costHistory?: Record<string, string>;
 		} = {},
 	) {
 		const recipes = opts.recipes ?? [chickenStirFry, pastaBolognese];
@@ -355,11 +424,23 @@ describe('Natural Language — Real User Messages', () => {
 			for (const c of children) {
 				if (path === `children/${c.profile.slug}.yaml`) return stringify(c);
 			}
+			if (opts.priceFiles) {
+				for (const [slug, content] of Object.entries(opts.priceFiles)) {
+					if (path === `prices/${slug}.md`) return content;
+				}
+			}
+			if (opts.costHistory) {
+				for (const [weekId, content] of Object.entries(opts.costHistory)) {
+					if (path === `cost-history/${weekId}.md`) return content;
+				}
+			}
 			return '';
 		});
 		store.list.mockImplementation(async (dir: string) => {
 			if (dir === 'recipes') return recipes.map((r) => `${r.id}.yaml`);
 			if (dir === 'children') return children.map((c) => `children/${c.profile.slug}.yaml`);
+			if (dir === 'prices' && opts.priceFiles) return Object.keys(opts.priceFiles).map((s) => `${s}.md`);
+			if (dir === 'cost-history' && opts.costHistory) return Object.keys(opts.costHistory).map((s) => `${s}.md`);
 			return [];
 		});
 	}
@@ -5424,6 +5505,463 @@ describe('Natural Language — Real User Messages', () => {
 				200,
 				expect.stringContaining('Cancelled'),
 			);
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H10 — COST TRACKING
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('H10 — Telling the bot about a price', () => {
+		it('"eggs are $3.50 at costco" → updates price database', async () => {
+			setupHousehold({});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(priceUpdateLLM);
+
+			await handleMessage(msg('eggs are $3.50 at costco'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/Updated.*Eggs.*\$3\.50.*Costco/i),
+			);
+			expect(store.write).toHaveBeenCalledWith(
+				expect.stringContaining('prices/'),
+				expect.any(String),
+			);
+		});
+
+		it('"chicken breast is now $17.99 at costco" → updates existing price', async () => {
+			setupHousehold({ priceFiles: { costco: costcoPriceFile } });
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify({ item: 'Chicken breast (6 lb)', price: 17.99, store: 'Costco', unit: '6 lb', department: 'Meat' }),
+			);
+
+			await handleMessage(msg('chicken breast is now $17.99 at costco'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/Updated.*Chicken breast.*\$17\.99/i),
+			);
+		});
+
+		it('"update rice price to $18.99 at costco" → explicit update verb works', async () => {
+			setupHousehold({});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify({ item: 'Rice, jasmine (25 lb)', price: 18.99, store: 'Costco', unit: '25 lb', department: 'Pantry' }),
+			);
+
+			await handleMessage(msg('update rice price to $18.99 at costco'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/Updated.*Rice.*\$18\.99/i),
+			);
+		});
+
+		it('"eggs are $3.50 at costco" with LLM failure → graceful error', async () => {
+			setupHousehold({});
+			vi.mocked(services.llm.complete).mockRejectedValueOnce(new Error('LLM unavailable'));
+
+			await handleMessage(msg('eggs are $3.50 at costco'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("couldn't understand"),
+			);
+		});
+
+		it('"eggs are $3.50 at costco" with no household → asks to create household', async () => {
+			// No setupHousehold call — empty store
+			await handleMessage(msg('eggs are $3.50 at costco'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('household'),
+			);
+		});
+	});
+
+	describe('H10 — Price update intent detection', () => {
+		it.each([
+			'eggs are $3.50 at costco',
+			'milk costs $3.89 at safeway',
+			'update rice to $18.99 at costco',
+			'set eggs to $8 at trader joes',
+		])('detects "%s" as price update', (text) => {
+			expect(isPriceUpdateIntent(text)).toBe(true);
+		});
+
+		it.each([
+			'add eggs to grocery list',
+			'food costs $50 this week',
+			'how much did we spend',
+			"what's for dinner",
+			'eggs are expensive',
+			'we need milk and eggs',
+		])('rejects "%s" as NOT a price update', (text) => {
+			expect(isPriceUpdateIntent(text)).toBe(false);
+		});
+	});
+
+	describe('H10 — Budget view intent detection', () => {
+		it.each([
+			'how much did we spend on food',
+			"what's our food budget",
+			'show food costs',
+			'food spending this month',
+			'weekly food budget',
+			'how much did we spend this week',
+		])('detects "%s" as budget view', (text) => {
+			expect(isBudgetViewIntent(text)).toBe(true);
+		});
+
+		it.each([
+			"what's for dinner",
+			'plan meals for this week',
+			'add eggs to grocery list',
+			'show me the pantry',
+			'what can I make with chicken',
+		])('rejects "%s" as NOT a budget view', (text) => {
+			expect(isBudgetViewIntent(text)).toBe(false);
+		});
+	});
+
+	describe('H10 — Asking about food spending', () => {
+		it('"how much did we spend on food" → shows weekly budget', async () => {
+			setupHousehold({
+				mealPlan: activeMealPlan,
+				priceFiles: { costco: costcoPriceFile },
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValue(costEstimateLLM);
+
+			await handleMessage(msg('how much did we spend on food'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/Food Budget|Weekly/i),
+			);
+		});
+
+		it('"what\'s our food budget" with no meal plan → helpful message', async () => {
+			setupHousehold({});
+
+			await handleMessage(msg("what's our food budget"));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('meal plan'),
+			);
+		});
+
+		it('"show food costs" with plan but no price data → helpful message', async () => {
+			setupHousehold({ mealPlan: activeMealPlan });
+
+			await handleMessage(msg('show food costs'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/price data|receipt/i),
+			);
+		});
+	});
+
+	describe('H10 — /foodbudget command', () => {
+		it('/foodbudget → weekly report with price data', async () => {
+			setupHousehold({
+				mealPlan: activeMealPlan,
+				priceFiles: { costco: costcoPriceFile },
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValue(costEstimateLLM);
+
+			await handleCommand!('foodbudget', [], msg(''));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringMatching(/Food Budget|Weekly Total/i),
+			);
+		});
+
+		it('/foodbudget month → monthly summary', async () => {
+			vi.useFakeTimers();
+			try {
+				vi.setSystemTime(new Date('2026-04-07T12:00:00Z'));
+				setupHousehold({ costHistory: { '2026-W14': weeklyHistoryW14 } });
+
+				await handleCommand!('foodbudget', ['month'], msg(''));
+
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('April'),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('/foodbudget year → yearly summary', async () => {
+			vi.useFakeTimers();
+			try {
+				vi.setSystemTime(new Date('2026-04-07T12:00:00Z'));
+				setupHousehold({ costHistory: { '2026-W14': weeklyHistoryW14 } });
+
+				await handleCommand!('foodbudget', ['year'], msg(''));
+
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('2026'),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('/foodbudget month with no history → helpful message', async () => {
+			vi.useFakeTimers();
+			try {
+				vi.setSystemTime(new Date('2026-04-07T12:00:00Z'));
+				setupHousehold({});
+
+				await handleCommand!('foodbudget', ['month'], msg(''));
+
+				expect(services.telegram.send).toHaveBeenCalledWith(
+					'matt',
+					expect.stringContaining('No food budget data'),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('/foodbudget without household → asks to create household', async () => {
+			// No setupHousehold
+			await handleCommand!('foodbudget', [], msg(''));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('household'),
+			);
+		});
+	});
+
+	describe('H10 — Meal plan cost annotations', () => {
+		it('"plan meals for this week" (single member + prices) → shows cost annotation', async () => {
+			setupHousehold({
+				hhOverride: singleMemberHousehold,
+				priceFiles: { costco: costcoPriceFile },
+				pantry: pantryItems,
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'default_store') return 'Costco';
+				if (key === 'location') return 'Dallas, TX';
+				return '';
+			});
+			// LLM call 1: meal plan generation
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify({
+					meals: [
+						{ recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry', date: '2026-04-07', mealType: 'dinner' },
+					],
+				}),
+			);
+			// LLM call 2: cost estimation
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(costEstimateLLM);
+			// LLM call 3: batch prep analysis (may be called)
+			vi.mocked(services.llm.complete).mockResolvedValue('[]');
+
+			await handleMessage(msg('plan meals for this week'));
+
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('💰'),
+				expect.any(Array),
+			);
+		});
+
+		it('"plan meals for this week" (single member, NO prices) → no cost annotation', async () => {
+			setupHousehold({
+				hhOverride: singleMemberHousehold,
+				pantry: pantryItems,
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'location') return 'Dallas, TX';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify({
+					meals: [
+						{ recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry', date: '2026-04-07', mealType: 'dinner' },
+					],
+				}),
+			);
+			vi.mocked(services.llm.complete).mockResolvedValue('[]');
+
+			await handleMessage(msg('plan meals for this week'));
+
+			const sendCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			expect(sendCall?.[1]).not.toContain('💰');
+		});
+
+		it('"plan meals for this week" (multi-member) → voting, no cost annotation', async () => {
+			setupHousehold({
+				priceFiles: { costco: costcoPriceFile },
+				pantry: pantryItems,
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify({
+					meals: [
+						{ recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry', date: '2026-04-07', mealType: 'dinner' },
+					],
+				}),
+			);
+			vi.mocked(services.llm.complete).mockResolvedValue('[]');
+
+			await handleMessage(msg('plan meals for this week'));
+
+			// Multi-member → voting messages, not cost annotations
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Voting'),
+			);
+		});
+	});
+
+	describe('H10 — Grocery list price annotations', () => {
+		it('/grocery with show_price_estimates=true and prices → shows cost total', async () => {
+			setupHousehold({
+				grocery: groceryList,
+				priceFiles: { costco: costcoPriceFile },
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'show_price_estimates') return true;
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(groceryCostLLM);
+
+			await handleCommand!('grocery', [], msg(''));
+
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('💰'),
+				expect.any(Array),
+			);
+		});
+
+		it('/grocery with show_price_estimates=false → no cost annotation', async () => {
+			setupHousehold({
+				grocery: groceryList,
+				priceFiles: { costco: costcoPriceFile },
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'show_price_estimates') return false;
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+
+			await handleCommand!('grocery', [], msg(''));
+
+			const sendCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			expect(sendCall?.[1]).not.toContain('💰');
+		});
+
+		it('"show me the grocery list" with show_price_estimates=true but NO prices → no cost annotation', async () => {
+			setupHousehold({ grocery: groceryList });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'show_price_estimates') return true;
+				return '';
+			});
+
+			await handleMessage(msg('show me the grocery list'));
+
+			const sendCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			expect(sendCall?.[1]).not.toContain('💰');
+		});
+	});
+
+	describe('H10 — Intent priority (price/budget vs other intents)', () => {
+		it('"add eggs to grocery list" → grocery add, NOT price update', async () => {
+			setupHousehold({});
+			await handleMessage(msg('add eggs to grocery list'));
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Added'),
+			);
+		});
+
+		it('"what\'s for dinner" → dinner intent, NOT budget view', async () => {
+			vi.useFakeTimers();
+			try {
+				vi.setSystemTime(new Date('2026-03-31T18:00:00Z'));
+				setupHousehold({ mealPlan: activeMealPlan });
+
+				await handleMessage(msg("what's for dinner"));
+
+				// May use send or sendWithButtons depending on context
+				const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+				const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+				const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+				expect(text).toContain('Chicken Stir Fry');
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('"plan meals for this week" → meal plan, not budget view', () => {
+			expect(isBudgetViewIntent('plan meals for this week')).toBe(false);
+			expect(isMealPlanGenerateIntent('plan meals for this week')).toBe(true);
+		});
+
+		it('"food costs $50 this week" → NOT a price update', () => {
+			expect(isPriceUpdateIntent('food costs $50 this week')).toBe(false);
+		});
+
+		it('"we need milk and eggs" → grocery add, NOT price update or budget', () => {
+			expect(isPriceUpdateIntent('we need milk and eggs')).toBe(false);
+			expect(isBudgetViewIntent('we need milk and eggs')).toBe(false);
+			expect(isGroceryAddIntent('we need milk and eggs')).toBe(true);
+		});
+	});
+
+	describe('H10 — Security', () => {
+		it('price update with SQL injection attempt → sanitized, no crash', async () => {
+			setupHousehold({});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(priceUpdateLLM);
+
+			await handleMessage(msg('eggs"; DROP TABLE -- are $1 at costco'));
+
+			// Should still process (sanitizeInput handles it internally)
+			expect(services.llm.complete).toHaveBeenCalled();
+			// Should not crash — either processes or gives graceful error
+			expect(services.telegram.send).toHaveBeenCalled();
+		});
+
+		it('budget query with XSS attempt → no crash', async () => {
+			setupHousehold({
+				mealPlan: activeMealPlan,
+				priceFiles: { costco: costcoPriceFile },
+			});
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'default_store') return 'Costco';
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValue(costEstimateLLM);
+
+			await handleMessage(msg('how much did we spend <script>alert(1)</script> on food'));
+
+			// Should not crash
+			expect(services.telegram.send).toHaveBeenCalled();
 		});
 	});
 });
