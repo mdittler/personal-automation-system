@@ -208,8 +208,8 @@ export function formatMealCostLine(title: string, cost: number, servings: number
 		return `${title} — price unknown`;
 	}
 
-	const perPerson = servings > 0 ? cost / servings : 0;
+	const perServing = servings > 0 ? cost / servings : 0;
 	// Use Math.round for consistent half-up rounding (toFixed uses banker's rounding)
-	const perPersonRounded = Math.round(perPerson * 100) / 100;
-	return `${title} — $${cost.toFixed(2)} ($${perPersonRounded.toFixed(2)}/person)`;
+	const perServingRounded = Math.round(perServing * 100) / 100;
+	return `${title} — $${cost.toFixed(2)} ($${perServingRounded.toFixed(2)}/serving)`;
 }

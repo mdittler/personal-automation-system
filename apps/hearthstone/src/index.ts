@@ -1944,8 +1944,8 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 						const estimates = await estimatePlanCost(services, plan, recipes, priceData.items, priceData.store);
 						if (estimates.length > 0) {
 							const totalCost = estimates.reduce((sum, e) => sum + e.totalCost, 0);
-							const perPerson = totalCost / estimates.length / hh.household.members.length;
-							planMsg += `\n\n💰 **Est. Total: $${totalCost.toFixed(2)}** · Per person: $${perPerson.toFixed(2)}`;
+							const avgPerMeal = totalCost / estimates.length;
+							planMsg += `\n\n💰 **Est. Total: $${totalCost.toFixed(2)}** · Avg/meal: $${avgPerMeal.toFixed(2)}`;
 
 							// Check budget alert
 							const allWeekIds = await listWeeklyHistories(hh.sharedStore);

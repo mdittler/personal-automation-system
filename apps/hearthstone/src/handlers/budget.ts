@@ -17,7 +17,7 @@ import {
 	saveWeeklyHistory,
 } from '../services/budget-reporter.js';
 import { loadCurrentPlan } from '../services/meal-plan-store.js';
-import { loadStorePrices, listStores } from '../services/price-store.js';
+import { loadStorePrices, listStores, getStoreSlug } from '../services/price-store.js';
 import { loadAllRecipes } from '../services/recipe-store.js';
 import { todayDate } from '../utils/date.js';
 
@@ -64,7 +64,7 @@ async function resolveStoreSlug(
 	sharedStore: ScopedDataStore,
 ): Promise<string | null> {
 	const configStore = (await services.config.get<string>('default_store')) as string | undefined;
-	if (configStore) return configStore;
+	if (configStore) return getStoreSlug(configStore);
 	const stores = await listStores(sharedStore);
 	return stores[0] ?? null;
 }
@@ -82,23 +82,20 @@ async function handleWeeklyBudget(
 		return;
 	}
 
-	const sharedStore = services.data.forShared('shared');
-	const storeSlug = await resolveStoreSlug(services, sharedStore);
+	const storeSlug = await resolveStoreSlug(services, store);
 	if (!storeSlug) {
 		await services.telegram.send(userId, 'No price data available. Add a receipt photo or price update to start tracking costs.');
 		return;
 	}
 
-	const priceData = await loadStorePrices(sharedStore, storeSlug);
+	const priceData = await loadStorePrices(store, storeSlug);
 	if (!priceData.items.length) {
 		await services.telegram.send(userId, 'No price data available. Add a receipt photo or price update to start tracking costs.');
 		return;
 	}
 
 	const recipes = await loadAllRecipes(store);
-	const today = todayDate(services.timezone);
-
-	const estimates = await estimatePlanCost(services, plan, recipes, priceData.items);
+	const estimates = await estimatePlanCost(services, plan, recipes, priceData.items, priceData.store);
 	const week = generateWeeklyReport(plan, estimates);
 
 	// Load previous week for comparison

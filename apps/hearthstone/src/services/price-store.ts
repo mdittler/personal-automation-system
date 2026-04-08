@@ -15,12 +15,13 @@ const PRICES_DIR = 'prices';
 
 /** Convert a store display name to a file-safe slug. */
 export function getStoreSlug(storeName: string): string {
-	return storeName
+	const slug = storeName
 		.toLowerCase()
 		.replace(/[^a-z0-9\s-]/g, '')
 		.replace(/\s+/g, '-')
 		.replace(/-+/g, '-')
 		.replace(/^-|-$/g, '');
+	return slug || 'unknown-store';
 }
 
 /** Format a StorePriceData as an Obsidian-compatible markdown file. */

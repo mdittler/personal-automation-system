@@ -178,9 +178,9 @@ describe('estimateGroceryListCost', () => {
 // ─── formatMealCostLine ───────────────────────────────────────────────────────
 
 describe('formatMealCostLine', () => {
-	it('formats "Title — $X.XX ($Y.YY/person)" for non-zero cost', () => {
+	it('formats "Title — $X.XX ($Y.YY/serving)" for non-zero cost', () => {
 		const result = formatMealCostLine('Pancakes', 0.86, 4);
-		expect(result).toBe('Pancakes — $0.86 ($0.22/person)');
+		expect(result).toBe('Pancakes — $0.86 ($0.22/serving)');
 	});
 
 	it('formats "Title — price unknown" for zero cost', () => {
