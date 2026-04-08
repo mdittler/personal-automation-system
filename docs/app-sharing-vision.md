@@ -208,5 +208,5 @@ These are documented for future implementation. Not in current phases.
 
 ### Container Isolation
 - Run untrusted apps in separate processes or containers
-- Maximum security but conflicts with single-process architecture and N100 hardware constraints
+- Maximum security but conflicts with single-process architecture
 - **Deferred indefinitely** — static analysis + manifest review is the chosen approach

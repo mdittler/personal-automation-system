@@ -1,6 +1,20 @@
 # Personal Automation System (PAS)
 
-A local-first home automation platform where you interact through a single Telegram bot. The infrastructure handles message routing, scheduling, data storage, LLM access, and a management GUI. Functionality comes from **apps** — modular plugins that you can build, share, and install independently.
+A local-first home automation platform built on scope-isolated app plugins, a single Telegram interface, manifest-driven contracts, and a markdown data layer compatible with Obsidian.
+
+## Why this exists
+
+Home automation platforms tend to fall into two camps: monoliths that centralize everything (losing isolation between capabilities) or fragmented app ecosystems (losing a unified interaction surface). PAS takes a middle path — apps are genuinely independent with their own data scopes and security boundaries, but users interact through a single Telegram bot. You get modularity without fragmentation.
+
+## What's distinctive
+
+Apps are loaded as TypeScript modules validated against a YAML manifest contract — they declare their intents, commands, schedules, and photo capabilities, and the infrastructure handles routing, cost tracking, and data isolation. All data is stored as markdown and YAML files on disk with no database, readable directly in Obsidian. External integrations are handled through n8n webhooks rather than per-app connectors. LLM access is multi-provider (Anthropic, Google Gemini, OpenAI, Ollama) with per-app rate limits and monthly cost caps. The whole system runs as a single Node.js process.
+
+![Architecture](docs/images/architecture.svg)
+
+## Status
+
+PAS is under active development. The core infrastructure is stable with over 4100 tests across 169 test files. Apps are in progress — a full-featured household food management app is complete. Currently running at household scale, shared publicly as a personal project with no production support offered.
 
 ## Features
 
@@ -13,7 +27,7 @@ A local-first home automation platform where you interact through a single Teleg
 - **Scheduling** — cron jobs and one-off scheduled tasks declared in app manifests
 - **Per-app cost controls** — rate limits and monthly cost caps enforced per app
 - **Multi-user** — register multiple Telegram users with per-user app access and data isolation
-- **Local-first** — runs on modest hardware (Intel N100), all data stored as files on disk (no database)
+- **Local-first** — runs on modest hardware (Mac Mini), all data stored as files on disk (no database)
 
 ## Quick Start
 
@@ -98,6 +112,7 @@ This generates a working app skeleton in `apps/my-app/` with manifest, source, a
 
 **Documentation:**
 
+- [User Guide](docs/USER_GUIDE.md) — how to interact with PAS as an end user
 - [Creating an App](docs/CREATING_AN_APP.md) — step-by-step developer guide
 - [Manifest Reference](docs/MANIFEST_REFERENCE.md) — complete field reference for `manifest.yaml`
 
@@ -108,6 +123,7 @@ This generates a working app skeleton in `apps/my-app/` with manifest, source, a
 | `apps/echo/` | Minimal example — echoes messages back (~30 lines) |
 | `apps/notes/` | Practical example — save, list, and summarize notes. Demonstrates commands, intents, LLM, data storage, and user config |
 | `apps/chatbot/` | Advanced example — conversational AI with context awareness, conversation history, and app metadata integration |
+| `apps/food/` | Full-featured app — household food management with recipes, meal planning, grocery lists, photos, cooking guidance, and cost tracking |
 
 **Installing shared apps:**
 
@@ -155,6 +171,7 @@ apps/                    # App plugins (each has manifest.yaml + src/)
   echo/                  # Minimal example app
   notes/                 # Practical example app
   chatbot/               # Built-in conversational AI fallback
+  food/                  # Household food management app
 config/
   pas.yaml.example       # System config template (users, timezone, LLM settings)
 core/                    # Infrastructure package

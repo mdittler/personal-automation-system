@@ -36,10 +36,10 @@ describe('TelegramService — sendWithButtons', () => {
 		});
 
 		const buttons: InlineButton[][] = [
-			[{ text: '☐ Milk', callbackData: 'app:hearthstone:toggle:0' }],
+			[{ text: '☐ Milk', callbackData: 'app:food:toggle:0' }],
 			[
-				{ text: '🔄 Refresh', callbackData: 'app:hearthstone:refresh' },
-				{ text: '🗑 Clear', callbackData: 'app:hearthstone:clear' },
+				{ text: '🔄 Refresh', callbackData: 'app:food:refresh' },
+				{ text: '🗑 Clear', callbackData: 'app:food:clear' },
 			],
 		];
 

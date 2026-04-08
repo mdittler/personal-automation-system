@@ -607,7 +607,7 @@ For each requirement, consider tests across these categories (not all apply ever
 - **Error handling** — invalid inputs, failures, malformed data
 - **Security** — injection attempts, path traversal, unauthorized access
 
-See the Hearthstone app (`apps/hearthstone/docs/urs.md`) for a real-world example with 72 requirements across 17 areas, or the infrastructure URS (`docs/urs.md` at the project root) for a fully implemented example.
+See the Food app (`apps/food/docs/urs.md`) for a real-world example with 72 requirements across 17 areas, or the infrastructure URS (`docs/urs.md` at the project root) for a fully implemented example.
 
 ## External Integration & n8n
 

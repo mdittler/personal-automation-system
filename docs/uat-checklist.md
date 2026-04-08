@@ -454,7 +454,7 @@ Requires `API_TOKEN` set in `.env` and n8n running on port 5678. Tests the highe
 | 15. Alerts | 23 | 19 | 0 | 2 | 15.18-15.19 skipped (no n8n dispatch URL configured) |
 | 16. Data Browser | 5 | | | |
 | 17. Multi-User | 5 | 0 | 0 | 5 | Skipped — no second Telegram user registered |
-| 18. Docker | 6 | 0 | 0 | 6 | Skipped — Docker not installed; test on N100 deployment |
+| 18. Docker | 6 | 0 | 0 | 6 | Skipped — Docker not installed; test on Mac Mini deployment |
 | 19. External Data API | 12 | 10 | 0 | 1 | 19.11 skipped (space deleted before test) |
 | 20. Obsidian Frontmatter | 16 | 12 | 0 | 4 | 20.13-20.16 skipped (Obsidian not tested) |
 | 21. n8n Execution APIs | 13 | 13 | 0 | 0 |

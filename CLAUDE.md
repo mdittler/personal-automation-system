@@ -11,7 +11,7 @@ A local-first home automation platform where users interact through a single Tel
 ### Runtime & Monorepo
 - **Node.js 22 LTS + TypeScript 5.x**, ESM only, `strict: true`
 - **pnpm workspaces** — `core/` is infrastructure, `apps/*` are plugins. Path aliases: `@core/*` → `core/src/*`
-- **Single process** — all apps in one Node.js process (target: Intel N100 mini PC)
+- **Single process** — all apps in one Node.js process (target: Mac Mini with 32GB RAM)
 - **Developer commands**: `pnpm dev`, `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm scaffold-app --name=<app>`, `pnpm install-app <git-url>`
 
 ### Data & Storage
@@ -104,7 +104,7 @@ A local-first home automation platform where users interact through a single Tel
 | `core/src/middleware/shutdown.ts` | Graceful shutdown manager |
 | `config/pas.yaml` | System configuration |
 | `apps/chatbot/src/index.ts` | Chatbot app (fallback, /ask, app-aware prompts) |
-| `apps/hearthstone/` | Food management app (household, recipes, grocery, pantry) |
+| `apps/food/` | Food management app (household, recipes, grocery, pantry) |
 | `apps/notes/` | Notes example app |
 | `docs/urs.md` | User Requirements Specification |
 | `docs/CREATING_AN_APP.md` | App developer guide |
@@ -131,7 +131,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-27A) and Hearthstone phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4140 tests passing across 169 test files.**
+All infrastructure phases (0-27A) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4140 tests passing across 169 test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 
@@ -140,4 +140,4 @@ See `docs/implementation-phases.md` for detailed phase guide.
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until 27B proves needed
 - **App registry/marketplace** — static JSON index files. Deferred until enough apps exist
 - **App signing** — cryptographic verification. Deferred until community forms
-- **Container isolation** — for untrusted apps. Deferred indefinitely (N100 constraints)
+- **Container isolation** — for untrusted apps. Deferred until community forms

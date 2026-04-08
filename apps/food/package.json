@@ -1,0 +1,20 @@
+{
+	"name": "@pas/food",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Family kitchen companion — recipes, meal planning, grocery lists, pantry management, and cooking guidance",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc --build",
+		"clean": "rm -rf dist tsconfig.tsbuildinfo"
+	},
+	"dependencies": {
+		"@pas/core": "workspace:*",
+		"yaml": "^2.8.2"
+	},
+	"devDependencies": {
+		"@types/node": "^25.3.2"
+	}
+}

@@ -53,16 +53,16 @@ Items that require manual action from the system owner. These cannot be automate
 
 - [x] **Phase 10** — Review provider abstraction types and client implementations
 - [x] **Phase 11** — Review configuration system and model discovery
-- [ ] **Phase 12** — Review LLM service rewrite and backward compatibility
-- [ ] **Phase 13** — Review safeguards (rate limits, cost caps, audit logging)
-- [ ] **Phase 14** — Review GUI updates for multi-provider management
+- [x] **Phase 12** — Review LLM service rewrite and backward compatibility
+- [x] **Phase 13** — Review safeguards (rate limits, cost caps, audit logging)
+- [x] **Phase 14** — Review GUI updates for multi-provider management
 - [x] **Phase 15** — Review integration, migration path, and documentation
 
 ## App Sharing Phase Reviews
 
 - [x] **Phase 16** — Review chatbot fallback app (conversational AI as default handler)
-- [ ] **Phase 17** — Review app packaging standard, install CLI, static analysis, and compatibility checks
-- [ ] **Phase 18** — Review app developer documentation and scaffold template
+- [x] **Phase 17** — Review app packaging standard, install CLI, static analysis, and compatibility checks
+- [x] **Phase 18** — Review app developer documentation and scaffold template
 
 ## Technical Debt
 

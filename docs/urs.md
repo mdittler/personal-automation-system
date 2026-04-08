@@ -1908,7 +1908,7 @@ The log viewer must read at most 512KB from the end of the log file to prevent m
 
 **Phase:** 0 | **Status:** Implemented
 
-All apps must run in a single Node.js process. Target hardware: Intel N100 mini PC.
+All apps must run in a single Node.js process. Target hardware: Mac Mini with 32GB RAM.
 
 **Tests:** Architectural constraint — verified by system design, not unit tests.
 

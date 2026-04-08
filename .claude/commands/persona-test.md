@@ -18,7 +18,7 @@ Read the app's manifest.yaml, help.md, and main source file to understand:
 
 ### 2. Study Existing Patterns
 
-Read `apps/hearthstone/src/__tests__/natural-language.test.ts` as the reference pattern. This file demonstrates:
+Read `apps/food/src/__tests__/natural-language.test.ts` as the reference pattern. This file demonstrates:
 - Grouping tests by user intent/scenario
 - Testing with casual, messy, real-world language
 - Verifying intent classification AND output correctness
