@@ -297,8 +297,10 @@ describe('price-store', () => {
 			expect(isPriceUpdateIntent('how much do eggs cost?')).toBe(false);
 			expect(isPriceUpdateIntent('eggs are expensive these days')).toBe(false);
 		});
-		it('rejects budget queries without dollar amounts and verbs', () => {
+		it('rejects budget queries with dollar amounts', () => {
 			expect(isPriceUpdateIntent('we spent $200 on groceries')).toBe(false);
+			expect(isPriceUpdateIntent('food costs $50 this week')).toBe(false);
+			expect(isPriceUpdateIntent('I heard eggs were $3 last week')).toBe(false);
 		});
 	});
 

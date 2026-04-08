@@ -231,9 +231,16 @@ export async function updatePricesFromReceipt(
 
 const PRICE_UPDATE_RE = /\$\d+(?:\.\d+)?/;
 const PRICE_UPDATE_VERBS = /\b(cost|price|are|is|was|costs|now|update|set)\b/i;
+// Require "at <store>" to disambiguate from budget queries like "food costs $50 this week"
+const STORE_MENTION_RE = /\bat\s+\w+/i;
+// Or explicit update phrasing: "update X price to $Y", "set X to $Y"
+const EXPLICIT_UPDATE_RE = /\b(update|set)\b.*\$\d/i;
 
 export function isPriceUpdateIntent(text: string): boolean {
-	return PRICE_UPDATE_RE.test(text) && PRICE_UPDATE_VERBS.test(text);
+	if (!PRICE_UPDATE_RE.test(text)) return false;
+	if (!PRICE_UPDATE_VERBS.test(text)) return false;
+	// Must mention a store ("at costco") or use explicit update verb
+	return STORE_MENTION_RE.test(text) || EXPLICIT_UPDATE_RE.test(text);
 }
 
 export interface ParsedPriceUpdate {
