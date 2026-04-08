@@ -36,9 +36,12 @@ import {
 	isRecipePhotoIntent,
 	isWhatCanIMakeIntent,
 	isWhatsForDinnerIntent,
+	isKidAdaptIntent,
+	isFoodIntroIntent,
+	isChildApprovalIntent,
 } from '../index.js';
 import { endSession, hasActiveSession } from '../services/cook-session.js';
-import type { FreezerItem, GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
+import type { ChildFoodLog, FreezerItem, GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
 
 // ─── Shared Fixtures ─────────────────────────────────────────────
 
@@ -237,6 +240,70 @@ const singleMemberHousehold: Household = {
 	createdAt: '2026-01-01T00:00:00.000Z',
 };
 
+// ─── H9: Family Fixtures ────────────────────────────────────────
+
+const margotProfile: ChildFoodLog = {
+	profile: {
+		name: 'Margot',
+		slug: 'margot',
+		birthDate: '2024-06-15',
+		allergenStage: 'early-introduction',
+		knownAllergens: ['milk', 'eggs'],
+		avoidAllergens: [],
+		dietaryNotes: 'Prefers soft textures',
+		createdAt: '2026-01-01T00:00:00.000Z',
+		updatedAt: '2026-01-01T00:00:00.000Z',
+	},
+	introductions: [
+		{
+			food: 'scrambled eggs',
+			allergenCategory: 'eggs',
+			date: '2026-04-01',
+			reaction: 'none',
+			accepted: true,
+			notes: '',
+		},
+	],
+};
+
+const oliverProfile: ChildFoodLog = {
+	profile: {
+		name: 'Oliver',
+		slug: 'oliver',
+		birthDate: '2025-10-01',
+		allergenStage: 'pre-solids',
+		knownAllergens: [],
+		avoidAllergens: ['peanuts'],
+		dietaryNotes: '',
+		createdAt: '2026-03-01T00:00:00.000Z',
+		updatedAt: '2026-03-01T00:00:00.000Z',
+	},
+	introductions: [],
+};
+
+/** Margot with a very recent egg intro (yesterday) — triggers allergen wait warnings. */
+const margotRecentIntro: ChildFoodLog = {
+	...margotProfile,
+	introductions: [
+		{
+			food: 'scrambled eggs',
+			allergenCategory: 'eggs',
+			date: '2026-04-06',
+			reaction: 'none',
+			accepted: true,
+			notes: '',
+		},
+	],
+};
+
+const kidAdaptLLMResponse = JSON.stringify({
+	setAsideBefore: ['Set aside plain rice and chicken before adding soy sauce'],
+	textureGuidance: ['Cut chicken into small, soft pieces', 'Steam broccoli until very soft'],
+	allergenFlags: ['Contains soy sauce — check if child tolerates soy'],
+	portionGuidance: '2-3 tablespoons of each component',
+	generalNotes: 'Good finger food once chicken is cut small enough',
+});
+
 // ─── Test Setup ──────────────────────────────────────────────────
 
 function createMockStore() {
@@ -262,18 +329,22 @@ describe('Natural Language — Real User Messages', () => {
 		await init(services);
 	});
 
-	/** Helper: set up a household with recipes and optionally a grocery list, pantry, and meal plan. */
+	/** Helper: set up a household with recipes and optionally a grocery list, pantry, meal plan, and children. */
 	function setupHousehold(
 		opts: {
 			recipes?: Recipe[];
 			grocery?: GroceryList;
 			pantry?: PantryItem[];
 			mealPlan?: MealPlan | null;
+			children?: ChildFoodLog[];
+			hhOverride?: Household;
 		} = {},
 	) {
 		const recipes = opts.recipes ?? [chickenStirFry, pastaBolognese];
+		const children = opts.children ?? [];
+		const hh = opts.hhOverride ?? household;
 		store.read.mockImplementation(async (path: string) => {
-			if (path === 'household.yaml') return stringify(household);
+			if (path === 'household.yaml') return stringify(hh);
 			if (path === 'grocery/active.yaml' && opts.grocery) return stringify(opts.grocery);
 			if (path === 'pantry.yaml' && opts.pantry) return stringify({ items: opts.pantry });
 			if (path === 'meal-plans/current.yaml' && opts.mealPlan)
@@ -281,10 +352,14 @@ describe('Natural Language — Real User Messages', () => {
 			for (const r of recipes) {
 				if (path === `recipes/${r.id}.yaml`) return stringify(r);
 			}
+			for (const c of children) {
+				if (path === `children/${c.profile.slug}.yaml`) return stringify(c);
+			}
 			return '';
 		});
 		store.list.mockImplementation(async (dir: string) => {
 			if (dir === 'recipes') return recipes.map((r) => `${r.id}.yaml`);
+			if (dir === 'children') return children.map((c) => `children/${c.profile.slug}.yaml`);
 			return [];
 		});
 	}
@@ -4522,6 +4597,827 @@ describe('Natural Language — Real User Messages', () => {
 			'take a photo',
 		])('does NOT match non-photo-retrieval: "%s"', (text) => {
 			expect(isRecipePhotoIntent(text.toLowerCase())).toBe(false);
+		});
+	});
+
+	// ─── H9: Family — Kid Adapt Intent Detection ─────────────────────
+
+	describe('H9 — Kid adapt intent detection', () => {
+		it.each([
+			'make the chicken stir fry for margot',
+			'can you adapt the pasta for margot',
+			'how would I prepare this for margot',
+			'kid friendly version of the pasta',
+			'is this recipe baby safe',
+			'toddler appropriate version please',
+			'how do I make this for the baby',
+			'cook the stir fry for margot tonight',
+			'make this for the little one',
+		])('detects kid adapt intent: "%s"', (text) => {
+			expect(isKidAdaptIntent(text, ['margot'])).toBe(true);
+		});
+
+		it.each([
+			"what's for dinner tonight",
+			'make the chicken stir fry',
+			'the kids are hungry',
+			"margot's school called today",
+		])('does NOT match kid adapt: "%s"', (text) => {
+			expect(isKidAdaptIntent(text, ['margot'])).toBe(false);
+		});
+	});
+
+	// ─── H9: Family — Food Intro Intent Detection ────────────────────
+
+	describe('H9 — Food intro intent detection', () => {
+		it.each([
+			'margot tried peanut butter today',
+			'we introduced eggs to the baby',
+			'gave her yogurt for the first time',
+			'fed the baby avocado today',
+			'introducing solids to the baby',
+			'new food alert she had hummus',
+			'baby tried scrambled eggs today',
+			'log allergen introduction',
+			'she tried banana yesterday',
+		])('detects food intro intent: "%s"', (text) => {
+			expect(isFoodIntroIntent(text)).toBe(true);
+		});
+
+		it.each([
+			'what should I make for dinner',
+			'add eggs to the grocery list',
+			'I tried a new restaurant last night',
+			'introduce yourself',
+			'what food should I cook',
+		])('does NOT match food intro: "%s"', (text) => {
+			expect(isFoodIntroIntent(text)).toBe(false);
+		});
+	});
+
+	// ─── H9: Family — Child Approval Intent Detection ────────────────
+
+	describe('H9 — Child approval intent detection', () => {
+		it.each([
+			'margot loved the chicken stir fry',
+			'margot hated the pasta',
+			'margot ate the stir fry',
+			'margot refused the soup',
+			"margot wouldn't eat the fish",
+			'margot enjoyed the mac and cheese',
+		])('detects child approval intent: "%s"', (text) => {
+			expect(isChildApprovalIntent(text, ['margot'])).toBe(true);
+		});
+
+		it('does NOT match when no child name present', () => {
+			expect(isChildApprovalIntent('I loved the chicken', ['margot'])).toBe(false);
+		});
+
+		it('does NOT match unknown child name', () => {
+			expect(isChildApprovalIntent('sarah liked the pasta', ['margot'])).toBe(false);
+		});
+
+		it('does NOT match child name without approval verb', () => {
+			expect(isChildApprovalIntent('margot is sleeping', ['margot'])).toBe(false);
+		});
+
+		it('returns false with empty child names list', () => {
+			expect(isChildApprovalIntent('margot loved the pasta', [])).toBe(false);
+		});
+	});
+
+	// ─── H9: Family — Kid Adaptation Full Flow ───────────────────────
+
+	describe('H9 — Kid adaptation through handleMessage', () => {
+		it('"make the chicken stir fry for margot" → generates adaptation', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(kidAdaptLLMResponse);
+
+			await handleMessage(msg('make the chicken stir fry for margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Margot'),
+			);
+		});
+
+		it('"adapt the pasta bolognese for margot" → defaults to only child', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(kidAdaptLLMResponse);
+
+			await handleMessage(msg('adapt the pasta bolognese for margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Margot'),
+			);
+		});
+
+		it('"make the chicken for margot" — adaptation disabled → tells user', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return false;
+				return '';
+			});
+
+			await handleMessage(msg('make the chicken stir fry for margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('disabled'),
+			);
+			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
+
+		it('"make the chicken stir fry for the baby" — no children registered → tells user', async () => {
+			setupHousehold({ children: [] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+
+			await handleMessage(msg('make the chicken stir fry for the baby'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('No children'),
+			);
+		});
+
+		it('"adapt the chicken stir fry for oliver" — two children, picks correct one', async () => {
+			setupHousehold({ children: [margotProfile, oliverProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(kidAdaptLLMResponse);
+
+			await handleMessage(msg('adapt the chicken stir fry for oliver'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Oliver'),
+			);
+		});
+
+		it('"adapt the chicken stir fry for the toddler" — two children, no name → asks which', async () => {
+			setupHousehold({ children: [margotProfile, oliverProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+
+			await handleMessage(msg('adapt the chicken stir fry for the toddler'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Which child'),
+			);
+		});
+
+		it('"make the tacos for margot" — recipe not found → asks which recipe', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+
+			await handleMessage(msg('make the tacos for margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Which recipe'),
+			);
+		});
+
+		it('"adapt the chicken stir fry for margot" — LLM fails → error message', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'child_meal_adaptation') return true;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockRejectedValueOnce(new Error('LLM down'));
+
+			await handleMessage(msg('cook the chicken stir fry for margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("couldn't generate"),
+			);
+		});
+	});
+
+	// ─── H9: Family — Food Introduction Full Flow ────────────────────
+
+	describe('H9 — Food introduction through handleMessage', () => {
+		it('"margot tried peanut butter today" → logs and shows reaction buttons', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('peanut butter');
+
+			await handleMessage(msg('margot tried peanut butter today'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('peanut butter'),
+				expect.any(Array),
+			);
+		});
+
+		it('"introduced eggs to the baby" → defaults to only child', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('eggs');
+
+			await handleMessage(msg('introduced eggs to the baby'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Margot'),
+				expect.any(Array),
+			);
+		});
+
+		it('"she tried banana yesterday" — non-allergenic food → no allergen note', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('banana');
+
+			await handleMessage(msg('she tried banana yesterday'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.not.stringContaining('allergen'),
+				expect.any(Array),
+			);
+		});
+
+		it('allergen wait warning when recent intro exists', async () => {
+			setupHousehold({ children: [margotRecentIntro] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 5;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('yogurt');
+
+			await handleMessage(msg('margot tried yogurt today'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('wait'),
+				expect.any(Array),
+			);
+		});
+
+		it('no children registered → tells user', async () => {
+			setupHousehold({ children: [] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('baby tried scrambled eggs today'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('No children'),
+			);
+		});
+
+		it('LLM extraction fails → falls back to regex', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockRejectedValueOnce(new Error('LLM down'));
+
+			await handleMessage(msg('margot tried peanut butter today'));
+			// Should still work via regex fallback — either logs the food or asks for clarification
+			expect(
+				vi.mocked(services.telegram.send).mock.calls.length +
+				vi.mocked(services.telegram.sendWithButtons).mock.calls.length,
+			).toBeGreaterThan(0);
+		});
+
+		it('two children, no name → asks which child', async () => {
+			setupHousehold({ children: [margotProfile, oliverProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('peanut butter');
+
+			await handleMessage(msg('baby tried peanut butter today'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Which child'),
+			);
+		});
+
+		it('LLM returns empty string → asks what food', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('');
+
+			await handleMessage(msg('margot tried something today'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('What food'),
+			);
+		});
+	});
+
+	// ─── H9: Family — Child Approval Full Flow ───────────────────────
+
+	describe('H9 — Child approval through handleMessage', () => {
+		it('"margot loved the chicken stir fry" → marks approved', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('margot loved the chicken stir fry'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('approved'),
+			);
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Chicken Stir Fry'),
+			);
+		});
+
+		it('"margot hated the pasta bolognese" → marks rejected', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('margot hated the pasta bolognese'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('rejected'),
+			);
+		});
+
+		it('"margot refused the chicken stir fry" → marks rejected', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('margot refused the chicken stir fry'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('rejected'),
+			);
+		});
+
+		it('"margot liked the tacos" — recipe not found → tells user', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('margot liked the tacos'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("couldn't find"),
+			);
+		});
+
+		it('"margot wouldn\'t eat the pasta bolognese" → marks rejected', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg("margot wouldn't eat the pasta bolognese"));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('rejected'),
+			);
+		});
+	});
+
+	// ─── H9: Family — /family Command ────────────────────────────────
+
+	describe('H9 — /family command', () => {
+		it('/family with no children → shows empty message', async () => {
+			setupHousehold({ children: [] });
+			await handleCommand!('family', [], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('No children'),
+			);
+		});
+
+		it('/family with children → lists them', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', [], msg(''));
+			// May use send or sendWithButtons depending on whether buttons are returned
+			const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+			const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+			expect(text).toContain('Margot');
+		});
+
+		it('/family add Emma June 15 2024 → adds child', async () => {
+			setupHousehold({ children: [] });
+			await handleCommand!('family', ['add', 'Emma', 'June', '15', '2024'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Emma'),
+			);
+			expect(store.write).toHaveBeenCalled();
+		});
+
+		it('/family add with no args → shows usage', async () => {
+			setupHousehold({ children: [] });
+			await handleCommand!('family', ['add'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Usage'),
+			);
+		});
+
+		it('/family add with bad date → tells user', async () => {
+			setupHousehold({ children: [] });
+			await handleCommand!('family', ['add', 'X', 'not-a-date'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining("couldn't understand"),
+			);
+		});
+
+		it('/family margot → shows specific child profile', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', ['margot'], msg(''));
+			const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+			const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+			expect(text).toContain('Margot');
+		});
+
+		it('/family remove margot → shows confirmation buttons', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', ['remove', 'margot'], msg(''));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Remove'),
+				expect.any(Array),
+			);
+		});
+
+		it('/family edit margot stage expanding → updates stage', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', ['edit', 'margot', 'stage', 'expanding'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Updated'),
+			);
+		});
+
+		it('/family edit margot safe peanuts → adds safe allergen', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', ['edit', 'margot', 'safe', 'peanuts'], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Updated'),
+			);
+		});
+
+		it('/family without household → tells user to set up', async () => {
+			// No setupHousehold call — store returns empty for household.yaml
+			await handleCommand!('family', [], msg(''));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('household'),
+			);
+		});
+	});
+
+	// ─── H9: Family — Callback Flows ─────────────────────────────────
+
+	describe('H9 — Family callback flows', () => {
+		it('fa:y approval → editMessage with approved', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fa:y:margot:chicken-stir-fry-001', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('approved'),
+			);
+		});
+
+		it('fa:n rejection → editMessage with rejected', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fa:n:margot:chicken-stir-fry-001', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('rejected'),
+			);
+		});
+
+		it('fa:c clear → editMessage with cleared', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fa:c:margot:chicken-stir-fry-001', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('cleared'),
+			);
+		});
+
+		it('fa:rm confirm after /family remove → archives and confirms', async () => {
+			setupHousehold({ children: [margotProfile] });
+			store.exists.mockResolvedValue(true); // deleteChildProfile checks exists()
+			// First trigger /family remove to set pending removal
+			await handleCommand!('family', ['remove', 'margot'], msg(''));
+			vi.mocked(services.telegram.sendWithButtons).mockClear();
+
+			await handleCallbackQuery?.('fa:rm:margot', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('removed'),
+			);
+		});
+
+		it('fa:rm-cancel → cancels removal', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand!('family', ['remove', 'margot'], msg(''));
+
+			await handleCallbackQuery?.('fa:rm-cancel', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Cancelled'),
+			);
+		});
+
+		it('fa:rm without pending → shows expired message', async () => {
+			setupHousehold({ children: [margotProfile] });
+			// No /family remove called first
+			await handleCallbackQuery?.('fa:rm:margot', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('expired'),
+			);
+		});
+
+		it('fa:es stage select → shows stage selection buttons', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fa:es:margot', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('stage'),
+				expect.any(Array),
+			);
+		});
+
+		it('fa:ss set stage → updates and confirms', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fa:ss:margot:expanding', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('expanding'),
+			);
+			expect(store.write).toHaveBeenCalled();
+		});
+
+		it('fi:r reaction none → records no reaction', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fi:r:margot:none', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('none'),
+			);
+		});
+
+		it('fi:r reaction mild → records mild reaction', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fi:r:margot:mild', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('mild'),
+			);
+		});
+
+		it('fi:rej rejection → records food rejected', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCallbackQuery?.('fi:rej:margot', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('rejected'),
+			);
+		});
+
+		it('fi:r with no introductions → shows "No recent" message', async () => {
+			setupHousehold({ children: [oliverProfile] }); // Oliver has no introductions
+			await handleCallbackQuery?.('fi:r:oliver:none', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('No recent'),
+			);
+		});
+	});
+
+	// ─── H9: Family — Intent Priority ────────────────────────────────
+
+	describe('H9 — Intent priority (family intents must not steal other intents)', () => {
+		it('"add milk to the grocery list" → grocery, not food intro despite "milk"', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('add milk to the grocery list'));
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('milk'),
+			);
+			// Should NOT trigger food intro flow
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+		});
+
+		it('"what\'s for dinner" → dinner intent, not family', async () => {
+			setupHousehold({
+				children: [margotProfile],
+				mealPlan: {
+					id: 'mp1',
+					startDate: '2026-04-07',
+					endDate: '2026-04-13',
+					meals: [{ date: '2026-04-07', recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry' }],
+					createdBy: 'matt',
+					createdAt: '2026-04-07T00:00:00.000Z',
+				},
+			});
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg("what's for dinner"));
+			// Should hit dinner intent (shows tonight's meal), may use send or sendWithButtons
+			const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+			const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+			expect(text).toContain('Chicken Stir Fry');
+		});
+
+		it('"show me the pantry" → pantry intent, not family', async () => {
+			setupHousehold({
+				children: [margotProfile],
+				pantry: [{ name: 'Rice', quantity: '2 lbs', category: 'grains', addedDate: '2026-04-01' }],
+			});
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('show me the pantry'));
+			const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+			const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+			const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+			expect(text).toContain('Rice');
+		});
+
+		it('"find a recipe with eggs" → recipe search, not kid adapt', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockResolvedValue('');
+
+			await handleMessage(msg('find a recipe with eggs'));
+			// Should not trigger food intro or kid adapt
+			const calls = vi.mocked(services.telegram.send).mock.calls;
+			const text = calls.map((c) => c[1]).join(' ');
+			expect(text).not.toContain('No children');
+			expect(text).not.toContain('adaptation');
+		});
+	});
+
+	// ─── H9: Family — Multi-Step Flows ───────────────────────────────
+
+	describe('H9 — Multi-step flows', () => {
+		it('food intro message → tap reaction button', async () => {
+			setupHousehold({ children: [margotProfile] });
+			vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+				if (key === 'allergen_wait_days') return 3;
+				return '';
+			});
+			vi.mocked(services.llm.complete).mockResolvedValueOnce('peanut butter');
+
+			// Step 1: Log food introduction
+			await handleMessage(msg('margot tried peanut butter today'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('peanut butter'),
+				expect.any(Array),
+			);
+
+			// Step 2: Tap the reaction button
+			await handleCallbackQuery?.('fi:r:margot:none', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('none'),
+			);
+		});
+
+		it('/family remove margot → confirm via callback', async () => {
+			setupHousehold({ children: [margotProfile] });
+			store.exists.mockResolvedValue(true);
+
+			// Step 1: Request removal
+			await handleCommand!('family', ['remove', 'margot'], msg(''));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Remove'),
+				expect.any(Array),
+			);
+
+			// Step 2: Confirm removal
+			await handleCallbackQuery?.('fa:rm:margot', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('removed'),
+			);
+		});
+
+		it('/family remove margot → cancel via callback', async () => {
+			setupHousehold({ children: [margotProfile] });
+
+			// Step 1: Request removal
+			await handleCommand!('family', ['remove', 'margot'], msg(''));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+				'matt',
+				expect.stringContaining('Remove'),
+				expect.any(Array),
+			);
+
+			// Step 2: Cancel removal
+			await handleCallbackQuery?.('fa:rm-cancel', {
+				userId: 'matt',
+				chatId: 100,
+				messageId: 200,
+			});
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('Cancelled'),
+			);
 		});
 	});
 });

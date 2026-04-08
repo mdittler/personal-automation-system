@@ -91,6 +91,7 @@ export interface Recipe {
 	kidAdaptation?: string;
 	scalingNotes?: string;
 	costEstimate?: number;
+	childApprovals?: Record<string, 'approved' | 'rejected'>; // keyed by child slug
 	status: RecipeStatus;
 	createdAt: string; // ISO date
 	updatedAt: string; // ISO date
@@ -269,4 +270,44 @@ export interface BatchAnalysis {
 export interface CuisineClassification {
 	recipe: string;
 	cuisine: string;
+}
+
+// ─── Family / Child Types (H9) ─────────────────────────────────
+
+export type AllergenStage = 'pre-solids' | 'early-introduction' | 'expanding' | 'established';
+
+export interface ChildProfile {
+	name: string;
+	slug: string;
+	birthDate: string; // ISO date
+	allergenStage: AllergenStage;
+	knownAllergens: string[];
+	avoidAllergens: string[];
+	dietaryNotes: string;
+	createdAt: string; // ISO datetime
+	updatedAt: string; // ISO datetime
+}
+
+export interface FoodIntroduction {
+	food: string;
+	allergenCategory: string | null; // Big 9 or null for non-allergenic
+	date: string; // ISO date
+	reaction: 'none' | 'mild' | 'moderate' | 'severe';
+	accepted: boolean;
+	notes: string;
+}
+
+export interface ChildFoodLog {
+	profile: ChildProfile;
+	introductions: FoodIntroduction[];
+}
+
+export interface KidAdaptation {
+	childName: string;
+	originalRecipeId: string;
+	setAsideBefore: string[];
+	textureGuidance: string[];
+	allergenFlags: string[];
+	portionGuidance: string;
+	generalNotes: string;
 }

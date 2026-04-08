@@ -92,6 +92,19 @@ import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded, buildBatc
 import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
 import { loadPhoto } from './services/photo-store.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
+import {
+	buildRecipeApprovalButtons,
+	handleFamilyCommand as handleFamilyCmd,
+	handleKidAdaptIntent,
+	handleFoodIntroduction,
+	handleApprovalCallback,
+	handleChildApprovalIntent,
+	handleFoodIntroCallback,
+	isKidAdaptIntent,
+	isFoodIntroIntent,
+	isChildApprovalIntent,
+} from './handlers/family.js';
+import { loadAllChildren } from './services/family-profiles.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
@@ -101,6 +114,22 @@ let services: CoreServices;
 
 /** Per-user cache of last search results for number selection. */
 const lastSearchResults = new Map<string, Recipe[]>();
+
+/** Send a recipe, appending per-child approval buttons when children exist. */
+async function sendRecipeWithApproval(userId: string, recipe: Recipe, text: string): Promise<void> {
+	const hh = await requireHousehold(services, userId);
+	if (hh) {
+		const children = await loadAllChildren(hh.sharedStore);
+		if (children.length > 0) {
+			const buttons = buildRecipeApprovalButtons(recipe.id, children, recipe.childApprovals);
+			if (buttons.length > 0) {
+				await services.telegram.sendWithButtons(userId, text, buttons);
+				return;
+			}
+		}
+	}
+	await services.telegram.send(userId, text);
+}
 
 // ─── Init ────────────────────────────────────────────────────────
 
@@ -127,7 +156,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (cached && num >= 1 && num <= cached.length) {
 			const selected = cached[num - 1];
 			if (selected) {
-				await services.telegram.send(ctx.userId, formatRecipe(selected));
+				await sendRecipeWithApproval(ctx.userId, selected, formatRecipe(selected));
 				return;
 			}
 		}
@@ -242,6 +271,51 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
+	// H9: Family intents — kid adaptation, food introduction, child approval (silent check, no error message)
+	{
+		const hh = await requireHousehold(services, ctx.userId);
+		if (hh) {
+			const allChildren = await loadAllChildren(hh.sharedStore);
+			const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
+
+			if (isKidAdaptIntent(lower, childNames)) {
+				const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
+				if (!adaptEnabled) {
+					await services.telegram.send(ctx.userId, 'Kid meal adaptation is disabled. Enable it in your Hearthstone settings.');
+					return;
+				}
+				const cached = lastSearchResults.get(ctx.userId);
+				const recipe = cached?.[0] ?? null;
+				const allRecipes = await loadAllRecipes(hh.sharedStore);
+				const msg = await handleKidAdaptIntent(services, text, ctx.userId, hh.sharedStore, recipe, allRecipes);
+				if (msg) {
+					await services.telegram.send(ctx.userId, msg);
+					return;
+				}
+			}
+
+			if (isFoodIntroIntent(lower)) {
+				const waitDays = ((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
+				const result = await handleFoodIntroduction(services, text, ctx.userId, hh.sharedStore, waitDays);
+				if (result.buttons) {
+					await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
+				} else {
+					await services.telegram.send(ctx.userId, result.text);
+				}
+				return;
+			}
+
+			if (isChildApprovalIntent(lower, childNames)) {
+				const allRecipes = await loadAllRecipes(hh.sharedStore);
+				const msg = await handleChildApprovalIntent(services, text, hh.sharedStore, allRecipes, childNames);
+				if (msg) {
+					await services.telegram.send(ctx.userId, msg);
+					return;
+				}
+			}
+		}
+	}
+
 	// Food question intent
 	if (isFoodQuestionIntent(lower)) {
 		await handleFoodQuestion(text, ctx);
@@ -315,6 +389,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• /pantry — view your pantry\n' +
 			'• /recipes — browse all recipes\n' +
 			'• /cook <recipe> — cook step-by-step\n' +
+			'• /family — manage child profiles and food introductions\n' +
 			'• /household — manage your household',
 	);
 };
@@ -361,6 +436,20 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'freezer':
 			await handleFreezerCommand(args, ctx);
 			break;
+		case 'family': {
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				return;
+			}
+			const result = await handleFamilyCmd(services, args, ctx.userId, hh.sharedStore);
+			if (result.buttons) {
+				await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
+			} else {
+				await services.telegram.send(ctx.userId, result.text);
+			}
+			break;
+		}
 		default:
 			await services.telegram.send(
 				ctx.userId,
@@ -666,7 +755,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					meal.recipeId = recipe.id;
 					meal.isNew = false;
 					await savePlan(hh.sharedStore, plan);
-					await services.telegram.send(ctx.userId, formatRecipe(recipe, true));
+					await sendRecipeWithApproval(ctx.userId, recipe, formatRecipe(recipe, true));
 				} catch (err) {
 					const { userMessage } = classifyLLMError(err);
 					await services.telegram.send(ctx.userId, userMessage);
@@ -676,7 +765,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				const allRecipes = await loadAllRecipes(hh.sharedStore);
 				const recipe = allRecipes.find((r) => r.id === meal.recipeId);
 				if (recipe) {
-					await services.telegram.send(ctx.userId, formatRecipe(recipe));
+					await sendRecipeWithApproval(ctx.userId, recipe, formatRecipe(recipe));
 				} else {
 					await services.telegram.send(
 						ctx.userId,
@@ -786,6 +875,18 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		// ─── H6: Perishable alert callbacks ─────────────────
 		if (data.startsWith('pa:')) {
 			await handlePerishableCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H9: Family approval callbacks ──────────────────
+		if (data.startsWith('fa:')) {
+			await handleApprovalCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H9: Food introduction callbacks ────────────────
+		if (data.startsWith('fi:')) {
+			await handleFoodIntroCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
 			return;
 		}
 
@@ -994,7 +1095,7 @@ async function handleRecipesCommand(args: string[], ctx: MessageContext): Promis
 		if (cached && num >= 1 && num <= cached.length) {
 			const selected = cached[num - 1];
 			if (selected) {
-				await services.telegram.send(ctx.userId, formatRecipe(selected));
+				await sendRecipeWithApproval(ctx.userId, selected, formatRecipe(selected));
 				return;
 			}
 		}
@@ -2287,6 +2388,9 @@ export function isCookIntent(text: string): boolean {
 		/\bprepare\s+(the|my|our|a)\b/i.test(text)
 	);
 }
+
+// Re-export family intent detectors for natural-language tests
+export { isKidAdaptIntent, isFoodIntroIntent, isChildApprovalIntent };
 
 // ─── H6: Intent Detection ──────────────────────────────────────
 

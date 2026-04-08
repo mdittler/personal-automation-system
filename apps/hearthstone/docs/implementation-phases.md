@@ -13,12 +13,12 @@ This document tracks the phased implementation of the Hearthstone food managemen
 | H1 | Foundation: Types, Household, Recipes | 11 | `/household`, `/recipes` | 70–90 | — | Complete |
 | H2 | Grocery Lists and Manual Pantry | 9 | `/grocery`, `/addgrocery`, `/pantry` | 65–85 | H1 | Complete |
 | H3 | Meal Planning | 8 | `/mealplan`, `/whatsfordinner` | 60–80 | H1, H2 | Complete |
-| H4 | Voting, Ratings, Shopping | 6 | Inline keyboards, shopping mode | 55–75 | H2, H3 | Not Started |
-| H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Not Started |
-| H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Not Started |
+| H4 | Voting, Ratings, Shopping | 6 | Inline keyboards, shopping mode | 55–75 | H2, H3 | Complete |
+| H5 | Cook Mode and Timers | 5 | `/cook`, food queries | 50–65 | H1 | Complete |
+| H6 | Leftovers and Waste | 6 | `/leftovers`, `/freezer`, 3 cron jobs | 55–70 | H2, H4 | Complete |
 | H7 | Batch Cooking and Cuisine | 5 | Prep plan, defrost, cuisine cron | 39 | H3, H6 | Complete |
 | H8 | Vision: Photos | 5 | 3 photo intents | 47 | H1, H2, *infra* | Complete |
-| H9 | Family Features | 4 | Kid adaptations, baby tracker | 40–55 | H1 | Not Started |
+| H9 | Family Features | 4 | Kid adaptations, baby tracker | 156 | H1 | Complete |
 | H10 | Cost Tracking | 5 | `/foodbudget` | 40–55 | H3, H8 | Not Started |
 | H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 55–70 | H3, H9 | Not Started |
 | H12 | Health, Culture, Events | 4 | Health insights, 5 event emitters | 35–50 | H7, H11 | Not Started |
@@ -165,26 +165,32 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H5: Cook Mode and Timers
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~160 new (~3160 cumulative) | **Started:** 2026-04-02 | **Completed:** 2026-04-02
 
 **Requirements:** REQ-COOK-001, REQ-COOK-002, REQ-COOK-003, REQ-COOK-004, REQ-QUERY-001
 
-**What gets built:**
-- Cook mode state machine — step-by-step navigation via Telegram
-- Timer integration — extract times from steps, one-off scheduler
-- Chromecast TTS — hands-free step reading via audio service
-- Recipe scaler — LLM non-linear ingredient scaling
-- Food query handler — safety, substitutions, knowledge questions
+**Implemented as H5a + H5b:**
 
-**Key files:** `src/services/cook-mode.ts`, `src/services/recipe-scaler.ts`, `src/services/cook-timer.ts`, `src/handlers/cook.ts`, `src/handlers/query.ts`
+**What gets built:**
+- Cook mode state machine — step-by-step navigation via Telegram (4-button UI: Back, Repeat, Next, Done)
+- Timer integration — extract times from steps, set/cancel timers, auto-cancel on navigation
+- Chromecast TTS — hands-free step reading via audio service, configurable device
+- Recipe scaler — flexible serving input parsing (numbers, "double", "half"), LLM scaling notes
+- Food query handler — contextual food questions with active cook session awareness
+- Text shortcuts — "next", "back", "repeat", "done" during active cook session
+
+**Key files:** `src/handlers/cook-mode.ts`, `src/services/cook-session.ts`, `src/services/recipe-scaler.ts`, `src/services/timer-parser.ts`
 
 ### Progress
+
+- [x] H5a: Cook mode navigation, recipe scaling, session management, 53 tests
+- [x] H5b: TTS/hands-free, cooking timers, food queries with context, persona tests
 
 ---
 
 ## Phase H6: Leftovers and Waste Reduction
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** ~200 new (~3400 cumulative) | **Started:** 2026-04-02 | **Completed:** 2026-04-03
 
 **Requirements:** REQ-WASTE-001, REQ-WASTE-002, REQ-WASTE-003, REQ-WASTE-004, REQ-PANTRY-004, REQ-PANTRY-005
 
@@ -193,17 +199,25 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 - REQ-PANTRY-005 (PI-5): Freezer inventory — separate from pantry, track items with frozen date, freezer-burn warnings
 
 **What gets built:**
-- Leftover store — CRUD, LLM expiry estimation, meal suggestions
-- Freezer store — CRUD, date tracking (PI-5)
-- Waste tracker — logging, analytics
-- Expiry checker — shared logic for pantry/freezer/leftovers (PI-4)
-- 3 scheduled jobs: perishable-check, freezer-check, leftover-check
+- Leftover store — CRUD, LLM expiry estimation, use/freeze/toss/keep actions
+- Freezer store — CRUD, date tracking, Monday check job (PI-5)
+- Waste store — append-only waste log with reason tracking (expired/spoiled/discarded)
+- Perishable handler — daily 9am pantry expiry check with inline buttons (PI-4)
+- Post-rating and post-cook leftover prompts
+- 3 scheduled jobs: perishable-check (daily 9am), leftover-check (daily 10am), freezer-check (Monday 9am)
 
-**Key files:** `src/services/leftover-store.ts`, `src/services/freezer-store.ts`, `src/services/waste-tracker.ts`, `src/services/expiry-checker.ts`
+**Key files:** `src/services/leftover-store.ts`, `src/services/freezer-store.ts`, `src/services/waste-store.ts`, `src/handlers/leftover-handler.ts`, `src/handlers/freezer-handler.ts`, `src/handlers/perishable-handler.ts`
 
 **Data:** `shared/leftovers.yaml`, `shared/freezer.yaml`, `shared/waste-log.yaml`
 
 ### Progress
+
+- [x] Waste store, leftover store, freezer store services with tests
+- [x] Leftover, freezer, perishable handlers with callback routing
+- [x] Integration into index.ts — commands, callbacks, intents, scheduled jobs
+- [x] Post-rating and post-cook leftover prompts
+- [x] Perishable expiry estimation for pantry items
+- [x] Security review fixes, persona NL tests
 
 ---
 
@@ -260,21 +274,42 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H9: Family Features
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** 156 | **Started:** 2026-04-07 | **Completed:** 2026-04-07
 
 **Requirements:** REQ-FAMILY-001, REQ-FAMILY-002, REQ-FAMILY-003, REQ-FAMILY-004
 
 **What gets built:**
 - Kid adapter — LLM-based age-appropriate recipe adaptations
-- Child tracker — food introduction log, allergen wait windows
-- Family profiles — child profile CRUD
-- "Margot approved" tagging with meal plan weighting
+- Child tracker — food introduction log, allergen wait windows, food-to-allergen mapping (80+ entries)
+- Family profiles — child profile CRUD with flexible date parsing
+- "Margot approved" tagging via buttons and natural language
+- Intent detection for kid adapt, food intro, child approval
+- `/family` command with add/remove/view/edit subcommands
+- `fa:` callback prefix for recipe approval buttons, `fi:` for food intro reaction buttons
+- Config-driven: `allergen_wait_days`, `child_meal_adaptation` toggle
 
 **Key files:** `src/services/kid-adapter.ts`, `src/services/child-tracker.ts`, `src/services/family-profiles.ts`, `src/handlers/family.ts`
 
-**Data:** `shared/children/<name>.yaml`
+**Data:** `shared/children/<slug>.yaml` — profile + food introduction log per child
 
 ### Progress
+- All 4 requirements implemented (REQ-FAMILY-001 through REQ-FAMILY-004)
+- 156 tests across 4 test files (family-profiles: 34, child-tracker: 31, kid-adapter: 10, family-handler: 81)
+- Types: ChildProfile, FoodIntroduction, ChildFoodLog, KidAdaptation + childApprovals on Recipe
+- Index.ts wired: /family command, 3 intent handlers, fa: + fi: callback routing, config reads
+
+### Review Fixes Applied
+- C1: Approval buttons on recipe views via `buildRecipeApprovalButtons`
+- C2: Config values from `services.config.get` instead of hardcoded defaults
+- C3: Natural language approval intent ("Margot loved the chili")
+- I1: Flexible date parsing (ISO, US MM/DD/YYYY, named month) with rollover validation
+- I2: Confirmation buttons before removing child profile
+- I3: LLM-based food name extraction with regex fallback
+- I4: `/family edit` subcommand for stage, allergens, notes
+- I5: Reaction recording via inline buttons after food introduction
+- I6: Expanded food-to-allergen mapping (80+ entries, longest-match-first ordering)
+- I7: Recipe name extraction from natural language for kid adapt intent
+- I8: DST-safe date math (noon UTC normalization, Math.round instead of Math.floor)
 
 ---
 
@@ -346,12 +381,12 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 | H1 | 2026-03-30 | 2026-03-30 | ~1100 (infra baseline) | Foundation: types, household, recipes, recipe parser |
 | H2 | 2026-03-30 | 2026-03-30 | ~2605 (cumulative) | Grocery lists, pantry (H2a complete) |
 | H3 | 2026-03-31 | 2026-03-31 | ~104 new (2709 total) | Meal planning, "what can I make?", seasonal data |
-| H4 | — | — | 0 | — |
-| H5 | — | — | 0 | — |
-| H6 | — | — | 0 | — |
+| H4 | 2026-03-31 | 2026-03-31 | ~105 new (~2814 cumulative) | Voting, ratings, shopping follow-up, cooked buttons |
+| H5 | 2026-04-02 | 2026-04-02 | ~160 new (~3160 cumulative) | Cook mode (H5a+H5b), timers, TTS, food queries |
+| H6 | 2026-04-02 | 2026-04-03 | ~200 new (~3400 cumulative) | Leftovers, freezer, waste, perishable alerts |
 | H7 | 2026-04-03 | 2026-04-03 | ~39 new (~3579 cumulative) | Batch cooking, cuisine tracking |
 | H8 | 2026-04-06 | 2026-04-06 | ~47 new (~3660 cumulative) | Vision: LLM image support, photo parsers, receipt capture |
-| H9 | — | — | 0 | — |
+| H9 | 2026-04-07 | 2026-04-07 | ~243 new (~1824 cumulative) | Family profiles, kid adapter, child tracker, food intro, approval tagging, NL user simulation tests |
 | H10 | — | — | 0 | — |
 | H11 | — | — | 0 | — |
 | H12 | — | — | 0 | — |
