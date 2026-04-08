@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 680" font-family="system-ui, -apple-system, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#3b82f6"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="680" fill="#f8fafc" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#0f172a">PAS Architecture</text>
+
+  <!-- Telegram -->
+  <rect x="340" y="50" width="220" height="44" rx="6" fill="#0088cc" opacity="0.9"/>
+  <text x="450" y="77" text-anchor="middle" fill="white" font-weight="600">Telegram Bot API</text>
+
+  <!-- Arrow: Telegram -> Router -->
+  <line x1="450" y1="94" x2="450" y2="128" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Message Router box -->
+  <rect x="270" y="130" width="360" height="70" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="450" y="152" text-anchor="middle" font-weight="bold" fill="#1e40af">Message Router</text>
+  <text x="450" y="170" text-anchor="middle" font-size="11" fill="#3b82f6">/command → Photo classify → NL intent → Fallback</text>
+  <text x="450" y="185" text-anchor="middle" font-size="10" fill="#64748b">+ rate limiting, authorization, space context</text>
+
+  <!-- Arrow: Router -> Apps -->
+  <line x1="450" y1="200" x2="450" y2="230" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Apps row -->
+  <rect x="50" y="232" width="800" height="74" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="70" y="252" font-weight="bold" fill="#166534" font-size="12">APPS</text>
+
+  <rect x="70" y="260" width="100" height="36" rx="4" fill="#bbf7d0"/>
+  <text x="120" y="283" text-anchor="middle" font-size="11" fill="#166534">Echo</text>
+
+  <rect x="185" y="260" width="100" height="36" rx="4" fill="#bbf7d0"/>
+  <text x="235" y="283" text-anchor="middle" font-size="11" fill="#166534">Notes</text>
+
+  <rect x="300" y="260" width="100" height="36" rx="4" fill="#bbf7d0"/>
+  <text x="350" y="283" text-anchor="middle" font-size="11" fill="#166534">Chatbot</text>
+
+  <rect x="415" y="260" width="100" height="36" rx="4" fill="#86efac"/>
+  <text x="465" y="283" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">Food</text>
+
+  <rect x="530" y="260" width="100" height="36" rx="4" fill="#bbf7d0" stroke="#22c55e" stroke-dasharray="4,2"/>
+  <text x="580" y="283" text-anchor="middle" font-size="11" fill="#166534">Your App</text>
+
+  <text x="660" y="252" font-size="10" fill="#64748b">manifest.yaml</text>
+  <text x="660" y="266" font-size="10" fill="#64748b">declares intents,</text>
+  <text x="660" y="280" font-size="10" fill="#64748b">commands, photos,</text>
+  <text x="660" y="294" font-size="10" fill="#64748b">schedules, config</text>
+
+  <!-- Arrow: Apps -> Core Services -->
+  <line x1="450" y1="306" x2="450" y2="336" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="458" y="326" font-size="10" fill="#64748b">CoreServices DI</text>
+
+  <!-- Core Services row -->
+  <rect x="50" y="338" width="800" height="100" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="70" y="358" font-weight="bold" fill="#1e40af" font-size="12">CORE SERVICES</text>
+
+  <!-- Service boxes - row 1 -->
+  <rect x="70" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="122" y="385" text-anchor="middle" font-size="11" fill="#1e40af">LLM Service</text>
+
+  <rect x="185" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="237" y="385" text-anchor="middle" font-size="11" fill="#1e40af">Data Store</text>
+
+  <rect x="300" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="352" y="385" text-anchor="middle" font-size="11" fill="#1e40af">Scheduler</text>
+
+  <rect x="415" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="467" y="385" text-anchor="middle" font-size="11" fill="#1e40af">Event Bus</text>
+
+  <rect x="530" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="582" y="385" text-anchor="middle" font-size="11" fill="#1e40af">Telegram</text>
+
+  <rect x="645" y="366" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="697" y="385" text-anchor="middle" font-size="11" fill="#1e40af">Audio</text>
+
+  <!-- Service boxes - row 2 -->
+  <rect x="70" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="122" y="419" text-anchor="middle" font-size="11" fill="#1e40af">LLM Guard</text>
+
+  <rect x="185" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="237" y="419" text-anchor="middle" font-size="11" fill="#1e40af">Spaces</text>
+
+  <rect x="300" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="352" y="419" text-anchor="middle" font-size="11" fill="#1e40af">Reports</text>
+
+  <rect x="415" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="467" y="419" text-anchor="middle" font-size="11" fill="#1e40af">Alerts</text>
+
+  <rect x="530" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="582" y="419" text-anchor="middle" font-size="11" fill="#1e40af">Context Store</text>
+
+  <rect x="645" y="400" width="105" height="28" rx="4" fill="#bfdbfe"/>
+  <text x="697" y="419" text-anchor="middle" font-size="11" fill="#1e40af">Secrets</text>
+
+  <!-- Arrows down from core services -->
+  <!-- LLM -> Providers -->
+  <line x1="122" y1="438" x2="122" y2="470" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- Data Store -> Files -->
+  <line x1="340" y1="438" x2="340" y2="470" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- LLM Providers -->
+  <rect x="30" y="472" width="260" height="70" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="50" y="492" font-weight="bold" fill="#92400e" font-size="12">LLM PROVIDERS</text>
+  <text x="50" y="510" font-size="11" fill="#92400e">Anthropic Claude</text>
+  <text x="50" y="524" font-size="11" fill="#92400e">Google Gemini</text>
+  <text x="175" y="510" font-size="11" fill="#92400e">OpenAI / Compatible</text>
+  <text x="175" y="524" font-size="11" fill="#92400e">Ollama (local)</text>
+
+  <!-- Data Layer -->
+  <rect x="310" y="472" width="280" height="70" rx="6" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
+  <text x="330" y="492" font-weight="bold" fill="#9d174d" font-size="12">DATA (Markdown + YAML on disk)</text>
+  <text x="330" y="510" font-size="11" fill="#9d174d">data/users/&lt;id&gt;/&lt;app&gt;/</text>
+  <text x="330" y="524" font-size="11" fill="#9d174d">data/spaces/&lt;id&gt;/&lt;app&gt;/</text>
+  <text x="490" y="510" font-size="11" fill="#9d174d">data/system/</text>
+  <text x="490" y="524" font-size="11" fill="#9d174d">Obsidian-ready</text>
+
+  <!-- External Integrations -->
+  <rect x="610" y="472" width="240" height="70" rx="6" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="630" y="492" font-weight="bold" fill="#7e22ce" font-size="12">EXTERNAL</text>
+  <text x="630" y="510" font-size="11" fill="#7e22ce">n8n (workflow dispatch)</text>
+  <text x="630" y="524" font-size="11" fill="#7e22ce">Webhooks (HMAC-signed)</text>
+  <text x="630" y="538" font-size="11" fill="#7e22ce">REST API (Bearer auth)</text>
+
+  <!-- Arrow: Core -> External -->
+  <line x1="730" y1="438" x2="730" y2="470" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Management GUI -->
+  <rect x="610" y="130" width="240" height="70" rx="6" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+  <text x="730" y="152" text-anchor="middle" font-weight="bold" fill="#854d0e">Management GUI</text>
+  <text x="730" y="170" text-anchor="middle" font-size="11" fill="#854d0e">Fastify + htmx + Pico CSS</text>
+  <text x="730" y="185" text-anchor="middle" font-size="10" fill="#64748b">config, models, costs, data</text>
+
+  <!-- Arrow: GUI -> Core -->
+  <line x1="630" y1="200" x2="630" y2="236" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Single process note -->
+  <rect x="50" y="560" width="800" height="36" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="450" y="583" text-anchor="middle" font-size="12" fill="#475569">Single Node.js process  ·  TypeScript strict ESM  ·  No database  ·  Mac Mini with 32GB RAM</text>
+
+  <!-- Legend -->
+  <text x="70" y="620" font-size="11" font-weight="bold" fill="#475569">Data flow:</text>
+  <line x1="145" y1="616" x2="185" y2="616" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="195" y="620" font-size="11" fill="#475569">message/request path</text>
+
+  <rect x="340" y="608" width="14" height="14" rx="2" fill="#bbf7d0" stroke="#22c55e"/>
+  <text x="360" y="620" font-size="11" fill="#475569">App plugins</text>
+
+  <rect x="460" y="608" width="14" height="14" rx="2" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="480" y="620" font-size="11" fill="#475569">Infrastructure</text>
+
+  <rect x="590" y="608" width="14" height="14" rx="2" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="610" y="620" font-size="11" fill="#475569">External providers</text>
+
+  <rect x="740" y="608" width="14" height="14" rx="2" fill="#fce7f3" stroke="#ec4899"/>
+  <text x="760" y="620" font-size="11" fill="#475569">Persistence</text>
+</svg>
