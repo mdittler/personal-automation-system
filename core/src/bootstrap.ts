@@ -32,6 +32,7 @@ import { DailyDiffService } from './services/daily-diff/index.js';
 import { ChangeLog } from './services/data-store/change-log.js';
 import { DataStoreServiceImpl } from './services/data-store/index.js';
 import { EventBusServiceImpl } from './services/event-bus/index.js';
+import { InviteService } from './services/invite/index.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { llmContext } from './services/llm/llm-context.js';
@@ -63,6 +64,7 @@ import {
 } from './services/telegram/message-adapter.js';
 import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
+import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
@@ -211,10 +213,26 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
+	const configPath = resolve('config', 'pas.yaml');
+
+	const inviteService = new InviteService({
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'invite' }),
+	});
+	await inviteService.cleanup();
+
+	const userMutationService = new UserMutationService({
+		userManager,
+		configPath,
+		logger: createChildLogger(logger, { service: 'user-mutation' }),
+	});
+
 	const userGuard = new UserGuard({
 		userManager,
 		telegram: telegramService,
 		logger: createChildLogger(logger, { service: 'user-guard' }),
+		inviteService,
+		userMutationService,
 	});
 
 	// 8b2. Space service (shared data spaces with membership)
@@ -508,6 +526,8 @@ export async function main(): Promise<void> {
 		userManager,
 		routeVerifier,
 		verificationUpperBound: verificationConfig?.upperBound,
+		inviteService,
+		userMutationService,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
@@ -689,6 +709,7 @@ export async function main(): Promise<void> {
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'gui' }),
 		loginRateLimiter,
+		userMutationService,
 	});
 
 	// 13b. External Data API (optional — disabled when API_TOKEN is empty)

@@ -21,6 +21,7 @@ import type { ReportService } from '../services/reports/index.js';
 import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
+import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
 import type { SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
@@ -51,6 +52,7 @@ export interface GuiOptions {
 	userManager?: UserManager;
 	contextStore?: ContextStoreServiceImpl;
 	spaceService?: SpaceService;
+	userMutationService?: UserMutationService;
 	dataDir: string;
 	logger: Logger;
 	loginRateLimiter?: RateLimiter;
