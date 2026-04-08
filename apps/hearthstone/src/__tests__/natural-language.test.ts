@@ -5291,25 +5291,31 @@ describe('Natural Language — Real User Messages', () => {
 		});
 
 		it('"what\'s for dinner" → dinner intent, not family', async () => {
-			setupHousehold({
-				children: [margotProfile],
-				mealPlan: {
-					id: 'mp1',
-					startDate: '2026-04-07',
-					endDate: '2026-04-13',
-					meals: [{ date: '2026-04-07', recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry' }],
-					createdBy: 'matt',
-					createdAt: '2026-04-07T00:00:00.000Z',
-				},
-			});
-			vi.mocked(services.config.get).mockResolvedValue('');
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-04-07T18:00:00Z'));
+			try {
+				setupHousehold({
+					children: [margotProfile],
+					mealPlan: {
+						id: 'mp1',
+						startDate: '2026-04-07',
+						endDate: '2026-04-13',
+						meals: [{ date: '2026-04-07', recipeId: 'chicken-stir-fry-001', recipeTitle: 'Chicken Stir Fry' }],
+						createdBy: 'matt',
+						createdAt: '2026-04-07T00:00:00.000Z',
+					},
+				});
+				vi.mocked(services.config.get).mockResolvedValue('');
 
-			await handleMessage(msg("what's for dinner"));
-			// Should hit dinner intent (shows tonight's meal), may use send or sendWithButtons
-			const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
-			const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
-			const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
-			expect(text).toContain('Chicken Stir Fry');
+				await handleMessage(msg("what's for dinner"));
+				// Should hit dinner intent (shows tonight's meal), may use send or sendWithButtons
+				const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
+				const sendWithBtnCall = vi.mocked(services.telegram.sendWithButtons).mock.calls[0];
+				const text = sendCall?.[1] ?? sendWithBtnCall?.[1] ?? '';
+				expect(text).toContain('Chicken Stir Fry');
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it('"show me the pantry" → pantry intent, not family', async () => {
