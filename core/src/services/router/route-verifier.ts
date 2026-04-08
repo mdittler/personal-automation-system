@@ -12,6 +12,7 @@
  *   SentMessage> so resolveCallback can call editMessage correctly.
  */
 
+import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, PhotoContext, SentMessage } from '../../types/telegram.js';
@@ -88,6 +89,7 @@ export class RouteVerifier {
 	private readonly pendingStore: PendingVerificationStore;
 	private readonly verificationLogger: VerificationLogger;
 	private readonly logger: Logger;
+	private readonly photoDir?: string;
 
 	/** Tracks real sent message IDs by pendingId (since we add to pendingStore before sending). */
 	private readonly sentMessages = new Map<string, SentMessage>();
@@ -99,6 +101,7 @@ export class RouteVerifier {
 		this.pendingStore = options.pendingStore;
 		this.verificationLogger = options.verificationLogger;
 		this.logger = options.logger;
+		this.photoDir = options.photoDir;
 	}
 
 	/**
@@ -114,6 +117,11 @@ export class RouteVerifier {
 	): Promise<VerifyAction> {
 		const isPhoto = 'photo' in ctx;
 		const messageText = isPhoto ? ((ctx as PhotoContext).caption ?? '') : (ctx as MessageContext).text;
+
+		let resolvedPhotoPath = photoPath;
+		if (isPhoto) {
+			resolvedPhotoPath = await this.savePhoto(ctx as PhotoContext);
+		}
 
 		const allApps = this.registry.getAll();
 		const candidateApps = allApps.map((app) => ({
@@ -159,7 +167,7 @@ export class RouteVerifier {
 				ctx,
 				messageText,
 				isPhoto,
-				photoPath,
+				photoPath: resolvedPhotoPath,
 				classifierResult,
 				verifierAgrees: true,
 				outcome: 'auto',
@@ -181,7 +189,7 @@ export class RouteVerifier {
 			verifierSuggestedAppId: suggestedAppId,
 			sentMessageId: 0,
 			sentChatId: 0,
-			photoPath,
+			photoPath: resolvedPhotoPath,
 		});
 
 		const buttons = [
@@ -210,7 +218,7 @@ export class RouteVerifier {
 			ctx,
 			messageText,
 			isPhoto,
-			photoPath,
+			photoPath: resolvedPhotoPath,
 			classifierResult,
 			verifierAgrees: false,
 			verifierSuggestedAppId: suggestedAppId,
@@ -280,6 +288,25 @@ export class RouteVerifier {
 	// ---------------------------------------------------------------------------
 	// Private helpers
 	// ---------------------------------------------------------------------------
+
+	private async savePhoto(ctx: PhotoContext): Promise<string | undefined> {
+		if (!this.photoDir) return undefined;
+		try {
+			const { ensureDir } = await import('../../utils/file.js');
+			const { writeFile } = await import('node:fs/promises');
+			await ensureDir(this.photoDir);
+			const timestamp = new Date().toISOString().replace(/[:.]/g, '').replace('T', '-').slice(0, 15);
+			const ext = ctx.mimeType.split('/')[1] ?? 'jpg';
+			const filename = `${timestamp}-${ctx.userId}.${ext}`;
+			const fullPath = join(this.photoDir, filename);
+			await writeFile(fullPath, ctx.photo);
+			// Return relative path for log references
+			return `route-verification/photos/${filename}`;
+		} catch (error) {
+			this.logger.error({ error }, 'Failed to save photo for verification log');
+			return undefined;
+		}
+	}
 
 	private logEntry(params: {
 		ctx: MessageContext | PhotoContext;

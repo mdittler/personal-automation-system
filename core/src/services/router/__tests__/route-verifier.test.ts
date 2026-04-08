@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RouteVerifier } from '../route-verifier.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { TelegramService } from '../../../types/telegram.js';
@@ -335,6 +338,139 @@ describe('RouteVerifier', () => {
 		expect(chatId).toBe(1); // from sendWithButtons mock return value
 		expect(messageId).toBe(100);
 		expect(text).toContain('Notes'); // app name in confirmation
+	});
+
+	// -------------------------------------------------------------------------
+	// photo saving
+	// -------------------------------------------------------------------------
+
+	describe('photo saving', () => {
+		let photoTmpDir: string;
+
+		beforeEach(async () => {
+			photoTmpDir = await mkdtemp(`${tmpdir()}/route-verifier-photo-`);
+		});
+
+		afterEach(() => {
+			rmSync(photoTmpDir, { recursive: true, force: true });
+		});
+
+		it('saves photo to photoDir when verifier disagrees and message is held', async () => {
+			const llm = createMockLLM(
+				'{"agrees": false, "suggestedAppId": "notes"}',
+			);
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '123',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'save this for later',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 1,
+			};
+
+			const result = await verifier.verify(ctx, classifierResult);
+
+			expect(result).toEqual({ action: 'held' });
+
+			// A file should have been written to photoTmpDir
+			const files = readdirSync(photoTmpDir);
+			expect(files).toHaveLength(1);
+			expect(files[0]).toMatch(/^.*-123\.jpeg$/);
+			expect(existsSync(`${photoTmpDir}/${files[0]!}`)).toBe(true);
+		});
+
+		it('saves photo to photoDir when verifier agrees', async () => {
+			const llm = createMockLLM('{"agrees": true}');
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '456',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'agreed photo',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 2,
+			};
+
+			await verifier.verify(ctx, classifierResult);
+
+			const files = readdirSync(photoTmpDir);
+			expect(files).toHaveLength(1);
+			expect(files[0]).toMatch(/^.*-456\.jpeg$/);
+		});
+
+		it('does not save photo when photoDir is not configured', async () => {
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+			// buildVerifier does not pass photoDir
+			const verifier = buildVerifier(llm);
+
+			const ctx: PhotoContext = {
+				userId: '123',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'no save',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 3,
+			};
+
+			// Should not throw, photo path in log should be undefined
+			const result = await verifier.verify(ctx, classifierResult);
+			expect(result).toEqual({ action: 'held' });
+
+			// pendingStore.add should have been called with photoPath undefined
+			const addArg = (pendingStore.add as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
+			expect(addArg['photoPath']).toBeUndefined();
+		});
+
+		it('includes saved photo path in the pending entry', async () => {
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '789',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'photo with path',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 4,
+			};
+
+			await verifier.verify(ctx, classifierResult);
+
+			const addArg = (pendingStore.add as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
+			expect(typeof addArg['photoPath']).toBe('string');
+			expect(addArg['photoPath']).toMatch(/^route-verification\/photos\/.*-789\.jpeg$/);
+		});
 	});
 
 	it('resolveCallback returns undefined for unknown pending ID', async () => {
