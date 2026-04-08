@@ -252,6 +252,72 @@ export interface Receipt {
 	capturedAt: string; // ISO datetime
 }
 
+// ─── Cost Tracking Types (H10) ─────────────────────────────────
+
+export interface PriceEntry {
+	name: string;          // normalized item name, e.g. "Eggs (60ct)"
+	price: number;         // dollar amount
+	unit: string;          // package unit, e.g. "60ct", "1 gal", "5 lb"
+	department: string;    // Dairy, Produce, Meat, Pantry, etc.
+	updatedAt: string;     // ISO date of last update
+}
+
+export interface StorePriceData {
+	store: string;         // display name, e.g. "Costco"
+	slug: string;          // file-safe name, e.g. "costco"
+	lastUpdated: string;   // ISO date
+	items: PriceEntry[];
+}
+
+export interface IngredientCost {
+	ingredientName: string;    // from recipe, e.g. "2 cups AP flour"
+	matchedItem: string | null; // from price DB, e.g. "AP flour (25 lb)"
+	matchedPrice: number | null; // full package price
+	matchedUnit: string | null;  // package unit
+	portionCost: number;        // cost for the recipe's quantity
+	isEstimate: boolean;        // true if LLM-estimated (no price DB match)
+}
+
+export interface MealCostEstimate {
+	recipeId: string;
+	recipeTitle: string;
+	store: string;            // which store's prices were used
+	ingredientCosts: IngredientCost[];
+	totalCost: number;        // sum of portionCost
+	perServingCost: number;   // totalCost / servings
+	servings: number;
+	estimatedAt: string;      // ISO datetime
+}
+
+export interface CostHistoryWeek {
+	weekId: string;           // "2026-W15"
+	startDate: string;        // ISO date
+	endDate: string;          // ISO date
+	meals: Array<{
+		date: string;
+		recipeTitle: string;
+		cost: number;
+		perServing: number;
+	}>;
+	totalCost: number;
+	avgPerMeal: number;
+	avgPerServing: number;
+	mealCount: number;
+}
+
+export interface CostHistoryMonth {
+	monthId: string;          // "2026-04"
+	weeks: Array<{
+		weekId: string;
+		totalCost: number;
+		mealCount: number;
+	}>;
+	totalCost: number;
+	avgPerMeal: number;
+	avgPerServing: number;
+	mealCount: number;
+}
+
 // ─── Batch Cooking Types (H7) ───────────────────────────────────
 
 export interface SharedPrepTask {

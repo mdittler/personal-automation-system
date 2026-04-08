@@ -212,3 +212,33 @@ Ask any cooking question:
 - "what can I substitute for buttermilk?"
 - "how long do I cook salmon at 400?"
 - "is it safe to eat raw cookie dough?"
+
+---
+
+## Cost Tracking
+
+Hearthstone tracks food costs from your grocery receipts and estimates meal costs.
+
+### Price Database
+Prices are automatically captured from receipt photos and stored per store:
+- Send a grocery receipt photo — prices are extracted and saved automatically
+- "eggs are $3.50 at costco" — manually update a price
+- "update milk price to $4.29 at kroger" — update specific items
+- Prices are stored in Obsidian-compatible files you can edit manually
+
+### Budget Reports
+- `/foodbudget` — see this week's meal costs and spending
+- `/foodbudget month` — monthly spending summary with trends
+- `/foodbudget year` — year-in-review with monthly totals
+- "how much did we spend on food?" — natural language budget query
+
+### Cost Annotations
+When price data is available:
+- Meal plans show estimated total cost and average per meal
+- If a plan is significantly more expensive than recent weeks, you'll see a budget alert with swap suggestions
+- Grocery lists show estimated totals when `show_price_estimates` is enabled in settings
+
+### Settings
+- `default_store` — which store's prices to use for estimates
+- `show_price_estimates` — show price annotations on grocery lists (off by default)
+- `preferred_stores` — your preferred stores for comparison
