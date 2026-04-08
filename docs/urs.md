@@ -1315,6 +1315,20 @@ Unregistered users must be able to redeem invite codes via `/start <code>` or by
 - `user-guard.test.ts` > invite code detection > trims whitespace from message text
 - `user-guard.test.ts` > invite code detection > handles welcome message send failure gracefully
 - `user-guard.test.ts` > invite code detection > does not attempt redemption for registered users
+- `user-guard.test.ts` > invite code detection > redeems valid code via /start deep link
+- `user-guard.test.ts` > invite code detection > sends invite error for expired /start code
+- `user-guard.test.ts` > invite code detection > handles /start with extra whitespace before code
+
+**Natural-language journey tests:**
+- `realistic-invite-journey.test.ts` > new user follows instructions > raw code, deep link, whitespace, double-space /start (4 tests)
+- `realistic-invite-journey.test.ts` > confused user sends wrong things > hi, questions, wrapped code, uppercase, wrong length, missing slash (9 tests)
+- `realistic-invite-journey.test.ts` > invalid/expired/used codes > expired, used, nonexistent, via deep link (4 tests)
+- `realistic-invite-journey.test.ts` > registered user edge cases > code-like text and deep link pass through (2 tests)
+- `realistic-invite-journey.test.ts` > admin /invite command > simple name, nickname, full name, emoji, no name, missing slash, natural language (7 tests)
+- `realistic-invite-journey.test.ts` > non-admin /invite > permission denied (1 test)
+- `realistic-invite-journey.test.ts` > /help visibility > admin sees /invite, regular user doesn't (2 tests)
+- `realistic-invite-journey.test.ts` > /start registered user > already registered passthrough (1 test)
+- `realistic-invite-journey.test.ts` > invite-adjacent messages > "invite mom for dinner" routes to classifier (1 test)
 
 **Security tests:**
 - `invite-command.test.ts` > /invite security > passes special characters in name to invite service
@@ -4544,7 +4558,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-USER-003 | user-manager.test.ts | 1 | 5 | Implemented |
 | REQ-USER-004 | user-guard.test.ts | 2 | 3 | Implemented |
 | REQ-USER-005 | index.test.ts (invite) | 4 | 5 | Implemented |
-| REQ-USER-006 | invite-command.test.ts, user-guard.test.ts | 2 | 8 | Implemented |
+| REQ-USER-006 | invite-command.test.ts, user-guard.test.ts, realistic-invite-journey.test.ts | 2 | 11 + 31 journey | Implemented |
 | REQ-USER-007 | user-mutation-service.test.ts, config-writer.test.ts | 6 | 6 | Implemented |
 | REQ-USER-008 | integration.test.ts (invite) | 3 | 3 | Implemented |
 | REQ-RATELIMIT-001 | rate-limiter.test.ts | 8 | 8 | Implemented |
