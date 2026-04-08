@@ -18,13 +18,17 @@ export interface UserManagerOptions {
 }
 
 export class UserManager {
-	private readonly users: ReadonlyArray<RegisteredUser>;
+	private users: RegisteredUser[];
 	private readonly userMap: Map<string, RegisteredUser>;
 	private readonly appToggle: AppToggleStore;
 	private readonly logger: Logger;
 
 	constructor(options: UserManagerOptions) {
-		this.users = options.config.users;
+		this.users = options.config.users.map((u) => ({
+			...u,
+			enabledApps: [...u.enabledApps],
+			sharedScopes: [...(u.sharedScopes ?? [])],
+		}));
 		this.appToggle = options.appToggle;
 		this.logger = options.logger;
 
@@ -70,6 +74,45 @@ export class UserManager {
 	/** Get all registered users. */
 	getAllUsers(): ReadonlyArray<RegisteredUser> {
 		return this.users;
+	}
+
+	/** Add a new user to the internal array and map. */
+	addUser(user: RegisteredUser): void {
+		this.users.push(user);
+		this.userMap.set(user.id, user);
+	}
+
+	/**
+	 * Remove a user by Telegram ID.
+	 * Returns true if the user was found and removed, false otherwise.
+	 */
+	removeUser(telegramId: string): boolean {
+		if (!this.userMap.has(telegramId)) return false;
+		this.userMap.delete(telegramId);
+		this.users = this.users.filter((u) => u.id !== telegramId);
+		return true;
+	}
+
+	/**
+	 * Update the enabledApps list for a user.
+	 * Returns true if the user was found and updated, false otherwise.
+	 */
+	updateUserApps(telegramId: string, enabledApps: string[]): boolean {
+		const user = this.userMap.get(telegramId);
+		if (!user) return false;
+		user.enabledApps = enabledApps;
+		return true;
+	}
+
+	/**
+	 * Update the sharedScopes list for a user.
+	 * Returns true if the user was found and updated, false otherwise.
+	 */
+	updateUserSharedScopes(telegramId: string, sharedScopes: string[]): boolean {
+		const user = this.userMap.get(telegramId);
+		if (!user) return false;
+		user.sharedScopes = sharedScopes;
+		return true;
 	}
 
 	/**

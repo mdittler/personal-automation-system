@@ -216,6 +216,135 @@ describe('UserManager', () => {
 		});
 	});
 
+	describe('addUser', () => {
+		it('adds a new user, verifiable via isRegistered and getUser', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const newUser: RegisteredUser = {
+				id: '333',
+				name: 'Carol',
+				isAdmin: false,
+				enabledApps: ['notes'],
+				sharedScopes: [],
+			};
+
+			mgr.addUser(newUser);
+
+			expect(mgr.isRegistered('333')).toBe(true);
+			expect(mgr.getUser('333')).toEqual(newUser);
+		});
+
+		it('adds a new user, verifiable via getAllUsers', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const newUser: RegisteredUser = {
+				id: '444',
+				name: 'Dave',
+				isAdmin: false,
+				enabledApps: [],
+				sharedScopes: [],
+			};
+
+			mgr.addUser(newUser);
+
+			const all = mgr.getAllUsers();
+			expect(all).toHaveLength(3);
+			expect(all.find((u) => u.id === '444')).toEqual(newUser);
+		});
+	});
+
+	describe('removeUser', () => {
+		it('removes an existing user and returns true', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.removeUser('222');
+
+			expect(result).toBe(true);
+			expect(mgr.isRegistered('222')).toBe(false);
+			expect(mgr.getUser('222')).toBeNull();
+			expect(mgr.getAllUsers()).toHaveLength(1);
+		});
+
+		it('returns false for a non-existent user', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.removeUser('999');
+
+			expect(result).toBe(false);
+			expect(mgr.getAllUsers()).toHaveLength(2);
+		});
+	});
+
+	describe('updateUserApps', () => {
+		it('updates the enabledApps for an existing user and returns true', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.updateUserApps('222', ['notes', 'food']);
+
+			expect(result).toBe(true);
+			expect(mgr.getUserApps('222')).toEqual(['notes', 'food']);
+		});
+
+		it('returns false for a non-existent user', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.updateUserApps('999', ['notes']);
+
+			expect(result).toBe(false);
+		});
+	});
+
+	describe('updateUserSharedScopes', () => {
+		it('updates the sharedScopes for an existing user and returns true', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.updateUserSharedScopes('222', ['family', 'work']);
+
+			expect(result).toBe(true);
+			expect(mgr.getSharedScopes('222')).toEqual(['family', 'work']);
+		});
+
+		it('returns false for a non-existent user', () => {
+			const mgr = new UserManager({
+				config: createMockConfig(testUsers),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			const result = mgr.updateUserSharedScopes('999', ['family']);
+
+			expect(result).toBe(false);
+		});
+	});
+
 	describe('validateConfig', () => {
 		it('returns empty array for valid config', () => {
 			const mgr = new UserManager({
