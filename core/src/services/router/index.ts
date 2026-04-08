@@ -137,7 +137,12 @@ export class Router {
 		const parsed = parseCommand(ctx.text);
 
 		// Handle /start <code> for unregistered users (invite redemption)
-		if (parsed?.command === '/start' && parsed.rawArgs.trim() && this.inviteService && this.userMutationService) {
+		if (
+			parsed?.command === '/start' &&
+			parsed.rawArgs.trim() &&
+			this.inviteService &&
+			this.userMutationService
+		) {
 			if (!this.findUser(ctx.userId)) {
 				await this.handleInviteRedemption(parsed.rawArgs.trim(), ctx.userId);
 				return;
@@ -748,12 +753,17 @@ export class Router {
 
 		await this.userMutationService.registerUser(newUser);
 		await this.inviteService.redeemCode(code, userId);
-		await this.trySend(userId, `Welcome to PAS, ${escapeMarkdown(result.invite.name)}\\! Type /help to see available commands\\.`);
+		await this.trySend(
+			userId,
+			`Welcome to PAS, ${escapeMarkdown(result.invite.name)}\\! Type /help to see available commands\\.`,
+		);
 	}
 
 	/** Find a registered user by Telegram user ID. */
 	private findUser(userId: string) {
-		return this.config.users.find((u) => u.id === userId) ?? this.userManager?.getUser(userId) ?? null;
+		return (
+			this.config.users.find((u) => u.id === userId) ?? this.userManager?.getUser(userId) ?? null
+		);
 	}
 
 	/** Check if an app is enabled for a user, considering toggle overrides. */

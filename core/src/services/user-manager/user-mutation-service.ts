@@ -47,10 +47,7 @@ export class UserMutationService {
 	 *
 	 * Returns an empty object on success, or `{ error: string }` on failure.
 	 */
-	async removeUser(
-		telegramId: string,
-		callerUserId?: string,
-	): Promise<{ error?: string }> {
+	async removeUser(telegramId: string, callerUserId?: string): Promise<{ error?: string }> {
 		// Self-removal guard
 		if (callerUserId !== undefined && callerUserId === telegramId) {
 			return { error: 'Cannot remove your own account.' };
@@ -64,9 +61,7 @@ export class UserMutationService {
 
 		// Last-admin guard
 		if (user.isAdmin) {
-			const adminCount = this.userManager
-				.getAllUsers()
-				.filter((u) => u.isAdmin).length;
+			const adminCount = this.userManager.getAllUsers().filter((u) => u.isAdmin).length;
 			if (adminCount <= 1) {
 				return { error: 'Cannot remove the last admin user.' };
 			}
