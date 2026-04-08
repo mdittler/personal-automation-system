@@ -5,6 +5,7 @@
  * Phase H2a: Grocery lists + basic pantry.
  * Phase H3: Meal planning, pantry matching, dinner tonight.
  * Phase H8: Vision — photo-based recipe/receipt/pantry/grocery capture.
+ * Phase H10: Cost tracking — price DB, budget reports, cost annotations.
  */
 
 import type { AppModule, CallbackContext, CoreServices, MessageContext, PhotoContext } from '@pas/core/types';
@@ -1940,11 +1941,10 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 				if (storeSlug) {
 					const priceData = await loadStorePrices(hh.sharedStore, storeSlug);
 					if (priceData.items.length > 0) {
-						const allRecipes = await loadAllRecipes(hh.sharedStore);
-						const estimates = await estimatePlanCost(services, plan, allRecipes, priceData.items, priceData.store);
+						const estimates = await estimatePlanCost(services, plan, recipes, priceData.items, priceData.store);
 						if (estimates.length > 0) {
 							const totalCost = estimates.reduce((sum, e) => sum + e.totalCost, 0);
-							const perPerson = estimates.length > 0 ? totalCost / estimates.length / 4 : 0;
+							const perPerson = totalCost / estimates.length / hh.household.members.length;
 							planMsg += `\n\n💰 **Est. Total: $${totalCost.toFixed(2)}** · Per person: $${perPerson.toFixed(2)}`;
 
 							// Check budget alert
