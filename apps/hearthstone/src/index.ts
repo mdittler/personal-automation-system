@@ -105,6 +105,22 @@ import {
 	isChildApprovalIntent,
 } from './handlers/family.js';
 import { loadAllChildren } from './services/family-profiles.js';
+import {
+	handleBudgetCommand as handleBudgetCmd,
+	isBudgetViewIntent,
+	isPriceUpdateIntent,
+} from './handlers/budget.js';
+import {
+	loadStorePrices,
+	parsePriceUpdateText,
+	saveStorePrices,
+	addOrUpdatePrice,
+	getStoreSlug,
+	listStores,
+} from './services/price-store.js';
+import { estimatePlanCost, estimateGroceryListCost } from './services/cost-estimator.js';
+import { checkBudgetAlert, formatBudgetAlert } from './services/budget-alerts.js';
+import { listWeeklyHistories, loadWeeklyHistory } from './services/budget-reporter.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate, isoNow } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
@@ -316,6 +332,23 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		}
 	}
 
+	// H10: Price update intent — "eggs are $3.50 at costco"
+	if (isPriceUpdateIntent(lower)) {
+		await handlePriceUpdateIntent(text, ctx);
+		return;
+	}
+
+	// H10: Budget view intent — "how much did we spend on food"
+	if (isBudgetViewIntent(lower)) {
+		const hh = await requireHousehold(services, ctx.userId);
+		if (!hh) {
+			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			return;
+		}
+		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+		return;
+	}
+
 	// Food question intent
 	if (isFoodQuestionIntent(lower)) {
 		await handleFoodQuestion(text, ctx);
@@ -390,6 +423,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• /recipes — browse all recipes\n' +
 			'• /cook <recipe> — cook step-by-step\n' +
 			'• /family — manage child profiles and food introductions\n' +
+			'• /foodbudget — view food spending\n' +
 			'• /household — manage your household',
 	);
 };
@@ -448,6 +482,15 @@ export const handleCommand: AppModule['handleCommand'] = async (
 			} else {
 				await services.telegram.send(ctx.userId, result.text);
 			}
+			break;
+		}
+		case 'foodbudget': {
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				return;
+			}
+			await handleBudgetCmd(services, args, ctx.userId, hh.sharedStore);
 			break;
 		}
 		default:
@@ -1514,9 +1557,33 @@ async function handleGroceryView(ctx: MessageContext): Promise<void> {
 		return;
 	}
 
+	let groceryMsg = formatGroceryMessage(list);
+
+	// H10: Annotate grocery list with price estimates if enabled
+	const showPrices = (await services.config.get<boolean>('show_price_estimates')) ?? false;
+	if (showPrices) {
+		try {
+			const stores = await listStores(hh.sharedStore);
+			const defaultStore = (await services.config.get<string>('default_store')) as string | undefined;
+			const storeSlug = defaultStore ? getStoreSlug(defaultStore) : stores[0] ?? '';
+			if (storeSlug) {
+				const priceData = await loadStorePrices(hh.sharedStore, storeSlug);
+				if (priceData.items.length > 0) {
+					const unpurchased = list.items.filter((i) => !i.purchased);
+					const costResult = await estimateGroceryListCost(services, unpurchased, priceData.items, priceData.store);
+					if (costResult.total > 0) {
+						groceryMsg += `\n\n💰 **Est. Total: $${costResult.total.toFixed(2)}** (${priceData.store})`;
+					}
+				}
+			}
+		} catch (err) {
+			services.logger.error('Failed to annotate grocery list with prices: %s', err);
+		}
+	}
+
 	await services.telegram.sendWithButtons(
 		ctx.userId,
-		formatGroceryMessage(list),
+		groceryMsg,
 		buildGroceryButtons(list),
 	);
 	services.logger.info('Showed grocery list (%d items) to %s', list.items.length, ctx.userId);
@@ -1863,9 +1930,44 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 		} else {
 			const location =
 				((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
+			let planMsg = formatPlanMessage(plan, recipes, location);
+
+			// H10: Append cost estimates if price data available
+			try {
+				const stores = await listStores(hh.sharedStore);
+				const defaultStore = (await services.config.get<string>('default_store')) as string | undefined;
+				const storeSlug = defaultStore ? getStoreSlug(defaultStore) : stores[0] ?? '';
+				if (storeSlug) {
+					const priceData = await loadStorePrices(hh.sharedStore, storeSlug);
+					if (priceData.items.length > 0) {
+						const allRecipes = await loadAllRecipes(hh.sharedStore);
+						const estimates = await estimatePlanCost(services, plan, allRecipes, priceData.items, priceData.store);
+						if (estimates.length > 0) {
+							const totalCost = estimates.reduce((sum, e) => sum + e.totalCost, 0);
+							const perPerson = estimates.length > 0 ? totalCost / estimates.length / 4 : 0;
+							planMsg += `\n\n💰 **Est. Total: $${totalCost.toFixed(2)}** · Per person: $${perPerson.toFixed(2)}`;
+
+							// Check budget alert
+							const allWeekIds = await listWeeklyHistories(hh.sharedStore);
+							const recentWeeks = [];
+							for (const id of allWeekIds.slice(-4)) {
+								const w = await loadWeeklyHistory(hh.sharedStore, id);
+								if (w) recentWeeks.push(w);
+							}
+							const alert = checkBudgetAlert(estimates, recentWeeks);
+							if (alert) {
+								planMsg += '\n' + formatBudgetAlert(alert);
+							}
+						}
+					}
+				}
+			} catch (err) {
+				services.logger.error('Failed to annotate plan with costs: %s', err);
+			}
+
 			await services.telegram.sendWithButtons(
 				ctx.userId,
-				formatPlanMessage(plan, recipes, location),
+				planMsg,
 				buildPlanButtons(plan),
 			);
 			services.logger.info('Generated meal plan for %s (single member)', ctx.userId);
@@ -2279,6 +2381,43 @@ function isFoodQuestionIntent(text: string): boolean {
 	);
 }
 
+// H10: Handle price update intent
+async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		return;
+	}
+
+	const parsed = await parsePriceUpdateText(services, text);
+	if (!parsed) {
+		await services.telegram.send(ctx.userId, 'I couldn\'t understand that price update. Try: "eggs are $3.50 at costco"');
+		return;
+	}
+
+	const slug = getStoreSlug(parsed.store);
+	let priceData = await loadStorePrices(hh.sharedStore, slug);
+	if (!priceData.store || priceData.store === slug) {
+		priceData = { ...priceData, store: parsed.store, slug };
+	}
+
+	const entry = {
+		name: parsed.item,
+		price: parsed.price,
+		unit: parsed.unit,
+		department: parsed.department,
+		updatedAt: todayDate(services.timezone),
+	};
+
+	priceData = addOrUpdatePrice(priceData, entry);
+	await saveStorePrices(hh.sharedStore, priceData);
+
+	await services.telegram.send(
+		ctx.userId,
+		`✅ Updated ${parsed.item} → $${parsed.price.toFixed(2)} at ${parsed.store}`,
+	);
+}
+
 export function isGroceryViewIntent(text: string): boolean {
 	// Reject if an add/generate verb precedes "grocery list" — those are add/generate intents
 	if (
@@ -2391,6 +2530,7 @@ export function isCookIntent(text: string): boolean {
 
 // Re-export family intent detectors for natural-language tests
 export { isKidAdaptIntent, isFoodIntroIntent, isChildApprovalIntent };
+export { isPriceUpdateIntent, isBudgetViewIntent };
 
 // ─── H6: Intent Detection ──────────────────────────────────────
 

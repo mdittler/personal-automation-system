@@ -17,6 +17,7 @@ import { addPantryItems, loadPantry, savePantry } from '../services/pantry-store
 import { addItems, loadGroceryList, saveGroceryList, createEmptyList } from '../services/grocery-store.js';
 import { isoNow } from '../utils/date.js';
 import type { Receipt } from '../types.js';
+import { updatePricesFromReceipt } from '../services/price-store.js';
 
 type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
 
@@ -184,13 +185,28 @@ async function handleReceiptPhoto(
 	});
 	await store.write(`receipts/${id}.yaml`, fm + stringify(receipt));
 
+	// H10: Auto-update price store from receipt
+	let priceUpdateMsg = '';
+	try {
+		const priceResult = await updatePricesFromReceipt(services, store, receipt);
+		if (priceResult.updatedCount > 0 || priceResult.addedCount > 0) {
+			const parts: string[] = [];
+			if (priceResult.updatedCount > 0) parts.push(`updated ${priceResult.updatedCount}`);
+			if (priceResult.addedCount > 0) parts.push(`added ${priceResult.addedCount} new`);
+			priceUpdateMsg = `\n📊 Prices: ${parts.join(', ')} items`;
+		}
+	} catch (err) {
+		services.logger.error('Failed to update prices from receipt: %s', err);
+	}
+
 	await services.telegram.send(
 		ctx.userId,
 		`🧾 Receipt captured!\n\n` +
 		`**${parsed.store}** — ${parsed.date}\n` +
 		`• ${parsed.lineItems.length} items\n` +
 		`• Total: $${parsed.total.toFixed(2)}\n` +
-		(parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : ''),
+		(parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : '') +
+		priceUpdateMsg,
 	);
 }
 
