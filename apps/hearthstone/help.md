@@ -166,6 +166,46 @@ Send a photo to Hearthstone and it will automatically detect what it is:
 
 ---
 
+## Family Features
+
+Manage child profiles, adapt recipes for little ones, and track food introductions safely.
+
+### Child Profiles
+- `/family` — list all registered children
+- `/family add Margot 2024-06-15` — add a child with name and birth date
+- `/family margot` — view a child's profile and recent food log
+- `/family remove Margot` — remove a child profile
+
+### Kid-Friendly Recipe Adaptations
+Ask Hearthstone to adapt any recipe for your child:
+- "make this for Margot" — adapt the last viewed recipe
+- "kid friendly version" — generic adaptation
+- "how do I adapt the chili for the baby?" — specify recipe and child
+
+Adaptations include:
+- What to set aside before adding spice/heat
+- Chopping and texture guidance for their age
+- Allergen flags based on the child's avoid list
+- Age-appropriate portion sizes
+
+### Food Introduction Tracker
+Track new foods as your baby starts solids:
+- "Margot tried peanut butter today" — log a new food
+- "introduced eggs to Margot" — log with allergen detection
+- "gave baby yogurt for the first time" — natural phrasing
+
+Hearthstone automatically:
+- Detects if the food is a common allergen (FDA Big 9)
+- Warns if you're introducing a new allergen too soon (configurable wait period, default 3 days)
+- Maintains a history of introduced foods and reactions
+
+### Child Approval Tagging
+Track which recipes your children enjoy:
+- Use the 👍/👎 buttons when viewing a recipe to tag it per child
+- Kid-approved recipes are weighted higher in future meal plan generation
+
+---
+
 ## Food Questions
 
 Ask any cooking question:

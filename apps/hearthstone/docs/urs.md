@@ -858,65 +858,145 @@ Append-only waste log at `waste-log.yaml`. Automatic logging when leftovers expi
 
 ### REQ-FAMILY-001: Kid-friendly adaptation
 
-**Origin:** TF-1 | **Status:** Planned
+**Origin:** TF-1 | **Status:** Implemented (Phase H9)
 
 For any recipe, generate LLM-based adaptation for the child: what to set aside before spice/heat, chopping/texture guidance for age, allergen flags, portion size guidance.
 
 **Standard tests:**
-- TBD
+- `kid-adapter.test.ts` > `generateKidAdaptation` > generates adaptation with all fields
+- `kid-adapter.test.ts` > `formatKidAdaptation` > formats adaptation with all sections
+- `family-handler.test.ts` > `handleKidAdaptIntent` > generates adaptation with cached recipe
+- `family-handler.test.ts` > `handleKidAdaptIntent` > searches allRecipes when no cached recipe
+- `family-handler.test.ts` > `isKidAdaptIntent` > matches "kid friendly version", "baby version", "make this for Margot", etc.
 
 **Edge case tests:**
-- TBD
+- `kid-adapter.test.ts` > `generateKidAdaptation` > warns for children under 6 months
+- `kid-adapter.test.ts` > `generateKidAdaptation` > handles LLM returning non-JSON gracefully
+- `kid-adapter.test.ts` > `formatKidAdaptation` > omits empty sections
+- `family-handler.test.ts` > `handleKidAdaptIntent` > prompts for recipe when none cached or found
+- `family-handler.test.ts` > `handleKidAdaptIntent` > returns message when no children exist
+- `family-handler.test.ts` > `handleKidAdaptIntent` > handles LLM error gracefully
+- `family-handler.test.ts` > `isKidAdaptIntent` > does not match unregistered child name
+- `family-handler.test.ts` > `isKidAdaptIntent` > handles regex-special characters in child names
 
-**Fixes:** None
+**Security tests:**
+- `kid-adapter.test.ts` > `generateKidAdaptation` > uses sanitizeInput on recipe fields
+
+**Fixes:**
+- I7: Extract recipe name from natural language text for kid adapt intent (search allRecipes by title)
 
 ---
 
 ### REQ-FAMILY-002: Child approval tagging
 
-**Origin:** TF-2 | **Status:** Planned
+**Origin:** TF-2 | **Status:** Implemented (Phase H9)
 
 Track which recipes the child actually eats vs rejects. Tag recipes as approved/rejected. Feed into meal planning weighting.
 
 **Standard tests:**
-- TBD
+- `family-handler.test.ts` > `handleApprovalCallback` > sets approval on recipe for child
+- `family-handler.test.ts` > `handleApprovalCallback` > sets rejection on recipe for child
+- `family-handler.test.ts` > `handleApprovalCallback` > clears approval on recipe for child
+- `family-handler.test.ts` > `handleChildApprovalIntent` > marks recipe as approved
+- `family-handler.test.ts` > `handleChildApprovalIntent` > marks recipe as rejected
+- `family-handler.test.ts` > `isChildApprovalIntent` > matches "Margot loved/refused/ate the chili"
+- `family-handler.test.ts` > `buildRecipeApprovalButtons` > builds buttons for each child
 
 **Edge case tests:**
-- TBD
+- `family-handler.test.ts` > `handleApprovalCallback` > handles stale recipe gracefully
+- `family-handler.test.ts` > `handleApprovalCallback` > handles missing child gracefully
+- `family-handler.test.ts` > `handleChildApprovalIntent` > returns null when no child matches
+- `family-handler.test.ts` > `handleChildApprovalIntent` > returns message when recipe not found
+- `family-handler.test.ts` > `isChildApprovalIntent` > returns false with empty child list
+- `family-handler.test.ts` > `buildRecipeApprovalButtons` > returns empty array when no children
+- `family-handler.test.ts` > `buildRecipeApprovalButtons` > shows current approval status
+- `family-handler.test.ts` > `buildRecipeApprovalButtons` > callback data stays under 64 bytes
 
-**Fixes:** None
+**Fixes:**
+- C1: Approval buttons now shown on recipe views via `buildRecipeApprovalButtons`
+- C3: Natural language approval ("Margot loved the chili") via `handleChildApprovalIntent`
 
 ---
 
 ### REQ-FAMILY-003: Baby food introduction tracker
 
-**Origin:** TF-3 | **Status:** Planned
+**Origin:** TF-3 | **Status:** Implemented (Phase H9)
 
 Track food introductions for baby: log new foods with date, flag recommended wait periods between allergens, alert if too soon, maintain history with reactions.
 
 **Standard tests:**
-- TBD
+- `child-tracker.test.ts` > `addFoodIntroduction` > appends entry to introductions list
+- `child-tracker.test.ts` > `checkAllergenWaitWindow` > returns safe/unsafe based on wait period
+- `child-tracker.test.ts` > `getRecentIntroductions` > returns introductions within day range
+- `child-tracker.test.ts` > `getAllergenHistory` > filters by allergen category
+- `child-tracker.test.ts` > `formatFoodLog` > formats introductions as readable text
+- `child-tracker.test.ts` > `matchAllergenCategory` > matches FDA Big 9 food-to-allergen mappings
+- `family-handler.test.ts` > `handleFoodIntroduction` > logs food and returns reaction buttons
+- `family-handler.test.ts` > `handleFoodIntroCallback` > records reaction severity
+- `family-handler.test.ts` > `handleFoodIntroCallback` > records food rejection
+- `family-handler.test.ts` > `isFoodIntroIntent` > matches "tried", "introduced", "gave", "new food" patterns
 
 **Edge case tests:**
-- TBD
+- `child-tracker.test.ts` > `addFoodIntroduction` > does not mutate original log
+- `child-tracker.test.ts` > `checkAllergenWaitWindow` > ignores re-introductions of same allergen
+- `child-tracker.test.ts` > `checkAllergenWaitWindow` > ignores non-allergenic foods
+- `child-tracker.test.ts` > `checkAllergenWaitWindow` > checks against most recent different-category allergen
+- `child-tracker.test.ts` > `matchAllergenCategory` > returns null for non-allergenic food
+- `child-tracker.test.ts` > `matchAllergenCategory` > is case-insensitive
+- `child-tracker.test.ts` > `matchAllergenCategory` > matches direct category names (tree nuts)
+- `family-handler.test.ts` > `handleFoodIntroduction` > falls back to regex when LLM fails
+- `family-handler.test.ts` > `handleFoodIntroduction` > warns about allergen wait window
+- `family-handler.test.ts` > `handleFoodIntroduction` > asks which child when multiple exist
+- `family-handler.test.ts` > `handleFoodIntroduction` > prompts for food when extraction fails
+- `family-handler.test.ts` > `handleFoodIntroCallback` > handles missing child gracefully
+- `family-handler.test.ts` > `handleFoodIntroCallback` > handles empty introduction list
+- `family-handler.test.ts` > `isFoodIntroIntent` > does not match unrelated text
 
-**Fixes:** None
+**Fixes:**
+- I3: LLM-based food name extraction with regex fallback
+- I5: Reaction recording via inline buttons after food introduction
+- I6: Expanded food-to-allergen mapping (80+ entries, longest-match-first)
+- I8: DST-safe date math (noon UTC normalization, Math.round)
 
 ---
 
 ### REQ-FAMILY-004: Family member configuration
 
-**Origin:** TF-4 | **Status:** Planned
+**Origin:** TF-4 | **Status:** Implemented (Phase H9)
 
 Expose family-related settings: children profiles, child meal adaptation toggle, allergen wait days.
 
 **Standard tests:**
-- TBD
+- `family-profiles.test.ts` > `slugifyChildName` > lowercases, replaces spaces, strips special chars
+- `family-profiles.test.ts` > `computeAgeMonths/Display` > computes age correctly
+- `family-profiles.test.ts` > `loadChildProfile/saveChildProfile` > CRUD operations
+- `family-profiles.test.ts` > `loadAllChildren` > loads all profiles from directory
+- `family-profiles.test.ts` > `deleteChildProfile` > archives child YAML file
+- `family-profiles.test.ts` > `formatChildProfile` > formats with age, allergens, introductions
+- `family-profiles.test.ts` > `parseBirthDate` > parses ISO, US, named month formats
+- `family-handler.test.ts` > `handleFamilyCommand` > add/remove/view/edit/list subcommands
 
 **Edge case tests:**
-- TBD
+- `family-profiles.test.ts` > `parseBirthDate` > rejects invalid dates (Feb 30, non-leap Feb 29)
+- `family-profiles.test.ts` > `parseBirthDate` > handles whitespace, leap years
+- `family-profiles.test.ts` > `computeAgeMonths` > 0 months for newborn, exact month boundaries
+- `family-profiles.test.ts` > `loadChildProfile` > returns null for corrupted YAML
+- `family-handler.test.ts` > `handleFamilyCommand` > rejects invalid date input
+- `family-handler.test.ts` > `handleFamilyCommand` > shows remove confirmation with buttons
+- `family-handler.test.ts` > `handleFamilyCommand` > rejects unknown edit field, invalid stage
+- `family-handler.test.ts` > `handleApprovalCallback` > remove confirmation and cancel callbacks
+- `family-handler.test.ts` > `handleApprovalCallback` > edit stage prompt and set stage callbacks
 
-**Fixes:** None
+**Security tests:**
+- `family-profiles.test.ts` > `loadChildProfile/deleteChildProfile` > rejects path traversal slugs
+- `family-handler.test.ts` > security > rejects path traversal in child name
+- `family-handler.test.ts` > security > callback data with malformed slug handled safely
+
+**Fixes:**
+- I1: Flexible date parsing (ISO, US MM/DD/YYYY, named month) with validation
+- I2: Confirmation buttons before removing child profile
+- I4: `/family edit` subcommand for stage, safe/avoid allergens, notes
+- C2: Config values read from `services.config.get` (allergen_wait_days, child_meal_adaptation)
 
 ---
 
@@ -1875,10 +1955,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-WASTE-002 | TBD | 0 | 0 | Planned |
 | REQ-WASTE-003 | leftover-handler.test.ts | 4 | 3 | Implemented |
 | REQ-WASTE-004 | waste-store.test.ts, natural-language.test.ts | 6 | 4 | Implemented |
-| REQ-FAMILY-001 | TBD | 0 | 0 | Planned |
-| REQ-FAMILY-002 | TBD | 0 | 0 | Planned |
-| REQ-FAMILY-003 | TBD | 0 | 0 | Planned |
-| REQ-FAMILY-004 | TBD | 0 | 0 | Planned |
+| REQ-FAMILY-001 | kid-adapter.test.ts, family-handler.test.ts | 5 | 9 | Implemented |
+| REQ-FAMILY-002 | family-handler.test.ts | 7 | 9 | Implemented |
+| REQ-FAMILY-003 | child-tracker.test.ts, family-handler.test.ts | 10 | 14 | Implemented |
+| REQ-FAMILY-004 | family-profiles.test.ts, family-handler.test.ts | 8 | 12 | Implemented |
 | REQ-BATCH-001 | batch-cooking.test.ts, natural-language.test.ts | 4 | 5 | Implemented |
 | REQ-BATCH-002 | batch-cooking.test.ts, natural-language.test.ts | 3 | 2 | Implemented |
 | REQ-BATCH-003 | batch-cooking.test.ts, natural-language.test.ts | 7 | 9 | Implemented |

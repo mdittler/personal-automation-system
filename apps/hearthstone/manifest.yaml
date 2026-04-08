@@ -36,6 +36,9 @@ capabilities:
       - "user wants to see food spending"
       - "user wants to see nutrition information"
       - "user wants to know what they can make with what they have"
+      - "user wants to adapt a recipe for a child"
+      - "user wants to log a new food introduction for a child"
+      - "user wants to tag a recipe as kid-approved or rejected"
     commands:
       - name: /recipes
         description: "Browse and search your recipe library"
@@ -63,6 +66,8 @@ capabilities:
         description: "View nutrition summaries and reports"
       - name: /whatsfordinner
         description: "See what's planned for tonight"
+      - name: /family
+        description: "Manage child profiles and food introduction tracking"
       - name: /household
         description: "Create, join, or manage your household link"
     accepts_photos: true
