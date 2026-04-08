@@ -189,7 +189,7 @@ function buildUserRow(
 	html += '</td>';
 
 	// Groups cell
-	html += `<td id="groups-cell-${safeId}">`;
+	html += `<td id="groups-${safeId}">`;
 	html += buildGroupsCell(user.id, user.sharedScopes);
 	html += '</td>';
 
@@ -212,7 +212,7 @@ function buildGroupsCell(userId: string, groups: string[]): string {
 
 	let html = `<form method="post" action="/gui/users/${safeId}/groups" `;
 	html += `hx-post="/gui/users/${safeId}/groups" `;
-	html += `hx-target="#groups-cell-${safeId}" hx-swap="innerHTML" `;
+	html += `hx-target="#groups-${safeId}" hx-swap="innerHTML" `;
 	html += `style="display:flex;gap:0.25rem;align-items:center;margin:0;">`;
 	html += `<input type="text" name="groups" value="${groupsValue}" `;
 	html += `placeholder="scope1, scope2" style="margin:0;padding:0.2rem 0.4rem;font-size:0.85rem;" />`;

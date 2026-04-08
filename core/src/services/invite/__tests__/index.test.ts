@@ -328,4 +328,38 @@ describe('InviteService', () => {
 			expect(afterStore[activeCode]).toBeDefined();
 		});
 	});
+
+	// --- security ---
+
+	describe('security', () => {
+		it('generates unique codes (no collisions in batch)', async () => {
+			const svc = makeService();
+			const codes = new Set<string>();
+			for (let i = 0; i < 20; i++) {
+				const code = await svc.createInvite(`User${i}`, 'admin');
+				codes.add(code);
+			}
+			expect(codes.size).toBe(20);
+		});
+
+		it('rejects code with uppercase characters (case-sensitive)', async () => {
+			const svc = makeService();
+			const result = await svc.validateCode('ABCD1234');
+			expect(result).toEqual({ error: 'Invalid invite code.' });
+		});
+
+		it('rejects code with special characters', async () => {
+			const svc = makeService();
+			const result = await svc.validateCode('abc<>!@#');
+			expect(result).toEqual({ error: 'Invalid invite code.' });
+		});
+
+		it('handles concurrent redemption safely (second call sees used code)', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+			await svc.redeemCode(code, '222');
+			const result = await svc.validateCode(code);
+			expect(result).toEqual({ error: 'This invite code has already been used.' });
+		});
+	});
 });

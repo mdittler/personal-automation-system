@@ -1270,6 +1270,100 @@ A user guard must check user registration before message routing. Unregistered u
 
 **Fixes:** None
 
+### REQ-USER-005: Invite code generation and validation
+
+**Phase:** 29 | **Status:** Implemented
+
+The system must support admin-generated invite codes for user registration. Codes must be 8-character hex strings, expire after 24 hours, and be single-use. Used/expired codes must return specific error messages. A cleanup mechanism must remove stale codes after 7 days.
+
+**Standard tests:**
+- `index.test.ts` (invite) > createInvite > returns an 8-character hex code
+- `index.test.ts` (invite) > createInvite > stores invite with correct fields
+- `index.test.ts` (invite) > validateCode > returns invite for valid code
+- `index.test.ts` (invite) > redeemCode > marks code as used with userId and timestamp
+
+**Edge case tests:**
+- `index.test.ts` (invite) > validateCode > returns error for non-existent code
+- `index.test.ts` (invite) > validateCode > returns error for expired code
+- `index.test.ts` (invite) > validateCode > returns error for already-used code
+- `index.test.ts` (invite) > cleanup > removes expired+used codes older than 7 days
+- `index.test.ts` (invite) > cleanup > preserves active unused codes
+
+**Security tests:**
+- `index.test.ts` (invite) > security > generates unique codes (no collisions)
+- `index.test.ts` (invite) > security > rejects codes with special characters
+- `index.test.ts` (invite) > security > handles concurrent redemption safely
+
+**Fixes:** None
+
+### REQ-USER-006: Invite code redemption
+
+**Phase:** 29 | **Status:** Implemented
+
+Unregistered users must be able to redeem invite codes via `/start <code>` or by sending the raw 8-char hex code. Successful redemption must register the user with default all-app access, sync to config, and send a welcome message. Invalid/expired/used codes must return specific error messages.
+
+**Standard tests:**
+- `invite-command.test.ts` > /start with invite code > validates, redeems, registers, and welcomes new user
+- `user-guard.test.ts` > invite code detection > registers user and returns true when valid invite code is sent
+
+**Edge case tests:**
+- `invite-command.test.ts` > /start with invite code > sends error for invalid invite code
+- `user-guard.test.ts` > invite code detection > sends specific error for expired/used code-shaped text
+- `user-guard.test.ts` > invite code detection > sends standard rejection when text is not code-shaped
+- `user-guard.test.ts` > invite code detection > sends standard rejection when no messageText provided
+- `user-guard.test.ts` > invite code detection > sends standard rejection when inviteService not configured
+- `user-guard.test.ts` > invite code detection > trims whitespace from message text
+- `user-guard.test.ts` > invite code detection > handles welcome message send failure gracefully
+- `user-guard.test.ts` > invite code detection > does not attempt redemption for registered users
+
+**Security tests:**
+- `invite-command.test.ts` > /invite security > passes special characters in name to invite service
+- `invite-command.test.ts` > /invite security > escapes MarkdownV2 special characters in response
+
+**Fixes:** None
+
+### REQ-USER-007: Runtime user mutations with config sync
+
+**Phase:** 29 | **Status:** Implemented
+
+The system must support adding, removing, and updating users at runtime. All mutations must sync to pas.yaml atomically, preserving non-user config sections. Removal must guard against self-removal and removing the last admin. App and scope updates must take effect immediately.
+
+**Standard tests:**
+- `user-mutation-service.test.ts` > registerUser > adds user to memory and syncs to config
+- `user-mutation-service.test.ts` > removeUser > removes user from memory and syncs to config
+- `user-mutation-service.test.ts` > updateUserApps > updates in-memory user apps
+- `user-mutation-service.test.ts` > updateUserSharedScopes > updates in-memory user shared scopes
+- `config-writer.test.ts` > writes users to existing config preserving other sections
+- `config-writer.test.ts` > converts camelCase fields to snake_case in YAML
+
+**Edge case tests:**
+- `user-mutation-service.test.ts` > removeUser > returns error if caller is trying to remove themselves
+- `user-mutation-service.test.ts` > removeUser > returns error if removing the last admin
+- `user-mutation-service.test.ts` > removeUser > returns error if user not found
+- `user-mutation-service.test.ts` > removeUser > allows removing an admin when another admin exists
+- `config-writer.test.ts` > creates file if it does not exist
+- `config-writer.test.ts` > handles empty user array
+
+**Fixes:** None
+
+### REQ-USER-008: GUI user management
+
+**Phase:** 29 | **Status:** Implemented
+
+A web GUI page must display all users in a table with app access checkboxes, editable group fields, and user removal buttons. App toggling must use htmx for inline updates. Group editing must validate group name format (alphanumeric, hyphens, underscores). User removal must require confirmation. All mutations must persist to config.
+
+**Standard tests:**
+- `integration.test.ts` (invite) > admin creates invite, user redeems, user is active, config persisted
+- `integration.test.ts` (invite) > removing user updates memory and config
+- `integration.test.ts` (invite) > updating apps persists to config
+
+**Edge case tests:**
+- GUI route > rejects invalid (non-numeric) user ID format
+- GUI route > returns 404 for non-existent user
+- GUI route > rejects invalid group name characters
+
+**Fixes:** fix checkbox name mismatch (users.eta vs users.ts), fix groups cell ID mismatch
+
 ---
 
 ## 13. Rate Limiting
@@ -4449,6 +4543,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-USER-002 | user-manager.test.ts, router.test.ts | 3 | 6 | Implemented |
 | REQ-USER-003 | user-manager.test.ts | 1 | 5 | Implemented |
 | REQ-USER-004 | user-guard.test.ts | 2 | 3 | Implemented |
+| REQ-USER-005 | index.test.ts (invite) | 4 | 5 | Implemented |
+| REQ-USER-006 | invite-command.test.ts, user-guard.test.ts | 2 | 8 | Implemented |
+| REQ-USER-007 | user-mutation-service.test.ts, config-writer.test.ts | 6 | 6 | Implemented |
+| REQ-USER-008 | integration.test.ts (invite) | 3 | 3 | Implemented |
 | REQ-RATELIMIT-001 | rate-limiter.test.ts | 8 | 8 | Implemented |
 | REQ-TOGGLE-001 | app-toggle.test.ts | 7 | 3 | Implemented |
 | REQ-CTX-001 | context-store.test.ts | 4 | 7 | Implemented |

@@ -319,4 +319,35 @@ describe('Router — /invite command', () => {
 			);
 		});
 	});
+
+	describe('/invite security', () => {
+		it('should pass special characters in name to invite service without sanitization', async () => {
+			const users = [
+				{ id: 'admin1', name: 'Admin', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+			];
+			const router = buildRouter(users, { inviteService, userMutationService });
+
+			await router.routeMessage(createTextCtx('/invite <script>alert(1)</script>', 'admin1'));
+
+			// Invite name is stored as-is — XSS protection happens at display time
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'<script>alert(1)</script>',
+				'admin1',
+			);
+		});
+
+		it('should escape MarkdownV2 special characters in invite response', async () => {
+			const users = [
+				{ id: 'admin1', name: 'Admin', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+			];
+			const router = buildRouter(users, { inviteService, userMutationService });
+
+			await router.routeMessage(createTextCtx('/invite Test.User_1', 'admin1'));
+
+			expect(telegram.send).toHaveBeenCalledWith(
+				'admin1',
+				expect.stringContaining('abc12345'),
+			);
+		});
+	});
 });

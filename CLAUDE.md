@@ -99,6 +99,10 @@ A local-first home automation platform where users interact through a single Tel
 | `core/src/services/app-installer/index.ts` | App install orchestrator |
 | `core/src/services/system-info/index.ts` | System introspection service |
 | `core/src/gui/index.ts` | GUI route registration |
+| `core/src/gui/routes/users.ts` | User management GUI routes |
+| `core/src/services/invite/index.ts` | Invite code generation, validation, redemption |
+| `core/src/services/user-manager/user-mutation-service.ts` | Runtime user mutations + config sync |
+| `core/src/services/config/config-writer.ts` | Sync users array to pas.yaml |
 | `core/src/gui/auth.ts` | GUI token auth + cookie middleware |
 | `core/src/gui/csrf.ts` | CSRF protection |
 | `core/src/api/index.ts` | External API plugin registration |
@@ -135,7 +139,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-28) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4200+ tests passing across 170+ test files.**
+All infrastructure phases (0-29) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4300+ tests passing across 180+ test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 

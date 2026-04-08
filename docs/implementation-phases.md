@@ -1980,6 +1980,66 @@ Add a post-classification verification step for grey-zone messages (confidence 0
 
 ---
 
+## Phase 29 — Invite Code Registration & User Management GUI
+
+**Status:** Complete
+**Depends on:** Phase 9 (User Manager), Phase 21 (Management GUI)
+
+### Goal
+
+Replace manual Telegram-ID-based user registration with admin-generated invite codes. Add a GUI page for managing user app access, shared scopes, and user removal. Support runtime user mutations that persist to pas.yaml.
+
+### New Files
+
+- `core/src/services/invite/index.ts` — InviteService: create, validate, redeem, cleanup invite codes. YAML-backed storage
+- `core/src/services/config/config-writer.ts` — `syncUsersToConfig()`: atomic user array sync to pas.yaml preserving other sections
+- `core/src/services/user-manager/user-mutation-service.ts` — UserMutationService: coordinates UserManager mutations + config sync
+- `core/src/gui/routes/users.ts` — GUI routes for user list, app toggles, group editing, user removal
+- `core/src/gui/views/users.eta` — User management page template
+- `core/src/services/invite/__tests__/index.test.ts` — InviteService unit tests (28 tests)
+- `core/src/services/invite/__tests__/integration.test.ts` — Full flow integration tests (3 tests)
+- `core/src/services/config/__tests__/config-writer.test.ts` — ConfigWriter tests (5 tests)
+- `core/src/services/user-manager/__tests__/user-mutation-service.test.ts` — UserMutationService tests (19 tests)
+- `core/src/services/router/__tests__/invite-command.test.ts` — Router /invite and /start tests (12 tests)
+
+### Changed Files
+
+- `core/src/services/user-manager/index.ts` — Added addUser, removeUser, updateUserApps, updateUserSharedScopes methods
+- `core/src/services/user-manager/user-guard.ts` — Added raw invite code detection for unregistered users
+- `core/src/services/user-manager/__tests__/user-guard.test.ts` — Added 9 invite code detection tests
+- `core/src/services/router/index.ts` — Added /invite command, /start code redemption, invite help section
+- `core/src/bootstrap.ts` — Wire InviteService, UserMutationService; pass to UserGuard, Router, GUI
+- `core/src/gui/index.ts` — Register user routes
+- `core/src/gui/views/layout.eta` — Added Users nav item
+- `CLAUDE.md` — Updated implementation status, key file paths
+
+### Key Decisions
+
+- **Invite codes over Telegram ID** — users don't need to find their Telegram ID
+- **8-char hex codes** — `crypto.randomBytes(4)`, single-use, 24h expiry
+- **Dual redemption paths** — `/start <code>` (Telegram deep link) and raw code detection in UserGuard
+- **Runtime mutations + config sync** — changes persist immediately to pas.yaml via atomic writes
+- **Last-admin guard** — prevents removing the sole admin user
+- **Freeform groups** — shared scopes are user-defined tags, not predefined selections
+- **GUI uses htmx** — inline checkbox toggles, form submissions, row deletion without page reload
+
+### URS Requirements
+
+- REQ-USER-005: Invite code generation and validation (4 standard, 5 edge case, 3 security tests)
+- REQ-USER-006: Invite code redemption (2 standard, 8 edge case, 2 security tests)
+- REQ-USER-007: Runtime user mutations with config sync (6 standard, 6 edge case tests)
+- REQ-USER-008: GUI user management (3 standard, 3 edge case tests)
+
+### Verification
+
+- `pnpm build` — no type errors
+- `pnpm test` — all tests pass
+- `pnpm lint` — no new lint errors
+- Manual: `/invite <name>` → code generated → new user sends `/start <code>` → registered and welcomed
+- Manual: `/gui/users` → toggle app checkboxes → edit groups → remove user → all changes persist
+
+---
+
 ## Deferred Phases (Future)
 
 These are documented but not scheduled. Implementation depends on ecosystem growth.
