@@ -1,0 +1,72 @@
+<div class="page-header">
+  <h1>Users</h1>
+</div>
+
+<% if (it.users.length === 0) { %>
+  <p class="empty-state">No users registered. Use the <code>/invite</code> command in Telegram to add users.</p>
+<% } else { %>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Apps</th>
+          <th>Groups</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (const user of it.users) { %>
+          <tr id="user-row-<%= user.id %>">
+            <td>
+              <strong><%= user.name %></strong>
+              <% if (user.isAdmin) { %>
+                <br><small>(admin)</small>
+              <% } %>
+            </td>
+            <td>
+              <form hx-post="/gui/users/<%= user.id %>/apps"
+                    hx-target="#user-row-<%= user.id %>"
+                    hx-swap="outerHTML"
+                    style="margin:0">
+                <% for (const app of it.apps) { %>
+                  <label style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;font-weight:normal">
+                    <input type="checkbox"
+                           name="apps"
+                           value="<%= app.id %>"
+                           <% if (user.enabledApps && (user.enabledApps[0] === '*' || user.enabledApps.includes(app.id))) { %>checked<% } %>
+                           onchange="this.form.requestSubmit()"
+                           style="margin:0" />
+                    <%= app.name %>
+                  </label>
+                <% } %>
+              </form>
+            </td>
+            <td id="groups-<%= user.id %>">
+              <form hx-post="/gui/users/<%= user.id %>/groups"
+                    hx-target="#groups-<%= user.id %>"
+                    hx-swap="innerHTML"
+                    style="margin:0;display:flex;gap:0.4rem;align-items:center">
+                <input type="text"
+                       name="groups"
+                       value="<%= (user.sharedScopes || []).join(', ') %>"
+                       placeholder="group1, group2"
+                       style="margin:0;flex:1;min-width:8rem" />
+                <button type="submit" class="outline" style="padding:0.25rem 0.6rem;margin:0;white-space:nowrap">Save</button>
+              </form>
+            </td>
+            <td>
+              <form hx-post="/gui/users/<%= user.id %>/remove"
+                    hx-target="#user-row-<%= user.id %>"
+                    hx-swap="delete"
+                    hx-confirm="Remove user <%= user.name %>? This cannot be undone."
+                    style="margin:0">
+                <button type="submit" class="outline secondary toggle-btn" style="padding:0.25rem 0.6rem;margin:0">Remove</button>
+              </form>
+            </td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
