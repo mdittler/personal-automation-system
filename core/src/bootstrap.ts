@@ -521,7 +521,7 @@ export async function main(): Promise<void> {
 			const messageCtx = adaptTextMessage(ctx);
 			if (!messageCtx) return;
 
-			if (!(await userGuard.checkUser(messageCtx.userId))) return;
+			if (!(await userGuard.checkUser(messageCtx.userId, messageCtx.text))) return;
 
 			if (!telegramRateLimiter.isAllowed(messageCtx.userId)) {
 				await telegramService.send(messageCtx.userId, 'Please slow down. Try again in a moment.');
