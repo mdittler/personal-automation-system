@@ -136,8 +136,21 @@ export interface SystemConfig {
 		dispatchUrl: string;
 	};
 
+	/** Routing configuration (optional — verification disabled by default). */
+	routing?: {
+		verification?: RoutingVerificationConfig;
+	};
+
 	/** Registered users. */
 	users: RegisteredUser[];
+}
+
+/** Route verification configuration. */
+export interface RoutingVerificationConfig {
+	/** Whether route verification is enabled. */
+	enabled: boolean;
+	/** Confidence upper bound — above this, skip verification. */
+	upperBound: number;
 }
 
 /** App configuration service provided to apps via CoreServices. */
