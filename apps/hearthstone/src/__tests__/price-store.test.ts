@@ -9,8 +9,12 @@ import {
 	listStores,
 	formatPriceFile,
 	parsePriceFile,
+	updatePricesFromReceipt,
+	isPriceUpdateIntent,
+	parsePriceUpdateText,
 } from '../services/price-store.js';
-import type { PriceEntry, StorePriceData } from '../types.js';
+import type { PriceEntry, StorePriceData, Receipt } from '../types.js';
+import type { CoreServices } from '@pas/core/types';
 
 function createMockStore(overrides: Record<string, unknown> = {}) {
 	return {
@@ -181,6 +185,109 @@ describe('price-store', () => {
 			const store = createMockStore();
 			const result = await listStores(store as never);
 			expect(result).toEqual([]);
+		});
+	});
+
+	describe('updatePricesFromReceipt', () => {
+		function createMockServices(): CoreServices {
+			return {
+				llm: {
+					complete: vi.fn().mockResolvedValue(JSON.stringify([
+						{ receiptName: 'KS ORG EGGS 5DZ', normalizedName: 'Eggs (60ct)', department: 'Dairy', unit: '60ct' },
+						{ receiptName: 'BANANA', normalizedName: 'Bananas (3 lb)', department: 'Produce', unit: '3 lb' },
+					])),
+				},
+				logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+			} as unknown as CoreServices;
+		}
+
+		const receipt: Receipt = {
+			id: '2026-04-07-abc123', store: 'Costco', date: '2026-04-07',
+			lineItems: [
+				{ name: 'KS ORG EGGS 5DZ', quantity: 1, unitPrice: 8.49, totalPrice: 8.49 },
+				{ name: 'BANANA', quantity: 1, unitPrice: 1.49, totalPrice: 1.49 },
+			],
+			subtotal: 9.98, tax: 0.60, total: 10.58,
+			photoPath: 'photos/receipt-abc.jpg', capturedAt: '2026-04-07T10:00:00.000Z',
+		};
+
+		it('normalizes receipt items and updates price store', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			const result = await updatePricesFromReceipt(mockServices, mockStore as never, receipt);
+			expect(result.updatedCount + result.addedCount).toBe(2);
+			expect(mockStore.write).toHaveBeenCalledOnce();
+			const [path] = mockStore.write.mock.calls[0] as [string, string];
+			expect(path).toBe('prices/costco.md');
+		});
+
+		it('returns summary with counts', async () => {
+			const existingContent = [
+				'---', 'store: Costco', 'slug: costco', 'last_updated: "2026-04-01"', 'item_count: 1', '---', '',
+				'## Dairy', '- Eggs (60ct): $7.99 <!-- updated: 2026-04-01 -->',
+			].join('\n');
+			const mockStore = createMockStore({ read: vi.fn().mockResolvedValue(existingContent) });
+			const mockServices = createMockServices();
+			const result = await updatePricesFromReceipt(mockServices, mockStore as never, receipt);
+			expect(result.updatedCount).toBe(1);
+			expect(result.addedCount).toBe(1);
+		});
+
+		it('handles LLM failure gracefully', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			vi.mocked(mockServices.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
+			const result = await updatePricesFromReceipt(mockServices, mockStore as never, receipt);
+			expect(result.updatedCount).toBe(0);
+			expect(result.addedCount).toBe(0);
+			expect(result.error).toBeTruthy();
+		});
+
+		it('skips line items with zero or negative prices', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			vi.mocked(mockServices.llm.complete).mockResolvedValue(JSON.stringify([
+				{ receiptName: 'COUPON DISC', normalizedName: 'Coupon', department: 'Other', unit: '' },
+			]));
+			const receiptWithDiscount: Receipt = {
+				...receipt, lineItems: [{ name: 'COUPON DISC', quantity: 1, unitPrice: null, totalPrice: -2.00 }],
+			};
+			const result = await updatePricesFromReceipt(mockServices, mockStore as never, receiptWithDiscount);
+			expect(result.addedCount).toBe(0);
+		});
+	});
+
+	describe('isPriceUpdateIntent', () => {
+		it('detects "eggs are $3.50 at costco"', () => { expect(isPriceUpdateIntent('eggs are $3.50 at costco')).toBe(true); });
+		it('detects "update milk price to $4.29"', () => { expect(isPriceUpdateIntent('update milk price to $4.29')).toBe(true); });
+		it('detects "chicken breast is $17.99 at kroger"', () => { expect(isPriceUpdateIntent('chicken breast is $17.99 at kroger')).toBe(true); });
+		it('detects "milk costs $3.89 at costco now"', () => { expect(isPriceUpdateIntent('milk costs $3.89 at costco now')).toBe(true); });
+		it('rejects "what is milk?"', () => { expect(isPriceUpdateIntent('what is milk?')).toBe(false); });
+		it('rejects "add milk to grocery list"', () => { expect(isPriceUpdateIntent('add milk to grocery list')).toBe(false); });
+	});
+
+	describe('parsePriceUpdateText', () => {
+		function createMockServices(): CoreServices {
+			return {
+				llm: { complete: vi.fn().mockResolvedValue(JSON.stringify({ item: 'Eggs (60ct)', price: 3.50, store: 'Costco', unit: '60ct', department: 'Dairy' })) },
+				logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+			} as unknown as CoreServices;
+		}
+
+		it('parses text into price update', async () => {
+			const svc = createMockServices();
+			const result = await parsePriceUpdateText(svc, 'eggs are $3.50 at costco');
+			expect(result).not.toBeNull();
+			expect(result!.item).toBe('Eggs (60ct)');
+			expect(result!.price).toBe(3.50);
+			expect(result!.store).toBe('Costco');
+		});
+
+		it('returns null on LLM failure', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockRejectedValue(new Error('fail'));
+			const result = await parsePriceUpdateText(svc, 'eggs $3.50 costco');
+			expect(result).toBeNull();
 		});
 	});
 });
