@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { VerificationLogger } from '../verification-logger.js';
 import type { VerificationLogEntry } from '../verification-logger.js';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 
 const baseEntry: VerificationLogEntry = {
 	timestamp: new Date('2026-04-08T14:32:05.000Z'),
@@ -50,7 +50,9 @@ describe('VerificationLogger', () => {
 		expect(content).toContain('**Message**: "I want to add chicken to the list"');
 		expect(content).toContain('**Type**: text');
 		expect(content).toContain('**User**: 12345');
-		expect(content).toContain('**Classifier**: food (confidence: 0.55, intent: "user wants to add items to the grocery list")');
+		expect(content).toContain(
+			'**Classifier**: food (confidence: 0.55, intent: "user wants to add items to the grocery list")',
+		);
 		expect(content).toContain('**Verifier**: food (agrees)');
 		expect(content).toContain('**Outcome**: routed to food (auto)');
 	});
@@ -118,8 +120,8 @@ describe('VerificationLogger', () => {
 
 		const content = await readFile(join(tmpDir, 'route-verification-log.md'), 'utf-8');
 		// The logged text should be max 200 chars
-		expect(content).toContain('"' + 'a'.repeat(200) + '"');
-		expect(content).not.toContain('"' + 'a'.repeat(201));
+		expect(content).toContain(`"${'a'.repeat(200)}"`);
+		expect(content).not.toContain(`"${'a'.repeat(201)}`);
 	});
 
 	it('formats timestamp as YYYY-MM-DD HH:MM:SS', async () => {

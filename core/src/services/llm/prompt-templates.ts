@@ -96,7 +96,7 @@ export function buildVerificationPrompt(input: VerificationPromptInput): string 
 
 	return [
 		'You are verifying a routing decision for a message sent to a personal automation system.',
-		'A classifier has already chosen which app and intent should handle the user\'s message.',
+		"A classifier has already chosen which app and intent should handle the user's message.",
 		'Your job is to decide whether that routing decision is correct.',
 		'',
 		'Classifier decision:',

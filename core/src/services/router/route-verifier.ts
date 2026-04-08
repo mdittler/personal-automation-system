@@ -18,9 +18,9 @@ import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, PhotoContext, SentMessage } from '../../types/telegram.js';
 import type { TelegramService } from '../../types/telegram.js';
 import type { AppRegistry } from '../app-registry/index.js';
-import type { PendingVerificationStore, PendingEntry } from './pending-verification-store.js';
-import type { VerificationLogger } from './verification-logger.js';
 import { buildVerificationPrompt } from '../llm/prompt-templates.js';
+import type { PendingEntry, PendingVerificationStore } from './pending-verification-store.js';
+import type { VerificationLogger } from './verification-logger.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -61,17 +61,21 @@ function escapeMarkdown(text: string): string {
 
 /** Parse the verifier LLM's JSON response. Returns undefined if unparseable. */
 function parseVerifierResponse(raw: string): VerifierResponse | undefined {
-	const stripped = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+	const stripped = raw
+		.trim()
+		.replace(/^```(?:json)?\s*/i, '')
+		.replace(/\s*```$/, '')
+		.trim();
 	try {
 		const parsed: unknown = JSON.parse(stripped);
 		if (typeof parsed !== 'object' || parsed === null) return undefined;
 		const obj = parsed as Record<string, unknown>;
-		if (typeof obj['agrees'] !== 'boolean') return undefined;
+		if (typeof obj.agrees !== 'boolean') return undefined;
 		return {
-			agrees: obj['agrees'] as boolean,
-			suggestedAppId: typeof obj['suggestedAppId'] === 'string' ? obj['suggestedAppId'] : undefined,
-			suggestedIntent: typeof obj['suggestedIntent'] === 'string' ? obj['suggestedIntent'] : undefined,
-			reasoning: typeof obj['reasoning'] === 'string' ? obj['reasoning'] : undefined,
+			agrees: obj.agrees,
+			suggestedAppId: typeof obj.suggestedAppId === 'string' ? obj.suggestedAppId : undefined,
+			suggestedIntent: typeof obj.suggestedIntent === 'string' ? obj.suggestedIntent : undefined,
+			reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : undefined,
 		};
 	} catch {
 		return undefined;
@@ -116,7 +120,9 @@ export class RouteVerifier {
 		photoPath?: string,
 	): Promise<VerifyAction> {
 		const isPhoto = 'photo' in ctx;
-		const messageText = isPhoto ? ((ctx as PhotoContext).caption ?? '') : (ctx as MessageContext).text;
+		const messageText = isPhoto
+			? ((ctx as PhotoContext).caption ?? '')
+			: (ctx as MessageContext).text;
 
 		let resolvedPhotoPath = photoPath;
 		if (isPhoto) {
@@ -224,12 +230,11 @@ export class RouteVerifier {
 			})),
 		];
 
-		const promptText =
-			`I'm not sure which app should handle your message. ` +
-			`Did you mean *${escapeMarkdown(classifierAppName)}*` +
-			(buttonEntries.size > 1
+		const suffix =
+			buttonEntries.size > 1
 				? ` or *${escapeMarkdown(suggestedAppName)}*?`
-				: `? Tap to confirm or I'll keep waiting.`);
+				: `? Tap to confirm or I'll keep waiting.`;
+		const promptText = `I'm not sure which app should handle your message. Did you mean *${escapeMarkdown(classifierAppName)}*${suffix}`;
 
 		let sent: SentMessage;
 		try {
@@ -324,7 +329,11 @@ export class RouteVerifier {
 			const { ensureDir } = await import('../../utils/file.js');
 			const { writeFile } = await import('node:fs/promises');
 			await ensureDir(this.photoDir);
-			const timestamp = new Date().toISOString().replace(/[:.]/g, '').replace('T', '-').slice(0, 15);
+			const timestamp = new Date()
+				.toISOString()
+				.replace(/[:.]/g, '')
+				.replace('T', '-')
+				.slice(0, 15);
 			const ext = ctx.mimeType.split('/')[1] ?? 'jpg';
 			const filename = `${timestamp}-${ctx.userId}.${ext}`;
 			const fullPath = join(this.photoDir, filename);

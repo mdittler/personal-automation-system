@@ -22,7 +22,7 @@ import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
-import type { RouteVerifier, VerifyAction } from './route-verifier.js';
+import type { RouteVerifier } from './route-verifier.js';
 
 /** Escape Telegram MarkdownV2 special characters in user-controlled text. */
 function escapeMarkdown(text: string): string {
@@ -170,7 +170,9 @@ export class Router {
 				const result = await this.routeVerifier.verify(enrichedCtx, match);
 				if (result.action === 'held') return;
 				// Verifier confirmed (possibly different app) — dispatch to its pick
-				const verifiedApp = this.registry.getApp((result as { action: 'route'; appId: string }).appId);
+				const verifiedApp = this.registry.getApp(
+					(result as { action: 'route'; appId: string }).appId,
+				);
 				if (verifiedApp) {
 					await this.dispatchMessage(verifiedApp, enrichedCtx);
 					return;
@@ -240,7 +242,9 @@ export class Router {
 					confidence: match.confidence,
 				});
 				if (result.action === 'held') return;
-				const verifiedApp = this.registry.getApp((result as { action: 'route'; appId: string }).appId);
+				const verifiedApp = this.registry.getApp(
+					(result as { action: 'route'; appId: string }).appId,
+				);
 				if (verifiedApp?.module.handlePhoto) {
 					await this.dispatchPhoto(verifiedApp, ctx);
 					return;

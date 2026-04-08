@@ -442,7 +442,11 @@ export async function main(): Promise<void> {
 					},
 				);
 			}
-			logger.info({ appId, count: schedules.length }, 'Registered %d app cron schedule(s)', schedules.length);
+			logger.info(
+				{ appId, count: schedules.length },
+				'Registered %d app cron schedule(s)',
+				schedules.length,
+			);
 		}
 	}
 
@@ -485,10 +489,7 @@ export async function main(): Promise<void> {
 			photoDir: resolve(config.dataDir, 'system', 'route-verification', 'photos'),
 		});
 
-		logger.info(
-			{ upperBound: verificationConfig.upperBound },
-			'Route verification enabled',
-		);
+		logger.info({ upperBound: verificationConfig.upperBound }, 'Route verification enabled');
 	} else {
 		logger.info('Route verification disabled');
 	}

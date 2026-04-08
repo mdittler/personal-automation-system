@@ -1,15 +1,15 @@
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RouteVerifier } from '../route-verifier.js';
+import type { Logger } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMService } from '../../../types/llm.js';
 import type { TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, PhotoContext } from '../../../types/telegram.js';
 import type { AppRegistry } from '../../app-registry/index.js';
 import type { PendingVerificationStore } from '../pending-verification-store.js';
+import { RouteVerifier } from '../route-verifier.js';
 import type { VerificationLogger } from '../verification-logger.js';
-import type { MessageContext, PhotoContext } from '../../../types/telegram.js';
-import type { Logger } from 'pino';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -39,7 +39,13 @@ function createMockRegistry(): AppRegistry {
 		getAll: vi.fn().mockReturnValue([
 			{
 				manifest: {
-					app: { id: 'food', name: 'Food', description: 'Food management', version: '1.0.0', author: 'test' },
+					app: {
+						id: 'food',
+						name: 'Food',
+						description: 'Food management',
+						version: '1.0.0',
+						author: 'test',
+					},
 					capabilities: {
 						messages: {
 							intents: [
@@ -54,7 +60,13 @@ function createMockRegistry(): AppRegistry {
 			},
 			{
 				manifest: {
-					app: { id: 'notes', name: 'Notes', description: 'Note taking', version: '1.0.0', author: 'test' },
+					app: {
+						id: 'notes',
+						name: 'Notes',
+						description: 'Note taking',
+						version: '1.0.0',
+						author: 'test',
+					},
 					capabilities: {
 						messages: { intents: ['save a note', 'note this'] },
 					},
@@ -128,7 +140,31 @@ function createPhotoCtx(overrides: Partial<PhotoContext> = {}): PhotoContext {
 	};
 }
 
-const classifierResult = { appId: 'food', intent: 'user wants to add items to the grocery list', confidence: 0.6 };
+const classifierResult = {
+	appId: 'food',
+	intent: 'user wants to add items to the grocery list',
+	confidence: 0.6,
+};
+
+/** Extract the first row of buttons from the sendWithButtons mock call. */
+function getButtonRow(tg: TelegramService): Array<{ text: string; callbackData: string }> {
+	const [, , buttons] = (tg.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
+		string,
+		string,
+		Array<Array<{ text: string; callbackData: string }>>,
+	];
+	return buttons[0] ?? [];
+}
+
+/** Extract the first call's Nth arg from a mock. */
+function mockArg<T>(fn: unknown, argIndex = 0): T {
+	return ((fn as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[])[argIndex] as T;
+}
+
+/** Extract the first call's return value from a mock. */
+function mockResult<T>(fn: unknown): T {
+	return (fn as ReturnType<typeof vi.fn>).mock.results[0].value as T;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -201,21 +237,14 @@ describe('RouteVerifier', () => {
 
 		await verifier.verify(createTextCtx(), classifierResult);
 
-		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			string,
-			string,
-			{ text: string; callbackData: string }[][],
-		];
-		const row = buttons[0]!;
+		const row = getButtonRow(telegram);
 		expect(row).toHaveLength(2);
-		expect(row[0]!.text).toBe('Food');
-		expect(row[1]!.text).toBe('Notes');
+		expect(row[0].text).toBe('Food');
+		expect(row[1].text).toBe('Notes');
 	});
 
 	it('stores pending entry when message is held', async () => {
-		const llm = createMockLLM(
-			'{"agrees": false, "suggestedAppId": "notes"}',
-		);
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
 		const verifier = buildVerifier(llm);
 
 		await verifier.verify(createTextCtx(), classifierResult);
@@ -224,20 +253,15 @@ describe('RouteVerifier', () => {
 		expect(pendingStore.add).toHaveBeenCalledOnce();
 
 		// The callback data in the buttons should contain the pendingId from add()
-		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			string,
-			string,
-			{ text: string; callbackData: string }[][],
-		];
-		const row = buttons[0]!;
+		const row = getButtonRow(telegram);
 		// All callback data strings should start with 'rv:<pendingId>:'
 		for (const btn of row) {
 			expect(btn.callbackData).toMatch(/^rv:pending-\d+:/);
 		}
 		// Deduplicated: classifier + verifier (no chatbot)
 		expect(row).toHaveLength(2);
-		expect(row[0]!.callbackData).toMatch(/:food$/);
-		expect(row[1]!.callbackData).toMatch(/:notes$/);
+		expect(row[0].callbackData).toMatch(/:food$/);
+		expect(row[1].callbackData).toMatch(/:notes$/);
 	});
 
 	it('uses standard tier for the verification LLM call', async () => {
@@ -303,7 +327,7 @@ describe('RouteVerifier', () => {
 
 		expect(result).toEqual({ action: 'route', appId: 'food' });
 		// The prompt passed to LLM should contain the caption text
-		const promptArg = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+		const promptArg = mockArg<string>(llm.complete, 0);
 		expect(promptArg).toContain('recipe photo caption');
 	});
 
@@ -319,22 +343,21 @@ describe('RouteVerifier', () => {
 		await verifier.verify(createTextCtx(), classifierResult);
 
 		// Get the pendingId from the add() call
-		const pendingId = (pendingStore.add as ReturnType<typeof vi.fn>).mock.results[0]!.value as string;
+		const pendingId = mockResult<string>(pendingStore.add);
 
 		const result = await verifier.resolveCallback(pendingId, 'notes');
 
 		expect(result).toBeDefined();
-		expect(result!.chosenAppId).toBe('notes');
-		expect(result!.entry).toBeDefined();
-		expect(result!.entry.classifierResult.appId).toBe('food');
+		const resolved = result as NonNullable<typeof result>;
+		expect(resolved.chosenAppId).toBe('notes');
+		expect(resolved.entry).toBeDefined();
+		expect(resolved.entry.classifierResult.appId).toBe('food');
 
 		// Should edit the button message
 		expect(telegram.editMessage).toHaveBeenCalledOnce();
-		const [chatId, messageId, text] = (telegram.editMessage as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			number,
-			number,
-			string,
-		];
+		const chatId = mockArg<number>(telegram.editMessage, 0);
+		const messageId = mockArg<number>(telegram.editMessage, 1);
+		const text = mockArg<string>(telegram.editMessage, 2);
 		expect(chatId).toBe(1); // from sendWithButtons mock return value
 		expect(messageId).toBe(100);
 		expect(text).toContain('Notes'); // app name in confirmation
@@ -356,9 +379,7 @@ describe('RouteVerifier', () => {
 		});
 
 		it('saves photo to photoDir when verifier disagrees and message is held', async () => {
-			const llm = createMockLLM(
-				'{"agrees": false, "suggestedAppId": "notes"}',
-			);
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
 			const verifier = new RouteVerifier({
 				llm,
 				telegram,
@@ -387,7 +408,7 @@ describe('RouteVerifier', () => {
 			const files = readdirSync(photoTmpDir);
 			expect(files).toHaveLength(1);
 			expect(files[0]).toMatch(/^.*-123\.jpeg$/);
-			expect(existsSync(`${photoTmpDir}/${files[0]!}`)).toBe(true);
+			expect(existsSync(`${photoTmpDir}/${files[0] as string}`)).toBe(true);
 		});
 
 		it('saves photo to photoDir when verifier agrees', async () => {
@@ -439,8 +460,8 @@ describe('RouteVerifier', () => {
 			expect(result).toEqual({ action: 'held' });
 
 			// pendingStore.add should have been called with photoPath undefined
-			const addArg = (pendingStore.add as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
-			expect(addArg['photoPath']).toBeUndefined();
+			const addArg = mockArg<Record<string, unknown>>(pendingStore.add, 0);
+			expect(addArg.photoPath).toBeUndefined();
 		});
 
 		it('includes saved photo path in the pending entry', async () => {
@@ -467,9 +488,9 @@ describe('RouteVerifier', () => {
 
 			await verifier.verify(ctx, classifierResult);
 
-			const addArg = (pendingStore.add as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
-			expect(typeof addArg['photoPath']).toBe('string');
-			expect(addArg['photoPath']).toMatch(/^route-verification\/photos\/.*-789\.jpeg$/);
+			const addArg = mockArg<Record<string, unknown>>(pendingStore.add, 0);
+			expect(typeof addArg.photoPath).toBe('string');
+			expect(addArg.photoPath).toMatch(/^route-verification\/photos\/.*-789\.jpeg$/);
 		});
 	});
 
@@ -488,7 +509,7 @@ describe('RouteVerifier', () => {
 		const verifier = buildVerifier(llm);
 
 		await verifier.verify(createTextCtx(), classifierResult);
-		const pendingId = (pendingStore.add as ReturnType<typeof vi.fn>).mock.results[0]!.value as string;
+		const pendingId = mockResult<string>(pendingStore.add);
 
 		// Clear calls from verify() itself
 		(verificationLogger.log as ReturnType<typeof vi.fn>).mockClear();
@@ -499,10 +520,10 @@ describe('RouteVerifier', () => {
 		await new Promise((r) => setTimeout(r, 0));
 
 		expect(verificationLogger.log).toHaveBeenCalledOnce();
-		const logArg = (verificationLogger.log as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
-		expect(logArg['outcome']).toBe('user override');
-		expect(logArg['userChoice']).toBe('notes');
-		expect(logArg['routedTo']).toBe('notes');
+		const logArg = mockArg<Record<string, unknown>>(verificationLogger.log, 0);
+		expect(logArg.outcome).toBe('user override');
+		expect(logArg.userChoice).toBe('notes');
+		expect(logArg.routedTo).toBe('notes');
 	});
 
 	// -------------------------------------------------------------------------
@@ -526,9 +547,7 @@ describe('RouteVerifier', () => {
 	});
 
 	it('allows chatbot as a suggested appId even when not in registry', async () => {
-		const llm = createMockLLM(
-			'{"agrees": false, "suggestedAppId": "chatbot"}',
-		);
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "chatbot"}');
 		const verifier = buildVerifier(llm);
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
@@ -610,34 +629,22 @@ describe('RouteVerifier', () => {
 
 		await verifier.verify(createTextCtx(), classifierResult);
 
-		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			string,
-			string,
-			{ text: string; callbackData: string }[][],
-		];
-		const row = buttons[0]!;
+		const row = getButtonRow(telegram);
 		// Should only have one button since both suggest the same app
 		expect(row).toHaveLength(1);
-		expect(row[0]!.text).toBe('Food');
+		expect(row[0].text).toBe('Food');
 	});
 
 	it('does not show chatbot as a button option when verifier suggests chatbot', async () => {
-		const llm = createMockLLM(
-			'{"agrees": false, "suggestedAppId": "chatbot"}',
-		);
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "chatbot"}');
 		const verifier = buildVerifier(llm);
 
 		await verifier.verify(createTextCtx(), classifierResult);
 
-		const [, , buttons] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			string,
-			string,
-			{ text: string; callbackData: string }[][],
-		];
-		const row = buttons[0]!;
+		const row = getButtonRow(telegram);
 		// Should only show the classifier pick, chatbot excluded from buttons
 		expect(row).toHaveLength(1);
-		expect(row[0]!.text).toBe('Food');
+		expect(row[0].text).toBe('Food');
 	});
 
 	// -------------------------------------------------------------------------
@@ -651,9 +658,9 @@ describe('RouteVerifier', () => {
 		await verifier.verify(createTextCtx(), classifierResult);
 
 		expect(verificationLogger.log).toHaveBeenCalledOnce();
-		const logArg = (verificationLogger.log as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
-		expect(logArg['outcome']).toBe('pending');
-		expect(logArg['routedTo']).toBe('pending');
+		const logArg = mockArg<Record<string, unknown>>(verificationLogger.log, 0);
+		expect(logArg.outcome).toBe('pending');
+		expect(logArg.routedTo).toBe('pending');
 	});
 
 	// -------------------------------------------------------------------------
@@ -661,17 +668,12 @@ describe('RouteVerifier', () => {
 	// -------------------------------------------------------------------------
 
 	it('sends a natural language prompt mentioning both app names', async () => {
-		const llm = createMockLLM(
-			'{"agrees": false, "suggestedAppId": "notes"}',
-		);
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
 		const verifier = buildVerifier(llm);
 
 		await verifier.verify(createTextCtx(), classifierResult);
 
-		const [, promptText] = (telegram.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
-			string,
-			string,
-		];
+		const promptText = mockArg<string>(telegram.sendWithButtons, 1);
 		expect(promptText).toContain('Food');
 		expect(promptText).toContain('Notes');
 		expect(promptText).toContain('not sure');

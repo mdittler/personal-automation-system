@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+	type VerificationPromptInput,
 	buildClassifyPrompt,
 	buildExtractPrompt,
 	buildVerificationPrompt,
 	sanitizeInput,
-	type VerificationPromptInput,
 } from '../prompt-templates.js';
 
 describe('prompt-templates', () => {

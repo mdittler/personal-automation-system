@@ -39,12 +39,13 @@ describe('PendingVerificationStore', () => {
 
 		const entry = store.get(id);
 		expect(entry).toBeDefined();
-		expect(entry!.classifierResult.appId).toBe('food');
-		expect(entry!.verifierSuggestedAppId).toBe('notes');
-		expect(entry!.sentMessageId).toBe(999);
-		expect(entry!.sentChatId).toBe(1001);
-		expect(entry!.isPhoto).toBe(false);
-		expect(entry!.createdAt).toBeInstanceOf(Date);
+		const e = entry as NonNullable<typeof entry>;
+		expect(e.classifierResult.appId).toBe('food');
+		expect(e.verifierSuggestedAppId).toBe('notes');
+		expect(e.sentMessageId).toBe(999);
+		expect(e.sentChatId).toBe(1001);
+		expect(e.isPhoto).toBe(false);
+		expect(e.createdAt).toBeInstanceOf(Date);
 	});
 
 	it('get does not remove the entry', () => {
@@ -67,7 +68,7 @@ describe('PendingVerificationStore', () => {
 
 		const entry = store.resolve(id);
 		expect(entry).toBeDefined();
-		expect(entry!.classifierResult.intent).toBe('log-meal');
+		expect((entry as NonNullable<typeof entry>).classifierResult.intent).toBe('log-meal');
 		expect(store.size).toBe(0);
 	});
 
@@ -104,7 +105,7 @@ describe('PendingVerificationStore', () => {
 		const id = store.add({ ...baseInput, photoPath: '/tmp/photo.jpg' });
 
 		const entry = store.get(id);
-		expect(entry!.photoPath).toBe('/tmp/photo.jpg');
+		expect((entry as NonNullable<typeof entry>).photoPath).toBe('/tmp/photo.jpg');
 	});
 
 	it('generated IDs fit in Telegram callback data budget', () => {
