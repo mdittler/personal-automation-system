@@ -32,6 +32,13 @@ describe('budget-handler', () => {
 		it('detects "what did we spend this week"', () => { expect(isBudgetViewIntent('what did we spend this week')).toBe(true); });
 		it('detects "show food costs"', () => { expect(isBudgetViewIntent('show food costs')).toBe(true); });
 		it('rejects "add eggs to grocery list"', () => { expect(isBudgetViewIntent('add eggs to grocery list')).toBe(false); });
+		it('rejects unrelated messages with food keywords', () => {
+			expect(isBudgetViewIntent('make me a meal plan for this week')).toBe(false);
+			expect(isBudgetViewIntent('what food should I buy')).toBe(false);
+		});
+		it('rejects price update messages', () => {
+			expect(isBudgetViewIntent('eggs are $3.50 at costco')).toBe(false);
+		});
 	});
 
 	describe('handleBudgetCommand', () => {
@@ -63,6 +70,13 @@ describe('budget-handler', () => {
 			await handleBudgetCommand(svc, [], 'user1', store as never);
 			const [, msg] = vi.mocked(svc.telegram.send).mock.calls[0]!;
 			expect(typeof msg).toBe('string');
+		});
+		it('handles /foodbudget with invalid subcommand gracefully', async () => {
+			const svc = createMockServices();
+			const store = createMockStore({ read: vi.fn().mockResolvedValue(null) });
+			await handleBudgetCommand(svc, ['invalid'], 'user1', store as never);
+			// Should fall through to weekly default since 'invalid' !== 'month' or 'year'
+			expect(svc.telegram.send).toHaveBeenCalled();
 		});
 	});
 });

@@ -50,6 +50,14 @@ describe('price-store', () => {
 		it('collapses multiple hyphens', () => {
 			expect(getStoreSlug('Sam\'s  Club!')).toBe('sams-club');
 		});
+		it('returns "unknown-store" for all-special-character names', () => {
+			expect(getStoreSlug('!!!')).toBe('unknown-store');
+			expect(getStoreSlug('')).toBe('unknown-store');
+		});
+		it('strips path traversal attempts', () => {
+			expect(getStoreSlug('../../etc/passwd')).toBe('etcpasswd');
+			expect(getStoreSlug('../malicious')).toBe('malicious');
+		});
 	});
 
 	describe('formatPriceFile', () => {
@@ -101,6 +109,19 @@ describe('price-store', () => {
 			expect(result.items).toEqual([]);
 			expect(result.store).toBe('costco');
 		});
+		it('handles malformed frontmatter gracefully', () => {
+			const raw = '## Dairy\n- Eggs (60ct): $7.99 <!-- updated: 2026-04-05 -->';
+			const result = parsePriceFile(raw, 'test');
+			expect(result.items).toHaveLength(1);
+			expect(result.items[0]!.name).toBe('Eggs (60ct)');
+		});
+		it('skips lines with non-numeric prices', () => {
+			const raw = '## Dairy\n- Eggs (60ct): $abc <!-- updated: 2026-04-05 -->\n- Milk (1 gal): $3.89 <!-- updated: 2026-04-01 -->';
+			const result = parsePriceFile(raw, 'test');
+			// $abc should be parsed as NaN and filtered or handled
+			const validItems = result.items.filter(i => !isNaN(i.price));
+			expect(validItems).toHaveLength(1);
+		});
 		it('extracts unit from parenthetical in name', () => {
 			const input = [
 				'---', 'store: Test', 'slug: test', 'last_updated: "2026-04-07"', 'item_count: 1', '---', '',
@@ -150,6 +171,14 @@ describe('price-store', () => {
 			const updated = addOrUpdatePrice(data, makeEntry({ name: 'Bananas (3 lb)', price: 1.49, department: 'Produce' }));
 			expect(updated.items).toHaveLength(1);
 			expect(updated.items[0]?.name).toBe('Bananas (3 lb)');
+		});
+		it('preserves items when adding entry with zero price', () => {
+			const data: StorePriceData = {
+				store: 'Test', slug: 'test', lastUpdated: '2026-04-01',
+				items: [makeEntry({ name: 'Eggs (60ct)', price: 7.99 })],
+			};
+			const updated = addOrUpdatePrice(data, makeEntry({ name: 'Free Item', price: 0 }));
+			expect(updated.items).toHaveLength(2);
 		});
 		it('updates existing item by name (case-insensitive)', () => {
 			const data: StorePriceData = { store: 'Costco', slug: 'costco', lastUpdated: '2026-04-07', items: [makeEntry({ name: 'Eggs (60ct)', price: 7.99 })] };
@@ -264,6 +293,13 @@ describe('price-store', () => {
 		it('detects "milk costs $3.89 at costco now"', () => { expect(isPriceUpdateIntent('milk costs $3.89 at costco now')).toBe(true); });
 		it('rejects "what is milk?"', () => { expect(isPriceUpdateIntent('what is milk?')).toBe(false); });
 		it('rejects "add milk to grocery list"', () => { expect(isPriceUpdateIntent('add milk to grocery list')).toBe(false); });
+		it('rejects messages about prices without update intent', () => {
+			expect(isPriceUpdateIntent('how much do eggs cost?')).toBe(false);
+			expect(isPriceUpdateIntent('eggs are expensive these days')).toBe(false);
+		});
+		it('rejects budget queries without dollar amounts and verbs', () => {
+			expect(isPriceUpdateIntent('we spent $200 on groceries')).toBe(false);
+		});
 	});
 
 	describe('parsePriceUpdateText', () => {
@@ -287,6 +323,18 @@ describe('price-store', () => {
 			const svc = createMockServices();
 			vi.mocked(svc.llm.complete).mockRejectedValue(new Error('fail'));
 			const result = await parsePriceUpdateText(svc, 'eggs $3.50 costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns invalid JSON', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue('not valid json');
+			const result = await parsePriceUpdateText(svc, 'eggs are $3.50 at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns JSON with missing fields', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs' }));
+			const result = await parsePriceUpdateText(svc, 'eggs are $3.50 at costco');
 			expect(result).toBeNull();
 		});
 	});

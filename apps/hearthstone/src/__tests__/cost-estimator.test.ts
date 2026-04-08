@@ -80,6 +80,13 @@ describe('estimateRecipeCost', () => {
 		expect(services.llm.complete).not.toHaveBeenCalled();
 	});
 
+	it('handles LLM returning malformed JSON gracefully', async () => {
+		const services = createMockServices('not valid json');
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'TestStore');
+		expect(result.totalCost).toBe(0);
+		expect(result.ingredientCosts).toHaveLength(0);
+	});
+
 	it('handles LLM failure gracefully (returns 0 cost)', async () => {
 		const services = createMockServices('');
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
@@ -161,6 +168,24 @@ describe('estimateGroceryListCost', () => {
 		{ name: 'AP Flour', matchedItem: 'AP Flour (25 lb)', estimatedCost: 8.99 },
 		{ name: 'Eggs', matchedItem: 'Eggs (60ct)', estimatedCost: 8.49 },
 	]);
+
+	it('returns zero total when no grocery items match prices', async () => {
+		const services = createMockServices(JSON.stringify([]));
+		const items: GroceryItem[] = [
+			{ name: 'Exotic Fruit', quantity: 1, unit: '', department: 'Produce', recipeIds: [], purchased: false, addedBy: 'user1' },
+		];
+		const result = await estimateGroceryListCost(services, items, priceItems, 'TestStore');
+		expect(result.total).toBe(0);
+	});
+
+	it('handles empty price database gracefully', async () => {
+		const services = createMockServices(JSON.stringify([]));
+		const items: GroceryItem[] = [
+			{ name: 'Milk', quantity: 1, unit: 'gal', department: 'Dairy', recipeIds: [], purchased: false, addedBy: 'user1' },
+		];
+		const result = await estimateGroceryListCost(services, items, [], 'TestStore');
+		expect(result.total).toBe(0);
+	});
 
 	it('matches grocery items to price entries and totals them', async () => {
 		const services = createMockServices(MOCK_GROCERY_COSTS);

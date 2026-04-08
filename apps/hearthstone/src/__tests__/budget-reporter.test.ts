@@ -103,6 +103,30 @@ describe('generateWeeklyReport', () => {
 		expect(result.avgPerMeal).toBeCloseTo(6.25);
 	});
 
+	it('handles single meal plans correctly', () => {
+		const plan = makePlan({
+			meals: [
+				{
+					recipeId: 'r1',
+					recipeTitle: 'Solo Meal',
+					date: '2026-04-07',
+					mealType: 'dinner',
+					votes: {},
+					cooked: false,
+					rated: false,
+					isNew: false,
+				},
+			],
+		});
+		const estimates = [
+			makeMealEstimate({ recipeId: 'r1', recipeTitle: 'Solo Meal', totalCost: 5.00, perServingCost: 1.25, servings: 4 }),
+		];
+		const result = generateWeeklyReport(plan, estimates);
+		expect(result.totalCost).toBe(5.00);
+		expect(result.mealCount).toBe(1);
+		expect(result.avgPerMeal).toBe(5.00);
+	});
+
 	it('handles empty estimates gracefully', () => {
 		const plan = makePlan();
 		const result = generateWeeklyReport(plan, []);
@@ -220,6 +244,21 @@ describe('formatWeeklyReportMessage', () => {
 		const result = formatWeeklyReportMessage(week, null);
 		// Should mention the most or least expensive meal
 		expect(result.toLowerCase()).toMatch(/most expensive|priciest|cheapest|least expensive/);
+	});
+
+	it('handles very long recipe names without breaking', () => {
+		const longNameWeek: CostHistoryWeek = {
+			weekId: '2026-W15',
+			startDate: '2026-04-07',
+			endDate: '2026-04-13',
+			meals: [{ date: '2026-04-07', recipeTitle: 'A'.repeat(100), cost: 10.00, perServing: 2.50 }],
+			totalCost: 10.00,
+			avgPerMeal: 10.00,
+			avgPerServing: 2.50,
+			mealCount: 1,
+		};
+		const msg = formatWeeklyReportMessage(longNameWeek, null);
+		expect(msg).toContain('A'.repeat(100));
 	});
 
 	it('shows no comparison when prevWeek is null', () => {
@@ -413,6 +452,16 @@ describe('checkBudgetAlert', () => {
 	it('returns null when no estimates', () => {
 		const result = checkBudgetAlert([], recentWeeks);
 		expect(result).toBeNull();
+	});
+
+	it('returns null when projected cost is exactly at 15% threshold', () => {
+		// Average of recentWeeks = 37.00, exactly 15% above = 42.55
+		// Provide estimates totaling exactly 42.55 (should NOT alert — percentAbove <= 15)
+		const estimates = [
+			makeMealEstimate({ recipeId: 'r-1', recipeTitle: 'Meal A', totalCost: 42.55 }),
+		];
+		const alert = checkBudgetAlert(estimates, recentWeeks);
+		expect(alert).toBeNull();
 	});
 
 	it('returns null when projected cost is within budget', () => {
