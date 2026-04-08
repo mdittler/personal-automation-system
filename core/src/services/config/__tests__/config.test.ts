@@ -423,4 +423,84 @@ describe('loadSystemConfig', () => {
 
 		expect(config.llm?.providers.anthropic.defaultModel).toBe('claude-opus-4-6');
 	});
+
+	// --- Route verification config tests ---
+
+	it('enables route verification by default when section is absent', async () => {
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, requiredEnvVars);
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+		});
+
+		expect(config.routing?.verification?.enabled).toBe(true);
+		expect(config.routing?.verification?.upperBound).toBe(0.7);
+	});
+
+	it('enables route verification by default when routing section exists but enabled is omitted', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({ routing: { verification: { upper_bound: 0.8 } } }),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.routing?.verification?.enabled).toBe(true);
+		expect(config.routing?.verification?.upperBound).toBe(0.8);
+	});
+
+	it('respects explicit enabled: false for route verification', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({ routing: { verification: { enabled: false } } }),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.routing?.verification?.enabled).toBe(false);
+	});
+
+	it('clamps upper_bound to [0, 1] range', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({ routing: { verification: { upper_bound: 1.5 } } }),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.routing?.verification?.upperBound).toBe(1);
+	});
+
+	it('clamps negative upper_bound to 0', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({ routing: { verification: { upper_bound: -0.5 } } }),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.routing?.verification?.upperBound).toBe(0);
+	});
 });

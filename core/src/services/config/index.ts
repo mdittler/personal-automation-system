@@ -75,6 +75,12 @@ interface PasYamlConfig {
 	n8n?: {
 		dispatch_url?: string;
 	};
+	routing?: {
+		verification?: {
+			enabled?: boolean;
+			upper_bound?: number;
+		};
+	};
 }
 
 /**
@@ -176,10 +182,24 @@ export async function loadSystemConfig(options?: {
 		n8n: {
 			dispatchUrl: yamlConfig?.n8n?.dispatch_url ?? '',
 		},
+		routing: {
+			verification: {
+				enabled: yamlConfig?.routing?.verification?.enabled ?? true,
+				upperBound: clampUpperBound(yamlConfig?.routing?.verification?.upper_bound),
+			},
+		},
 		users,
 	};
 
 	return config;
+}
+
+/**
+ * Clamp the verification upper_bound to valid range [0, 1], defaulting to 0.7.
+ */
+function clampUpperBound(value: number | undefined): number {
+	if (value === undefined) return 0.7;
+	return Math.max(0, Math.min(1, value));
 }
 
 /**

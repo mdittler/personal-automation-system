@@ -1,0 +1,681 @@
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import type { Logger } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LLMService } from '../../../types/llm.js';
+import type { TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, PhotoContext } from '../../../types/telegram.js';
+import type { AppRegistry } from '../../app-registry/index.js';
+import type { PendingVerificationStore } from '../pending-verification-store.js';
+import { RouteVerifier } from '../route-verifier.js';
+import type { VerificationLogger } from '../verification-logger.js';
+
+// ---------------------------------------------------------------------------
+// Mock factories
+// ---------------------------------------------------------------------------
+
+function createMockLLM(response: string): LLMService {
+	return {
+		complete: vi.fn().mockResolvedValue(response),
+		classify: vi.fn(),
+		extractStructured: vi.fn(),
+		getModelForTier: vi.fn(),
+	} as unknown as LLMService;
+}
+
+function createMockTelegram(): TelegramService {
+	return {
+		send: vi.fn(),
+		sendPhoto: vi.fn(),
+		sendOptions: vi.fn(),
+		sendWithButtons: vi.fn().mockResolvedValue({ chatId: 1, messageId: 100 }),
+		editMessage: vi.fn(),
+	};
+}
+
+function createMockRegistry(): AppRegistry {
+	return {
+		getAll: vi.fn().mockReturnValue([
+			{
+				manifest: {
+					app: {
+						id: 'food',
+						name: 'Food',
+						description: 'Food management',
+						version: '1.0.0',
+						author: 'test',
+					},
+					capabilities: {
+						messages: {
+							intents: [
+								'user wants to add items to the grocery list',
+								'user wants to save a recipe',
+							],
+						},
+					},
+				},
+				module: {},
+				appDir: '/apps/food',
+			},
+			{
+				manifest: {
+					app: {
+						id: 'notes',
+						name: 'Notes',
+						description: 'Note taking',
+						version: '1.0.0',
+						author: 'test',
+					},
+					capabilities: {
+						messages: { intents: ['save a note', 'note this'] },
+					},
+				},
+				module: {},
+				appDir: '/apps/notes',
+			},
+		]),
+		getApp: vi.fn(),
+		getManifestCache: vi.fn(),
+		getLoadedAppIds: vi.fn(),
+	} as unknown as AppRegistry;
+}
+
+function createMockPendingStore(): PendingVerificationStore {
+	const entries = new Map<string, ReturnType<PendingVerificationStore['resolve']>>();
+	let counter = 0;
+
+	return {
+		add: vi.fn().mockImplementation((input) => {
+			const id = `pending-${++counter}`;
+			entries.set(id, { ...input, createdAt: new Date() });
+			return id;
+		}),
+		get: vi.fn().mockImplementation((id: string) => entries.get(id)),
+		resolve: vi.fn().mockImplementation((id: string) => {
+			const entry = entries.get(id);
+			entries.delete(id);
+			return entry;
+		}),
+		size: 0,
+	} as unknown as PendingVerificationStore;
+}
+
+function createMockVerificationLogger(): VerificationLogger {
+	return {
+		log: vi.fn().mockResolvedValue(undefined),
+	} as unknown as VerificationLogger;
+}
+
+function createMockLogger(): Logger {
+	return {
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
+	} as unknown as Logger;
+}
+
+function createTextCtx(overrides: Partial<MessageContext> = {}): MessageContext {
+	return {
+		userId: 'user1',
+		text: 'add milk to the grocery list',
+		timestamp: new Date(),
+		chatId: 42,
+		messageId: 7,
+		...overrides,
+	};
+}
+
+function createPhotoCtx(overrides: Partial<PhotoContext> = {}): PhotoContext {
+	return {
+		userId: 'user1',
+		photo: Buffer.from('fake'),
+		caption: 'my recipe photo',
+		mimeType: 'image/jpeg',
+		timestamp: new Date(),
+		chatId: 42,
+		messageId: 8,
+		...overrides,
+	};
+}
+
+const classifierResult = {
+	appId: 'food',
+	intent: 'user wants to add items to the grocery list',
+	confidence: 0.6,
+};
+
+/** Extract the first row of buttons from the sendWithButtons mock call. */
+function getButtonRow(tg: TelegramService): Array<{ text: string; callbackData: string }> {
+	const [, , buttons] = (tg.sendWithButtons as ReturnType<typeof vi.fn>).mock.calls[0] as [
+		string,
+		string,
+		Array<Array<{ text: string; callbackData: string }>>,
+	];
+	return buttons[0] ?? [];
+}
+
+/** Extract the first call's Nth arg from a mock. */
+function mockArg<T>(fn: unknown, argIndex = 0): T {
+	return ((fn as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[])[argIndex] as T;
+}
+
+/** Extract the first call's return value from a mock. */
+function mockResult<T>(fn: unknown): T {
+	return (fn as ReturnType<typeof vi.fn>).mock.results[0].value as T;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('RouteVerifier', () => {
+	let telegram: TelegramService;
+	let registry: AppRegistry;
+	let pendingStore: PendingVerificationStore;
+	let verificationLogger: VerificationLogger;
+	let logger: Logger;
+
+	beforeEach(() => {
+		telegram = createMockTelegram();
+		registry = createMockRegistry();
+		pendingStore = createMockPendingStore();
+		verificationLogger = createMockVerificationLogger();
+		logger = createMockLogger();
+	});
+
+	function buildVerifier(llm: LLMService): RouteVerifier {
+		return new RouteVerifier({ llm, telegram, registry, pendingStore, verificationLogger, logger });
+	}
+
+	// -------------------------------------------------------------------------
+	// verify() — agrees
+	// -------------------------------------------------------------------------
+
+	it('returns route action when verifier agrees', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+		const ctx = createTextCtx();
+
+		const result = await verifier.verify(ctx, classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+	});
+
+	it('does not send buttons when verifier agrees', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	// -------------------------------------------------------------------------
+	// verify() — disagrees
+	// -------------------------------------------------------------------------
+
+	it('returns held action and sends buttons when verifier disagrees', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "notes", "suggestedIntent": "save a note", "reasoning": "looks like a note"}',
+		);
+		const verifier = buildVerifier(llm);
+		const ctx = createTextCtx();
+
+		const result = await verifier.verify(ctx, classifierResult);
+
+		expect(result).toEqual({ action: 'held' });
+		expect(telegram.sendWithButtons).toHaveBeenCalledOnce();
+	});
+
+	it('sends correct button labels when verifier disagrees', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "notes", "suggestedIntent": "save a note"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const row = getButtonRow(telegram);
+		expect(row).toHaveLength(2);
+		expect(row[0].text).toBe('Food');
+		expect(row[1].text).toBe('Notes');
+	});
+
+	it('stores pending entry when message is held', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		// pendingStore.add should have been called once
+		expect(pendingStore.add).toHaveBeenCalledOnce();
+
+		// The callback data in the buttons should contain the pendingId from add()
+		const row = getButtonRow(telegram);
+		// All callback data strings should start with 'rv:<pendingId>:'
+		for (const btn of row) {
+			expect(btn.callbackData).toMatch(/^rv:pending-\d+:/);
+		}
+		// Deduplicated: classifier + verifier (no chatbot)
+		expect(row).toHaveLength(2);
+		expect(row[0].callbackData).toMatch(/:food$/);
+		expect(row[1].callbackData).toMatch(/:notes$/);
+	});
+
+	it('uses standard tier for the verification LLM call', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(llm.complete).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({ tier: 'standard' }),
+		);
+	});
+
+	// -------------------------------------------------------------------------
+	// verify() — graceful degradation
+	// -------------------------------------------------------------------------
+
+	it('degrades gracefully when LLM call fails', async () => {
+		const llm: LLMService = {
+			complete: vi.fn().mockRejectedValue(new Error('network error')),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+			getModelForTier: vi.fn(),
+		} as unknown as LLMService;
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	it('degrades gracefully when LLM returns unparseable response', async () => {
+		const llm = createMockLLM('this is not json at all!!!');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	it('degrades gracefully when LLM response is valid JSON but missing agrees field', async () => {
+		const llm = createMockLLM('{"something": "else"}');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+	});
+
+	// -------------------------------------------------------------------------
+	// verify() — photo context
+	// -------------------------------------------------------------------------
+
+	it('handles photo context correctly — uses caption as message text', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+		const ctx = createPhotoCtx({ caption: 'recipe photo caption' });
+
+		const result = await verifier.verify(ctx, classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		// The prompt passed to LLM should contain the caption text
+		const promptArg = mockArg<string>(llm.complete, 0);
+		expect(promptArg).toContain('recipe photo caption');
+	});
+
+	// -------------------------------------------------------------------------
+	// resolveCallback()
+	// -------------------------------------------------------------------------
+
+	it('resolveCallback resolves pending entry and edits message', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		// Trigger a held message to store a pending entry
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		// Get the pendingId from the add() call
+		const pendingId = mockResult<string>(pendingStore.add);
+
+		const result = await verifier.resolveCallback(pendingId, 'notes');
+
+		expect(result).toBeDefined();
+		const resolved = result as NonNullable<typeof result>;
+		expect(resolved.chosenAppId).toBe('notes');
+		expect(resolved.entry).toBeDefined();
+		expect(resolved.entry.classifierResult.appId).toBe('food');
+
+		// Should edit the button message
+		expect(telegram.editMessage).toHaveBeenCalledOnce();
+		const chatId = mockArg<number>(telegram.editMessage, 0);
+		const messageId = mockArg<number>(telegram.editMessage, 1);
+		const text = mockArg<string>(telegram.editMessage, 2);
+		expect(chatId).toBe(1); // from sendWithButtons mock return value
+		expect(messageId).toBe(100);
+		expect(text).toContain('Notes'); // app name in confirmation
+	});
+
+	// -------------------------------------------------------------------------
+	// photo saving
+	// -------------------------------------------------------------------------
+
+	describe('photo saving', () => {
+		let photoTmpDir: string;
+
+		beforeEach(async () => {
+			photoTmpDir = await mkdtemp(`${tmpdir()}/route-verifier-photo-`);
+		});
+
+		afterEach(() => {
+			rmSync(photoTmpDir, { recursive: true, force: true });
+		});
+
+		it('saves photo to photoDir when verifier disagrees and message is held', async () => {
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '123',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'save this for later',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 1,
+			};
+
+			const result = await verifier.verify(ctx, classifierResult);
+
+			expect(result).toEqual({ action: 'held' });
+
+			// A file should have been written to photoTmpDir
+			const files = readdirSync(photoTmpDir);
+			expect(files).toHaveLength(1);
+			expect(files[0]).toMatch(/^.*-123\.jpeg$/);
+			expect(existsSync(`${photoTmpDir}/${files[0] as string}`)).toBe(true);
+		});
+
+		it('saves photo to photoDir when verifier agrees', async () => {
+			const llm = createMockLLM('{"agrees": true}');
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '456',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'agreed photo',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 2,
+			};
+
+			await verifier.verify(ctx, classifierResult);
+
+			const files = readdirSync(photoTmpDir);
+			expect(files).toHaveLength(1);
+			expect(files[0]).toMatch(/^.*-456\.jpeg$/);
+		});
+
+		it('does not save photo when photoDir is not configured', async () => {
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+			// buildVerifier does not pass photoDir
+			const verifier = buildVerifier(llm);
+
+			const ctx: PhotoContext = {
+				userId: '123',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'no save',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 3,
+			};
+
+			// Should not throw, photo path in log should be undefined
+			const result = await verifier.verify(ctx, classifierResult);
+			expect(result).toEqual({ action: 'held' });
+
+			// pendingStore.add should have been called with photoPath undefined
+			const addArg = mockArg<Record<string, unknown>>(pendingStore.add, 0);
+			expect(addArg.photoPath).toBeUndefined();
+		});
+
+		it('includes saved photo path in the pending entry', async () => {
+			const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+			const verifier = new RouteVerifier({
+				llm,
+				telegram,
+				registry,
+				pendingStore,
+				verificationLogger,
+				logger,
+				photoDir: photoTmpDir,
+			});
+
+			const ctx: PhotoContext = {
+				userId: '789',
+				photo: Buffer.from('fake-jpeg-data'),
+				caption: 'photo with path',
+				mimeType: 'image/jpeg',
+				timestamp: new Date(),
+				chatId: 1,
+				messageId: 4,
+			};
+
+			await verifier.verify(ctx, classifierResult);
+
+			const addArg = mockArg<Record<string, unknown>>(pendingStore.add, 0);
+			expect(typeof addArg.photoPath).toBe('string');
+			expect(addArg.photoPath).toMatch(/^route-verification\/photos\/.*-789\.jpeg$/);
+		});
+	});
+
+	it('resolveCallback returns undefined for unknown pending ID', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.resolveCallback('nonexistent-id', 'food');
+
+		expect(result).toBeUndefined();
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it('resolveCallback logs the user override to verificationLogger', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+		const pendingId = mockResult<string>(pendingStore.add);
+
+		// Clear calls from verify() itself
+		(verificationLogger.log as ReturnType<typeof vi.fn>).mockClear();
+
+		await verifier.resolveCallback(pendingId, 'notes');
+
+		// Allow the fire-and-forget log promise to resolve
+		await new Promise((r) => setTimeout(r, 0));
+
+		expect(verificationLogger.log).toHaveBeenCalledOnce();
+		const logArg = mockArg<Record<string, unknown>>(verificationLogger.log, 0);
+		expect(logArg.outcome).toBe('user override');
+		expect(logArg.userChoice).toBe('notes');
+		expect(logArg.routedTo).toBe('notes');
+	});
+
+	// -------------------------------------------------------------------------
+	// appId validation
+	// -------------------------------------------------------------------------
+
+	it('falls back to classifier pick when verifier suggests non-existent appId', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "hallucinated-app", "reasoning": "made up"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ suggestedAppId: 'hallucinated-app' }),
+			expect.stringContaining('non-existent app'),
+		);
+	});
+
+	it('allows chatbot as a suggested appId even when not in registry', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "chatbot"}');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		// chatbot is a valid suggestion — message should be held
+		expect(result).toEqual({ action: 'held' });
+	});
+
+	// -------------------------------------------------------------------------
+	// edge cases
+	// -------------------------------------------------------------------------
+
+	it('skips verification when only 1 app is installed', async () => {
+		const singleAppRegistry = {
+			getAll: vi.fn().mockReturnValue([
+				{
+					manifest: {
+						app: { id: 'food', name: 'Food', description: 'Food management' },
+						capabilities: { messages: { intents: ['grocery'] } },
+					},
+					module: {},
+					appDir: '/apps/food',
+				},
+			]),
+			getApp: vi.fn(),
+			getManifestCache: vi.fn(),
+			getLoadedAppIds: vi.fn(),
+		} as unknown as AppRegistry;
+
+		const llm = createMockLLM('should not be called');
+		const verifier = new RouteVerifier({
+			llm,
+			telegram,
+			registry: singleAppRegistry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('skips verification when zero apps are installed', async () => {
+		const emptyRegistry = {
+			getAll: vi.fn().mockReturnValue([]),
+			getApp: vi.fn(),
+			getManifestCache: vi.fn(),
+			getLoadedAppIds: vi.fn(),
+		} as unknown as AppRegistry;
+
+		const llm = createMockLLM('should not be called');
+		const verifier = new RouteVerifier({
+			llm,
+			telegram,
+			registry: emptyRegistry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(llm.complete).not.toHaveBeenCalled();
+	});
+
+	// -------------------------------------------------------------------------
+	// button deduplication
+	// -------------------------------------------------------------------------
+
+	it('deduplicates buttons when verifier suggests same app as classifier', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "food", "reasoning": "same app but wrong intent"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const row = getButtonRow(telegram);
+		// Should only have one button since both suggest the same app
+		expect(row).toHaveLength(1);
+		expect(row[0].text).toBe('Food');
+	});
+
+	it('does not show chatbot as a button option when verifier suggests chatbot', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "chatbot"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const row = getButtonRow(telegram);
+		// Should only show the classifier pick, chatbot excluded from buttons
+		expect(row).toHaveLength(1);
+		expect(row[0].text).toBe('Food');
+	});
+
+	// -------------------------------------------------------------------------
+	// held message log entry
+	// -------------------------------------------------------------------------
+
+	it('logs pending outcome when message is held', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(verificationLogger.log).toHaveBeenCalledOnce();
+		const logArg = mockArg<Record<string, unknown>>(verificationLogger.log, 0);
+		expect(logArg.outcome).toBe('pending');
+		expect(logArg.routedTo).toBe('pending');
+	});
+
+	// -------------------------------------------------------------------------
+	// natural language prompt message
+	// -------------------------------------------------------------------------
+
+	it('sends a natural language prompt mentioning both app names', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const promptText = mockArg<string>(telegram.sendWithButtons, 1);
+		expect(promptText).toContain('Food');
+		expect(promptText).toContain('Notes');
+		expect(promptText).toContain('not sure');
+	});
+});

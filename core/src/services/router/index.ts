@@ -22,6 +22,7 @@ import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
+import type { RouteVerifier } from './route-verifier.js';
 
 /** Escape Telegram MarkdownV2 special characters in user-controlled text. */
 function escapeMarkdown(text: string): string {
@@ -48,6 +49,10 @@ export interface RouterOptions {
 	spaceService?: SpaceService;
 	/** User manager for /space invite by name. */
 	userManager?: UserManager;
+	/** Route verifier for grey-zone confidence disambiguation. */
+	routeVerifier?: RouteVerifier;
+	/** Confidence upper bound for verification (default: 0.7). */
+	verificationUpperBound?: number;
 }
 
 export class Router {
@@ -64,6 +69,8 @@ export class Router {
 	private readonly fallbackMode: 'chatbot' | 'notes';
 	private readonly spaceService?: SpaceService;
 	private readonly userManager?: UserManager;
+	private readonly routeVerifier?: RouteVerifier;
+	private readonly verificationUpperBound: number;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -81,6 +88,8 @@ export class Router {
 		this.fallbackMode = options.fallbackMode ?? 'chatbot';
 		this.spaceService = options.spaceService;
 		this.userManager = options.userManager;
+		this.routeVerifier = options.routeVerifier;
+		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -152,6 +161,24 @@ export class Router {
 				return;
 			}
 
+			// Grey-zone verification: if confidence is moderate and verifier is configured
+			if (
+				this.routeVerifier &&
+				match.confidence >= this.confidenceThreshold &&
+				match.confidence < this.verificationUpperBound
+			) {
+				const result = await this.routeVerifier.verify(enrichedCtx, match);
+				if (result.action === 'held') return;
+				// Verifier confirmed (possibly different app) — dispatch to its pick
+				const verifiedApp = this.registry.getApp(
+					(result as { action: 'route'; appId: string }).appId,
+				);
+				if (verifiedApp) {
+					await this.dispatchMessage(verifiedApp, enrichedCtx);
+					return;
+				}
+			}
+
 			const app = this.registry.getApp(match.appId);
 			if (app) {
 				await this.dispatchMessage(app, enrichedCtx);
@@ -201,6 +228,27 @@ export class Router {
 			if (!(await this.isAppEnabled(ctx.userId, match.appId, user.enabledApps))) {
 				await this.trySend(ctx.userId, `You don't have access to the ${match.appId} app.`);
 				return;
+			}
+
+			// Grey-zone verification for photo messages
+			if (
+				this.routeVerifier &&
+				match.confidence >= this.confidenceThreshold &&
+				match.confidence < this.verificationUpperBound
+			) {
+				const result = await this.routeVerifier.verify(ctx, {
+					appId: match.appId,
+					intent: match.photoType,
+					confidence: match.confidence,
+				});
+				if (result.action === 'held') return;
+				const verifiedApp = this.registry.getApp(
+					(result as { action: 'route'; appId: string }).appId,
+				);
+				if (verifiedApp?.module.handlePhoto) {
+					await this.dispatchPhoto(verifiedApp, ctx);
+					return;
+				}
 			}
 
 			const app = this.registry.getApp(match.appId);

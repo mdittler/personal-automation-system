@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
-| **Status** | Phases 0–18 complete, Phase 19 pending |
-| **Last Updated** | 2026-03-11 |
+| **Status** | Phases 0–28 complete (except 27A-Vaults, 27B, 27C planned) |
+| **Last Updated** | 2026-04-08 |
 
 ---
 
@@ -41,6 +41,7 @@
 | 26 | n8n dispatch pattern | **Complete** | ~12 | API endpoints for reports/alerts/changes/LLM/telegram, dispatch mode |
 | 27A | Obsidian cross-app linking | **Complete** | ~5 | Conventions, utilities, Dataview fields, chatbot data awareness |
 | 27A-Vaults | VaultService | **Planned** | ~4 | Per-user Obsidian vaults with symlinks for personal, shared, and space data |
+| 28 | Route Verification | **Complete** | ~10 | Grey-zone LLM verification, inline buttons, verification log |
 | 27B | FileIndexService | **Planned** | ~6 | In-memory cross-app file metadata index with tag/backlink search |
 | 27C | CrossAppDataService | **Planned** | ~8 | Read-only cross-app file access + wiki-link resolution |
 
@@ -1920,6 +1921,62 @@ The `_shared/` and `_spaces/` prefixes use underscores, which cannot collide wit
 - `pnpm build` — no type errors
 - `pnpm test` — all tests pass
 - Manual: open `data/vaults/<userId>/` as Obsidian vault, verify cross-scope wiki-links resolve
+
+---
+
+## Phase 28 — Route Verification (Grey-Zone Disambiguation)
+
+**Status:** Complete
+**Depends on:** Phase 5 (Router), Phase 10 (Multi-provider LLM)
+
+### Goal
+
+Add a post-classification verification step for grey-zone messages (confidence 0.4–0.7). A second LLM call (standard tier) with full app descriptions verifies the classifier's routing decision. On disagreement, inline Telegram buttons let the user choose the correct app. The message is held indefinitely until the user responds.
+
+### New Files
+
+- `core/src/services/router/route-verifier.ts` — RouteVerifier service: LLM verification, button presentation, callback resolution
+- `core/src/services/router/pending-verification-store.ts` — In-memory Map of pending verifications (lost on restart — acceptable)
+- `core/src/services/router/verification-logger.ts` — Appends verification events to `data/system/route-verification-log.md`
+- `core/src/services/router/__tests__/route-verifier.test.ts` — RouteVerifier unit tests (29 tests)
+- `core/src/services/router/__tests__/pending-verification-store.test.ts` — PendingVerificationStore tests (10 tests)
+- `core/src/services/router/__tests__/verification-logger.test.ts` — VerificationLogger tests (8 tests)
+- `core/src/services/router/__tests__/router-verification.test.ts` — Router integration tests (8 tests)
+
+### Changed Files
+
+- `core/src/types/config.ts` — Added `RoutingVerificationConfig` interface, optional `routing` on SystemConfig
+- `core/src/services/config/index.ts` — Parse `routing.verification` from YAML, default enabled, clamp upper_bound
+- `core/src/services/llm/prompt-templates.ts` — Added `buildVerificationPrompt()` with sanitized inputs
+- `core/src/services/router/index.ts` — Grey-zone check in `routeMessage()` and `routePhoto()`
+- `core/src/bootstrap.ts` — Wire verification services, `rv:` callback handler
+- `config/pas.yaml.example` — Route verification config section
+- `config/pas.example.yaml` — Route verification config section
+- `CLAUDE.md` — Route verification architecture decision, key file paths
+
+### Key Decisions
+
+- **Enabled by default** — verification runs without explicit config; disable with `routing.verification.enabled: false`
+- **Standard tier** for verification — needs better reasoning than fast-tier classifier
+- **Hold indefinitely** — no timeout; message waits until user taps inline button
+- **Graceful degradation** — LLM failure falls back to classifier's pick
+- **appId validation** — verifier's suggested appId checked against registry; hallucinated IDs fall back to classifier
+- **Button deduplication** — no duplicate buttons when classifier and verifier suggest same app; chatbot excluded from buttons
+- **In-memory pending store** — lost on restart (acceptable for grey-zone messages)
+- **Verification log** — markdown file with YAML frontmatter for Obsidian compatibility
+- **Photo support** — photos saved to `data/system/route-verification/photos/` for log references
+- **Prompt injection defense** — all user text, app descriptions, and intent strings sanitized via `sanitizeInput()`
+
+### URS Requirements
+
+- REQ-ROUTE-006: Route verification (22 standard tests, 24 edge case tests)
+
+### Verification
+
+- `pnpm build` — no type errors
+- `pnpm test` — all tests pass (4200+ tests)
+- `pnpm lint` — no new lint errors
+- Manual: send ambiguous Telegram message → buttons appear → tap → routed correctly → log entry written
 
 ---
 
