@@ -580,15 +580,36 @@ After clearing purchased items, if items remain on the grocery list, a 1-hour fo
 
 ### REQ-GROCERY-010: Store-aware pricing
 
-**Origin:** GL-10 | **Status:** Planned
+**Origin:** GL-10 | **Status:** Implemented
 
-Grocery lists configurable by store. Show estimated prices per item and total per store for comparison. Support "shopping at" context. Price data from LLM knowledge refined with user-reported actuals.
+Grocery lists configurable by store. Show estimated prices per item and total per store for comparison. Price data from receipt photos and manual text updates.
 
 **Standard tests:**
-- TBD
+- `price-store.test.ts` > formatPriceFile > formats items grouped by department
+- `price-store.test.ts` > parsePriceFile > parses a formatted price file back to StorePriceData
+- `price-store.test.ts` > loadStorePrices > returns parsed data from file
+- `price-store.test.ts` > saveStorePrices > writes formatted price file
+- `price-store.test.ts` > addOrUpdatePrice > adds new items and updates existing
+- `price-store.test.ts` > lookupPrice > finds exact match (case-insensitive)
+- `price-store.test.ts` > listStores > lists store slugs from prices directory
+- `price-store.test.ts` > updatePricesFromReceipt > normalizes receipt items and updates price store
+- `cost-estimator.test.ts` > estimateGroceryListCost > matches grocery items to price entries and totals
 
 **Edge case tests:**
-- TBD
+- `price-store.test.ts` > parsePriceFile > returns empty items for empty file
+- `price-store.test.ts` > parsePriceFile > handles malformed frontmatter gracefully
+- `price-store.test.ts` > parsePriceFile > skips lines with non-numeric prices
+- `price-store.test.ts` > addOrUpdatePrice > preserves items with zero price
+- `price-store.test.ts` > lookupPrice > returns null for no match
+- `price-store.test.ts` > listStores > returns empty array when no price files
+- `cost-estimator.test.ts` > estimateGroceryListCost > returns zero total when no items match
+- `cost-estimator.test.ts` > estimateGroceryListCost > handles empty price database
+
+**Security tests:**
+- `price-store.test.ts` > getStoreSlug > returns "unknown-store" for empty/special char names
+- `price-store.test.ts` > getStoreSlug > strips path traversal attempts
+- `price-store.test.ts` > updatePricesFromReceipt > handles LLM failure gracefully
+- `price-store.test.ts` > updatePricesFromReceipt > skips line items with zero or negative prices
 
 **Fixes:** None
 
@@ -596,15 +617,24 @@ Grocery lists configurable by store. Show estimated prices per item and total pe
 
 ### REQ-GROCERY-011: Store configuration
 
-**Origin:** GL-11 | **Status:** Planned
+**Origin:** GL-11 | **Status:** Implemented
 
-Expose store-related settings: preferred stores, default store, show price estimates, staple items, shopping follow-up hours.
+Expose store-related settings: preferred stores, default store, show price estimates.
 
 **Standard tests:**
-- TBD
+- `budget-handler.test.ts` > isBudgetViewIntent > detects budget-related queries
+- `price-store.test.ts` > isPriceUpdateIntent > detects price update patterns
+- `price-store.test.ts` > parsePriceUpdateText > parses text into price update
 
 **Edge case tests:**
-- TBD
+- `price-store.test.ts` > isPriceUpdateIntent > rejects non-price messages
+- `price-store.test.ts` > isPriceUpdateIntent > rejects budget queries with dollar amounts
+- `budget-handler.test.ts` > isBudgetViewIntent > rejects unrelated messages
+
+**Security tests:**
+- `price-store.test.ts` > parsePriceUpdateText > returns null on LLM failure
+- `price-store.test.ts` > parsePriceUpdateText > returns null when LLM returns invalid JSON
+- `price-store.test.ts` > parsePriceUpdateText > returns null when LLM returns JSON with missing fields
 
 **Fixes:** None
 
@@ -1387,15 +1417,23 @@ User sends photo of grocery receipt. LLM vision extracts total and key line item
 
 ### REQ-COST-002: Cost-per-meal estimates
 
-**Origin:** CT-2 | **Status:** Planned
+**Origin:** CT-2 | **Status:** Implemented
 
 Estimate cost-per-meal based on ingredient costs from receipts and recipe ingredient lists.
 
 **Standard tests:**
-- TBD
+- `cost-estimator.test.ts` > estimateRecipeCost > returns ingredient costs and total for recipe
+- `cost-estimator.test.ts` > estimatePlanCost > estimates cost for all meals in plan using recipe map
+- `cost-estimator.test.ts` > formatMealCostLine > formats "Title — $X.XX ($Y.YY/serving)" for non-zero cost
 
 **Edge case tests:**
-- TBD
+- `cost-estimator.test.ts` > estimateRecipeCost > handles empty ingredients (returns 0 cost)
+- `cost-estimator.test.ts` > estimateRecipeCost > handles LLM returning malformed JSON gracefully
+- `cost-estimator.test.ts` > estimatePlanCost > skips meals with no matching recipe (isNew suggestions)
+- `cost-estimator.test.ts` > formatMealCostLine > formats "Title — price unknown" for zero cost
+
+**Security tests:**
+- `cost-estimator.test.ts` > estimateRecipeCost > handles LLM failure gracefully (returns 0 cost)
 
 **Fixes:** None
 
@@ -1403,15 +1441,31 @@ Estimate cost-per-meal based on ingredient costs from receipts and recipe ingred
 
 ### REQ-COST-003: Weekly/monthly spend reports
 
-**Origin:** CT-3 | **Status:** Planned
+**Origin:** CT-3 | **Status:** Implemented
 
 Generate food spend summary on request or schedule: total spend, cost-per-meal average, trend vs previous periods.
 
 **Standard tests:**
-- TBD
+- `budget-reporter.test.ts` > generateWeeklyReport > builds report from plan and estimates
+- `budget-reporter.test.ts` > generateWeeklyReport > maps meals to correct dates from plan
+- `budget-reporter.test.ts` > generateMonthlyReport > aggregates weeks into monthly summary
+- `budget-reporter.test.ts` > generateYearlyReport > aggregates months into yearly summary
+- `budget-reporter.test.ts` > formatWeeklyReportMessage > contains the 📊 header, meal costs, totals
+- `budget-reporter.test.ts` > formatMonthlyReportMessage > contains month label and totals
+- `budget-reporter.test.ts` > formatYearlyReportMessage > contains year label, monthly totals, YTD
+- `budget-reporter.test.ts` > saveWeeklyHistory > saves to cost-history/{weekId}.md path
+- `budget-reporter.test.ts` > loadWeeklyHistory > loads and parses a saved week back
+- `budget-reporter.test.ts` > listWeeklyHistories > returns weekId strings from cost-history directory
+- `budget-handler.test.ts` > handleBudgetCommand > shows weekly/monthly/yearly reports
 
 **Edge case tests:**
-- TBD
+- `budget-reporter.test.ts` > generateWeeklyReport > handles empty estimates gracefully
+- `budget-reporter.test.ts` > generateWeeklyReport > handles single meal plans correctly
+- `budget-reporter.test.ts` > formatWeeklyReportMessage > shows no comparison when prevWeek is null
+- `budget-reporter.test.ts` > formatWeeklyReportMessage > handles very long recipe names
+- `budget-reporter.test.ts` > loadWeeklyHistory > returns null when file does not exist
+- `budget-reporter.test.ts` > listWeeklyHistories > returns empty array when no history files
+- `budget-handler.test.ts` > handleBudgetCommand — integration > handles invalid subcommand gracefully
 
 **Fixes:** None
 
@@ -1419,15 +1473,22 @@ Generate food spend summary on request or schedule: total spend, cost-per-meal a
 
 ### REQ-COST-004: Budget alerts
 
-**Origin:** CT-4 | **Status:** Planned
+**Origin:** CT-4 | **Status:** Implemented
 
 If a meal plan is trending expensive relative to historical average, flag it and suggest swaps.
 
 **Standard tests:**
-- TBD
+- `budget-reporter.test.ts` > checkBudgetAlert > returns alert when projected cost is >15% above average
+- `budget-reporter.test.ts` > checkBudgetAlert > identifies the most expensive meal in the alert
+- `budget-reporter.test.ts` > formatBudgetAlert > contains warning emoji and percentage
+- `budget-reporter.test.ts` > formatBudgetAlert > contains most expensive meal title and cost
+- `budget-reporter.test.ts` > formatBudgetAlert > includes suggestion to swap
 
 **Edge case tests:**
-- TBD
+- `budget-reporter.test.ts` > checkBudgetAlert > returns null when no historical data
+- `budget-reporter.test.ts` > checkBudgetAlert > returns null when no estimates
+- `budget-reporter.test.ts` > checkBudgetAlert > returns null when projected cost is within budget
+- `budget-reporter.test.ts` > checkBudgetAlert > returns null when exactly at 15% threshold
 
 **Fixes:** None
 
@@ -1944,8 +2005,8 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
 | REQ-GROCERY-008 | grocery-store.test.ts, app.test.ts, telegram-buttons.test.ts | 6 | 14 | Implemented |
 | REQ-GROCERY-009 | shopping-followup.test.ts, app.test.ts | 3 | 5 | Implemented |
-| REQ-GROCERY-010 | TBD | 0 | 0 | Planned |
-| REQ-GROCERY-011 | TBD | 0 | 0 | Planned |
+| REQ-GROCERY-010 | price-store.test.ts, cost-estimator.test.ts | 9 | 12 | Implemented |
+| REQ-GROCERY-011 | budget-handler.test.ts, price-store.test.ts | 3 | 6 | Implemented |
 | REQ-PANTRY-001 | pantry-store.test.ts, app.test.ts, photo-parsers.test.ts, photo-handler.test.ts | 14 | 10 | Implemented |
 | REQ-PANTRY-002 | pantry-matcher.test.ts, app.test.ts, natural-language.test.ts | 4 | 4 | Implemented |
 | REQ-PANTRY-003 | grocery-generator.test.ts, pantry-store.test.ts | 3 | 3 | Implemented |
@@ -1973,9 +2034,9 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
 | REQ-SOCIAL-003 | TBD | 0 | 0 | Planned |
 | REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
-| REQ-COST-002 | TBD | 0 | 0 | Planned |
-| REQ-COST-003 | TBD | 0 | 0 | Planned |
-| REQ-COST-004 | TBD | 0 | 0 | Planned |
+| REQ-COST-002 | cost-estimator.test.ts | 3 | 5 | Implemented |
+| REQ-COST-003 | budget-reporter.test.ts, budget-handler.test.ts | 11 | 7 | Implemented |
+| REQ-COST-004 | budget-reporter.test.ts | 5 | 4 | Implemented |
 | REQ-SEASON-001 | meal-planner.test.ts, meal-plan-store.test.ts | 2 | 1 | Implemented |
 | REQ-SEASON-002 | TBD | 0 | 0 | Planned |
 | REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |

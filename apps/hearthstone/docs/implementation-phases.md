@@ -19,7 +19,7 @@ This document tracks the phased implementation of the Hearthstone food managemen
 | H7 | Batch Cooking and Cuisine | 5 | Prep plan, defrost, cuisine cron | 39 | H3, H6 | Complete |
 | H8 | Vision: Photos | 5 | 3 photo intents | 47 | H1, H2, *infra* | Complete |
 | H9 | Family Features | 4 | Kid adaptations, baby tracker | 156 | H1 | Complete |
-| H10 | Cost Tracking | 5 | `/foodbudget` | 40–55 | H3, H8 | Not Started |
+| H10 | Cost Tracking | 5 | `/foodbudget` | 98 | H3, H8 | Complete |
 | H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 55–70 | H3, H9 | Not Started |
 | H12 | Health, Culture, Events | 4 | Health insights, 5 event emitters | 35–50 | H7, H11 | Not Started |
 
@@ -315,23 +315,39 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H10: Cost Tracking and Store Pricing
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** 98 | **Started:** 2026-04-07 | **Completed:** 2026-04-08
 
 **Requirements:** REQ-COST-002, REQ-COST-003, REQ-COST-004, REQ-GROCERY-010, REQ-GROCERY-011 (full)
 
 **Also includes (deferred from H2a):**
-- REQ-GROCERY-010 (GL-10): Store pricing — per-item price estimates, multi-store comparison, user-reported actual prices
-- REQ-GROCERY-011 (GL-11): Store configuration — preferred stores, store-specific department mapping, price history
+- REQ-GROCERY-010 (GL-10): Store pricing — per-item price estimates from receipt history
+- REQ-GROCERY-011 (GL-11): Store configuration — preferred stores, default store, show price estimates
 
 **What gets built:**
-- Cost tracker — cost-per-meal estimation, spend aggregation
-- Store pricing — multi-store estimates, user-reported actuals (GL-10)
-- Store configuration — preferred stores, department mapping (GL-11)
-- Budget alerts — plan cost trending, swap suggestions
+- Price store — per-store markdown price database, receipt auto-update, text intent parsing
+- Cost estimator — LLM semantic matching of recipe ingredients to price DB with unit conversion
+- Budget reporter — weekly/monthly/yearly cost reports with history persistence
+- Budget alerts — flag expensive meal plans (>15% above rolling average), suggest swaps
+- Budget handler — /foodbudget command routing
+- Integrations — receipt→prices hook, meal plan cost annotations, grocery list price annotations
 
-**Key files:** `src/services/cost-tracker.ts`, `src/services/store-pricing.ts`, `src/services/budget-alerts.ts`, `src/handlers/budget.ts`
+**Key files:** `src/services/price-store.ts`, `src/services/cost-estimator.ts`, `src/services/budget-reporter.ts`, `src/services/budget-alerts.ts`, `src/handlers/budget.ts`
 
 ### Progress
+
+- [x] Types (PriceEntry, StorePriceData, MealCostEstimate, CostHistoryWeek, CostHistoryMonth)
+- [x] Price store CRUD with Obsidian-compatible markdown format
+- [x] Receipt auto-update (LLM normalization of receipt line items)
+- [x] Text intent parsing ("eggs are $3.50 at costco")
+- [x] Cost estimator (LLM semantic matching + unit conversion)
+- [x] Budget reporter (weekly/monthly/yearly reports + history persistence)
+- [x] Budget alerts (>15% threshold, most expensive meal identification)
+- [x] Budget handler (/foodbudget command)
+- [x] Wired into index.ts (commands, intents) and photo.ts (receipt hook)
+- [x] Meal plan cost annotations with budget alerts
+- [x] Grocery list price annotations (gated by show_price_estimates)
+- [x] Code review fixes (critical bugs, security hardening, UX improvements)
+- [x] Test gaps filled (edge cases, security, false positive prevention)
 
 ---
 
@@ -387,6 +403,6 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 | H7 | 2026-04-03 | 2026-04-03 | ~39 new (~3579 cumulative) | Batch cooking, cuisine tracking |
 | H8 | 2026-04-06 | 2026-04-06 | ~47 new (~3660 cumulative) | Vision: LLM image support, photo parsers, receipt capture |
 | H9 | 2026-04-07 | 2026-04-07 | ~243 new (~1824 cumulative) | Family profiles, kid adapter, child tracker, food intro, approval tagging, NL user simulation tests |
-| H10 | — | — | 0 | — |
+| H10 | 2026-04-07 | 2026-04-08 | 98 | Complete |
 | H11 | — | — | 0 | — |
 | H12 | — | — | 0 | — |
