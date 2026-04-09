@@ -53,6 +53,11 @@ import {
 	isNutritionViewIntent,
 } from './handlers/nutrition.js';
 import {
+	handleQuickMealAddCallback,
+	handleQuickMealAddReply,
+	hasPendingQuickMealAdd,
+} from './handlers/quick-meal-flow.js';
+import {
 	handlePerishableCallback,
 	handlePerishableCheckJob,
 } from './handlers/perishable-handler.js';
@@ -262,6 +267,13 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (hasPendingFreezerAdd(ctx.userId)) {
 		await handlePendingFreezerAdd(text, ctx);
 		return;
+	}
+
+	// H11.w: Pending quick-meal add guided flow
+	if (hasPendingQuickMealAdd(ctx.userId)) {
+		const userStore = services.data.forUser(ctx.userId);
+		const handled = await handleQuickMealAddReply(services, userStore, ctx.userId, text);
+		if (handled) return;
 	}
 
 	// Try to detect intent from the message
@@ -1152,6 +1164,13 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				ctx.messageId,
 				hh.sharedStore,
 			);
+			return;
+		}
+
+		// ─── H11.w: Quick-meal guided add callbacks ──────────
+		if (data.startsWith('app:food:nut:meals:add:')) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleQuickMealAddCallback(services, userStore, ctx.userId, data);
 			return;
 		}
 

@@ -16,6 +16,7 @@ import {
 	archiveQuickMeal,
 	slugifyLabel,
 } from '../services/quick-meals-store.js';
+import { beginQuickMealAdd } from './quick-meal-flow.js';
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -209,10 +210,15 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			if (mealsSub === 'add' || mealsSub === 'edit') {
-				// Scaffolded in Tasks 10b / 10c — do NOT implement here.
+			if (mealsSub === 'add') {
+				await beginQuickMealAdd(services, userId);
+				return;
+			}
+
+			if (mealsSub === 'edit') {
+				// Deferred to H11.w task 10c
 				await services.telegram.send(userId,
-					`meals ${mealsSub} arrives in the next H11.w sub-task.`);
+					'`/nutrition meals edit` arrives in the next H11.w sub-task.');
 				return;
 			}
 

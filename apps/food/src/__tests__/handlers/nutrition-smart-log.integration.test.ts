@@ -22,6 +22,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestContext } from '../../../../../core/src/services/context/request-context.js';
 import { saveQuickMeal, loadQuickMeals } from '../../services/quick-meals-store.js';
+import {
+	beginQuickMealAdd,
+	handleQuickMealAddReply,
+	handleQuickMealAddCallback,
+	hasPendingQuickMealAdd,
+	__resetQuickMealFlowForTests,
+} from '../../handlers/quick-meal-flow.js';
 import type { Recipe, MonthlyMacroLog, QuickMealTemplate } from '../../types.js';
 
 // Mock loadAllRecipes so each test can control the recipe library without
@@ -108,7 +115,26 @@ function buildTelegramSpy(): TelegramSpy {
 	return spy;
 }
 
-function buildServices(userStore: ReturnType<typeof buildUserStore>, telegram: TelegramSpy) {
+interface BuildServicesOverrides {
+	llm?: {
+		complete?: ReturnType<typeof vi.fn>;
+		getModelForTier?: ReturnType<typeof vi.fn>;
+		classify?: ReturnType<typeof vi.fn>;
+		extractStructured?: ReturnType<typeof vi.fn>;
+	};
+}
+
+function buildServices(
+	userStore: ReturnType<typeof buildUserStore>,
+	telegram: TelegramSpy,
+	overrides: BuildServicesOverrides = {},
+) {
+	const defaultLlm = {
+		complete: vi.fn().mockResolvedValue('ok'),
+		getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+		classify: vi.fn(),
+		extractStructured: vi.fn(),
+	};
 	return {
 		telegram,
 		logger: {
@@ -118,7 +144,8 @@ function buildServices(userStore: ReturnType<typeof buildUserStore>, telegram: T
 			debug: vi.fn(),
 		},
 		llm: {
-			complete: vi.fn().mockResolvedValue('ok'),
+			...defaultLlm,
+			...(overrides.llm ?? {}),
 		},
 		config: {
 			get: vi.fn().mockResolvedValue(undefined),
@@ -415,5 +442,151 @@ describe('H11.w — /nutrition meals list + remove', () => {
 			handleNutritionCommand(services as never, ['meals', 'remove'], 'u1', sharedStore as never),
 		);
 		expect(telegram.lastMessage).toMatch(/usage/i);
+	});
+});
+
+describe('H11.w — /nutrition meals add guided flow', () => {
+	beforeEach(() => __resetQuickMealFlowForTests());
+
+	it('walks through all 4 steps and saves the template', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue(JSON.stringify({
+					calories: 850, protein: 50, carbs: 80, fat: 35, fiber: 12,
+					confidence: 0.75, reasoning: 'standard Chipotle bowl',
+				})),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+
+		// Step 0: begin
+		await dispatchAs('u1', () => beginQuickMealAdd(services as never, 'u1'));
+		expect(telegram.lastMessage).toMatch(/what do you want to call/i);
+		expect(hasPendingQuickMealAdd('u1')).toBe(true);
+
+		// Step 1: label reply
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'Chipotle chicken bowl'),
+		);
+		expect(telegram.lastMessage).toMatch(/kind of meal/i);
+		expect((telegram.lastButtons as unknown[])?.length ?? 0).toBeGreaterThanOrEqual(1);
+
+		// Step 2: kind callback
+		await dispatchAs('u1', () =>
+			handleQuickMealAddCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:add:kind:restaurant',
+			),
+		);
+		expect(telegram.lastMessage).toMatch(/ingredients/i);
+
+		// Step 3: ingredients reply
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(
+				services as never,
+				userStore as never,
+				'u1',
+				'brown rice\nchicken\nguac\nsalsa',
+			),
+		);
+		expect(telegram.lastMessage).toMatch(/notes/i);
+
+		// Step 4: notes reply — skip + LLM call + confirm
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'skip'),
+		);
+		expect(telegram.lastMessage).toMatch(/850 cal/);
+		const confirmButtons = telegram.lastButtons as Array<Array<{ text: string; callbackData: string }>>;
+		expect(confirmButtons.flat().map((b) => b.text)).toContain('Save');
+
+		// Step 5: save callback
+		await dispatchAs('u1', () =>
+			handleQuickMealAddCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:add:confirm:save',
+			),
+		);
+		expect(telegram.lastMessage).toMatch(/saved quick-meal/i);
+
+		// Verify persistence
+		const list = await loadQuickMeals(userStore as never);
+		expect(list).toHaveLength(1);
+		expect(list[0]!.label).toBe('Chipotle chicken bowl');
+		expect(list[0]!.kind).toBe('restaurant');
+		expect(list[0]!.ingredients).toEqual(['brown rice', 'chicken', 'guac', 'salsa']);
+		expect(list[0]!.estimatedMacros.calories).toBe(850);
+		expect(list[0]!.confidence).toBe(0.75);
+		expect(hasPendingQuickMealAdd('u1')).toBe(false);
+	});
+
+	it('cancel reply aborts the flow', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		await dispatchAs('u1', () => beginQuickMealAdd(services as never, 'u1'));
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'cancel'),
+		);
+
+		expect(hasPendingQuickMealAdd('u1')).toBe(false);
+		expect(telegram.lastMessage).toMatch(/cancel/i);
+	});
+
+	it('LLM failure on confirmation step exits cleanly', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue('not json'),
+				getModelForTier: vi.fn().mockReturnValue('x'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+
+		await dispatchAs('u1', () => beginQuickMealAdd(services as never, 'u1'));
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'Mystery meal'),
+		);
+		await dispatchAs('u1', () =>
+			handleQuickMealAddCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:add:kind:home',
+			),
+		);
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'stuff'),
+		);
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'skip'),
+		);
+
+		expect(telegram.lastMessage).toMatch(/couldn't estimate/i);
+		expect(hasPendingQuickMealAdd('u1')).toBe(false);
+	});
+
+	it('nutrition meals add command kicks off the flow', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['meals', 'add'], 'u1', sharedStore as never),
+		);
+
+		expect(hasPendingQuickMealAdd('u1')).toBe(true);
+		expect(telegram.lastMessage).toMatch(/what do you want to call/i);
 	});
 });
