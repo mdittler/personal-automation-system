@@ -111,15 +111,22 @@ export async function recordAdHocLog(
 }
 
 /**
- * Finds a similar prior entry, if any.
+ * Finds a similar prior entry within the last 30 days, if any.
+ * Stale entries (lastSeenDate older than WINDOW_DAYS relative to `today`)
+ * are ignored in-memory so callers don't need to call `trimExpired` first.
  */
 export async function findSimilarAdHoc(
 	store: ScopedDataStore,
 	text: string,
+	today: string = new Date().toISOString().slice(0, 10),
 ): Promise<AdHocEntry | null> {
 	const tokens = tokenize(text);
 	const f = await read(store);
-	const match = f.entries.find((e) => jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD);
+	const match = f.entries.find(
+		(e) =>
+			jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD &&
+			daysBetween(e.lastSeenDate, today) <= WINDOW_DAYS,
+	);
 	return match ?? null;
 }
 

@@ -61,7 +61,7 @@ export async function handleQuickMealLogCallback(
 	if (data === 'app:food:nut:log:adhoc-prompt') {
 		await services.telegram.send(
 			userId,
-			'Ad-hoc free-text logging arrives in the next sub-task. For now use `/nutrition log <recipe or meal> <portion>`.',
+			'Tell me what you ate in plain English — for example "I had half the lasagna" or "I ate a bunch of BBQ". I\'ll estimate the macros.',
 		);
 		return true;
 	}

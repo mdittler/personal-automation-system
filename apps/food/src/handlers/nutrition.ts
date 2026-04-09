@@ -94,6 +94,73 @@ export async function handleAdHocPromotionCallback(
 export function __resetAdHocPromotionForTests(): void {
 	pendingPromotion.clear();
 }
+
+/**
+ * Callback handler for the ambiguous-recipe picker emitted by
+ * dispatchSmartLog. Matches `app:food:nut:log:recipe:<id>:<portion>` and
+ * `app:food:nut:log:none`. Returns true if the callback was consumed.
+ *
+ * On a recipe selection, loads the recipe from the shared store, scales
+ * its per-serving macros by the portion value, and logs the entry.
+ * On `log:none`, sends a gentle fallthrough message pointing the user at
+ * `/nutrition meals add` or rephrasing the request.
+ */
+export async function handleRecipeLogCallback(
+	services: CoreServices,
+	userStore: ScopedDataStore,
+	sharedStore: ScopedDataStore,
+	userId: string,
+	data: string,
+): Promise<boolean> {
+	if (data === 'app:food:nut:log:none') {
+		await services.telegram.send(
+			userId,
+			'Ok — none of those. Try rephrasing, or use `/nutrition meals add` to save a new quick-meal.',
+		);
+		return true;
+	}
+
+	const match = data.match(/^app:food:nut:log:recipe:([a-z0-9][a-z0-9-]*):(\d+(?:\.\d+)?)$/);
+	if (!match) return false;
+
+	const recipeId = match[1]!;
+	const portion = parseFloat(match[2]!);
+	if (!Number.isFinite(portion) || portion <= 0) {
+		await services.telegram.send(userId, 'Invalid portion on that button.');
+		return true;
+	}
+
+	const recipes = await loadAllRecipes(sharedStore);
+	const recipe = recipes.find(r => r.id === recipeId);
+	if (!recipe) {
+		await services.telegram.send(userId, 'That recipe no longer exists.');
+		return true;
+	}
+
+	const per = recipe.macros ?? {};
+	const scaled = {
+		calories: Math.round((per.calories ?? 0) * portion),
+		protein: Math.round((per.protein ?? 0) * portion),
+		carbs: Math.round((per.carbs ?? 0) * portion),
+		fat: Math.round((per.fat ?? 0) * portion),
+		fiber: Math.round((per.fiber ?? 0) * portion),
+	};
+	const entry: MealMacroEntry = {
+		recipeId: recipe.id,
+		recipeTitle: recipe.title,
+		mealType: 'logged',
+		servingsEaten: portion,
+		macros: scaled,
+		estimationKind: 'recipe',
+		sourceId: recipe.id,
+	};
+	await logMealMacros(userStore, userId, entry, todayDate(services.timezone));
+	await services.telegram.send(
+		userId,
+		`Logged: **${recipe.title}** × ${portion} — ${scaled.calories} cal, ${scaled.protein}g protein`,
+	);
+	return true;
+}
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -133,8 +200,18 @@ const LOG_MEAL_NL_RE =
 const LOG_MEAL_NL_EXCLUSION_RE =
 	/\b(how\s+are|how\s+much|how'?s|what\s+(?:did|should|can)|show|summary|report|adherence|on\s+track|my\s+macros|my\s+nutrition|am\s+i|progress)\b/i;
 
+// Non-food objects that commonly follow "I had" / "I ate" / "I finished" —
+// if the direct object of the verb is one of these, the user is NOT
+// reporting a meal. Anchored to the immediate verb object so phrases like
+// "I had chicken after my walk" still classify as a meal log.
+const LOG_MEAL_NL_NON_FOOD_OBJECT_RE =
+	/^\s*(?:i\s+(?:just\s+)?(?:had|ate|finished)|(?:just\s+)?(?:had|ate|finished))\s+(?:a\s+|an\s+|some\s+|my\s+|the\s+)?(fun|nap|rest|shower|bath|meeting|call|day|morning|afternoon|evening|night|walk|run|workout|nothing|dream|conversation|argument|fight|chat|talk|thought|idea|minute|moment|second|break|laugh|cry|cold|headache|cough|accident|baby|child|kid|dog|cat|pet|drink\s+of\s+water)\b/i;
+
 export function isLogMealNLIntent(text: string): boolean {
-	return LOG_MEAL_NL_RE.test(text) && !LOG_MEAL_NL_EXCLUSION_RE.test(text);
+	if (!LOG_MEAL_NL_RE.test(text)) return false;
+	if (LOG_MEAL_NL_EXCLUSION_RE.test(text)) return false;
+	if (LOG_MEAL_NL_NON_FOOD_OBJECT_RE.test(text)) return false;
+	return true;
 }
 
 /**
@@ -319,8 +396,24 @@ export async function handleNutritionCommand(
 					await services.telegram.send(userId, 'Usage: `/nutrition meals remove <label>`');
 					return;
 				}
-				const id = slugifyLabel(label);
-				await archiveQuickMeal(userStore, id);
+				// Resolve by id (slug), then by case-insensitive label match, so
+				// renamed templates stay reachable via their displayed label.
+				const all = await loadQuickMeals(userStore);
+				let targetId: string | null = null;
+				try {
+					const slug = slugifyLabel(label);
+					if (all.some(t => t.id === slug)) targetId = slug;
+				} catch { /* ignore — fall through to label match */ }
+				if (!targetId) {
+					const needle = label.toLowerCase();
+					const byLabel = all.find(t => t.label.toLowerCase() === needle);
+					if (byLabel) targetId = byLabel.id;
+				}
+				if (!targetId) {
+					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
+					return;
+				}
+				await archiveQuickMeal(userStore, targetId);
 				await services.telegram.send(userId, `Removed quick-meal: ${label}`);
 				return;
 			}
@@ -336,14 +429,17 @@ export async function handleNutritionCommand(
 					await services.telegram.send(userId, 'Usage: `/nutrition meals edit <label>`');
 					return;
 				}
-				let id: string;
+				// Try id (slug) first, then case-insensitive label match.
+				const all = await loadQuickMeals(userStore);
+				let existing: typeof all[number] | undefined;
 				try {
-					id = slugifyLabel(label);
-				} catch {
-					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
-					return;
+					const slug = slugifyLabel(label);
+					existing = all.find(t => t.id === slug);
+				} catch { /* ignore */ }
+				if (!existing) {
+					const needle = label.toLowerCase();
+					existing = all.find(t => t.label.toLowerCase() === needle);
 				}
-				const existing = await findQuickMealById(userStore, id);
 				if (!existing) {
 					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
 					return;
@@ -394,13 +490,19 @@ export async function handleNutritionCommand(
 			}
 
 			// Path 1: Legacy numeric form — preserved verbatim for back-compat.
-			// Triggered when the caller supplies a label plus at least four
-			// following tokens (calories, protein, carbs, fat) — i.e. args.length >= 6.
-			// This matches the historical shape `/nutrition log <label> <cal> <p> <c> <f> [fiber]`
-			// and keeps the existing per-field error messages that legacy tests pin on.
-			// Recipe-reference calls use at most 4 args (`log <word> <word> <portion>`)
-			// so this 6-arg heuristic avoids colliding with the smart-log path.
-			if (args.length >= 6) {
+			// Shape: `/nutrition log <label> <cal> <p> <c> <f> [fiber]` (args.length >= 6).
+			// To avoid colliding with multi-word free-text labels of the same length
+			// (e.g. "chicken pasta with tomato sauce and cheese"), detect the user's
+			// intent via a "contains a digit" quorum on the four mandatory macro fields
+			// (args[2..5]). If at least 2 look numeric-ish the user is clearly
+			// attempting the numeric form (with a possible typo in one field) and
+			// should get per-field validation errors. If fewer than 2 are numeric the
+			// tokens are a multi-word food label — fall through to the smart-log path.
+			const looksNumericish = (t: string | undefined): boolean =>
+				t !== undefined && /\d/.test(t);
+			const numericHits = [args[2], args[3], args[4], args[5]].filter(looksNumericish).length;
+			const legacyNumericShape = args.length >= 6 && numericHits >= 2;
+			if (legacyNumericShape) {
 				const label = args[1];
 				if (!label) {
 					await services.telegram.send(userId,

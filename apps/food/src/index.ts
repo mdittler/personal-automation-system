@@ -52,6 +52,7 @@ import {
 	handleNutritionCommand as handleNutritionCmd,
 	handleNutritionLogNL,
 	handleAdHocPromotionCallback,
+	handleRecipeLogCallback,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
 } from './handlers/nutrition.js';
@@ -1230,6 +1231,16 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			data === 'app:food:nut:log:promote:no'
 		) {
 			await handleAdHocPromotionCallback(services, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.w review: Ambiguous recipe picker callbacks ──
+		if (
+			data.startsWith('app:food:nut:log:recipe:') ||
+			data === 'app:food:nut:log:none'
+		) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleRecipeLogCallback(services, userStore, hh.sharedStore, ctx.userId, data);
 			return;
 		}
 
