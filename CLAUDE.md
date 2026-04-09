@@ -89,7 +89,9 @@ A local-first home automation platform where users interact through a single Tel
 | `core/src/services/data-store/scoped-store.ts` | Per-user/per-app data access |
 | `core/src/services/llm/index.ts` | LLM service (multi-provider routing) |
 | `core/src/services/llm/llm-guard.ts` | Per-app rate limit + cost cap |
-| `core/src/services/llm/llm-context.ts` | AsyncLocalStorage userId propagation |
+| `core/src/services/context/request-context.ts` | Unified AsyncLocalStorage userId propagation (LLM cost attribution + per-user config reads) |
+| `core/src/services/config/app-config-service.ts` | Per-user config overrides (reads userId from requestContext) |
+| `core/src/services/scheduler/per-user-dispatch.ts` | Wraps user_scope: all scheduled jobs in per-user requestContext |
 | `core/src/services/reports/index.ts` | ReportService: CRUD, run, cron lifecycle |
 | `core/src/services/alerts/index.ts` | AlertService: CRUD, evaluate, cron lifecycle |
 | `core/src/services/spaces/index.ts` | SpaceService: CRUD, membership |
@@ -139,13 +141,16 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-29) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10) are complete. **4390+ tests passing across 180+ test files.**
+All infrastructure phases (0-29) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x) are complete. **4692+ tests passing across 190+ test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 
 ### Deferred / Future Items
 - **Phase 27B** — FileIndexService: in-memory cross-app file metadata index. Deferred until lifestyle apps validate Phase 27A conventions
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until 27B proves needed
+- **Infra: Per-User Config Runtime Propagation** — **FIXED 2026-04-09.** A unified `requestContext` AsyncLocalStorage (replacing the former `llmContext`) now propagates the active `userId` through every dispatch point (message, command, photo, callback, scheduled job, alert action, API message, GUI simulated message). `AppConfigServiceImpl` reads `getCurrentUserId()` from the request context, so `services.config.get(key)` automatically returns the calling user's override. Scheduled jobs declared `user_scope: all` are now invoked once per registered user by the scheduler inside a per-user context, and `AppModule.handleScheduledJob(jobId, userId?)` receives that userId. Canonical regression test: `core/src/services/config/__tests__/per-user-runtime.integration.test.ts`.
+- **Phase H11.x** — Nutrition/Hosting/Config polish — **UNBLOCKED 2026-04-09** (infra fix above). Backlog at `C:\Users\matth\.claude\plans\h11y-option-a-full-backlog.md`.
+- **Phase H11.y** — Nutrition/Hosting guided flows (buttons + natural-language routing). Not started. Backlog at `C:\Users\matth\.claude\plans\h11y-option-a-full-backlog.md` items #11-15, #21, #29.
 - **App registry/marketplace** — static JSON index files. Deferred until enough apps exist
 - **App signing** — cryptographic verification. Deferred until community forms
 - **Container isolation** — for untrusted apps. Deferred until community forms

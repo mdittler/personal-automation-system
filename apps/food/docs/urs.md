@@ -335,15 +335,31 @@ Any household member can ask "what's for dinner" and get tonight's planned meal,
 
 ### REQ-MEAL-006: Macro nutrient tracking
 
-**Origin:** MP-6 | **Status:** Planned
+**Origin:** MP-6 | **Status:** Implemented
 
 Track macro nutrients per planned/cooked meal. Store daily macro logs per user. Make data queryable over configurable periods. Support target macros per user with progress tracking.
 
 **Standard tests:**
-- TBD
+- sumMacros / averageMacros / macrosFromRecipe math
+- Monthly log CRUD (load, save, daily lookup)
+- logMealMacros appends and recalculates totals
+- loadMacrosForPeriod spans months, filters by date range
+- computeProgress with targets and daily averages
+- formatMacroSummary displays progress vs targets
+- autoLogFromCookedMeal scales recipe macros and logs
+- Nutrition handler: week, month, targets, targets set subcommands
+- Weekly nutrition summary scheduled job
+- NL journey tests: /nutrition commands, intent detection
 
 **Edge case tests:**
-- TBD
+- Zero servings recipe doesn't crash
+- Negative servings produces negative macros
+- Month boundary spanning in loadMacrosForPeriod
+- Reversed date range returns empty
+- Zero entries in computeProgress
+- averageMacros with zero count
+- Path traversal in month parameter rejected
+- Invalid/negative/excessive macro targets rejected
 
 **Fixes:** None
 
@@ -1360,15 +1376,24 @@ Declare broad food-related intent so general food queries route to Food rather t
 
 ### REQ-SOCIAL-001: Event planning
 
-**Origin:** SH-1 | **Status:** Planned
+**Origin:** SH-1 | **Status:** Implemented
 
 User declares a social event. App suggests scaled menu, checks guest dietary needs, generates delta grocery list, creates prep timeline working backward from event time.
 
 **Standard tests:**
-- TBD
+- parseEventDescription extracts guest count, time, names via LLM
+- suggestEventMenu calls LLM with dietary restrictions context
+- generatePrepTimeline builds backward timeline from event time
+- generateDeltaGroceryList subtracts pantry from needed items
+- planEvent orchestrates full pipeline (3 LLM calls)
+- formatEventPlan / formatPrepTimeline formatting
+- Hosting handler /hosting plan subcommand
+- NL journey: /hosting plan dinner for 6
 
 **Edge case tests:**
-- TBD
+- Menu items without matching recipe return empty grocery list
+- Empty pantry returns all items
+- Prompt injection sanitization in all LLM calls
 
 **Fixes:** None
 
@@ -1376,15 +1401,25 @@ User declares a social event. App suggests scaled menu, checks guest dietary nee
 
 ### REQ-SOCIAL-002: Guest profiles
 
-**Origin:** SH-2 | **Status:** Planned
+**Origin:** SH-2 | **Status:** Implemented
 
 Store profiles for frequent guests with name, dietary restrictions, and allergies. Consulted during event planning.
 
 **Standard tests:**
-- TBD
+- loadGuests / saveGuests YAML CRUD
+- addGuest with dedup by slug
+- removeGuest by slug
+- findGuestByName (exact + partial, case-insensitive)
+- formatGuestProfile / formatGuestList
+- getGuestsWithRestriction filter
+- Hosting handler /hosting guests list/add/remove subcommands
+- Button-based guest removal UX
 
 **Edge case tests:**
-- TBD
+- Empty name rejected
+- Name exceeding max length rejected
+- slugifyGuestName with special characters / path traversal
+- Duplicate guest throws error
 
 **Fixes:** None
 
@@ -1392,15 +1427,17 @@ Store profiles for frequent guests with name, dietary restrictions, and allergie
 
 ### REQ-SOCIAL-003: Guest configuration
 
-**Origin:** SH-3 | **Status:** Planned
+**Origin:** SH-3 | **Status:** Implemented
 
 Expose guest-related settings: frequent guest profiles.
 
 **Standard tests:**
-- TBD
+- Guest CRUD via /hosting guests add/remove
+- Guest list display formatting
+- Button-based guest management UX
 
 **Edge case tests:**
-- TBD
+- Empty guest list shows help message
 
 **Fixes:** None
 
@@ -1541,15 +1578,18 @@ Maintain static dataset of seasonal produce for configurable region. Use to bias
 
 ### REQ-SEASON-002: Seasonal nudges
 
-**Origin:** SR-2 | **Status:** Planned
+**Origin:** SR-2 | **Status:** Implemented
 
 Optionally send seasonal nudges with in-season produce and matching recipes.
 
 **Standard tests:**
-- TBD
+- Sends seasonal nudge to all household members
+- Skips when seasonal_nudges config is disabled
+- Skips when no household exists
 
 **Edge case tests:**
-- TBD
+- Handles LLM failure gracefully
+- Sanitizes location config in LLM prompt
 
 **Fixes:** None
 
@@ -1576,15 +1616,25 @@ Expose region-related settings: region code, seasonal nudges toggle.
 
 ### REQ-NUTR-001: Pediatrician visit report
 
-**Origin:** NR-1 | **Status:** Planned
+**Origin:** NR-1 | **Status:** Implemented
 
 Generate summary report for a child's eating habits: food variety, allergen exposure history, macro balance, reactions, foods approved vs rejected.
 
 **Standard tests:**
-- TBD
+- computeFoodVariety counts unique foods within period
+- computeAllergenHistory groups by category, sorted by first intro
+- computeReactionSummary filters non-none reactions
+- computeApprovalSummary from childApprovals
+- computeMacroBalance averages macros over period
+- formatPediatricianReport structured Telegram message
+- generatePediatricianReport orchestrator
+- Nutrition handler /nutrition pediatrician subcommand
+- Child selection buttons when no child specified
 
 **Edge case tests:**
-- TBD
+- No introductions returns empty variety/allergen/reaction
+- Empty period with no macro data
+- NL journey: /nutrition pediatrician margot
 
 **Fixes:** None
 
@@ -1592,15 +1642,23 @@ Generate summary report for a child's eating habits: food variety, allergen expo
 
 ### REQ-NUTR-002: Personal nutrition summary
 
-**Origin:** NR-2 | **Status:** Planned
+**Origin:** NR-2 | **Status:** Implemented
 
 Generate nutrition summary for any household member over configurable period: macro intake vs targets, trends, notable patterns.
 
 **Standard tests:**
-- TBD
+- detectTrends (increasing, decreasing, stable via linear regression)
+- formatTrendSummary
+- generatePersonalSummary with LLM + graceful fallback
+- generateWeeklyDigest for last 7 days
+- Nutrition handler /nutrition week, /nutrition month
 
 **Edge case tests:**
-- TBD
+- detectTrends with fewer than 3 days returns empty
+- detectTrends with flat values returns stable
+- formatTrendSummary with empty trends
+- LLM failure falls back to structured summary
+- No data returns informative message
 
 **Fixes:** None
 
@@ -2020,7 +2078,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-MEAL-003 | voting.test.ts, voting-handler.test.ts, app.test.ts | 6 | 10 | Implemented |
 | REQ-MEAL-004 | rating.test.ts, rating-handler.test.ts, app.test.ts | 5 | 9 | Implemented |
 | REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
-| REQ-MEAL-006 | TBD | 0 | 0 | Planned |
+| REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, natural-language.test.ts | 53 | 15 | Implemented |
 | REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
@@ -2056,18 +2114,18 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-COOK-004 | recipe-scaler.test.ts, cook-mode-handler.test.ts | 18 | 11 | Implemented |
 | REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 10 | 6 | Implemented |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
-| REQ-SOCIAL-001 | TBD | 0 | 0 | Planned |
-| REQ-SOCIAL-002 | TBD | 0 | 0 | Planned |
-| REQ-SOCIAL-003 | TBD | 0 | 0 | Planned |
+| REQ-SOCIAL-001 | hosting-planner.test.ts, hosting-handler.test.ts, natural-language.test.ts | 16 | 8 | Implemented |
+| REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts | 29 | 7 | Implemented |
+| REQ-SOCIAL-003 | guest-profiles.test.ts, hosting-handler.test.ts | 5 | 3 | Implemented |
 | REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
 | REQ-COST-002 | cost-estimator.test.ts, natural-language.test.ts | 3 | 5 | Implemented |
 | REQ-COST-003 | budget-reporter.test.ts, budget-handler.test.ts, natural-language.test.ts | 11 | 7 | Implemented |
 | REQ-COST-004 | budget-reporter.test.ts, natural-language.test.ts | 5 | 4 | Implemented |
 | REQ-SEASON-001 | meal-planner.test.ts, meal-plan-store.test.ts | 2 | 1 | Implemented |
-| REQ-SEASON-002 | TBD | 0 | 0 | Planned |
+| REQ-SEASON-002 | seasonal-nudge.test.ts | 5 | 0 | Implemented |
 | REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |
-| REQ-NUTR-001 | TBD | 0 | 0 | Planned |
-| REQ-NUTR-002 | TBD | 0 | 0 | Planned |
+| REQ-NUTR-001 | pediatrician-report.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 16 | 5 | Implemented |
+| REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 14 | 5 | Implemented |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
 | REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
@@ -2086,4 +2144,26 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **35 test files** | **264** | **321** | **585 tests** |
+| **Totals** | **44 test files** | **402** | **364** | **766 tests** |
+
+---
+
+## Known Latent Bugs / Deferred Infra
+
+### PAS-wide: Per-user config runtime propagation — FIXED 2026-04-09
+
+**What was broken:** `AppConfigServiceImpl.setUserId(userId)` existed but was never called in production PAS code. At runtime `this.userId` was always `null`, so every `services.config.get(key)` call across every app silently returned the manifest default. Per-user overrides saved via the GUI config editor were written to disk but unreachable at handler runtime.
+
+**Fix:** The former bespoke `llmContext` AsyncLocalStorage was promoted into a unified `requestContext` (`core/src/services/context/request-context.ts`) and now propagates the active userId at every dispatch point (message, command, photo, callback, scheduled job, alert action, API message, GUI simulated message). `AppConfigServiceImpl.loadOverrides()` reads `getCurrentUserId()` from the request context. The vestigial `setUserId` method was removed. `user_scope: all` scheduled jobs are iterated by the scheduler once per registered user inside a per-user request context, and `AppModule.handleScheduledJob(jobId, userId?)` receives that userId.
+
+**Impact on Food app:** Every Food callsite of `services.config.get(...)` — `meal_types`, `location`, `dietary_preferences`, `dietary_restrictions`, `plan_generation_day`, `voting_window_hours`, `preferred_stores`, `default_store`, `show_price_estimates`, `staple_items`, `seasonal_nudges`, `child_meal_adaptation`, `allergen_wait_days`, `cooking_speaker_device`, `hands_free_default`, and the five H11.x `macro_target_*` keys — now returns the calling user's override automatically. H11.x item #1 (loadTargets config-first) is unblocked.
+
+**Canonical regression test:** `core/src/services/config/__tests__/per-user-runtime.integration.test.ts`.
+
+### Phase H11.3 scheduler cron override — DEFERRED
+
+`SchedulerService` only exposes `scheduleOnce`/`cancelOnce`. Manifest cron jobs are registered once at bootstrap with no per-user unregister/reregister surface. Proper per-user cron overrides would require core scheduler infra changes (out of scope for H11.x). Workaround: GUI Scheduler page (`core/src/gui/routes/scheduler.ts`) can edit cron strings directly. Manifest exposes informational `schedule_overrides_info` key pointing users there.
+
+### Phase H11.3 guest profiles GUI editor — DEFERRED
+
+`GuestProfile[]` is an array-of-object structure. The core GUI config editor has no array-of-object widget. Adding one is a core GUI change out of scope for H11.x. Manifest exposes informational `guest_profiles_info` key; `/hosting guests add|remove|list` remains the editing path.

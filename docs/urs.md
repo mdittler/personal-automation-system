@@ -893,19 +893,24 @@ The system must include built-in provider definitions for Anthropic, Google, Ope
 
 The system must support per-user app configuration with manifest defaults and user overrides. Overrides persist to YAML. User override takes precedence over manifest default. Invalid userId format must be rejected.
 
+**Runtime propagation:** Every `user_config` key defined in an app manifest is readable at runtime as a per-user value. The infrastructure propagates the current user's identity to all app entry points (message, command, photo, callback, scheduled job, alert action, API message, GUI simulated message) via a unified `requestContext` AsyncLocalStorage. Apps call `services.config.get(key)` and transparently receive the calling user's override — no manual context wiring required.
+
 **Standard tests:**
 - `app-config-service.test.ts` > get returns manifest default when no overrides
 - `app-config-service.test.ts` > get returns user override when set
 - `app-config-service.test.ts` > getAll merges defaults with overrides
 - `app-config-service.test.ts` > setAll writes overrides to YAML file
-- `app-config-service.test.ts` > setUserId sets context for subsequent get calls
+- `app-config-service.test.ts` > get reads userId from requestContext for subsequent get calls
+- `per-user-runtime.integration.test.ts` > end-to-end GUI-save-then-dispatch returns override for the targeted user and default for untouched users
 
 **Edge case tests:**
 - `app-config-service.test.ts` > get throws for unknown config key
 - `app-config-service.test.ts` > setAll rejects invalid userId format
-- `app-config-service.test.ts` > getAll returns only defaults when no user set
+- `app-config-service.test.ts` > getAll returns only defaults when no user context
 - `app-config-service.test.ts` > get returns override when key exists in both defaults and overrides
-- `app-config-service.test.ts` > loadOverrides returns null when no userId set
+- `app-config-service.test.ts` > loadOverrides returns null when no requestContext userId is set
+- `per-user-runtime.integration.test.ts` > get outside any requestContext scope returns the manifest default
+- `per-user-runtime.integration.test.ts` > concurrent requestContext scopes do not leak userIds across apps
 
 **Concurrency tests:**
 - `app-config-service.test.ts` > concurrent setAll calls produce consistent final state
@@ -915,6 +920,7 @@ The system must support per-user app configuration with manifest defaults and us
 
 **Fixes:**
 - D32 (2026-03): `loadOverrides()` missing userId validation — path traversal via `getAll(userId)`. Fixed with `^[a-zA-Z0-9_-]+$` pattern check. See Post-Phase 18 Security Review.
+- Per-user runtime propagation (2026-04-09): `AppConfigServiceImpl.setUserId()` was never called in production, so every `services.config.get(key)` silently returned the manifest default. Fixed by unifying `llmContext` into a top-level `requestContext` AsyncLocalStorage and wrapping every dispatch point. `AppConfigService` now reads `getCurrentUserId()` from the request context. Scheduled jobs declared `user_scope: all` are iterated by the scheduler once per registered user inside a per-user request context.
 
 ---
 

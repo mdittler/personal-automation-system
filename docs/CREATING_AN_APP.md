@@ -530,6 +530,25 @@ Read per-user settings declared in `user_config`:
 const limit = await services.config.get<number>('notes_per_page') ?? 10;
 ```
 
+**Per-user propagation is automatic.** The infrastructure establishes the active user's context (via an internal `requestContext` AsyncLocalStorage) at every dispatch point — `handleMessage`, `handleCommand`, `handlePhoto`, `handleCallbackQuery`, `handleScheduledJob` (when `user_scope: all`), alert actions, API messages, and GUI simulated messages. Your app just calls `services.config.get(key)` and the returned value reflects the calling user's override (set in the management GUI) when one exists, otherwise the manifest default. You never need to pass a userId to `config.get(...)`.
+
+**Scheduled jobs.** When a manifest schedule declares `user_scope: all`, the scheduler invokes your handler once per registered user and passes that user's id as the second argument:
+
+```typescript
+export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
+  jobId: string,
+  userId?: string, // set for user_scope: all, undefined for shared/system jobs
+) => {
+  if (jobId === 'weekly-digest' && userId) {
+    // services.config.get(...) returns userId's overrides automatically
+    const style = await services.config.get<string>('digest_style');
+    // ... build per-user digest
+  }
+};
+```
+
+For `user_scope: shared` or `system` jobs the handler runs once with `userId` undefined; cross-user iteration (if any) is your app's responsibility, but you can wrap each iteration in `services` calls normally — the scheduled-job context already has no user bound, so you get manifest defaults unless you iterate users explicitly.
+
 ## Testing
 
 Tests use Vitest with mock CoreServices.

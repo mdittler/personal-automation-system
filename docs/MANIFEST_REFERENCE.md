@@ -82,7 +82,9 @@ Recurring cron jobs. Each schedule requires a handler file.
 | `description` | string | Yes | Human-readable description |
 | `cron` | string | Yes | Standard 5-field cron expression |
 | `handler` | string | Yes | Handler file path relative to app root |
-| `user_scope` | string | Yes | `all` (per user), `shared` (once for shared data), `system` (once) |
+| `user_scope` | string | Yes | `all` (invoked once per registered user), `shared` (once for shared data), `system` (once) |
+
+**Per-user dispatch (`user_scope: all`):** The scheduler iterates registered system users and invokes the handler once per user inside a per-user request context. The second argument to `handleScheduledJob(jobId, userId?)` is the iterating user's id, and `services.config.get(key)` automatically returns that user's override within the invocation. For `shared` and `system` jobs the handler is invoked once with `userId` undefined.
 
 **Example:**
 
@@ -94,6 +96,20 @@ capabilities:
       cron: "0 3 * * *"
       handler: "dist/handlers/cleanup.js"
       user_scope: all
+```
+
+```ts
+// In your AppModule
+export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
+  jobId: string,
+  userId?: string, // set for user_scope: all, undefined otherwise
+) => {
+  if (jobId === 'daily-cleanup' && userId) {
+    // services.config.get(...) automatically returns userId's overrides
+    const retention = await services.config.get<number>('retention_days');
+    // ... per-user cleanup logic
+  }
+};
 ```
 
 ### `rules`
@@ -152,7 +168,7 @@ The following services are **always injected** into every app, regardless of `re
 
 | CoreServices field | Type | Description |
 |-------------------|------|-------------|
-| `config` | `AppConfigService` | Per-user app configuration. Returns defaults from `user_config` block when no user override exists |
+| `config` | `AppConfigService` | Per-user app configuration. Returns the calling user's override (set via the GUI) when present, otherwise the `user_config` default. The active userId is propagated transparently via the infrastructure's `requestContext`, so app code never needs to pass userId to `config.get(...)` |
 | `secrets` | `SecretsService` | External API credential access via `services.secrets.get(id)`. See `external_apis` below |
 | `timezone` | `string` | IANA timezone string from system config (e.g. `'America/New_York'`). Use with `Intl.DateTimeFormat` |
 | `logger` | `AppLogger` | Scoped structured logger (Pino), automatically tagged with your app ID. Levels: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |

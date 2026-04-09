@@ -2040,6 +2040,42 @@ Replace manual Telegram-ID-based user registration with admin-generated invite c
 
 ---
 
+## Phase 30: Per-User Config Runtime Propagation
+
+**Date:** 2026-04-09  **Status:** Complete  **Unblocks:** H11.x (nutrition/hosting per-user config)
+
+### Motivation
+
+`AppConfigServiceImpl.setUserId()` was never called in production — every `services.config.get(key)` silently returned the manifest default, making per-user overrides saved via the GUI config editor unreachable at handler runtime. The fix generalizes the existing `llmContext` AsyncLocalStorage into a unified `requestContext` consumed by both LLM cost attribution and config lookups.
+
+### Files Touched
+
+- **New:** `core/src/services/context/request-context.ts` + tests — unified request-scoped ALS (`{userId?: string}`)
+- **New:** `core/src/services/scheduler/per-user-dispatch.ts` + tests — wraps `user_scope: all` jobs in a per-user request context
+- **New:** `core/src/services/config/__tests__/per-user-runtime.integration.test.ts` — end-to-end regression test
+- **Deleted:** `core/src/services/llm/llm-context.ts` (replaced by request-context)
+- **Modified:** `core/src/services/config/app-config-service.ts` — reads `getCurrentUserId()` from requestContext; removed vestigial `setUserId` field/method
+- **Modified:** `core/src/bootstrap.ts` — every dispatch site (message/photo/verification/callback) now wraps in `requestContext.run`; cron registration delegates to `buildScheduledJobHandler`
+- **Modified:** `core/src/api/routes/messages.ts`, `core/src/services/alerts/alert-executor.ts`, `core/src/services/llm/providers/base-provider.ts` — import path updates
+- **Modified:** `core/src/types/app-module.ts` — extended `handleScheduledJob` signature to `(jobId, userId?)`
+- **Modified:** `apps/food/src/index.ts` — accepts new optional `userId` parameter (H11.x will wire up the `weekly-nutrition-summary` branch)
+- **Modified:** `apps/food/src/handlers/nutrition-summary.ts` — migrated to single-user contract (filters to targeted household member, delegates iteration to scheduler)
+- **Docs:** `docs/MANIFEST_REFERENCE.md`, `docs/CREATING_AN_APP.md`, `docs/urs.md`, `apps/food/docs/urs.md`, `CLAUDE.md`
+
+### Verification
+
+- `pnpm build` — clean
+- `pnpm test` — 4709 tests across 192 files, all green
+- `per-user-runtime.integration.test.ts` is the canonical regression: write via `setAll('alice', {...})`, read via `requestContext.run({userId:'alice'}, () => config.get(...))`, asserts override returned; `bob` (no override) gets default; outside any `requestContext.run` scope also returns default
+
+### Consequences
+
+- Every `user_config` key across every app is now meaningfully per-user at runtime — no app code changes required
+- The former `llmContext` export no longer exists; any future `core/src/` code needing the current user's id should import `getCurrentUserId` from `core/src/services/context/request-context.ts`
+- `user_scope: all` scheduled jobs are now invoked once per registered user; app handlers filtering by their own household/membership criteria should early-return for users they don't own
+
+---
+
 ## Deferred Phases (Future)
 
 These are documented but not scheduled. Implementation depends on ecosystem growth.
