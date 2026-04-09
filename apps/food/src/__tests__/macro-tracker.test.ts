@@ -507,8 +507,10 @@ describe('macro-tracker', () => {
 			};
 			const progress = computeProgress([day], {}, 'today');
 			const result = formatMacroSummary(progress, day);
-			expect(result).toMatch(/BBQ mystery\s*\*/);      // flagged
-			expect(result).not.toMatch(/Oatmeal\s*\*/);       // not flagged
+			// Flag pattern: `**<title>** *` — bold closer followed by space + lone asterisk.
+			// The looser `\s*\*` regex would falsely match the closing `**` of the bold title.
+			expect(result).toMatch(/\*\*BBQ mystery\*\* \*/); // flagged
+			expect(result).not.toMatch(/\*\*Oatmeal\*\* \*/); // not flagged
 			expect(result).toMatch(/low-confidence/i);        // legend present
 			expect(result).toContain('1100');                 // totals still include flagged
 		});
@@ -551,7 +553,7 @@ describe('macro-tracker', () => {
 			};
 			const progress = computeProgress([day], {}, 'today');
 			const result = formatMacroSummary(progress, day);
-			expect(result).not.toMatch(/Legacy Meal\s*\*/); // no flag for undefined confidence
+			expect(result).not.toMatch(/\*\*Legacy Meal\*\* \*/); // no flag for undefined confidence
 			expect(result).not.toMatch(/low-confidence/i);   // no legend
 		});
 
