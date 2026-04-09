@@ -39,6 +39,9 @@ capabilities:
       - "user wants to adapt a recipe for a child"
       - "user wants to log a new food introduction for a child"
       - "user wants to tag a recipe as kid-approved or rejected"
+      - "user wants to log a meal they cooked by name with an optional portion"
+      - "user wants to log an unfamiliar meal with a free-text description"
+      - "user wants to save a frequent meal as a quick-meal template"
     commands:
       - name: /recipes
         description: "Browse and search your recipe library"
@@ -63,7 +66,7 @@ capabilities:
       - name: /foodbudget
         description: "View food cost tracking and reports"
       - name: /nutrition
-        description: "View nutrition summaries and reports"
+        description: "View nutrition summaries and reports, log meals, and manage quick-meal templates (use subcommands: today, week, month, log, meals add|list|edit|remove, adherence, targets)"
       - name: /whatsfordinner
         description: "See what's planned for tonight"
       - name: /family

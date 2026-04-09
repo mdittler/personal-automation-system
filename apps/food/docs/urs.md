@@ -394,6 +394,40 @@ Expose meal planning configuration as user-configurable settings: meal types, pl
 
 ---
 
+### REQ-MEAL-008: Smart nutrition logging
+
+**Origin:** H11.w | **Status:** Implemented
+
+Replace the unusable numeric `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]` entry with three intelligent logging paths: (1) recipe-reference — log a meal by matching an existing household recipe and scaling its cached macros by portion; (2) quick-meal templates — user-saved frequent meals (e.g. "Chipotle bowl", "breakfast rotation") with LLM-estimated macros, managed via `/nutrition meals add|list|edit|remove`; (3) ad-hoc LLM estimator — free-text description (e.g. "family BBQ — burgers, chips, potato salad") routed to the LLM for a best-effort estimate with a confidence score. Natural-language routing detects logging intent without requiring the `/nutrition log` prefix. A low-confidence flag (`*`) is displayed on meals with confidence < 0.5 in daily and adherence views. After a user logs a similar ad-hoc meal twice within 30 days, the system prompts to save it as a quick-meal template.
+
+**Standard tests:**
+- Portion parser: fractions, words ("half", "a quarter"), leading and trailing positions
+- Recipe matcher: exact match, fuzzy title match, no-match fallthrough
+- Quick-meals store: save, load, find-by-id, usage increment, per-user isolation
+- Macro estimator: LLM wrapper with Zod validation, failure paths, confidence extraction
+- Ad-hoc history: 30-day window, Jaccard similarity dedup at 0.5 threshold
+- Handler: `/nutrition log <recipe-name> [portion]` scales recipe macros
+- Handler: `/nutrition log <quick-meal-label> [portion]` scales saved template
+- Handler: `/nutrition log <free text>` ad-hoc LLM path writes `estimationKind: 'llm-ad-hoc'`
+- Handler: `/nutrition log` with no args shows top-5 quick-meal button grid
+- Handler: `/nutrition meals add|list|edit|remove` guided flows (label → kind → ingredients → notes → LLM estimate → confirm)
+- Low-confidence `*` flag renders on daily and adherence views when confidence < 0.5
+- Ad-hoc dedup: second similar log triggers "save as quick-meal?" prompt; Yes seeds the add flow pre-filled
+- Natural-language routing: "I had half the lasagna for lunch" → recipe path; "I ate my usual chipotle bowl" → quick-meal path; "log a burger of unknown size" → ad-hoc path
+- USDA FDC client: graceful null on missing key, HTTP error, network failure
+
+**Edge case tests:**
+- Recipe match with zero servings doesn't crash
+- Quick-meal edit preserves `id` across label rename
+- Ad-hoc promotion prompt only fires on the second similar log, not the first
+- Portion parser rejects nonsense tokens without swallowing the label
+- LLM failure in ad-hoc path surfaces a clear error, does not silently log zeros
+- Per-user isolation: user A's quick-meals invisible to user B
+
+**Fixes:** None
+
+---
+
 ## 3. Grocery Lists
 
 ### REQ-GROCERY-001: Recipe-to-grocery conversion
@@ -2187,6 +2221,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
 | REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, nutrition-per-user-config.integration.test.ts, natural-language.test.ts, natural-language-h11x.test.ts | 63 | 17 | Implemented |
 | REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
+| REQ-MEAL-008 | smart-nutrition-logging.integration.test.ts, nutrition-smart-log.integration.test.ts, natural-language-h11w.test.ts, portion-parser.test.ts, quick-meals-store.test.ts, macro-estimator.test.ts, usda-fdc-client.test.ts, ad-hoc-history.test.ts, recipe-matcher.test.ts | 50 | 10 | Implemented |
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
 | REQ-GROCERY-003 | item-parser.test.ts, app.test.ts | 5 | 5 | Implemented |

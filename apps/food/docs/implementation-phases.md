@@ -22,6 +22,7 @@ This document tracks the phased implementation of the Food food management app. 
 | H10 | Cost Tracking | 5 | `/foodbudget` | 145 | H3, H8 | Complete |
 | H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 171 | H3, H9 | Complete |
 | H11.x | Nutrition + Hosting + Config Polish | 3 | Daily view, manual log, adherence, guest flags, delta fallback, config surface | 34 | H11 | Complete |
+| H11.w | Smart Nutrition Logging | 1 | `/nutrition log` (smart), `/nutrition meals add\|list\|edit\|remove` | ~60 | H11.x | Complete |
 | H12 | Health, Culture, Events | 4 | Health insights, 5 event emitters | 35–50 | H7, H11 | Not Started |
 
 **Total:** 75 requirement implementations → 610–810 estimated tests
@@ -504,4 +505,5 @@ A natural-language persona test suite (`natural-language-h11z.test.ts`) exposed 
 | H11.x | 2026-04-09 | 2026-04-09 | 34 new + 8 post-Phase-30 closeout tests (2298 food cumulative) | Nutrition daily+log+adherence, hosting flags+fallback, config surface; closeout applied loadTargets partial-config merge fix, added computeAdherence unit tests, trend-per-field tests, fiber-in-prompt guard, prompt-injection fence, REQ-NUTR-003. **Closeout 2026-04-09 (post-Phase-30):** added `nutrition-per-user-config.integration.test.ts` (5 tests) exercising the real `AppConfigServiceImpl` + `requestContext` path, plus 3 persona tests in `natural-language-h11x.test.ts` — regression fence against the setUserId bug. |
 | H11.z | 2026-04-09 | 2026-04-09 | ~45 new (2362 food cumulative) | Ingredient normalization: `canonicalName` added to Ingredient/PantryItem/GroceryItem; `ingredient-normalizer.ts` with deterministic fast-path + LLM fast-tier fallback + in-memory LRU + persistent YAML cache; write-time normalization in pantry add, recipe parser, hosting inline ingredients; canonical equality in `pantryContains` + `grocery-dedup` (with 60% legacy fallback); one-shot migration script + startup warning; REQ-INGRED-001 |
 | H11.z-it2 | 2026-04-09 | 2026-04-09 | ~60 new + 3 GAP skips (4871 total, 196 files) | Hardening: deterministicCanonical strips articles + quantity words; pantryContains gains head-noun rescue tier; canonicalMerge null-unit reconciliation sweep; persona pressure-test matrix; 3 GAP it.skip blocks (unit conversion, possessives, misspellings) |
+| H11.w | 2026-04-09 | 2026-04-09 | ~60 new (reconciled in Task 18) | Smart nutrition logging: recipe-reference log (scales recipe macros by portion), saved quick-meal templates (LLM-estimated, editable), ad-hoc LLM estimator, natural-language routing, low-confidence `*` flag, 30-day ad-hoc dedup promotion prompt, USDA FDC cross-check client |
 | H12 | — | — | 0 | — |
