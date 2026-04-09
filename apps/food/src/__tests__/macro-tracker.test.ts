@@ -553,6 +553,62 @@ describe('macro-tracker', () => {
 		});
 	});
 
+	// ─── logMealMacros — source fields (H11.w) ────────────────────
+	describe('logMealMacros — source fields (H11.w)', () => {
+		function createStatefulStore() {
+			const storage = new Map<string, string>();
+			return {
+				read: vi.fn(async (path: string) => storage.get(path) ?? null),
+				write: vi.fn(async (path: string, content: string) => { storage.set(path, content); }),
+				append: vi.fn(async () => {}),
+				exists: vi.fn(async (path: string) => storage.has(path)),
+				list: vi.fn(async () => []),
+				archive: vi.fn(async () => {}),
+			};
+		}
+
+		it('persists estimationKind, confidence, and sourceId through write + read', async () => {
+			const store = createStatefulStore();
+			const entry: MealMacroEntry = {
+				recipeId: 'adhoc',
+				recipeTitle: 'BBQ burger + salad',
+				mealType: 'dinner',
+				servingsEaten: 1,
+				macros: { calories: 800, protein: 35, carbs: 60, fat: 45, fiber: 6 },
+				estimationKind: 'llm-ad-hoc',
+				confidence: 0.4,
+				sourceId: 'adhoc-xyz',
+			};
+			await logMealMacros(store as never, 'u1', entry, '2026-04-09');
+
+			const log = await loadMonthlyLog(store as never, '2026-04');
+			expect(log).not.toBeNull();
+			const day = getDailyMacros(log!, '2026-04-09');
+			expect(day).not.toBeNull();
+			expect(day!.meals).toHaveLength(1);
+			expect(day!.meals[0].estimationKind).toBe('llm-ad-hoc');
+			expect(day!.meals[0].confidence).toBe(0.4);
+			expect(day!.meals[0].sourceId).toBe('adhoc-xyz');
+		});
+
+		it('omits optional fields when not provided (back-compat)', async () => {
+			const store = createStatefulStore();
+			const entry: MealMacroEntry = {
+				recipeId: 'r1',
+				recipeTitle: 'Legacy Meal',
+				mealType: 'lunch',
+				servingsEaten: 1,
+				macros: { calories: 500, protein: 20, carbs: 50, fat: 15, fiber: 3 },
+			};
+			await logMealMacros(store as never, 'u1', entry, '2026-04-09');
+
+			const log = await loadMonthlyLog(store as never, '2026-04');
+			const day = getDailyMacros(log!, '2026-04-09');
+			expect(day!.meals[0].estimationKind).toBeUndefined();
+			expect(day!.meals[0].confidence).toBeUndefined();
+		});
+	});
+
 	// ─── Security ────────────────────────────────────────────
 	describe('security', () => {
 		it('rejects path traversal in month parameter', async () => {
