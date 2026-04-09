@@ -1501,3 +1501,68 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 		expect(telegram.lastMessage).toMatch(/change your mind|nutrition meals add/i);
 	});
 });
+
+describe('H11.w — per-user isolation', () => {
+	function makeQuickMeal(
+		overrides: Partial<QuickMealTemplate> & { id: string; userId: string; label: string },
+	): QuickMealTemplate {
+		const now = new Date().toISOString();
+		return {
+			id: overrides.id,
+			userId: overrides.userId,
+			label: overrides.label,
+			kind: 'restaurant',
+			ingredients: ['brown rice', 'chicken'],
+			estimatedMacros: { calories: 800, protein: 50, carbs: 90, fat: 20, fiber: 8 },
+			confidence: 0.75,
+			llmModel: 'test-model',
+			usageCount: 0,
+			createdAt: now,
+			updatedAt: now,
+			...overrides,
+		};
+	}
+
+	it("user A's quick-meals are invisible to user B", async () => {
+		const storeA = buildUserStore();
+		const storeB = buildUserStore();
+
+		await saveQuickMeal(
+			storeA as never,
+			makeQuickMeal({ id: 'chipotle-bowl', userId: 'u1', label: 'Chipotle bowl' }),
+		);
+
+		const aList = await loadQuickMeals(storeA as never);
+		const bList = await loadQuickMeals(storeB as never);
+		expect(aList).toHaveLength(1);
+		expect(aList[0]!.label).toBe('Chipotle bowl');
+		expect(bList).toHaveLength(0);
+	});
+
+	it("user B's /nutrition log no-args does not show user A's quick-meals", async () => {
+		const storeA = buildUserStore();
+		const storeB = buildUserStore();
+
+		await saveQuickMeal(
+			storeA as never,
+			makeQuickMeal({
+				id: 'chipotle-bowl',
+				userId: 'u1',
+				label: 'Chipotle bowl',
+				usageCount: 5,
+			}),
+		);
+
+		const telegram = buildTelegramSpy();
+		const services = buildServices(storeB, telegram);
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u2', () =>
+			handleNutritionCommand(services as never, ['log'], 'u2', sharedStore as never),
+		);
+
+		const allText =
+			telegram.messages.map((m) => m.text).join('\n') + (telegram.lastMessage ?? '');
+		expect(allText).not.toContain('Chipotle bowl');
+	});
+});
