@@ -28,6 +28,8 @@ apps/*/__tests__/**/*.js
 apps/*/__tests__/**/*.d.ts
 apps/*/__tests__/**/*.js.map
 apps/*/__tests__/**/*.d.ts.map
+# TypeScript incremental build artifacts (should not be committed)
+*.tsbuildinfo
 
 # Data directory (persistent data, not version controlled)
 data/
