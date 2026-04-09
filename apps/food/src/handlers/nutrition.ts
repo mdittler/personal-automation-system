@@ -9,6 +9,8 @@ import { generateWeeklyDigest, generatePersonalSummary } from '../services/nutri
 import { generatePediatricianReport } from '../services/pediatrician-report.js';
 import { loadChildProfile, loadAllChildren } from '../services/family-profiles.js';
 import { loadAllRecipes } from '../services/recipe-store.js';
+import { matchRecipes } from '../services/recipe-matcher.js';
+import { parsePortion } from '../services/portion-parser.js';
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -162,65 +164,159 @@ export async function handleNutritionCommand(
 		}
 
 		if (subCommand === 'log') {
-			const label = args[1];
-			if (!label) {
+			// Path 1: Legacy numeric form — preserved verbatim for back-compat.
+			// Triggered when the caller supplies a label plus at least four
+			// following tokens (calories, protein, carbs, fat) — i.e. args.length >= 6.
+			// This matches the historical shape `/nutrition log <label> <cal> <p> <c> <f> [fiber]`
+			// and keeps the existing per-field error messages that legacy tests pin on.
+			// Recipe-reference calls use at most 4 args (`log <word> <word> <portion>`)
+			// so this 6-arg heuristic avoids colliding with the smart-log path.
+			if (args.length >= 6) {
+				const label = args[1];
+				if (!label) {
+					await services.telegram.send(userId,
+						'Usage: `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]`\nExample: `/nutrition log lunch 600 40 50 20 8`');
+					return;
+				}
+				if (label.length > 100) {
+					await services.telegram.send(userId,
+						'Invalid label: must be 100 characters or fewer.');
+					return;
+				}
+				type FieldSpec = { name: string; raw: string | undefined; optional?: boolean };
+				const specs: FieldSpec[] = [
+					{ name: 'calories', raw: args[2] },
+					{ name: 'protein', raw: args[3] },
+					{ name: 'carbs', raw: args[4] },
+					{ name: 'fat', raw: args[5] },
+					{ name: 'fiber', raw: args[6], optional: true },
+				];
+				const parsed: Record<string, number> = {};
+				for (const spec of specs) {
+					if (spec.raw === undefined) {
+						if (spec.optional) {
+							parsed[spec.name] = 0;
+							continue;
+						}
+						await services.telegram.send(userId,
+							`Invalid ${spec.name} value: ''. Must be a number between 0 and 99999.`);
+						return;
+					}
+					const val = parseInt(spec.raw, 10);
+					if (isNaN(val) || val < 0 || val > 99999) {
+						await services.telegram.send(userId,
+							`Invalid ${spec.name} value: '${spec.raw}'. Must be a number between 0 and 99999.`);
+						return;
+					}
+					parsed[spec.name] = val;
+				}
+				const calories = parsed.calories ?? 0;
+				const protein = parsed.protein ?? 0;
+				const carbs = parsed.carbs ?? 0;
+				const fat = parsed.fat ?? 0;
+				const fiber = parsed.fiber ?? 0;
+
+				const entry: MealMacroEntry = {
+					recipeId: 'manual',
+					recipeTitle: label,
+					mealType: 'manual',
+					servingsEaten: 1,
+					macros: { calories, protein, carbs, fat, fiber },
+				};
+				const today = todayDate(services.timezone);
+				await logMealMacros(userStore, userId, entry, today);
 				await services.telegram.send(userId,
-					'Usage: `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]`\nExample: `/nutrition log lunch 600 40 50 20 8`');
+					`Logged: **${label}** — ${calories} cal, ${protein}g protein`);
 				return;
 			}
-			if (label.length > 100) {
+
+			// Path 2+: Smart log — recipe reference (quick-meal / ad-hoc fallthroughs
+			// arrive in H11.w Tasks 10/12).
+			const rawArgs = args.slice(1);
+			if (rawArgs.length === 0) {
+				await services.telegram.send(userId,
+					'Usage: `/nutrition log <meal name> [portion]`\n' +
+					'Examples:\n' +
+					'  `/nutrition log lasagna half`\n' +
+					'  `/nutrition log chicken curry 1.5`');
+				return;
+			}
+
+			// If the last token parses as a portion, peel it off; otherwise
+			// treat everything as the label and default portion to 1.
+			let portionRaw = '1';
+			let labelText = rawArgs.join(' ');
+			if (rawArgs.length >= 2) {
+				const maybePortion = parsePortion(rawArgs[rawArgs.length - 1]!);
+				if (maybePortion.ok) {
+					portionRaw = rawArgs[rawArgs.length - 1]!;
+					labelText = rawArgs.slice(0, -1).join(' ');
+				}
+			}
+			const portion = parsePortion(portionRaw);
+			if (!portion.ok) {
+				await services.telegram.send(userId, `Invalid portion: ${portion.error}`);
+				return;
+			}
+			if (labelText.length === 0) {
+				await services.telegram.send(userId,
+					'Usage: `/nutrition log <meal name> [portion]`');
+				return;
+			}
+			if (labelText.length > 100) {
 				await services.telegram.send(userId,
 					'Invalid label: must be 100 characters or fewer.');
 				return;
 			}
-			// Parse each field individually so the error message can
-			// point at the specific offender — generic "invalid" leaves
-			// users guessing which value to fix. Fiber is optional and
-			// defaults to 0 when omitted.
-			type FieldSpec = { name: string; raw: string | undefined; optional?: boolean };
-			const specs: FieldSpec[] = [
-				{ name: 'calories', raw: args[2] },
-				{ name: 'protein', raw: args[3] },
-				{ name: 'carbs', raw: args[4] },
-				{ name: 'fat', raw: args[5] },
-				{ name: 'fiber', raw: args[6], optional: true },
-			];
-			const parsed: Record<string, number> = {};
-			for (const spec of specs) {
-				if (spec.raw === undefined) {
-					if (spec.optional) {
-						parsed[spec.name] = 0;
-						continue;
-					}
-					await services.telegram.send(userId,
-						`Invalid ${spec.name} value: ''. Must be a number between 0 and 99999.`);
-					return;
-				}
-				const val = parseInt(spec.raw, 10);
-				if (isNaN(val) || val < 0 || val > 99999) {
-					await services.telegram.send(userId,
-						`Invalid ${spec.name} value: '${spec.raw}'. Must be a number between 0 and 99999.`);
-					return;
-				}
-				parsed[spec.name] = val;
-			}
-			const calories = parsed.calories ?? 0;
-			const protein = parsed.protein ?? 0;
-			const carbs = parsed.carbs ?? 0;
-			const fat = parsed.fat ?? 0;
-			const fiber = parsed.fiber ?? 0;
 
-			const entry: MealMacroEntry = {
-				recipeId: 'manual',
-				recipeTitle: label,
-				mealType: 'manual',
-				servingsEaten: 1,
-				macros: { calories, protein, carbs, fat, fiber },
-			};
-			const today = todayDate(services.timezone);
-			await logMealMacros(userStore, userId, entry, today);
+			const recipes = await loadAllRecipes(sharedStore);
+			const match = matchRecipes(labelText, recipes);
+
+			if (match.kind === 'unique') {
+				const r = match.recipe;
+				const per = r.macros ?? {};
+				const scale = portion.value;
+				const scaled = {
+					calories: Math.round((per.calories ?? 0) * scale),
+					protein: Math.round((per.protein ?? 0) * scale),
+					carbs: Math.round((per.carbs ?? 0) * scale),
+					fat: Math.round((per.fat ?? 0) * scale),
+					fiber: Math.round((per.fiber ?? 0) * scale),
+				};
+				const entry: MealMacroEntry = {
+					recipeId: r.id,
+					recipeTitle: r.title,
+					mealType: 'logged',
+					servingsEaten: scale,
+					macros: scaled,
+					estimationKind: 'recipe',
+					sourceId: r.id,
+				};
+				const today = todayDate(services.timezone);
+				await logMealMacros(userStore, userId, entry, today);
+				await services.telegram.send(userId,
+					`Logged: **${r.title}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
+				return;
+			}
+
+			if (match.kind === 'ambiguous') {
+				const buttons: InlineButton[][] = match.candidates.map(c => [{
+					text: c.title,
+					callbackData: `app:food:nut:log:recipe:${c.id}:${portion.value}`,
+				}]);
+				buttons.push([{ text: 'None of these', callbackData: 'app:food:nut:log:none' }]);
+				await services.telegram.sendWithButtons(
+					userId,
+					`Which recipe did you mean?`,
+					buttons,
+				);
+				return;
+			}
+
+			// match.kind === 'none' — placeholder until Tasks 10/12 wire
+			// quick-meal + ad-hoc fallthroughs.
 			await services.telegram.send(userId,
-				`Logged: **${label}** — ${calories} cal, ${protein}g protein`);
+				`No recipe matched '${labelText}'. (Quick-meal and ad-hoc paths arrive in later H11.w tasks.)`);
 			return;
 		}
 
