@@ -21,7 +21,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestContext } from '../../../../../core/src/services/context/request-context.js';
-import type { Recipe, MonthlyMacroLog } from '../../types.js';
+import { saveQuickMeal, loadQuickMeals } from '../../services/quick-meals-store.js';
+import type { Recipe, MonthlyMacroLog, QuickMealTemplate } from '../../types.js';
 
 // Mock loadAllRecipes so each test can control the recipe library without
 // needing to write real YAML files through recipe-store's formatter.
@@ -331,5 +332,88 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		expect(entry.recipeTitle).toBe('lunch');
 		expect(entry.macros.calories).toBe(600);
 		expect(entry.macros.protein).toBe(40);
+	});
+});
+
+function quickMealFixture(overrides: Partial<QuickMealTemplate> = {}): QuickMealTemplate {
+	return {
+		id: 'm1',
+		userId: 'u1',
+		label: 'Meal',
+		kind: 'home',
+		ingredients: ['rice'],
+		estimatedMacros: { calories: 500, protein: 20, carbs: 60, fat: 15, fiber: 5 },
+		confidence: 0.7,
+		llmModel: 'test-model',
+		usageCount: 0,
+		createdAt: '2026-04-09T00:00:00Z',
+		updatedAt: '2026-04-09T00:00:00Z',
+		...overrides,
+	};
+}
+
+describe('H11.w — /nutrition meals list + remove', () => {
+	it('lists quick-meals grouped by kind and sorted by usageCount desc', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'a', label: 'A', kind: 'home', usageCount: 1 }));
+		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'b', label: 'B', kind: 'restaurant', usageCount: 5 }));
+		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'c', label: 'C', kind: 'home', usageCount: 3 }));
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['meals', 'list'], 'u1', sharedStore as never),
+		);
+
+		const msg = telegram.lastMessage ?? '';
+		expect(msg).toContain('A');
+		expect(msg).toContain('B');
+		expect(msg).toContain('C');
+		// C (home, 3) must appear before A (home, 1) in the home group.
+		expect(msg.indexOf('C')).toBeLessThan(msg.indexOf('A'));
+		// restaurant section must appear and contain B.
+		expect(msg).toMatch(/restaurant/i);
+	});
+
+	it('shows an empty-state hint when no quick-meals exist', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['meals', 'list'], 'u1', sharedStore as never),
+		);
+		expect(telegram.lastMessage).toMatch(/no quick-meals/i);
+		expect(telegram.lastMessage).toMatch(/meals add/i);
+	});
+
+	it('removes a quick-meal by label (case-insensitive slugify)', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'chipotle-bowl', label: 'Chipotle Bowl' }));
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['meals', 'remove', 'chipotle', 'bowl'], 'u1', sharedStore as never),
+		);
+		const list = await loadQuickMeals(userStore as never);
+		expect(list).toHaveLength(0);
+		expect(telegram.lastMessage).toMatch(/removed/i);
+	});
+
+	it('remove with no label arg shows usage', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['meals', 'remove'], 'u1', sharedStore as never),
+		);
+		expect(telegram.lastMessage).toMatch(/usage/i);
 	});
 });

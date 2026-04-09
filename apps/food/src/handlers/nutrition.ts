@@ -12,6 +12,11 @@ import { loadAllRecipes } from '../services/recipe-store.js';
 import { matchRecipes } from '../services/recipe-matcher.js';
 import { parsePortion } from '../services/portion-parser.js';
 import {
+	loadQuickMeals,
+	archiveQuickMeal,
+	slugifyLabel,
+} from '../services/quick-meals-store.js';
+import {
 	loadMonthlyLog,
 	getDailyMacros,
 	computeProgress,
@@ -160,6 +165,59 @@ export async function handleNutritionCommand(
 
 			const summary = await generatePersonalSummary(services, userStore, userId, startDate, endDate, targets);
 			await services.telegram.send(userId, summary);
+			return;
+		}
+
+		if (subCommand === 'meals') {
+			const mealsSub = args[1]?.toLowerCase();
+
+			if (!mealsSub || mealsSub === 'list') {
+				const list = await loadQuickMeals(userStore);
+				if (list.length === 0) {
+					await services.telegram.send(userId,
+						'No quick-meals saved yet. Use `/nutrition meals add` to create one.');
+					return;
+				}
+				const byKind: Record<'home' | 'restaurant' | 'other', typeof list> = {
+					home: [], restaurant: [], other: [],
+				};
+				for (const t of list) byKind[t.kind].push(t);
+				for (const k of Object.keys(byKind) as Array<keyof typeof byKind>) {
+					byKind[k].sort((a, b) => b.usageCount - a.usageCount);
+				}
+				const lines: string[] = ['**Quick Meals**'];
+				for (const k of ['home', 'restaurant', 'other'] as const) {
+					if (byKind[k].length === 0) continue;
+					lines.push('', `_${k}_`);
+					for (const t of byKind[k]) {
+						lines.push(`- **${t.label}** — ${t.estimatedMacros.calories ?? 0} cal (${t.usageCount}× used)`);
+					}
+				}
+				await services.telegram.send(userId, lines.join('\n'));
+				return;
+			}
+
+			if (mealsSub === 'remove') {
+				const label = args.slice(2).join(' ').trim();
+				if (!label) {
+					await services.telegram.send(userId, 'Usage: `/nutrition meals remove <label>`');
+					return;
+				}
+				const id = slugifyLabel(label);
+				await archiveQuickMeal(userStore, id);
+				await services.telegram.send(userId, `Removed quick-meal: ${label}`);
+				return;
+			}
+
+			if (mealsSub === 'add' || mealsSub === 'edit') {
+				// Scaffolded in Tasks 10b / 10c — do NOT implement here.
+				await services.telegram.send(userId,
+					`meals ${mealsSub} arrives in the next H11.w sub-task.`);
+				return;
+			}
+
+			await services.telegram.send(userId,
+				'Unknown: `/nutrition meals <add|list|edit|remove>`');
 			return;
 		}
 
@@ -441,6 +499,9 @@ export async function handleNutritionCommand(
 			'`/nutrition week` — Weekly macros\n' +
 			'`/nutrition month` — Monthly macros\n' +
 			'`/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]` — Manual macro entry\n' +
+			'`/nutrition log <meal name> [portion]` — Log a recipe or quick-meal\n' +
+			'`/nutrition meals list` — List saved quick-meals\n' +
+			'`/nutrition meals remove <label>` — Remove a saved quick-meal\n' +
 			'`/nutrition adherence [days]` — Adherence vs targets over period (default 30)\n' +
 			'`/nutrition targets` — View/set macro targets\n' +
 			'`/nutrition pediatrician <child> [days]` — Child nutrition report');
