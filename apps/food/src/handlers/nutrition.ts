@@ -117,6 +117,44 @@ export function isNutritionViewIntent(text: string): boolean {
 	return NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower);
 }
 
+// ─── H11.w Task 15: Natural-language meal-log intent ────────────────────────
+//
+// Matches free-text phrasings that look like the user is *reporting* a
+// meal they just ate ("I had / I ate / I just finished / log / tracking ...")
+// but explicitly excludes nutrition-query phrasings so that
+// isNutritionViewIntent keeps handling "how are my macros", "show my
+// nutrition summary", etc. Used by apps/food/src/index.ts#handleMessage
+// to dispatch into handleNutritionLogNL, which bypasses the legacy
+// 6-arg numeric guard in /nutrition log.
+
+const LOG_MEAL_NL_RE =
+	/^\s*(i\s+(?:just\s+)?(?:had|ate|finished)|(?:just\s+)?(?:had|ate|finished)|log(?:ged)?|i'?m\s+logging|tracking)\b/i;
+
+const LOG_MEAL_NL_EXCLUSION_RE =
+	/\b(how\s+are|how\s+much|how'?s|what\s+(?:did|should|can)|show|summary|report|adherence|on\s+track|my\s+macros|my\s+nutrition|am\s+i|progress)\b/i;
+
+export function isLogMealNLIntent(text: string): boolean {
+	return LOG_MEAL_NL_RE.test(text) && !LOG_MEAL_NL_EXCLUSION_RE.test(text);
+}
+
+/**
+ * Strip the leading NL verb phrase + common fillers and return the
+ * remaining text describing the meal. The result is handed to
+ * `handleNutritionLogNL`, which portion-parses the tail and dispatches
+ * through the shared smart-log pipeline.
+ */
+export function extractLogMealText(text: string): string {
+	let rest = text.trim();
+	rest = rest.replace(
+		/^\s*(i\s+(?:just\s+)?(?:had|ate|finished)|(?:just\s+)?(?:had|ate|finished)|log(?:ged)?|i'?m\s+logging|tracking)\b[\s,:-]*/i,
+		'',
+	);
+	rest = rest.replace(/^\s*(?:my\s+usual|a|an|the|some|my)\s+/i, '');
+	rest = rest.replace(/\band\s+some\s+/gi, 'and ');
+	rest = rest.replace(/\s{2,}/g, ' ').trim();
+	return rest;
+}
+
 // ─── Helpers ────���───────────────────��──────────────────────────────────��──────
 
 const TARGETS_FILE = 'nutrition/targets.yaml';
@@ -421,8 +459,10 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			// Path 2+: Smart log — recipe reference (quick-meal / ad-hoc fallthroughs
-			// arrive in H11.w Tasks 10/12).
+			// Path 2+: Smart log — delegated to the shared dispatchSmartLog
+			// helper so the NL path (handleNutritionLogNL) can reuse the
+			// exact same recipe → quick-meal → ad-hoc pipeline without
+			// the legacy 6-arg numeric guard above.
 			const rawArgs = args.slice(1);
 			if (rawArgs.length === 0) {
 				await services.telegram.send(userId,
@@ -460,131 +500,7 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const recipes = await loadAllRecipes(sharedStore);
-			const match = matchRecipes(labelText, recipes);
-
-			if (match.kind === 'unique') {
-				const r = match.recipe;
-				const per = r.macros ?? {};
-				const scale = portion.value;
-				const scaled = {
-					calories: Math.round((per.calories ?? 0) * scale),
-					protein: Math.round((per.protein ?? 0) * scale),
-					carbs: Math.round((per.carbs ?? 0) * scale),
-					fat: Math.round((per.fat ?? 0) * scale),
-					fiber: Math.round((per.fiber ?? 0) * scale),
-				};
-				const entry: MealMacroEntry = {
-					recipeId: r.id,
-					recipeTitle: r.title,
-					mealType: 'logged',
-					servingsEaten: scale,
-					macros: scaled,
-					estimationKind: 'recipe',
-					sourceId: r.id,
-				};
-				const today = todayDate(services.timezone);
-				await logMealMacros(userStore, userId, entry, today);
-				await services.telegram.send(userId,
-					`Logged: **${r.title}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
-				return;
-			}
-
-			if (match.kind === 'ambiguous') {
-				const buttons: InlineButton[][] = match.candidates.map(c => [{
-					text: c.title,
-					callbackData: `app:food:nut:log:recipe:${c.id}:${portion.value}`,
-				}]);
-				buttons.push([{ text: 'None of these', callbackData: 'app:food:nut:log:none' }]);
-				await services.telegram.sendWithButtons(
-					userId,
-					`Which recipe did you mean?`,
-					buttons,
-				);
-				return;
-			}
-
-			// match.kind === 'none' — try quick-meal label fallthrough
-			// (Task 11). Ad-hoc LLM path arrives in Task 12.
-			const quickMeals = await loadQuickMeals(userStore);
-			let wantedSlug: string | null = null;
-			try {
-				wantedSlug = slugifyLabel(labelText);
-			} catch {
-				wantedSlug = null;
-			}
-			const needle = labelText.toLowerCase();
-			const qm = quickMeals.find(
-				(m) => (wantedSlug && m.id === wantedSlug) || m.label.toLowerCase() === needle,
-			);
-			if (qm) {
-				await logQuickMeal(userStore, userId, qm, portion.value, services);
-				return;
-			}
-
-			// Path 4: Ad-hoc LLM estimate (Task 12). Last-resort fallthrough.
-			const est = await estimateMacros(
-				{ label: labelText, ingredients: [labelText], kind: 'other' },
-				services.llm,
-			);
-			if (!est.ok) {
-				await services.telegram.send(
-					userId,
-					`Couldn't estimate macros for '${labelText}': ${est.error}. Try rephrasing or use \`/nutrition meals add\` to save a quick-meal.`,
-				);
-				return;
-			}
-
-			const scale = portion.value;
-			const scaledAdHoc = {
-				calories: Math.round((est.macros.calories ?? 0) * scale),
-				protein: Math.round((est.macros.protein ?? 0) * scale),
-				carbs: Math.round((est.macros.carbs ?? 0) * scale),
-				fat: Math.round((est.macros.fat ?? 0) * scale),
-				fiber: Math.round((est.macros.fiber ?? 0) * scale),
-			};
-			const adHocEntry: MealMacroEntry = {
-				recipeId: 'adhoc',
-				recipeTitle: labelText,
-				mealType: 'logged',
-				servingsEaten: scale,
-				macros: scaledAdHoc,
-				estimationKind: 'llm-ad-hoc',
-				confidence: est.confidence,
-				// sourceId intentionally omitted for ad-hoc entries.
-			};
-			const adHocToday = todayDate(services.timezone);
-			await logMealMacros(userStore, userId, adHocEntry, adHocToday);
-
-			// Task 14: check for similar prior ad-hoc BEFORE recording. If a
-			// match exists, the current log is at least the 2nd occurrence
-			// and we follow up with a "save as quick-meal?" prompt.
-			const priorSimilar = await findSimilarAdHoc(userStore, labelText);
-			await recordAdHocLog(userStore, labelText, adHocToday);
-
-			const lowConf = est.confidence < 0.5;
-			const flag = lowConf ? ' *' : '';
-			const legend = lowConf ? '\n_* low-confidence estimate_' : '';
-			await services.telegram.send(
-				userId,
-				`Logged${flag}: **${labelText}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
-			);
-
-			// Task 14: fire-and-forget follow-up prompt (does not block the
-			// confirm). Only fires on 2nd or later similar occurrence.
-			if (priorSimilar) {
-				setPendingPromotion(userId, labelText, [labelText]);
-				await services.telegram.sendWithButtons(
-					userId,
-					`You've logged "${labelText}" before. Save it as a quick-meal for one-tap logging next time?`,
-					[
-						[
-							{ text: 'Yes, save', callbackData: 'app:food:nut:log:promote:yes' },
-							{ text: 'No thanks', callbackData: 'app:food:nut:log:promote:no' },
-						],
-					],
-				);
-			}
+			await dispatchSmartLog(services, userStore, sharedStore, userId, labelText, portion.value);
 			return;
 		}
 
@@ -718,5 +634,210 @@ export async function handleNutritionCommand(
 	} catch (err) {
 		services.logger.error('handleNutritionCommand failed', err);
 		await services.telegram.send(userId, 'Unable to generate nutrition report. Please try again.');
+	}
+}
+
+// ─── H11.w Task 15: Shared smart-log dispatcher ─────────────────────────────
+//
+// Extracted from handleNutritionCommand's /nutrition log subcommand so the
+// NL path (handleNutritionLogNL) can reuse the same recipe → quick-meal →
+// ad-hoc pipeline without going through the legacy 6-arg numeric guard.
+async function dispatchSmartLog(
+	services: CoreServices,
+	userStore: ScopedDataStore,
+	sharedStore: ScopedDataStore,
+	userId: string,
+	labelText: string,
+	portionValue: number,
+): Promise<void> {
+	const recipes = await loadAllRecipes(sharedStore);
+	const match = matchRecipes(labelText, recipes);
+
+	if (match.kind === 'unique') {
+		const r = match.recipe;
+		const per = r.macros ?? {};
+		const scale = portionValue;
+		const scaled = {
+			calories: Math.round((per.calories ?? 0) * scale),
+			protein: Math.round((per.protein ?? 0) * scale),
+			carbs: Math.round((per.carbs ?? 0) * scale),
+			fat: Math.round((per.fat ?? 0) * scale),
+			fiber: Math.round((per.fiber ?? 0) * scale),
+		};
+		const entry: MealMacroEntry = {
+			recipeId: r.id,
+			recipeTitle: r.title,
+			mealType: 'logged',
+			servingsEaten: scale,
+			macros: scaled,
+			estimationKind: 'recipe',
+			sourceId: r.id,
+		};
+		const today = todayDate(services.timezone);
+		await logMealMacros(userStore, userId, entry, today);
+		await services.telegram.send(userId,
+			`Logged: **${r.title}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
+		return;
+	}
+
+	if (match.kind === 'ambiguous') {
+		const buttons: InlineButton[][] = match.candidates.map(c => [{
+			text: c.title,
+			callbackData: `app:food:nut:log:recipe:${c.id}:${portionValue}`,
+		}]);
+		buttons.push([{ text: 'None of these', callbackData: 'app:food:nut:log:none' }]);
+		await services.telegram.sendWithButtons(
+			userId,
+			`Which recipe did you mean?`,
+			buttons,
+		);
+		return;
+	}
+
+	// match.kind === 'none' — quick-meal label fallthrough.
+	const quickMeals = await loadQuickMeals(userStore);
+	let wantedSlug: string | null = null;
+	try {
+		wantedSlug = slugifyLabel(labelText);
+	} catch {
+		wantedSlug = null;
+	}
+	const needle = labelText.toLowerCase();
+	const qm = quickMeals.find(
+		(m) => (wantedSlug && m.id === wantedSlug) || m.label.toLowerCase() === needle,
+	);
+	if (qm) {
+		await logQuickMeal(userStore, userId, qm, portionValue, services);
+		return;
+	}
+
+	// Ad-hoc LLM estimate — last resort.
+	const est = await estimateMacros(
+		{ label: labelText, ingredients: [labelText], kind: 'other' },
+		services.llm,
+	);
+	if (!est.ok) {
+		await services.telegram.send(
+			userId,
+			`Couldn't estimate macros for '${labelText}': ${est.error}. Try rephrasing or use \`/nutrition meals add\` to save a quick-meal.`,
+		);
+		return;
+	}
+
+	const scale = portionValue;
+	const scaledAdHoc = {
+		calories: Math.round((est.macros.calories ?? 0) * scale),
+		protein: Math.round((est.macros.protein ?? 0) * scale),
+		carbs: Math.round((est.macros.carbs ?? 0) * scale),
+		fat: Math.round((est.macros.fat ?? 0) * scale),
+		fiber: Math.round((est.macros.fiber ?? 0) * scale),
+	};
+	const adHocEntry: MealMacroEntry = {
+		recipeId: 'adhoc',
+		recipeTitle: labelText,
+		mealType: 'logged',
+		servingsEaten: scale,
+		macros: scaledAdHoc,
+		estimationKind: 'llm-ad-hoc',
+		confidence: est.confidence,
+		// sourceId intentionally omitted for ad-hoc entries.
+	};
+	const adHocToday = todayDate(services.timezone);
+	await logMealMacros(userStore, userId, adHocEntry, adHocToday);
+
+	const priorSimilar = await findSimilarAdHoc(userStore, labelText);
+	await recordAdHocLog(userStore, labelText, adHocToday);
+
+	const lowConf = est.confidence < 0.5;
+	const flag = lowConf ? ' *' : '';
+	const legend = lowConf ? '\n_* low-confidence estimate_' : '';
+	await services.telegram.send(
+		userId,
+		`Logged${flag}: **${labelText}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
+	);
+
+	if (priorSimilar) {
+		setPendingPromotion(userId, labelText, [labelText]);
+		await services.telegram.sendWithButtons(
+			userId,
+			`You've logged "${labelText}" before. Save it as a quick-meal for one-tap logging next time?`,
+			[
+				[
+					{ text: 'Yes, save', callbackData: 'app:food:nut:log:promote:yes' },
+					{ text: 'No thanks', callbackData: 'app:food:nut:log:promote:no' },
+				],
+			],
+		);
+	}
+}
+
+/**
+ * Natural-language entry point for meal logging.
+ *
+ * Skips the legacy 6-arg numeric guard in /nutrition log and dispatches
+ * straight into the shared smart-log pipeline (recipe → quick-meal →
+ * ad-hoc LLM). The caller is expected to have already detected the
+ * intent via `isLogMealNLIntent(text)`; this function parses an
+ * optional trailing portion token from the cleaned meal text and
+ * dispatches accordingly.
+ */
+export async function handleNutritionLogNL(
+	services: CoreServices,
+	text: string,
+	userId: string,
+	sharedStore: ScopedDataStore,
+): Promise<void> {
+	const userStore = services.data.forUser(userId);
+	try {
+		const cleaned = extractLogMealText(text);
+		if (!cleaned) {
+			await services.telegram.send(
+				userId,
+				'What did you eat? Try "I had chicken curry" or "I ate half the lasagna".',
+			);
+			return;
+		}
+
+		// Tokenize and peel off a leading OR trailing portion if present.
+		// Leading: "half of the lasagna", "1/2 the lasagna", "a quarter
+		// of the pizza". After peeling, also strip a trailing "of" / "of the"
+		// connector so the matcher sees the bare label.
+		const tokens = cleaned.split(/\s+/);
+		let portionValue = 1;
+		let labelText = cleaned;
+		if (tokens.length >= 2) {
+			const leading = parsePortion(tokens[0]!);
+			if (leading.ok) {
+				portionValue = leading.value;
+				let rest = tokens.slice(1);
+				// Strip a leading "of the" / "of" connector.
+				if (rest[0]?.toLowerCase() === 'of') rest = rest.slice(1);
+				if (rest[0]?.toLowerCase() === 'the') rest = rest.slice(1);
+				labelText = rest.join(' ');
+			} else {
+				const trailing = parsePortion(tokens[tokens.length - 1]!);
+				if (trailing.ok) {
+					portionValue = trailing.value;
+					labelText = tokens.slice(0, -1).join(' ');
+				}
+			}
+		}
+
+		if (labelText.length === 0) {
+			await services.telegram.send(
+				userId,
+				'What did you eat? Try "I had chicken curry" or "I ate half the lasagna".',
+			);
+			return;
+		}
+		if (labelText.length > 100) {
+			await services.telegram.send(userId, 'Invalid label: must be 100 characters or fewer.');
+			return;
+		}
+
+		await dispatchSmartLog(services, userStore, sharedStore, userId, labelText, portionValue);
+	} catch (err) {
+		services.logger.error('handleNutritionLogNL failed', err);
+		await services.telegram.send(userId, 'Unable to log meal. Please try again.');
 	}
 }

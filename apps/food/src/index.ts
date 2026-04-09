@@ -50,7 +50,9 @@ import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/lefto
 import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
 import {
 	handleNutritionCommand as handleNutritionCmd,
+	handleNutritionLogNL,
 	handleAdHocPromotionCallback,
+	isLogMealNLIntent,
 	isNutritionViewIntent,
 } from './handlers/nutrition.js';
 import {
@@ -444,6 +446,25 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H10: Price update intent — "eggs are $3.50 at costco"
 	if (isPriceUpdateIntent(lower)) {
 		await handlePriceUpdateIntent(text, ctx);
+		return;
+	}
+
+	// H11.w Task 15: Natural-language meal log intent — "I had X",
+	// "I just ate X", "log X". Routes into handleNutritionLogNL which
+	// bypasses the legacy 6-arg numeric guard in /nutrition log.
+	// Must run BEFORE isNutritionViewIntent so "I had lasagna" doesn't
+	// get eaten by the macro-view intent, and the exclusion list in
+	// isLogMealNLIntent keeps "how are my macros" on the view path.
+	if (isLogMealNLIntent(text)) {
+		const hh = await requireHousehold(services, ctx.userId);
+		if (!hh) {
+			await services.telegram.send(
+				ctx.userId,
+				'Set up a household first with /household create <name>',
+			);
+			return;
+		}
+		await handleNutritionLogNL(services, text, ctx.userId, hh.sharedStore);
 		return;
 	}
 
