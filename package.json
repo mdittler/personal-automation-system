@@ -33,6 +33,7 @@
 	},
 	"dependencies": {
 		"cron-parser": "^5.5.0",
-		"cronstrue": "^3.13.0"
+		"cronstrue": "^3.13.0",
+		"zod": "^3.23.0"
 	}
 }
