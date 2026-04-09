@@ -19,7 +19,7 @@ import type {
 import type { AudioService } from '../../types/audio.js';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
-import { llmContext } from '../llm/llm-context.js';
+import { requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
@@ -436,7 +436,7 @@ async function executeDispatchMessage(
 	};
 
 	// Wrap in LLM context for per-user cost attribution (same as API messages route)
-	await llmContext.run({ userId: config.user_id }, () => deps.router!.routeMessage(ctx));
+	await requestContext.run({ userId: config.user_id }, () => deps.router!.routeMessage(ctx));
 
 	deps.logger.info(
 		{ userId: config.user_id, textLength: text.length },

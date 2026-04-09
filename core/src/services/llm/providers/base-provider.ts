@@ -15,7 +15,7 @@ import {
 	type ProviderType,
 } from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
-import { getCurrentUserId } from '../llm-context.js';
+import { getCurrentUserId } from '../../context/request-context.js';
 import { withRetry } from '../retry.js';
 
 export interface BaseProviderOptions {

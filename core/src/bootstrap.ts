@@ -35,7 +35,7 @@ import { EventBusServiceImpl } from './services/event-bus/index.js';
 import { InviteService } from './services/invite/index.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
 import { LLMServiceImpl } from './services/llm/index.js';
-import { llmContext } from './services/llm/llm-context.js';
+import { requestContext } from './services/context/request-context.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
 import { ModelCatalog } from './services/llm/model-catalog.js';
 import { ModelSelector } from './services/llm/model-selector.js';
@@ -549,7 +549,7 @@ export async function main(): Promise<void> {
 			}
 
 			// Wrap in LLM context so cost tracking can attribute LLM calls to this user
-			await llmContext.run({ userId: messageCtx.userId }, () => router.routeMessage(messageCtx));
+			await requestContext.run({ userId: messageCtx.userId }, () => router.routeMessage(messageCtx));
 		});
 	});
 
@@ -568,7 +568,7 @@ export async function main(): Promise<void> {
 
 			const photoCtx = await adaptPhotoMessage(ctx, photoLogger);
 			if (photoCtx) {
-				await llmContext.run({ userId: photoCtx.userId }, () => router.routePhoto(photoCtx));
+				await requestContext.run({ userId: photoCtx.userId }, () => router.routePhoto(photoCtx));
 			} else if (ctx.message?.photo) {
 				// Photo was present but adapter returned null (download failed)
 				if (userId) {
@@ -608,7 +608,7 @@ export async function main(): Promise<void> {
 					const appEntry = registry.getApp(chosenAppId);
 
 					// Dispatch to chosen app (wrap in LLM context for cost tracking)
-					await llmContext.run({ userId }, async () => {
+					await requestContext.run({ userId }, async () => {
 						if (chosenAppId === 'chatbot' && chatbotApp) {
 							await chatbotApp.module.handleMessage(
 								entry.ctx as import('./types/telegram.js').MessageContext,
@@ -654,7 +654,7 @@ export async function main(): Promise<void> {
 							messageId: ctx.callbackQuery.message?.message_id ?? 0,
 						};
 						const handler = appEntry.module.handleCallbackQuery;
-						await llmContext.run({ userId }, () => handler(customData, callbackCtx));
+						await requestContext.run({ userId }, () => handler(customData, callbackCtx));
 					}
 					return;
 				}

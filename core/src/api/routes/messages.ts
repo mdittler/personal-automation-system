@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { llmContext } from '../../services/llm/llm-context.js';
+import { requestContext } from '../../services/context/request-context.js';
 import type { Router } from '../../services/router/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { MessageContext } from '../../types/telegram.js';
@@ -77,7 +77,7 @@ export function registerMessagesRoute(
 			};
 
 			// Wrap in LLM context for per-user cost attribution
-			await llmContext.run({ userId }, () => router.routeMessage(ctx));
+			await requestContext.run({ userId }, () => router.routeMessage(ctx));
 
 			logger.info({ userId, textLength: text.length }, 'API message dispatched');
 
