@@ -865,3 +865,180 @@ describe('H11.w — /nutrition meals edit guided flow', () => {
 		expect(hasPendingQuickMealEdit('u1')).toBe(false);
 	});
 });
+
+describe('H11.w — /nutrition log quick-pick grid and quick-meal path', () => {
+	it('no-args shows top-5 most-used quick-meal buttons', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		// Seed 7 quick-meals with usageCount 0..6.
+		for (let i = 0; i < 7; i++) {
+			await saveQuickMeal(
+				userStore as never,
+				quickMealFixture({
+					id: `meal-${i}`,
+					label: `Meal ${i}`,
+					usageCount: i,
+					estimatedMacros: { calories: 100 + i * 10, protein: 10, carbs: 20, fat: 5, fiber: 2 },
+				}),
+			);
+		}
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['log'], 'u1', sharedStore as never),
+		);
+
+		expect(telegram.sendWithButtons).toHaveBeenCalled();
+		const buttons = telegram.lastButtons as Array<Array<{ text: string; callbackData: string }>>;
+		const flat = buttons.flat();
+		const quickMealButtons = flat.filter((b) => b.callbackData.startsWith('app:food:nut:log:quickmeal:'));
+		expect(quickMealButtons.length).toBeGreaterThanOrEqual(5);
+		// Highest usage = Meal 6 — should be in the first quick-meal button.
+		expect(quickMealButtons[0]!.text).toContain('Meal 6');
+		// Escape row present.
+		expect(flat.some((b) => b.callbackData === 'app:food:nut:log:adhoc-prompt')).toBe(true);
+	});
+
+	it('no-args with empty quick-meal store sends usage message (no buttons)', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(services as never, ['log'], 'u1', sharedStore as never),
+		);
+
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+		expect(telegram.lastMessage).toMatch(/usage/i);
+		expect(telegram.lastMessage).toMatch(/meals add/i);
+	});
+
+	it('quick-meal log via callback with portion 1 logs at full macros and bumps usageCount', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({
+				id: 'chipotle-bowl',
+				label: 'Chipotle bowl',
+				kind: 'restaurant',
+				estimatedMacros: { calories: 850, protein: 50, carbs: 80, fat: 35, fiber: 12 },
+				confidence: 0.75,
+				usageCount: 1,
+			}),
+		);
+
+		// Use the callback router the same way handleCallbackQuery would.
+		const { handleQuickMealLogCallback } = await import('../../handlers/quick-meal-log.js');
+		await dispatchAs('u1', () =>
+			handleQuickMealLogCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:log:quickmeal:chipotle-bowl:1',
+			),
+		);
+
+		// Read back the log.
+		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
+		expect(key).toBeDefined();
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
+		const entry = log!.days[0]!.meals[0]!;
+		expect(entry.sourceId).toBe('chipotle-bowl');
+		expect(entry.estimationKind).toBe('quick-meal');
+		expect(entry.confidence).toBe(0.75);
+		expect(entry.macros.calories).toBe(850);
+		expect(entry.servingsEaten).toBe(1);
+
+		// usageCount bumped to 2.
+		const list = await loadQuickMeals(userStore as never);
+		const updated = list.find((m) => m.id === 'chipotle-bowl')!;
+		expect(updated.usageCount).toBe(2);
+	});
+
+	it('quick-meal log via callback with portion 0.5 scales macros', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({
+				id: 'chipotle-bowl',
+				label: 'Chipotle bowl',
+				kind: 'restaurant',
+				estimatedMacros: { calories: 850, protein: 50, carbs: 80, fat: 35, fiber: 12 },
+				confidence: 0.75,
+				usageCount: 1,
+			}),
+		);
+
+		const { handleQuickMealLogCallback } = await import('../../handlers/quick-meal-log.js');
+		await dispatchAs('u1', () =>
+			handleQuickMealLogCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:log:quickmeal:chipotle-bowl:0.5',
+			),
+		);
+
+		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
+		const entry = log!.days[0]!.meals[0]!;
+		expect(entry.servingsEaten).toBe(0.5);
+		expect(entry.macros.calories).toBe(425);
+		expect(entry.macros.protein).toBe(25);
+	});
+
+	it('/nutrition log <label> falls through to quick-meal match when no recipe matches', async () => {
+		mockRecipes.current = []; // no recipes
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+		const sharedStore = buildUserStore();
+
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({
+				id: 'chipotle-bowl',
+				label: 'Chipotle bowl',
+				kind: 'restaurant',
+				estimatedMacros: { calories: 850, protein: 50, carbs: 80, fat: 35, fiber: 12 },
+				confidence: 0.75,
+				usageCount: 0,
+			}),
+		);
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'chipotle', 'bowl', '1'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/') && k.endsWith('.yaml'));
+		expect(key).toBeDefined();
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
+		const entry = log!.days[0]!.meals[0]!;
+		expect(entry.sourceId).toBe('chipotle-bowl');
+		expect(entry.estimationKind).toBe('quick-meal');
+		expect(entry.macros.calories).toBe(850);
+	});
+});

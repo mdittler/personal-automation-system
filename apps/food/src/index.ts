@@ -60,6 +60,7 @@ import {
 	hasPendingQuickMealAdd,
 	hasPendingQuickMealEdit,
 } from './handlers/quick-meal-flow.js';
+import { handleQuickMealLogCallback } from './handlers/quick-meal-log.js';
 import {
 	handlePerishableCallback,
 	handlePerishableCheckJob,
@@ -1188,6 +1189,16 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data.startsWith('app:food:nut:meals:edit:')) {
 			const userStore = services.data.forUser(ctx.userId);
 			await handleQuickMealEditCallback(services, userStore, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.w Task 11: Quick-meal log / adhoc-prompt callbacks ──
+		if (
+			data.startsWith('app:food:nut:log:quickmeal:') ||
+			data === 'app:food:nut:log:adhoc-prompt'
+		) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleQuickMealLogCallback(services, userStore, ctx.userId, data);
 			return;
 		}
 

@@ -18,6 +18,7 @@ import {
 	slugifyLabel,
 } from '../services/quick-meals-store.js';
 import { beginQuickMealAdd, beginQuickMealEdit } from './quick-meal-flow.js';
+import { logQuickMeal } from './quick-meal-log.js';
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -244,6 +245,41 @@ export async function handleNutritionCommand(
 		}
 
 		if (subCommand === 'log') {
+			// Path 0: No-args — show a quick-pick button grid of the user's
+			// top-5 most-used quick-meals plus a "Something else…" escape.
+			if (args.length === 1) {
+				const meals = await loadQuickMeals(userStore);
+				if (meals.length === 0) {
+					await services.telegram.send(
+						userId,
+						'Usage: `/nutrition log <recipe or meal>`. Save frequent meals with `/nutrition meals add`.',
+					);
+					return;
+				}
+				const top = [...meals].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5);
+				const rows: InlineButton[][] = [];
+				for (let i = 0; i < top.length; i += 2) {
+					const row: InlineButton[] = [];
+					for (const qm of top.slice(i, i + 2)) {
+						const cal = qm.estimatedMacros.calories ?? 0;
+						row.push({
+							text: `${qm.label} (${cal} cal)`,
+							callbackData: `app:food:nut:log:quickmeal:${qm.id}:1`,
+						});
+					}
+					rows.push(row);
+				}
+				rows.push([
+					{ text: 'Something else…', callbackData: 'app:food:nut:log:adhoc-prompt' },
+				]);
+				await services.telegram.sendWithButtons(
+					userId,
+					'What did you eat? Pick a quick-meal or choose "Something else…":',
+					rows,
+				);
+				return;
+			}
+
 			// Path 1: Legacy numeric form — preserved verbatim for back-compat.
 			// Triggered when the caller supplies a label plus at least four
 			// following tokens (calories, protein, carbs, fat) — i.e. args.length >= 6.
@@ -393,10 +429,26 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			// match.kind === 'none' — placeholder until Tasks 10/12 wire
-			// quick-meal + ad-hoc fallthroughs.
+			// match.kind === 'none' — try quick-meal label fallthrough
+			// (Task 11). Ad-hoc LLM path arrives in Task 12.
+			const quickMeals = await loadQuickMeals(userStore);
+			let wantedSlug: string | null = null;
+			try {
+				wantedSlug = slugifyLabel(labelText);
+			} catch {
+				wantedSlug = null;
+			}
+			const needle = labelText.toLowerCase();
+			const qm = quickMeals.find(
+				(m) => (wantedSlug && m.id === wantedSlug) || m.label.toLowerCase() === needle,
+			);
+			if (qm) {
+				await logQuickMeal(userStore, userId, qm, portion.value, services);
+				return;
+			}
+
 			await services.telegram.send(userId,
-				`No recipe matched '${labelText}'. (Quick-meal and ad-hoc paths arrive in later H11.w tasks.)`);
+				`No recipe or quick-meal matched '${labelText}'. Try \`/nutrition meals add\` to save it, or rephrase.`);
 			return;
 		}
 
