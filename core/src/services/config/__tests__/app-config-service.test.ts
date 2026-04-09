@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ManifestUserConfig } from '../../../types/manifest.js';
 import { readYamlFile } from '../../../utils/yaml.js';
+import { requestContext } from '../../context/request-context.js';
 import { AppConfigServiceImpl } from '../app-config-service.js';
 
 let tempDir: string;
@@ -35,16 +36,12 @@ describe('AppConfigServiceImpl', () => {
 			appId: 'test-app',
 			defaults,
 		});
-		svc.setUserId('user1');
 
-		const theme = await svc.get<string>('theme');
-		expect(theme).toBe('light');
-
-		const notify = await svc.get<boolean>('notify');
-		expect(notify).toBe(true);
-
-		const maxItems = await svc.get<number>('max_items');
-		expect(maxItems).toBe(10);
+		await requestContext.run({ userId: 'user1' }, async () => {
+			expect(await svc.get<string>('theme')).toBe('light');
+			expect(await svc.get<boolean>('notify')).toBe(true);
+			expect(await svc.get<number>('max_items')).toBe(10);
+		});
 	});
 
 	it('get returns user override when set', async () => {
@@ -55,10 +52,10 @@ describe('AppConfigServiceImpl', () => {
 		});
 
 		await svc.setAll('user1', { theme: 'dark' });
-		svc.setUserId('user1');
 
-		const theme = await svc.get<string>('theme');
-		expect(theme).toBe('dark');
+		await requestContext.run({ userId: 'user1' }, async () => {
+			expect(await svc.get<string>('theme')).toBe('dark');
+		});
 	});
 
 	it('getAll merges defaults with overrides', async () => {
@@ -92,7 +89,7 @@ describe('AppConfigServiceImpl', () => {
 		expect(data).toEqual({ theme: 'dark', max_items: 25 });
 	});
 
-	it('setUserId sets context for subsequent get calls', async () => {
+	it('get resolves userId from the current requestContext', async () => {
 		const svc = new AppConfigServiceImpl({
 			dataDir: tempDir,
 			appId: 'test-app',
@@ -102,11 +99,27 @@ describe('AppConfigServiceImpl', () => {
 		await svc.setAll('user1', { theme: 'dark' });
 		await svc.setAll('user2', { theme: 'blue' });
 
-		svc.setUserId('user1');
-		expect(await svc.get<string>('theme')).toBe('dark');
+		await requestContext.run({ userId: 'user1' }, async () => {
+			expect(await svc.get<string>('theme')).toBe('dark');
+		});
 
-		svc.setUserId('user2');
-		expect(await svc.get<string>('theme')).toBe('blue');
+		await requestContext.run({ userId: 'user2' }, async () => {
+			expect(await svc.get<string>('theme')).toBe('blue');
+		});
+	});
+
+	it('get falls through to manifest default outside any requestContext scope', async () => {
+		const svc = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'test-app',
+			defaults,
+		});
+
+		// Even if a user has an override...
+		await svc.setAll('user1', { theme: 'dark' });
+
+		// ...calling get() outside any requestContext.run cannot see it.
+		expect(await svc.get<string>('theme')).toBe('light');
 	});
 
 	it('get throws for unknown config key', async () => {
@@ -115,11 +128,12 @@ describe('AppConfigServiceImpl', () => {
 			appId: 'test-app',
 			defaults,
 		});
-		svc.setUserId('user1');
 
-		await expect(svc.get('nonexistent')).rejects.toThrow(
-			'Config key "nonexistent" not found for app "test-app"',
-		);
+		await requestContext.run({ userId: 'user1' }, async () => {
+			await expect(svc.get('nonexistent')).rejects.toThrow(
+				'Config key "nonexistent" not found for app "test-app"',
+			);
+		});
 	});
 
 	it('setAll rejects invalid userId format', async () => {
@@ -159,12 +173,12 @@ describe('AppConfigServiceImpl', () => {
 		});
 
 		await svc.setAll('user1', { theme: 'dark', notify: false, max_items: 50 });
-		svc.setUserId('user1');
 
-		// All keys overridden — override values should win
-		expect(await svc.get<string>('theme')).toBe('dark');
-		expect(await svc.get<boolean>('notify')).toBe(false);
-		expect(await svc.get<number>('max_items')).toBe(50);
+		await requestContext.run({ userId: 'user1' }, async () => {
+			expect(await svc.get<string>('theme')).toBe('dark');
+			expect(await svc.get<boolean>('notify')).toBe(false);
+			expect(await svc.get<number>('max_items')).toBe(50);
+		});
 	});
 
 	it('concurrent setAll calls produce consistent final state', async () => {
@@ -186,14 +200,14 @@ describe('AppConfigServiceImpl', () => {
 		expect(['dark', 'blue', 'green']).toContain(all.theme);
 	});
 
-	it('loadOverrides returns null when no userId set', async () => {
+	it('loadOverrides returns null when no userId in context', async () => {
 		const svc = new AppConfigServiceImpl({
 			dataDir: tempDir,
 			appId: 'test-app',
 			defaults,
 		});
 
-		// No setUserId called — get should fall through to defaults
+		// No requestContext — get should fall through to defaults
 		const theme = await svc.get<string>('theme');
 		expect(theme).toBe('light');
 
@@ -201,6 +215,29 @@ describe('AppConfigServiceImpl', () => {
 		await expect(svc.get('nonexistent')).rejects.toThrow(
 			'Config key "nonexistent" not found for app "test-app"',
 		);
+	});
+
+	it('concurrent requestContext scopes do not leak userIds across apps', async () => {
+		const svc = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'test-app',
+			defaults,
+		});
+
+		await svc.setAll('user1', { theme: 'dark' });
+		await svc.setAll('user2', { theme: 'blue' });
+
+		const results = await Promise.all([
+			requestContext.run({ userId: 'user1' }, async () => {
+				await new Promise((r) => setTimeout(r, 2));
+				return svc.get<string>('theme');
+			}),
+			requestContext.run({ userId: 'user2' }, async () => {
+				await new Promise((r) => setTimeout(r, 1));
+				return svc.get<string>('theme');
+			}),
+		]);
+		expect(results).toEqual(['dark', 'blue']);
 	});
 
 	it('getAll returns defaults only for path traversal userId', async () => {

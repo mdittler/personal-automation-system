@@ -6,12 +6,19 @@
  * 2. Manifest defaults (from the app's manifest user_config section)
  *
  * User overrides take precedence over manifest defaults.
+ *
+ * The active user is resolved from the request-scoped AsyncLocalStorage
+ * context (`requestContext`). Infrastructure establishes the context at
+ * every dispatch entry point (Telegram messages, callbacks, scheduled
+ * jobs, alert actions, API calls), so app code can call `get(key)` without
+ * ever handling userId explicitly.
  */
 
 import { join } from 'node:path';
 import type { AppConfigService } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import { getCurrentUserId } from '../context/request-context.js';
 
 export interface AppConfigServiceOptions {
 	/** Absolute path to the data directory. */
@@ -26,7 +33,6 @@ export class AppConfigServiceImpl implements AppConfigService {
 	private readonly dataDir: string;
 	private readonly appId: string;
 	private readonly defaultsMap: Map<string, unknown>;
-	private userId: string | null = null;
 
 	constructor(options: AppConfigServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -37,14 +43,6 @@ export class AppConfigServiceImpl implements AppConfigService {
 		for (const item of options.defaults) {
 			this.defaultsMap.set(item.key, item.default);
 		}
-	}
-
-	/**
-	 * Set the current user context for config lookups.
-	 * Called by the infrastructure before dispatching to an app handler.
-	 */
-	setUserId(userId: string): void {
-		this.userId = userId;
 	}
 
 	async get<T>(key: string): Promise<T> {
@@ -91,8 +89,22 @@ export class AppConfigServiceImpl implements AppConfigService {
 		await writeYamlFile(overridePath, values);
 	}
 
+	/**
+	 * Resolve the userId for an override lookup.
+	 *
+	 * Priority:
+	 * 1. `explicitUserId` argument — used by `getAll(userId)` for the GUI,
+	 *    which reads another user's config from outside that user's
+	 *    request context.
+	 * 2. The current `requestContext` userId — the normal path for
+	 *    `get()` calls from inside an app handler.
+	 *
+	 * Returns null when neither source yields a userId (e.g. `get()`
+	 * called outside any dispatch scope, like a one-off startup probe).
+	 * A null result causes callers to fall through to manifest defaults.
+	 */
 	private async loadOverrides(explicitUserId?: string): Promise<Record<string, unknown> | null> {
-		const uid = explicitUserId ?? this.userId;
+		const uid = explicitUserId ?? getCurrentUserId() ?? null;
 		if (uid === null) return null;
 		if (!/^[a-zA-Z0-9_-]+$/.test(uid)) return null;
 
