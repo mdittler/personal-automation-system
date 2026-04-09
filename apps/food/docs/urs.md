@@ -2013,6 +2013,71 @@ All user-provided text sent to LLM prompts must be sanitized via `sanitizeInput(
 
 ---
 
+### REQ-INGRED-001: Canonical ingredient normalization
+
+**Origin:** Phase H11.z | **Status:** Implemented (hardened in iteration 2, 2026-04-09)
+
+Ingredients, pantry items, and grocery items carry a `canonicalName` field computed at write time (deterministic fast-path → LLM fast-tier fallback → persistent cache). Downstream matching (pantry-contains, grocery-dedup, hosting subtract) uses canonical equality before any fuzzy/substring path, so `"tomato"` + `"tomatoes"` + `"Roma tomatoes"` collapse to the same canonical `"tomato"` without burning an LLM call on every query. Legacy entries lacking `canonicalName` still work via the 60%-length substring fallback until the one-shot migration script (`apps/food/scripts/migrate-ingredient-canonical.ts`) is run.
+
+**Iteration 2 refinements (2026-04-09):**
+- `deterministicCanonical` strips leading articles (`a/an/the`) and informal quantity words (`some/any/several/a few/lots of/a bunch of/a handful of`) *before* quantifier stripping. Fixes the "a potato" → canonical `a potato` silent-dupe regression.
+- `deterministicDisplay` helper produces a cleaned display form with the same strips, preserving case and plurality of the head noun. `normalizePantryItems` propagates this back to the item `name` field so user-facing surfaces (/pantry list, reply text) don't echo raw qualifiers like "a potato" or "4 cups of salt".
+- `pantryContains` gains a head-noun rescue tier between canonical equality and the legacy 60%-substring path: bidirectional `endsWith(" <other>")` with a leading-space boundary guard. Rescues varietal/brand mismatches ("Roma tomatoes" pantry ↔ "tomato" query, "Kerrygold butter" ↔ "butter") while preserving the word-boundary guards that keep "rice" ≠ "licorice" and "potato" ≠ "tomato".
+- `canonicalMerge` null-unit reconciliation sweep: a second pass after the primary `${canonical}|${unit}` grouping folds unit-less entries into unit-ful siblings sharing the same canonical, order-independent. Fixes the "2 lbs chicken" + "chicken" split-list bug.
+
+**Standard tests:**
+- `ingredient-normalizer.test.ts` > deterministic path maps `tomatoes` → `tomato` without LLM
+- `ingredient-normalizer.test.ts` > strips leading quantifiers (`4 cups of salt` → `salt`)
+- `ingredient-normalizer.test.ts` > strips leading articles a/an/the (iter 2)
+- `ingredient-normalizer.test.ts` > strips informal quantity words (some/any/several/a few/lots of/a bunch of/a handful of) (iter 2)
+- `ingredient-normalizer.test.ts` > article strip composes with quantifier strip (iter 2)
+- `ingredient-normalizer.test.ts` > article strip composes with singularization on multi-word heads (iter 2)
+- `ingredient-normalizer.test.ts` > LLM fallback path for ambiguous input
+- `ingredient-normalizer.test.ts` > in-memory cache hit skips LLM on repeat
+- `ingredient-normalizer.test.ts` > persistent cache survives normalizer re-init
+- `pantry-store.test.ts` > `addPantryItems` > dedupes `tomato` + `tomatoes` via canonical key
+- `pantry-store.test.ts` > `normalizePantryItems` > populates canonicalName on unlabeled items
+- `pantry-store.test.ts` > `pantryContains` > canonical equality fast-path
+- `pantry-store.test.ts` > `pantryContains` > head-noun rescue: Roma tomatoes ↔ tomato (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > head-noun rescue: symmetric match (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > head-noun rescue: brand (Kerrygold butter ↔ butter) (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > head-noun rescue: varietal (extra-virgin olive oil ↔ olive oil) (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > head-noun rescue: prep-state adjective (chopped onion ↔ onion) (iter 2)
+- `recipe-parser.test.ts` > attaches canonicalName to each parsed ingredient
+- `grocery-dedup.test.ts` > merges tomato/tomatoes canonically without an LLM call
+- `grocery-dedup.test.ts` > null-unit reconciliation: unit-ful entry wins (iter 2)
+- `grocery-dedup.test.ts` > null-unit reconciliation: symmetric order (iter 2)
+- `hosting-planner.test.ts` > subtracts inline ingredients via canonical equality
+- `natural-language-h11z.test.ts` > full persona pressure-test matrix (iter 2): articles, quantity words, varietal rescue end-to-end, null-unit merge, journey dedup
+
+**Edge case tests:**
+- `ingredient-normalizer.test.ts` > mass-noun exceptions (`molasses`, `couscous`) retained
+- `ingredient-normalizer.test.ts` > graceful fallback when LLM fails
+- `ingredient-normalizer.test.ts` > just "a" or "the" alone produces empty (LLM fallback territory) (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > legacy fallback when no canonical on either side
+- `grocery-dedup.test.ts` > canonical merge promotes a known department over `Other`
+- `grocery-dedup.test.ts` > regression: same-unit merge still works after null-unit sweep (iter 2)
+- `grocery-dedup.test.ts` > regression: distinct canonicals with null-unit stay distinct (iter 2)
+- `natural-language-h11z.test.ts` > LLM down → deterministic fast-path still serves article/quantity-word inputs (iter 2)
+- `natural-language-h11z.test.ts` > display-name leakage guard: pantry name does not echo stripped article (iter 2)
+
+**Security tests:**
+- `ingredient-normalizer.test.ts` > sanitizes LLM prompt — no triple backticks from malicious input (anti-injection framing present on all LLM-reaching surfaces; head-noun rescue and null-unit sweep are pure string ops with no LLM touch)
+
+**Regression tests:**
+- `pantry-store.test.ts` > `pantryContains` > REGRESSION: "rice" pantry + "licorice" query → false (word-boundary guard) (iter 2)
+- `pantry-store.test.ts` > `pantryContains` > REGRESSION: "potato" pantry + "tomato" query → false (iter 2)
+- `natural-language-h11z.test.ts` > REGRESSION: rice ≠ licorice, potato ≠ tomato word-boundary guards in persona form (iter 2)
+
+**Documented-not-fixed gaps (tracked as `it.skip` with `GAP:` comments in `natural-language-h11z.test.ts`):**
+- **GAP-1**: Cross-family unit conversion (`2 lbs chicken` + `16 oz chicken` stay split). Fix requires a `unit-conversions.ts` module + unit-family table. Deferred to H11.zz.
+- **GAP-2**: Possessive stripping (`Matt's eggs` → `matt's egg`, does not dedup with `egg`). Needs a scoped regex; deferred pending a policy decision to avoid over-stripping recipe titles.
+- **GAP-3**: Misspelling tolerance (`tomatoe`/`brocoli`/`onyon` produce unique canonicals). Needs bounded Levenshtein or LLM rescue; deferred pending user-corpus calibration.
+
+**Fixes:** Iteration 2 (2026-04-09) — article strip, display-name propagation, head-noun rescue, null-unit merge. See `apps/food/docs/implementation-phases.md` H11.z iteration 2 section.
+
+---
+
 ### REQ-SEC-002: Input validation
 
 **Origin:** Phase H1 Security Review | **Status:** Implemented
@@ -2182,12 +2247,13 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-NFR-006 | voting-handler.test.ts, rating-handler.test.ts, app.test.ts | 1 | 3 | Implemented |
 | REQ-NFR-007 | date-utils.test.ts | 3 | 5 | Implemented |
 | REQ-NFR-008 | N/A | 0 | 0 | Implemented |
+| REQ-INGRED-001 | ingredient-normalizer.test.ts, pantry-store.test.ts, recipe-parser.test.ts, grocery-dedup.test.ts, hosting-planner.test.ts, natural-language-h11z.test.ts | 23 | 10 | Implemented (iter 2 hardened) |
 | REQ-SEC-001 | recipe-parser.test.ts, app.test.ts | 2 | 1 | Implemented |
 | REQ-SEC-002 | recipe-store.test.ts | 2 | 5 | Implemented |
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **44 test files** | **413** | **369** | **782 tests** |
+| **Totals** | **46 test files** | **436** | **379** | **815 tests** |
 
 ---
 

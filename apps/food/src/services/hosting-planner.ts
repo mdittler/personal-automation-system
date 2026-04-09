@@ -6,10 +6,6 @@
  */
 
 import type { CoreServices } from '@pas/core/types';
-import { sanitizeInput } from '../utils/sanitize.js';
-import { parseJsonResponse } from './recipe-parser.js';
-import { findGuestByName } from './guest-profiles.js';
-import { pantryContains } from './pantry-store.js';
 import type {
 	EventMenuItem,
 	EventPlan,
@@ -19,6 +15,10 @@ import type {
 	PrepTimelineStep,
 	Recipe,
 } from '../types.js';
+import { sanitizeInput } from '../utils/sanitize.js';
+import { findGuestByName } from './guest-profiles.js';
+import { pantryContains } from './pantry-store.js';
+import { attachCanonicalNames, parseJsonResponse } from './recipe-parser.js';
 
 export interface ParsedEvent {
 	guestCount: number;
@@ -56,14 +56,20 @@ export async function suggestEventMenu(
 	guests: GuestProfile[],
 	recipes: Recipe[],
 ): Promise<EventMenuItem[]> {
-	const restrictions = guests.flatMap(g => g.dietaryRestrictions.map(r => sanitizeInput(r, 50)));
-	const allergies = guests.flatMap(g => g.allergies.map(a => sanitizeInput(a, 50)));
+	const restrictions = guests.flatMap((g) =>
+		g.dietaryRestrictions.map((r) => sanitizeInput(r, 50)),
+	);
+	const allergies = guests.flatMap((g) => g.allergies.map((a) => sanitizeInput(a, 50)));
 	const uniqueRestrictions = [...new Set(restrictions)];
 	const uniqueAllergies = [...new Set(allergies)];
 
-	const recipeList = recipes.slice(0, 30).map(r =>
-		`- ${sanitizeInput(r.title)} (serves ${r.servings}, tags: ${r.tags.map(t => sanitizeInput(t, 30)).join(', ')})`
-	).join('\n');
+	const recipeList = recipes
+		.slice(0, 30)
+		.map(
+			(r) =>
+				`- ${sanitizeInput(r.title)} (serves ${r.servings}, tags: ${r.tags.map((t) => sanitizeInput(t, 30)).join(', ')})`,
+		)
+		.join('\n');
 
 	const prompt = `Suggest a menu for ${guestCount} guests. Return ONLY valid JSON array:
 [
@@ -97,7 +103,18 @@ ${uniqueAllergies.length > 0 ? `Allergies to avoid: ${uniqueAllergies.join(', ')
 Suggest 2-4 dishes (appetizer/main/side/dessert). Prefer recipes from the library. Scale servings for ${guestCount} people. Note dietary accommodations. For any dish NOT in the library, include a structured "ingredients" array so it can be added to the shopping list.`;
 
 	const result = await services.llm.complete(prompt, { tier: 'standard' });
-	return parseJsonResponse(result, 'event menu') as EventMenuItem[];
+	const menu = parseJsonResponse(result, 'event menu') as EventMenuItem[];
+
+	// Phase H11.z: attach canonicalName to any inline ingredients on novel dishes
+	// so the downstream pantry subtract in generateDeltaGroceryList can match by
+	// canonical equality instead of fragile substring logic.
+	for (const item of menu) {
+		if (item.ingredients && item.ingredients.length > 0) {
+			item.ingredients = await attachCanonicalNames(services, item.ingredients);
+		}
+	}
+
+	return menu;
 }
 
 export async function generatePrepTimeline(
@@ -105,7 +122,9 @@ export async function generatePrepTimeline(
 	menu: EventMenuItem[],
 	eventTime: string,
 ): Promise<PrepTimelineStep[]> {
-	const menuList = menu.map(m => `- ${sanitizeInput(m.recipeTitle)} (${m.scaledServings} servings)`).join('\n');
+	const menuList = menu
+		.map((m) => `- ${sanitizeInput(m.recipeTitle)} (${m.scaledServings} servings)`)
+		.join('\n');
 
 	const prompt = `Create a prep timeline working backward from the event time. Return ONLY valid JSON array:
 [
@@ -144,7 +163,7 @@ export function generateDeltaGroceryList(
 	const placeholders: string[] = [];
 
 	for (const item of menu) {
-		const recipe = recipes.find(r => r.id === item.recipeId);
+		const recipe = recipes.find((r) => r.id === item.recipeId);
 		if (recipe) {
 			const scaleFactor = item.scaledServings / recipe.servings;
 			for (const ing of recipe.ingredients) {
@@ -152,6 +171,7 @@ export function generateDeltaGroceryList(
 					name: ing.name,
 					quantity: ing.quantity != null ? Math.ceil(ing.quantity * scaleFactor) : null,
 					unit: ing.unit ?? null,
+					...(ing.canonicalName ? { canonicalName: ing.canonicalName } : {}),
 				});
 			}
 			continue;
@@ -170,9 +190,10 @@ export function generateDeltaGroceryList(
 		}
 	}
 
-	// Filter by pantry using the structured ingredient name — no free-form parsing.
-	// pantryContains does case-insensitive substring + 60% length-ratio matching.
-	const notInPantry = needed.filter((ing) => !pantryContains(pantry, ing.name));
+	// Filter by pantry using the structured ingredient name. H11.z: prefer
+	// canonical equality when both sides carry `canonicalName`; fall back to
+	// the legacy case-insensitive substring path for un-migrated data.
+	const notInPantry = needed.filter((ing) => !pantryContains(pantry, ing.name, ing.canonicalName));
 
 	return [...notInPantry.map(formatIngredient), ...placeholders];
 }
@@ -232,7 +253,7 @@ export function formatEventPlan(plan: EventPlan): string {
 		lines.push('');
 		lines.push('**Known guests:**');
 		for (const g of plan.guests) {
-			const notes = [...g.dietaryRestrictions, ...g.allergies.map(a => `allergy: ${a}`)];
+			const notes = [...g.dietaryRestrictions, ...g.allergies.map((a) => `allergy: ${a}`)];
 			lines.push(`- ${g.name}${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`);
 		}
 	}
@@ -270,7 +291,7 @@ export function formatPrepTimeline(steps: PrepTimelineStep[]): string {
 	if (steps.length === 0) return 'No prep timeline available.';
 
 	return steps
-		.map(s => {
+		.map((s) => {
 			const recipe = s.recipe ? ` [${s.recipe}]` : '';
 			return `${s.time}: ${s.task}${recipe}`;
 		})

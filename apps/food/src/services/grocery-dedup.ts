@@ -9,7 +9,81 @@ import type { CoreServices } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import type { GroceryItem } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
+import { normalizeIngredientName } from './ingredient-normalizer.js';
 import { parseJsonResponse } from './recipe-parser.js';
+
+/**
+ * Phase H11.z: collapse items that share the same canonical name and unit.
+ * This is a deterministic short-circuit that runs before the LLM dedup call —
+ * most common duplicates (tomato/tomatoes, chicken breast/chicken breasts)
+ * get merged without burning an LLM call.
+ */
+async function canonicalMerge(
+	services: CoreServices,
+	items: GroceryItem[],
+): Promise<GroceryItem[]> {
+	const byKey = new Map<string, GroceryItem>();
+	for (const item of items) {
+		let canonical = item.canonicalName;
+		if (!canonical) {
+			try {
+				canonical = (await normalizeIngredientName(services, item.name)).canonical;
+			} catch {
+				canonical = item.name.toLowerCase();
+			}
+		}
+		const key = `${canonical}|${item.unit?.toLowerCase() ?? ''}`;
+		const existing = byKey.get(key);
+		if (existing) {
+			if (existing.quantity != null && item.quantity != null) {
+				existing.quantity += item.quantity;
+			}
+			for (const rid of item.recipeIds) {
+				if (!existing.recipeIds.includes(rid)) existing.recipeIds.push(rid);
+			}
+			// Prefer a non-"Other" department if either side has one
+			if (existing.department === 'Other' && item.department !== 'Other') {
+				existing.department = item.department;
+			}
+		} else {
+			byKey.set(key, { ...item, canonicalName: canonical });
+		}
+	}
+	// Phase H11.z iteration 2: null-unit reconciliation sweep. Primary pass
+	// keys on `${canonical}|${unit}`, so "2 lbs chicken" and "chicken" (no
+	// unit) survive as separate entries. Walk the result and fold null-unit
+	// entries into a unit-ful sibling sharing the same canonical. Summing
+	// a null quantity into a unit-ful quantity slightly over-reports (e.g.
+	// `2 lbs + 1 → 3 lbs`), but one slightly-over-counted line is better
+	// user experience than two near-duplicate chicken lines.
+	const primary = [...byKey.values()];
+	// Pass 1: unit-ful entries go straight through, preserving order.
+	// Falsy check (`!i.unit`) rather than `!== null` for symmetry with the
+	// primary-pass key (`item.unit?.toLowerCase() ?? ''`), which already
+	// conflates `null` and `""`.
+	const result: GroceryItem[] = primary.filter((i) => !!i.unit);
+	// Pass 2: null-unit (or empty-string-unit) entries look for a unit-ful
+	// sibling to fold into. Two passes (not one) so the reconciliation works
+	// regardless of whether the null-unit or unit-ful entry appeared first.
+	for (const item of primary) {
+		if (item.unit) continue;
+		const sibling = result.find((r) => r.canonicalName === item.canonicalName && !!r.unit);
+		if (sibling) {
+			if (sibling.quantity != null && item.quantity != null) {
+				sibling.quantity += item.quantity;
+			}
+			for (const rid of item.recipeIds) {
+				if (!sibling.recipeIds.includes(rid)) sibling.recipeIds.push(rid);
+			}
+			if (sibling.department === 'Other' && item.department !== 'Other') {
+				sibling.department = item.department;
+			}
+		} else {
+			result.push(item);
+		}
+	}
+	return result;
+}
 
 const DEDUP_PROMPT = `You are a grocery list organizer. Given a list of grocery items, do two things:
 
@@ -37,12 +111,21 @@ export async function deduplicateAndAssignDepartments(
 	services: CoreServices,
 	items: GroceryItem[],
 ): Promise<GroceryItem[]> {
-	// Skip LLM if nothing needs work
+	// Skip LLM if nothing needs work (fast path for trivial inputs)
 	const hasOtherDept = items.some((i) => i.department === 'Other');
 	const hasPossibleDupes = items.length > 1;
 	if (!hasOtherDept && !hasPossibleDupes) return items;
 
-	const itemList = items.map((i) => ({
+	// Phase H11.z: deterministic canonical merge first — handles common
+	// plural/singular and casing duplicates without an LLM call.
+	const merged = await canonicalMerge(services, items);
+
+	// Re-check whether LLM is still needed after canonical merge.
+	const stillNeedsOther = merged.some((i) => i.department === 'Other');
+	const stillHasDupes = merged.length > 1;
+	if (!stillNeedsOther && !stillHasDupes) return merged;
+
+	const itemList = merged.map((i) => ({
 		name: i.name,
 		quantity: i.quantity,
 		unit: i.unit,
@@ -58,7 +141,7 @@ export async function deduplicateAndAssignDepartments(
 		);
 
 		const parsed = parseJsonResponse(result, 'grocery dedup');
-		if (!Array.isArray(parsed)) return items;
+		if (!Array.isArray(parsed)) return merged;
 
 		// Map LLM results back to full GroceryItem objects
 		const dedupedItems: GroceryItem[] = [];
@@ -66,7 +149,7 @@ export async function deduplicateAndAssignDepartments(
 			if (!llmItem || typeof llmItem !== 'object' || !llmItem.name) continue;
 
 			// Find original item to preserve recipeIds, addedBy
-			const original = items.find(
+			const original = merged.find(
 				(i) => i.name.toLowerCase() === String(llmItem.name).toLowerCase(),
 			);
 
@@ -81,11 +164,11 @@ export async function deduplicateAndAssignDepartments(
 			});
 		}
 
-		return dedupedItems.length > 0 ? dedupedItems : items;
+		return dedupedItems.length > 0 ? dedupedItems : merged;
 	} catch (err) {
 		// Graceful degradation — return items unchanged
 		const { userMessage } = classifyLLMError(err);
 		services.logger.warn('Grocery dedup LLM failed (using items as-is): %s', userMessage);
-		return items;
+		return merged;
 	}
 }

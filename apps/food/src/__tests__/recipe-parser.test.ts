@@ -1,12 +1,18 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyRecipeEdit, parseRecipeText } from '../services/recipe-parser.js';
+import { resetIngredientNormalizerCacheForTests } from '../services/ingredient-normalizer.js';
+import {
+	applyRecipeEdit,
+	attachCanonicalNames,
+	parseRecipeText,
+} from '../services/recipe-parser.js';
 
 describe('Recipe Parser', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
+		resetIngredientNormalizerCacheForTests();
 		services = createMockCoreServices();
 	});
 
@@ -112,6 +118,53 @@ describe('Recipe Parser', () => {
 
 			await expect(parseRecipeText(services, 'test')).rejects.toThrow('overloaded');
 		});
+
+		// Phase H11.z: canonical ingredient names
+		it('attaches canonicalName to each parsed ingredient', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				JSON.stringify({
+					title: 'Pasta',
+					source: 'homemade',
+					ingredients: [
+						{ name: 'tomatoes', quantity: 4, unit: null },
+						{ name: 'onions', quantity: 2, unit: null },
+						{ name: '2 cloves garlic', quantity: 2, unit: null },
+					],
+					instructions: ['cook'],
+					servings: 4,
+					tags: [],
+					allergens: [],
+				}),
+			);
+			const result = await parseRecipeText(services, 'pasta recipe');
+			expect(result.ingredients[0]?.canonicalName).toBe('tomato');
+			expect(result.ingredients[1]?.canonicalName).toBe('onion');
+			expect(result.ingredients[2]?.canonicalName).toBe('garlic');
+		});
+	});
+
+	describe('attachCanonicalNames', () => {
+		beforeEach(() => {
+			resetIngredientNormalizerCacheForTests();
+			services = createMockCoreServices();
+		});
+
+		it('populates canonicalName from plain ingredient list', async () => {
+			const result = await attachCanonicalNames(services, [
+				{ name: 'carrots', quantity: 3, unit: null },
+				{ name: 'Roma tomatoes', quantity: 2, unit: null },
+			]);
+			expect(result[0]?.canonicalName).toBe('carrot');
+			expect(result[1]?.canonicalName).toBe('roma tomato');
+		});
+
+		it('leaves ingredients alone that already carry canonicalName', async () => {
+			const result = await attachCanonicalNames(services, [
+				{ name: 'Salt', quantity: 1, unit: 'tsp', canonicalName: 'salt' },
+			]);
+			expect(result[0]?.canonicalName).toBe('salt');
+			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('applyRecipeEdit', () => {
@@ -189,7 +242,9 @@ describe('Recipe Parser', () => {
 
 		it('throws clear error when LLM returns array instead of object', async () => {
 			vi.mocked(services.llm.complete).mockResolvedValue('[1, 2, 3]');
-			await expect(parseRecipeText(services, 'test')).rejects.toThrow('Could not parse a complete recipe');
+			await expect(parseRecipeText(services, 'test')).rejects.toThrow(
+				'Could not parse a complete recipe',
+			);
 		});
 
 		it('accepts JSON with extra unknown fields gracefully', async () => {

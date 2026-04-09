@@ -1,8 +1,9 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroceryItem } from '../types.js';
 import { deduplicateAndAssignDepartments } from '../services/grocery-dedup.js';
+import { resetIngredientNormalizerCacheForTests } from '../services/ingredient-normalizer.js';
+import type { GroceryItem } from '../types.js';
 
 function makeItem(overrides: Partial<GroceryItem> = {}): GroceryItem {
 	return {
@@ -21,6 +22,7 @@ describe('deduplicateAndAssignDepartments', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
+		resetIngredientNormalizerCacheForTests();
 		services = createMockCoreServices();
 	});
 
@@ -28,9 +30,30 @@ describe('deduplicateAndAssignDepartments', () => {
 
 	it('returns merged and reassigned items from LLM response', async () => {
 		const items: GroceryItem[] = [
-			makeItem({ name: 'Chicken breast', quantity: 1, unit: 'lbs', department: 'Meat & Seafood', recipeIds: ['r1'], addedBy: 'alice' }),
-			makeItem({ name: 'Boneless chicken', quantity: 2, unit: 'lbs', department: 'Other', recipeIds: ['r2'], addedBy: 'bob' }),
-			makeItem({ name: 'Broccoli', quantity: 1, unit: 'bunch', department: 'Other', recipeIds: ['r1'], addedBy: 'alice' }),
+			makeItem({
+				name: 'Chicken breast',
+				quantity: 1,
+				unit: 'lbs',
+				department: 'Meat & Seafood',
+				recipeIds: ['r1'],
+				addedBy: 'alice',
+			}),
+			makeItem({
+				name: 'Boneless chicken',
+				quantity: 2,
+				unit: 'lbs',
+				department: 'Other',
+				recipeIds: ['r2'],
+				addedBy: 'bob',
+			}),
+			makeItem({
+				name: 'Broccoli',
+				quantity: 1,
+				unit: 'bunch',
+				department: 'Other',
+				recipeIds: ['r1'],
+				addedBy: 'alice',
+			}),
 		];
 
 		vi.mocked(services.llm.complete).mockResolvedValue(
@@ -53,9 +76,7 @@ describe('deduplicateAndAssignDepartments', () => {
 	// ─── Skips LLM ───────────────────────────────────────────────
 
 	it('skips LLM call for single item with known department', async () => {
-		const items: GroceryItem[] = [
-			makeItem({ name: 'Eggs', department: 'Dairy & Eggs' }),
-		];
+		const items: GroceryItem[] = [makeItem({ name: 'Eggs', department: 'Dairy & Eggs' })];
 
 		const result = await deduplicateAndAssignDepartments(services, items);
 
@@ -95,9 +116,7 @@ describe('deduplicateAndAssignDepartments', () => {
 	});
 
 	it('calls LLM for single item with department "Other"', async () => {
-		const items: GroceryItem[] = [
-			makeItem({ name: 'Quinoa', department: 'Other' }),
-		];
+		const items: GroceryItem[] = [makeItem({ name: 'Quinoa', department: 'Other' })];
 
 		vi.mocked(services.llm.complete).mockResolvedValue(
 			JSON.stringify([
@@ -122,7 +141,9 @@ describe('deduplicateAndAssignDepartments', () => {
 
 		const result = await deduplicateAndAssignDepartments(services, items);
 
-		expect(result).toBe(items);
+		// Post-H11.z: canonical merge creates a new array, but content is unchanged
+		expect(result).toHaveLength(2);
+		expect(result.map((i) => i.name)).toEqual(['Rice', 'Pasta']);
 		expect(services.logger.warn).toHaveBeenCalledWith(
 			expect.stringContaining('Grocery dedup LLM failed'),
 			expect.any(String),
@@ -143,7 +164,8 @@ describe('deduplicateAndAssignDepartments', () => {
 
 		const result = await deduplicateAndAssignDepartments(services, items);
 
-		expect(result).toBe(items);
+		expect(result).toHaveLength(2);
+		expect(result.map((i) => i.name)).toEqual(['Butter', 'Cream']);
 	});
 
 	// ─── Empty LLM result ────────────────────────────────────────
@@ -158,15 +180,30 @@ describe('deduplicateAndAssignDepartments', () => {
 
 		const result = await deduplicateAndAssignDepartments(services, items);
 
-		expect(result).toBe(items);
+		expect(result).toHaveLength(2);
+		expect(result.map((i) => i.name)).toEqual(['Salt', 'Pepper']);
 	});
 
 	// ─── Preserves recipeIds / addedBy ───────────────────────────
 
 	it('preserves recipeIds and addedBy from original items', async () => {
 		const items: GroceryItem[] = [
-			makeItem({ name: 'Tomatoes', quantity: 2, unit: null, department: 'Produce', recipeIds: ['soup', 'salad'], addedBy: 'chef-1' }),
-			makeItem({ name: 'Garlic', quantity: 3, unit: 'cloves', department: 'Other', recipeIds: ['pasta'], addedBy: 'chef-2' }),
+			makeItem({
+				name: 'Tomatoes',
+				quantity: 2,
+				unit: null,
+				department: 'Produce',
+				recipeIds: ['soup', 'salad'],
+				addedBy: 'chef-1',
+			}),
+			makeItem({
+				name: 'Garlic',
+				quantity: 3,
+				unit: 'cloves',
+				department: 'Other',
+				recipeIds: ['pasta'],
+				addedBy: 'chef-2',
+			}),
 		];
 
 		vi.mocked(services.llm.complete).mockResolvedValue(
@@ -237,6 +274,54 @@ describe('deduplicateAndAssignDepartments', () => {
 
 	// ─── Edge: LLM returns items with missing/invalid fields ─────
 
+	// ─── Phase H11.z — canonical grouping ────────────────────────
+
+	it('merges tomato/tomatoes canonically without an LLM call', async () => {
+		const items: GroceryItem[] = [
+			makeItem({
+				name: 'tomato',
+				quantity: 2,
+				unit: null,
+				department: 'Produce',
+				recipeIds: ['a'],
+			}),
+			makeItem({
+				name: 'tomatoes',
+				quantity: 3,
+				unit: null,
+				department: 'Produce',
+				recipeIds: ['b'],
+			}),
+		];
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].quantity).toBe(5);
+		expect(result[0].recipeIds).toEqual(['a', 'b']);
+		// Deterministic path — no LLM call needed
+		expect(services.llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('canonical merge promotes a known department over Other', async () => {
+		const items: GroceryItem[] = [
+			makeItem({ name: 'Onion', quantity: 1, unit: null, department: 'Other', recipeIds: ['x'] }),
+			makeItem({
+				name: 'onions',
+				quantity: 2,
+				unit: null,
+				department: 'Produce',
+				recipeIds: ['y'],
+			}),
+		];
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].department).toBe('Produce');
+		expect(services.llm.complete).not.toHaveBeenCalled();
+	});
+
 	it('handles LLM items with missing fields gracefully', async () => {
 		const items: GroceryItem[] = [
 			makeItem({ name: 'Tofu', department: 'Other' }),
@@ -262,5 +347,122 @@ describe('deduplicateAndAssignDepartments', () => {
 		expect(result[0].department).toBe('Produce');
 		expect(result[1].name).toBe('Tempeh');
 		expect(result[1].department).toBe('Other'); // missing department → 'Other'
+	});
+
+	// ─── Phase H11.z iteration 2 — null-unit reconciliation ──────
+
+	it('merges null-unit entry into unit-ful sibling with same canonical', async () => {
+		const items: GroceryItem[] = [
+			makeItem({
+				name: 'chicken',
+				quantity: 2,
+				unit: 'lbs',
+				department: 'Meat & Seafood',
+				recipeIds: ['a'],
+			}),
+			makeItem({
+				name: 'chicken',
+				quantity: 1,
+				unit: null,
+				department: 'Meat & Seafood',
+				recipeIds: ['b'],
+			}),
+		];
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].unit).toBe('lbs');
+		expect(result[0].quantity).toBe(3);
+		expect(result[0].recipeIds).toEqual(['a', 'b']);
+		expect(services.llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('merges null-unit entry symmetrically when null-unit appears first', async () => {
+		const items: GroceryItem[] = [
+			makeItem({
+				name: 'chicken',
+				quantity: 1,
+				unit: null,
+				department: 'Meat & Seafood',
+				recipeIds: ['b'],
+			}),
+			makeItem({
+				name: 'chicken',
+				quantity: 2,
+				unit: 'lbs',
+				department: 'Meat & Seafood',
+				recipeIds: ['a'],
+			}),
+		];
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].unit).toBe('lbs');
+		expect(result[0].quantity).toBe(3);
+		expect(result[0].recipeIds.sort()).toEqual(['a', 'b']);
+		expect(services.llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('regression: same-unit merge still works after null-unit sweep', async () => {
+		const items: GroceryItem[] = [
+			makeItem({
+				name: 'milk',
+				quantity: 1,
+				unit: 'gallon',
+				department: 'Dairy & Eggs',
+				recipeIds: ['a'],
+			}),
+			makeItem({
+				name: 'milk',
+				quantity: 2,
+				unit: 'gallon',
+				department: 'Dairy & Eggs',
+				recipeIds: ['b'],
+			}),
+		];
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].quantity).toBe(3);
+		expect(result[0].unit).toBe('gallon');
+		expect(services.llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('regression: distinct canonicals with null-unit stay distinct', async () => {
+		// "olive oil" vs "vegetable oil" — different canonicals, neither should
+		// rescue-merge via the null-unit sweep (canonicalMerge does not use the
+		// head-noun rescue — that's only for pantryContains).
+		const items: GroceryItem[] = [
+			makeItem({
+				name: 'olive oil',
+				quantity: 1,
+				unit: null,
+				department: 'Pantry & Dry Goods',
+				recipeIds: ['a'],
+			}),
+			makeItem({
+				name: 'vegetable oil',
+				quantity: 1,
+				unit: 'bottle',
+				department: 'Pantry & Dry Goods',
+				recipeIds: ['b'],
+			}),
+		];
+
+		// LLM may or may not be called depending on further merging; mock it
+		// to return the items unchanged so the assertion is on the canonical
+		// merge output, not LLM creativity.
+		vi.mocked(services.llm.complete).mockResolvedValue(
+			JSON.stringify([
+				{ name: 'olive oil', quantity: 1, unit: null, department: 'Pantry & Dry Goods' },
+				{ name: 'vegetable oil', quantity: 1, unit: 'bottle', department: 'Pantry & Dry Goods' },
+			]),
+		);
+
+		const result = await deduplicateAndAssignDepartments(services, items);
+		expect(result).toHaveLength(2);
 	});
 });

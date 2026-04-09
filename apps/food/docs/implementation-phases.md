@@ -434,6 +434,39 @@ Follow-up phase addressing deferred H11 audit items in three groupings.
 
 ---
 
+## Phase H11.z: Ingredient Normalization
+
+**Status:** Complete | **Tests:** ~45 new (2362 cumulative food) | **Started:** 2026-04-09 | **Completed:** 2026-04-09
+
+**Requirements:** REQ-INGRED-001
+
+**What got built:**
+- New `ingredient-normalizer.ts` service with layered resolution: in-memory LRU → persistent YAML cache (`ingredient-cache.yaml`) → deterministic fast-path (singularize, strip quantifiers, strip bracketed qualifiers) → LLM fast-tier fallback (anti-injection framing) → graceful degradation
+- `canonicalName?: string` added to `Ingredient`, `PantryItem`, `GroceryItem` (optional for backward compat during migration)
+- Write-time normalization: `parseRecipeText` attaches canonicalName, pantry add paths call `normalizePantryItems`, hosting `suggestEventMenu` normalizes novel-dish inline ingredients, grocery dedup canonical-merges before the LLM call
+- `pantryContains()` rewritten as canonical-equality fast-path with the legacy 60%-substring path retained as fallback for un-migrated data
+- One-shot migration script `apps/food/scripts/migrate-ingredient-canonical.ts` walks `data/users/shared/food/{pantry.yaml, recipes/*.yaml, grocery/active.yaml}`, idempotent, logs uncertain entries to `data/system/food/migration-unresolved.log`
+- Startup warning in `food/src/index.ts` init if the unresolved log is non-empty
+
+**Why:** Pantry/recipes/grocery/hosting all did ad-hoc lowercasing + substring matching at query time. `"tomato"` and `"tomatoes"` lived as two pantry entries; `"4 cups of salt"` failed to match pantry entry `"salt"`; every subtract/dedup burned an LLM call or relied on fragile heuristics. Flagged by the user as "a huge problem in practical use" during H11.x.
+
+### H11.z Iteration 2 — Hardening (2026-04-09)
+
+A natural-language persona test suite (`natural-language-h11z.test.ts`) exposed three silent correctness bugs in the iteration-1 pipeline:
+
+1. **Article leak** — `"a potato"` normalized to `a potato` (the quantifier regex only matched digit-led prefixes), creating permanent dupes against future `"potato"` entries. **Fix:** `deterministicCanonical` now strips leading articles and informal quantity words (`a/an/the/some/any/several/a few/lots of/a bunch of/a handful of`) before the quantifier regex. New `deterministicDisplay` helper runs the same strips while preserving case and plural form of the head noun, and `normalizePantryItems` propagates that cleaned display back to the item `name` so user-facing surfaces (`/pantry list`, reply text) don't echo raw qualifiers like "a potato" or "4 cups of salt".
+2. **Varietal mismatch** — `"Roma tomatoes"` pantry (canonical `roma tomato`) did not match recipe query `"tomato"`; the legacy 60%-substring fallback never ran (both sides have canonicals) and couldn't have rescued it anyway (6/13 = 46% < 60%). **Fix:** `pantryContains` gains a head-noun rescue tier between canonical-equality and legacy-substring — bidirectional `endsWith(" <other>")` with a leading-space requirement that preserves the `"rice"` ↔ `"licorice"` / `"potato"` ↔ `"tomato"` word-boundary guard.
+3. **Null-unit split** — `canonicalMerge` keyed on `${canonical}|${unit}`, so `2 lbs chicken` + `chicken` (no unit) survived as two lines. **Fix:** a null-unit reconciliation sweep folds unit-less entries into unit-ful siblings sharing the same canonical (order-independent).
+
+**Documented-not-fixed gaps** (each lives as an `it.skip` with a `GAP:` comment in `natural-language-h11z.test.ts`, telling the next engineer exactly what to change and where):
+- **GAP-1: Cross-family unit conversion** — `2 lbs chicken` + `16 oz chicken` stay split. Requires a `unit-conversions.ts` module with a unit-family table. Deferred to a dedicated mini-phase (H11.zz).
+- **GAP-2: Possessive stripping** — `Matt's eggs` produces `matt's egg`, does not dedup with `egg`. Needs a scoped regex pass; deferred pending a policy decision to avoid over-stripping recipe titles.
+- **GAP-3: Misspelling tolerance** — `tomatoe`, `brocoli`, `onyon` produce unique canonicals. Needs either bounded Levenshtein or LLM rescue on first-seen miss; deferred pending user corpus calibration.
+
+**Why (process):** Iteration 1 of the persona tests initially shipped with four assertions that had been relaxed to match broken behavior instead of exposing the bugs. Captured as feedback memory `feedback_never_relax_tests.md` — the rule is: fix the code, or document the gap thoroughly. Never silently loosen the test.
+
+---
+
 ## Phase H12: Health, Culture, and Events
 
 **Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
@@ -469,4 +502,6 @@ Follow-up phase addressing deferred H11 audit items in three groupings.
 | H10 | 2026-04-07 | 2026-04-08 | 145 | Complete |
 | H11 | 2026-04-08 | 2026-04-08 | 171 | Complete |
 | H11.x | 2026-04-09 | 2026-04-09 | 34 new (2290 food cumulative) | Nutrition daily+log+adherence, hosting flags+fallback, config surface; closeout applied loadTargets partial-config merge fix, added computeAdherence unit tests, trend-per-field tests, fiber-in-prompt guard, prompt-injection fence, REQ-NUTR-003 |
+| H11.z | 2026-04-09 | 2026-04-09 | ~45 new (2362 food cumulative) | Ingredient normalization: `canonicalName` added to Ingredient/PantryItem/GroceryItem; `ingredient-normalizer.ts` with deterministic fast-path + LLM fast-tier fallback + in-memory LRU + persistent YAML cache; write-time normalization in pantry add, recipe parser, hosting inline ingredients; canonical equality in `pantryContains` + `grocery-dedup` (with 60% legacy fallback); one-shot migration script + startup warning; REQ-INGRED-001 |
+| H11.z-it2 | 2026-04-09 | 2026-04-09 | ~60 new + 3 GAP skips (4871 total, 196 files) | Hardening: deterministicCanonical strips articles + quantity words; pantryContains gains head-noun rescue tier; canonicalMerge null-unit reconciliation sweep; persona pressure-test matrix; 3 GAP it.skip blocks (unit conversion, possessives, misspellings) |
 | H12 | — | — | 0 | — |

@@ -16,6 +16,12 @@ export interface Ingredient {
 	quantity: number | null;
 	unit: string | null;
 	notes?: string;
+	/**
+	 * Canonical lowercase singular form, computed at write time by
+	 * `ingredient-normalizer.ts`. Optional only for backward compatibility
+	 * with legacy data written before Phase H11.z — new writes MUST populate.
+	 */
+	canonicalName?: string;
 }
 
 export interface MacroData {
@@ -145,6 +151,11 @@ export interface GroceryItem {
 	recipeIds: string[]; // which recipes need this item
 	purchased: boolean;
 	addedBy: string; // userId or 'system'
+	/**
+	 * Canonical lowercase singular form (Phase H11.z). Optional for
+	 * backward compatibility with legacy data.
+	 */
+	canonicalName?: string;
 }
 
 export interface GroceryList {
@@ -162,6 +173,11 @@ export interface PantryItem {
 	addedDate: string;
 	expiryEstimate?: string; // ISO date, LLM-estimated
 	category: string; // produce, dairy, meat, etc.
+	/**
+	 * Canonical lowercase singular form (Phase H11.z). Optional for
+	 * backward compatibility with legacy data.
+	 */
+	canonicalName?: string;
 }
 
 export interface FreezerItem {
@@ -255,44 +271,44 @@ export interface Receipt {
 // ─── Cost Tracking Types (H10) ─────────────────────────────────
 
 export interface PriceEntry {
-	name: string;          // normalized item name, e.g. "Eggs (60ct)"
-	price: number;         // dollar amount
-	unit: string;          // package unit, e.g. "60ct", "1 gal", "5 lb"
-	department: string;    // Dairy, Produce, Meat, Pantry, etc.
-	updatedAt: string;     // ISO date of last update
+	name: string; // normalized item name, e.g. "Eggs (60ct)"
+	price: number; // dollar amount
+	unit: string; // package unit, e.g. "60ct", "1 gal", "5 lb"
+	department: string; // Dairy, Produce, Meat, Pantry, etc.
+	updatedAt: string; // ISO date of last update
 }
 
 export interface StorePriceData {
-	store: string;         // display name, e.g. "Costco"
-	slug: string;          // file-safe name, e.g. "costco"
-	lastUpdated: string;   // ISO date
+	store: string; // display name, e.g. "Costco"
+	slug: string; // file-safe name, e.g. "costco"
+	lastUpdated: string; // ISO date
 	items: PriceEntry[];
 }
 
 export interface IngredientCost {
-	ingredientName: string;    // from recipe, e.g. "2 cups AP flour"
+	ingredientName: string; // from recipe, e.g. "2 cups AP flour"
 	matchedItem: string | null; // from price DB, e.g. "AP flour (25 lb)"
 	matchedPrice: number | null; // full package price
-	matchedUnit: string | null;  // package unit
-	portionCost: number;        // cost for the recipe's quantity
-	isEstimate: boolean;        // true if LLM-estimated (no price DB match)
+	matchedUnit: string | null; // package unit
+	portionCost: number; // cost for the recipe's quantity
+	isEstimate: boolean; // true if LLM-estimated (no price DB match)
 }
 
 export interface MealCostEstimate {
 	recipeId: string;
 	recipeTitle: string;
-	store: string;            // which store's prices were used
+	store: string; // which store's prices were used
 	ingredientCosts: IngredientCost[];
-	totalCost: number;        // sum of portionCost
-	perServingCost: number;   // totalCost / servings
+	totalCost: number; // sum of portionCost
+	perServingCost: number; // totalCost / servings
 	servings: number;
-	estimatedAt: string;      // ISO datetime
+	estimatedAt: string; // ISO datetime
 }
 
 export interface CostHistoryWeek {
-	weekId: string;           // "2026-W15"
-	startDate: string;        // ISO date
-	endDate: string;          // ISO date
+	weekId: string; // "2026-W15"
+	startDate: string; // ISO date
+	endDate: string; // ISO date
 	meals: Array<{
 		date: string;
 		recipeTitle: string;
@@ -306,7 +322,7 @@ export interface CostHistoryWeek {
 }
 
 export interface CostHistoryMonth {
-	monthId: string;          // "2026-04"
+	monthId: string; // "2026-04"
 	weeks: Array<{
 		weekId: string;
 		totalCost: number;
@@ -382,28 +398,28 @@ export interface KidAdaptation {
 
 export interface MacroTargets {
 	calories?: number;
-	protein?: number;   // grams
-	carbs?: number;     // grams
-	fat?: number;       // grams
-	fiber?: number;     // grams
+	protein?: number; // grams
+	carbs?: number; // grams
+	fat?: number; // grams
+	fiber?: number; // grams
 }
 
 export interface MealMacroEntry {
 	recipeId: string;
 	recipeTitle: string;
-	mealType: string;     // dinner, lunch, etc.
+	mealType: string; // dinner, lunch, etc.
 	servingsEaten: number;
 	macros: MacroData;
 }
 
 export interface DailyMacroEntry {
-	date: string;         // ISO date YYYY-MM-DD
+	date: string; // ISO date YYYY-MM-DD
 	meals: MealMacroEntry[];
 	totals: MacroData;
 }
 
 export interface MonthlyMacroLog {
-	month: string;        // YYYY-MM
+	month: string; // YYYY-MM
 	userId: string;
 	days: DailyMacroEntry[];
 }
@@ -411,18 +427,18 @@ export interface MonthlyMacroLog {
 export interface MacroProgress {
 	current: MacroData;
 	targets: MacroTargets;
-	period: string;       // "today", "this week", "2026-04"
+	period: string; // "today", "this week", "2026-04"
 	daysTracked: number;
 	dailyAverage: MacroData;
 	adherence?: MacroAdherence;
 }
 
 export interface MacroFieldAdherence {
-	daysTracked: number;    // days where the target was set AND the day had any data
-	daysHit: number;        // days within ±tolerance of target
-	percentHit: number;     // 0–100, rounded
-	currentStreak: number;  // consecutive hits ending at the most recent day
-	longestStreak: number;  // longest consecutive-hit run in the period
+	daysTracked: number; // days where the target was set AND the day had any data
+	daysHit: number; // days within ±tolerance of target
+	percentHit: number; // 0–100, rounded
+	currentStreak: number; // consecutive hits ending at the most recent day
+	longestStreak: number; // longest consecutive-hit run in the period
 }
 
 export interface MacroAdherence {
@@ -461,18 +477,18 @@ export interface EventMenuItem {
 }
 
 export interface PrepTimelineStep {
-	time: string;            // relative time like "T-3h", "T-1h", "T-15min"
+	time: string; // relative time like "T-3h", "T-1h", "T-15min"
 	task: string;
 	recipe?: string;
 }
 
 export interface EventPlan {
 	description: string;
-	eventTime: string;       // ISO datetime
+	eventTime: string; // ISO datetime
 	guestCount: number;
 	guests: GuestProfile[];
 	menu: EventMenuItem[];
 	prepTimeline: PrepTimelineStep[];
 	deltaGroceryItems: string[];
-	timelineError?: string;  // populated if the prep-timeline LLM call failed
+	timelineError?: string; // populated if the prep-timeline LLM call failed
 }

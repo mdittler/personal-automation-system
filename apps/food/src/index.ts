@@ -8,10 +8,92 @@
  * Phase H10: Cost tracking — price DB, budget reports, cost annotations.
  */
 
-import type { AppModule, CallbackContext, CoreServices, MessageContext, PhotoContext } from '@pas/core/types';
+import type {
+	AppModule,
+	CallbackContext,
+	CoreServices,
+	MessageContext,
+	PhotoContext,
+} from '@pas/core/types';
 import type { ScopedDataStore } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { stringify } from 'yaml';
+import {
+	handleBudgetCommand as handleBudgetCmd,
+	isBudgetViewIntent,
+	isPriceUpdateIntent,
+} from './handlers/budget.js';
+import {
+	handleCookCallback,
+	handleCookCommand,
+	handleCookIntent,
+	handleCookTextAction,
+	handleServingsReply,
+	hasPendingCookRecipe,
+	isCookModeActive,
+} from './handlers/cook-mode.js';
+import {
+	buildRecipeApprovalButtons,
+	handleApprovalCallback,
+	handleChildApprovalIntent,
+	handleFamilyCommand as handleFamilyCmd,
+	handleFoodIntroCallback,
+	handleFoodIntroduction,
+	handleKidAdaptIntent,
+	isChildApprovalIntent,
+	isFoodIntroIntent,
+	isKidAdaptIntent,
+} from './handlers/family.js';
+import { handleFreezerCallback, handleFreezerCheckJob } from './handlers/freezer-handler.js';
+import { handleHostingCommand as handleHostingCmd, isHostingIntent } from './handlers/hosting.js';
+import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/leftover-handler.js';
+import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
+import {
+	handleNutritionCommand as handleNutritionCmd,
+	isNutritionViewIntent,
+} from './handlers/nutrition.js';
+import {
+	handlePerishableCallback,
+	handlePerishableCheckJob,
+} from './handlers/perishable-handler.js';
+import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
+import {
+	handleCookedCallback,
+	handleNightlyRatingPromptJob,
+	handleRateCallback,
+} from './handlers/rating.js';
+import { handleSeasonalNudgeJob } from './handlers/seasonal-nudge.js';
+import {
+	cancelShoppingFollowup,
+	handleShopFollowupClearCallback,
+	handleShopFollowupKeepCallback,
+	scheduleShoppingFollowup,
+} from './handlers/shopping-followup.js';
+import {
+	handleFinalizeVotesJob,
+	handleVoteCallback,
+	sendVotingMessages,
+} from './handlers/voting.js';
+import {
+	analyzeBatchPrep,
+	buildBatchFreezeButtons,
+	checkDefrostNeeded,
+	formatBatchPrepMessage,
+} from './services/batch-cooking.js';
+import { checkBudgetAlert, formatBudgetAlert } from './services/budget-alerts.js';
+import { listWeeklyHistories, loadWeeklyHistory } from './services/budget-reporter.js';
+import { getSession } from './services/cook-session.js';
+import { estimateGroceryListCost, estimatePlanCost } from './services/cost-estimator.js';
+import { checkCuisineDiversity } from './services/cuisine-tracker.js';
+import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
+import {
+	addFreezerItem,
+	buildFreezerButtons,
+	formatFreezerList,
+	loadFreezer,
+	parseFreezerInput,
+	saveFreezer,
+} from './services/freezer-store.js';
 import { deduplicateAndAssignDepartments } from './services/grocery-dedup.js';
 import { generateGroceryFromRecipes } from './services/grocery-generator.js';
 import {
@@ -25,6 +107,7 @@ import {
 	saveGroceryList,
 	togglePurchased,
 } from './services/grocery-store.js';
+import { formatGuestList, loadGuests, removeGuest } from './services/guest-profiles.js';
 import {
 	createHousehold,
 	getHouseholdInfo,
@@ -32,6 +115,15 @@ import {
 	leaveHousehold,
 } from './services/household.js';
 import { parseManualItems } from './services/item-parser.js';
+import {
+	addLeftover,
+	buildLeftoverButtons,
+	formatLeftoverList,
+	loadLeftovers,
+	parseLeftoverInput,
+	saveLeftovers,
+} from './services/leftover-store.js';
+import { autoLogFromCookedMeal } from './services/macro-tracker.js';
 import {
 	archivePlan,
 	buildPlanButtons,
@@ -49,10 +141,21 @@ import {
 	formatPantry,
 	groceryToPantryItems,
 	loadPantry,
+	normalizePantryItems,
 	parsePantryItems,
 	removePantryItem,
 	savePantry,
 } from './services/pantry-store.js';
+import { generatePediatricianReport } from './services/pediatrician-report.js';
+import { loadPhoto } from './services/photo-store.js';
+import {
+	addOrUpdatePrice,
+	getStoreSlug,
+	listStores,
+	loadStorePrices,
+	parsePriceUpdateText,
+	saveStorePrices,
+} from './services/price-store.js';
 import { applyRecipeEdit, parseRecipeText } from './services/recipe-parser.js';
 import {
 	EDITABLE_RECIPE_FIELDS,
@@ -64,73 +167,9 @@ import {
 	searchRecipes,
 	updateRecipe,
 } from './services/recipe-store.js';
-import { handleVoteCallback, handleFinalizeVotesJob, sendVotingMessages } from './handlers/voting.js';
-import { handleCookedCallback, handleRateCallback, handleNightlyRatingPromptJob } from './handlers/rating.js';
-import { scheduleShoppingFollowup, cancelShoppingFollowup, handleShopFollowupClearCallback, handleShopFollowupKeepCallback } from './handlers/shopping-followup.js';
-import { handleCookCommand, handleCookIntent, handleCookCallback, handleCookTextAction, handleServingsReply, hasPendingCookRecipe, isCookModeActive } from './handlers/cook-mode.js';
-import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/leftover-handler.js';
-import { handleFreezerCallback, handleFreezerCheckJob } from './handlers/freezer-handler.js';
-import { handlePerishableCallback, handlePerishableCheckJob } from './handlers/perishable-handler.js';
-import { getSession } from './services/cook-session.js';
-import {
-	addLeftover,
-	buildLeftoverButtons,
-	formatLeftoverList,
-	loadLeftovers,
-	parseLeftoverInput,
-	saveLeftovers,
-} from './services/leftover-store.js';
-import {
-	addFreezerItem,
-	buildFreezerButtons,
-	formatFreezerList,
-	loadFreezer,
-	parseFreezerInput,
-	saveFreezer,
-} from './services/freezer-store.js';
 import { appendWaste } from './services/waste-store.js';
-import { analyzeBatchPrep, formatBatchPrepMessage, checkDefrostNeeded, buildBatchFreezeButtons } from './services/batch-cooking.js';
-import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
-import { loadPhoto } from './services/photo-store.js';
-import { checkCuisineDiversity } from './services/cuisine-tracker.js';
-import {
-	buildRecipeApprovalButtons,
-	handleFamilyCommand as handleFamilyCmd,
-	handleKidAdaptIntent,
-	handleFoodIntroduction,
-	handleApprovalCallback,
-	handleChildApprovalIntent,
-	handleFoodIntroCallback,
-	isKidAdaptIntent,
-	isFoodIntroIntent,
-	isChildApprovalIntent,
-} from './handlers/family.js';
-import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
-import { generatePediatricianReport } from './services/pediatrician-report.js';
-import { loadGuests, removeGuest, formatGuestList } from './services/guest-profiles.js';
-import {
-	handleBudgetCommand as handleBudgetCmd,
-	isBudgetViewIntent,
-	isPriceUpdateIntent,
-} from './handlers/budget.js';
-import { handleNutritionCommand as handleNutritionCmd, isNutritionViewIntent } from './handlers/nutrition.js';
-import { handleHostingCommand as handleHostingCmd, isHostingIntent } from './handlers/hosting.js';
-import { handleSeasonalNudgeJob } from './handlers/seasonal-nudge.js';
-import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
-import { autoLogFromCookedMeal } from './services/macro-tracker.js';
-import {
-	loadStorePrices,
-	parsePriceUpdateText,
-	saveStorePrices,
-	addOrUpdatePrice,
-	getStoreSlug,
-	listStores,
-} from './services/price-store.js';
-import { estimatePlanCost, estimateGroceryListCost } from './services/cost-estimator.js';
-import { checkBudgetAlert, formatBudgetAlert } from './services/budget-alerts.js';
-import { listWeeklyHistories, loadWeeklyHistory } from './services/budget-reporter.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
-import { todayDate, isoNow } from './utils/date.js';
+import { todayDate } from './utils/date.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
@@ -159,6 +198,21 @@ async function sendRecipeWithApproval(userId: string, recipe: Recipe, text: stri
 
 export const init: AppModule['init'] = async (s: CoreServices) => {
 	services = s;
+	// Phase H11.z: surface unresolved canonical-name entries (if any) so the
+	// user knows to re-run the migration script after LLM access is restored.
+	// Non-blocking: failures here must not prevent app startup.
+	try {
+		const { existsSync, statSync } = await import('node:fs');
+		const { resolve } = await import('node:path');
+		const logPath = resolve(process.cwd(), 'data', 'system', 'food', 'migration-unresolved.log');
+		if (existsSync(logPath) && statSync(logPath).size > 0) {
+			s.logger.warn(
+				'food: ingredient-canonical migration has unresolved entries — see data/system/food/migration-unresolved.log',
+			);
+		}
+	} catch {
+		// diagnostic only
+	}
 };
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
@@ -305,13 +359,23 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			if (isKidAdaptIntent(lower, childNames)) {
 				const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
 				if (!adaptEnabled) {
-					await services.telegram.send(ctx.userId, 'Kid meal adaptation is disabled. Enable it in your Food settings.');
+					await services.telegram.send(
+						ctx.userId,
+						'Kid meal adaptation is disabled. Enable it in your Food settings.',
+					);
 					return;
 				}
 				const cached = lastSearchResults.get(ctx.userId);
 				const recipe = cached?.[0] ?? null;
 				const allRecipes = await loadAllRecipes(hh.sharedStore);
-				const msg = await handleKidAdaptIntent(services, text, ctx.userId, hh.sharedStore, recipe, allRecipes);
+				const msg = await handleKidAdaptIntent(
+					services,
+					text,
+					ctx.userId,
+					hh.sharedStore,
+					recipe,
+					allRecipes,
+				);
 				if (msg) {
 					await services.telegram.send(ctx.userId, msg);
 					return;
@@ -319,8 +383,15 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			}
 
 			if (isFoodIntroIntent(lower)) {
-				const waitDays = ((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
-				const result = await handleFoodIntroduction(services, text, ctx.userId, hh.sharedStore, waitDays);
+				const waitDays =
+					((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
+				const result = await handleFoodIntroduction(
+					services,
+					text,
+					ctx.userId,
+					hh.sharedStore,
+					waitDays,
+				);
 				if (result.buttons) {
 					await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
 				} else {
@@ -331,7 +402,13 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 			if (isChildApprovalIntent(lower, childNames)) {
 				const allRecipes = await loadAllRecipes(hh.sharedStore);
-				const msg = await handleChildApprovalIntent(services, text, hh.sharedStore, allRecipes, childNames);
+				const msg = await handleChildApprovalIntent(
+					services,
+					text,
+					hh.sharedStore,
+					allRecipes,
+					childNames,
+				);
 				if (msg) {
 					await services.telegram.send(ctx.userId, msg);
 					return;
@@ -350,7 +427,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (isNutritionViewIntent(lower)) {
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
-			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			await services.telegram.send(
+				ctx.userId,
+				'Set up a household first with /household create <name>',
+			);
 			return;
 		}
 		await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
@@ -361,7 +441,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (isHostingIntent(lower)) {
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
-			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			await services.telegram.send(
+				ctx.userId,
+				'Set up a household first with /household create <name>',
+			);
 			return;
 		}
 		await handleHostingCmd(services, ['plan', text], ctx.userId, hh.sharedStore);
@@ -372,7 +455,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (isBudgetViewIntent(lower)) {
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
-			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			await services.telegram.send(
+				ctx.userId,
+				'Set up a household first with /household create <name>',
+			);
 			return;
 		}
 		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
@@ -503,7 +589,10 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'family': {
 			const hh = await requireHousehold(services, ctx.userId);
 			if (!hh) {
-				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
 				return;
 			}
 			const result = await handleFamilyCmd(services, args, ctx.userId, hh.sharedStore);
@@ -517,7 +606,10 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'foodbudget': {
 			const hh = await requireHousehold(services, ctx.userId);
 			if (!hh) {
-				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
 				return;
 			}
 			await handleBudgetCmd(services, args, ctx.userId, hh.sharedStore);
@@ -526,7 +618,10 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'nutrition': {
 			const hh = await requireHousehold(services, ctx.userId);
 			if (!hh) {
-				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
 				return;
 			}
 			await handleNutritionCmd(services, args, ctx.userId, hh.sharedStore);
@@ -535,7 +630,10 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'hosting': {
 			const hh = await requireHousehold(services, ctx.userId);
 			if (!hh) {
-				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
 				return;
 			}
 			await handleHostingCmd(services, args, ctx.userId, hh.sharedStore);
@@ -636,8 +734,10 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const purchased = getPendingPantryItems(ctx.userId);
 			if (purchased?.length) {
 				const rawPantryItems = groceryToPantryItems(purchased, services.timezone);
+				// H11.z: ensure canonicalName present (grocery items may predate normalization)
+				const normalized = await normalizePantryItems(services, rawPantryItems);
 				// H6: Estimate expiry for perishable items
-				const pantryItems = await enrichWithExpiry(services, rawPantryItems);
+				const pantryItems = await enrichWithExpiry(services, normalized);
 				const existing = await loadPantry(hh.sharedStore);
 				const updated = addPantryItems(existing, pantryItems);
 				await savePantry(hh.sharedStore, updated);
@@ -783,7 +883,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 						ctx.messageId,
 						'🗳 Meal plan regenerated! Voting messages sent to all household members.',
 					);
-					services.logger.info('Regenerated meal plan %s with voting for %d members', plan.id, hh.household.members.length);
+					services.logger.info(
+						'Regenerated meal plan %s with voting for %d members',
+						plan.id,
+						hh.household.members.length,
+					);
 				} else {
 					const location =
 						((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
@@ -803,7 +907,12 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 						const batchMsg = formatBatchPrepMessage(batchResult);
 						const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 						for (const memberId of hh.household.members) {
-							await sendBatchPrepToMember(memberId, batchMsg, batchButtons, batchResult.freezerFriendlyRecipes);
+							await sendBatchPrepToMember(
+								memberId,
+								batchMsg,
+								batchButtons,
+								batchResult.freezerFriendlyRecipes,
+							);
 						}
 					}
 				} catch (batchErr) {
@@ -915,10 +1024,10 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			// H11: Auto-log macros when meal is marked as cooked
 			try {
 				const plan = await loadCurrentPlan(hh.sharedStore);
-				const meal = plan?.meals.find(m => m.date === mealDate && m.cooked);
+				const meal = plan?.meals.find((m) => m.date === mealDate && m.cooked);
 				if (meal) {
-					const recipe = await loadAllRecipes(hh.sharedStore).then(
-						recipes => recipes.find(r => r.id === meal.recipeId),
+					const recipe = await loadAllRecipes(hh.sharedStore).then((recipes) =>
+						recipes.find((r) => r.id === meal.recipeId),
 					);
 					if (recipe) {
 						const userStore = services.data.forUser(ctx.userId);
@@ -955,7 +1064,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data.startsWith('lo:')) {
 			if (data === 'lo:add') {
 				setPendingLeftoverAdd(ctx.userId);
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "chili, about 3 servings")');
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					'What leftovers do you have? (e.g., "chili, about 3 servings")',
+				);
 				return;
 			}
 			if (data.startsWith('lo:post-meal:yes')) {
@@ -963,10 +1076,21 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				const encoded = data.slice('lo:post-meal:yes:'.length);
 				const fromRecipe = encoded ? decodeURIComponent(encoded) : undefined;
 				setPendingLeftoverAdd(ctx.userId, fromRecipe);
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What leftovers do you have? (e.g., "about 3 servings of chili")');
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					'What leftovers do you have? (e.g., "about 3 servings of chili")',
+				);
 				return;
 			}
-			await handleLeftoverCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			await handleLeftoverCallback(
+				services,
+				data.slice(3),
+				ctx.userId,
+				ctx.chatId,
+				ctx.messageId,
+				hh.sharedStore,
+			);
 			return;
 		}
 
@@ -974,28 +1098,60 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data.startsWith('fz:')) {
 			if (data === 'fz:add') {
 				setPendingFreezerAdd(ctx.userId);
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")');
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")',
+				);
 				return;
 			}
-			await handleFreezerCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			await handleFreezerCallback(
+				services,
+				data.slice(3),
+				ctx.userId,
+				ctx.chatId,
+				ctx.messageId,
+				hh.sharedStore,
+			);
 			return;
 		}
 
 		// ─── H6: Perishable alert callbacks ─────────────────
 		if (data.startsWith('pa:')) {
-			await handlePerishableCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			await handlePerishableCallback(
+				services,
+				data.slice(3),
+				ctx.userId,
+				ctx.chatId,
+				ctx.messageId,
+				hh.sharedStore,
+			);
 			return;
 		}
 
 		// ─── H9: Family approval callbacks ──────────────────
 		if (data.startsWith('fa:')) {
-			await handleApprovalCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			await handleApprovalCallback(
+				services,
+				data.slice(3),
+				ctx.userId,
+				ctx.chatId,
+				ctx.messageId,
+				hh.sharedStore,
+			);
 			return;
 		}
 
 		// ─── H9: Food introduction callbacks ────────────────
 		if (data.startsWith('fi:')) {
-			await handleFoodIntroCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			await handleFoodIntroCallback(
+				services,
+				data.slice(3),
+				ctx.userId,
+				ctx.chatId,
+				ctx.messageId,
+				hh.sharedStore,
+			);
 			return;
 		}
 
@@ -1004,13 +1160,24 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const childSlug = data.slice('nut:ped:'.length);
 			const childLog = await loadChildProfile(hh.sharedStore, childSlug);
 			if (!childLog) {
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Child "${childSlug}" not found.`);
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					`Child "${childSlug}" not found.`,
+				);
 				return;
 			}
 			const recipes = await loadAllRecipes(hh.sharedStore);
 			const userStore = services.data.forUser(ctx.userId);
 			const today = todayDate(services.timezone);
-			const report = await generatePediatricianReport(hh.sharedStore, userStore, childLog, recipes, 90, today);
+			const report = await generatePediatricianReport(
+				hh.sharedStore,
+				userStore,
+				childLog,
+				recipes,
+				90,
+				today,
+			);
 			await services.telegram.editMessage(ctx.chatId, ctx.messageId, report);
 			return;
 		}
@@ -1035,7 +1202,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const slug = data.slice('host:grem:'.length);
 			const removed = await removeGuest(hh.sharedStore, slug);
 			if (removed) {
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Removed guest: **${slug}**`);
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					`Removed guest: **${slug}**`,
+				);
 			} else {
 				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Guest not found.`);
 			}
@@ -1050,7 +1221,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 
 			const recipeName = getBatchFreezeRecipe(ctx.chatId, ctx.messageId, index);
 			if (!recipeName) {
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'This freeze suggestion has expired. Generate a new meal plan to try again.');
+				await services.telegram.editMessage(
+					ctx.chatId,
+					ctx.messageId,
+					'This freeze suggestion has expired. Generate a new meal plan to try again.',
+				);
 				return;
 			}
 
@@ -1064,7 +1239,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const existingFreezer = await loadFreezer(hh.sharedStore);
 			const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
 			await saveFreezer(hh.sharedStore, updatedFreezer);
-			await services.telegram.editMessage(ctx.chatId, ctx.messageId, `🧊 Logged frozen batch: ${recipeName}`);
+			await services.telegram.editMessage(
+				ctx.chatId,
+				ctx.messageId,
+				`🧊 Logged frozen batch: ${recipeName}`,
+			);
 			return;
 		}
 	} catch (err) {
@@ -1162,7 +1341,11 @@ function setBatchFreezeRecipes(chatId: number, messageId: number, recipes: strin
 	}
 }
 
-function getBatchFreezeRecipe(chatId: number, messageId: number, index: number): string | undefined {
+function getBatchFreezeRecipe(
+	chatId: number,
+	messageId: number,
+	index: number,
+): string | undefined {
 	const key = `${chatId}:${messageId}`;
 	const entry = pendingBatchFreezeRecipes.get(key);
 	if (!entry || Date.now() > entry.expiresAt) {
@@ -1452,7 +1635,10 @@ async function handleSearchRecipe(text: string, ctx: MessageContext): Promise<vo
 async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
@@ -1476,15 +1662,25 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 			if (photoRecipes.length === 1) {
 				const photo = await loadPhoto(hh.sharedStore, photoRecipes[0]!.sourcePhoto!);
 				if (photo) {
-					await services.telegram.sendPhoto(ctx.userId, photo, `Original photo: ${photoRecipes[0]!.title}`);
+					await services.telegram.sendPhoto(
+						ctx.userId,
+						photo,
+						`Original photo: ${photoRecipes[0]!.title}`,
+					);
 				} else {
-					await services.telegram.send(ctx.userId, `The photo for "${photoRecipes[0]!.title}" could not be found.`);
+					await services.telegram.send(
+						ctx.userId,
+						`The photo for "${photoRecipes[0]!.title}" could not be found.`,
+					);
 				}
 				return;
 			}
 			lastSearchResults.set(ctx.userId, photoRecipes);
 			const list = photoRecipes.map((r, i) => `${i + 1}. ${r.title}`).join('\n');
-			await services.telegram.send(ctx.userId, `Which recipe photo?\n\n${list}\n\nReply with a number.`);
+			await services.telegram.send(
+				ctx.userId,
+				`Which recipe photo?\n\n${list}\n\nReply with a number.`,
+			);
 			return;
 		}
 
@@ -1673,13 +1869,20 @@ async function handleGroceryView(ctx: MessageContext): Promise<void> {
 	if (showPrices) {
 		try {
 			const stores = await listStores(hh.sharedStore);
-			const defaultStore = (await services.config.get<string>('default_store')) as string | undefined;
-			const storeSlug = defaultStore ? getStoreSlug(defaultStore) : stores[0] ?? '';
+			const defaultStore = (await services.config.get<string>('default_store')) as
+				| string
+				| undefined;
+			const storeSlug = defaultStore ? getStoreSlug(defaultStore) : (stores[0] ?? '');
 			if (storeSlug) {
 				const priceData = await loadStorePrices(hh.sharedStore, storeSlug);
 				if (priceData.items.length > 0) {
 					const unpurchased = list.items.filter((i) => !i.purchased);
-					const costResult = await estimateGroceryListCost(services, unpurchased, priceData.items, priceData.store);
+					const costResult = await estimateGroceryListCost(
+						services,
+						unpurchased,
+						priceData.items,
+						priceData.store,
+					);
 					if (costResult.total > 0) {
 						groceryMsg += `\n\n💰 **Est. Total: $${costResult.total.toFixed(2)}** (${priceData.store})`;
 					}
@@ -1690,11 +1893,7 @@ async function handleGroceryView(ctx: MessageContext): Promise<void> {
 		}
 	}
 
-	await services.telegram.sendWithButtons(
-		ctx.userId,
-		groceryMsg,
-		buildGroceryButtons(list),
-	);
+	await services.telegram.sendWithButtons(ctx.userId, groceryMsg, buildGroceryButtons(list));
 	services.logger.info('Showed grocery list (%d items) to %s', list.items.length, ctx.userId);
 }
 
@@ -1916,12 +2115,14 @@ async function handlePantryAdd(text: string, ctx: MessageContext): Promise<void>
 		return;
 	}
 
-	const newItems = parsePantryItems(itemsText, services.timezone);
-	if (!newItems.length) {
+	const parsed = parsePantryItems(itemsText, services.timezone);
+	if (!parsed.length) {
 		await services.telegram.send(ctx.userId, "I couldn't parse any items from that.");
 		return;
 	}
 
+	// H11.z: normalize ingredient names (canonical form) before dedup + save.
+	const newItems = await normalizePantryItems(services, parsed);
 	const existing = await loadPantry(hh.sharedStore);
 	const updated = addPantryItems(existing, newItems);
 	await savePantry(hh.sharedStore, updated);
@@ -2035,7 +2236,11 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 				ctx.userId,
 				'🗳 Meal plan generated! Voting messages sent to all household members.',
 			);
-			services.logger.info('Generated meal plan %s with voting for %d members', plan.id, hh.household.members.length);
+			services.logger.info(
+				'Generated meal plan %s with voting for %d members',
+				plan.id,
+				hh.household.members.length,
+			);
 		} else {
 			const location =
 				((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
@@ -2044,12 +2249,20 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 			// H10: Append cost estimates if price data available
 			try {
 				const stores = await listStores(hh.sharedStore);
-				const defaultStore = (await services.config.get<string>('default_store')) as string | undefined;
-				const storeSlug = defaultStore ? getStoreSlug(defaultStore) : stores[0] ?? '';
+				const defaultStore = (await services.config.get<string>('default_store')) as
+					| string
+					| undefined;
+				const storeSlug = defaultStore ? getStoreSlug(defaultStore) : (stores[0] ?? '');
 				if (storeSlug) {
 					const priceData = await loadStorePrices(hh.sharedStore, storeSlug);
 					if (priceData.items.length > 0) {
-						const estimates = await estimatePlanCost(services, plan, recipes, priceData.items, priceData.store);
+						const estimates = await estimatePlanCost(
+							services,
+							plan,
+							recipes,
+							priceData.items,
+							priceData.store,
+						);
 						if (estimates.length > 0) {
 							const totalCost = estimates.reduce((sum, e) => sum + e.totalCost, 0);
 							const avgPerMeal = totalCost / estimates.length;
@@ -2073,11 +2286,7 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 				services.logger.error('Failed to annotate plan with costs: %s', err);
 			}
 
-			await services.telegram.sendWithButtons(
-				ctx.userId,
-				planMsg,
-				buildPlanButtons(plan),
-			);
+			await services.telegram.sendWithButtons(ctx.userId, planMsg, buildPlanButtons(plan));
 			services.logger.info('Generated meal plan for %s (single member)', ctx.userId);
 		}
 
@@ -2089,7 +2298,12 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 				const batchMessage = formatBatchPrepMessage(batchAnalysis);
 				const batchButtons = buildBatchFreezeButtons(batchAnalysis.freezerFriendlyRecipes);
 				for (const memberId of hh.household.members) {
-					await sendBatchPrepToMember(memberId, batchMessage, batchButtons, batchAnalysis.freezerFriendlyRecipes);
+					await sendBatchPrepToMember(
+						memberId,
+						batchMessage,
+						batchButtons,
+						batchAnalysis.freezerFriendlyRecipes,
+					);
 				}
 			}
 		} catch (batchErr) {
@@ -2322,7 +2536,12 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 						const household = await loadHousehold(sharedStore);
 						if (household) {
 							for (const memberId of household.members) {
-								await sendBatchPrepToMember(memberId, batchMessage, batchButtons, batchAnalysis.freezerFriendlyRecipes);
+								await sendBatchPrepToMember(
+									memberId,
+									batchMessage,
+									batchButtons,
+									batchAnalysis.freezerFriendlyRecipes,
+								);
 							}
 						}
 					}
@@ -2446,7 +2665,12 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 				const batchMsg = formatBatchPrepMessage(batchResult);
 				const batchButtons = buildBatchFreezeButtons(batchResult.freezerFriendlyRecipes);
 				for (const memberId of household.members) {
-					await sendBatchPrepToMember(memberId, batchMsg, batchButtons, batchResult.freezerFriendlyRecipes);
+					await sendBatchPrepToMember(
+						memberId,
+						batchMsg,
+						batchButtons,
+						batchResult.freezerFriendlyRecipes,
+					);
 				}
 			}
 		} catch (batchErr) {
@@ -2508,13 +2732,19 @@ function isFoodQuestionIntent(text: string): boolean {
 async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
 	const parsed = await parsePriceUpdateText(services, text);
 	if (!parsed) {
-		await services.telegram.send(ctx.userId, 'I couldn\'t understand that price update. Try: "eggs are $3.50 at costco"');
+		await services.telegram.send(
+			ctx.userId,
+			'I couldn\'t understand that price update. Try: "eggs are $3.50 at costco"',
+		);
 		return;
 	}
 
@@ -2661,8 +2891,9 @@ export { isHostingIntent };
 
 function isLeftoverAddIntent(lower: string): boolean {
 	return (
-		/\b(leftover|left over)\b/i.test(lower) && /\b(have|got|save|store|put|log)\b/i.test(lower)
-	) || /\b(there'?s|we'?ve got)\b.*\b(left over|leftover|remaining)\b/i.test(lower);
+		(/\b(leftover|left over)\b/i.test(lower) && /\b(have|got|save|store|put|log)\b/i.test(lower)) ||
+		/\b(there'?s|we'?ve got)\b.*\b(left over|leftover|remaining)\b/i.test(lower)
+	);
 }
 
 function isLeftoverViewIntent(lower: string): boolean {
@@ -2699,7 +2930,10 @@ function isWasteIntent(lower: string): boolean {
 async function handleLeftoversView(ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 	const items = await loadLeftovers(hh.sharedStore);
@@ -2737,7 +2971,10 @@ async function estimateLeftoverExpiry(storedDate: string, foodName: string): Pro
 async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
@@ -2749,7 +2986,10 @@ async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promi
 
 	if (!itemText) {
 		setPendingLeftoverAdd(ctx.userId);
-		await services.telegram.send(ctx.userId, 'What leftovers do you have? (e.g., "chili, about 3 servings")');
+		await services.telegram.send(
+			ctx.userId,
+			'What leftovers do you have? (e.g., "chili, about 3 servings")',
+		);
 		return;
 	}
 
@@ -2794,7 +3034,10 @@ async function handlePendingLeftoverAdd(text: string, ctx: MessageContext): Prom
 async function handleFreezerView(ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 	const items = await loadFreezer(hh.sharedStore);
@@ -2812,7 +3055,10 @@ async function handleFreezerView(ctx: MessageContext): Promise<void> {
 async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
@@ -2825,7 +3071,10 @@ async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promis
 
 	if (!itemText) {
 		setPendingFreezerAdd(ctx.userId);
-		await services.telegram.send(ctx.userId, 'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")');
+		await services.telegram.send(
+			ctx.userId,
+			'What would you like to add to the freezer? (e.g., "2 lbs chicken breasts")',
+		);
 		return;
 	}
 
@@ -2857,7 +3106,10 @@ async function handlePendingFreezerAdd(text: string, ctx: MessageContext): Promi
 async function handleWasteIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
@@ -2875,7 +3127,9 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 		return;
 	}
 
-	const reason: WasteLogEntry['reason'] = /\b(spoil|mold|rotten)\b/i.test(text) ? 'spoiled' : 'expired';
+	const reason: WasteLogEntry['reason'] = /\b(spoil|mold|rotten)\b/i.test(text)
+		? 'spoiled'
+		: 'expired';
 
 	const entry: WasteLogEntry = {
 		name: sanitizeInput(itemText),
@@ -2903,7 +3157,10 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 async function handleLeftoversCommand(args: string[], ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 
@@ -2921,7 +3178,10 @@ async function handleLeftoversCommand(args: string[], ctx: MessageContext): Prom
 async function handleFreezerCommand(args: string[], ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) {
-		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
 		return;
 	}
 

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { createMockCoreServices } from '@pas/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import type { GroceryItem, PantryItem } from '../types.js';
+import { resetIngredientNormalizerCacheForTests } from '../services/ingredient-normalizer.js';
 import {
 	addPantryItems,
 	enrichWithExpiry,
@@ -8,11 +9,13 @@ import {
 	groceryToPantryItems,
 	isPerishableCategory,
 	loadPantry,
+	normalizePantryItems,
 	pantryContains,
 	parsePantryItems,
 	removePantryItem,
 	savePantry,
 } from '../services/pantry-store.js';
+import type { GroceryItem, PantryItem } from '../types.js';
 
 function makePantryItem(overrides: Partial<PantryItem> = {}): PantryItem {
 	return {
@@ -60,9 +63,7 @@ describe('pantry-store', () => {
 		});
 
 		it('parses YAML array format', async () => {
-			const items: PantryItem[] = [
-				makePantryItem({ name: 'Milk', category: 'Dairy & Eggs' }),
-			];
+			const items: PantryItem[] = [makePantryItem({ name: 'Milk', category: 'Dairy & Eggs' })];
 			const store = mockStore(stringify(items));
 			const result = await loadPantry(store as never);
 			expect(result).toHaveLength(1);
@@ -116,10 +117,7 @@ describe('pantry-store', () => {
 			const items = [makePantryItem()];
 			await savePantry(store as never, items);
 			expect(store.write).toHaveBeenCalledTimes(1);
-			expect(store.write).toHaveBeenCalledWith(
-				'pantry.yaml',
-				expect.stringContaining('items:'),
-			);
+			expect(store.write).toHaveBeenCalledWith('pantry.yaml', expect.stringContaining('items:'));
 		});
 
 		it('includes frontmatter in output', async () => {
@@ -159,10 +157,7 @@ describe('pantry-store', () => {
 		});
 
 		it('preserves other items when updating one', () => {
-			const existing = [
-				makePantryItem({ name: 'Eggs' }),
-				makePantryItem({ name: 'Butter' }),
-			];
+			const existing = [makePantryItem({ name: 'Eggs' }), makePantryItem({ name: 'Butter' })];
 			const newItems = [makePantryItem({ name: 'EGGS', quantity: '24' })];
 			const result = addPantryItems(existing, newItems);
 			expect(result).toHaveLength(2);
@@ -188,16 +183,90 @@ describe('pantry-store', () => {
 			expect(existing).toHaveLength(1);
 			expect(result).toHaveLength(2);
 		});
+
+		// Phase H11.z: canonical-name dedup
+		it('merges entries that differ only in plural form once normalized', async () => {
+			resetIngredientNormalizerCacheForTests();
+			const services = createMockCoreServices();
+			const normalized = await normalizePantryItems(services, [
+				makePantryItem({ name: 'tomato' }),
+				makePantryItem({ name: 'tomatoes' }),
+			]);
+			const result = addPantryItems([], normalized);
+			expect(result).toHaveLength(1);
+			expect(result[0]?.canonicalName).toBe('tomato');
+		});
+
+		it('merges a canonicalized new entry into a legacy entry that predates normalization', async () => {
+			resetIngredientNormalizerCacheForTests();
+			const services = createMockCoreServices();
+			const legacy = [makePantryItem({ name: 'onions' })]; // no canonicalName
+			const normalized = await normalizePantryItems(services, [
+				makePantryItem({ name: 'onion', quantity: '3' }),
+			]);
+			const result = addPantryItems(legacy, normalized);
+			// Legacy lacks canonical, so its dedup key is "onions"; new entry's
+			// canonical is "onion" — they live as separate entries until the
+			// legacy one is migrated. This documents the intentional split.
+			expect(result).toHaveLength(2);
+		});
+
+		it('merges when both sides have canonicalName set', async () => {
+			resetIngredientNormalizerCacheForTests();
+			const services = createMockCoreServices();
+			const existing = await normalizePantryItems(services, [
+				makePantryItem({ name: 'Salt', quantity: '1 jar' }),
+			]);
+			const incoming = await normalizePantryItems(services, [
+				makePantryItem({ name: 'salt', quantity: '2 jars' }),
+			]);
+			const result = addPantryItems(existing, incoming);
+			expect(result).toHaveLength(1);
+			expect(result[0]?.quantity).toBe('2 jars');
+			expect(result[0]?.canonicalName).toBe('salt');
+		});
+	});
+
+	// ── normalizePantryItems ────────────────────────────────────
+
+	describe('normalizePantryItems', () => {
+		beforeEach(() => {
+			resetIngredientNormalizerCacheForTests();
+		});
+
+		it('populates canonicalName for every item', async () => {
+			const services = createMockCoreServices();
+			const result = await normalizePantryItems(services, [
+				makePantryItem({ name: 'tomatoes' }),
+				makePantryItem({ name: 'carrots' }),
+			]);
+			expect(result[0]?.canonicalName).toBe('tomato');
+			expect(result[1]?.canonicalName).toBe('carrot');
+		});
+
+		it('leaves items alone that already have canonicalName', async () => {
+			const services = createMockCoreServices();
+			const result = await normalizePantryItems(services, [
+				makePantryItem({ name: 'Salt', canonicalName: 'salt' }),
+			]);
+			expect(result[0]?.canonicalName).toBe('salt');
+			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
+
+		it('strips quantity + unit prefixes before canonicalizing', async () => {
+			const services = createMockCoreServices();
+			const result = await normalizePantryItems(services, [
+				makePantryItem({ name: '4 cups of salt' }),
+			]);
+			expect(result[0]?.canonicalName).toBe('salt');
+		});
 	});
 
 	// ── removePantryItem ────────────────────────────────────────
 
 	describe('removePantryItem', () => {
 		it('removes item by exact name', () => {
-			const items = [
-				makePantryItem({ name: 'Eggs' }),
-				makePantryItem({ name: 'Milk' }),
-			];
+			const items = [makePantryItem({ name: 'Eggs' }), makePantryItem({ name: 'Milk' })];
 			const result = removePantryItem(items, 'Eggs');
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('Milk');
@@ -273,6 +342,91 @@ describe('pantry-store', () => {
 
 		it('returns false for empty pantry', () => {
 			expect(pantryContains([], 'Eggs')).toBe(false);
+		});
+
+		// Phase H11.z: canonical-name equality path
+		it('matches via canonicalName when both sides have it', () => {
+			const canonicalItems = [
+				makePantryItem({ name: 'Salt', canonicalName: 'salt' }),
+				makePantryItem({ name: 'Roma tomatoes', canonicalName: 'roma tomato' }),
+			];
+			// Raw name wouldn't match legacy substring (case), but canonical does
+			expect(pantryContains(canonicalItems, 'Salt', 'salt')).toBe(true);
+			expect(pantryContains(canonicalItems, 'tomatoes', 'roma tomato')).toBe(true);
+		});
+
+		it('does not false-positive on canonical mismatch', () => {
+			const canonicalItems = [makePantryItem({ name: 'Salt', canonicalName: 'salt' })];
+			expect(pantryContains(canonicalItems, 'sugar', 'sugar')).toBe(false);
+		});
+
+		it('falls back to legacy substring path when pantry lacks canonicalName', () => {
+			const legacy = [makePantryItem({ name: 'Rice' })]; // no canonicalName
+			// Passing canonical doesn't help (legacy side has none), but legacy
+			// substring path still matches exact name.
+			expect(pantryContains(legacy, 'rice', 'rice')).toBe(true);
+		});
+
+		// ── Phase H11.z iteration 2: head-noun rescue tier ──────────
+		describe('head-noun rescue (Phase H11.z iteration 2)', () => {
+			it('matches pantry "roma tomato" against recipe query "tomato"', () => {
+				const canonicalItems = [
+					makePantryItem({ name: 'Roma tomatoes', canonicalName: 'roma tomato' }),
+				];
+				expect(pantryContains(canonicalItems, 'tomatoes', 'tomato')).toBe(true);
+			});
+
+			it('matches symmetrically: pantry "tomato" against query "roma tomato"', () => {
+				const canonicalItems = [makePantryItem({ name: 'Tomato', canonicalName: 'tomato' })];
+				expect(pantryContains(canonicalItems, 'Roma tomatoes', 'roma tomato')).toBe(true);
+			});
+
+			it('matches pantry "kerrygold butter" against query "butter"', () => {
+				const canonicalItems = [
+					makePantryItem({ name: 'Kerrygold butter', canonicalName: 'kerrygold butter' }),
+				];
+				expect(pantryContains(canonicalItems, 'butter', 'butter')).toBe(true);
+			});
+
+			it('matches pantry "extra-virgin olive oil" against query "olive oil"', () => {
+				const canonicalItems = [
+					makePantryItem({
+						name: 'Extra-virgin olive oil',
+						canonicalName: 'extra-virgin olive oil',
+					}),
+				];
+				expect(pantryContains(canonicalItems, 'olive oil', 'olive oil')).toBe(true);
+			});
+
+			it('matches pantry "large yellow onion" against query "onion"', () => {
+				const canonicalItems = [
+					makePantryItem({ name: 'Large yellow onion', canonicalName: 'large yellow onion' }),
+				];
+				expect(pantryContains(canonicalItems, 'onion', 'onion')).toBe(true);
+			});
+
+			it('matches prep-state adjectives: pantry "chopped onion" + query "onion"', () => {
+				const canonicalItems = [
+					makePantryItem({ name: 'Chopped onions', canonicalName: 'chopped onion' }),
+				];
+				expect(pantryContains(canonicalItems, 'onion', 'onion')).toBe(true);
+			});
+
+			it('does NOT match "rice" pantry against "licorice" query (word-boundary guard)', () => {
+				// "licorice".endsWith(" rice") is FALSE (no leading space) — crucial regression.
+				const canonicalItems = [makePantryItem({ name: 'Rice', canonicalName: 'rice' })];
+				expect(pantryContains(canonicalItems, 'licorice', 'licorice')).toBe(false);
+			});
+
+			it('does NOT match "potato" pantry against "tomato" query', () => {
+				const canonicalItems = [makePantryItem({ name: 'Potato', canonicalName: 'potato' })];
+				expect(pantryContains(canonicalItems, 'tomato', 'tomato')).toBe(false);
+			});
+
+			it('does NOT match pantry "salt" against query "sugar"', () => {
+				const canonicalItems = [makePantryItem({ name: 'Salt', canonicalName: 'salt' })];
+				expect(pantryContains(canonicalItems, 'sugar', 'sugar')).toBe(false);
+			});
 		});
 	});
 
@@ -496,9 +650,7 @@ describe('pantry-store', () => {
 		});
 
 		it('enrichWithExpiry defaults to no expiry on LLM failure', async () => {
-			const items = [
-				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood' }),
-			];
+			const items = [makePantryItem({ name: 'Chicken', category: 'Meat & Seafood' })];
 			const mockServices = {
 				llm: { complete: vi.fn().mockRejectedValue(new Error('fail')) },
 				timezone: 'UTC',

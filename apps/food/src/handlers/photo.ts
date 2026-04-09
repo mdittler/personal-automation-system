@@ -13,7 +13,12 @@ import { parseReceiptFromPhoto } from '../services/receipt-parser.js';
 import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
 import { parseGroceryFromPhoto } from '../services/grocery-photo-parser.js';
 import { saveRecipe, updateRecipe } from '../services/recipe-store.js';
-import { addPantryItems, loadPantry, savePantry } from '../services/pantry-store.js';
+import {
+	addPantryItems,
+	loadPantry,
+	normalizePantryItems,
+	savePantry,
+} from '../services/pantry-store.js';
 import { addItems, loadGroceryList, saveGroceryList, createEmptyList } from '../services/grocery-store.js';
 import { isoNow } from '../utils/date.js';
 import type { Receipt } from '../types.js';
@@ -225,9 +230,10 @@ async function handlePantryPhoto(
 		return;
 	}
 
-	// Add items to pantry
+	// H11.z: normalize canonical names before dedup + save.
+	const normalized = await normalizePantryItems(services, items);
 	const pantry = await loadPantry(store);
-	const updated = addPantryItems(pantry, items);
+	const updated = addPantryItems(pantry, normalized);
 	await savePantry(store, updated);
 
 	const itemNames = items.map((i) => `• ${i.name} (${i.quantity})`).join('\n');

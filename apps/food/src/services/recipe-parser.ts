@@ -3,8 +3,9 @@
  */
 
 import type { CoreServices } from '@pas/core/types';
-import type { ParsedRecipe } from '../types.js';
+import type { Ingredient, ParsedRecipe } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
+import { normalizeIngredientName } from './ingredient-normalizer.js';
 
 const PARSE_PROMPT = `You are a recipe parser. Extract the recipe from the user's text into a structured JSON format.
 
@@ -59,7 +60,31 @@ export async function parseRecipeText(services: CoreServices, text: string): Pro
 	parsed.servings = parsed.servings ?? 4;
 	parsed.source = parsed.source ?? 'homemade';
 
+	// Phase H11.z: attach canonicalName to each ingredient so downstream
+	// pantry / hosting subtract operations can match on canonical equality.
+	parsed.ingredients = await attachCanonicalNames(services, parsed.ingredients);
+
 	return parsed;
+}
+
+/**
+ * Populate `canonicalName` on a list of ingredients. Skips entries that
+ * already have one (so re-parsed recipes don't re-hit the normalizer).
+ */
+export async function attachCanonicalNames(
+	services: CoreServices,
+	ingredients: Ingredient[],
+): Promise<Ingredient[]> {
+	const result: Ingredient[] = [];
+	for (const ing of ingredients) {
+		if (ing.canonicalName) {
+			result.push(ing);
+			continue;
+		}
+		const { canonical } = await normalizeIngredientName(services, ing.name);
+		result.push({ ...ing, canonicalName: canonical || ing.name.toLowerCase() });
+	}
+	return result;
 }
 
 const EDIT_PROMPT = `You are a recipe editor. The user wants to modify a recipe field.

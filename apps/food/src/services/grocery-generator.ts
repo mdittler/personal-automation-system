@@ -81,7 +81,8 @@ export async function generateGroceryFromRecipes(
 	const pantry = await loadPantry(sharedStore);
 	const excludedPantry: string[] = [];
 	const afterPantry = afterStaples.filter((item) => {
-		if (pantryContains(pantry, item.name)) {
+		// H11.z: prefer canonical match when grocery item carries one
+		if (pantryContains(pantry, item.name, item.canonicalName)) {
 			excludedPantry.push(item.name);
 			return false;
 		}
