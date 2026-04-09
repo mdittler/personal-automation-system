@@ -28,11 +28,22 @@
  * Companion to natural-language-h11.test.ts (which covers H11 base).
  */
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
+// Deep relative imports into core — `AppConfigServiceImpl` and
+// `requestContext` are not part of the public `@pas/core/*` subpath
+// surface, but the H11.x closeout persona tests below need the REAL
+// implementations (not the stubbed `services.config` mock) to exercise
+// the Phase 30 propagation path.
+import { AppConfigServiceImpl } from '../../../../core/src/services/config/app-config-service.js';
+import { requestContext } from '../../../../core/src/services/context/request-context.js';
+import type { ManifestUserConfig } from '../../../../core/src/types/manifest.js';
 import { handleCommand, handleMessage, init } from '../index.js';
 import type { Household, MonthlyMacroLog, Recipe } from '../types.js';
 
@@ -115,7 +126,13 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 
 	function setupHousehold(
 		opts: {
-			targets?: { calories?: number; protein?: number; carbs?: number; fat?: number; fiber?: number };
+			targets?: {
+				calories?: number;
+				protein?: number;
+				carbs?: number;
+				fat?: number;
+				fiber?: number;
+			};
 			monthlyLog?: MonthlyMacroLog;
 			guests?: unknown[];
 		} = {},
@@ -457,12 +474,20 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 			await handleCommand(
 				'hosting',
 				[
-					'guests', 'add', 'Sarah',
-					'--diet', 'vegetarian,pescatarian',
-					'--allergy', 'peanuts,tree nuts',
-					'--notes', 'brings', 'wine',
+					'guests',
+					'add',
+					'Sarah',
+					'--diet',
+					'vegetarian,pescatarian',
+					'--allergy',
+					'peanuts,tree nuts',
+					'--notes',
+					'brings',
+					'wine',
 				],
-				msg('/hosting guests add Sarah --diet vegetarian,pescatarian --allergy peanuts,tree nuts --notes brings wine'),
+				msg(
+					'/hosting guests add Sarah --diet vegetarian,pescatarian --allergy peanuts,tree nuts --notes brings wine',
+				),
 			);
 
 			expect(store.write).toHaveBeenCalled();
@@ -484,7 +509,19 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 
 			await handleCommand(
 				'hosting',
-				['guests', 'add', 'Mike', '-d', 'vegan', '-a', 'soy', '-n', 'prefers', 'sparkling', 'water'],
+				[
+					'guests',
+					'add',
+					'Mike',
+					'-d',
+					'vegan',
+					'-a',
+					'soy',
+					'-n',
+					'prefers',
+					'sparkling',
+					'water',
+				],
 				msg('/hosting guests add Mike -d vegan -a soy -n prefers sparkling water'),
 			);
 
@@ -598,7 +635,7 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 			expect(sent).not.toMatch(/TypeError|stack/);
 		});
 
-		it('Journey: /nutrition adherence failure doesn\'t crash — empty-state path instead', async () => {
+		it("Journey: /nutrition adherence failure doesn't crash — empty-state path instead", async () => {
 			setupHousehold({ targets: { calories: 2000, protein: 150, carbs: 200, fat: 70, fiber: 30 } });
 
 			// No data + targets set = friendly empty-state, no LLM call at all
@@ -606,6 +643,155 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 
 			expect(services.telegram.send).toHaveBeenCalled();
 			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
+	});
+
+	// ════════════════════════════════════════════════════════════════════════
+	// H11.x CLOSEOUT (2026-04-09 post-Phase-30) —
+	// Persona-level per-user config propagation with the REAL config service.
+	//
+	// Every test above stubs `services.config.get` with a vi.fn. That's
+	// fine for handler logic but blind to the bug Phase 30 fixed: if
+	// `AppConfigServiceImpl.setUserId` were ever dropped again, those
+	// mocked tests would keep passing while real end-users silently got
+	// manifest defaults. The tests below swap `services.config` for a
+	// real `AppConfigServiceImpl` backed by a temp directory, and wrap
+	// each `handleCommand` dispatch in `requestContext.run({ userId })`
+	// exactly the way the router does. A regression to the setUserId bug
+	// will fail all of these loudly.
+	// ════════════════════════════════════════════════════════════════════════
+
+	describe('[H11.x closeout] per-user macro targets — real config service', () => {
+		const tempDirs: string[] = [];
+		const macroDefaults: ManifestUserConfig[] = [
+			{
+				key: 'macro_target_calories',
+				type: 'number',
+				default: 0,
+				description: 'Daily calorie target',
+			},
+			{
+				key: 'macro_target_protein',
+				type: 'number',
+				default: 0,
+				description: 'Daily protein target (g)',
+			},
+			{
+				key: 'macro_target_carbs',
+				type: 'number',
+				default: 0,
+				description: 'Daily carbs target (g)',
+			},
+			{ key: 'macro_target_fat', type: 'number', default: 0, description: 'Daily fat target (g)' },
+			{
+				key: 'macro_target_fiber',
+				type: 'number',
+				default: 0,
+				description: 'Daily fiber target (g)',
+			},
+		];
+
+		/** Swaps `services.config` for a real AppConfigServiceImpl backed by a fresh temp dir. */
+		async function installRealConfig(): Promise<AppConfigServiceImpl> {
+			const dir = await mkdtemp(join(tmpdir(), 'pas-nl-h11x-realconfig-'));
+			tempDirs.push(dir);
+			const realConfig = new AppConfigServiceImpl({
+				dataDir: dir,
+				appId: 'food',
+				defaults: macroDefaults,
+			});
+			// Overwrite the mock injected by createMockCoreServices.
+			(services as unknown as { config: AppConfigServiceImpl }).config = realConfig;
+			return realConfig;
+		}
+
+		afterAll(async () => {
+			for (const dir of tempDirs) {
+				await rm(dir, { recursive: true, force: true });
+			}
+		});
+
+		it('user saves calories via the GUI, then asks "/nutrition targets" — GUI value wins', async () => {
+			// The persona: a household user edited `macro_target_calories`
+			// in the GUI config editor (2400) and now opens the bot to
+			// confirm their targets. Without Phase 30's propagation, the
+			// handler would read the manifest default (0) and tell them
+			// their calories are "not set".
+			setupHousehold({
+				targets: { calories: 2000, protein: 150, carbs: 200, fat: 70, fiber: 30 },
+			});
+			const realConfig = await installRealConfig();
+			await realConfig.setAll('matt', { macro_target_calories: 2400 });
+
+			await requestContext.run({ userId: 'matt' }, async () => {
+				await handleCommand('nutrition', ['targets'], msg('/nutrition targets'));
+			});
+
+			const sent = vi.mocked(services.telegram.send).mock.calls.at(-1)![1] as string;
+			// GUI override for calories, YAML base for the rest.
+			expect(sent).toMatch(/Calories:\s*2400/);
+			expect(sent).toMatch(/Protein:\s*150g/);
+			expect(sent).toMatch(/Fiber:\s*30g/);
+			// And the default (0/'not set') must NOT leak through.
+			expect(sent).not.toMatch(/Calories:\s*not set/);
+		});
+
+		it('two household members see independent macro targets across dispatches', async () => {
+			// Multi-user household: matt and sarah. The router dispatches
+			// each message inside its own requestContext. The bug Phase 30
+			// fixed would have leaked one user's data across both users
+			// because setUserId was never called.
+			setupHousehold();
+			const realConfig = await installRealConfig();
+			await realConfig.setAll('matt', { macro_target_calories: 2800 });
+			await realConfig.setAll('sarah', { macro_target_calories: 1700 });
+
+			await requestContext.run({ userId: 'matt' }, async () => {
+				await handleCommand('nutrition', ['targets'], msg('/nutrition targets', 'matt'));
+			});
+			const mattMsg = vi.mocked(services.telegram.send).mock.calls.at(-1)![1] as string;
+
+			await requestContext.run({ userId: 'sarah' }, async () => {
+				await handleCommand('nutrition', ['targets'], msg('/nutrition targets', 'sarah'));
+			});
+			const sarahMsg = vi.mocked(services.telegram.send).mock.calls.at(-1)![1] as string;
+
+			expect(mattMsg).toMatch(/Calories:\s*2800/);
+			expect(mattMsg).not.toMatch(/Calories:\s*1700/);
+			expect(sarahMsg).toMatch(/Calories:\s*1700/);
+			expect(sarahMsg).not.toMatch(/Calories:\s*2800/);
+		});
+
+		it('user writes targets via the CLI, a later dispatch reads them back', async () => {
+			// Persona flow: user types `/nutrition targets set 2500 180 250 80 35`,
+			// gets a confirmation, then in a later message types `/nutrition targets`
+			// to double-check. Both messages come in as separate dispatches,
+			// each in its own requestContext. The round-trip must survive.
+			setupHousehold();
+			await installRealConfig();
+
+			await requestContext.run({ userId: 'matt' }, async () => {
+				await handleCommand(
+					'nutrition',
+					['targets', 'set', '2500', '180', '250', '80', '35'],
+					msg('/nutrition targets set 2500 180 250 80 35'),
+				);
+			});
+
+			// Clear the mock send history so the read-back dispatch is
+			// easy to inspect on its own.
+			vi.mocked(services.telegram.send).mockClear();
+
+			await requestContext.run({ userId: 'matt' }, async () => {
+				await handleCommand('nutrition', ['targets'], msg('/nutrition targets'));
+			});
+
+			const readMsg = vi.mocked(services.telegram.send).mock.calls.at(-1)![1] as string;
+			expect(readMsg).toMatch(/Calories:\s*2500/);
+			expect(readMsg).toMatch(/Protein:\s*180g/);
+			expect(readMsg).toMatch(/Carbs:\s*250g/);
+			expect(readMsg).toMatch(/Fat:\s*80g/);
+			expect(readMsg).toMatch(/Fiber:\s*35g/);
 		});
 	});
 });

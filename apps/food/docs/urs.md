@@ -2185,7 +2185,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-MEAL-003 | voting.test.ts, voting-handler.test.ts, app.test.ts | 6 | 10 | Implemented |
 | REQ-MEAL-004 | rating.test.ts, rating-handler.test.ts, app.test.ts | 5 | 9 | Implemented |
 | REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
-| REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, natural-language.test.ts | 56 | 16 | Implemented |
+| REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, nutrition-per-user-config.integration.test.ts, natural-language.test.ts, natural-language-h11x.test.ts | 63 | 17 | Implemented |
 | REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
@@ -2253,7 +2253,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **46 test files** | **436** | **379** | **815 tests** |
+| **Totals** | **48 test files** | **443** | **380** | **823 tests** |
 
 ---
 
