@@ -207,4 +207,81 @@ describe('per-user config runtime propagation', () => {
 		expect(all.macro_target_calories).toBe(2400);
 		expect(all.macro_target_protein).toBe(100); // default merged in
 	});
+
+	// ─── Security: malicious userId in requestContext ──────────────────
+	//
+	// The ALS is dumb storage and will preserve any string passed in. If
+	// an attacker could inject an arbitrary userId into the request
+	// context (e.g. via a Telegram spoof, a malformed API call, or a bug
+	// in an upstream dispatch site), the config service's own
+	// defense-in-depth must prevent that userId from reaching the
+	// filesystem. These tests pin that behavior — breaking them means a
+	// future refactor accidentally loosened the guardrail.
+
+	it('rejects path-traversal userId in requestContext and returns defaults', async () => {
+		const service = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'food',
+			defaults: nutritionDefaults,
+		});
+
+		// A legitimate override for alice exists on disk.
+		await service.setAll('alice', { macro_target_calories: 2400 });
+
+		// An attacker injects a path-traversal userId. loadOverrides must
+		// not touch the filesystem with this value.
+		const calories = await dispatchAs('../alice', () =>
+			service.get<number>('macro_target_calories'),
+		);
+		expect(calories).toBe(2000); // default, not alice's 2400
+
+		// Confirm other traversal shapes also fall through to defaults.
+		const slashes = await dispatchAs('..%2Falice', () =>
+			service.get<number>('macro_target_calories'),
+		);
+		expect(slashes).toBe(2000);
+
+		const nested = await dispatchAs('food/../food/alice', () =>
+			service.get<number>('macro_target_calories'),
+		);
+		expect(nested).toBe(2000);
+	});
+
+	it('rejects empty-string userId in requestContext and returns defaults', async () => {
+		const service = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'food',
+			defaults: nutritionDefaults,
+		});
+
+		await service.setAll('alice', { macro_target_calories: 2400 });
+
+		// An empty string is a common "forgot to set the user" bug at a
+		// dispatch site. It must fall through to defaults, not silently
+		// resolve to some random file on disk.
+		const calories = await dispatchAs('', () =>
+			service.get<number>('macro_target_calories'),
+		);
+		expect(calories).toBe(2000);
+	});
+
+	it('rejects userId containing invalid characters in requestContext and returns defaults', async () => {
+		const service = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'food',
+			defaults: nutritionDefaults,
+		});
+
+		await service.setAll('alice', { macro_target_calories: 2400 });
+
+		// Spaces, quotes, shell metacharacters, non-ASCII — none of these
+		// pass the ^[a-zA-Z0-9_-]+$ guardrail in loadOverrides.
+		const invalid = ['alice bob', 'alice"; rm -rf /', 'αlice', 'alice\n'];
+		for (const uid of invalid) {
+			const calories = await dispatchAs(uid, () =>
+				service.get<number>('macro_target_calories'),
+			);
+			expect(calories).toBe(2000);
+		}
+	});
 });

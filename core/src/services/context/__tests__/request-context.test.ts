@@ -55,4 +55,36 @@ describe('requestContext', () => {
 		]);
 		expect(results.sort()).toEqual(['u1', 'u2']);
 	});
+
+	// ─── Edge cases ────────────────────────────────────────────────────
+
+	it('inner run() with userId: undefined shadows the outer userId', () => {
+		// A dispatch site that enters a sub-scope without a user (e.g. a
+		// background health-check triggered inside a message handler) must
+		// be able to *clear* the user context, not inherit it. Otherwise
+		// infrastructure code would silently read per-user config under the
+		// wrong identity.
+		const inner = requestContext.run({ userId: 'outer' }, () => {
+			return requestContext.run({ userId: undefined }, () => getCurrentUserId());
+		});
+		expect(inner).toBeUndefined();
+	});
+
+	it('preserves arbitrary string userIds verbatim (validation is a consumer responsibility)', () => {
+		// The ALS is dumb data storage — it must not mutate or pre-validate
+		// userIds. Consumers (AppConfigService, LLM cost tracker, etc.) are
+		// responsible for format validation before using the value as e.g.
+		// a filesystem path component.
+		const suspicious = [
+			'',
+			'../../etc/passwd',
+			'user with space',
+			'unicode-Ω',
+			'"; rm -rf /',
+		];
+		for (const uid of suspicious) {
+			const seen = requestContext.run({ userId: uid }, () => getCurrentUserId());
+			expect(seen).toBe(uid);
+		}
+	});
 });

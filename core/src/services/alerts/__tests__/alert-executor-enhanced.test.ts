@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AlertAction } from '../../../types/alert.js';
+import { getCurrentUserId } from '../../context/request-context.js';
 import {
 	type ExecutionContext,
 	type ExecutorDeps,
@@ -572,6 +573,31 @@ describe('executeActions — dispatch_message', () => {
 		const result = await executeActions(actions, ['user1'], deps, makeContext());
 
 		expect(result.failureCount).toBe(1);
+	});
+
+	it('dispatches inside requestContext so downstream config.get is per-user', async () => {
+		// Regression guard for the per-user config runtime propagation fix.
+		// alert-executor must wrap router.routeMessage in requestContext.run
+		// with the action's user_id so that when the router reaches an app
+		// handler, `services.config.get(...)` resolves to that user's
+		// overrides — not the manifest defaults.
+		let seenUserId: string | undefined = 'SENTINEL';
+		const router = {
+			routeMessage: vi.fn().mockImplementation(async () => {
+				seenUserId = getCurrentUserId();
+			}),
+		};
+		const deps = makeDeps({ router: router as any });
+		const actions: AlertAction[] = [
+			{
+				type: 'dispatch_message',
+				config: { text: '/note test', user_id: 'user42' },
+			},
+		];
+
+		await executeActions(actions, ['user42'], deps, makeContext());
+
+		expect(seenUserId).toBe('user42');
 	});
 });
 

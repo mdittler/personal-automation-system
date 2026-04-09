@@ -351,6 +351,71 @@ When a scheduled job fails, a notification must be sent to the admin via Telegra
 
 ---
 
+### REQ-SCHED-006: Per-user scheduled job dispatch
+
+**Phase:** 30 | **Status:** Implemented
+
+Scheduled jobs declared with `user_scope: all` in an app manifest must be invoked once per registered system user. Each invocation runs inside a per-user `requestContext` scope so that `services.config.get(key)` inside the handler resolves to that user's overrides. Scheduled jobs declared with `user_scope: shared` or `user_scope: system` must be invoked exactly once with `userId` undefined (behavior unchanged from prior phases). Errors in a single user's invocation must not abort iteration for the remaining users.
+
+**Standard tests:**
+- `per-user-dispatch.test.ts` > invokes handler once with undefined userId for user_scope: shared
+- `per-user-dispatch.test.ts` > invokes handler once with undefined userId for user_scope: system
+- `per-user-dispatch.test.ts` > invokes handler once per registered user for user_scope: all
+- `per-user-dispatch.test.ts` > each per-user invocation is wrapped in requestContext with that user's id
+- `request-context.test.ts` > returns undefined outside any run() scope
+- `request-context.test.ts` > exposes userId set by run()
+- `request-context.test.ts` > inner run() overrides outer run()
+- `request-context.test.ts` > restores outer context after inner run() exits
+- `request-context.test.ts` > propagates through awaited async boundaries
+- `request-context.test.ts` > does not leak across sibling run() calls
+
+**Edge case tests:**
+- `per-user-dispatch.test.ts` > returns silently when user_scope: all has no registered users
+- `per-user-dispatch.test.ts` > returns silently when the app module has no handleScheduledJob
+- `per-user-dispatch.test.ts` > continues iterating after a per-user invocation throws (error isolation)
+- `request-context.test.ts` > returns undefined when store is present but userId is omitted
+- `request-context.test.ts` > inner run() with userId: undefined shadows the outer userId
+- `request-context.test.ts` > preserves arbitrary string userIds verbatim (validation is a consumer responsibility)
+
+**Fixes:**
+- Per-user config runtime propagation (2026-04-09): before the fix, `handleScheduledJob` received only a jobId and no per-user context, so `user_scope: all` handlers had no way to know which user they were running on behalf of. Fixed by extending the signature to `(jobId, userId?)` and delegating per-user iteration to the scheduler via `buildScheduledJobHandler` (core/src/services/scheduler/per-user-dispatch.ts).
+
+---
+
+### REQ-SCHED-007: Dispatch-site request-context propagation
+
+**Phase:** 30 | **Status:** Implemented
+
+Every infrastructure dispatch point that has a userId in scope must wrap the dispatched work in `requestContext.run({ userId }, ...)` so that downstream `AppConfigService.get(key)` calls automatically resolve to the caller's per-user overrides. The unified `requestContext` AsyncLocalStorage (core/src/services/context/request-context.ts) is consumed by both the LLM cost attribution in `base-provider.ts` and the config service's `loadOverrides` path.
+
+Dispatch sites covered:
+1. Telegram message (bootstrap.ts)
+2. Telegram photo (bootstrap.ts)
+3. Telegram route-verification callback (bootstrap.ts)
+4. Telegram app callback query (bootstrap.ts)
+5. HTTP POST /api/messages (api/routes/messages.ts)
+6. Alert executor `dispatch_message` action (services/alerts/alert-executor.ts)
+7. Scheduled jobs with `user_scope: all` (services/scheduler/per-user-dispatch.ts — see REQ-SCHED-006)
+
+**Standard tests:**
+- `messages.test.ts` > dispatches inside requestContext so config.get resolves per-user
+- `alert-executor-enhanced.test.ts` > dispatches inside requestContext so downstream config.get is per-user
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routeMessage call is wrapped in requestContext.run
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routePhoto call is wrapped in requestContext.run
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > the verification-callback dispatch block is wrapped in requestContext.run
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run
+- `dispatch-context-wrap.test.ts` > api/routes/messages.ts > wraps router.routeMessage in requestContext.run
+- `dispatch-context-wrap.test.ts` > services/alerts/alert-executor.ts > wraps deps.router.routeMessage in requestContext.run with the action user_id
+
+**Edge case tests:**
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > imports requestContext from the context module (not from llm/)
+- `dispatch-context-wrap.test.ts` > services/llm/providers/base-provider.ts > reads userId via getCurrentUserId from the unified request-context module
+
+**Fixes:**
+- Per-user config runtime propagation (2026-04-09): the former bespoke `llmContext` only served LLM cost attribution. Promoted to a unified `requestContext` also consumed by `AppConfigService` so per-user config reads work at every dispatch point. Canonical regression: `per-user-runtime.integration.test.ts`.
+
+---
+
 ## 6. Condition Evaluator
 
 ### REQ-COND-001: Rule file parsing

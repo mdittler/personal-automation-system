@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
+import { getCurrentUserId } from '../../services/context/request-context.js';
 import { ChangeLog } from '../../services/data-store/change-log.js';
 import { registerApiRoutes } from '../index.js';
 
@@ -119,6 +120,23 @@ describe('API Messages Route', () => {
 		expect(ctx.text).toBe('Hello PAS');
 		expect(ctx.chatId).toBe(0);
 		expect(ctx.messageId).toBe(0);
+	});
+
+	it('dispatches inside requestContext so config.get resolves per-user', async () => {
+		// Regression guard for the per-user config runtime propagation fix.
+		// The API route must wrap router.routeMessage in requestContext.run
+		// so that AppConfigService.get() resolves to the caller's overrides
+		// when the router ultimately invokes an app handler. Breaking this
+		// wrap is invisible from the outside — the only observable symptom
+		// is that every config.get silently returns the manifest default.
+		let seenUserId: string | undefined = 'SENTINEL';
+		mockRouter.routeMessage.mockImplementationOnce(async () => {
+			seenUserId = getCurrentUserId();
+		});
+
+		const res = await post({ userId: 'user1', text: 'Hello PAS' });
+		expect(res.statusCode).toBe(200);
+		expect(seenUserId).toBe('user1');
 	});
 
 	it('message context includes timestamp', async () => {
