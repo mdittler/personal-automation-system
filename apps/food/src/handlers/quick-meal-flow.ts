@@ -86,6 +86,36 @@ export async function beginQuickMealAdd(
 }
 
 /**
+ * Task 14: seed the guided add flow from an ad-hoc log promotion.
+ * Jumps straight to the kind picker with label + ingredients pre-filled,
+ * skipping the initial "what to call this meal?" and ingredients prompts.
+ */
+export async function beginQuickMealAddPrefilled(
+	services: CoreServices,
+	userId: string,
+	label: string,
+	ingredients: string[],
+): Promise<void> {
+	touch(userId, {
+		step: 'awaiting_kind',
+		label,
+		ingredients,
+		expiresAt: 0,
+	});
+	await services.telegram.sendWithButtons(
+		userId,
+		`**Save as quick-meal: ${label}**\n\nWhat kind of meal is this?`,
+		[
+			[
+				{ text: 'Home cooking', callbackData: 'app:food:nut:meals:add:kind:home' },
+				{ text: 'Restaurant', callbackData: 'app:food:nut:meals:add:kind:restaurant' },
+				{ text: 'Other', callbackData: 'app:food:nut:meals:add:kind:other' },
+			],
+		],
+	);
+}
+
+/**
  * Text-reply handler. Called from index.ts `handleMessage` when
  * `hasPendingQuickMealAdd(userId)` is true. Returns true if it consumed the
  * message, false if the state was invalid and caller should fall through.

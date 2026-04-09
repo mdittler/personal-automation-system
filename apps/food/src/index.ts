@@ -50,6 +50,7 @@ import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/lefto
 import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
 import {
 	handleNutritionCommand as handleNutritionCmd,
+	handleAdHocPromotionCallback,
 	isNutritionViewIntent,
 } from './handlers/nutrition.js';
 import {
@@ -1199,6 +1200,15 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		) {
 			const userStore = services.data.forUser(ctx.userId);
 			await handleQuickMealLogCallback(services, userStore, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.w Task 14: Ad-hoc dedup promote callbacks ───
+		if (
+			data === 'app:food:nut:log:promote:yes' ||
+			data === 'app:food:nut:log:promote:no'
+		) {
+			await handleAdHocPromotionCallback(services, ctx.userId, data);
 			return;
 		}
 

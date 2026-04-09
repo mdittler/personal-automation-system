@@ -1255,3 +1255,249 @@ describe('H11.w — ad-hoc /nutrition log free-text', () => {
 		expect(entry.estimationKind).toBe('llm-ad-hoc');
 	});
 });
+
+describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
+	it('prompts to save as quick-meal on the second similar ad-hoc log', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const llmComplete = vi.fn();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: llmComplete,
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		// First log — should NOT trigger the prompt.
+		llmComplete.mockResolvedValueOnce(
+			JSON.stringify({
+				calories: 820,
+				protein: 35,
+				carbs: 60,
+				fat: 45,
+				fiber: 6,
+				confidence: 0.6,
+			}),
+		);
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'burger', 'potato', 'salad'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+
+		// Second log — similar tokens, SHOULD prompt.
+		llmComplete.mockResolvedValueOnce(
+			JSON.stringify({
+				calories: 810,
+				protein: 34,
+				carbs: 58,
+				fat: 44,
+				fiber: 5,
+				confidence: 0.6,
+			}),
+		);
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'burger', 'potato', 'salad'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+		expect(telegram.sendWithButtons).toHaveBeenCalled();
+		const call = telegram.sendWithButtons.mock.calls.at(-1)!;
+		expect(call[1]).toMatch(/save.*quick-meal/i);
+		const flat = (call[2] as Array<Array<{ text: string; callbackData: string }>>).flat();
+		expect(flat.some((b) => /yes/i.test(b.text))).toBe(true);
+		expect(flat.some((b) => /no/i.test(b.text))).toBe(true);
+		expect(
+			flat.some((b) => b.callbackData === 'app:food:nut:log:promote:yes'),
+		).toBe(true);
+		expect(
+			flat.some((b) => b.callbackData === 'app:food:nut:log:promote:no'),
+		).toBe(true);
+	});
+
+	it('does NOT prompt on dissimilar ad-hoc logs', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const llmComplete = vi.fn();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: llmComplete,
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		llmComplete.mockResolvedValueOnce(
+			JSON.stringify({
+				calories: 400,
+				protein: 15,
+				carbs: 30,
+				fat: 10,
+				fiber: 5,
+				confidence: 0.6,
+			}),
+		);
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'apple'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		llmComplete.mockResolvedValueOnce(
+			JSON.stringify({
+				calories: 900,
+				protein: 40,
+				carbs: 70,
+				fat: 45,
+				fiber: 6,
+				confidence: 0.6,
+			}),
+		);
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'burger'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	it('promote:yes seeds the guided add flow with label + ingredients prefilled', async () => {
+		const { beginQuickMealAddPrefilled, hasPendingQuickMealAdd, __resetQuickMealFlowForTests } =
+			await import('../../handlers/quick-meal-flow.js');
+		const { handleAdHocPromotionCallback, __resetAdHocPromotionForTests } = await import(
+			'../../handlers/nutrition.js'
+		);
+		__resetQuickMealFlowForTests();
+		__resetAdHocPromotionForTests();
+
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const llmComplete = vi.fn();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: llmComplete,
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		// Twice — second triggers the pending promotion.
+		for (let i = 0; i < 2; i++) {
+			llmComplete.mockResolvedValueOnce(
+				JSON.stringify({
+					calories: 500,
+					protein: 20,
+					carbs: 40,
+					fat: 20,
+					fiber: 3,
+					confidence: 0.6,
+				}),
+			);
+			await dispatchAs('u1', () =>
+				handleNutritionCommand(
+					services as never,
+					['log', 'chipotle', 'chicken', 'bowl'],
+					'u1',
+					sharedStore as never,
+				),
+			);
+		}
+		expect(telegram.sendWithButtons).toHaveBeenCalled();
+
+		// Click "Yes" — should seed quick-meal flow at the kind-picker step.
+		await handleAdHocPromotionCallback(
+			services as never,
+			'u1',
+			'app:food:nut:log:promote:yes',
+		);
+		expect(hasPendingQuickMealAdd('u1')).toBe(true);
+		// The kind picker is sent via sendWithButtons with the kind callbacks.
+		const last = telegram.sendWithButtons.mock.calls.at(-1)!;
+		const flat = (last[2] as Array<Array<{ text: string; callbackData: string }>>).flat();
+		expect(
+			flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:home'),
+		).toBe(true);
+		expect(
+			flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:restaurant'),
+		).toBe(true);
+		expect(last[1]).toMatch(/kind of meal/i);
+	});
+
+	it('promote:no sends an ack and clears the pending promotion', async () => {
+		const { handleAdHocPromotionCallback, __resetAdHocPromotionForTests } = await import(
+			'../../handlers/nutrition.js'
+		);
+		const { __resetQuickMealFlowForTests, hasPendingQuickMealAdd } = await import(
+			'../../handlers/quick-meal-flow.js'
+		);
+		__resetQuickMealFlowForTests();
+		__resetAdHocPromotionForTests();
+
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const llmComplete = vi.fn();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: llmComplete,
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		for (let i = 0; i < 2; i++) {
+			llmComplete.mockResolvedValueOnce(
+				JSON.stringify({
+					calories: 300,
+					protein: 10,
+					carbs: 40,
+					fat: 10,
+					fiber: 2,
+					confidence: 0.6,
+				}),
+			);
+			await dispatchAs('u1', () =>
+				handleNutritionCommand(
+					services as never,
+					['log', 'overnight', 'oats'],
+					'u1',
+					sharedStore as never,
+				),
+			);
+		}
+
+		await handleAdHocPromotionCallback(
+			services as never,
+			'u1',
+			'app:food:nut:log:promote:no',
+		);
+		expect(hasPendingQuickMealAdd('u1')).toBe(false);
+		expect(telegram.lastMessage).toMatch(/change your mind|nutrition meals add/i);
+	});
+});

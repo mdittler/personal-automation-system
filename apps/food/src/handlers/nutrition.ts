@@ -17,10 +17,83 @@ import {
 	findQuickMealById,
 	slugifyLabel,
 } from '../services/quick-meals-store.js';
-import { beginQuickMealAdd, beginQuickMealEdit } from './quick-meal-flow.js';
+import {
+	beginQuickMealAdd,
+	beginQuickMealEdit,
+	beginQuickMealAddPrefilled,
+} from './quick-meal-flow.js';
 import { logQuickMeal } from './quick-meal-log.js';
 import { estimateMacros } from '../services/macro-estimator.js';
-import { recordAdHocLog } from '../services/ad-hoc-history.js';
+import { recordAdHocLog, findSimilarAdHoc } from '../services/ad-hoc-history.js';
+
+// ─── Task 14: Ad-hoc dedup promotion pending state ──────────────────────────
+
+interface PendingPromotion {
+	label: string;
+	ingredients: string[];
+	expiresAt: number;
+}
+
+const PROMO_TTL_MS = 5 * 60 * 1000;
+const pendingPromotion = new Map<string, PendingPromotion>();
+
+function setPendingPromotion(userId: string, label: string, ingredients: string[]): void {
+	pendingPromotion.set(userId, {
+		label,
+		ingredients,
+		expiresAt: Date.now() + PROMO_TTL_MS,
+	});
+	// Size guard — drop oldest if >100 concurrent prompts.
+	if (pendingPromotion.size > 100) {
+		const oldest = pendingPromotion.keys().next().value;
+		if (oldest && oldest !== userId) pendingPromotion.delete(oldest);
+	}
+}
+
+function consumePendingPromotion(userId: string): PendingPromotion | undefined {
+	const entry = pendingPromotion.get(userId);
+	pendingPromotion.delete(userId);
+	if (!entry) return undefined;
+	if (Date.now() > entry.expiresAt) return undefined;
+	return entry;
+}
+
+/**
+ * Callback handler for the Task 14 "save as quick-meal?" prompt.
+ * Invoked from index.ts when the callback data matches
+ * `app:food:nut:log:promote:yes` or `:no`.
+ */
+export async function handleAdHocPromotionCallback(
+	services: CoreServices,
+	userId: string,
+	data: string,
+): Promise<void> {
+	if (data === 'app:food:nut:log:promote:no') {
+		consumePendingPromotion(userId);
+		await services.telegram.send(
+			userId,
+			'Ok. Use `/nutrition meals add` later if you change your mind.',
+		);
+		return;
+	}
+	if (data === 'app:food:nut:log:promote:yes') {
+		const pending = consumePendingPromotion(userId);
+		if (!pending) {
+			await services.telegram.send(
+				userId,
+				'Promotion expired — use `/nutrition meals add` to save it manually.',
+			);
+			return;
+		}
+		await beginQuickMealAddPrefilled(services, userId, pending.label, pending.ingredients);
+		return;
+	}
+}
+
+/** Test-only reset for the Task 14 pending-promotion map. */
+export function __resetAdHocPromotionForTests(): void {
+	pendingPromotion.clear();
+}
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -482,6 +555,11 @@ export async function handleNutritionCommand(
 			};
 			const adHocToday = todayDate(services.timezone);
 			await logMealMacros(userStore, userId, adHocEntry, adHocToday);
+
+			// Task 14: check for similar prior ad-hoc BEFORE recording. If a
+			// match exists, the current log is at least the 2nd occurrence
+			// and we follow up with a "save as quick-meal?" prompt.
+			const priorSimilar = await findSimilarAdHoc(userStore, labelText);
 			await recordAdHocLog(userStore, labelText, adHocToday);
 
 			const lowConf = est.confidence < 0.5;
@@ -491,6 +569,22 @@ export async function handleNutritionCommand(
 				userId,
 				`Logged${flag}: **${labelText}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
 			);
+
+			// Task 14: fire-and-forget follow-up prompt (does not block the
+			// confirm). Only fires on 2nd or later similar occurrence.
+			if (priorSimilar) {
+				setPendingPromotion(userId, labelText, [labelText]);
+				await services.telegram.sendWithButtons(
+					userId,
+					`You've logged "${labelText}" before. Save it as a quick-meal for one-tap logging next time?`,
+					[
+						[
+							{ text: 'Yes, save', callbackData: 'app:food:nut:log:promote:yes' },
+							{ text: 'No thanks', callbackData: 'app:food:nut:log:promote:no' },
+						],
+					],
+				);
+			}
 			return;
 		}
 
