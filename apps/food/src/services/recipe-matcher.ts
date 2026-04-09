@@ -44,6 +44,6 @@ export function matchRecipes(input: string, recipes: Recipe[]): RecipeMatchResul
   if (best === 0) return { kind: 'none' };
 
   const top = scored.filter(s => s.score === best);
-  if (top.length === 1) return { kind: 'unique', recipe: top[0].recipe };
+  if (top.length === 1) return { kind: 'unique', recipe: top[0]!.recipe };
   return { kind: 'ambiguous', candidates: top.map(s => s.recipe) };
 }

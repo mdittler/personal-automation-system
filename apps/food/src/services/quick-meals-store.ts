@@ -95,7 +95,7 @@ export async function archiveQuickMeal(
   const idx = f.active.findIndex(t => t.id === id);
   if (idx < 0) return;
   const [removed] = f.active.splice(idx, 1);
-  f.archive.push({ ...removed, updatedAt: new Date().toISOString() });
+  f.archive.push({ ...removed!, updatedAt: new Date().toISOString() });
   await writeFile(store, f);
 }
 
