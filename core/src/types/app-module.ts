@@ -66,9 +66,16 @@ export interface AppModule {
 
 	/**
 	 * Called when a manifest-declared cron schedule fires.
-	 * The jobId matches the schedule's `id` field in the manifest.
+	 *
+	 * - `jobId` matches the schedule's `id` field in the manifest.
+	 * - `userId` is passed when the schedule declares `user_scope: all`.
+	 *   The infrastructure invokes the handler once per registered system
+	 *   user (within a `requestContext.run({ userId }, ...)` scope, so
+	 *   `services.config.get` returns that user's overrides automatically).
+	 *   For `user_scope: shared` and `user_scope: system` jobs, `userId`
+	 *   is undefined and the handler runs once.
 	 */
-	handleScheduledJob?(jobId: string): Promise<void>;
+	handleScheduledJob?(jobId: string, userId?: string): Promise<void>;
 
 	/**
 	 * Called when the system shuts down.

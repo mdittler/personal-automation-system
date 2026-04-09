@@ -52,6 +52,7 @@ import { PendingVerificationStore } from './services/router/pending-verification
 import { RouteVerifier } from './services/router/route-verifier.js';
 import { VerificationLogger } from './services/router/verification-logger.js';
 import { SchedulerServiceImpl } from './services/scheduler/index.js';
+import { buildScheduledJobHandler } from './services/scheduler/per-user-dispatch.js';
 import { SecretsServiceImpl } from './services/secrets/index.js';
 import { SpaceService } from './services/spaces/index.js';
 import { SystemInfoServiceImpl } from './services/system-info/index.js';
@@ -439,7 +440,12 @@ export async function main(): Promise<void> {
 
 	await registry.loadAll(serviceFactory);
 
-	// 9b. Register app cron schedules from manifests
+	// 9b. Register app cron schedules from manifests.
+	//
+	// For `user_scope: all` schedules, buildScheduledJobHandler iterates
+	// the registered users and wraps each invocation in a requestContext
+	// scope so that services.config.get (and any other per-request
+	// infrastructure) resolves per-user within the handler body.
 	for (const entry of registry.getAll()) {
 		const schedules = entry.manifest.capabilities?.schedules ?? [];
 		if (schedules.length > 0 && entry.module.handleScheduledJob) {
@@ -455,9 +461,18 @@ export async function main(): Promise<void> {
 						description: schedule.description,
 						userScope: schedule.user_scope,
 					},
-					() => async () => {
-						await appModule.handleScheduledJob!(schedule.id);
-					},
+					() =>
+						buildScheduledJobHandler({
+							appId,
+							jobId: schedule.id,
+							userScope: schedule.user_scope,
+							appModule,
+							userProvider: userManager,
+							logger: createChildLogger(logger, {
+								service: 'scheduled-job',
+								appId,
+							}),
+						}),
 				);
 			}
 			logger.info(
