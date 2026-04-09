@@ -17,6 +17,8 @@ import { estimateMacros } from '../services/macro-estimator.js';
 import { saveQuickMeal, slugifyLabel } from '../services/quick-meals-store.js';
 import type { QuickMealTemplate } from '../types.js';
 
+type Kind = 'home' | 'restaurant' | 'other';
+
 type AddStep =
 	| 'awaiting_label'
 	| 'awaiting_kind'
@@ -304,7 +306,355 @@ export async function handleQuickMealAddCallback(
 	return false;
 }
 
+// ─── Edit flow (H11.w task 10c) ──────────────────────────────────────────────
+
+type EditStep =
+	| 'picker'
+	| 'awaiting_label'
+	| 'awaiting_kind'
+	| 'awaiting_ingredients'
+	| 'awaiting_ingredients_confirm'
+	| 'awaiting_notes';
+
+interface PendingEdit {
+	working: QuickMealTemplate; // mutated in place as the user edits fields
+	step: EditStep;
+	pendingIngredients?: string[];
+	pendingEstimate?: {
+		calories: number;
+		protein: number;
+		carbs: number;
+		fat: number;
+		fiber: number;
+		confidence: number;
+		model: string;
+		reasoning?: string;
+	};
+	expiresAt: number;
+}
+
+const pendingEdit = new Map<string, PendingEdit>();
+
+function touchEdit(userId: string, state: PendingEdit): void {
+	state.expiresAt = Date.now() + PENDING_TTL_MS;
+	pendingEdit.set(userId, state);
+	if (pendingEdit.size > 100) {
+		const oldest = pendingEdit.keys().next().value;
+		if (oldest && oldest !== userId) pendingEdit.delete(oldest);
+	}
+}
+
+function cleanupExpiredEdit(userId: string): PendingEdit | undefined {
+	const entry = pendingEdit.get(userId);
+	if (!entry) return undefined;
+	if (Date.now() > entry.expiresAt) {
+		pendingEdit.delete(userId);
+		return undefined;
+	}
+	return entry;
+}
+
+export function hasPendingQuickMealEdit(userId: string): boolean {
+	return cleanupExpiredEdit(userId) !== undefined;
+}
+
+async function sendFieldPicker(
+	services: CoreServices,
+	userId: string,
+	working: QuickMealTemplate,
+): Promise<void> {
+	await services.telegram.sendWithButtons(
+		userId,
+		`**Edit quick-meal: ${working.label}**\n\nWhich field?`,
+		[
+			[
+				{ text: 'Label', callbackData: 'app:food:nut:meals:edit:field:label' },
+				{ text: 'Kind', callbackData: 'app:food:nut:meals:edit:field:kind' },
+				{ text: 'Ingredients', callbackData: 'app:food:nut:meals:edit:field:ingredients' },
+			],
+			[
+				{ text: 'Notes', callbackData: 'app:food:nut:meals:edit:field:notes' },
+				{ text: 'Done', callbackData: 'app:food:nut:meals:edit:field:done' },
+			],
+		],
+	);
+}
+
+/** Entry point — invoked by `/nutrition meals edit <label>` after the handler
+ *  has resolved the slug and loaded the existing template. */
+export async function beginQuickMealEdit(
+	services: CoreServices,
+	userId: string,
+	existing: QuickMealTemplate,
+): Promise<void> {
+	// Deep-ish clone so we don't mutate the caller's object until Done.
+	const working: QuickMealTemplate = {
+		...existing,
+		ingredients: [...existing.ingredients],
+		estimatedMacros: { ...existing.estimatedMacros },
+	};
+	touchEdit(userId, { working, step: 'picker', expiresAt: 0 });
+	await sendFieldPicker(services, userId, working);
+}
+
+/**
+ * Text-reply handler for the edit flow. Called from index.ts handleMessage
+ * when `hasPendingQuickMealEdit(userId)` is true.
+ */
+export async function handleQuickMealEditReply(
+	services: CoreServices,
+	userStore: ScopedDataStore,
+	userId: string,
+	text: string,
+): Promise<boolean> {
+	const state = cleanupExpiredEdit(userId);
+	if (!state) return false;
+
+	const raw = text.trim();
+	if (raw.toLowerCase() === 'cancel') {
+		pendingEdit.delete(userId);
+		await services.telegram.send(userId, 'Cancelled — no changes saved.');
+		return true;
+	}
+
+	if (state.step === 'awaiting_label') {
+		if (!raw || raw.length > 100) {
+			await services.telegram.send(
+				userId,
+				'Label must be 1-100 characters. Try again, or reply "cancel".',
+			);
+			return true;
+		}
+		state.working.label = raw;
+		// Do NOT re-slugify — keep id stable so usageCount / history stay intact.
+		state.step = 'picker';
+		touchEdit(userId, state);
+		await sendFieldPicker(services, userId, state.working);
+		return true;
+	}
+
+	if (state.step === 'awaiting_ingredients') {
+		const ingredients = raw
+			.split(/\r?\n/)
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0 && l.length < 200);
+		if (ingredients.length === 0) {
+			await services.telegram.send(
+				userId,
+				'At least one ingredient required. One per line. (Or reply "cancel".)',
+			);
+			return true;
+		}
+
+		await services.telegram.send(userId, 'Estimating macros…');
+		const result = await estimateMacros(
+			{
+				label: state.working.label,
+				ingredients,
+				kind: state.working.kind,
+				notes: state.working.notes,
+			},
+			services.llm,
+		);
+
+		if (!result.ok) {
+			await services.telegram.send(
+				userId,
+				"Couldn't estimate macros: " + result.error + '. Returning to the field picker.',
+			);
+			state.step = 'picker';
+			touchEdit(userId, state);
+			await sendFieldPicker(services, userId, state.working);
+			return true;
+		}
+
+		state.pendingIngredients = ingredients;
+		state.pendingEstimate = {
+			calories: result.macros.calories ?? 0,
+			protein: result.macros.protein ?? 0,
+			carbs: result.macros.carbs ?? 0,
+			fat: result.macros.fat ?? 0,
+			fiber: result.macros.fiber ?? 0,
+			confidence: result.confidence,
+			model: result.model,
+			reasoning: result.reasoning,
+		};
+		state.step = 'awaiting_ingredients_confirm';
+		touchEdit(userId, state);
+
+		// TODO(H11.w task 16): USDA cross-check branch goes here — if apiKey
+		// present and crossCheckIngredients returns non-null, present
+		// [Use LLM / Use USDA / Average / Cancel] buttons instead.
+
+		const e = state.pendingEstimate;
+		const lines = [
+			`**${state.working.label}**`,
+			`New estimated macros (confidence ${Math.round(e.confidence * 100)}%):`,
+			`• ${e.calories} cal`,
+			`• ${e.protein}g protein, ${e.carbs}g carbs, ${e.fat}g fat, ${e.fiber}g fiber`,
+		];
+		if (e.reasoning) lines.push(`_${e.reasoning}_`);
+		await services.telegram.sendWithButtons(userId, lines.join('\n'), [
+			[
+				{ text: 'Save', callbackData: 'app:food:nut:meals:edit:confirm:save' },
+				{ text: 'Cancel', callbackData: 'app:food:nut:meals:edit:confirm:cancel' },
+			],
+		]);
+		return true;
+	}
+
+	if (state.step === 'awaiting_notes') {
+		state.working.notes = raw.toLowerCase() === 'skip' ? undefined : raw;
+		state.step = 'picker';
+		touchEdit(userId, state);
+		await sendFieldPicker(services, userId, state.working);
+		return true;
+	}
+
+	// Unexpected text while on the picker or awaiting a button — ignore.
+	return false;
+}
+
+/**
+ * Callback-query handler for the edit flow. Called from index.ts
+ * handleCallbackQuery when `data` starts with `app:food:nut:meals:edit:`.
+ */
+export async function handleQuickMealEditCallback(
+	services: CoreServices,
+	userStore: ScopedDataStore,
+	userId: string,
+	data: string,
+): Promise<boolean> {
+	const state = cleanupExpiredEdit(userId);
+	if (!state) {
+		await services.telegram.send(
+			userId,
+			'Your quick-meal edit flow has expired. Start over with `/nutrition meals edit <label>`.',
+		);
+		return true;
+	}
+
+	// Field pick: app:food:nut:meals:edit:field:<label|kind|ingredients|notes|done>
+	const fieldMatch = data.match(
+		/^app:food:nut:meals:edit:field:(label|kind|ingredients|notes|done)$/,
+	);
+	if (fieldMatch && state.step === 'picker') {
+		const field = fieldMatch[1] as 'label' | 'kind' | 'ingredients' | 'notes' | 'done';
+
+		if (field === 'done') {
+			state.working.updatedAt = new Date().toISOString();
+			await saveQuickMeal(userStore, state.working);
+			pendingEdit.delete(userId);
+			await services.telegram.send(
+				userId,
+				`Updated quick-meal: **${state.working.label}**`,
+			);
+			return true;
+		}
+
+		if (field === 'label') {
+			state.step = 'awaiting_label';
+			touchEdit(userId, state);
+			await services.telegram.send(
+				userId,
+				`Current label: **${state.working.label}**\n\nReply with the new label (or "cancel").`,
+			);
+			return true;
+		}
+
+		if (field === 'kind') {
+			state.step = 'awaiting_kind';
+			touchEdit(userId, state);
+			await services.telegram.sendWithButtons(
+				userId,
+				`Current kind: **${state.working.kind}**\n\nPick a new kind:`,
+				[
+					[
+						{ text: 'Home cooking', callbackData: 'app:food:nut:meals:edit:kind:home' },
+						{ text: 'Restaurant', callbackData: 'app:food:nut:meals:edit:kind:restaurant' },
+						{ text: 'Other', callbackData: 'app:food:nut:meals:edit:kind:other' },
+					],
+				],
+			);
+			return true;
+		}
+
+		if (field === 'ingredients') {
+			state.step = 'awaiting_ingredients';
+			touchEdit(userId, state);
+			const current = state.working.ingredients.map((i) => `  ${i}`).join('\n');
+			await services.telegram.send(
+				userId,
+				`Current ingredients:\n${current}\n\nReply with the new ingredient list, one per line. (This will re-run the macro estimate.) Reply "cancel" to abort.`,
+			);
+			return true;
+		}
+
+		if (field === 'notes') {
+			state.step = 'awaiting_notes';
+			touchEdit(userId, state);
+			const cur = state.working.notes ?? '(none)';
+			await services.telegram.send(
+				userId,
+				`Current notes: ${cur}\n\nReply with new notes (or "skip" to clear, "cancel" to abort).`,
+			);
+			return true;
+		}
+	}
+
+	// Kind pick inside edit/kind step
+	const kindMatch = data.match(/^app:food:nut:meals:edit:kind:(home|restaurant|other)$/);
+	if (kindMatch && state.step === 'awaiting_kind') {
+		state.working.kind = kindMatch[1] as Kind;
+		state.step = 'picker';
+		touchEdit(userId, state);
+		await sendFieldPicker(services, userId, state.working);
+		return true;
+	}
+
+	// Ingredients confirm
+	if (
+		data === 'app:food:nut:meals:edit:confirm:save' &&
+		state.step === 'awaiting_ingredients_confirm' &&
+		state.pendingEstimate &&
+		state.pendingIngredients
+	) {
+		state.working.ingredients = state.pendingIngredients;
+		state.working.estimatedMacros = {
+			calories: state.pendingEstimate.calories,
+			protein: state.pendingEstimate.protein,
+			carbs: state.pendingEstimate.carbs,
+			fat: state.pendingEstimate.fat,
+			fiber: state.pendingEstimate.fiber,
+		};
+		state.working.confidence = state.pendingEstimate.confidence;
+		state.working.llmModel = state.pendingEstimate.model;
+		state.pendingIngredients = undefined;
+		state.pendingEstimate = undefined;
+		state.step = 'picker';
+		touchEdit(userId, state);
+		await sendFieldPicker(services, userId, state.working);
+		return true;
+	}
+
+	if (
+		data === 'app:food:nut:meals:edit:confirm:cancel' &&
+		state.step === 'awaiting_ingredients_confirm'
+	) {
+		state.pendingIngredients = undefined;
+		state.pendingEstimate = undefined;
+		state.step = 'picker';
+		touchEdit(userId, state);
+		await services.telegram.send(userId, 'Ingredient edit discarded.');
+		await sendFieldPicker(services, userId, state.working);
+		return true;
+	}
+
+	return false;
+}
+
 /** Test-only — clears the in-process state map. Used by vitest tests. */
 export function __resetQuickMealFlowForTests(): void {
 	pending.clear();
+	pendingEdit.clear();
 }

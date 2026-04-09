@@ -14,9 +14,10 @@ import { parsePortion } from '../services/portion-parser.js';
 import {
 	loadQuickMeals,
 	archiveQuickMeal,
+	findQuickMealById,
 	slugifyLabel,
 } from '../services/quick-meals-store.js';
-import { beginQuickMealAdd } from './quick-meal-flow.js';
+import { beginQuickMealAdd, beginQuickMealEdit } from './quick-meal-flow.js';
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -216,9 +217,24 @@ export async function handleNutritionCommand(
 			}
 
 			if (mealsSub === 'edit') {
-				// Deferred to H11.w task 10c
-				await services.telegram.send(userId,
-					'`/nutrition meals edit` arrives in the next H11.w sub-task.');
+				const label = args.slice(2).join(' ').trim();
+				if (!label) {
+					await services.telegram.send(userId, 'Usage: `/nutrition meals edit <label>`');
+					return;
+				}
+				let id: string;
+				try {
+					id = slugifyLabel(label);
+				} catch {
+					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
+					return;
+				}
+				const existing = await findQuickMealById(userStore, id);
+				if (!existing) {
+					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
+					return;
+				}
+				await beginQuickMealEdit(services, userId, existing);
 				return;
 			}
 

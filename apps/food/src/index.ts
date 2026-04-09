@@ -55,7 +55,10 @@ import {
 import {
 	handleQuickMealAddCallback,
 	handleQuickMealAddReply,
+	handleQuickMealEditCallback,
+	handleQuickMealEditReply,
 	hasPendingQuickMealAdd,
+	hasPendingQuickMealEdit,
 } from './handlers/quick-meal-flow.js';
 import {
 	handlePerishableCallback,
@@ -273,6 +276,13 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (hasPendingQuickMealAdd(ctx.userId)) {
 		const userStore = services.data.forUser(ctx.userId);
 		const handled = await handleQuickMealAddReply(services, userStore, ctx.userId, text);
+		if (handled) return;
+	}
+
+	// H11.w: Pending quick-meal edit guided flow
+	if (hasPendingQuickMealEdit(ctx.userId)) {
+		const userStore = services.data.forUser(ctx.userId);
+		const handled = await handleQuickMealEditReply(services, userStore, ctx.userId, text);
 		if (handled) return;
 	}
 
@@ -1171,6 +1181,13 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data.startsWith('app:food:nut:meals:add:')) {
 			const userStore = services.data.forUser(ctx.userId);
 			await handleQuickMealAddCallback(services, userStore, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.w: Quick-meal guided edit callbacks ─────────
+		if (data.startsWith('app:food:nut:meals:edit:')) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleQuickMealEditCallback(services, userStore, ctx.userId, data);
 			return;
 		}
 
