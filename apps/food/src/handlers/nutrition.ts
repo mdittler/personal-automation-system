@@ -148,7 +148,7 @@ export async function handleNutritionCommand(
 			}
 
 			const progress = computeProgress([day], targets, 'today');
-			await services.telegram.send(userId, formatMacroSummary(progress));
+			await services.telegram.send(userId, formatMacroSummary(progress, day));
 			return;
 		}
 

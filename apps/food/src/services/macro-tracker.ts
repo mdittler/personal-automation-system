@@ -274,13 +274,32 @@ export function formatAdherenceSummary(adherence: MacroAdherence): string {
 	return lines.join('\n');
 }
 
-export function formatMacroSummary(progress: MacroProgress): string {
+export function formatMacroSummary(progress: MacroProgress, dailyEntry?: DailyMacroEntry): string {
 	if (progress.daysTracked === 0) {
 		return `No macro data tracked for ${progress.period}.`;
 	}
 
 	const lines: string[] = [`**Nutrition — ${progress.period}** (${progress.daysTracked} day${progress.daysTracked === 1 ? '' : 's'})`];
 	lines.push('');
+
+	// H11.w: If daily entry is provided and has meals, list them
+	if (dailyEntry && dailyEntry.meals.length > 0) {
+		const hasLowConfidence = dailyEntry.meals.some(
+			m => m.confidence !== undefined && m.confidence < 0.5,
+		);
+
+		for (const meal of dailyEntry.meals) {
+			const isLowConf = meal.confidence !== undefined && meal.confidence < 0.5;
+			const flag = isLowConf ? ' *' : '';
+			lines.push(`- **${meal.recipeTitle}**${flag}`);
+		}
+
+		if (hasLowConfidence) {
+			lines.push('_* low-confidence estimate_');
+		}
+
+		lines.push('');
+	}
 
 	const hasTargets = Object.values(progress.targets).some(v => v !== undefined && v > 0);
 

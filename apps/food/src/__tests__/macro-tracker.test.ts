@@ -478,6 +478,104 @@ describe('macro-tracker', () => {
 			});
 			expect(result).toMatch(/no.*data|no.*tracked/i);
 		});
+
+		// H11.w: Low-confidence meal flagging
+		it('flags low-confidence meals with * and adds legend line', () => {
+			const day: DailyMacroEntry = {
+				date: '2026-04-09',
+				meals: [
+					{
+						recipeId: 'r1',
+						recipeTitle: 'Oatmeal',
+						mealType: 'breakfast',
+						servingsEaten: 1,
+						macros: { calories: 300, protein: 10, carbs: 50, fat: 5, fiber: 8 },
+						estimationKind: 'recipe',
+						confidence: 0.95,
+					},
+					{
+						recipeId: 'adhoc',
+						recipeTitle: 'BBQ mystery',
+						mealType: 'dinner',
+						servingsEaten: 1,
+						macros: { calories: 800, protein: 30, carbs: 60, fat: 40, fiber: 4 },
+						estimationKind: 'llm-ad-hoc',
+						confidence: 0.3,
+					},
+				],
+				totals: { calories: 1100, protein: 40, carbs: 110, fat: 45, fiber: 12 },
+			};
+			const progress = computeProgress([day], {}, 'today');
+			const result = formatMacroSummary(progress, day);
+			expect(result).toMatch(/BBQ mystery\s*\*/);      // flagged
+			expect(result).not.toMatch(/Oatmeal\s*\*/);       // not flagged
+			expect(result).toMatch(/low-confidence/i);        // legend present
+			expect(result).toContain('1100');                 // totals still include flagged
+		});
+
+		it('omits legend line when no meals are low-confidence', () => {
+			const day: DailyMacroEntry = {
+				date: '2026-04-09',
+				meals: [
+					{
+						recipeId: 'r1',
+						recipeTitle: 'Oatmeal',
+						mealType: 'breakfast',
+						servingsEaten: 1,
+						macros: { calories: 300, protein: 10, carbs: 50, fat: 5, fiber: 8 },
+						estimationKind: 'recipe',
+						confidence: 0.95,
+					},
+				],
+				totals: { calories: 300, protein: 10, carbs: 50, fat: 5, fiber: 8 },
+			};
+			const progress = computeProgress([day], {}, 'today');
+			const result = formatMacroSummary(progress, day);
+			expect(result).not.toMatch(/low-confidence/i);
+		});
+
+		it('handles meals with undefined confidence', () => {
+			const day: DailyMacroEntry = {
+				date: '2026-04-09',
+				meals: [
+					{
+						recipeId: 'r1',
+						recipeTitle: 'Legacy Meal',
+						mealType: 'lunch',
+						servingsEaten: 1,
+						macros: { calories: 500, protein: 20, carbs: 50, fat: 15, fiber: 3 },
+						// no confidence or estimationKind (backward compat)
+					},
+				],
+				totals: { calories: 500, protein: 20, carbs: 50, fat: 15, fiber: 3 },
+			};
+			const progress = computeProgress([day], {}, 'today');
+			const result = formatMacroSummary(progress, day);
+			expect(result).not.toMatch(/Legacy Meal\s*\*/); // no flag for undefined confidence
+			expect(result).not.toMatch(/low-confidence/i);   // no legend
+		});
+
+		it('correctly positions * after bold markdown markers', () => {
+			// Simulating a meal with bold title
+			const day: DailyMacroEntry = {
+				date: '2026-04-09',
+				meals: [
+					{
+						recipeId: 'r1',
+						recipeTitle: 'Bold Recipe',
+						mealType: 'lunch',
+						servingsEaten: 1,
+						macros: { calories: 600, protein: 25, carbs: 60, fat: 20, fiber: 5 },
+						confidence: 0.3,
+					},
+				],
+				totals: { calories: 600, protein: 25, carbs: 60, fat: 20, fiber: 5 },
+			};
+			const progress = computeProgress([day], {}, 'today');
+			const result = formatMacroSummary(progress, day);
+			// The * should appear separately, not concatenated with **
+			expect(result).toMatch(/\*\*.*?\*\*\s+\*/);
+		});
 	});
 
 	// ─── autoLogFromCookedMeal ────────────────────────────────
