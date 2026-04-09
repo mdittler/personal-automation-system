@@ -2193,7 +2193,10 @@ function nextMonday(dateStr: string): string {
 
 // ─── Scheduled Job Handler ──────────────────────────────────────
 
-export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId: string) => {
+export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
+	jobId: string,
+	_userId?: string,
+) => {
 	// H4: Finalize votes hourly
 	if (jobId === 'finalize-votes') {
 		const finalized = await handleFinalizeVotesJob(services);
