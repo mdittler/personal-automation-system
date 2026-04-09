@@ -83,3 +83,11 @@ defaults:
 #   - id: n8n-data
 #     url: http://localhost:5678/webhook/pas-data
 #     events: ["data:changed"]
+
+# Food app — optional integrations
+# food:
+#   # Optional: USDA FoodData Central API key for quick-meal macro cross-check.
+#   # Get a free key at https://fdc.nal.usda.gov/api-guide.html
+#   # Can also be set via the USDA_FDC_API_KEY environment variable.
+#   # Leave empty to disable cross-check (the LLM estimate is used alone).
+#   usda_fdc_api_key: ""

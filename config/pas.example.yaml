@@ -27,3 +27,10 @@ defaults:
 #   verification:
 #     enabled: false      # set to false to disable verification
 #     upper_bound: 0.7    # confidence above this skips verification (0.0–1.0)
+
+# Food app — optional integrations
+# food:
+#   # Optional: USDA FoodData Central API key for quick-meal macro cross-check.
+#   # Get a free key at https://fdc.nal.usda.gov/api-guide.html
+#   # Can also be set via the USDA_FDC_API_KEY environment variable.
+#   usda_fdc_api_key: ""
