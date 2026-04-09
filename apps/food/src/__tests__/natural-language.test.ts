@@ -41,9 +41,11 @@ import {
 	isChildApprovalIntent,
 	isPriceUpdateIntent,
 	isBudgetViewIntent,
+	isNutritionViewIntent,
+	isHostingIntent,
 } from '../index.js';
 import { endSession, hasActiveSession } from '../services/cook-session.js';
-import type { ChildFoodLog, FreezerItem, GroceryList, Household, MealPlan, PantryItem, Recipe } from '../types.js';
+import type { ChildFoodLog, FreezerItem, GroceryList, GuestProfile, Household, MealPlan, PantryItem, Recipe } from '../types.js';
 
 // ─── Shared Fixtures ─────────────────────────────────────────────
 
@@ -5962,6 +5964,178 @@ describe('Natural Language — Real User Messages', () => {
 
 			// Should not crash
 			expect(services.telegram.send).toHaveBeenCalled();
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H11: NUTRITION TRACKING — "How are my macros?"
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('Nutrition intent detection', () => {
+		it('"how are my macros" → nutrition intent', () => {
+			expect(isNutritionViewIntent('how are my macros')).toBe(true);
+		});
+
+		it('"show my calorie intake" → nutrition intent', () => {
+			expect(isNutritionViewIntent('show my calorie intake')).toBe(true);
+		});
+
+		it('"what\'s my protein intake this week" → nutrition intent', () => {
+			expect(isNutritionViewIntent("what's my protein intake this week")).toBe(true);
+		});
+
+		it('"check my nutrition summary" → nutrition intent', () => {
+			expect(isNutritionViewIntent('check my nutrition summary')).toBe(true);
+		});
+
+		it('"track my macros" → nutrition intent', () => {
+			expect(isNutritionViewIntent('track my macros')).toBe(true);
+		});
+
+		it('"how many calories did I have today" → nutrition intent', () => {
+			expect(isNutritionViewIntent('how many calories did I have today')).toBe(true);
+		});
+
+		it('"add eggs to grocery list" → NOT nutrition', () => {
+			expect(isNutritionViewIntent('add eggs to grocery list')).toBe(false);
+		});
+
+		it('"what\'s for dinner" → NOT nutrition', () => {
+			expect(isNutritionViewIntent("what's for dinner")).toBe(false);
+		});
+	});
+
+	describe('Nutrition commands', () => {
+		it('"/nutrition" → shows weekly summary', async () => {
+			setupHousehold();
+			vi.mocked(services.llm.complete).mockResolvedValue('Your week was great!');
+			await handleCommand('nutrition', [], msg('/nutrition'));
+			expect(services.telegram.send).toHaveBeenCalled();
+		});
+
+		it('"/nutrition week" → shows weekly summary', async () => {
+			setupHousehold();
+			vi.mocked(services.llm.complete).mockResolvedValue('Weekly summary');
+			await handleCommand('nutrition', ['week'], msg('/nutrition week'));
+			expect(services.telegram.send).toHaveBeenCalled();
+		});
+
+		it('"/nutrition month" → shows monthly summary', async () => {
+			setupHousehold();
+			vi.mocked(services.llm.complete).mockResolvedValue('Monthly summary');
+			await handleCommand('nutrition', ['month'], msg('/nutrition month'));
+			expect(services.telegram.send).toHaveBeenCalled();
+		});
+
+		it('"/nutrition targets" → shows current targets', async () => {
+			setupHousehold();
+			await handleCommand('nutrition', ['targets'], msg('/nutrition targets'));
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Macro Targets'));
+		});
+
+		it('"/nutrition targets set 2000 150 200 70" → saves targets', async () => {
+			setupHousehold();
+			await handleCommand('nutrition', ['targets', 'set', '2000', '150', '200', '70'], msg('/nutrition targets set 2000 150 200 70'));
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('updated'));
+			expect(store.write).toHaveBeenCalled();
+		});
+
+		it('"/nutrition pediatrician" without child → shows child buttons', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand('nutrition', ['pediatrician'], msg('/nutrition pediatrician'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+			const callArgs = vi.mocked(services.telegram.sendWithButtons).mock.calls[0]!;
+			const buttons = callArgs[2] as Array<Array<{ text: string }>>;
+			expect(buttons[0]![0]!.text).toBe('Margot');
+		});
+
+		it('"/nutrition pediatrician margot" → generates report', async () => {
+			setupHousehold({ children: [margotProfile] });
+			await handleCommand('nutrition', ['pediatrician', 'margot'], msg('/nutrition pediatrician margot'));
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Margot'));
+		});
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// H11: HOSTING — "We're having people over Saturday"
+	// ═══════════════════════════════════════════════════════════════
+
+	describe('Hosting intent detection', () => {
+		it('"we\'re having people over for dinner" → hosting intent', () => {
+			expect(isHostingIntent("we're having people over for dinner")).toBe(true);
+		});
+
+		it('"plan a dinner party" → hosting intent', () => {
+			expect(isHostingIntent('plan a dinner party')).toBe(true);
+		});
+
+		it('"hosting 6 guests Saturday" → hosting intent', () => {
+			expect(isHostingIntent('hosting 6 guests Saturday')).toBe(true);
+		});
+
+		it('"having friends for dinner" → hosting intent', () => {
+			expect(isHostingIntent('having friends for dinner')).toBe(true);
+		});
+
+		it('"having family over this weekend" → hosting intent', () => {
+			expect(isHostingIntent('having family over this weekend')).toBe(true);
+		});
+
+		it('"add eggs to grocery list" → NOT hosting', () => {
+			expect(isHostingIntent('add eggs to grocery list')).toBe(false);
+		});
+
+		it('"what\'s for dinner tonight" → NOT hosting', () => {
+			expect(isHostingIntent("what's for dinner tonight")).toBe(false);
+		});
+	});
+
+	describe('Hosting commands', () => {
+		it('"/hosting" → shows menu with buttons', async () => {
+			setupHousehold();
+			await handleCommand('hosting', [], msg('/hosting'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+		});
+
+		it('"/hosting guests" → lists guest profiles', async () => {
+			setupHousehold();
+			await handleCommand('hosting', ['guests'], msg('/hosting guests'));
+			expect(services.telegram.send).toHaveBeenCalled();
+		});
+
+		it('"/hosting guests add Sarah vegetarian" → adds guest', async () => {
+			setupHousehold();
+			await handleCommand('hosting', ['guests', 'add', 'Sarah', 'vegetarian'], msg('/hosting guests add Sarah vegetarian'));
+			expect(store.write).toHaveBeenCalled();
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Sarah'));
+		});
+
+		it('"/hosting guests remove" without name → shows buttons', async () => {
+			setupHousehold();
+			store.read.mockImplementation(async (path: string) => {
+				if (path === 'household.yaml') return stringify(household);
+				if (path === 'guests.yaml') return '- name: Sarah\n  slug: sarah\n  dietaryRestrictions: [vegetarian]\n  allergies: []\n  createdAt: "2026-04-08T10:00:00.000Z"\n  updatedAt: "2026-04-08T10:00:00.000Z"';
+				return '';
+			});
+			await handleCommand('hosting', ['guests', 'remove'], msg('/hosting guests remove'));
+			expect(services.telegram.sendWithButtons).toHaveBeenCalled();
+		});
+
+		it('"/hosting plan dinner for 6 people" → plans event', async () => {
+			setupHousehold();
+			vi.mocked(services.llm.complete)
+				.mockResolvedValueOnce(JSON.stringify({
+					guestCount: 6, eventTime: '2026-04-12T18:00:00',
+					guestNames: [], dietaryNotes: '', description: 'dinner for 6',
+				}))
+				.mockResolvedValueOnce(JSON.stringify([
+					{ recipeTitle: 'Pasta', scaledServings: 6, dietaryNotes: [] },
+				]))
+				.mockResolvedValueOnce(JSON.stringify([
+					{ time: 'T-2h', task: 'Start cooking' },
+				]));
+			await handleCommand('hosting', ['plan', 'dinner', 'for', '6', 'people'], msg('/hosting plan dinner for 6 people'));
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Event Plan'));
 		});
 	});
 });

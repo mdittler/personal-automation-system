@@ -377,3 +377,102 @@ export interface KidAdaptation {
 	portionGuidance: string;
 	generalNotes: string;
 }
+
+// ─── Nutrition / Macro Types (H11) ────────────────────────────────
+
+export interface MacroTargets {
+	calories?: number;
+	protein?: number;   // grams
+	carbs?: number;     // grams
+	fat?: number;       // grams
+	fiber?: number;     // grams
+}
+
+export interface MealMacroEntry {
+	recipeId: string;
+	recipeTitle: string;
+	mealType: string;     // dinner, lunch, etc.
+	servingsEaten: number;
+	macros: MacroData;
+}
+
+export interface DailyMacroEntry {
+	date: string;         // ISO date YYYY-MM-DD
+	meals: MealMacroEntry[];
+	totals: MacroData;
+}
+
+export interface MonthlyMacroLog {
+	month: string;        // YYYY-MM
+	userId: string;
+	days: DailyMacroEntry[];
+}
+
+export interface MacroProgress {
+	current: MacroData;
+	targets: MacroTargets;
+	period: string;       // "today", "this week", "2026-04"
+	daysTracked: number;
+	dailyAverage: MacroData;
+	adherence?: MacroAdherence;
+}
+
+export interface MacroFieldAdherence {
+	daysTracked: number;    // days where the target was set AND the day had any data
+	daysHit: number;        // days within ±tolerance of target
+	percentHit: number;     // 0–100, rounded
+	currentStreak: number;  // consecutive hits ending at the most recent day
+	longestStreak: number;  // longest consecutive-hit run in the period
+}
+
+export interface MacroAdherence {
+	calories?: MacroFieldAdherence;
+	protein?: MacroFieldAdherence;
+	carbs?: MacroFieldAdherence;
+	fat?: MacroFieldAdherence;
+	fiber?: MacroFieldAdherence;
+}
+
+// ─── Guest Profile Types (H11) ────────────────────────────────────
+
+export interface GuestProfile {
+	name: string;
+	slug: string;
+	dietaryRestrictions: string[];
+	allergies: string[];
+	notes?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+// ─── Hosting / Event Types (H11) ──────────────────────────────────
+
+export interface EventMenuItem {
+	recipeTitle: string;
+	recipeId?: string;
+	scaledServings: number;
+	dietaryNotes: string[];
+	/**
+	 * Inline ingredient list the LLM may provide for dishes not in the recipe library.
+	 * Uses the same structured shape as recipe ingredients so the pantry-subtract
+	 * and display-formatting paths can be shared between library and novel dishes.
+	 */
+	ingredients?: Ingredient[];
+}
+
+export interface PrepTimelineStep {
+	time: string;            // relative time like "T-3h", "T-1h", "T-15min"
+	task: string;
+	recipe?: string;
+}
+
+export interface EventPlan {
+	description: string;
+	eventTime: string;       // ISO datetime
+	guestCount: number;
+	guests: GuestProfile[];
+	menu: EventMenuItem[];
+	prepTimeline: PrepTimelineStep[];
+	deltaGroceryItems: string[];
+	timelineError?: string;  // populated if the prep-timeline LLM call failed
+}

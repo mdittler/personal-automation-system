@@ -20,7 +20,8 @@ This document tracks the phased implementation of the Food food management app. 
 | H8 | Vision: Photos | 5 | 3 photo intents | 47 | H1, H2, *infra* | Complete |
 | H9 | Family Features | 4 | Kid adaptations, baby tracker | 156 | H1 | Complete |
 | H10 | Cost Tracking | 5 | `/foodbudget` | 145 | H3, H8 | Complete |
-| H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 55–70 | H3, H9 | Not Started |
+| H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 171 | H3, H9 | Complete |
+| H11.x | Nutrition + Hosting + Config Polish | 3 | Daily view, manual log, adherence, guest flags, delta fallback, config surface | 34 | H11 | Complete |
 | H12 | Health, Culture, Events | 4 | Health insights, 5 event emitters | 35–50 | H7, H11 | Not Started |
 
 **Total:** 75 requirement implementations → 610–810 estimated tests
@@ -354,21 +355,82 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 
 ## Phase H11: Nutrition, Seasonal Nudges, and Hosting
 
-**Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
+**Status:** Complete | **Tests:** 171 | **Started:** 2026-04-08 | **Completed:** 2026-04-08
 
 **Requirements:** REQ-MEAL-006, REQ-NUTR-001, REQ-NUTR-002, REQ-SEASON-002, REQ-SOCIAL-001, REQ-SOCIAL-002, REQ-SOCIAL-003
 
 **What gets built:**
-- Macro tracker — daily macro logging, target tracking
-- Nutrition reporter — summaries, pediatrician reports
-- Hosting planner — event planning, guest profiles, prep timelines
+- Macro tracker — daily macro logging, target tracking, auto-log from cooked meals
+- Nutrition reporter — weekly/monthly summaries with LLM trends, pediatrician reports
+- Hosting planner — event planning, guest profiles, prep timelines, delta grocery
 - 2 cron jobs: seasonal-nudge, weekly-nutrition-summary
+- Button-based UX for child selection, guest removal, hosting menu
 
-**Key files:** `src/services/macro-tracker.ts`, `src/services/nutrition-reporter.ts`, `src/services/pediatrician-report.ts`, `src/services/hosting-planner.ts`, `src/services/guest-profiles.ts`
+**Key files:** `src/services/macro-tracker.ts`, `src/services/nutrition-reporter.ts`, `src/services/pediatrician-report.ts`, `src/services/hosting-planner.ts`, `src/services/guest-profiles.ts`, `src/handlers/nutrition.ts`, `src/handlers/hosting.ts`, `src/handlers/seasonal-nudge.ts`, `src/handlers/nutrition-summary.ts`
 
-**Data:** `<userId>/nutrition/<YYYY-MM>.yaml`, `shared/guests.yaml`
+**Data:** `<userId>/nutrition/<YYYY-MM>.yaml`, `<userId>/nutrition/targets.yaml`, `shared/guests.yaml`
 
 ### Progress
+
+- [x] Types (MacroTargets, MealMacroEntry, DailyMacroEntry, MonthlyMacroLog, MacroProgress, GuestProfile, EventPlan, etc.)
+- [x] Guest profiles service (CRUD, slug-based matching, restriction filtering)
+- [x] Macro tracker service (monthly YAML logs, auto-log from cooked meals, period queries)
+- [x] Nutrition reporter service (trend detection, LLM summaries with fallback)
+- [x] Pediatrician report service (food variety, allergen history, reaction summary)
+- [x] Hosting planner service (3-LLM pipeline: parse → menu → timeline, delta grocery)
+- [x] Nutrition handler (/nutrition week, month, targets, pediatrician subcommands)
+- [x] Hosting handler (/hosting plan, guests list/add/remove)
+- [x] Seasonal nudge scheduled job (bi-monthly, location-aware)
+- [x] Weekly nutrition summary scheduled job (per-household-member)
+- [x] Wired into index.ts (commands, intents, scheduled jobs, auto-log hook in cooked callback)
+- [x] Security hardening (prompt injection, path traversal, input validation)
+- [x] UX improvements (button-based child selection, guest removal, hosting menu)
+- [x] Security tests (prompt injection, path traversal, input validation)
+- [x] Edge case tests (boundary conditions, zero/negative inputs, LLM failures)
+- [x] Natural language user journey tests (27 tests: intent detection + command routing)
+
+---
+
+## Phase H11.x: Nutrition + Hosting + Config Polish
+
+**Status:** Complete | **Tests:** 34 new (2290 cumulative food) | **Started:** 2026-04-09 | **Completed:** 2026-04-09
+
+Follow-up phase addressing deferred H11 audit items in three groupings.
+
+### H11.1 — Nutrition polish
+
+- Daily view as default (`/nutrition`, `/nutrition today|day|daily`); `week`/`month` remain explicit subcommands
+- `/nutrition targets set` accepts a fifth positional `fiber` arg; display + LLM context include fiber
+- `/nutrition log <label> <cal> <p> <c> <f> [fiber]` — manual meal entry, reuses `logMealMacros`
+- `detectTrends()` now covers all 5 macros (calories/protein/carbs/fat/fiber)
+- **Adherence tracking:** new `MacroAdherence` type, `computeAdherence()` helper (±10% tolerance, per-field daysHit/percent/current+longest streaks), `/nutrition adherence [days]` subcommand, adherence block surfaced inline in week/month views and piped into LLM narrative
+
+### H11.2 — Hosting polish
+
+- `/hosting guests add` supports `--diet`/`--allergy`/`--notes` flags (with `-d`/`-a`/`-n` aliases). Comma-split diet/allergy, notes absorbs until next flag. Bare-args backward compat preserved.
+- Delta grocery fallback for novel LLM menu items: uses inline `ingredients: string[]` when present, otherwise emits `Ingredients for: <title>` placeholder so the shopper sees the gap
+- Prep-timeline LLM failure no longer aborts `planEvent`; emits `timelineError` banner on the plan and logs `warn`
+- `EventPlan.timelineError?` added; `EventMenuItem.ingredients?` added
+
+### H11.3 — Config surface
+
+- Manifest `user_config` exposes `macro_target_calories|protein|carbs|fat|fiber` — `loadTargets()` prefers config values, falls back to `nutrition/targets.yaml`; `saveTargets()` writes both surfaces so GUI + CLI stay in sync
+- `weekly-nutrition-summary` scheduled job reads targets through the same config-first helper
+- **Scheduler cron overrides deferred:** investigation confirmed `SchedulerService` only exposes `scheduleOnce`/`cancelOnce`; manifest cron is registered once at bootstrap. A per-user override would require scheduler infra changes (unregister/reregister surface) or handler-level polling shims — out of scope. Added informational `schedule_overrides_info` key pointing users at the GUI Scheduler page.
+- **Guest profiles GUI editor deferred:** `GuestProfile[]` requires an array-of-object widget the core GUI config editor doesn't yet support. Added informational `guest_profiles_info` key; `/hosting guests add|remove|list` remains the editing path.
+
+### Progress
+
+- [x] Types: `MacroAdherence`, `MacroFieldAdherence`, `MacroProgress.adherence?`, `EventPlan.timelineError?`, `EventMenuItem.ingredients?`
+- [x] `macro-tracker.ts`: `computeAdherence`, `formatAdherenceSummary`, threaded into `computeProgress`/`formatMacroSummary`
+- [x] `nutrition-reporter.ts`: 5-field trend detection, fiber + adherence in LLM context
+- [x] `nutrition.ts` handler: today default, `log`, `adherence`, fiber target, config-integrated load/save
+- [x] `nutrition-summary.ts`: config-first target load
+- [x] `hosting.ts` handler: `parseGuestAddArgs` with flag syntax + backward compat
+- [x] `hosting-planner.ts`: delta grocery fallback, prep-timeline error path
+- [x] `manifest.yaml`: 5 macro-target keys + 2 informational keys
+- [x] Tests: hosting-planner (inline ingredients, fallback, timeline error), nutrition handler (today, log, adherence, config load, fiber), hosting handler (parseGuestAddArgs + integration)
+- [x] Closeout (2026-04-09 after infra fix): `loadTargets` partial-config merge bug fix (config overlays YAML base instead of short-circuiting); `computeAdherence` unit tests; seeded `/nutrition adherence` handler test; carbs/fat/fiber trend tests; fiber-in-LLM-prompt regression guard; `/nutrition week` adherence-in-prompt integration test; prompt-injection fence on `generatePersonalSummary`; `parseGuestAddArgs` uppercase-flag normalization + notes sanitization; `/nutrition log` field-specific error messages and 100-char label cap; REQ-NUTR-003 added to URS for adherence tracking
 
 ---
 
@@ -405,5 +467,6 @@ The manifest's commands/intents are auto-indexed by `AppMetadataService`, but `h
 | H8 | 2026-04-06 | 2026-04-06 | ~47 new (~3660 cumulative) | Vision: LLM image support, photo parsers, receipt capture |
 | H9 | 2026-04-07 | 2026-04-07 | ~243 new (~1824 cumulative) | Family profiles, kid adapter, child tracker, food intro, approval tagging, NL user simulation tests |
 | H10 | 2026-04-07 | 2026-04-08 | 145 | Complete |
-| H11 | — | — | 0 | — |
+| H11 | 2026-04-08 | 2026-04-08 | 171 | Complete |
+| H11.x | 2026-04-09 | 2026-04-09 | 34 new (2290 food cumulative) | Nutrition daily+log+adherence, hosting flags+fallback, config surface; closeout applied loadTargets partial-config merge fix, added computeAdherence unit tests, trend-per-field tests, fiber-in-prompt guard, prompt-injection fence, REQ-NUTR-003 |
 | H12 | — | — | 0 | — |

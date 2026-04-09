@@ -288,3 +288,31 @@ user_config:
     type: boolean
     default: false
     description: "Automatically enable voice output when starting cook mode (skip the prompt)."
+  - key: macro_target_calories
+    type: number
+    default: 0
+    description: "Daily calorie target (0 = not set)"
+  - key: macro_target_protein
+    type: number
+    default: 0
+    description: "Daily protein target in grams (0 = not set)"
+  - key: macro_target_carbs
+    type: number
+    default: 0
+    description: "Daily carbs target in grams (0 = not set)"
+  - key: macro_target_fat
+    type: number
+    default: 0
+    description: "Daily fat target in grams (0 = not set)"
+  - key: macro_target_fiber
+    type: number
+    default: 0
+    description: "Daily fiber target in grams (0 = not set)"
+  - key: guest_profiles_info
+    type: string
+    default: "Edit via /hosting guests add|remove|list"
+    description: "Guest profiles are managed via the /hosting command (not editable here)"
+  - key: schedule_overrides_info
+    type: string
+    default: "Edit the seasonal-nudge and weekly-nutrition-summary cron schedules via the GUI Scheduler page"
+    description: "Schedule cron expressions are managed via the GUI Scheduler page, not here"

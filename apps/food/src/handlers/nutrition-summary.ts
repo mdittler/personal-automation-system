@@ -24,30 +24,28 @@ async function loadUserTargets(
 	services: CoreServices,
 	userStore: ScopedDataStore,
 ): Promise<MacroTargets> {
-	const fromConfig: MacroTargets = {};
-	let hasConfigValue = false;
+	// Base layer: YAML file (CLI source of truth).
+	let base: MacroTargets = {};
+	try {
+		const raw = await userStore.read(TARGETS_FILE);
+		if (raw) {
+			const content = stripFrontmatter(raw);
+			if (content.trim()) base = (parse(content) as MacroTargets) ?? {};
+		}
+	} catch {
+		// ignore — corrupt YAML falls through to an empty base
+	}
+
+	// Overlay: non-zero user_config values (GUI overrides).
 	for (const [field, key] of CONFIG_TARGET_KEYS) {
 		try {
 			const val = await services.config.get<number>(key);
-			if (typeof val === 'number' && val > 0) {
-				fromConfig[field] = val;
-				hasConfigValue = true;
-			}
+			if (typeof val === 'number' && val > 0) base[field] = val;
 		} catch {
 			// ignore
 		}
 	}
-	if (hasConfigValue) return fromConfig;
-
-	try {
-		const raw = await userStore.read(TARGETS_FILE);
-		if (!raw) return {};
-		const content = stripFrontmatter(raw);
-		if (!content.trim()) return {};
-		return (parse(content) as MacroTargets) ?? {};
-	} catch {
-		return {};
-	}
+	return base;
 }
 
 /**

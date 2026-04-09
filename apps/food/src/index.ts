@@ -105,12 +105,19 @@ import {
 	isFoodIntroIntent,
 	isChildApprovalIntent,
 } from './handlers/family.js';
-import { loadAllChildren } from './services/family-profiles.js';
+import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
+import { generatePediatricianReport } from './services/pediatrician-report.js';
+import { loadGuests, removeGuest, formatGuestList } from './services/guest-profiles.js';
 import {
 	handleBudgetCommand as handleBudgetCmd,
 	isBudgetViewIntent,
 	isPriceUpdateIntent,
 } from './handlers/budget.js';
+import { handleNutritionCommand as handleNutritionCmd, isNutritionViewIntent } from './handlers/nutrition.js';
+import { handleHostingCommand as handleHostingCmd, isHostingIntent } from './handlers/hosting.js';
+import { handleSeasonalNudgeJob } from './handlers/seasonal-nudge.js';
+import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
+import { autoLogFromCookedMeal } from './services/macro-tracker.js';
 import {
 	loadStorePrices,
 	parsePriceUpdateText,
@@ -339,6 +346,28 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
+	// H11: Nutrition intent — "how are my macros", "show nutrition summary"
+	if (isNutritionViewIntent(lower)) {
+		const hh = await requireHousehold(services, ctx.userId);
+		if (!hh) {
+			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			return;
+		}
+		await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
+		return;
+	}
+
+	// H11: Hosting intent — "we're having people over", "plan a dinner party"
+	if (isHostingIntent(lower)) {
+		const hh = await requireHousehold(services, ctx.userId);
+		if (!hh) {
+			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			return;
+		}
+		await handleHostingCmd(services, ['plan', text], ctx.userId, hh.sharedStore);
+		return;
+	}
+
 	// H10: Budget view intent — "how much did we spend on food"
 	if (isBudgetViewIntent(lower)) {
 		const hh = await requireHousehold(services, ctx.userId);
@@ -492,6 +521,24 @@ export const handleCommand: AppModule['handleCommand'] = async (
 				return;
 			}
 			await handleBudgetCmd(services, args, ctx.userId, hh.sharedStore);
+			break;
+		}
+		case 'nutrition': {
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				return;
+			}
+			await handleNutritionCmd(services, args, ctx.userId, hh.sharedStore);
+			break;
+		}
+		case 'hosting': {
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+				return;
+			}
+			await handleHostingCmd(services, args, ctx.userId, hh.sharedStore);
 			break;
 		}
 		default:
@@ -862,7 +909,25 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 
 		// ─── H4: Rating callbacks ───────────────────────────
 		if (data.startsWith('cooked:')) {
-			await handleCookedCallback(services, data.slice(7), ctx.userId, ctx.chatId, ctx.messageId);
+			const mealDate = data.slice(7);
+			await handleCookedCallback(services, mealDate, ctx.userId, ctx.chatId, ctx.messageId);
+
+			// H11: Auto-log macros when meal is marked as cooked
+			try {
+				const plan = await loadCurrentPlan(hh.sharedStore);
+				const meal = plan?.meals.find(m => m.date === mealDate && m.cooked);
+				if (meal) {
+					const recipe = await loadAllRecipes(hh.sharedStore).then(
+						recipes => recipes.find(r => r.id === meal.recipeId),
+					);
+					if (recipe) {
+						const userStore = services.data.forUser(ctx.userId);
+						await autoLogFromCookedMeal(userStore, ctx.userId, recipe, 1, mealDate, meal.mealType);
+					}
+				}
+			} catch (err) {
+				services.logger.error('Auto-log macros failed', err);
+			}
 			return;
 		}
 		if (data.startsWith('rate:')) {
@@ -931,6 +996,49 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		// ─── H9: Food introduction callbacks ────────────────
 		if (data.startsWith('fi:')) {
 			await handleFoodIntroCallback(services, data.slice(3), ctx.userId, ctx.chatId, ctx.messageId, hh.sharedStore);
+			return;
+		}
+
+		// ─── H11: Nutrition callbacks ────────────────────────
+		if (data.startsWith('nut:ped:')) {
+			const childSlug = data.slice('nut:ped:'.length);
+			const childLog = await loadChildProfile(hh.sharedStore, childSlug);
+			if (!childLog) {
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Child "${childSlug}" not found.`);
+				return;
+			}
+			const recipes = await loadAllRecipes(hh.sharedStore);
+			const userStore = services.data.forUser(ctx.userId);
+			const today = todayDate(services.timezone);
+			const report = await generatePediatricianReport(hh.sharedStore, userStore, childLog, recipes, 90, today);
+			await services.telegram.editMessage(ctx.chatId, ctx.messageId, report);
+			return;
+		}
+
+		// ─── H11: Hosting callbacks ──────────────────────────
+		if (data === 'host:guests') {
+			const guests = await loadGuests(hh.sharedStore);
+			await services.telegram.editMessage(ctx.chatId, ctx.messageId, formatGuestList(guests));
+			return;
+		}
+
+		if (data === 'host:gadd') {
+			await services.telegram.editMessage(
+				ctx.chatId,
+				ctx.messageId,
+				'To add a guest, send:\n`/hosting guests add <name> [restrictions...]`\n\nExample: `/hosting guests add Sarah vegetarian gluten-free`',
+			);
+			return;
+		}
+
+		if (data.startsWith('host:grem:')) {
+			const slug = data.slice('host:grem:'.length);
+			const removed = await removeGuest(hh.sharedStore, slug);
+			if (removed) {
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Removed guest: **${slug}**`);
+			} else {
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Guest not found.`);
+			}
 			return;
 		}
 
@@ -2195,7 +2303,7 @@ function nextMonday(dateStr: string): string {
 
 export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 	jobId: string,
-	_userId?: string,
+	userId?: string,
 ) => {
 	// H4: Finalize votes hourly
 	if (jobId === 'finalize-votes') {
@@ -2268,6 +2376,18 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 	if (jobId === 'cuisine-diversity-check') {
 		const sharedStore = services.data.forShared('shared');
 		await checkCuisineDiversity(services, sharedStore);
+		return;
+	}
+
+	// H11: Seasonal nudge 1st and 15th of month
+	if (jobId === 'seasonal-nudge') {
+		await handleSeasonalNudgeJob(services);
+		return;
+	}
+
+	// H11: Weekly nutrition summary Sunday 8pm (user_scope: all — invoked per user)
+	if (jobId === 'weekly-nutrition-summary') {
+		await handleWeeklyNutritionSummaryJob(services, userId);
 		return;
 	}
 
@@ -2534,6 +2654,8 @@ export function isCookIntent(text: string): boolean {
 // Re-export family intent detectors for natural-language tests
 export { isKidAdaptIntent, isFoodIntroIntent, isChildApprovalIntent };
 export { isPriceUpdateIntent, isBudgetViewIntent };
+export { isNutritionViewIntent };
+export { isHostingIntent };
 
 // ─── H6: Intent Detection ──────────────────────────────────────
 

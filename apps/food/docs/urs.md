@@ -337,7 +337,12 @@ Any household member can ask "what's for dinner" and get tonight's planned meal,
 
 **Origin:** MP-6 | **Status:** Implemented
 
-Track macro nutrients per planned/cooked meal. Store daily macro logs per user. Make data queryable over configurable periods. Support target macros per user with progress tracking.
+Track macro nutrients per planned/cooked meal. Store daily macro logs per user. Make data queryable over configurable periods. Support target macros per user (calories, protein, carbs, fat, fiber) with progress tracking. Manual `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]` is a fallback; the primary data pipeline is automatic logging from cooked planned meals.
+
+**Acceptance criteria — default view:**
+- The `/nutrition` command with no arguments **shall** display the current day's macro progress (daily view). This is a deliberate change from the prior weekly default so users can quickly check where they stand before their next meal.
+- Weekly and monthly summaries **shall** remain accessible via the explicit subcommands `/nutrition week` and `/nutrition month`.
+- Aliases `/nutrition today`, `/nutrition day`, and `/nutrition daily` **shall** resolve to the same daily view as the bare `/nutrition` command.
 
 **Standard tests:**
 - sumMacros / averageMacros / macrosFromRecipe math
@@ -347,7 +352,9 @@ Track macro nutrients per planned/cooked meal. Store daily macro logs per user. 
 - computeProgress with targets and daily averages
 - formatMacroSummary displays progress vs targets
 - autoLogFromCookedMeal scales recipe macros and logs
-- Nutrition handler: week, month, targets, targets set subcommands
+- Nutrition handler: today (default), week, month, targets, targets set, log, adherence subcommands
+- `/nutrition log` manual meal entry persists and echoes macros
+- `/nutrition targets set` persists fiber row and mirrors all 5 `macro_target_*` keys to `services.config.setAll`
 - Weekly nutrition summary scheduled job
 - NL journey tests: /nutrition commands, intent detection
 
@@ -360,6 +367,9 @@ Track macro nutrients per planned/cooked meal. Store daily macro logs per user. 
 - averageMacros with zero count
 - Path traversal in month parameter rejected
 - Invalid/negative/excessive macro targets rejected
+- Partial per-user config overrides merge cleanly over the YAML fallback (unset GUI keys fall through to YAML, do not drop to "not set")
+- `/nutrition log` rejects non-numeric args with a field-specific error that names the offending field
+- `/nutrition log` rejects labels longer than 100 characters
 
 **Fixes:** None
 
@@ -1644,14 +1654,16 @@ Generate summary report for a child's eating habits: food variety, allergen expo
 
 **Origin:** NR-2 | **Status:** Implemented
 
-Generate nutrition summary for any household member over configurable period: macro intake vs targets, trends, notable patterns.
+Generate nutrition summary for any household member over configurable period: macro intake vs targets, trends (calories, protein, carbs, fat, fiber), notable patterns. The generated LLM prompt includes all five macros in the daily-average, total and target lines, plus a trend summary. When targets and data are both present, the prompt also includes an "Adherence" block rendered from `computeAdherence` so the narrative summary can reference hit rates and streaks. User-generated content (meal labels, recipe titles) must not be inlined into the prompt without going through the defensive sanitization path used elsewhere.
 
 **Standard tests:**
-- detectTrends (increasing, decreasing, stable via linear regression)
+- detectTrends (increasing, decreasing, stable via linear regression) for all five macro fields including carbs/fat/fiber
 - formatTrendSummary
 - generatePersonalSummary with LLM + graceful fallback
+- generatePersonalSummary feeds fiber values and target into the LLM prompt
 - generateWeeklyDigest for last 7 days
 - Nutrition handler /nutrition week, /nutrition month
+- /nutrition week prompt includes an Adherence block when targets and data are both present
 
 **Edge case tests:**
 - detectTrends with fewer than 3 days returns empty
@@ -1659,6 +1671,36 @@ Generate nutrition summary for any household member over configurable period: ma
 - formatTrendSummary with empty trends
 - LLM failure falls back to structured summary
 - No data returns informative message
+
+**Security tests:**
+- generatePersonalSummary prompt-injection fence — malicious meal titles (triple backticks, "IGNORE PREVIOUS INSTRUCTIONS") never reach the LLM prompt because only numeric aggregates are inlined
+
+**Fixes:** None
+
+---
+
+### REQ-NUTR-003: Macro target adherence tracking
+
+**Origin:** H11.1 | **Status:** Implemented
+
+Track and report per-macro adherence — `daysTracked`, `daysHit`, `percentHit`, `currentStreak`, `longestStreak` — over a user-selected period, using a ±10% tolerance band against configured targets. Adherence is surfaced via a dedicated `/nutrition adherence [days]` subcommand (default 30 days, accepts 1..365) and is inlined into weekly/monthly summaries and the LLM personal-summary prompt whenever targets are set. Fields with an unset (or zero) target are skipped from the adherence block. The command gracefully reports "no targets set" when the user has not configured any, and "no macro data tracked" when targets are set but no days of data exist in the requested window.
+
+**Standard tests:**
+- `computeAdherence` — counts days within ±10% of target as hits (5/7 hit case → 71%)
+- All-hit case: current and longest streak both equal daysTracked
+- All-miss case: zero hits, zero streaks
+- Broken-streak case: `longestStreak` preserved, `currentStreak` reflects the tail
+- Fields with zero/unset target are skipped from the result
+- Empty entries list returns zeroed field records (defensive; callers guard this)
+- `formatAdherenceSummary` includes `on target`, percentage and streak line
+- `/nutrition adherence` handler reports `daysHit / daysTracked`, `percentHit%` and a streak line for seeded 7-day data
+- `/nutrition adherence` reports "no targets set" when unset
+- `/nutrition adherence` reports "no macro data tracked" when targets set but no logs
+- Adherence block is inlined into `formatMacroSummary` and fed to the LLM prompt in `generatePersonalSummary`
+
+**Edge case tests:**
+- Period out of bounds (<1 or >365 days) rejected with a clear error
+- Partial hit patterns produce the expected streak reset semantics
 
 **Fixes:** None
 
@@ -2078,7 +2120,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-MEAL-003 | voting.test.ts, voting-handler.test.ts, app.test.ts | 6 | 10 | Implemented |
 | REQ-MEAL-004 | rating.test.ts, rating-handler.test.ts, app.test.ts | 5 | 9 | Implemented |
 | REQ-MEAL-005 | meal-plan-store.test.ts, app.test.ts, natural-language.test.ts | 3 | 3 | Implemented |
-| REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, natural-language.test.ts | 53 | 15 | Implemented |
+| REQ-MEAL-006 | macro-tracker.test.ts, nutrition-reporter.test.ts, nutrition-handler.test.ts, nutrition-summary.test.ts, natural-language.test.ts | 56 | 16 | Implemented |
 | REQ-MEAL-007 | meal-planner.test.ts, app.test.ts | 3 | 2 | Implemented |
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
@@ -2115,7 +2157,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 10 | 6 | Implemented |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
 | REQ-SOCIAL-001 | hosting-planner.test.ts, hosting-handler.test.ts, natural-language.test.ts | 16 | 8 | Implemented |
-| REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts | 29 | 7 | Implemented |
+| REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts | 31 | 7 | Implemented |
 | REQ-SOCIAL-003 | guest-profiles.test.ts, hosting-handler.test.ts | 5 | 3 | Implemented |
 | REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
 | REQ-COST-002 | cost-estimator.test.ts, natural-language.test.ts | 3 | 5 | Implemented |
@@ -2125,7 +2167,8 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SEASON-002 | seasonal-nudge.test.ts | 5 | 0 | Implemented |
 | REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |
 | REQ-NUTR-001 | pediatrician-report.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 16 | 5 | Implemented |
-| REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 14 | 5 | Implemented |
+| REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 20 | 5 | Implemented |
+| REQ-NUTR-003 | macro-tracker.test.ts, nutrition-handler.test.ts | 8 | 0 | Implemented |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
 | REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
@@ -2144,7 +2187,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **44 test files** | **402** | **364** | **766 tests** |
+| **Totals** | **44 test files** | **413** | **369** | **782 tests** |
 
 ---
 
