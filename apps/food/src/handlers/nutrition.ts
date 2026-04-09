@@ -19,6 +19,8 @@ import {
 } from '../services/quick-meals-store.js';
 import { beginQuickMealAdd, beginQuickMealEdit } from './quick-meal-flow.js';
 import { logQuickMeal } from './quick-meal-log.js';
+import { estimateMacros } from '../services/macro-estimator.js';
+import { recordAdHocLog } from '../services/ad-hoc-history.js';
 import {
 	loadMonthlyLog,
 	getDailyMacros,
@@ -447,8 +449,48 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			await services.telegram.send(userId,
-				`No recipe or quick-meal matched '${labelText}'. Try \`/nutrition meals add\` to save it, or rephrase.`);
+			// Path 4: Ad-hoc LLM estimate (Task 12). Last-resort fallthrough.
+			const est = await estimateMacros(
+				{ label: labelText, ingredients: [labelText], kind: 'other' },
+				services.llm,
+			);
+			if (!est.ok) {
+				await services.telegram.send(
+					userId,
+					`Couldn't estimate macros for '${labelText}': ${est.error}. Try rephrasing or use \`/nutrition meals add\` to save a quick-meal.`,
+				);
+				return;
+			}
+
+			const scale = portion.value;
+			const scaledAdHoc = {
+				calories: Math.round((est.macros.calories ?? 0) * scale),
+				protein: Math.round((est.macros.protein ?? 0) * scale),
+				carbs: Math.round((est.macros.carbs ?? 0) * scale),
+				fat: Math.round((est.macros.fat ?? 0) * scale),
+				fiber: Math.round((est.macros.fiber ?? 0) * scale),
+			};
+			const adHocEntry: MealMacroEntry = {
+				recipeId: 'adhoc',
+				recipeTitle: labelText,
+				mealType: 'logged',
+				servingsEaten: scale,
+				macros: scaledAdHoc,
+				estimationKind: 'llm-ad-hoc',
+				confidence: est.confidence,
+				// sourceId intentionally omitted for ad-hoc entries.
+			};
+			const adHocToday = todayDate(services.timezone);
+			await logMealMacros(userStore, userId, adHocEntry, adHocToday);
+			await recordAdHocLog(userStore, labelText, adHocToday);
+
+			const lowConf = est.confidence < 0.5;
+			const flag = lowConf ? ' *' : '';
+			const legend = lowConf ? '\n_* low-confidence estimate_' : '';
+			await services.telegram.send(
+				userId,
+				`Logged${flag}: **${labelText}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
+			);
 			return;
 		}
 

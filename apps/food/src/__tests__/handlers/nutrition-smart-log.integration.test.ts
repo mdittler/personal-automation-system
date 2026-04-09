@@ -314,7 +314,7 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		expect(Array.from(userStore.files.keys()).some((k) => k.startsWith('nutrition/'))).toBe(false);
 	});
 
-	it('emits placeholder on no match', async () => {
+	it('emits error on no match when LLM ad-hoc path also fails', async () => {
 		mockRecipes.current = [
 			makeRecipe({
 				id: 'lasagna-abc123',
@@ -324,6 +324,7 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		];
 		const userStore = buildUserStore();
 		const telegram = buildTelegramSpy();
+		// Default mock LLM returns 'ok' (non-JSON) — ad-hoc estimator will fail.
 		const services = buildServices(userStore, telegram);
 		const sharedStore = buildUserStore();
 
@@ -336,7 +337,7 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 			),
 		);
 
-		expect(telegram.lastMessage).toMatch(/no recipe/i);
+		expect(telegram.lastMessage).toMatch(/couldn.?t estimate/i);
 		expect(Array.from(userStore.files.keys()).some((k) => k.startsWith('nutrition/'))).toBe(false);
 	});
 
@@ -1040,5 +1041,217 @@ describe('H11.w — /nutrition log quick-pick grid and quick-meal path', () => {
 		expect(entry.sourceId).toBe('chipotle-bowl');
 		expect(entry.estimationKind).toBe('quick-meal');
 		expect(entry.macros.calories).toBe(850);
+	});
+});
+
+describe('H11.w — ad-hoc /nutrition log free-text', () => {
+	it('logs an ad-hoc estimate with confidence 0.4 flagged', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue(
+					JSON.stringify({
+						calories: 820,
+						protein: 35,
+						carbs: 60,
+						fat: 45,
+						fiber: 6,
+						confidence: 0.4,
+						reasoning: 'sizes unspecified',
+					}),
+				),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'mystery', 'burger', 'plate'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		const key = Array.from(userStore.files.keys()).find(
+			(k) => k.startsWith('nutrition/') && k.endsWith('.yaml'),
+		);
+		expect(key).toBeDefined();
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
+		expect(log!.days[0]!.meals).toHaveLength(1);
+		const entry = log!.days[0]!.meals[0]!;
+		expect(entry.estimationKind).toBe('llm-ad-hoc');
+		expect(entry.confidence).toBe(0.4);
+		expect(entry.macros.calories).toBe(820);
+		expect(entry.recipeTitle).toContain('burger');
+		expect(entry.sourceId).toBeUndefined();
+		expect(telegram.lastMessage).toMatch(/Logged \*/);
+		expect(telegram.lastMessage).toMatch(/low-confidence estimate/i);
+	});
+
+	it('high-confidence ad-hoc log has no * flag', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue(
+					JSON.stringify({
+						calories: 180,
+						protein: 6,
+						carbs: 6,
+						fat: 15,
+						fiber: 3,
+						confidence: 0.8,
+					}),
+				),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'handful', 'of', 'almonds'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		expect(telegram.lastMessage).not.toMatch(/low-confidence estimate/i);
+		expect(telegram.lastMessage).not.toMatch(/Logged \*/);
+		// Confirm it was still logged
+		const key = Array.from(userStore.files.keys()).find(
+			(k) => k.startsWith('nutrition/') && k.endsWith('.yaml'),
+		);
+		expect(key).toBeDefined();
+	});
+
+	it('LLM failure (gibberish output) sends error and does not write a meal', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue('gibberish not json'),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'some', 'mystery', 'food'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		expect(telegram.lastMessage).toMatch(/couldn.?t estimate/i);
+		const hasMealLog = Array.from(userStore.files.keys()).some(
+			(k) => k.startsWith('nutrition/') && k.endsWith('.yaml'),
+		);
+		expect(hasMealLog).toBe(false);
+	});
+
+	it('records the free text to ad-hoc history', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue(
+					JSON.stringify({
+						calories: 820,
+						protein: 35,
+						carbs: 60,
+						fat: 45,
+						fiber: 6,
+						confidence: 0.4,
+					}),
+				),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'mystery', 'burger', 'plate'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		const { findSimilarAdHoc } = await import('../../services/ad-hoc-history.js');
+		const match = await findSimilarAdHoc(
+			userStore as never,
+			'mystery burger plate',
+		);
+		expect(match).not.toBeNull();
+		expect(match!.occurrences).toBe(1);
+	});
+
+	it('ad-hoc with explicit portion scales correctly', async () => {
+		mockRecipes.current = [];
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram, {
+			llm: {
+				complete: vi.fn().mockResolvedValue(
+					JSON.stringify({
+						calories: 1000,
+						protein: 50,
+						carbs: 80,
+						fat: 40,
+						fiber: 10,
+						confidence: 0.7,
+					}),
+				),
+				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+		});
+		const sharedStore = buildUserStore();
+
+		await dispatchAs('u1', () =>
+			handleNutritionCommand(
+				services as never,
+				['log', 'mystery', 'plate', '0.5'],
+				'u1',
+				sharedStore as never,
+			),
+		);
+
+		const key = Array.from(userStore.files.keys()).find(
+			(k) => k.startsWith('nutrition/') && k.endsWith('.yaml'),
+		);
+		expect(key).toBeDefined();
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
+		const entry = log!.days[0]!.meals[0]!;
+		expect(entry.servingsEaten).toBe(0.5);
+		expect(entry.macros.calories).toBe(500);
+		expect(entry.estimationKind).toBe('llm-ad-hoc');
 	});
 });
