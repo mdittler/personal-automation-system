@@ -404,12 +404,39 @@ export interface MacroTargets {
 	fiber?: number; // grams
 }
 
+export type EstimationKind = 'recipe' | 'quick-meal' | 'llm-ad-hoc' | 'manual';
+
+export interface QuickMealTemplate {
+	id: string;                  // slugified label
+	userId: string;
+	label: string;
+	kind: 'home' | 'restaurant' | 'other';
+	ingredients: string[];       // free text, one per line
+	notes?: string;
+	estimatedMacros: MacroData;  // LLM-computed at save time
+	confidence: number;          // 0.0-1.0
+	llmModel: string;            // audit trail (model id)
+	usdaCrossCheck?: {
+		calories: number;
+		matchedIngredients: number;
+		totalIngredients: number;
+	};
+	usageCount: number;
+	lastUsedAt?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export interface MealMacroEntry {
 	recipeId: string;
 	recipeTitle: string;
 	mealType: string; // dinner, lunch, etc.
 	servingsEaten: number;
 	macros: MacroData;
+	// H11.w additions (all optional — back-compat with existing entries)
+	estimationKind?: EstimationKind;
+	confidence?: number;
+	sourceId?: string; // recipe id, quick-meal id, or undefined for manual/ad-hoc
 }
 
 export interface DailyMacroEntry {
