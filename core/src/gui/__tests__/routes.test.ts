@@ -104,7 +104,7 @@ async function buildApp(tempDir: string) {
 	});
 
 	const registry = createMockRegistry();
-	const cronManager = new CronManager(logger, 'UTC');
+	const cronManager = new CronManager(logger, 'UTC', tempDir);
 	const oneOffManager = new OneOffManager(tempDir, logger);
 	const scheduler = { cron: cronManager, oneOff: oneOffManager } as unknown as SchedulerServiceImpl;
 	const appToggle = new AppToggleStore({ dataDir: tempDir, logger });
@@ -135,7 +135,7 @@ async function buildApp(tempDir: string) {
 		async (gui) => {
 			await registerAuth(gui, { authToken: AUTH_TOKEN });
 			await registerCsrfProtection(gui);
-			registerDashboardRoutes(gui, { registry, scheduler, config, dataDir: tempDir, logger });
+			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir: tempDir, logger });
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir: tempDir, logger });
@@ -498,7 +498,7 @@ describe('GUI Routes', () => {
 				getManifestCache: () => ({}) as ReturnType<AppRegistry['getManifestCache']>,
 			} as unknown as AppRegistry;
 
-			const cronMgr = new CronManager(logger, 'UTC');
+			const cronMgr = new CronManager(logger, 'UTC', configTempDir);
 			const oneOff = new OneOffManager(configTempDir, logger);
 			const scheduler = { cron: cronMgr, oneOff } as unknown as SchedulerServiceImpl;
 
@@ -520,6 +520,7 @@ describe('GUI Routes', () => {
 						registry,
 						scheduler,
 						config,
+						modelSelector: { getStandardRef: () => ({ provider: 'anthropic', model: 'claude-sonnet-4-6' }) } as unknown as ModelSelector,
 						dataDir: configTempDir,
 						logger,
 					});

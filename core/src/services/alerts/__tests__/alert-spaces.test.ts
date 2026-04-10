@@ -70,7 +70,7 @@ function makeService(overrides: Partial<AlertServiceOptions> = {}): {
 		llm: makeLLM(),
 		telegram,
 		userManager: makeUserManager(),
-		cronManager: new CronManager(logger, 'America/New_York'),
+		cronManager: new CronManager(logger, 'America/New_York', tempDir),
 		reportService: makeReportService(),
 		timezone: 'America/New_York',
 		logger,

@@ -25,7 +25,7 @@ export class SchedulerServiceImpl implements SchedulerService {
 	readonly oneOff: OneOffManager;
 
 	constructor(options: SchedulerServiceOptions) {
-		this.cron = new CronManager(options.logger, options.timezone);
+		this.cron = new CronManager(options.logger, options.timezone, options.dataDir);
 		this.oneOff = new OneOffManager(options.dataDir, options.logger);
 	}
 

@@ -11,7 +11,7 @@
         <tr>
           <th>Name</th>
           <th>Apps</th>
-          <th>Groups <small style="font-weight:normal;opacity:0.7">(comma-separated)</small></th>
+          <th>Spaces</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -42,26 +42,38 @@
               </form>
             </td>
             <td id="groups-<%= user.id %>">
-              <form hx-post="/gui/users/<%= user.id %>/groups"
-                    hx-target="#groups-<%= user.id %>"
-                    hx-swap="innerHTML"
-                    style="margin:0;display:flex;gap:0.4rem;align-items:center">
-                <input type="text"
-                       name="groups"
-                       value="<%= (user.sharedScopes || []).join(', ') %>"
-                       placeholder="e.g. grocery, family"
-                       style="margin:0;flex:1;min-width:8rem" />
-                <button type="submit" class="outline" style="padding:0.25rem 0.6rem;margin:0;white-space:nowrap">Save</button>
-              </form>
+              <% if (it.spaces.length === 0) { %>
+                <span style="font-size:0.85rem;color:var(--pas-text-muted)">No spaces — <a href="/gui/spaces">create one</a></span>
+              <% } else { %>
+                <form hx-post="/gui/users/<%= user.id %>/groups"
+                      hx-target="#groups-<%= user.id %>"
+                      hx-swap="innerHTML"
+                      style="margin:0">
+                  <% for (const space of it.spaces) { %>
+                    <label style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;font-weight:normal;font-size:0.85rem;">
+                      <input type="checkbox"
+                             name="space_<%= space.id %>"
+                             <% if (user.sharedScopes && user.sharedScopes.includes(space.id)) { %>checked<% } %>
+                             onchange="this.form.requestSubmit()"
+                             style="margin:0" />
+                      <%= space.name %>
+                    </label>
+                  <% } %>
+                </form>
+              <% } %>
             </td>
             <td>
-              <form hx-post="/gui/users/<%= user.id %>/remove"
-                    hx-target="#user-row-<%= user.id %>"
-                    hx-swap="delete"
-                    hx-confirm="Remove user <%= user.name %>? This cannot be undone."
-                    style="margin:0">
-                <button type="submit" class="outline secondary toggle-btn" style="padding:0.25rem 0.6rem;margin:0">Remove</button>
-              </form>
+              <% if (user.isAdmin && it.adminCount <= 1) { %>
+                <button class="outline secondary toggle-btn" style="opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>
+              <% } else { %>
+                <form hx-post="/gui/users/<%= user.id %>/remove"
+                      hx-target="#user-row-<%= user.id %>"
+                      hx-swap="delete"
+                      hx-confirm="Remove user <%= user.name %>? This cannot be undone."
+                      style="margin:0">
+                  <button type="submit" class="outline secondary toggle-btn">Remove</button>
+                </form>
+              <% } %>
             </td>
           </tr>
         <% } %>

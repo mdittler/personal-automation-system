@@ -74,7 +74,7 @@ function makeUserManager(): UserManager {
 
 async function buildApp() {
 	telegram = makeTelegram();
-	const cronManager = new CronManager(logger, 'UTC');
+	const cronManager = new CronManager(logger, 'UTC', tempDir);
 
 	reportService = new ReportService({
 		dataDir: tempDir,

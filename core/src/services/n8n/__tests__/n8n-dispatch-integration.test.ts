@@ -79,7 +79,7 @@ describe('n8n dispatch integration — ReportService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			timezone: 'UTC',
 			logger,
 			n8nDispatcher: dispatcher,
@@ -100,7 +100,7 @@ describe('n8n dispatch integration — ReportService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			timezone: 'UTC',
 			logger,
 			// No n8nDispatcher
@@ -129,7 +129,7 @@ describe('n8n dispatch integration — ReportService', () => {
 			enabled: true,
 			dispatch: vi.fn().mockResolvedValue(true),
 		};
-		const cronManager = new CronManager(logger, 'UTC');
+		const cronManager = new CronManager(logger, 'UTC', tempDir);
 
 		const service = new ReportService({
 			dataDir: tempDir,
@@ -181,7 +181,7 @@ describe('n8n dispatch integration — AlertService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			timezone: 'UTC',
 			logger,
 		});
@@ -191,7 +191,7 @@ describe('n8n dispatch integration — AlertService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			reportService,
 			timezone: 'UTC',
 			logger,
@@ -212,7 +212,7 @@ describe('n8n dispatch integration — AlertService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			timezone: 'UTC',
 			logger,
 		});
@@ -222,7 +222,7 @@ describe('n8n dispatch integration — AlertService', () => {
 			llm: makeLLM(),
 			telegram: makeTelegram(),
 			userManager: makeUserManager(),
-			cronManager: new CronManager(logger, 'UTC'),
+			cronManager: new CronManager(logger, 'UTC', tempDir),
 			reportService,
 			timezone: 'UTC',
 			logger,
@@ -237,7 +237,7 @@ describe('n8n dispatch integration — AlertService', () => {
 			enabled: true,
 			dispatch: vi.fn().mockResolvedValue(true),
 		};
-		const cronManager = new CronManager(logger, 'UTC');
+		const cronManager = new CronManager(logger, 'UTC', tempDir);
 
 		const reportService = new ReportService({
 			dataDir: tempDir,

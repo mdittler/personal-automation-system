@@ -143,6 +143,8 @@ A local-first home automation platform where users interact through a single Tel
 
 All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x, H11.z incl. iteration-2 hardening, H11.w, H11.y, H12a, H12b) are complete. **5422 tests passing across 222 test files.**
 
+**GUI cleanup (2026-04-10):** Left sidebar navigation (all 10 nav items moved to sticky sidebar, top bar keeps PAS brand + Dashboard + theme + logout); Users page groups column replaced with space checkboxes (auto-save on toggle, linked to SpaceService.listSpaces()); admin self-removal UX protection (Remove button disabled for sole admin); scheduler lastRunAt persisted to `data/system/cron-last-run.json` (survives restarts); dashboard Claude Model now reads from ModelSelector instead of stale .env value.
+
 See `docs/implementation-phases.md` for detailed phase guide.
 
 ### Deferred / Future Items

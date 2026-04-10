@@ -95,7 +95,7 @@ export async function registerGuiRoutes(
 			await registerCsrfProtection(gui);
 
 			// Content routes
-			registerDashboardRoutes(gui, { registry, scheduler, config, dataDir, logger });
+			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir, logger });
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir, logger });
@@ -146,11 +146,12 @@ export async function registerGuiRoutes(
 					logger,
 				});
 			}
-			if (userManager && userMutationService) {
+			if (userManager && userMutationService && spaceService) {
 				registerUserRoutes(gui, {
 					userManager,
 					userMutationService,
 					registry,
+					spaceService,
 					logger,
 				});
 			}

@@ -9,6 +9,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { AppRegistry } from '../../services/app-registry/index.js';
+import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import type { SystemConfig } from '../../types/config.js';
 
@@ -16,6 +17,7 @@ export interface DashboardOptions {
 	registry: AppRegistry;
 	scheduler: SchedulerServiceImpl;
 	config: SystemConfig;
+	modelSelector: ModelSelector;
 	dataDir: string;
 	logger: Logger;
 }
@@ -35,7 +37,7 @@ function formatUptime(seconds: number): string {
 }
 
 export function registerDashboardRoutes(server: FastifyInstance, options: DashboardOptions): void {
-	const { registry, scheduler, config, logger } = options;
+	const { registry, scheduler, config, modelSelector, logger } = options;
 
 	server.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
 		const appIds = registry.getLoadedAppIds();
@@ -66,7 +68,7 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 			timezone: config.timezone,
 			ollamaUrl: config.ollama?.url ?? 'not configured',
 			ollamaModel: config.ollama?.model ?? 'n/a',
-			claudeModel: config.claude.model,
+			claudeModel: modelSelector.getStandardRef().model,
 		};
 
 		return reply.viewAsync('dashboard', {

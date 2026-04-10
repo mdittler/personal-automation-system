@@ -46,47 +46,31 @@
 	--pico-primary-background: #6366f1;
 }
 
-/* ----- 3. Header / Nav ----- */
-header.container nav {
+/* ----- 3. Top bar ----- */
+.pas-topbar {
+	position: sticky;
+	top: 0;
+	z-index: 100;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.5rem;
-	padding: 0.5rem 0;
+	padding: 0 1rem;
+	height: 52px;
+	background: var(--pico-card-background-color);
 	border-bottom: 1px solid var(--pas-border);
-	margin-bottom: 1rem;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-header.container nav ul {
-	list-style: none;
+.pas-topbar-left {
 	display: flex;
-	gap: 0.25rem;
-	padding: 0;
-	margin: 0;
-	flex-wrap: nowrap;
 	align-items: center;
+	gap: 0.5rem;
 }
 
-header.container nav ul li a {
-	padding: 0.35rem 0.65rem;
-	border-radius: 999px;
-	text-decoration: none;
-	font-size: 0.875rem;
-	color: var(--pas-text-muted);
-	transition: background 0.15s, color 0.15s;
-	display: inline-flex;
+.pas-topbar-right {
+	display: flex;
 	align-items: center;
-	gap: 0.35rem;
-}
-
-header.container nav ul li a:hover {
-	background: var(--pas-primary-light);
-	color: var(--pico-primary);
-}
-
-header.container nav ul li a[aria-current="page"] {
-	background: var(--pas-primary);
-	color: #fff;
+	gap: 0.5rem;
 }
 
 .pas-brand {
@@ -94,10 +78,113 @@ header.container nav ul li a[aria-current="page"] {
 	font-size: 1.1rem;
 	letter-spacing: -0.5px;
 	color: var(--pico-primary) !important;
-	margin-right: 0.75rem;
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
+	text-decoration: none;
+	margin-right: 0.25rem;
+}
+
+.pas-topbar-link {
+	padding: 0.3rem 0.7rem;
+	border-radius: 999px;
+	text-decoration: none;
+	font-size: 0.875rem;
+	color: var(--pas-text-muted);
+	transition: background 0.15s, color 0.15s;
+}
+
+.pas-topbar-link:hover,
+.pas-topbar-link.active {
+	background: var(--pas-primary-light);
+	color: var(--pico-primary);
+}
+
+.pas-topbar-link.active {
+	background: var(--pas-primary);
+	color: #fff;
+}
+
+.pas-hamburger {
+	background: none;
+	border: 1px solid var(--pas-border);
+	border-radius: var(--pas-radius-sm);
+	padding: 0.3rem 0.4rem;
+	margin: 0;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	color: var(--pas-text-muted);
+}
+
+.pas-hamburger:hover {
+	background: var(--pas-primary-light);
+	color: var(--pico-primary);
+}
+
+/* ----- 3b. App layout: sidebar + content ----- */
+.pas-app-layout {
+	display: flex;
+	min-height: calc(100vh - 52px);
+	position: relative;
+}
+
+/* ----- 3c. Sidebar ----- */
+.pas-sidebar {
+	width: 220px;
+	flex-shrink: 0;
+	background: var(--pico-card-background-color);
+	border-right: 1px solid var(--pas-border);
+	position: sticky;
+	top: 52px;
+	height: calc(100vh - 52px);
+	overflow-y: auto;
+	overflow-x: hidden;
+	transition: width 0.2s ease;
+}
+
+.pas-sidebar nav {
+	padding: 0.75rem 0.5rem;
+}
+
+.pas-sidebar nav ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.pas-sidebar nav ul li a {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.45rem 0.75rem;
+	border-radius: var(--pas-radius-sm);
+	text-decoration: none;
+	font-size: 0.875rem;
+	color: var(--pas-text-muted);
+	transition: background 0.15s, color 0.15s;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.pas-sidebar nav ul li a:hover {
+	background: var(--pas-primary-light);
+	color: var(--pico-primary);
+}
+
+.pas-sidebar nav ul li a[aria-current="page"] {
+	background: var(--pas-primary);
+	color: #fff;
+}
+
+.pas-sidebar nav ul li a[aria-current="page"] .nav-icon {
+	opacity: 1;
+}
+
+.nav-section-divider {
+	height: 1px;
+	background: var(--pas-border);
+	margin: 0.4rem 0.75rem;
 }
 
 .nav-icon {
@@ -107,15 +194,92 @@ header.container nav ul li a[aria-current="page"] {
 	opacity: 0.7;
 }
 
-a[aria-current="page"] .nav-icon {
-	opacity: 1;
+/* Sidebar overlay (mobile tap-to-close) */
+.pas-sidebar-overlay {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 90;
+	background: rgba(0, 0, 0, 0.35);
 }
 
-.nav-divider {
-	width: 1px;
-	height: 20px;
-	background: var(--pas-border);
-	margin: 0 0.25rem;
+.pas-sidebar-overlay.visible {
+	display: block;
+}
+
+/* ----- 3d. Main content area ----- */
+.pas-main-content {
+	flex: 1;
+	min-width: 0;
+	padding: 1.5rem 2rem;
+	overflow-x: auto;
+}
+
+/* ----- 3e. Medium screens: icon-only sidebar ----- */
+@media (min-width: 769px) and (max-width: 1200px) {
+	.pas-sidebar {
+		width: 52px;
+	}
+
+	.pas-sidebar .nav-label {
+		display: none;
+	}
+
+	.pas-sidebar nav ul li a {
+		padding: 0.45rem;
+		justify-content: center;
+		gap: 0;
+	}
+
+	/* Expand sidebar on hover */
+	.pas-sidebar:hover {
+		width: 220px;
+		position: absolute;
+		z-index: 95;
+		box-shadow: 2px 0 8px rgba(0, 0, 0, 0.12);
+	}
+
+	.pas-sidebar:hover .nav-label {
+		display: inline;
+	}
+
+	.pas-sidebar:hover nav ul li a {
+		padding: 0.45rem 0.75rem;
+		justify-content: flex-start;
+		gap: 0.6rem;
+	}
+}
+
+/* ----- 3f. Mobile: hidden sidebar, toggle to show ----- */
+@media (max-width: 768px) {
+	.pas-sidebar {
+		position: fixed;
+		top: 52px;
+		left: 0;
+		height: calc(100vh - 52px);
+		z-index: 95;
+		transform: translateX(-100%);
+		transition: transform 0.2s ease, width 0.2s ease;
+		box-shadow: none;
+	}
+
+	.pas-sidebar.open {
+		transform: translateX(0);
+		box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+	}
+
+	.pas-main-content {
+		padding: 1rem;
+	}
+
+	.page-header {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.data-layout {
+		grid-template-columns: 1fr;
+	}
 }
 
 /* ----- 4. Page headers ----- */
@@ -377,8 +541,8 @@ table tbody tr:nth-child(even):hover {
 /* ----- 16. Footer ----- */
 .pas-footer {
 	text-align: center;
-	padding: 2rem 0 1rem;
-	margin-top: 3rem;
+	padding: 1.5rem 0 1rem;
+	margin-top: 2rem;
 	border-top: 1px solid var(--pas-border);
 	color: var(--pas-text-muted);
 	font-size: 0.8rem;
@@ -403,47 +567,3 @@ fieldset {
 	border-radius: var(--pas-radius-sm);
 }
 
-/* Responsive nav — icon-only at medium widths */
-@media (min-width: 769px) and (max-width: 1400px) {
-	.nav-label {
-		display: none;
-	}
-
-	header.container nav ul li a {
-		padding: 0.35rem 0.5rem;
-	}
-
-	.nav-divider {
-		display: none;
-	}
-
-	.pas-brand .nav-label {
-		display: none;
-	}
-}
-
-/* Responsive nav — stacked at small widths */
-@media (max-width: 768px) {
-	header.container nav {
-		flex-direction: column;
-		align-items: flex-start;
-	}
-
-	header.container nav ul:first-child {
-		flex-wrap: wrap;
-		gap: 0.15rem;
-	}
-
-	.nav-divider {
-		display: none;
-	}
-
-	.page-header {
-		flex-direction: column;
-		align-items: flex-start;
-	}
-
-	.data-layout {
-		grid-template-columns: 1fr;
-	}
-}

@@ -7,14 +7,17 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { AppRegistry } from '../../services/app-registry/index.js';
+import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import type { RegisteredUser } from '../../types/users.js';
 
 export interface UserRoutesOptions {
 	userManager: UserManager;
 	userMutationService: UserMutationService;
 	registry: AppRegistry;
+	spaceService: SpaceService;
 	logger: Logger;
 }
 
@@ -28,7 +31,7 @@ function escapeHtml(str: string): string {
 }
 
 export function registerUserRoutes(server: FastifyInstance, options: UserRoutesOptions): void {
-	const { userManager, userMutationService, registry, logger } = options;
+	const { userManager, userMutationService, registry, spaceService, logger } = options;
 
 	// --- List all users ---
 	server.get('/users', async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -38,12 +41,16 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			id,
 			name: registry.getApp(id)?.manifest.app.name ?? id,
 		}));
+		const spaces = spaceService.listSpaces();
+		const adminCount = users.filter((u) => u.isAdmin).length;
 
 		return reply.viewAsync('users', {
 			title: 'Users — PAS',
 			activePage: 'users',
 			users,
 			apps,
+			spaces,
+			adminCount,
 		});
 	});
 
@@ -81,12 +88,14 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			return reply.status(404).type('text/html').send('User not found');
 		}
 
+		const spaces = spaceService.listSpaces();
+		const adminCount = userManager.getAllUsers().filter((u) => u.isAdmin).length;
 		return reply
 			.type('text/html')
-			.send(buildUserRow(updatedUser, allAppIds, registry, userManager));
+			.send(buildUserRow(updatedUser, allAppIds, registry, spaces, adminCount));
 	});
 
-	// --- Update user shared scopes (htmx partial) ---
+	// --- Update user shared scopes via space checkboxes (htmx partial) ---
 	server.post('/users/:userId/groups', async (request: FastifyRequest, reply: FastifyReply) => {
 		const { userId } = request.params as { userId: string };
 
@@ -99,31 +108,20 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			return reply.status(404).type('text/html').send('User not found');
 		}
 
-		const body = request.body as { groups?: string };
-		const raw = (body.groups ?? '').trim();
-		const groups = raw
-			? raw
-					.split(',')
-					.map((g) => g.trim())
-					.filter(Boolean)
-			: [];
+		const body = request.body as Record<string, string>;
+		const allSpaces = spaceService.listSpaces();
+		const checkedScopes: string[] = [];
 
-		// Validate each group name
-		for (const group of groups) {
-			if (!/^[a-zA-Z0-9_-]+$/.test(group)) {
-				return reply
-					.status(400)
-					.type('text/html')
-					.send(
-						`<p style="color:var(--pico-del-color)">Invalid group name: ${escapeHtml(group)}</p>`,
-					);
+		for (const space of allSpaces) {
+			if (body[`space_${space.id}`] === 'on') {
+				checkedScopes.push(space.id);
 			}
 		}
 
-		await userMutationService.updateUserSharedScopes(userId, groups);
-		logger.info({ userId, groups }, 'User shared scopes updated via GUI');
+		await userMutationService.updateUserSharedScopes(userId, checkedScopes);
+		logger.info({ userId, scopes: checkedScopes }, 'User shared scopes updated via GUI');
 
-		return reply.type('text/html').send(buildGroupsCell(userId, groups));
+		return reply.type('text/html').send(buildSpacesCell(userId, checkedScopes, allSpaces));
 	});
 
 	// --- Remove user (htmx partial) ---
@@ -155,7 +153,8 @@ function buildUserRow(
 	user: RegisteredUser,
 	allAppIds: string[],
 	registry: AppRegistry,
-	_userManager: UserManager,
+	spaces: SpaceDefinition[],
+	adminCount: number,
 ): string {
 	const safeName = escapeHtml(user.name);
 	const safeId = escapeHtml(user.id);
@@ -188,36 +187,56 @@ function buildUserRow(
 	html += '</form>';
 	html += '</td>';
 
-	// Groups cell
+	// Spaces checkboxes cell
 	html += `<td id="groups-${safeId}">`;
-	html += buildGroupsCell(user.id, user.sharedScopes);
+	html += buildSpacesCell(user.id, user.sharedScopes ?? [], spaces);
 	html += '</td>';
 
-	// Remove button cell
+	// Remove button cell — disabled for sole admin
+	const isSoleAdmin = user.isAdmin && adminCount <= 1;
 	html += '<td>';
-	html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem" `;
-	html += `hx-post="/gui/users/${safeId}/remove" `;
-	html += `hx-target="#user-row-${safeId}" hx-swap="delete" `;
-	html += `hx-confirm="Remove user ${safeName}?">Remove</button>`;
+	if (isSoleAdmin) {
+		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem;opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>`;
+	} else {
+		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem" `;
+		html += `hx-post="/gui/users/${safeId}/remove" `;
+		html += `hx-target="#user-row-${safeId}" hx-swap="delete" `;
+		html += `hx-confirm="Remove user ${safeName}?">Remove</button>`;
+	}
 	html += '</td>';
 
 	html += '</tr>';
 	return html;
 }
 
-/** Build the groups form cell content (htmx-replaceable). */
-function buildGroupsCell(userId: string, groups: string[]): string {
+/** Build the spaces checkboxes cell content (htmx-replaceable). */
+function buildSpacesCell(
+	userId: string,
+	userScopes: string[],
+	spaces: SpaceDefinition[],
+): string {
 	const safeId = escapeHtml(userId);
-	const groupsValue = escapeHtml(groups.join(', '));
+	const scopeSet = new Set(userScopes);
+
+	if (spaces.length === 0) {
+		return `<span style="font-size:0.85rem;color:var(--pas-text-muted)">No spaces — <a href="/gui/spaces">create one</a></span>`;
+	}
 
 	let html = `<form method="post" action="/gui/users/${safeId}/groups" `;
 	html += `hx-post="/gui/users/${safeId}/groups" `;
 	html += `hx-target="#groups-${safeId}" hx-swap="innerHTML" `;
-	html += `style="display:flex;gap:0.25rem;align-items:center;margin:0;">`;
-	html += `<input type="text" name="groups" value="${groupsValue}" `;
-	html += `placeholder="scope1, scope2" style="margin:0;padding:0.2rem 0.4rem;font-size:0.85rem;" />`;
-	html += `<button type="submit" class="outline" style="padding:0.2rem 0.5rem;margin:0;font-size:0.85rem">Save</button>`;
-	html += '</form>';
+	html += `style="margin:0;">`;
 
+	for (const space of spaces) {
+		const safeSpaceId = escapeHtml(space.id);
+		const safeSpaceName = escapeHtml(space.name);
+		const checked = scopeSet.has(space.id) ? ' checked' : '';
+		html += `<label style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;font-weight:normal;font-size:0.85rem;">`;
+		html += `<input type="checkbox" name="space_${safeSpaceId}" onchange="this.form.requestSubmit()"${checked} style="margin:0;" />`;
+		html += `${safeSpaceName}`;
+		html += '</label>';
+	}
+
+	html += '</form>';
 	return html;
 }

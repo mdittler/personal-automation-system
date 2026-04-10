@@ -6,6 +6,8 @@
  * Logs start time, end time, and success/failure (URS-SCH-004).
  */
 
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Logger } from 'pino';
 import type { ScheduledJob } from '../../types/scheduler.js';
@@ -21,10 +23,47 @@ export class CronManager {
 	private readonly lastRunAt = new Map<string, Date>();
 	private readonly logger: Logger;
 	private readonly timezone: string;
+	private readonly persistPath: string;
 
-	constructor(logger: Logger, timezone: string) {
+	constructor(logger: Logger, timezone: string, dataDir: string) {
 		this.logger = logger;
 		this.timezone = timezone;
+		this.persistPath = join(dataDir, 'system', 'cron-last-run.json');
+		this.loadLastRunData();
+	}
+
+	private loadLastRunData(): void {
+		try {
+			const raw = readFileSync(this.persistPath, 'utf-8');
+			const data = JSON.parse(raw) as Record<string, string>;
+			for (const [key, dateStr] of Object.entries(data)) {
+				const parsed = new Date(dateStr);
+				if (!isNaN(parsed.getTime())) {
+					this.lastRunAt.set(key, parsed);
+				}
+			}
+		} catch {
+			// File doesn't exist yet or is malformed — start fresh
+		}
+	}
+
+	private persistLastRunData(): void {
+		try {
+			// Ensure directory exists (data/system/ is always created at startup, but be safe)
+			const dir = dirname(this.persistPath);
+			try {
+				readFileSync(dir); // probe — will throw if missing
+			} catch {
+				// ignore — writeFileSync will fail if dir is missing, caught below
+			}
+			const data: Record<string, string> = {};
+			for (const [key, date] of this.lastRunAt) {
+				data[key] = date.toISOString();
+			}
+			writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
+		} catch (err) {
+			this.logger.warn({ error: err }, 'Failed to persist cron last-run data');
+		}
 	}
 
 	/**
@@ -50,6 +89,7 @@ export class CronManager {
 				const handler = handlerResolver();
 				await runTask(job.appId, job.id, handler, this.logger);
 				this.lastRunAt.set(jobKey, new Date());
+				this.persistLastRunData();
 			},
 			{ timezone: this.timezone },
 		);
@@ -92,6 +132,7 @@ export class CronManager {
 		entry.task.stop();
 		this.jobs.delete(jobKey);
 		this.lastRunAt.delete(jobKey);
+		this.persistLastRunData();
 		this.logger.info({ jobKey }, 'Cron job unregistered');
 		return true;
 	}

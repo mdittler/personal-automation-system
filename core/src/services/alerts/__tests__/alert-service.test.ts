@@ -80,7 +80,7 @@ function makeService(overrides: Partial<AlertServiceOptions> = {}): {
 } {
 	const telegram = makeTelegram();
 	const llm = makeLLM();
-	const cronManager = new CronManager(logger, 'America/New_York');
+	const cronManager = new CronManager(logger, 'America/New_York', tempDir);
 	const reportService = makeReportService();
 
 	const service = new AlertService({

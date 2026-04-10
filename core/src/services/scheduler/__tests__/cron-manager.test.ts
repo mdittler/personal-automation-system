@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import cron from 'node-cron';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
@@ -5,6 +6,7 @@ import type { ScheduledJob } from '../../../types/scheduler.js';
 import { CronManager } from '../cron-manager.js';
 
 const logger = pino({ level: 'silent' });
+const testDataDir = tmpdir();
 
 function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
 	return {
@@ -20,7 +22,7 @@ function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
 
 describe('CronManager', () => {
 	it('registers a cron job', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -29,7 +31,7 @@ describe('CronManager', () => {
 	});
 
 	it('rejects duplicate job registration', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -39,7 +41,7 @@ describe('CronManager', () => {
 	});
 
 	it('rejects invalid cron expressions', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob({ cron: 'not a cron' }), () => handler);
@@ -48,7 +50,7 @@ describe('CronManager', () => {
 	});
 
 	it('registers multiple jobs from different apps', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob({ id: 'job-a', appId: 'app-1' }), () => handler);
@@ -58,7 +60,7 @@ describe('CronManager', () => {
 	});
 
 	it('getJobDetails includes lastRunAt as null before any runs', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -73,7 +75,7 @@ describe('CronManager', () => {
 	// --- unregister ---
 
 	it('unregisters an existing job and returns true', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -85,13 +87,13 @@ describe('CronManager', () => {
 	});
 
 	it('returns false when unregistering a nonexistent job', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const result = manager.unregister('nonexistent:job');
 		expect(result).toBe(false);
 	});
 
 	it('removes lastRunAt entry on unregister', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -103,7 +105,7 @@ describe('CronManager', () => {
 	});
 
 	it('allows re-registering a job after unregister', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -115,7 +117,7 @@ describe('CronManager', () => {
 	});
 
 	it('start and stop do not throw', () => {
-		const manager = new CronManager(logger, 'America/New_York');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);
@@ -125,7 +127,7 @@ describe('CronManager', () => {
 
 	it('passes timezone option to node-cron createTask', () => {
 		const createTaskSpy = vi.spyOn(cron, 'createTask');
-		const manager = new CronManager(logger, 'Europe/London');
+		const manager = new CronManager(logger, 'Europe/London', testDataDir);
 		const handler = vi.fn();
 
 		manager.register(makeJob(), () => handler);

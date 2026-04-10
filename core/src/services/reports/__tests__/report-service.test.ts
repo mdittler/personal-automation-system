@@ -71,7 +71,7 @@ function makeService(overrides: Partial<ReportServiceOptions> = {}): {
 } {
 	const telegram = makeTelegram();
 	const llm = makeLLM();
-	const cronManager = new CronManager(logger, 'UTC');
+	const cronManager = new CronManager(logger, 'UTC', tempDir);
 
 	const service = new ReportService({
 		dataDir: tempDir,
@@ -453,7 +453,7 @@ describe('ReportService — cron lifecycle', () => {
 		await service1.saveReport(makeValidReport({ id: 'report-b', name: 'B', enabled: false }));
 
 		// Create a new service instance (simulates restart)
-		const cronManager2 = new CronManager(logger, 'UTC');
+		const cronManager2 = new CronManager(logger, 'UTC', tempDir);
 		const service2 = new ReportService({
 			dataDir: tempDir,
 			changeLog: new ChangeLog(tempDir),
