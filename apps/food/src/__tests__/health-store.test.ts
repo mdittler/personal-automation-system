@@ -33,7 +33,7 @@ function createMockStore() {
 function makeEntry(date: string, overrides: Partial<DailyHealthEntry> = {}): DailyHealthEntry {
 	return {
 		date,
-		metrics: { sleepHours: 7, energyLevel: 8 },
+		metrics: { sleepHours: 7 },
 		source: 'health-app',
 		...overrides,
 	};
@@ -145,7 +145,7 @@ describe('saveMonthlyHealth', () => {
 	});
 
 	it('round-trips day entries through save and load', async () => {
-		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-05', { metrics: { sleepHours: 8, mood: 9 } })]);
+		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-05', { metrics: { sleepHours: 8, weightKg: 72 } })]);
 
 		let stored = '';
 		store.write.mockImplementation(async (_path, content) => { stored = content as string; });
@@ -155,7 +155,7 @@ describe('saveMonthlyHealth', () => {
 		const loaded = await loadMonthlyHealth(store as unknown as ScopedDataStore, '2026-04');
 
 		expect(loaded!.days[0]!.metrics.sleepHours).toBe(8);
-		expect(loaded!.days[0]!.metrics.mood).toBe(9);
+		expect(loaded!.days[0]!.metrics.weightKg).toBe(72);
 	});
 });
 
@@ -205,19 +205,17 @@ describe('upsertDailyHealth', () => {
 	});
 
 	it('replaces an existing day entry (upsert semantics)', async () => {
-		const existingLog = makeLog('2026-04', 'alice', [makeEntry('2026-04-10', { metrics: { energyLevel: 3 } })]);
+		const existingLog = makeLog('2026-04', 'alice', [makeEntry('2026-04-10', { metrics: { sleepHours: 6 } })]);
 		store.read.mockResolvedValue(serialiseLog(existingLog));
 
-		const updated = makeEntry('2026-04-10', { metrics: { energyLevel: 9 } });
+		const updated = makeEntry('2026-04-10', { metrics: { sleepHours: 9 } });
 		await upsertDailyHealth(store as unknown as ScopedDataStore, 'alice', updated);
 
 		const written = vi.mocked(store.write).mock.calls[0]![1] as string;
-		// Parse the written content to verify only one entry for that date
-		const parsed = JSON.parse(JSON.stringify(written)); // keep as string for inspection
 		const occurrences = (written.match(/2026-04-10/g) ?? []).length;
 		expect(occurrences).toBeGreaterThanOrEqual(1);
-		expect(written).toContain('energyLevel: 9');
-		expect(written).not.toContain('energyLevel: 3');
+		expect(written).toContain('sleepHours: 9');
+		expect(written).not.toContain('sleepHours: 6');
 	});
 });
 

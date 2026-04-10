@@ -61,13 +61,13 @@ export interface HealthDailyMetricsPayload {
 	date: string; // YYYY-MM-DD
 	metrics: {
 		sleepHours?: number;
-		energyLevel?: number;    // 1–10 self-report or derived
 		weightKg?: number;
 		restingHeartRate?: number;
 		workoutMinutes?: number;
 		workoutIntensity?: 'low' | 'moderate' | 'high';
-		mood?: number;           // 1–10
 		notes?: string;
+		// energyLevel and mood removed — subjective signals belong in a future
+		// fitness/health app (e.g. Garmin stress score). See CLAUDE.md deferred items.
 	};
 	source: string; // emitting app id, for provenance
 }

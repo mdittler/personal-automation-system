@@ -60,7 +60,7 @@ function makeMacroEntry(date: string): DailyMacroEntry {
 function makeHealthEntry(date: string, overrides: Partial<DailyHealthEntry> = {}): DailyHealthEntry {
 	return {
 		date,
-		metrics: { sleepHours: 7, energyLevel: 7 },
+		metrics: { sleepHours: 7 },
 		source: 'health-app',
 		...overrides,
 	};
@@ -186,8 +186,8 @@ describe('correlateHealth', () => {
 		expect(prompt as string).toContain('calories');
 		expect(prompt as string).toContain('protein_g');
 		expect(prompt as string).not.toContain('sleep_h');
-		expect(prompt as string).not.toContain('energy_1_10');
-		expect(prompt as string).not.toContain('mood_1_10');
+		expect(prompt as string).not.toContain('weight_kg');
+		expect(prompt as string).not.toContain('workout_min');
 	});
 
 	// ─── Health data is optional bonus (future health app) ────────────────
@@ -204,7 +204,7 @@ describe('correlateHealth', () => {
 
 		const [prompt] = vi.mocked(services.llm.complete).mock.calls[0]!;
 		expect(prompt as string).toContain('sleep_h');
-		expect(prompt as string).toContain('energy_1_10');
+		expect(prompt as string).toContain('weight_kg');
 	});
 
 	it('still calls the LLM when health dates do not overlap with macro dates', async () => {

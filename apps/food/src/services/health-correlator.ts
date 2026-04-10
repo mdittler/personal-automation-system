@@ -33,7 +33,7 @@ export interface CorrelationInsight {
  * - null when the LLM call fails or returns invalid JSON
  * - CorrelationInsight[] (≤3) on success
  *
- * Health data (sleep, energy, mood, weight, workout) is included in the
+ * Health data (sleep, weight, workout) is included in the
  * analysis when available from a connected health app, but is not required.
  */
 export async function correlateHealth(
@@ -71,8 +71,6 @@ export async function correlateHealth(
 		};
 		if (hasHealthData) {
 			row['sleep_h'] = health?.metrics.sleepHours ?? null;
-			row['energy_1_10'] = health?.metrics.energyLevel ?? null;
-			row['mood_1_10'] = health?.metrics.mood ?? null;
 			row['weight_kg'] = health?.metrics.weightKg ?? null;
 			row['workout_min'] = health?.metrics.workoutMinutes ?? null;
 			// Limit notes to 50 chars to constrain injection surface (sanitizeInput neutralizes backticks)
@@ -84,7 +82,7 @@ export async function correlateHealth(
 
 	const tableJson = JSON.stringify(rows, null, 2);
 	const healthContext = hasHealthData
-		? ' and available health metrics (sleep, energy, mood, weight, workout)'
+		? ' and available health metrics (sleep, weight, workout)'
 		: '';
 
 	const prompt = `You are an observational nutrition analyst. Given the following daily nutrition data${healthContext}, identify up to ${MAX_INSIGHTS} patterns or trends.

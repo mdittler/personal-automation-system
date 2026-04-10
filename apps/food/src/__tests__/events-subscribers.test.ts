@@ -31,7 +31,7 @@ function makeHealthPayload(overrides: Partial<HealthDailyMetricsPayload> = {}): 
 	return {
 		userId: 'alice',
 		date: '2026-04-10',
-		metrics: { sleepHours: 7, energyLevel: 8 },
+		metrics: { sleepHours: 7 },
 		source: 'health-app',
 		...overrides,
 	};
