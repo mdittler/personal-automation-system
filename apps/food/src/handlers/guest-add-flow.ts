@@ -528,6 +528,11 @@ export async function handleGuestAddCallback(
 	return false;
 }
 
+/** Cancels an in-progress guest-add flow for the given user (e.g. household dissolved). */
+export function cancelGuestAddFlow(userId: string): void {
+	pending.delete(userId);
+}
+
 /** Test-only — clears the in-process state map. */
 export function __resetGuestAddFlowForTests(): void {
 	pending.clear();

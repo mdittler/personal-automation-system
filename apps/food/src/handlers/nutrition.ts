@@ -182,10 +182,12 @@ import type { MacroTargets, MealMacroEntry } from '../types.js';
 
 const NUTRITION_KEYWORDS = /\b(nutrition|macros?|calories?|calorie|protein|carbs?|intake|macro)\b/i;
 const NUTRITION_CONTEXT = /\b(track|show|summary|how|view|check|my|intake|this)\b/i;
+const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|show.*today.*nutrition|today.*macros?|today.*calories?)\b/i;
 
 export function isNutritionViewIntent(text: string): boolean {
 	const lower = text.toLowerCase();
-	return NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower);
+	return (NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower))
+		|| NUTRITION_TODAY_PATTERNS.test(lower);
 }
 
 // ─── H11.w Task 15: Natural-language meal-log intent ────────────────────────
@@ -777,7 +779,7 @@ export async function handleNutritionCommand(
 			'`/nutrition log <meal name> [portion]` — Log a recipe or quick-meal\n' +
 			'`/nutrition meals list` — List saved quick-meals\n' +
 			'`/nutrition meals remove <label>` — Remove a saved quick-meal\n' +
-			'`/nutrition adherence [days]` — Adherence vs targets over period (default 30)\n' +
+			'`/nutrition adherence [days]` — Adherence vs targets; pick a period or pass a day count\n' +
 			'`/nutrition targets` — View/set macro targets\n' +
 			'`/nutrition pediatrician <child> [days]` — Child nutrition report');
 	} catch (err) {

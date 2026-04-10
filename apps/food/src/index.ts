@@ -78,6 +78,7 @@ import {
 	hasPendingGuestAdd,
 	handleGuestAddReply,
 	handleGuestAddCallback,
+	cancelGuestAddFlow,
 } from './handlers/guest-add-flow.js';
 import { handleQuickMealLogCallback } from './handlers/quick-meal-log.js';
 import {
@@ -316,10 +317,14 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H11.y: Pending guest-add guided flow
 	if (hasPendingGuestAdd(ctx.userId)) {
 		const hhForGuest = await requireHousehold(services, ctx.userId);
-		if (hhForGuest) {
-			const handled = await handleGuestAddReply(services, hhForGuest.sharedStore, ctx.userId, text);
-			if (handled) return;
+		if (!hhForGuest) {
+			// Household dissolved — cancel the in-progress flow so it doesn't leak
+			cancelGuestAddFlow(ctx.userId);
+			await services.telegram.send(ctx.userId, 'Guest setup cancelled — household no longer found.');
+			return;
 		}
+		const handled = await handleGuestAddReply(services, hhForGuest.sharedStore, ctx.userId, text);
+		if (handled) return;
 	}
 
 	// Try to detect intent from the message
