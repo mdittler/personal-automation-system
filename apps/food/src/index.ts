@@ -481,23 +481,6 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
-	// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
-	if (isTargetsSetIntent(text)) {
-		await beginTargetsFlow(services, ctx.userId);
-		return;
-	}
-
-	// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
-	if (isAdherenceIntent(text)) {
-		const hhAdh = await requireHousehold(services, ctx.userId);
-		if (!hhAdh) {
-			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
-			return;
-		}
-		await handleNutritionCmd(services, ['adherence'], ctx.userId, hhAdh.sharedStore);
-		return;
-	}
-
 	// H11.w Task 15: Natural-language meal log intent — "I had X",
 	// "I just ate X", "log X". Routes into handleNutritionLogNL which
 	// bypasses the legacy 6-arg numeric guard in /nutrition log.
@@ -514,6 +497,23 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			return;
 		}
 		await handleNutritionLogNL(services, text, ctx.userId, hh.sharedStore);
+		return;
+	}
+
+	// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
+	if (isTargetsSetIntent(text)) {
+		await beginTargetsFlow(services, ctx.userId);
+		return;
+	}
+
+	// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
+	if (isAdherenceIntent(text)) {
+		const hhAdh = await requireHousehold(services, ctx.userId);
+		if (!hhAdh) {
+			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			return;
+		}
+		await handleNutritionCmd(services, ['adherence'], ctx.userId, hhAdh.sharedStore);
 		return;
 	}
 
