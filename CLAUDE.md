@@ -141,7 +141,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x, H11.z incl. iteration-2 hardening, H11.w) are complete. **4959 tests passing across 205 test files.**
+All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x, H11.z incl. iteration-2 hardening, H11.w, H11.y) are complete. **5129 tests passing across 212 test files.**
 
 See `docs/implementation-phases.md` for detailed phase guide.
 
@@ -149,7 +149,7 @@ See `docs/implementation-phases.md` for detailed phase guide.
 - **Phase 27B** — FileIndexService: in-memory cross-app file metadata index. Deferred until lifestyle apps validate Phase 27A conventions
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until 27B proves needed
 - **Infra: Per-User Config Runtime Propagation** — **FIXED 2026-04-09.** A unified `requestContext` AsyncLocalStorage (replacing the former `llmContext`) now propagates the active `userId` through every dispatch point (message, command, photo, callback, scheduled job, alert action, API message, GUI simulated message). `AppConfigServiceImpl` reads `getCurrentUserId()` from the request context, so `services.config.get(key)` automatically returns the calling user's override. Scheduled jobs declared `user_scope: all` are now invoked once per registered user by the scheduler inside a per-user context, and `AppModule.handleScheduledJob(jobId, userId?)` receives that userId. Canonical regression tests: `core/src/services/config/__tests__/per-user-runtime.integration.test.ts` (core fence) and `apps/food/src/__tests__/handlers/nutrition-per-user-config.integration.test.ts` (food app fence).
-- **Phase H11.y** — Nutrition/Hosting guided flows (buttons + natural-language routing). Not started. Backlog at `C:\Users\matth\.claude\plans\h11y-option-a-full-backlog.md` items #11-15, #21, #29.
+- **Phase H11.y** — **COMPLETE 2026-04-09.** Guided button flows for nutrition target-setting (`targets-flow.ts`) and hosting guest-add (`guest-add-flow.ts`); adherence period picker; NL routing for `isTargetsSetIntent` / `isAdherenceIntent` / extended `isNutritionViewIntent`.
 - **App registry/marketplace** — static JSON index files. Deferred until enough apps exist
 - **App signing** — cryptographic verification. Deferred until community forms
 - **Container isolation** — for untrusted apps. Deferred until community forms
