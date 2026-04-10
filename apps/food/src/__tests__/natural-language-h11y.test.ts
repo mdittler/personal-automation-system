@@ -105,6 +105,7 @@ describe('H11.y persona — isAdherenceIntent', () => {
 			'log my macros',         // log intent, not adherence
 			'I had a good macro day', // past statement, not a query
 			'what are my targets',   // targets view, not adherence
+			'tell me my macro totals', // pure view query, not an adherence check
 		];
 		for (const phrase of shouldNotMatch) {
 			it(`"${phrase}" → NOT adherence intent`, () => {
@@ -206,6 +207,26 @@ describe('H11.y persona — end-to-end NL routing (handleMessage)', () => {
 			expect(text).not.toMatch(/Step 1\/5/);
 		}
 	});
+
+	it('"how am I doing on my macros" → adherence path: household-missing message sent', async () => {
+		// No household is seeded in the mock store (read returns ''), so
+		// requireHousehold returns null and the route sends the setup prompt.
+		// This fences that isAdherenceIntent correctly routes to the adherence
+		// path rather than falling through to an unrelated handler.
+		await handleMessage(msg('how am I doing on my macros'));
+
+		// Period-picker buttons must NOT have been sent (no household).
+		const withButtonsCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+		for (const [, text] of withButtonsCalls) {
+			expect(text).not.toMatch(/period/i);
+		}
+
+		// The household-missing message must have been sent via send().
+		expect(services.telegram.send).toHaveBeenCalled();
+		const sendCalls = vi.mocked(services.telegram.send).mock.calls;
+		const texts = sendCalls.map(([, t]) => t as string);
+		expect(texts.some(t => t.toLowerCase().includes('household'))).toBe(true);
+	});
 });
 
 // ─── Section 7: No false collision between intents ───────────────────────────
@@ -239,5 +260,10 @@ describe('H11.y persona — intent collision prevention', () => {
 		// isLogMealNLIntent checks for "I had/I ate/just had" — "what have I eaten"
 		// starts with "what", so it must not match the meal-log path.
 		expect(isLogMealNLIntent(text)).toBe(false);
+	});
+
+	it('"how am I doing on my macros" — adherence intent, NOT nutrition view intent', () => {
+		expect(isAdherenceIntent('how am I doing on my macros')).toBe(true);
+		expect(isNutritionViewIntent('how am I doing on my macros')).toBe(false);
 	});
 });

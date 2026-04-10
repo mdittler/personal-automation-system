@@ -186,6 +186,11 @@ const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|show.*toda
 
 export function isNutritionViewIntent(text: string): boolean {
 	const lower = text.toLowerCase();
+	// Adherence-check phrasings ("how am I doing on my macros", "am I hitting
+	// my targets") overlap with NUTRITION_KEYWORDS + NUTRITION_CONTEXT. Exclude
+	// them here so the router's adherence branch (checked first) handles them
+	// exclusively.
+	if (isAdherenceIntent(text)) return false;
 	return (NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower))
 		|| NUTRITION_TODAY_PATTERNS.test(lower);
 }
