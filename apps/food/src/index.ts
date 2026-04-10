@@ -52,9 +52,12 @@ import {
 	handleNutritionCommand as handleNutritionCmd,
 	handleNutritionLogNL,
 	handleAdHocPromotionCallback,
+	handleAdherencePeriodCallback,
 	handleRecipeLogCallback,
+	isAdherenceIntent,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
+	isTargetsSetIntent,
 } from './handlers/nutrition.js';
 import {
 	handleQuickMealAddCallback,
@@ -64,6 +67,18 @@ import {
 	hasPendingQuickMealAdd,
 	hasPendingQuickMealEdit,
 } from './handlers/quick-meal-flow.js';
+import {
+	beginTargetsFlow,
+	hasPendingTargetsFlow,
+	handleTargetsFlowReply,
+	handleTargetsFlowCallback,
+} from './handlers/targets-flow.js';
+import {
+	beginGuestAddFlow,
+	hasPendingGuestAdd,
+	handleGuestAddReply,
+	handleGuestAddCallback,
+} from './handlers/guest-add-flow.js';
 import { handleQuickMealLogCallback } from './handlers/quick-meal-log.js';
 import {
 	handlePerishableCallback,
@@ -291,6 +306,22 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) return;
 	}
 
+	// H11.y: Pending targets-set guided flow
+	if (hasPendingTargetsFlow(ctx.userId)) {
+		const userStore = services.data.forUser(ctx.userId);
+		const handled = await handleTargetsFlowReply(services, userStore, ctx.userId, text);
+		if (handled) return;
+	}
+
+	// H11.y: Pending guest-add guided flow
+	if (hasPendingGuestAdd(ctx.userId)) {
+		const hhForGuest = await requireHousehold(services, ctx.userId);
+		if (hhForGuest) {
+			const handled = await handleGuestAddReply(services, hhForGuest.sharedStore, ctx.userId, text);
+			if (handled) return;
+		}
+	}
+
 	// Try to detect intent from the message
 	const lower = text.toLowerCase();
 
@@ -447,6 +478,23 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H10: Price update intent — "eggs are $3.50 at costco"
 	if (isPriceUpdateIntent(lower)) {
 		await handlePriceUpdateIntent(text, ctx);
+		return;
+	}
+
+	// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
+	if (isTargetsSetIntent(text)) {
+		await beginTargetsFlow(services, ctx.userId);
+		return;
+	}
+
+	// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
+	if (isAdherenceIntent(text)) {
+		const hhAdh = await requireHousehold(services, ctx.userId);
+		if (!hhAdh) {
+			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
+			return;
+		}
+		await handleNutritionCmd(services, ['adherence'], ctx.userId, hhAdh.sharedStore);
 		return;
 	}
 
@@ -1244,6 +1292,26 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			return;
 		}
 
+		// ─── H11.y: Targets-flow callbacks ───────────────────────────────────
+		if (data.startsWith('app:food:nut:tgt:')) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleTargetsFlowCallback(services, userStore, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.y: Adherence period picker callbacks ─────────────────────────
+		if (data.startsWith('app:food:nut:adh:')) {
+			const userStore = services.data.forUser(ctx.userId);
+			await handleAdherencePeriodCallback(services, userStore, ctx.userId, data);
+			return;
+		}
+
+		// ─── H11.y: Guest add flow callbacks ─────────────────────────────────
+		if (data.startsWith('app:food:host:gadd:')) {
+			await handleGuestAddCallback(services, hh.sharedStore, ctx.userId, data, ctx.chatId, ctx.messageId);
+			return;
+		}
+
 		// ─── H11: Nutrition callbacks ────────────────────────
 		if (data.startsWith('nut:ped:')) {
 			const childSlug = data.slice('nut:ped:'.length);
@@ -1279,11 +1347,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		}
 
 		if (data === 'host:gadd') {
-			await services.telegram.editMessage(
-				ctx.chatId,
-				ctx.messageId,
-				'To add a guest, send:\n`/hosting guests add <name> [restrictions...]`\n\nExample: `/hosting guests add Sarah vegetarian gluten-free`',
-			);
+			await beginGuestAddFlow(services, ctx.userId);
 			return;
 		}
 

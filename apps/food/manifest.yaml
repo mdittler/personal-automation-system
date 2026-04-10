@@ -42,6 +42,8 @@ capabilities:
       - "user wants to log a meal they cooked by name with an optional portion"
       - "user wants to log an unfamiliar meal with a free-text description"
       - "user wants to save a frequent meal as a quick-meal template"
+      - "user wants to set or change their nutrition or macro targets"
+      - "user wants to see how well they are hitting their macro targets over time"
     commands:
       - name: /recipes
         description: "Browse and search your recipe library"

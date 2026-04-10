@@ -218,6 +218,26 @@ export function isLogMealNLIntent(text: string): boolean {
 	return true;
 }
 
+// ─── H11.y: Targets-set and adherence NL intent detectors ───────────────────
+
+// Regex for "set my calorie targets", "change my macros", etc.
+const TARGETS_SET_KEYWORDS = /\b(set|change|update|edit|adjust|configure)\b.*\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*targets?\b/i;
+const TARGETS_SET_ALT = /\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*targets?\b.*\b(set|change|update|edit|adjust)\b/i;
+
+export function isTargetsSetIntent(text: string): boolean {
+	return TARGETS_SET_KEYWORDS.test(text) || TARGETS_SET_ALT.test(text);
+}
+
+// Regex for "how am I doing on macros", "hitting my targets", "macro streak" etc.
+const ADHERENCE_KEYWORDS = /\b(adherence|hitting.*targets?|how.*doing.*macro|on track.*macro|macro.*streak|streak.*macro|macros?.*adherence|sticking to.*targets?|meeting.*targets?)\b/i;
+
+export function isAdherenceIntent(text: string): boolean {
+	return ADHERENCE_KEYWORDS.test(text) || (
+		/\bmacros?\b/i.test(text) &&
+		/\b(how am i doing|am i hitting|on track|streak|sticking|meeting)\b/i.test(text)
+	);
+}
+
 /**
  * Strip the leading NL verb phrase + common fillers and return the
  * remaining text describing the meal. The result is handed to
@@ -695,7 +715,7 @@ export async function handleNutritionCommand(
 			lines.push(`Fat: ${targets.fat ? `${targets.fat}g` : 'not set'}`);
 			lines.push(`Fiber: ${targets.fiber ? `${targets.fiber}g` : 'not set'}`);
 			lines.push('');
-			lines.push('To set targets: `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]`');
+			lines.push('Use `/nutrition targets set` to launch the guided setup, or `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]` as a shortcut.');
 			await services.telegram.send(userId, lines.join('\n'));
 			return;
 		}
