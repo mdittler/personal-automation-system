@@ -8,6 +8,7 @@
 import type { ScopedDataStore } from '@pas/core/types';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type {
 	DailyMacroEntry,
 	MacroAdherence,
@@ -291,7 +292,7 @@ export function formatMacroSummary(progress: MacroProgress, dailyEntry?: DailyMa
 		for (const meal of dailyEntry.meals) {
 			const isLowConf = meal.confidence !== undefined && meal.confidence < 0.5;
 			const flag = isLowConf ? ' *' : '';
-			lines.push(`- **${meal.recipeTitle}**${flag}`);
+			lines.push(`- **${escapeMarkdown(meal.recipeTitle)}**${flag}`);
 		}
 
 		if (hasLowConfidence) {

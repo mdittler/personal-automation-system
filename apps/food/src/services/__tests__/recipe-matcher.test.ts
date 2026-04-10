@@ -43,4 +43,26 @@ describe('matchRecipes', () => {
     expect(res.kind).toBe('unique');
     if (res.kind === 'unique') expect(res.recipe.id).toBe('r4');
   });
+
+  // M1: unicode-aware tokenization — diacritics must be folded so that a user
+  // typing "pate" still matches a recipe titled "Pâté de campagne".
+  it('folds unicode diacritics when matching titles (M1)', () => {
+    const recipes: Recipe[] = [R('r5', 'Pâté de campagne')];
+    const res = matchRecipes('pate', recipes);
+    expect(res.kind).toBe('unique');
+    if (res.kind === 'unique') expect(res.recipe.id).toBe('r5');
+  });
+
+  // M4: ambiguous candidate list is capped at 5 to avoid oversized Telegram
+  // button grids.
+  it('caps ambiguous candidate list at 5 (M4)', () => {
+    const many: Recipe[] = Array.from({ length: 10 }, (_, i) =>
+      R(`r${i}`, `Chicken Special ${i}`),
+    );
+    const res = matchRecipes('chicken special', many);
+    expect(res.kind).toBe('ambiguous');
+    if (res.kind === 'ambiguous') {
+      expect(res.candidates.length).toBeLessThanOrEqual(5);
+    }
+  });
 });

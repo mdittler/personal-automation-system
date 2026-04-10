@@ -13,9 +13,11 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { estimateMacros } from '../services/macro-estimator.js';
-import { saveQuickMeal, slugifyLabel } from '../services/quick-meals-store.js';
+import { estimateMacros, MAX_INGREDIENTS, MAX_INGREDIENT_LEN } from '../services/macro-estimator.js';
+import { saveQuickMeal } from '../services/quick-meals-store.js';
 import type { QuickMealTemplate } from '../types.js';
+import { validateLabel } from '../utils/validate-label.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 type Kind = 'home' | 'restaurant' | 'other';
 
@@ -51,10 +53,13 @@ const pending = new Map<string, PendingAdd>();
 function touch(userId: string, state: PendingAdd): void {
 	state.expiresAt = Date.now() + PENDING_TTL_MS;
 	pending.set(userId, state);
-	// Size guard — drop oldest if >100 concurrent flows (mirrors leftover-add)
+	// Time-based sweep — never evict another user's still-valid flow.
+	// (The previous LRU drop-oldest could victimize an unrelated user.)
 	if (pending.size > 100) {
-		const oldest = pending.keys().next().value;
-		if (oldest && oldest !== userId) pending.delete(oldest);
+		const now = Date.now();
+		for (const [k, v] of pending) {
+			if (v.expiresAt < now) pending.delete(k);
+		}
 	}
 }
 
@@ -96,15 +101,38 @@ export async function beginQuickMealAddPrefilled(
 	label: string,
 	ingredients: string[],
 ): Promise<void> {
+	// H5 fix: prefilled label must pass the same validation as the typed
+	// path. Otherwise an ad-hoc promotion can seed pending state with a
+	// label that fails slugifyLabel later in the confirm callback.
+	const validation = validateLabel(label);
+	if (!validation.ok) {
+		await services.telegram.send(
+			userId,
+			`Cannot save as quick-meal: ${validation.error}`,
+		);
+		return;
+	}
+	// Bound ingredients here too — promotion may seed from a long ad-hoc text.
+	const cleanIngredients = ingredients
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0 && l.length <= MAX_INGREDIENT_LEN)
+		.slice(0, MAX_INGREDIENTS);
+	if (cleanIngredients.length === 0) {
+		await services.telegram.send(
+			userId,
+			'Cannot save as quick-meal: no usable ingredients to seed the flow.',
+		);
+		return;
+	}
 	touch(userId, {
 		step: 'awaiting_kind',
 		label,
-		ingredients,
+		ingredients: cleanIngredients,
 		expiresAt: 0,
 	});
 	await services.telegram.sendWithButtons(
 		userId,
-		`**Save as quick-meal: ${label}**\n\nWhat kind of meal is this?`,
+		`**Save as quick-meal: ${escapeMarkdown(label)}**\n\nWhat kind of meal is this?`,
 		[
 			[
 				{ text: 'Home cooking', callbackData: 'app:food:nut:meals:add:kind:home' },
@@ -136,10 +164,13 @@ export async function handleQuickMealAddReply(
 			await services.telegram.send(userId, 'Cancelled.');
 			return true;
 		}
-		if (!label || label.length > 100) {
+		// C1 fix: validate slug-ability and markdown-safety NOW so the user
+		// cannot reach the confirm-save callback with a label that throws.
+		const validation = validateLabel(label);
+		if (!validation.ok) {
 			await services.telegram.send(
 				userId,
-				'Label must be 1-100 characters. Try again, or reply "cancel" to abort.',
+				`${validation.error} Try again, or reply "cancel" to abort.`,
 			);
 			return true;
 		}
@@ -166,16 +197,36 @@ export async function handleQuickMealAddReply(
 			await services.telegram.send(userId, 'Cancelled.');
 			return true;
 		}
-		const ingredients = text
+		// H7 fix: `<= 200`, not `< 200`. Also count-cap, also feedback to the
+		// user when lines were dropped instead of silent loss.
+		const rawLines = text
 			.split(/\r?\n/)
 			.map((l) => l.trim())
-			.filter((l) => l.length > 0 && l.length < 200);
+			.filter((l) => l.length > 0);
+		const tooLong = rawLines.filter((l) => l.length > MAX_INGREDIENT_LEN).length;
+		let ingredients = rawLines.filter((l) => l.length <= MAX_INGREDIENT_LEN);
+		const overCap = Math.max(0, ingredients.length - MAX_INGREDIENTS);
+		ingredients = ingredients.slice(0, MAX_INGREDIENTS);
 		if (ingredients.length === 0) {
 			await services.telegram.send(
 				userId,
 				'At least one ingredient required. One per line. (Or reply "cancel".)',
 			);
 			return true;
+		}
+		const notes: string[] = [];
+		if (tooLong > 0) {
+			notes.push(
+				`${tooLong} ingredient line${tooLong === 1 ? ' was' : 's were'} too long (max ${MAX_INGREDIENT_LEN} chars) and dropped.`,
+			);
+		}
+		if (overCap > 0) {
+			notes.push(
+				`Only the first ${MAX_INGREDIENTS} ingredients will be used (you sent ${ingredients.length + overCap}).`,
+			);
+		}
+		if (notes.length > 0) {
+			await services.telegram.send(userId, notes.join('\n'));
 		}
 		state.ingredients = ingredients;
 		state.step = 'awaiting_notes';
@@ -232,13 +283,9 @@ export async function handleQuickMealAddReply(
 		state.step = 'awaiting_confirm';
 		touch(userId, state);
 
-		// TODO(H11.w task 16): USDA cross-check branch goes here — if apiKey present
-		// and crossCheckIngredients returns non-null, present [Use LLM / Use USDA /
-		// Average / Cancel] buttons instead of the simple [Save / Cancel] pair below.
-
 		const e = state.estimate;
 		const lines = [
-			`**${state.label}**`,
+			`**${escapeMarkdown(state.label!)}**`,
 			`Estimated macros (confidence ${Math.round(e.confidence * 100)}%):`,
 			`• ${e.calories} cal`,
 			`• ${e.protein}g protein, ${e.carbs}g carbs, ${e.fat}g fat, ${e.fiber}g fiber`,
@@ -296,34 +343,55 @@ export async function handleQuickMealAddCallback(
 		state.step === 'awaiting_confirm' &&
 		state.estimate
 	) {
-		const id = slugifyLabel(state.label!);
-		const now = new Date().toISOString();
-		const template: QuickMealTemplate = {
-			id,
-			userId,
-			label: state.label!,
-			kind: state.kind!,
-			ingredients: state.ingredients!,
-			notes: state.notes,
-			estimatedMacros: {
-				calories: state.estimate.calories,
-				protein: state.estimate.protein,
-				carbs: state.estimate.carbs,
-				fat: state.estimate.fat,
-				fiber: state.estimate.fiber,
-			},
-			confidence: state.estimate.confidence,
-			llmModel: state.estimate.model,
-			usageCount: 0,
-			createdAt: now,
-			updatedAt: now,
-		};
-		await saveQuickMeal(userStore, template);
-		pending.delete(userId);
-		await services.telegram.send(
-			userId,
-			`Saved quick-meal: **${state.label}** (${state.estimate.calories} cal)`,
-		);
+		// Defensive belt-and-braces — even though awaiting_label and
+		// beginQuickMealAddPrefilled now both call validateLabel, we wrap
+		// the slug + save in a try/catch so any future code path that
+		// reaches this branch with a bad label fails gracefully instead
+		// of throwing out of the callback handler.
+		try {
+			const validation = validateLabel(state.label!);
+			if (!validation.ok) {
+				pending.delete(userId);
+				await services.telegram.send(
+					userId,
+					`Cannot save: ${validation.error}`,
+				);
+				return true;
+			}
+			const now = new Date().toISOString();
+			const template: QuickMealTemplate = {
+				id: validation.slug,
+				userId,
+				label: state.label!,
+				kind: state.kind!,
+				ingredients: state.ingredients!,
+				notes: state.notes,
+				estimatedMacros: {
+					calories: state.estimate.calories,
+					protein: state.estimate.protein,
+					carbs: state.estimate.carbs,
+					fat: state.estimate.fat,
+					fiber: state.estimate.fiber,
+				},
+				confidence: state.estimate.confidence,
+				llmModel: state.estimate.model,
+				usageCount: 0,
+				createdAt: now,
+				updatedAt: now,
+			};
+			await saveQuickMeal(userStore, template);
+			pending.delete(userId);
+			await services.telegram.send(
+				userId,
+				`Saved quick-meal: **${escapeMarkdown(state.label!)}** (${state.estimate.calories} cal)`,
+			);
+		} catch (err) {
+			pending.delete(userId);
+			await services.telegram.send(
+				userId,
+				`Could not save quick-meal: ${(err as Error).message}`,
+			);
+		}
 		return true;
 	}
 
@@ -368,9 +436,12 @@ const pendingEdit = new Map<string, PendingEdit>();
 function touchEdit(userId: string, state: PendingEdit): void {
 	state.expiresAt = Date.now() + PENDING_TTL_MS;
 	pendingEdit.set(userId, state);
+	// Time-based sweep — see touch() above for rationale.
 	if (pendingEdit.size > 100) {
-		const oldest = pendingEdit.keys().next().value;
-		if (oldest && oldest !== userId) pendingEdit.delete(oldest);
+		const now = Date.now();
+		for (const [k, v] of pendingEdit) {
+			if (v.expiresAt < now) pendingEdit.delete(k);
+		}
 	}
 }
 
@@ -395,7 +466,7 @@ async function sendFieldPicker(
 ): Promise<void> {
 	await services.telegram.sendWithButtons(
 		userId,
-		`**Edit quick-meal: ${working.label}**\n\nWhich field?`,
+		`**Edit quick-meal: ${escapeMarkdown(working.label)}**\n\nWhich field?`,
 		[
 			[
 				{ text: 'Label', callbackData: 'app:food:nut:meals:edit:field:label' },
@@ -448,10 +519,11 @@ export async function handleQuickMealEditReply(
 	}
 
 	if (state.step === 'awaiting_label') {
-		if (!raw || raw.length > 100) {
+		const validation = validateLabel(raw);
+		if (!validation.ok) {
 			await services.telegram.send(
 				userId,
-				'Label must be 1-100 characters. Try again, or reply "cancel".',
+				`${validation.error} Try again, or reply "cancel".`,
 			);
 			return true;
 		}
@@ -464,16 +536,34 @@ export async function handleQuickMealEditReply(
 	}
 
 	if (state.step === 'awaiting_ingredients') {
-		const ingredients = raw
+		const rawLines = raw
 			.split(/\r?\n/)
 			.map((l) => l.trim())
-			.filter((l) => l.length > 0 && l.length < 200);
+			.filter((l) => l.length > 0);
+		const tooLong = rawLines.filter((l) => l.length > MAX_INGREDIENT_LEN).length;
+		let ingredients = rawLines.filter((l) => l.length <= MAX_INGREDIENT_LEN);
+		const overCap = Math.max(0, ingredients.length - MAX_INGREDIENTS);
+		ingredients = ingredients.slice(0, MAX_INGREDIENTS);
 		if (ingredients.length === 0) {
 			await services.telegram.send(
 				userId,
 				'At least one ingredient required. One per line. (Or reply "cancel".)',
 			);
 			return true;
+		}
+		const dropNotes: string[] = [];
+		if (tooLong > 0) {
+			dropNotes.push(
+				`${tooLong} ingredient line${tooLong === 1 ? ' was' : 's were'} too long (max ${MAX_INGREDIENT_LEN} chars) and dropped.`,
+			);
+		}
+		if (overCap > 0) {
+			dropNotes.push(
+				`Only the first ${MAX_INGREDIENTS} ingredients will be used.`,
+			);
+		}
+		if (dropNotes.length > 0) {
+			await services.telegram.send(userId, dropNotes.join('\n'));
 		}
 
 		await services.telegram.send(userId, 'Estimating macros…');
@@ -512,13 +602,9 @@ export async function handleQuickMealEditReply(
 		state.step = 'awaiting_ingredients_confirm';
 		touchEdit(userId, state);
 
-		// TODO(H11.w task 16): USDA cross-check branch goes here — if apiKey
-		// present and crossCheckIngredients returns non-null, present
-		// [Use LLM / Use USDA / Average / Cancel] buttons instead.
-
 		const e = state.pendingEstimate;
 		const lines = [
-			`**${state.working.label}**`,
+			`**${escapeMarkdown(state.working.label)}**`,
 			`New estimated macros (confidence ${Math.round(e.confidence * 100)}%):`,
 			`• ${e.calories} cal`,
 			`• ${e.protein}g protein, ${e.carbs}g carbs, ${e.fat}g fat, ${e.fiber}g fiber`,
@@ -577,7 +663,7 @@ export async function handleQuickMealEditCallback(
 			pendingEdit.delete(userId);
 			await services.telegram.send(
 				userId,
-				`Updated quick-meal: **${state.working.label}**`,
+				`Updated quick-meal: **${escapeMarkdown(state.working.label)}**`,
 			);
 			return true;
 		}
@@ -587,7 +673,7 @@ export async function handleQuickMealEditCallback(
 			touchEdit(userId, state);
 			await services.telegram.send(
 				userId,
-				`Current label: **${state.working.label}**\n\nReply with the new label (or "cancel").`,
+				`Current label: **${escapeMarkdown(state.working.label)}**\n\nReply with the new label (or "cancel").`,
 			);
 			return true;
 		}
@@ -597,7 +683,7 @@ export async function handleQuickMealEditCallback(
 			touchEdit(userId, state);
 			await services.telegram.sendWithButtons(
 				userId,
-				`Current kind: **${state.working.kind}**\n\nPick a new kind:`,
+				`Current kind: **${escapeMarkdown(state.working.kind)}**\n\nPick a new kind:`,
 				[
 					[
 						{ text: 'Home cooking', callbackData: 'app:food:nut:meals:edit:kind:home' },

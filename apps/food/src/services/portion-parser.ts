@@ -53,6 +53,12 @@ export function parsePortion(raw: string): PortionResult {
     return clamp(v);
   }
 
+  // Strict decimal regex BEFORE Number(): Number("0x10") = 16, Number("1e2")
+  // = 100. Both would otherwise sneak past clamp() in unexpected ways. We
+  // also allow no leading sign (portion must be positive — clamp handles 0).
+  if (!/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    return { ok: false, error: `cannot parse portion: '${raw}'` };
+  }
   const num = Number(trimmed);
   if (Number.isFinite(num)) return clamp(num);
 

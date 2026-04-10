@@ -105,4 +105,102 @@ describe('quick-meals-store', () => {
       saveQuickMeal(store as unknown as ScopedDataStore, template({ id: '../etc/passwd' })),
     ).rejects.toThrow();
   });
+
+  // ── Hardening regression tests (H11.w thorough review) ──
+
+  // M2: Zod validation at the persistence boundary rejects invalid templates
+  // even if a future code path bypasses the guided flow.
+  it('rejects label with markdown special characters (M2/H6)', async () => {
+    await expect(
+      saveQuickMeal(store as unknown as ScopedDataStore, template({ label: 'my *pizza*' })),
+    ).rejects.toThrow(/markdown special/);
+  });
+
+  it('rejects oversized label at the persistence boundary (M2)', async () => {
+    await expect(
+      saveQuickMeal(store as unknown as ScopedDataStore, template({ label: 'a'.repeat(101) })),
+    ).rejects.toThrow(/label too long/);
+  });
+
+  it('rejects > 50 ingredients at the persistence boundary (M2)', async () => {
+    await expect(
+      saveQuickMeal(
+        store as unknown as ScopedDataStore,
+        template({ ingredients: Array.from({ length: 51 }, () => 'x') }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  // M3: archive FIFO cap — unbounded growth would balloon the YAML file.
+  it('caps archive at ARCHIVE_MAX via FIFO eviction (M3)', async () => {
+    // Pre-seed the file directly with 500 archived items + one active.
+    // Going through saveQuickMeal 500x is too slow for a unit test.
+    const { stringify } = await import('yaml');
+    const seed = {
+      active: [template({ id: 'about-to-archive', label: 'About to archive' })],
+      archive: Array.from({ length: 500 }, (_, i) =>
+        template({ id: `archived-${i}`, label: `Archived ${i}` }),
+      ),
+    };
+    (store as any).read = vi.fn(async () => `---\ntags: [food]\n---\n${stringify(seed)}`);
+    const writes: Array<[string, string]> = [];
+    (store as any).write = vi.fn(async (path: string, content: string) => {
+      writes.push([path, content]);
+    });
+
+    await archiveQuickMeal(store as unknown as ScopedDataStore, 'about-to-archive');
+
+    const raw = writes.at(-1)?.[1] ?? '';
+    // The oldest archived item should have been FIFO-evicted.
+    expect(raw).not.toContain('id: archived-0\n');
+    // The newly archived item should now be in archive.
+    expect(raw).toContain('id: about-to-archive');
+    // The most recent kept items should still be there.
+    expect(raw).toContain('id: archived-499');
+  });
+
+  // H3: a corrupt YAML file must be preserved, not silently overwritten.
+  it('preserves corrupt YAML to a sidecar file instead of overwriting (H3)', async () => {
+    // Seed the store with a frontmatter + broken YAML body.
+    const corrupt = '---\ntags: [food]\n---\nactive:\n  - id: foo\n  ingredients: [unterminated';
+    (store as any).read = vi.fn(async (path: string) => {
+      if (path === 'quick-meals.yaml') return corrupt;
+      return null;
+    });
+    const writes: Array<[string, string]> = [];
+    (store as any).write = vi.fn(async (path: string, content: string) => {
+      writes.push([path, content]);
+    });
+
+    // Silence the expected "corrupt YAML preserved" console.error
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await saveQuickMeal(store as unknown as ScopedDataStore, template());
+    } finally {
+      errSpy.mockRestore();
+    }
+
+    // A sidecar .corrupt-<ts> file should have been written with the original.
+    const sidecar = writes.find(([p]) => p.startsWith('quick-meals.yaml.corrupt-'));
+    expect(sidecar).toBeDefined();
+    expect(sidecar?.[1]).toBe(corrupt);
+  });
+
+  // H4: concurrent saves must not lose each other's mutations.
+  it('serializes concurrent saves so no template is lost (H4)', async () => {
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        saveQuickMeal(
+          store as unknown as ScopedDataStore,
+          template({ id: `parallel-${i}`, label: `Parallel ${i}` }),
+        ),
+      ),
+    );
+    const list = await loadQuickMeals(store as unknown as ScopedDataStore);
+    expect(list).toHaveLength(10);
+    const ids = list.map((t) => t.id).sort();
+    expect(ids).toEqual(
+      Array.from({ length: 10 }, (_, i) => `parallel-${i}`).sort(),
+    );
+  });
 });
