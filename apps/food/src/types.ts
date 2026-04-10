@@ -519,3 +519,44 @@ export interface EventPlan {
 	deltaGroceryItems: string[];
 	timelineError?: string; // populated if the prep-timeline LLM call failed
 }
+
+// ─── Cultural Calendar Types (H12b) ─────────────────────────────
+
+export interface FixedDateRule {
+	type: 'fixed';
+	month: number; // 1-12
+	day: number;
+}
+
+export interface NthWeekdayDateRule {
+	type: 'nthWeekday';
+	month: number;   // 1-12
+	weekday: number; // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+	n: number;       // 1-based occurrence (4 = 4th occurrence)
+}
+
+export interface EasterDateRule {
+	type: 'easter';
+	offset?: number; // days offset from Easter (e.g. -47 for Mardi Gras)
+}
+
+export interface TableDateRule {
+	type: 'table';
+	dates: Record<number, string>; // year → "MM-DD"
+}
+
+export type HolidayDateRule = FixedDateRule | NthWeekdayDateRule | EasterDateRule | TableDateRule;
+
+export interface Holiday {
+	id: string;
+	name: string;
+	dateRule: HolidayDateRule;
+	cuisine: string;
+	traditionalFoods: string[];
+	region: string;
+	enabled: boolean;
+}
+
+export interface CulturalCalendar {
+	holidays: Holiday[];
+}

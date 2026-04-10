@@ -59,6 +59,15 @@ import {
 	isNutritionViewIntent,
 	isTargetsSetIntent,
 } from './handlers/nutrition.js';
+import { handleHealthCorrelation, isHealthCorrelationIntent } from './handlers/health.js';
+import {
+	isCulturalCalendarIntent,
+	handleCulturalCalendarMessage,
+	handleCulturalCalendarJob,
+} from './handlers/cultural-calendar-handler.js';
+import { correlateHealth } from './services/health-correlator.js';
+import { emitRecipeScheduled } from './events/emitters.js';
+import { registerHealthSubscribers } from './events/subscribers.js';
 import {
 	handleQuickMealAddCallback,
 	handleQuickMealAddReply,
@@ -242,6 +251,8 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 	} catch {
 		// diagnostic only
 	}
+	// H12a: Register health:daily-metrics subscriber (fire-and-forget, non-blocking)
+	registerHealthSubscribers(s);
 };
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
@@ -522,6 +533,12 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
+	// H12a: Health correlation intent — "how does my diet affect my energy"
+	if (isHealthCorrelationIntent(text)) {
+		await handleHealthCorrelation(services, ctx);
+		return;
+	}
+
 	// H11: Nutrition intent — "how are my macros", "show nutrition summary"
 	if (isNutritionViewIntent(text)) {
 		const hh = await requireHousehold(services, ctx.userId);
@@ -533,6 +550,13 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			return;
 		}
 		await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
+		return;
+	}
+
+	// H12b: Cultural calendar intent — "holiday recipes", "what should I cook for Thanksgiving"
+	// Must come BEFORE isHostingIntent to not be blocked by it, but uses exclusion for "host/party/guests"
+	if (isCulturalCalendarIntent(text)) {
+		await handleCulturalCalendarMessage(services, ctx);
 		return;
 	}
 
@@ -1104,6 +1128,15 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					plan.meals.push(newMeal);
 				}
 				await savePlan(hh.sharedStore, plan);
+				// Emit recipe-scheduled for the new meal after the swap
+				await emitRecipeScheduled(services, {
+					planId: plan.id,
+					recipeId: newMeal.recipeId,
+					recipeTitle: newMeal.recipeTitle,
+					date: dateStr,
+					mealType: newMeal.mealType,
+					householdId: hh.household.id,
+				});
 				const location =
 					((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
 				await services.telegram.editMessage(
@@ -2643,6 +2676,16 @@ async function handleMealSwap(text: string, ctx: MessageContext): Promise<void> 
 		}
 		await savePlan(hh.sharedStore, plan);
 
+		// Emit recipe-scheduled for the swapped meal
+		await emitRecipeScheduled(services, {
+			planId: plan.id,
+			recipeId: newMeal.recipeId,
+			recipeTitle: newMeal.recipeTitle,
+			date: targetDate,
+			mealType: newMeal.mealType,
+			householdId: hh.household.id,
+		});
+
 		const location =
 			((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
 		await services.telegram.sendWithButtons(
@@ -2760,9 +2803,33 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 		return;
 	}
 
+	// H12b: Cultural calendar check Sunday 10am
+	if (jobId === 'cultural-calendar-check') {
+		await handleCulturalCalendarJob(services);
+		return;
+	}
+
 	// H11: Weekly nutrition summary Sunday 8pm (user_scope: all — invoked per user)
 	if (jobId === 'weekly-nutrition-summary') {
 		await handleWeeklyNutritionSummaryJob(services, userId);
+		return;
+	}
+
+	// H12a: Weekly health correlation Monday 9am (user_scope: all — invoked per user)
+	if (jobId === 'weekly-health-correlation') {
+		if (!userId) return;
+		const userStore = services.data.forUser(userId);
+		const sharedStore = services.data.forShared('shared');
+		const insights = await correlateHealth(services, userStore, sharedStore);
+		if (!insights || insights.length === 0) return; // no data or LLM failure — skip silently
+		const lines: string[] = ['📊 **Weekly Health Correlation**', ''];
+		for (const insight of insights) {
+			const label = insight.metric.charAt(0).toUpperCase() + insight.metric.slice(1);
+			lines.push(`**${label}**: ${insight.pattern}`);
+			lines.push(`_${insight.disclaimer}_`);
+			lines.push('');
+		}
+		await services.telegram.send(userId, lines.join('\n').trimEnd());
 		return;
 	}
 

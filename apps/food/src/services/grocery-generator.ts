@@ -11,6 +11,9 @@ import { deduplicateAndAssignDepartments } from './grocery-dedup.js';
 import { addItems, createEmptyList, loadGroceryList, saveGroceryList } from './grocery-store.js';
 import { assignDepartment } from './item-parser.js';
 import { loadPantry, pantryContains } from './pantry-store.js';
+import { emitGroceryListReady } from '../events/emitters.js';
+import { loadHousehold } from '../utils/household-guard.js';
+import { isoNow } from '../utils/date.js';
 
 export interface GenerationResult {
 	list: GroceryList;
@@ -99,6 +102,16 @@ export async function generateGroceryFromRecipes(
 
 	// 8. Save
 	await saveGroceryList(sharedStore, list);
+
+	// Emit event after successful save
+	const household = await loadHousehold(sharedStore);
+	await emitGroceryListReady(services, {
+		listId: list.id,
+		householdId: household?.id ?? 'shared',
+		itemCount: list.items.length,
+		source: 'recipes',
+		generatedAt: isoNow(),
+	});
 
 	return {
 		list,

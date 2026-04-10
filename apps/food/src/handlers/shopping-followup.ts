@@ -10,6 +10,8 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { archivePurchased, loadGroceryList, saveGroceryList } from '../services/grocery-store.js';
 import type { GroceryItem, GroceryList, Household } from '../types.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { emitShoppingCompleted } from '../events/emitters.js';
+import { isoNow } from '../utils/date.js';
 
 // Node timer globals — not in ES2024 lib, so we declare them here.
 declare function setTimeout(callback: () => void, ms: number): unknown;
@@ -133,9 +135,23 @@ export async function handleShopFollowupClearCallback(
 
 	const remaining = list.items.filter((i: GroceryItem) => !i.purchased);
 	const count = remaining.length;
+	// "Clear remaining" means the user finished shopping — count all items on the list
+	// (both already-marked purchased + newly-cleared remaining) as purchased.
+	// Using only purchasedCount would report 0 for a typical trip where the user
+	// didn't individually tick items off during shopping.
+	const totalItems = list.items.length;
 
 	await archivePurchased(sharedStore, remaining, services.timezone);
 	await saveGroceryList(sharedStore, { ...list, items: [] } as GroceryList);
+
+	// Emit shopping-completed after successful save
+	const household = await loadHousehold(sharedStore);
+	await emitShoppingCompleted(services, {
+		listId: list.id,
+		householdId: household?.id ?? 'shared',
+		itemsPurchased: totalItems,
+		completedAt: isoNow(),
+	});
 
 	await services.telegram.editMessage(
 		chatId,

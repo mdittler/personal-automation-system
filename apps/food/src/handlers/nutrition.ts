@@ -184,6 +184,12 @@ const NUTRITION_KEYWORDS = /\b(nutrition|macros?|calories?|calorie|protein|carbs
 const NUTRITION_CONTEXT = /\b(track|show|summary|how|view|check|my|intake|this)\b/i;
 const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|what have i had.*today|show.*today.*nutrition|today.*macros?|today.*calories?|macros?.*today|calories?.*today)\b/i;
 
+// H12a: health-correlation phrasings overlap with NUTRITION_KEYWORDS + NUTRITION_CONTEXT
+// (e.g. "how does my nutrition affect my sleep"). Exclude them here so
+// isHealthCorrelationIntent (checked after isAdherenceIntent) handles them exclusively.
+const HEALTH_CORRELATION_GUARD =
+	/how\s+is\s+(my\s+)?(diet|eating|food|nutrition)\s+(affect|impact)|how\s+does\s+(my\s+)?(diet|eating|food|nutrition)\s+affect|(health\s+correlation|diet.*health|food.*health|nutrition.*health)|diet\s+health\s+check|\bcorrelate\s+(my\s+)?(diet|food|eating|nutrition)/i;
+
 export function isNutritionViewIntent(text: string): boolean {
 	const lower = text.toLowerCase();
 	// Adherence-check phrasings ("how am I doing on my macros", "am I hitting
@@ -191,6 +197,9 @@ export function isNutritionViewIntent(text: string): boolean {
 	// them here so the router's adherence branch (checked first) handles them
 	// exclusively.
 	if (isAdherenceIntent(text)) return false;
+	// Health-correlation phrasings ("how does my nutrition affect my sleep")
+	// also overlap. Exclude them so isHealthCorrelationIntent handles them.
+	if (HEALTH_CORRELATION_GUARD.test(text)) return false;
 	return (NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower))
 		|| NUTRITION_TODAY_PATTERNS.test(lower);
 }

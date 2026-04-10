@@ -27,6 +27,10 @@ import {
 } from '../services/voting.js';
 import { isoNow } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import {
+	emitMealPlanFinalized,
+	emitRecipeScheduled,
+} from '../events/emitters.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +82,27 @@ async function finalizePlan(
 	// Finalize the plan
 	plan.status = 'active';
 	await savePlan(sharedStore, plan);
+
+	// Emit events after successful save
+	const household = await loadHousehold(sharedStore);
+	const householdId = household?.id ?? 'shared';
+	await emitMealPlanFinalized(services, {
+		planId: plan.id,
+		weekStart: plan.startDate,
+		householdId,
+		mealCount: plan.meals.length,
+		finalizedAt: isoNow(),
+	});
+	for (const meal of plan.meals) {
+		await emitRecipeScheduled(services, {
+			planId: plan.id,
+			recipeId: meal.recipeId,
+			recipeTitle: meal.recipeTitle,
+			date: meal.date,
+			mealType: meal.mealType,
+			householdId,
+		});
+	}
 
 	// Read location config for message formatting
 	const location = ((await services.config.get<string>('location')) as string | undefined) ?? '';

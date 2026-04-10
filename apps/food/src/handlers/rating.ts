@@ -18,8 +18,9 @@ import {
 } from '../services/rating.js';
 import { loadRecipe, updateRecipe } from '../services/recipe-store.js';
 import type { Household } from '../types.js';
-import { todayDate } from '../utils/date.js';
+import { isoNow, todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { emitMealCooked } from '../events/emitters.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -67,6 +68,17 @@ export async function handleCookedCallback(
 
 	meal.cooked = true;
 	await savePlan(sharedStore, plan);
+
+	// Emit event after successful save
+	await emitMealCooked(services, {
+		planId: plan.id,
+		recipeId: meal.recipeId,
+		recipeTitle: meal.recipeTitle,
+		date: mealDate,
+		mealType: meal.mealType,
+		householdId: household.id,
+		cookedAt: isoNow(),
+	});
 
 	const day = formatDay(mealDate);
 	await services.telegram.editMessage(
