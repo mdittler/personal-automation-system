@@ -87,12 +87,8 @@ describe('targets-flow', () => {
 	describe('TTL expiration', () => {
 		it('hasPendingTargetsFlow returns false after state expires', async () => {
 			const services = createMockServices();
-			await beginTargetsFlow(services as never, USER_ID);
-			// Manually expire by manipulating the Map via __reset and re-seeding
-			// with an already-expired expiresAt. Since we can't access the private
-			// map directly, we test via handleTargetsFlowCallback with a mock.
-			// The cleanest way is to use vi.useFakeTimers.
 			vi.useFakeTimers();
+			await beginTargetsFlow(services as never, USER_ID);
 			vi.advanceTimersByTime(11 * 60 * 1000); // 11 min
 			expect(hasPendingTargetsFlow(USER_ID)).toBe(false);
 			vi.useRealTimers();
@@ -417,8 +413,8 @@ describe('targets-flow', () => {
 			const services = createMockServices();
 			const userStore = createMockUserStore();
 
-			await beginTargetsFlow(services as never, USER_ID);
 			vi.useFakeTimers();
+			await beginTargetsFlow(services as never, USER_ID);
 			vi.advanceTimersByTime(11 * 60 * 1000);
 
 			const consumed = await handleTargetsFlowCallback(
