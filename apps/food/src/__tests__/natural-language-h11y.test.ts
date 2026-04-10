@@ -266,4 +266,55 @@ describe('H11.y persona — intent collision prevention', () => {
 		expect(isAdherenceIntent('how am I doing on my macros')).toBe(true);
 		expect(isNutritionViewIntent('how am I doing on my macros')).toBe(false);
 	});
+
+	it('"log my calories against my target" → log intent only, NOT targets-set', () => {
+		// Mixed phrase: "log" triggers meal-log; "target" alone (no mutation verb) must not
+		// trigger targets-set. Documents intentional routing boundary.
+		expect(isLogMealNLIntent('log my calories against my target')).toBe(true);
+		expect(isTargetsSetIntent('log my calories against my target')).toBe(false);
+	});
+});
+
+// ─── Section 8: Persona phrases — vocabulary extensions from H11.y review ───
+//
+// These tests verify the regex extensions added in the H11.y review pass:
+// "goal" as synonym for "target", "lower/raise/bump" as mutation verbs,
+// "calories today" word-order variant, and "what have I had today".
+
+describe('H11.y persona — vocabulary extension coverage', () => {
+	describe('isTargetsSetIntent — "goal" synonym and raise/lower/bump verbs', () => {
+		const extended = [
+			'I want to lower my calorie goal',
+			'can you raise my protein goal',
+			'bump my fat goal up a bit',
+			'lower my carb goal for this week',
+			'change my calorie goals',
+		];
+		for (const phrase of extended) {
+			it(`"${phrase}" → targets-set intent`, () => {
+				expect(isTargetsSetIntent(phrase)).toBe(true);
+			});
+		}
+	});
+
+	describe('isAdherenceIntent — calorie-flavoured on-track phrases', () => {
+		it('"am I on track with my calories" → adherence intent', () => {
+			expect(isAdherenceIntent('am I on track with my calories')).toBe(true);
+		});
+		it('"on track with my calorie goals" → adherence intent', () => {
+			expect(isAdherenceIntent('on track with my calorie goals')).toBe(true);
+		});
+	});
+
+	describe('isNutritionViewIntent — word-order variants', () => {
+		it('"what have I had today" → nutrition view intent', () => {
+			expect(isNutritionViewIntent('what have I had today')).toBe(true);
+		});
+		it('"calories today" → nutrition view intent', () => {
+			expect(isNutritionViewIntent('calories today')).toBe(true);
+		});
+		it('"macros today" → nutrition view intent', () => {
+			expect(isNutritionViewIntent('macros today')).toBe(true);
+		});
+	});
 });

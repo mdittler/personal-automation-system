@@ -182,7 +182,7 @@ import type { MacroTargets, MealMacroEntry } from '../types.js';
 
 const NUTRITION_KEYWORDS = /\b(nutrition|macros?|calories?|calorie|protein|carbs?|intake|macro)\b/i;
 const NUTRITION_CONTEXT = /\b(track|show|summary|how|view|check|my|intake|this)\b/i;
-const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|show.*today.*nutrition|today.*macros?|today.*calories?)\b/i;
+const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|what have i had.*today|show.*today.*nutrition|today.*macros?|today.*calories?|macros?.*today|calories?.*today)\b/i;
 
 export function isNutritionViewIntent(text: string): boolean {
 	const lower = text.toLowerCase();
@@ -228,15 +228,15 @@ export function isLogMealNLIntent(text: string): boolean {
 // ─── H11.y: Targets-set and adherence NL intent detectors ───────────────────
 
 // Regex for "set my calorie targets", "change my macros", etc.
-const TARGETS_SET_KEYWORDS = /\b(set|change|update|edit|adjust|configure)\b.*\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*targets?\b/i;
-const TARGETS_SET_ALT = /\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*targets?\b.*\b(set|change|update|edit|adjust)\b/i;
+const TARGETS_SET_KEYWORDS = /\b(set|change|update|edit|adjust|configure|raise|lower|bump)\b.*\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b/i;
+const TARGETS_SET_ALT = /\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b.*\b(set|change|update|edit|adjust|raise|lower)\b/i;
 
 export function isTargetsSetIntent(text: string): boolean {
 	return TARGETS_SET_KEYWORDS.test(text) || TARGETS_SET_ALT.test(text);
 }
 
 // Regex for "how am I doing on macros", "hitting my targets", "macro streak" etc.
-const ADHERENCE_KEYWORDS = /\b(adherence|hitting.*targets?|how.*doing.*macro|on track.*macro|macro.*streak|streak.*macro|macros?.*adherence|sticking to.*targets?|meeting.*targets?)\b/i;
+const ADHERENCE_KEYWORDS = /\b(adherence|hitting.*targets?|how.*doing.*macro|on track.*(macros?|calories?)|macro.*streak|streak.*macro|macros?.*adherence|sticking to.*targets?|meeting.*targets?)\b/i;
 
 export function isAdherenceIntent(text: string): boolean {
 	return ADHERENCE_KEYWORDS.test(text) || (
