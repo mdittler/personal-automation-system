@@ -44,6 +44,8 @@ capabilities:
       - "user wants to save a frequent meal as a quick-meal template"
       - "user wants to set or change their nutrition or macro targets"
       - "user wants to see how well they are hitting their macro targets over time"
+      - "user wants to understand how their diet is affecting their health or energy"
+      - "user wants holiday or cultural recipe suggestions"
     commands:
       - name: /recipes
         description: "Browse and search your recipe library"
@@ -127,10 +129,20 @@ capabilities:
       cron: "0 8 * * 0"
       handler: "dist/handlers/cuisine-diversity.js"
       user_scope: shared
+    - id: weekly-health-correlation
+      description: "Weekly diet-performance correlation summary per user"
+      cron: "0 9 * * 1"
+      handler: "dist/handlers/health.js"
+      user_scope: all
     - id: defrost-check
       description: "Check if tomorrow's meals need frozen ingredients defrosted"
       cron: "0 19 * * *"
       handler: "dist/handlers/defrost-check.js"
+      user_scope: shared
+    - id: cultural-calendar-check
+      description: "Check for upcoming holidays and suggest themed recipes"
+      cron: "0 10 * * 0"
+      handler: "dist/handlers/cultural-calendar-handler.js"
       user_scope: shared
 
   events:
@@ -145,7 +157,10 @@ capabilities:
         description: "Fired when a meal is marked as cooked"
       - id: "food:shopping-completed"
         description: "Fired when a shopping session is completed"
-    subscribes: []
+    subscribes:
+      - event: "health:daily-metrics"
+        handler: "dist/events/subscribers.js"
+        required: false
 
 requirements:
   services:
@@ -194,6 +209,9 @@ requirements:
       - path: "seasonal/"
         access: read-write
         description: "Seasonal produce reference data"
+      - path: "cultural-calendar.yaml"
+        access: read-write
+        description: "Household cultural calendar with holiday preferences"
       - path: "waste-log.yaml"
         access: read-write
         description: "Food waste tracking"
@@ -317,6 +335,10 @@ user_config:
     type: string
     default: "Edit via /hosting guests add|remove|list"
     description: "Guest profiles are managed via the /hosting command (not editable here)"
+  - key: cultural_calendar
+    type: boolean
+    default: true
+    description: "Send weekly recipe suggestions for upcoming cultural holidays and celebrations (does not affect on-demand queries)"
   - key: schedule_overrides_info
     type: string
     default: "Edit the seasonal-nudge and weekly-nutrition-summary cron schedules via the GUI Scheduler page"

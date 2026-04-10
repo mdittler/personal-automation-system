@@ -1777,15 +1777,22 @@ Track and report per-macro adherence — `daysTracked`, `daysHit`, `percentHit`,
 
 ### REQ-HEALTH-001: Diet-performance correlation
 
-**Origin:** DH-1 | **Status:** Planned
+**Origin:** DH-1 | **Status:** Implemented (Phase H12a)
 
 If health/fitness data available via other PAS apps, correlate dietary patterns with wellness metrics. Pattern recognition with observational disclaimer.
 
 **Standard tests:**
-- TBD
+- `health-correlator.test.ts` > correlateHealth > calls LLM with standard tier and returns ≤3 insights
+- `health-correlator.test.ts` > correlateHealth > returns empty array when fewer than 5 overlapping days
+- `health-correlator.test.ts` > correlateHealth > includes disclaimer field in each insight
+- `natural-language-h12a.test.ts` > isHealthCorrelationIntent > matches "how is my diet affecting me"
+- `natural-language-h12a.test.ts` > handleMessage routing > routes health correlation intent to handler
+- `natural-language-h12a.test.ts` > handleMessage routing > sends "need more data" when insights empty
 
 **Edge case tests:**
-- TBD
+- `health-correlator.test.ts` > correlateHealth > returns null on LLM parse failure
+- `health-correlator.test.ts` > correlateHealth > sanitizes notes field against prompt injection
+- `natural-language-h12a.test.ts` > intent disjointness > isHealthCorrelationIntent does not fire on adherence phrases
 
 **Fixes:** None
 
@@ -1793,15 +1800,18 @@ If health/fitness data available via other PAS apps, correlate dietary patterns 
 
 ### REQ-HEALTH-002: Cross-app event subscription
 
-**Origin:** DH-2 | **Status:** Planned
+**Origin:** DH-2 | **Status:** Implemented (Phase H12a)
 
 Subscribe to relevant events from health/fitness apps via PAS event bus.
 
 **Standard tests:**
-- TBD
+- `events-subscribers.test.ts` > registerHealthSubscribers > persists valid health:daily-metrics payload to user store
+- `events-subscribers.test.ts` > registerHealthSubscribers > silently drops malformed payloads
+- `events-emitters.test.ts` > each emitter > calls eventBus.emit with correct event name and typed payload
+- `events-emitters.test.ts` > each emitter > swallows emit errors without propagating to caller
 
 **Edge case tests:**
-- TBD
+- `events-subscribers.test.ts` > registerHealthSubscribers > logs warning on handler failure without crashing
 
 **Fixes:** None
 
@@ -1846,15 +1856,40 @@ Track cuisine distribution of recent meal plans. Suggest branching out if defaul
 
 ### REQ-CULTURE-002: Cultural calendar integration
 
-**Origin:** CR-2 | **Status:** Planned
+**Origin:** CR-2 | **Status:** Implemented (Phase H12b)
 
 Optionally suggest recipes tied to cultural events and holidays. Configurable cultural calendars.
 
 **Standard tests:**
-- TBD
+- `cultural-calendar.test.ts > resolveHolidayDate > fixed rule > returns correct date for Christmas`
+- `cultural-calendar.test.ts > resolveHolidayDate > nthWeekday rule > resolves Thanksgiving 2025 to Nov 27`
+- `cultural-calendar.test.ts > resolveHolidayDate > easter rule > resolves Easter 2025 to Apr 20`
+- `cultural-calendar.test.ts > resolveHolidayDate > table rule > returns date for year present in table`
+- `cultural-calendar.test.ts > getUpcomingHolidays > returns holidays whose date falls within the window`
+- `cultural-calendar.test.ts > ensureCalendar > writes DEFAULT_HOLIDAYS to shared store on first run (file missing)`
+- `cultural-calendar.test.ts > ensureCalendar > returns existing calendar without overwriting when file exists`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarJob > sends holiday recipe suggestion to all household members when a holiday is upcoming`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarJob > LLM prompt includes upcoming holiday name`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarJob > sends both holiday names in LLM prompt when two holidays are in the window`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarMessage > sends holiday-specific suggestion when a holiday name is mentioned in the message`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarMessage > includes matching household recipe titles in the LLM prompt`
+- `natural-language-h12b-persona.test.ts > isCulturalCalendarIntent — shouldMatch > matches "holiday recipes"`
+- `natural-language-h12b-persona.test.ts > isCulturalCalendarIntent — shouldMatch > matches "what should I cook for Thanksgiving"`
 
 **Edge case tests:**
-- TBD
+- `cultural-calendar.test.ts > resolveHolidayDate > table rule > returns null for year missing from table`
+- `cultural-calendar.test.ts > getUpcomingHolidays > excludes disabled holidays`
+- `cultural-calendar.test.ts > getUpcomingHolidays > handles cross-year boundary (Dec 28 + 14 days includes Jan 1 next year)`
+- `cultural-calendar.test.ts > getUpcomingHolidays > includes holiday exactly on last day of window (inclusive)`
+- `cultural-calendar.test.ts > getUpcomingHolidays > skips table-rule holidays with no entry for that year`
+- `cultural-calendar.test.ts > loadCalendar > returns null when YAML is corrupt`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarJob > returns early when cultural_calendar config is false`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarJob > handles LLM failure gracefully without throwing`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarMessage > sends "no upcoming holidays" when named holiday has no future dates (table miss)`
+- `handlers/cultural-calendar-handler.test.ts > handleCulturalCalendarMessage > recovers from corrupt cultural-calendar.yaml and uses seed defaults`
+- `handlers/cultural-calendar-handler.test.ts > isCulturalCalendarIntent > does not match "what should we make for dinner" (meal-planning phrase)`
+- `natural-language-h12b-persona.test.ts > isCulturalCalendarIntent — shouldNotMatch > does not match "host a holiday party"`
+- `natural-language-h12b-persona.test.ts > isCulturalCalendarIntent — shouldNotMatch > does not match meal-planning phrases`
 
 **Fixes:** None
 
@@ -1987,15 +2022,16 @@ Standard tier for recipe parsing and meal planning. Fast tier for quick queries.
 
 ### REQ-NFR-005: Privacy
 
-**Origin:** NF-5 | **Status:** Planned
+**Origin:** NF-5 | **Status:** Implemented (Phase H12a)
 
 Health data stays local. No data leaves the PAS instance. All LLM calls through infrastructure providers.
 
 **Standard tests:**
-- TBD
+- `health-correlator.test.ts` > correlateHealth > all LLM calls go through services.llm (no direct SDK imports)
+- `events-subscribers.test.ts` > registerHealthSubscribers > health data written to per-user store only
 
 **Edge case tests:**
-- TBD
+- `health-correlator.test.ts` > correlateHealth > sanitizes user notes to prevent prompt injection
 
 **Fixes:** None
 
@@ -2303,16 +2339,16 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts, natural-language-h11y.test.ts | 22 | 5 | Implemented |
 | REQ-NUTR-003 | macro-tracker.test.ts, nutrition-handler.test.ts (period picker) | 10 | 0 | Implemented |
 | REQ-NUTR-004 | targets-flow.test.ts, nutrition-handler.test.ts, natural-language-h11y.test.ts | 15 | 4 | Implemented |
-| REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
-| REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
+| REQ-HEALTH-001 | health-correlator.test.ts, natural-language-h12a.test.ts | 6 | 3 | Implemented |
+| REQ-HEALTH-002 | events-subscribers.test.ts, events-emitters.test.ts | 4 | 1 | Implemented |
 | REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
-| REQ-CULTURE-002 | TBD | 0 | 0 | Planned |
+| REQ-CULTURE-002 | cultural-calendar.test.ts, handlers/cultural-calendar-handler.test.ts, natural-language-h12b-persona.test.ts | 14 | 13 | Implemented |
 | REQ-HOUSEHOLD-001 | household.test.ts, household-guard.test.ts, app.test.ts | 7 | 31 | Implemented |
 | REQ-NFR-001 | app.test.ts | 1 | 0 | Implemented |
 | REQ-NFR-002 | app.test.ts | 2 | 1 | Implemented |
 | REQ-NFR-003 | TBD | 0 | 0 | Planned |
 | REQ-NFR-004 | recipe-parser.test.ts, app.test.ts | 3 | 0 | Implemented |
-| REQ-NFR-005 | TBD | 0 | 0 | Planned |
+| REQ-NFR-005 | health-correlator.test.ts, events-subscribers.test.ts | 2 | 1 | Implemented |
 | REQ-NFR-006 | voting-handler.test.ts, rating-handler.test.ts, app.test.ts | 1 | 3 | Implemented |
 | REQ-NFR-007 | date-utils.test.ts | 3 | 5 | Implemented |
 | REQ-NFR-008 | N/A | 0 | 0 | Implemented |
