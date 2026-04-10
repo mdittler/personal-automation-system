@@ -259,9 +259,8 @@ export async function handleGuestAddReply(
 		}
 		state.name = name;
 		state.step = 'awaiting_diet';
-		touch(userId, state);
 		await sendDietPicker(services, userId, state);
-		touch(userId, state); // update sentMessage reference
+		touch(userId, state);
 		return true;
 	}
 
@@ -269,15 +268,13 @@ export async function handleGuestAddReply(
 	if (state.awaitingCustomInput) {
 		if (text.trim().toLowerCase() === 'cancel') {
 			state.awaitingCustomInput = false;
-			touch(userId, state);
 			// Re-send the picker for the current step
 			if (state.step === 'awaiting_diet') {
 				await sendDietPicker(services, userId, state);
-				touch(userId, state);
 			} else if (state.step === 'awaiting_allergy') {
 				await sendAllergyPicker(services, userId, state);
-				touch(userId, state);
 			}
+			touch(userId, state);
 			return true;
 		}
 		// Parse comma-separated values, trim and filter empty, apply sanitizeInput
@@ -294,7 +291,8 @@ export async function handleGuestAddReply(
 			}
 			state.awaitingCustomInput = false;
 			state.step = 'awaiting_allergy';
-			touch(userId, state);
+			// Custom input advances directly to the next step — no picker re-show
+			// (cleaner UX than re-rendering the toggle screen with a "custom: ..." pseudo-button).
 			await sendAllergyPicker(services, userId, state);
 			touch(userId, state);
 		} else if (state.step === 'awaiting_allergy') {
@@ -305,6 +303,8 @@ export async function handleGuestAddReply(
 			}
 			state.awaitingCustomInput = false;
 			state.step = 'awaiting_notes';
+			// Custom input advances directly to the next step — no picker re-show
+			// (cleaner UX than re-rendering the toggle screen with a "custom: ..." pseudo-button).
 			touch(userId, state);
 			await sendNotesStep(services, userId);
 		}
@@ -369,7 +369,6 @@ export async function handleGuestAddCallback(
 		if (action === 'none') {
 			state.dietaryRestrictions = [];
 			state.step = 'awaiting_allergy';
-			touch(userId, state);
 			await sendAllergyPicker(services, userId, state);
 			touch(userId, state);
 			return true;
@@ -377,7 +376,6 @@ export async function handleGuestAddCallback(
 
 		if (action === 'done') {
 			state.step = 'awaiting_allergy';
-			touch(userId, state);
 			await sendAllergyPicker(services, userId, state);
 			touch(userId, state);
 			return true;

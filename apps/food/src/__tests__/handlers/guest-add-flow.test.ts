@@ -321,6 +321,51 @@ describe('guest-add-flow', () => {
 		});
 	});
 
+	// ─── [Type my own] for diet ──────────────────────────────────────────────
+
+	describe('[Type my own] for diet', () => {
+		it('custom diet input adds items and advances to allergy picker', async () => {
+			const services = createMockServices();
+			const sharedStore = createMockSharedStore();
+
+			await beginGuestAddFlow(services as never, USER_ID);
+			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Sarah');
+			vi.clearAllMocks();
+
+			// Tap [Type my own] for diet
+			const consumed = await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:custom',
+				CHAT_ID,
+				MSG_ID,
+			);
+			expect(consumed).toBe(true);
+			// Flow still pending
+			expect(hasPendingGuestAdd(USER_ID)).toBe(true);
+			// Prompt message sent asking for custom value
+			expect(services.telegram.send).toHaveBeenCalledOnce();
+			const promptMsg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(promptMsg).toMatch(/dietary restriction/i);
+
+			vi.clearAllMocks();
+
+			// Reply with custom diet values
+			const replyConsumed = await handleGuestAddReply(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'kosher, halal',
+			);
+			expect(replyConsumed).toBe(true);
+			// Should advance to allergy step — allergy picker sent via sendWithButtons
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledOnce();
+			const allergyMsg = services.telegram.sendWithButtons.mock.calls[0]![1] as string;
+			expect(allergyMsg).toContain('Allergies');
+		});
+	});
+
 	// ─── [Type my own] for allergy ────────────────────────────────────────────
 
 	describe('[Type my own] for allergy', () => {
@@ -568,6 +613,60 @@ describe('guest-add-flow', () => {
 
 			const [, calledGuest] = (addGuest as ReturnType<typeof vi.fn>).mock.calls[0]!;
 			expect(calledGuest.notes!.length).toBe(500);
+		});
+	});
+
+	// ─── Per-user isolation ───────────────────────────────────────────────────
+
+	describe('per-user isolation', () => {
+		it('user-a and user-b maintain independent flow state', async () => {
+			const servicesA = createMockServices();
+			const servicesB = createMockServices();
+			const sharedStore = createMockSharedStore();
+
+			const USER_A = 'user-a';
+			const USER_B = 'user-b';
+
+			// Start flows for both users
+			await beginGuestAddFlow(servicesA as never, USER_A);
+			await beginGuestAddFlow(servicesB as never, USER_B);
+
+			expect(hasPendingGuestAdd(USER_A)).toBe(true);
+			expect(hasPendingGuestAdd(USER_B)).toBe(true);
+
+			// Advance user-a to diet step by supplying a name
+			await handleGuestAddReply(servicesA as never, sharedStore as never, USER_A, 'Alice');
+
+			// user-a is now at diet step; user-b is still at name step
+			expect(hasPendingGuestAdd(USER_A)).toBe(true);
+			expect(hasPendingGuestAdd(USER_B)).toBe(true);
+
+			// Advancing user-a does not affect user-b — user-b cannot accept a diet callback
+			const userBDietResult = await handleGuestAddCallback(
+				servicesB as never,
+				sharedStore as never,
+				USER_B,
+				'app:food:host:gadd:diet:vegetarian',
+				CHAT_ID,
+				MSG_ID,
+			);
+			// user-b is on awaiting_name step, so diet callback returns false (no match)
+			expect(userBDietResult).toBe(false);
+
+			// user-a can still handle diet callbacks independently
+			const userADietResult = await handleGuestAddCallback(
+				servicesA as never,
+				sharedStore as never,
+				USER_A,
+				'app:food:host:gadd:diet:vegetarian',
+				CHAT_ID,
+				MSG_ID,
+			);
+			expect(userADietResult).toBe(true);
+
+			// Both flows still pending and independent
+			expect(hasPendingGuestAdd(USER_A)).toBe(true);
+			expect(hasPendingGuestAdd(USER_B)).toBe(true);
 		});
 	});
 
