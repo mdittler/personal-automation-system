@@ -23,6 +23,7 @@ This document tracks the phased implementation of the Food food management app. 
 | H11 | Nutrition, Seasonal, Hosting | 7 | `/nutrition`, `/hosting`, 2 cron jobs | 171 | H3, H9 | Complete |
 | H11.x | Nutrition + Hosting + Config Polish | 3 | Daily view, manual log, adherence, guest flags, delta fallback, config surface | 34 | H11 | Complete |
 | H11.w | Smart Nutrition Logging | 1 | `/nutrition log` (smart), `/nutrition meals add\|list\|edit\|remove` | ~60 | H11.x | Complete |
+| H11.y | Guided UX Flows | 1 | guided /nutrition targets set flow, adherence period picker, conversational /hosting guest-add flow, NL routing for adherence/targets | ~44 new | H11.w | Complete |
 | H12 | Health, Culture, Events | 4 | Health insights, 5 event emitters | 35–50 | H7, H11 | Not Started |
 
 **Total:** 75 requirement implementations → 610–810 estimated tests
@@ -468,6 +469,28 @@ A natural-language persona test suite (`natural-language-h11z.test.ts`) exposed 
 
 ---
 
+## Phase H11.y: Guided UX Flows
+
+**Status:** Complete | **Tests:** ~44 new | **Started:** 2026-04-09 | **Completed:** 2026-04-09
+
+### What was built
+
+**`targets-flow.ts`** — Guided 5-step button flow for `/nutrition targets set`. Replaces the memorization-unfriendly `<cal> <protein> <carbs> <fat> [fiber]` positional form as the primary entry point. Quick-pick buttons per step (calories: 1500/1800/2000/2200/2500, protein: 80/120/150/180/220, carbs: 150/200/250/300/350, fat: 50/65/80/100, fiber: 20/25/30/40/Skip) with a `[Custom]` text-reply fallback. Confirm screen shows all 5 values before saving. Calls `saveTargets` on confirm. In-process Map state machine with 10-min TTL, following the `quick-meal-flow.ts` pattern. Positional shortcut (`/nutrition targets set 2000 150 200 70 30`) preserved as advanced form.
+
+**`guest-add-flow.ts`** — Conversational 5-step guided flow for adding a hosting guest. Replaces the dead-end `host:gadd` button hint that showed stale `/hosting guests add <name>` CLI instructions. Steps: name (text) → diet (multi-select toggle with `[Vegetarian][Vegan][Gluten-free][Dairy-free][None][Type my own][Done]`, editMessage for in-place ✓ updates) → allergies (same pattern with peanuts/tree nuts/shellfish/eggs/dairy) → notes ([Skip] or text) → confirm ([Save][Cancel]). Sanitizes all free-text inputs via `sanitizeInput`. Calls `addGuest(sharedStore, guest)` on confirm.
+
+**Adherence period picker** — `/nutrition adherence` with no args now sends `[Last 7 days] [Last 30 days] [Last 90 days]` buttons instead of defaulting to 30. `handleAdherencePeriodCallback` runs the full adherence computation for the chosen period. Explicit day count still accepted as before.
+
+**NL routing** — `isTargetsSetIntent` (matches "set my calorie targets", "change my macros", etc.) and `isAdherenceIntent` (matches "how am I doing on macros", "macro streak", etc.) exported and wired into `handleMessage`. Extended `isNutritionViewIntent` with `NUTRITION_TODAY_PATTERNS` ("what have I eaten today", "today's macros", etc.). Added `isAdherenceIntent` guard in `isNutritionViewIntent` to prevent overlap. Correct ordering: `isLogMealNLIntent` → `isTargetsSetIntent` → `isAdherenceIntent` → `isNutritionViewIntent`.
+
+**Manifest:** 2 new intents for targets-set and adherence detection.
+
+**Tests:** `targets-flow.test.ts` (12 tests), `guest-add-flow.test.ts` (21 tests), `natural-language-h11y.test.ts` (44 tests), extensions to `nutrition-handler.test.ts`.
+
+**Why:** Items #11, #13, #14, #15, #21, #29 from `h11y-option-a-full-backlog.md`. `/nutrition targets set` was a 5-positional-arg memorization trap; `host:gadd` button was a dead end with stale syntax; `/nutrition adherence` had no period discoverability; adherence/targets lacked NL routing.
+
+---
+
 ## Phase H12: Health, Culture, and Events
 
 **Status:** Not Started | **Tests:** 0 | **Started:** — | **Completed:** —
@@ -506,4 +529,5 @@ A natural-language persona test suite (`natural-language-h11z.test.ts`) exposed 
 | H11.z | 2026-04-09 | 2026-04-09 | ~45 new (2362 food cumulative) | Ingredient normalization: `canonicalName` added to Ingredient/PantryItem/GroceryItem; `ingredient-normalizer.ts` with deterministic fast-path + LLM fast-tier fallback + in-memory LRU + persistent YAML cache; write-time normalization in pantry add, recipe parser, hosting inline ingredients; canonical equality in `pantryContains` + `grocery-dedup` (with 60% legacy fallback); one-shot migration script + startup warning; REQ-INGRED-001 |
 | H11.z-it2 | 2026-04-09 | 2026-04-09 | ~60 new + 3 GAP skips (4871 total, 196 files) | Hardening: deterministicCanonical strips articles + quantity words; pantryContains gains head-noun rescue tier; canonicalMerge null-unit reconciliation sweep; persona pressure-test matrix; 3 GAP it.skip blocks (unit conversion, possessives, misspellings) |
 | H11.w | 2026-04-09 | 2026-04-09 | ~60 new (reconciled in Task 18) | Smart nutrition logging: recipe-reference log (scales recipe macros by portion), saved quick-meal templates (LLM-estimated, editable), ad-hoc LLM estimator, natural-language routing, low-confidence `*` flag, 30-day ad-hoc dedup promotion prompt, USDA FDC cross-check client |
+| H11.y | 2026-04-09 | 2026-04-09 | ~44 new (2664 food cumulative, 76 files) | Guided UX flows: targets-flow.ts (5-step button flow for /nutrition targets set), guest-add-flow.ts (5-step conversational flow for /hosting guests add with multi-select diet/allergy toggles), adherence period picker ([Last 7/30/90] buttons for no-arg /nutrition adherence), NL routing for isAdherenceIntent + isTargetsSetIntent + extended isNutritionViewIntent, manifest intents, persona test suite natural-language-h11y.test.ts |
 | H12 | — | — | 0 | — |

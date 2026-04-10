@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-food |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-03 |
+| **Last Updated** | 2026-04-09 |
 
 ## Conventions
 
@@ -1458,6 +1458,13 @@ Store profiles for frequent guests with name, dietary restrictions, and allergie
 - getGuestsWithRestriction filter
 - Hosting handler /hosting guests list/add/remove subcommands
 - Button-based guest removal UX
+- Guided guest-add flow: name → diet multi-select toggles (✓ prefix on selected) → allergy toggles → notes → confirm → addGuest called with correct GuestProfile
+- `[None]` on diet/allergy advances immediately without Done
+- `[Type my own]` for diet/allergy → comma-separated text → items added to array
+- `[Skip]` notes → confirm with no notes
+- Cancel → state cleared
+- Free-text inputs sanitized via sanitizeInput
+- Per-user flow isolation (User A and User B have independent state)
 
 **Edge case tests:**
 - Empty name rejected
@@ -1717,7 +1724,7 @@ Generate nutrition summary for any household member over configurable period: ma
 
 **Origin:** H11.1 | **Status:** Implemented
 
-Track and report per-macro adherence — `daysTracked`, `daysHit`, `percentHit`, `currentStreak`, `longestStreak` — over a user-selected period, using a ±10% tolerance band against configured targets. Adherence is surfaced via a dedicated `/nutrition adherence [days]` subcommand (default 30 days, accepts 1..365) and is inlined into weekly/monthly summaries and the LLM personal-summary prompt whenever targets are set. Fields with an unset (or zero) target are skipped from the adherence block. The command gracefully reports "no targets set" when the user has not configured any, and "no macro data tracked" when targets are set but no days of data exist in the requested window.
+Track and report per-macro adherence — `daysTracked`, `daysHit`, `percentHit`, `currentStreak`, `longestStreak` — over a user-selected period, using a ±10% tolerance band against configured targets. Adherence is surfaced via a dedicated `/nutrition adherence [days]` subcommand (default 30 days, accepts 1..365; with no day argument a period picker sends [Last 7] [Last 30] [Last 90] buttons) and is inlined into weekly/monthly summaries and the LLM personal-summary prompt whenever targets are set. Fields with an unset (or zero) target are skipped from the adherence block. The command gracefully reports "no targets set" when the user has not configured any, and "no macro data tracked" when targets are set but no days of data exist in the requested window.
 
 **Standard tests:**
 - `computeAdherence` — counts days within ±10% of target as hits (5/7 hit case → 71%)
@@ -1731,10 +1738,36 @@ Track and report per-macro adherence — `daysTracked`, `daysHit`, `percentHit`,
 - `/nutrition adherence` reports "no targets set" when unset
 - `/nutrition adherence` reports "no macro data tracked" when targets set but no logs
 - Adherence block is inlined into `formatMacroSummary` and fed to the LLM prompt in `generatePersonalSummary`
+- `/nutrition adherence` with no args → sends period picker buttons with callback data app:food:nut:adh:7/30/90
+- Period picker callback `app:food:nut:adh:7` → runs 7-day adherence and sends result
 
 **Edge case tests:**
 - Period out of bounds (<1 or >365 days) rejected with a clear error
 - Partial hit patterns produce the expected streak reset semantics
+
+**Fixes:** None
+
+---
+
+### REQ-NUTR-004: Guided macro target setup flow
+
+**Origin:** H11.y | **Status:** Implemented
+
+`/nutrition targets set` with no numeric arguments launches a guided 5-step button flow (calories → protein → carbs → fat → fiber → confirm). Each step offers quick-pick buttons and a `[Custom]` text-reply fallback. A `[Skip]` button on the fiber step sets fiber to 0. A confirm screen shows all 5 values before saving. Calling `/nutrition targets set` with all 5 numeric args still works as an advanced shortcut. Natural-language phrasings ("set my calorie targets", "change my macros") route to the same flow via `isTargetsSetIntent`.
+
+**Standard tests:**
+- Full guided flow: all 5 steps via buttons → confirm → saveTargets called with correct values
+- Custom input path: `[Custom]` tap → typed number → step advances
+- Invalid custom input: non-numeric → error message, step stays
+- `[Skip]` fiber → fiber=0 in confirm
+- Cancel at any step → flow cleared, no write
+- TTL expiry → `hasPendingTargetsFlow` returns false
+- `/nutrition targets set 2000 150 200 70 30` positional shortcut still works
+
+**Edge case tests:**
+- Value out of range (>99999) → error, stays on step
+- "set my calorie targets" NL phrase → `isTargetsSetIntent` = true, `isLogMealNLIntent` = false
+- "I hit my calorie targets" → `isTargetsSetIntent` = false (hit, not set)
 
 **Fixes:** None
 
@@ -2257,7 +2290,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-QUERY-001 | app.test.ts, contextual-food-question.test.ts | 10 | 6 | Implemented |
 | REQ-QUERY-002 | app.test.ts | 1 | 2 | Implemented |
 | REQ-SOCIAL-001 | hosting-planner.test.ts, hosting-handler.test.ts, natural-language.test.ts | 16 | 8 | Implemented |
-| REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts | 31 | 7 | Implemented |
+| REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts, guest-add-flow.test.ts | 47 | 7 | Implemented |
 | REQ-SOCIAL-003 | guest-profiles.test.ts, hosting-handler.test.ts | 5 | 3 | Implemented |
 | REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
 | REQ-COST-002 | cost-estimator.test.ts, natural-language.test.ts | 3 | 5 | Implemented |
@@ -2266,9 +2299,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SEASON-001 | meal-planner.test.ts, meal-plan-store.test.ts | 2 | 1 | Implemented |
 | REQ-SEASON-002 | seasonal-nudge.test.ts | 5 | 0 | Implemented |
 | REQ-SEASON-003 | meal-planner.test.ts | 2 | 1 | Implemented |
-| REQ-NUTR-001 | pediatrician-report.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 16 | 5 | Implemented |
-| REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts | 20 | 5 | Implemented |
-| REQ-NUTR-003 | macro-tracker.test.ts, nutrition-handler.test.ts | 8 | 0 | Implemented |
+| REQ-NUTR-001 | pediatrician-report.test.ts, nutrition-handler.test.ts, natural-language.test.ts, natural-language-h11y.test.ts | 19 | 5 | Implemented |
+| REQ-NUTR-002 | nutrition-reporter.test.ts, nutrition-handler.test.ts, natural-language.test.ts, natural-language-h11y.test.ts | 22 | 5 | Implemented |
+| REQ-NUTR-003 | macro-tracker.test.ts, nutrition-handler.test.ts (period picker) | 10 | 0 | Implemented |
+| REQ-NUTR-004 | targets-flow.test.ts, nutrition-handler.test.ts, natural-language-h11y.test.ts | 15 | 4 | Implemented |
 | REQ-HEALTH-001 | TBD | 0 | 0 | Planned |
 | REQ-HEALTH-002 | TBD | 0 | 0 | Planned |
 | REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
@@ -2288,7 +2322,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
 | REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
-| **Totals** | **55+ test files** | **500+** | **425+** | **925+ tests** |
+| **Totals** | **76+ test files** | **540+** | **430+** | **970+ tests** |
 
 ---
 
