@@ -22,6 +22,7 @@ import {
 	beginQuickMealEdit,
 	beginQuickMealAddPrefilled,
 } from './quick-meal-flow.js';
+import { beginTargetsFlow } from './targets-flow.js';
 import { logQuickMeal } from './quick-meal-log.js';
 import { estimateMacros } from '../services/macro-estimator.js';
 import { recordAdHocLog, findSimilarAdHoc } from '../services/ad-hoc-history.js';
@@ -280,7 +281,7 @@ async function loadTargets(
 	return base;
 }
 
-async function saveTargets(
+export async function saveTargets(
 	services: CoreServices,
 	userStore: ScopedDataStore,
 	userId: string,
@@ -618,7 +619,23 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const periodDays = parseInt(args[1] ?? '30', 10);
+			// No day argument — show period picker buttons.
+			if (args[1] === undefined) {
+				await services.telegram.sendWithButtons(
+					userId,
+					'Which period?',
+					[
+						[
+							{ text: 'Last 7 days', callbackData: 'app:food:nut:adh:7' },
+							{ text: 'Last 30 days', callbackData: 'app:food:nut:adh:30' },
+							{ text: 'Last 90 days', callbackData: 'app:food:nut:adh:90' },
+						],
+					],
+				);
+				return;
+			}
+
+			const periodDays = parseInt(args[1], 10);
 			if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
 				await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
 				return;
@@ -644,7 +661,14 @@ export async function handleNutritionCommand(
 
 		if (subCommand === 'targets') {
 			if (args[1]?.toLowerCase() === 'set') {
-				const calories = parseInt(args[2] ?? '0', 10);
+				// No numeric args — launch the guided button flow.
+				if (args[2] === undefined) {
+					await beginTargetsFlow(services, userId);
+					return;
+				}
+
+				// Advanced shortcut: positional args provided.
+				const calories = parseInt(args[2], 10);
 				const protein = parseInt(args[3] ?? '0', 10);
 				const carbs = parseInt(args[4] ?? '0', 10);
 				const fat = parseInt(args[5] ?? '0', 10);
@@ -945,4 +969,49 @@ export async function handleNutritionLogNL(
 		services.logger.error('handleNutritionLogNL failed', err);
 		await services.telegram.send(userId, 'Unable to log meal. Please try again.');
 	}
+}
+
+/**
+ * Callback handler for the adherence period picker.
+ * Invoked from index.ts when callback data matches `app:food:nut:adh:<days>`.
+ */
+export async function handleAdherencePeriodCallback(
+	services: CoreServices,
+	userStore: ScopedDataStore,
+	userId: string,
+	data: string,
+): Promise<void> {
+	const match = data.match(/^app:food:nut:adh:(\d+)$/);
+	if (!match) return;
+
+	const periodDays = parseInt(match[1]!, 10);
+	if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
+		await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
+		return;
+	}
+
+	const targets = await loadTargets(services, userStore);
+	const hasTarget = [targets.calories, targets.protein, targets.carbs, targets.fat, targets.fiber].some(v => v && v > 0);
+	if (!hasTarget) {
+		await services.telegram.send(userId,
+			'No macro targets set. Use `/nutrition targets set` first.');
+		return;
+	}
+
+	const today = todayDate(services.timezone);
+	const end = new Date(today);
+	const start = new Date(today);
+	start.setDate(start.getDate() - (periodDays - 1));
+	const startDate = start.toISOString().slice(0, 10);
+	const endDate = end.toISOString().slice(0, 10);
+
+	const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
+	if (entries.length === 0) {
+		await services.telegram.send(userId, `No macro data tracked in the last ${periodDays} days.`);
+		return;
+	}
+	const adherence = computeAdherence(entries, targets);
+	const block = formatAdherenceSummary(adherence);
+	const header = `**Adherence — last ${periodDays} days** (${entries.length} day${entries.length === 1 ? '' : 's'} of data)`;
+	await services.telegram.send(userId, block ? `${header}\n\n${block}` : header);
 }

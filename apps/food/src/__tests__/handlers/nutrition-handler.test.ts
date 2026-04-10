@@ -1,8 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
 	handleNutritionCommand,
 	isNutritionViewIntent,
+	handleAdherencePeriodCallback,
 } from '../../handlers/nutrition.js';
+
+// Mock targets-flow so beginTargetsFlow can be observed without actually
+// starting the flow state machine.
+vi.mock('../../handlers/targets-flow.js', () => ({
+	beginTargetsFlow: vi.fn().mockResolvedValue(undefined),
+	hasPendingTargetsFlow: vi.fn().mockReturnValue(false),
+	handleTargetsFlowReply: vi.fn().mockResolvedValue(false),
+	handleTargetsFlowCallback: vi.fn().mockResolvedValue(false),
+	__resetTargetsFlowForTests: vi.fn(),
+}));
+
+import { beginTargetsFlow } from '../../handlers/targets-flow.js';
 
 function createMockServices() {
 	const userStore = {
@@ -474,6 +487,105 @@ describe('nutrition handler', () => {
 				macro_target_fat: 70,
 				macro_target_fiber: 30,
 			});
+		});
+	});
+
+	// ─── H11.y additions ──────────────────────────────────────────────────────
+	describe('H11.y additions', () => {
+		beforeEach(() => {
+			vi.clearAllMocks();
+		});
+
+		it('/nutrition adherence no args → sends period picker buttons', async () => {
+			const services = createMockServices();
+			const userStore = services.data.forUser('user1');
+			// Seed targets so the "no targets" guard passes.
+			userStore.read.mockResolvedValue('calories: 2000');
+			const store = createMockScopedStore();
+			await handleNutritionCommand(services as never, ['adherence'], 'user1', store as never);
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledOnce();
+			const buttons = services.telegram.sendWithButtons.mock.calls[0]![2] as Array<Array<{ text: string; callbackData: string }>>;
+			const flatButtons = buttons.flat();
+			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
+			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
+			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
+		});
+
+		it('handleAdherencePeriodCallback with app:food:nut:adh:7 runs adherence and sends result', async () => {
+			const services = createMockServices();
+			const tz = services.timezone;
+			const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+			const dates: string[] = [];
+			for (let i = 6; i >= 0; i--) {
+				const d = new Date(todayStr);
+				d.setUTCDate(d.getUTCDate() - i);
+				dates.push(d.toISOString().slice(0, 10));
+			}
+			const days = dates.map((date) => ({
+				date,
+				meals: [],
+				totals: { calories: 2000, protein: 150, carbs: 0, fat: 0, fiber: 0 },
+			}));
+			const byMonth = new Map<string, typeof days>();
+			for (const d of days) {
+				const month = d.date.slice(0, 7);
+				if (!byMonth.has(month)) byMonth.set(month, []);
+				byMonth.get(month)!.push(d);
+			}
+			const userStore = createMockScopedStore({
+				read: vi.fn().mockImplementation(async (path: string) => {
+					if (path === 'nutrition/targets.yaml') return 'calories: 2000\nprotein: 150';
+					const m = path.match(/^nutrition\/(\d{4}-\d{2})\.yaml$/);
+					if (m) {
+						const month = m[1]!;
+						const monthDays = byMonth.get(month) ?? [];
+						return `month: "${month}"\nuserId: user1\ndays:\n${monthDays
+							.map(
+								(d) =>
+									`  - date: "${d.date}"\n    meals: []\n    totals:\n      calories: ${d.totals.calories}\n      protein: ${d.totals.protein}\n      carbs: 0\n      fat: 0\n      fiber: 0`,
+							)
+							.join('\n')}`;
+					}
+					return null;
+				}),
+			});
+			await handleAdherencePeriodCallback(
+				services as never,
+				userStore as never,
+				'user1',
+				'app:food:nut:adh:7',
+			);
+			expect(services.telegram.send).toHaveBeenCalledOnce();
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			// Should show the adherence result, not the button picker.
+			expect(msg).toContain('Adherence');
+			expect(msg).toContain('7 days');
+		});
+
+		it('/nutrition targets set no args → calls beginTargetsFlow', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(services as never, ['targets', 'set'], 'user1', store as never);
+			expect(beginTargetsFlow).toHaveBeenCalledOnce();
+			// Should NOT have sent the "Invalid targets" error.
+			expect(services.telegram.send).not.toHaveBeenCalled();
+		});
+
+		it('/nutrition targets set with numeric args still works as positional shortcut', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', '2000', '150', '200', '70'],
+				'user1',
+				store as never,
+			);
+			// beginTargetsFlow should NOT have been called
+			expect(beginTargetsFlow).not.toHaveBeenCalled();
+			// Should write and confirm
+			const userStore = services.data.forUser('user1');
+			expect(userStore.write).toHaveBeenCalled();
+			expect(services.telegram.send).toHaveBeenCalledOnce();
 		});
 	});
 });

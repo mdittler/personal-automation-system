@@ -343,14 +343,20 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 			expect(sent).toMatch(/1 and 365/);
 		});
 
-		it('defaults to 30 days when no period given', async () => {
+		it('shows period picker buttons when no period given (H11.y)', async () => {
 			setupHousehold({ targets: { calories: 2000, protein: 150, carbs: 200, fat: 70, fiber: 30 } });
 
 			await handleCommand('nutrition', ['adherence'], msg('/nutrition adherence'));
 
-			// No-data path still mentions the default "30 days"
-			const sent = vi.mocked(services.telegram.send).mock.calls[0]![1] as string;
-			expect(sent).toMatch(/30 days/);
+			// H11.y: no-arg adherence now shows a button picker instead of
+			// defaulting to 30 days. Assert the period picker was shown.
+			const sendWithButtons = vi.mocked(services.telegram.sendWithButtons);
+			expect(sendWithButtons).toHaveBeenCalledOnce();
+			const buttons = sendWithButtons.mock.calls[0]![2] as Array<Array<{ text: string; callbackData: string }>>;
+			const flat = buttons.flat();
+			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
+			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
+			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
 		});
 	});
 
