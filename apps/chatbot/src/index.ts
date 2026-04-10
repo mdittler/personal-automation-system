@@ -21,6 +21,7 @@ import type { SystemInfoService } from '@pas/core/types';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { slugifyModelId } from '@pas/core/utils/slugify';
+import { formatRelativeTime } from '@pas/core/utils/cron-describe';
 import { ConversationHistory, type ConversationTurn } from './conversation-history.js';
 
 let services: CoreServices;
@@ -361,6 +362,26 @@ export const handleCommand: AppModule['handleCommand'] = async (
 };
 
 /**
+ * Format conversation turns with recency markers and relative timestamps.
+ * Last 4 turns (2 exchanges) are tagged [Recent]; earlier turns are [Earlier].
+ * Accepts an optional `now` for deterministic testing.
+ */
+export function formatConversationHistory(
+	turns: ConversationTurn[],
+	now: Date = new Date(),
+): string[] {
+	const recentCutoff = turns.length - 4;
+	return turns.map((turn, i) => {
+		const role = turn.role === 'user' ? 'User' : 'Assistant';
+		const recencyTag = i >= recentCutoff ? '[Recent]' : '[Earlier]';
+		const timePart = turn.timestamp
+			? ` (${formatRelativeTime(new Date(turn.timestamp), now)})`
+			: '';
+		return `- ${recencyTag}${timePart} ${role}: ${sanitizeInput(turn.content, 500)}`;
+	});
+}
+
+/**
  * Build app-aware system prompt with metadata, knowledge, system data,
  * context, and history. Used by /ask and auto-detect mode.
  */
@@ -465,12 +486,9 @@ export async function buildAppAwareSystemPrompt(
 	if (turns.length > 0) {
 		parts.push('');
 		parts.push(
-			'Previous conversation (continue naturally \u2014 if the user refers to something discussed here, respond about that topic):',
+			'Previous conversation for context. Focus on the user\u2019s current message. Use this history when relevant, but do not assume the user is continuing an old topic:',
 		);
-		for (const turn of turns) {
-			const role = turn.role === 'user' ? 'User' : 'Assistant';
-			parts.push(`- ${role}: ${sanitizeInput(turn.content, 500)}`);
-		}
+		parts.push(...formatConversationHistory(turns));
 	}
 
 	// Model journal section
@@ -512,12 +530,9 @@ export async function buildSystemPrompt(
 	if (turns.length > 0) {
 		parts.push('');
 		parts.push(
-			'Previous conversation (continue naturally \u2014 if the user refers to something discussed here, respond about that topic):',
+			'Previous conversation for context. Focus on the user\u2019s current message. Use this history when relevant, but do not assume the user is continuing an old topic:',
 		);
-		for (const turn of turns) {
-			const role = turn.role === 'user' ? 'User' : 'Assistant';
-			parts.push(`- ${role}: ${sanitizeInput(turn.content, 500)}`);
-		}
+		parts.push(...formatConversationHistory(turns));
 	}
 
 	// Model journal section

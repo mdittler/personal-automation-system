@@ -117,6 +117,23 @@ const groceryManifest: AppManifest = {
 	},
 };
 
+// Second photo app — needed to test grey-zone verification (single-app skips LLM entirely)
+const photoManifest2: AppManifest = {
+	app: {
+		id: 'photos',
+		name: 'Photos',
+		version: '1.0.0',
+		description: 'Photo archiving app',
+		author: 'Test',
+	},
+	capabilities: {
+		messages: {
+			accepts_photos: true,
+			photo_intents: ['landscape', 'portrait'],
+		},
+	},
+};
+
 // ---------------------------------------------------------------------------
 // Context helpers
 // ---------------------------------------------------------------------------
@@ -285,18 +302,24 @@ describe('Router — grey-zone verification', () => {
 
 	describe('routePhoto', () => {
 		let groceryModule: AppModule;
+		let photoModule2: AppModule;
 
 		beforeEach(() => {
 			groceryModule = createMockModule();
+			photoModule2 = createMockModule();
 		});
 
-		it('calls verifier when photo confidence is in grey zone', async () => {
-			// Confidence 0.55 — above threshold but below upper bound
+		it('calls verifier when photo confidence is in grey zone (multiple photo apps)', async () => {
+			// Grey-zone verification only applies when multiple apps compete for photos.
+			// With a single photo app, the classifier routes directly at confidence 1.0 (no LLM).
 			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
 			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
 
 			const router = buildRouter(
-				[{ manifest: groceryManifest, module: groceryModule }],
+				[
+					{ manifest: groceryManifest, module: groceryModule },
+					{ manifest: photoManifest2, module: photoModule2 },
+				],
 				greyZoneLlm,
 				verifier,
 			);
@@ -307,12 +330,15 @@ describe('Router — grey-zone verification', () => {
 			expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
 		});
 
-		it('skips verifier for photo when confidence is above upper bound', async () => {
+		it('skips verifier for photo when confidence is above upper bound (multiple photo apps)', async () => {
 			const highConfLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
 			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
 
 			const router = buildRouter(
-				[{ manifest: groceryManifest, module: groceryModule }],
+				[
+					{ manifest: groceryManifest, module: groceryModule },
+					{ manifest: photoManifest2, module: photoModule2 },
+				],
 				highConfLlm,
 				verifier,
 			);
@@ -323,12 +349,35 @@ describe('Router — grey-zone verification', () => {
 			expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
 		});
 
-		it('does not dispatch photo when verifier returns held', async () => {
-			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
+		it('single photo app routes directly without LLM (confidence 1.0, no verification)', async () => {
+			// When only one app accepts photos, the classifier skips LLM entirely.
+			// This means confidence is always 1.0 and verifier is never invoked.
+			const anyLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
 			const verifier = createMockVerifier({ action: 'held' });
 
 			const router = buildRouter(
 				[{ manifest: groceryManifest, module: groceryModule }],
+				anyLlm,
+				verifier,
+			);
+
+			await router.routePhoto(createPhotoCtx('grocery receipt here'));
+
+			// Verifier not called — confidence is 1.0 (above upper bound)
+			expect(verifier.verify).not.toHaveBeenCalled();
+			// Photo dispatched directly
+			expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
+		});
+
+		it('does not dispatch photo when verifier returns held (multiple photo apps)', async () => {
+			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
+			const verifier = createMockVerifier({ action: 'held' });
+
+			const router = buildRouter(
+				[
+					{ manifest: groceryManifest, module: groceryModule },
+					{ manifest: photoManifest2, module: photoModule2 },
+				],
 				greyZoneLlm,
 				verifier,
 			);

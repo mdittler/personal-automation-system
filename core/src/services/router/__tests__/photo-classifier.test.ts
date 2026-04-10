@@ -51,6 +51,24 @@ describe('PhotoClassifier', () => {
 		expect(llm.classify).not.toHaveBeenCalled();
 	});
 
+	it('should route directly when only one app WITH caption (skip LLM)', async () => {
+		const llm = createMockLLM({ category: '', confidence: 0 });
+		const classifier = new PhotoClassifier({ llm, logger: createMockLogger() });
+
+		// Simulate real-world caption variations that would previously fail LLM classification
+		for (const caption of ['grocery receipt_1', 'grocery receipt 2', 'my receipt', 'recipe']) {
+			const result = await classifier.classify(caption, singleAppTable, 0.4);
+
+			expect(result).toEqual({
+				appId: 'grocery',
+				photoType: 'receipt',
+				confidence: 1.0,
+			});
+		}
+		// Should NOT call LLM — no routing ambiguity when only one app
+		expect(llm.classify).not.toHaveBeenCalled();
+	});
+
 	it('should return null when multiple apps and no caption', async () => {
 		const llm = createMockLLM({ category: '', confidence: 0 });
 		const classifier = new PhotoClassifier({ llm, logger: createMockLogger() });

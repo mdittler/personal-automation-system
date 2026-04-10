@@ -27,6 +27,10 @@
 			"import": "./dist/utils/frontmatter.js",
 			"types": "./dist/utils/frontmatter.d.ts"
 		},
+		"./utils/cron-describe": {
+			"import": "./dist/utils/cron-describe.js",
+			"types": "./dist/utils/cron-describe.d.ts"
+		},
 		"./testing": {
 			"import": "./dist/testing/mock-services.js",
 			"types": "./dist/testing/mock-services.d.ts"

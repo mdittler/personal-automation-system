@@ -49,14 +49,18 @@ export class PhotoClassifier {
 			return null;
 		}
 
-		// If only one app has photo intents, route directly without LLM
+		// If only one app has photo intents, route directly without LLM.
+		// The app itself handles photo type classification (e.g. food app uses keyword + vision).
 		const uniqueApps = [...new Set(photoIntentTable.map((e) => e.appId))];
-		if (uniqueApps.length === 1 && !caption) {
+		if (uniqueApps.length === 1) {
 			const singleAppId = uniqueApps[0];
 			const firstEntry = photoIntentTable[0];
 			if (!singleAppId || !firstEntry) return null;
 			const firstCategory = firstEntry.category;
-			this.logger.debug({ appId: singleAppId }, 'Single photo app, no caption — routing directly');
+			this.logger.debug(
+				{ appId: singleAppId, caption: caption ?? '(none)' },
+				'Single photo app — routing directly',
+			);
 			return {
 				appId: singleAppId,
 				photoType: firstCategory,
