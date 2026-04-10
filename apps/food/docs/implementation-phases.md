@@ -485,7 +485,7 @@ A natural-language persona test suite (`natural-language-h11z.test.ts`) exposed 
 
 **Manifest:** 2 new intents for targets-set and adherence detection.
 
-**Tests:** `targets-flow.test.ts` (12 tests), `guest-add-flow.test.ts` (21 tests), `natural-language-h11y.test.ts` (44 tests), extensions to `nutrition-handler.test.ts`.
+**Tests:** `targets-flow.test.ts` (12 tests), `guest-add-flow.test.ts` (18 tests), `natural-language-h11y.test.ts` (44 tests), extensions to `nutrition-handler.test.ts`.
 
 **Why:** Items #11, #13, #14, #15, #21, #29 from `h11y-option-a-full-backlog.md`. `/nutrition targets set` was a 5-positional-arg memorization trap; `host:gadd` button was a dead end with stale syntax; `/nutrition adherence` had no period discoverability; adherence/targets lacked NL routing.
 

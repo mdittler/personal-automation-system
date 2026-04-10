@@ -74,12 +74,13 @@ const DIET_OPTIONS: Array<{ label: string; value: string }> = [
 	{ label: 'Dairy-free', value: 'dairy-free' },
 ];
 
-const ALLERGY_OPTIONS: Array<{ label: string; value: string }> = [
-	{ label: 'Peanuts', value: 'peanuts' },
-	{ label: 'Tree nuts', value: 'tree nuts' },
-	{ label: 'Shellfish', value: 'shellfish' },
-	{ label: 'Eggs', value: 'eggs' },
-	{ label: 'Dairy', value: 'dairy' },
+const ALLERGY_OPTIONS: Array<{ label: string; value: string; slug: string }> = [
+	{ label: 'Peanuts', value: 'peanuts', slug: 'peanuts' },
+	// slug uses hyphen so callback_data contains no spaces (Telegram best practice)
+	{ label: 'Tree nuts', value: 'tree nuts', slug: 'tree-nuts' },
+	{ label: 'Shellfish', value: 'shellfish', slug: 'shellfish' },
+	{ label: 'Eggs', value: 'eggs', slug: 'eggs' },
+	{ label: 'Dairy', value: 'dairy', slug: 'dairy' },
 ];
 
 function buildDietButtons(
@@ -116,32 +117,14 @@ function buildDietButtons(
 function buildAllergyButtons(
 	selected: string[],
 ): Array<Array<{ text: string; callbackData: string }>> {
-	const row1 = [
-		{
-			text: (selected.includes('peanuts') ? '✓ ' : '') + 'Peanuts',
-			callbackData: 'app:food:host:gadd:allergy:peanuts',
-		},
-		{
-			text: (selected.includes('tree nuts') ? '✓ ' : '') + 'Tree nuts',
-			callbackData: 'app:food:host:gadd:allergy:tree nuts',
-		},
-	];
-	const row2 = [
-		{
-			text: (selected.includes('shellfish') ? '✓ ' : '') + 'Shellfish',
-			callbackData: 'app:food:host:gadd:allergy:shellfish',
-		},
-		{
-			text: (selected.includes('eggs') ? '✓ ' : '') + 'Eggs',
-			callbackData: 'app:food:host:gadd:allergy:eggs',
-		},
-	];
-	const row3 = [
-		{
-			text: (selected.includes('dairy') ? '✓ ' : '') + 'Dairy',
-			callbackData: 'app:food:host:gadd:allergy:dairy',
-		},
-	];
+	const btn = (opt: (typeof ALLERGY_OPTIONS)[number]) => ({
+		// Use opt.slug in callback_data (no spaces), opt.value for selection check
+		text: (selected.includes(opt.value) ? '✓ ' : '') + opt.label,
+		callbackData: `app:food:host:gadd:allergy:${opt.slug}`,
+	});
+	const row1 = [btn(ALLERGY_OPTIONS[0]!), btn(ALLERGY_OPTIONS[1]!)];
+	const row2 = [btn(ALLERGY_OPTIONS[2]!), btn(ALLERGY_OPTIONS[3]!)];
+	const row3 = [btn(ALLERGY_OPTIONS[4]!)];
 	const row4 = [
 		{ text: 'Type my own', callbackData: 'app:food:host:gadd:allergy:custom' },
 		{ text: 'None', callbackData: 'app:food:host:gadd:allergy:none' },
@@ -451,12 +434,13 @@ export async function handleGuestAddCallback(
 			return true;
 		}
 
-		// It's a preset option toggle — the value may have spaces (e.g. "tree nuts")
-		const isAllergyOption = ALLERGY_OPTIONS.some((o) => o.value === action);
-		if (isAllergyOption) {
-			const idx = state.allergies.indexOf(action);
+		// It's a preset option toggle — match by slug, store the display value
+		const allergyOption = ALLERGY_OPTIONS.find((o) => o.slug === action);
+		if (allergyOption) {
+			const storedValue = allergyOption.value;
+			const idx = state.allergies.indexOf(storedValue);
 			if (idx === -1) {
-				state.allergies.push(action);
+				state.allergies.push(storedValue);
 			} else {
 				state.allergies.splice(idx, 1);
 			}

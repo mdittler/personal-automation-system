@@ -523,7 +523,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	}
 
 	// H11: Nutrition intent — "how are my macros", "show nutrition summary"
-	if (isNutritionViewIntent(lower)) {
+	if (isNutritionViewIntent(text)) {
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
 			await services.telegram.send(
@@ -752,6 +752,18 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 	data: string,
 	ctx: CallbackContext,
 ) => {
+	// ─── Household-independent callbacks (handle before requireHousehold) ───
+	if (data.startsWith('app:food:nut:tgt:')) {
+		const userStore = services.data.forUser(ctx.userId);
+		await handleTargetsFlowCallback(services, userStore, ctx.userId, data);
+		return;
+	}
+	if (data.startsWith('app:food:nut:adh:')) {
+		const userStore = services.data.forUser(ctx.userId);
+		await handleAdherencePeriodCallback(services, userStore, ctx.userId, data);
+		return;
+	}
+
 	const hh = await requireHousehold(services, ctx.userId);
 	if (!hh) return;
 
@@ -1294,20 +1306,6 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		) {
 			const userStore = services.data.forUser(ctx.userId);
 			await handleRecipeLogCallback(services, userStore, hh.sharedStore, ctx.userId, data);
-			return;
-		}
-
-		// ─── H11.y: Targets-flow callbacks ───────────────────────────────────
-		if (data.startsWith('app:food:nut:tgt:')) {
-			const userStore = services.data.forUser(ctx.userId);
-			await handleTargetsFlowCallback(services, userStore, ctx.userId, data);
-			return;
-		}
-
-		// ─── H11.y: Adherence period picker callbacks ─────────────────────────
-		if (data.startsWith('app:food:nut:adh:')) {
-			const userStore = services.data.forUser(ctx.userId);
-			await handleAdherencePeriodCallback(services, userStore, ctx.userId, data);
 			return;
 		}
 

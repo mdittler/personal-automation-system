@@ -614,6 +614,60 @@ describe('guest-add-flow', () => {
 			const [, calledGuest] = (addGuest as ReturnType<typeof vi.fn>).mock.calls[0]!;
 			expect(calledGuest.notes!.length).toBe(500);
 		});
+
+		it('guest name with triple backticks is neutralized via sanitizeInput', async () => {
+			// sanitizeInput collapses triple-backticks (LLM prompt injection guard).
+			// HTML is NOT stripped — names go to markdown files, not HTML rendering.
+			const services = createMockServices();
+			const sharedStore = createMockSharedStore();
+
+			await beginGuestAddFlow(services as never, USER_ID);
+			// Name containing triple backticks (potential LLM fence escape)
+			await handleGuestAddReply(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'```injection attempt```',
+			);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:confirm:save',
+				CHAT_ID,
+				MSG_ID,
+			);
+
+			const [, calledGuest] = (addGuest as ReturnType<typeof vi.fn>).mock.calls[0]!;
+			// Triple backticks should be collapsed to single backtick by sanitizeInput
+			expect(calledGuest.name).not.toContain('```');
+		});
+
+		it('very long guest name is truncated to 100 characters', async () => {
+			const services = createMockServices();
+			const sharedStore = createMockSharedStore();
+
+			await beginGuestAddFlow(services as never, USER_ID);
+			const longName = 'x'.repeat(200);
+			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, longName);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:confirm:save',
+				CHAT_ID,
+				MSG_ID,
+			);
+
+			const [, calledGuest] = (addGuest as ReturnType<typeof vi.fn>).mock.calls[0]!;
+			expect(calledGuest.name.length).toBeLessThanOrEqual(100);
+		});
 	});
 
 	// ─── Per-user isolation ───────────────────────────────────────────────────
