@@ -38,4 +38,14 @@ describe('parsePortion', () => {
     expect(parsePortion('NaN').ok).toBe(false);
     expect(parsePortion('100').ok).toBe(false); // exceeds max 20
   });
+
+  // M6: a strict regex must run before Number() so that hex/exponent literals
+  // do not slip through. Without it `Number('0x10')` returns 16.
+  it('rejects hex/exponent/whitespace literals (M6)', () => {
+    expect(parsePortion('0x10').ok).toBe(false);
+    expect(parsePortion('1e2').ok).toBe(false);
+    expect(parsePortion('0b10').ok).toBe(false);
+    expect(parsePortion('0o10').ok).toBe(false);
+    expect(parsePortion('+1').ok).toBe(false);
+  });
 });

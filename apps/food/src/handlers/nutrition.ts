@@ -25,6 +25,7 @@ import {
 import { logQuickMeal } from './quick-meal-log.js';
 import { estimateMacros } from '../services/macro-estimator.js';
 import { recordAdHocLog, findSimilarAdHoc } from '../services/ad-hoc-history.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 // ─── Task 14: Ad-hoc dedup promotion pending state ──────────────────────────
 
@@ -43,10 +44,12 @@ function setPendingPromotion(userId: string, label: string, ingredients: string[
 		ingredients,
 		expiresAt: Date.now() + PROMO_TTL_MS,
 	});
-	// Size guard — drop oldest if >100 concurrent prompts.
+	// Time-based sweep — never evict another user's still-valid promotion.
 	if (pendingPromotion.size > 100) {
-		const oldest = pendingPromotion.keys().next().value;
-		if (oldest && oldest !== userId) pendingPromotion.delete(oldest);
+		const now = Date.now();
+		for (const [k, v] of pendingPromotion) {
+			if (v.expiresAt < now) pendingPromotion.delete(k);
+		}
 	}
 }
 
@@ -157,7 +160,7 @@ export async function handleRecipeLogCallback(
 	await logMealMacros(userStore, userId, entry, todayDate(services.timezone));
 	await services.telegram.send(
 		userId,
-		`Logged: **${recipe.title}** × ${portion} — ${scaled.calories} cal, ${scaled.protein}g protein`,
+		`Logged: **${escapeMarkdown(recipe.title)}** × ${portion} — ${scaled.calories} cal, ${scaled.protein}g protein`,
 	);
 	return true;
 }
@@ -383,7 +386,7 @@ export async function handleNutritionCommand(
 					if (byKind[k].length === 0) continue;
 					lines.push('', `_${k}_`);
 					for (const t of byKind[k]) {
-						lines.push(`- **${t.label}** — ${t.estimatedMacros.calories ?? 0} cal (${t.usageCount}× used)`);
+						lines.push(`- **${escapeMarkdown(t.label)}** — ${t.estimatedMacros.calories ?? 0} cal (${t.usageCount}× used)`);
 					}
 				}
 				await services.telegram.send(userId, lines.join('\n'));
@@ -557,7 +560,7 @@ export async function handleNutritionCommand(
 				const today = todayDate(services.timezone);
 				await logMealMacros(userStore, userId, entry, today);
 				await services.telegram.send(userId,
-					`Logged: **${label}** — ${calories} cal, ${protein}g protein`);
+					`Logged: **${escapeMarkdown(label)}** — ${calories} cal, ${protein}g protein`);
 				return;
 			}
 
@@ -778,7 +781,7 @@ async function dispatchSmartLog(
 		const today = todayDate(services.timezone);
 		await logMealMacros(userStore, userId, entry, today);
 		await services.telegram.send(userId,
-			`Logged: **${r.title}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
+			`Logged: **${escapeMarkdown(r.title)}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
 		return;
 	}
 
@@ -855,7 +858,7 @@ async function dispatchSmartLog(
 	const legend = lowConf ? '\n_* low-confidence estimate_' : '';
 	await services.telegram.send(
 		userId,
-		`Logged${flag}: **${labelText}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
+		`Logged${flag}: **${escapeMarkdown(labelText)}** — ${scaledAdHoc.calories} cal, confidence ${Math.round(est.confidence * 100)}%${legend}`,
 	);
 
 	if (priorSimilar) {

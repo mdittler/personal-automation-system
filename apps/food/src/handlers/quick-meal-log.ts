@@ -12,6 +12,7 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { findQuickMealById, incrementUsage } from '../services/quick-meals-store.js';
 import { logMealMacros } from '../services/macro-tracker.js';
 import { todayDate } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type { MacroData, MealMacroEntry, QuickMealTemplate } from '../types.js';
 
 /** Logs a quick-meal against the user's monthly macro log, scaling by portion. */
@@ -43,7 +44,7 @@ export async function logQuickMeal(
 	await incrementUsage(store, qm.id);
 	await services.telegram.send(
 		userId,
-		`Logged: **${qm.label}** × ${portion} — ${scaled.calories} cal`,
+		`Logged: **${escapeMarkdown(qm.label)}** × ${portion} — ${scaled.calories} cal`,
 	);
 }
 
