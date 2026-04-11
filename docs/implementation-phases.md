@@ -44,6 +44,8 @@
 | 28 | Route Verification | **Complete** | ~10 | Grey-zone LLM verification, inline buttons, verification log |
 | 27B | FileIndexService | **Planned** | ~6 | In-memory cross-app file metadata index with tag/backlink search |
 | 27C | CrossAppDataService | **Planned** | ~8 | Read-only cross-app file access + wiki-link resolution |
+| R1 | Security: Access Control | **Complete** | ~8 | Route-verifier app access check (F1), atomic invite redemption (F2) |
+| R2 | Security: Chatbot LLM Trust | **Complete** | ~6 | Model-switch admin+intent gating (F4), history anti-instruction framing (F5), system data admin gating (F6) |
 
 ### Dependency Graph
 
