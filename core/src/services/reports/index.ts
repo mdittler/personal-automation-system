@@ -29,7 +29,7 @@ import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { N8nDispatcher } from '../n8n/index.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
 import type { UserManager } from '../user-manager/index.js';
-import { formatForTelegram, formatReport } from './report-formatter.js';
+import { formatReport, formatReportForTelegram } from './report-formatter.js';
 import { validateReport } from './report-validator.js';
 import { type CollectorDeps, collectSection } from './section-collector.js';
 
@@ -229,8 +229,9 @@ export class ReportService {
 			// 4. Save to history
 			await this.saveToHistory(reportId, result);
 
-			// 5. Deliver via Telegram
-			await this.deliver(report, markdown);
+			// 5. Deliver via Telegram (escaped for Telegram safety)
+			const telegramText = formatReportForTelegram(report, sections, summary, runDate);
+			await this.deliver(report, telegramText);
 
 			// 6. Emit event for webhook delivery
 			this.eventBus?.emit('report:completed', {
@@ -323,12 +324,10 @@ export class ReportService {
 		}
 	}
 
-	private async deliver(report: ReportDefinition, markdown: string): Promise<void> {
-		const telegramText = formatForTelegram(markdown);
-
+	private async deliver(report: ReportDefinition, text: string): Promise<void> {
 		for (const userId of report.delivery) {
 			try {
-				await this.telegram.send(userId, telegramText);
+				await this.telegram.send(userId, text);
 			} catch (error) {
 				this.logger.error(
 					{ error, reportId: report.id, userId },
