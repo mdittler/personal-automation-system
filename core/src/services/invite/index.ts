@@ -101,6 +101,14 @@ export class InviteService {
 			throw new Error(`Invite code not found: ${code}`);
 		}
 
+		if (invite.usedBy !== null) {
+			throw new Error(`Invite code already used: ${code}`);
+		}
+
+		if (new Date(invite.expiresAt) <= new Date()) {
+			throw new Error(`Invite code expired: ${code}`);
+		}
+
 		invite.usedBy = usedBy;
 		invite.usedAt = new Date().toISOString();
 

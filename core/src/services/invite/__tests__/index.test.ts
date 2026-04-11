@@ -210,6 +210,27 @@ describe('InviteService', () => {
 			const store = await svc2.listInvites();
 			expect(store[code]?.usedBy).toBe('user123');
 		});
+
+		it('rejects already-used codes', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+			await svc.redeemCode(code, 'user123');
+
+			await expect(svc.redeemCode(code, 'user456')).rejects.toThrow('already used');
+		});
+
+		it('rejects expired codes', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+
+			// Force expiry
+			const store = await svc.listInvites();
+			store[code]!.expiresAt = new Date(Date.now() - 1000).toISOString();
+			const { writeYamlFile } = await import('../../../utils/yaml.js');
+			await writeYamlFile(join(tempDir, 'system', 'invites.yaml'), store);
+
+			await expect(svc.redeemCode(code, 'user123')).rejects.toThrow('expired');
+		});
 	});
 
 	// --- listInvites ---
