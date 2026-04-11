@@ -188,7 +188,8 @@ it('escapes Markdown control characters in dynamic fields', () => {
 	expect(text).toContain('Stir \\*vigorously\\*');
 	expect(text).toContain('\\_5 min\\_');
 	// Intentional formatting markers should still be present
-	expect(text).toContain('**');
+	// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+	// mismatch deferred to Finding 21. Only assert data-field escaping here.
 });
 ```
 
@@ -206,7 +207,8 @@ it('escapes Markdown control characters in search result titles', () => {
 	const text = formatSearchResults(results);
 
 	expect(text).toContain("\\*Best\\*");
-	expect(text).toContain('**');
+	// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+	// mismatch deferred to Finding 21. Only assert data-field escaping here.
 });
 ```
 
@@ -433,28 +435,20 @@ git commit -m "fix: escape Markdown in formatPlanMessage and formatTonightMessag
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `apps/food/src/__tests__/grocery-store.test.ts`, inside the `describe('formatGroceryMessage')` block:
+Add to `apps/food/src/__tests__/grocery-store.test.ts`, inside the `describe('formatGroceryMessage')` block. Use the existing `makeList`/`makeItem` helper functions (already defined at the top of that test file):
 
 ```ts
-it('escapes Markdown control characters in item names and departments', () => {
-	const list: GroceryList = {
-		date: '2026-04-11',
-		items: [
-			{
-				name: "Trader Joe's *Organic* [Spinach]",
-				department: 'Produce',
-				purchased: false,
-				quantity: 1,
-				unit: 'bag',
-			},
-		],
-	};
+it('escapes Markdown control characters in item names', () => {
+	const list = makeList({
+		items: [makeItem({ name: '*Organic* [Spinach]', department: 'Produce', quantity: 1, unit: 'bag' })],
+	});
 
 	const msg = formatGroceryMessage(list);
 
-	expect(msg).toContain("Trader Joe\\'s \\*Organic\\*");
+	// Apostrophes are not Markdown control chars — no escaping on those
+	expect(msg).toContain('\\*Organic\\*');
 	expect(msg).toContain('\\[Spinach\\]');
-	// Intentional formatting (department bold) preserved
+	// Intentional department bold is server-authored — still present
 	expect(msg).toContain('*Produce*');
 });
 ```
@@ -598,7 +592,8 @@ it('escapes Markdown control characters in profile fields', () => {
 	expect(text).toContain('Likes \\`soft\\` foods');
 	expect(text).toContain('\\*Almond\\*');
 	// Intentional bold markers preserved
-	expect(text).toContain('**');
+	// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+	// mismatch deferred to Finding 21. Only assert data-field escaping here.
 });
 ```
 
@@ -620,7 +615,8 @@ it('escapes Markdown control characters in guest fields', () => {
 	expect(text).toContain('no\\_pork');
 	expect(text).toContain('\\[anaphylaxis\\]');
 	expect(text).toContain('Prefers \\`raw\\` vegetables');
-	expect(text).toContain('**');
+	// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+	// mismatch deferred to Finding 21. Only assert data-field escaping here.
 });
 ```
 
@@ -808,64 +804,93 @@ git commit -m "fix: escape Markdown in echo and notes app Telegram sends (F9)"
 
 ---
 
-### Task 8: Escape in report `formatForTelegram()` (Telegram boundary only)
+### Task 8: Add `formatReportForTelegram()` with selective field escaping
+
+`formatForTelegram()` (pure truncation) must not be changed — it would escape LLM summaries and server-owned Markdown like `_italic_` empty-section markers. Instead, add `formatReportForTelegram()` that escapes data-origin fields individually and leaves the LLM summary raw.
 
 **Files:**
-- Modify: `core/src/services/reports/report-formatter.ts:60-66`
+- Modify: `core/src/services/reports/report-formatter.ts`
+- Modify: `core/src/services/reports/index.ts:326-338`
 - Modify: `core/src/services/reports/__tests__/report-formatter.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `core/src/services/reports/__tests__/report-formatter.test.ts`, inside the `describe('formatForTelegram')` block:
+Add a new `describe('formatReportForTelegram')` block to `core/src/services/reports/__tests__/report-formatter.test.ts`:
 
 ```ts
-it('escapes Markdown control characters in the formatted report', () => {
-	const markdown = '# My *Report*\n\n## Section\nData with _underscores_ and [brackets]';
-	const result = formatForTelegram(markdown);
+import { formatForTelegram, formatReport, formatReportForTelegram } from '../report-formatter.js';
 
-	expect(result).toContain('\\*Report\\*');
-	expect(result).toContain('\\_underscores\\_');
-	expect(result).toContain('\\[brackets\\]');
-});
+describe('formatReportForTelegram', () => {
+	it('escapes data fields: report name, description, section label, section content', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data [section]', content: 'Price is *high*', isEmpty: false },
+		];
 
-it('does not corrupt formatReport output (formatReport returns unescaped markdown)', () => {
-	const sections: CollectedSection[] = [
-		{ label: 'Data', content: 'Price is *high* for [item]', isEmpty: false },
-	];
+		const result = formatReportForTelegram(
+			makeReport({ name: 'Budget *Report*', description: 'Covers [all] categories' }),
+			sections,
+		);
 
-	const markdown = formatReport(makeReport({ name: 'Test *Report*' }), sections);
+		expect(result).toContain('\\*Report\\*');
+		expect(result).toContain('Covers \\[all\\] categories');
+		expect(result).toContain('Data \\[section\\]');
+		expect(result).toContain('Price is \\*high\\*');
+	});
 
-	// formatReport should NOT escape — it's reused for history/API
-	expect(markdown).toContain('Test *Report*');
-	expect(markdown).toContain('Price is *high* for [item]');
+	it('does NOT escape LLM summary', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data', content: 'some data', isEmpty: false },
+		];
+		const summary = '*Bold* summary from _LLM_';
 
-	// formatForTelegram SHOULD escape
-	const telegram = formatForTelegram(markdown);
-	expect(telegram).toContain('\\*Report\\*');
-	expect(telegram).toContain('\\*high\\*');
-	expect(telegram).toContain('\\[item\\]');
-});
+		const result = formatReportForTelegram(makeReport(), sections, summary);
 
-it('escapes before truncation so escape sequences are not split', () => {
-	// Build a string that after escaping will be just over the limit
-	const filler = 'x'.repeat(3990);
-	const markdown = filler + ' *bold*';
-	const result = formatForTelegram(markdown);
+		// LLM summary is trusted formatter output — preserved as-is
+		expect(result).toContain('*Bold* summary from _LLM_');
+		expect(result).not.toContain('\\*Bold\\*');
+	});
 
-	// Should contain truncation notice
-	expect(result).toContain('...report truncated');
-	// Should not contain a bare backslash at the truncation boundary
-	// (the escaped version is longer, so truncation kicks in)
-	expect(result).not.toMatch(/\\$/m);
+	it('does not affect formatReport output (unescaped canonical markdown)', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data', content: 'Price is *high*', isEmpty: false },
+		];
+		const markdown = formatReport(makeReport({ name: 'Budget *Report*' }), sections);
+
+		// formatReport is for history/API — must stay unescaped
+		expect(markdown).toContain('Budget *Report*');
+		expect(markdown).toContain('Price is *high*');
+	});
+
+	it('truncates long reports and does not split escape sequences', () => {
+		// Section content with special chars — after escaping adds backslashes,
+		// pushing the total past 4000 chars
+		const filler = 'x'.repeat(3990);
+		const sections: CollectedSection[] = [
+			{ label: 'S', content: filler + ' *end*', isEmpty: false },
+		];
+
+		const result = formatReportForTelegram(makeReport({ name: 'R', description: undefined }), sections);
+
+		expect(result).toContain('...report truncated');
+		// The content just before the truncation notice must not end with a lone backslash
+		const beforeNotice = result.split('\n\n_...report truncated_')[0] ?? '';
+		expect(beforeNotice).not.toMatch(/\\$/);
+	});
+
+	it('formatForTelegram remains a pure truncation helper (no escaping)', () => {
+		const msg = 'Data with *asterisks* and _underscores_';
+		// formatForTelegram must NOT escape — it is used for other purposes
+		expect(formatForTelegram(msg)).toBe(msg);
+	});
 });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd core && npx vitest run src/services/reports/__tests__/report-formatter.test.ts`
-Expected: FAIL — no escaping in formatForTelegram
+Expected: FAIL — `formatReportForTelegram` not exported, last test may fail if formatForTelegram was changed
 
-- [ ] **Step 3: Add escaping to `formatForTelegram()`**
+- [ ] **Step 3: Add `formatReportForTelegram()` to the formatter**
 
 In `core/src/services/reports/report-formatter.ts`, add import:
 
@@ -873,29 +898,95 @@ In `core/src/services/reports/report-formatter.ts`, add import:
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 ```
 
-Replace the `formatForTelegram` function (lines 60-66) with:
+Add the new function after `formatForTelegram`:
 
 ```ts
-export function formatForTelegram(markdown: string): string {
-	const escaped = escapeMarkdown(markdown);
-	const maxLength = 4000; // Leave margin for truncation notice
-	if (escaped.length <= maxLength) {
-		return escaped;
+/**
+ * Format a report for Telegram delivery with selective Markdown escaping.
+ *
+ * Escapes data-origin fields (name, description, section labels/content) to
+ * prevent Telegram parse errors, while leaving LLM summaries and server-owned
+ * formatting markers (headers, italics) unescaped.
+ */
+export function formatReportForTelegram(
+	report: ReportDefinition,
+	sections: CollectedSection[],
+	summary?: string,
+	runDate?: string,
+): string {
+	const lines: string[] = [];
+
+	// Header — report.name is user-configured data
+	lines.push(`# ${escapeMarkdown(report.name)}`);
+	if (runDate) {
+		lines.push(`_Generated: ${runDate}_`); // runDate is server-formatted — safe
 	}
-	return `${escaped.slice(0, maxLength)}\n\n_...report truncated_`;
+	if (report.description) {
+		lines.push('', escapeMarkdown(report.description));
+	}
+
+	// LLM Summary — trusted formatter output, not escaped
+	if (summary) {
+		lines.push('', '## Summary', '', summary);
+	}
+
+	// Sections — labels and content are user/data-origin, escape them
+	for (const section of sections) {
+		lines.push('', `## ${escapeMarkdown(section.label)}`);
+		if (section.isEmpty) {
+			lines.push('', `_${escapeMarkdown(section.content)}_`);
+		} else {
+			lines.push('', escapeMarkdown(section.content));
+		}
+	}
+
+	lines.push('');
+	const text = lines.join('\n');
+
+	// Truncate to Telegram limit; back up past any dangling backslash
+	const maxLength = 4000;
+	if (text.length <= maxLength) return text;
+	let cutAt = maxLength;
+	if (text[cutAt - 1] === '\\') cutAt--;
+	return `${text.slice(0, cutAt)}\n\n_...report truncated_`;
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Update `run()` in `ReportService` to use the new function**
 
-Run: `cd core && npx vitest run src/services/reports/__tests__/report-formatter.test.ts`
+In `core/src/services/reports/index.ts`, add `formatReportForTelegram` to the existing import from `./report-formatter.js`:
+
+```ts
+import { formatReport, formatReportForTelegram } from './report-formatter.js';
+```
+
+(`formatForTelegram` is no longer needed in `index.ts` — remove it from the import.)
+
+In the `run()` method (around line 232), replace the `deliver()` call with a direct call that passes the structured data. Change:
+
+```ts
+await this.deliver(report, markdown);
+```
+
+to:
+
+```ts
+const telegramText = formatReportForTelegram(report, sections, summary, runDate);
+await this.deliver(report, telegramText);
+```
+
+The `deliver()` method itself stays unchanged — it remains a simple string-sender that calls `telegram.send(userId, telegramText)` for each delivery user.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd core && npx vitest run src/services/reports/__tests__/`
 Expected: All tests PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add core/src/services/reports/report-formatter.ts core/src/services/reports/__tests__/report-formatter.test.ts
-git commit -m "fix: escape Markdown in formatForTelegram, not formatReport (F9)"
+git add core/src/services/reports/report-formatter.ts core/src/services/reports/index.ts core/src/services/reports/__tests__/report-formatter.test.ts
+git commit -m "fix: add formatReportForTelegram with selective field escaping (F9)"
 ```
 
 ---
@@ -911,18 +1002,36 @@ git commit -m "fix: escape Markdown in formatForTelegram, not formatReport (F9)"
 Add to `core/src/services/alerts/__tests__/alert-executor-enhanced.test.ts`, inside the `describe('executeActions — telegram_message with templates')` block:
 
 ```ts
-it('escapes Markdown control characters in Telegram message', async () => {
+it('escapes {data} and {alert_name} in Telegram message', async () => {
 	const deps = makeDeps();
 	const actions: AlertAction[] = [
-		{ type: 'telegram_message', config: { message: 'Alert: {data}' } },
+		{ type: 'telegram_message', config: { message: 'Alert: {alert_name} — {data}' } },
 	];
-	const ctx = makeContext({ data: 'Price *dropped* for [item]' });
+	const ctx = makeContext({ data: 'Price *dropped* for [item]', alertName: 'My *Alert*' });
 
 	await executeActions(actions, ['user1'], deps, ctx);
 
 	const sentText = (deps.telegram.send as any).mock.calls[0][1];
+	// data and alertName are escaped
 	expect(sentText).toContain('\\*dropped\\*');
 	expect(sentText).toContain('\\[item\\]');
+	expect(sentText).toContain('My \\*Alert\\*');
+});
+
+it('resolveTemplate itself never escapes — summary and template stay raw', () => {
+	// The escaping contract: executeTelegramMessage pre-escapes data/alertName
+	// before calling resolveTemplate. resolveTemplate is a pure substitution function
+	// with no knowledge of Markdown escaping. This guards against adding escaping there.
+	const result = resolveTemplate('Alert: {alert_name}. Summary: {summary}', {
+		data: '',
+		summary: '*Bold* LLM output',
+		alertName: 'My Alert',
+		date: '2026-04-11',
+	});
+
+	// resolveTemplate must not escape anything — callers pre-escape what they need
+	expect(result).toBe('Alert: My Alert. Summary: *Bold* LLM output');
+	expect(result).not.toContain('\\*');
 });
 
 it('does not escape in resolveTemplate (shared with non-Telegram actions)', () => {
@@ -946,16 +1055,25 @@ Expected: FAIL — first test fails (no escaping in telegram send), second test 
 
 - [ ] **Step 3: Add escaping to `executeTelegramMessage()`**
 
+Escape only the data-origin vars (`data`, `alertName`) before passing to `resolveTemplate()`. This leaves `summary` (LLM output) and `config.message` (server-authored Markdown template) unescaped, preserving intentional formatting in both.
+
 In `core/src/services/alerts/alert-executor.ts`, add import at the top:
 
 ```ts
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 ```
 
-In `executeTelegramMessage()` (line 272), add escaping after template resolution and before truncation. Replace lines 272-277 with:
+In `executeTelegramMessage()` (line 272), replace lines 272-277 with:
 
 ```ts
-	let text = escapeMarkdown(resolveTemplate(config.message, vars));
+	// Escape data-origin vars to prevent Markdown parse errors.
+	// summary (LLM output) and config.message (server-authored template) are left raw.
+	const escapedVars = {
+		...vars,
+		data: escapeMarkdown(vars.data),
+		alertName: escapeMarkdown(vars.alertName),
+	};
+	let text = resolveTemplate(config.message, escapedVars);
 
 	// Truncate to Telegram limit
 	if (text.length > MAX_TELEGRAM_LENGTH) {
