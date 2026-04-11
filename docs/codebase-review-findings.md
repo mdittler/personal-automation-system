@@ -72,7 +72,7 @@ Suggested tests:
 
 ### Finding 4: Chatbot executes model-switch tags from any LLM response
 
-- Status: open
+- Status: fixed
 - Severity: high
 - Classification: LLM trust boundary / missing authorization
 - Location: `apps/chatbot/src/index.ts:247-249`, `apps/chatbot/src/index.ts:343-345`, `apps/chatbot/src/index.ts:826-854`
@@ -104,7 +104,7 @@ Suggested tests:
 
 ### Finding 5: Conversation history is not framed as untrusted prompt data
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: prompt injection / persistent untrusted context
 - Location: `apps/chatbot/src/index.ts:369-380`, `apps/chatbot/src/index.ts:485-491`, `apps/chatbot/src/index.ts:530-535`
@@ -135,7 +135,7 @@ Suggested tests:
 
 ### Finding 6: Admin-level system data is exposed through the chatbot prompt path
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: information disclosure / LLM trust boundary
 - Location: `apps/chatbot/src/index.ts:442-469`, `apps/chatbot/src/index.ts:576-722`
