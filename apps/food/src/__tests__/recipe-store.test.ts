@@ -372,6 +372,38 @@ describe('formatRecipe', () => {
 		const text = formatRecipe(recipe, true);
 		expect(text).not.toContain('Time:');
 	});
+
+	it('escapes Markdown control characters in dynamic fields', () => {
+		const recipe = makeSampleRecipe({
+			title: "Mom's *Best* Recipe",
+			cuisine: 'Thai_fusion',
+			tags: ['kid_friendly', 'quick*easy'],
+			ingredients: [
+				{
+					name: 'sugar [brown]',
+					quantity: 1,
+					unit: 'cup',
+					notes: 'use `raw` if possible',
+				},
+			],
+			instructions: ['Stir *vigorously* for _5 min_'],
+		});
+
+		const text = formatRecipe(recipe);
+
+		// Data fields should be escaped
+		expect(text).toContain("\\*Best\\*");
+		expect(text).toContain('Thai\\_fusion');
+		expect(text).toContain('kid\\_friendly');
+		expect(text).toContain('quick\\*easy');
+		expect(text).toContain('sugar \\[brown\\]');
+		expect(text).toContain('use \\`raw\\` if possible');
+		expect(text).toContain('Stir \\*vigorously\\*');
+		expect(text).toContain('\\_5 min\\_');
+		// Intentional formatting markers should still be present
+		// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+		// mismatch deferred to Finding 21. Only assert data-field escaping here.
+	});
 });
 
 describe('formatSearchResults', () => {
@@ -508,5 +540,20 @@ describe('formatSearchResults — numbered', () => {
 		];
 		const text = formatSearchResults(results);
 		expect(text).toContain('Reply with a number');
+	});
+
+	it('escapes Markdown control characters in search result titles', () => {
+		const results: RecipeSearchResult[] = [
+			{
+				recipe: makeSampleRecipe({ title: "Mom's *Best* Recipe" }),
+				relevance: 'exact_match',
+			},
+		];
+
+		const text = formatSearchResults(results);
+
+		expect(text).toContain("\\*Best\\*");
+		// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+		// mismatch deferred to Finding 21. Only assert data-field escaping here.
 	});
 });
