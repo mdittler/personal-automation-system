@@ -303,5 +303,41 @@ describe('family-profiles', () => {
 			expect(output).toContain('Margot');
 			expect(output).toContain('No foods introduced yet');
 		});
+
+		it('escapes Markdown control characters in profile fields', () => {
+			const log: ChildFoodLog = {
+				profile: {
+					name: 'Baby *Star*',
+					slug: 'baby-star',
+					birthDate: '2025-06-01',
+					allergenStage: 'early-introduction',
+					knownAllergens: ['tree_nuts'],
+					avoidAllergens: ['peanut [severe]'],
+					dietaryNotes: 'Likes `soft` foods',
+					createdAt: '2026-01-01T00:00:00.000Z',
+					updatedAt: '2026-01-01T00:00:00.000Z',
+				},
+				introductions: [
+					{
+						food: '*Almond* Butter',
+						date: '2026-04-10',
+						accepted: true,
+						allergenCategory: 'tree_nuts',
+						reaction: 'none',
+						notes: '',
+					},
+				],
+			};
+
+			const text = formatChildProfile(log, '2026-04-11');
+
+			expect(text).toContain('\\*Star\\*');
+			expect(text).toContain('tree\\_nuts');
+			expect(text).toContain('peanut \\[severe\\]');
+			expect(text).toContain('Likes \\`soft\\` foods');
+			expect(text).toContain('\\*Almond\\*');
+			// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+			// mismatch deferred to Finding 21. Only assert data-field escaping here.
+		});
 	});
 });

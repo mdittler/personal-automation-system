@@ -9,6 +9,7 @@ import type { ScopedDataStore } from '@pas/core/types';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { GuestProfile } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const GUESTS_FILE = 'guests.yaml';
 
@@ -86,19 +87,19 @@ export function findGuestByName(guests: GuestProfile[], name: string): GuestProf
 }
 
 export function formatGuestProfile(guest: GuestProfile): string {
-	const lines: string[] = [`**${guest.name}**`];
+	const lines: string[] = [`**${escapeMarkdown(guest.name)}**`];
 
 	if (guest.dietaryRestrictions.length > 0) {
-		lines.push(`Diet: ${guest.dietaryRestrictions.join(', ')}`);
+		lines.push(`Diet: ${guest.dietaryRestrictions.map(escapeMarkdown).join(', ')}`);
 	}
 	if (guest.allergies.length > 0) {
-		lines.push(`Allergies: ${guest.allergies.join(', ')}`);
+		lines.push(`Allergies: ${guest.allergies.map(escapeMarkdown).join(', ')}`);
 	}
 	if (guest.dietaryRestrictions.length === 0 && guest.allergies.length === 0) {
 		lines.push('No restrictions');
 	}
 	if (guest.notes) {
-		lines.push(`Notes: ${guest.notes}`);
+		lines.push(`Notes: ${escapeMarkdown(guest.notes)}`);
 	}
 
 	return lines.join('\n');
