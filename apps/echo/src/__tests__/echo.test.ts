@@ -33,6 +33,17 @@ describe('Echo App', () => {
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'hello world');
 		});
 
+		it('escapes Markdown control characters in echoed text', async () => {
+			const ctx = createTestMessageContext({ text: 'hello *world* and _test_' });
+
+			await echo.handleMessage(ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'test-user',
+				'hello \\*world\\* and \\_test\\_',
+			);
+		});
+
 		it('should append the message to log.md', async () => {
 			const store = createMockScopedStore();
 			vi.mocked(services.data.forUser).mockReturnValue(store);
@@ -62,6 +73,16 @@ describe('Echo App', () => {
 			await echo.handleCommand!('/echo', ['hello', 'world'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'hello world');
+		});
+
+		it('escapes Markdown control characters in command args', async () => {
+			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
+			await echo.handleCommand!('/echo', ['*bold*', '_italic_'], createTestMessageContext());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'test-user',
+				'\\*bold\\* \\_italic\\_',
+			);
 		});
 
 		it('should send "(empty)" when no args given', async () => {

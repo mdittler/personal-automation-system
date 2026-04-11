@@ -1,4 +1,5 @@
 import type { AppModule, CoreServices, MessageContext } from '@pas/core/types';
+import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
 import { generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 
@@ -89,7 +90,7 @@ async function listNotes(ctx: MessageContext): Promise<void> {
 		(await services.config.get<number>('notes_per_page')) ?? DEFAULT_NOTES_PER_PAGE;
 	const recent = lines.slice(-notesPerPage);
 	const header = `Today's notes (${recent.length}/${lines.length}):\n`;
-	await services.telegram.send(ctx.userId, header + recent.join('\n'));
+	await services.telegram.send(ctx.userId, header + recent.map(escapeMarkdown).join('\n'));
 }
 
 async function summarizeNotes(ctx: MessageContext): Promise<void> {
