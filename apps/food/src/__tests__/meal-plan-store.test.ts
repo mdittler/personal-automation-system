@@ -286,6 +286,23 @@ describe('formatPlanMessage', () => {
 		const text = formatPlanMessage(plan, [], 'Raleigh, NC');
 		expect(text).toContain('dinner');
 	});
+
+	it('escapes Markdown control characters in dynamic fields', () => {
+		const plan = makePlan({
+			meals: [
+				makeMeal({
+					recipeTitle: "Mom's *Best* Pasta",
+					isNew: true,
+					description: 'A _wonderful_ new suggestion',
+				}),
+			],
+		});
+
+		const text = formatPlanMessage(plan, [], 'Raleigh, NC');
+
+		expect(text).toContain("\\*Best\\*");
+		expect(text).toContain('\\_wonderful\\_');
+	});
 });
 
 describe('formatTonightMessage', () => {
@@ -366,6 +383,32 @@ describe('formatTonightMessage', () => {
 		// Should not throw or show undefined/null noise
 		expect(text).not.toContain('null');
 		expect(text).not.toContain('undefined');
+	});
+
+	it('escapes Markdown control characters in recipe title and description', () => {
+		const meal = makeMeal({ recipeTitle: "Chef's *Special* [Deluxe]" });
+		const recipe = makeRecipe({
+			instructions: ['Use `high heat` for _best_ results'],
+		});
+
+		const text = formatTonightMessage(meal, recipe);
+
+		expect(text).toContain("\\*Special\\*");
+		expect(text).toContain('\\[Deluxe\\]');
+		expect(text).toContain('Use \\`high heat\\`');
+		expect(text).toContain('\\_best\\_');
+	});
+
+	it('escapes description for new suggestions without recipe', () => {
+		const meal = makeMeal({
+			recipeTitle: '*New* Dish',
+			description: 'Try this _amazing_ recipe',
+		});
+
+		const text = formatTonightMessage(meal, null);
+
+		expect(text).toContain('\\*New\\*');
+		expect(text).toContain('\\_amazing\\_');
 	});
 });
 
