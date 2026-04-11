@@ -443,7 +443,7 @@ export async function buildAppAwareSystemPrompt(
 	// System data section (live data based on question categories)
 	const categories = categorizeQuestion(question);
 	if (categories.size > 0 && services.systemInfo) {
-		const isAdmin = services.systemInfo?.isUserAdmin(userId ?? '') ?? false;
+		const isAdmin = services.systemInfo.isUserAdmin(userId ?? '');
 		const systemData = await gatherSystemData(services.systemInfo, categories, question, userId, isAdmin);
 		if (systemData) {
 			parts.push('');
@@ -586,12 +586,14 @@ export async function gatherSystemData(
 			const tiers = systemInfo.getTierAssignments();
 			sections.push('Active model tiers:');
 			for (const t of tiers) {
-				// Get pricing for each active model
-				const pricing = systemInfo.getModelPricing(t.model);
+				// Get pricing for each active model (admin only)
+				const pricing = isAdmin ? systemInfo.getModelPricing(t.model) : null;
 				const priceStr = pricing
 					? ` (input: $${pricing.inputPerMillion}/M tokens, output: $${pricing.outputPerMillion}/M tokens)`
 					: '';
-				sections.push(`  ${t.tier}: ${t.provider}/${t.model}${priceStr}`);
+				// Admin sees full provider/model; non-admin sees model only (no provider leak)
+				const modelLabel = isAdmin ? `${t.provider}/${t.model}` : t.model;
+				sections.push(`  ${t.tier}: ${modelLabel}${priceStr}`);
 			}
 
 			// Providers — admin only
@@ -671,17 +673,19 @@ export async function gatherSystemData(
 				}
 			}
 
-			// Include pricing for active models
-			const tiers = systemInfo.getTierAssignments();
-			const pricedModels = new Set<string>();
-			for (const t of tiers) {
-				if (pricedModels.has(t.model)) continue;
-				pricedModels.add(t.model);
-				const pricing = systemInfo.getModelPricing(t.model);
-				if (pricing) {
-					sections.push(
-						`  ${t.model} pricing: $${pricing.inputPerMillion}/M input, $${pricing.outputPerMillion}/M output`,
-					);
+			// Include per-model pricing for active models (admin only)
+			if (isAdmin) {
+				const tiers = systemInfo.getTierAssignments();
+				const pricedModels = new Set<string>();
+				for (const t of tiers) {
+					if (pricedModels.has(t.model)) continue;
+					pricedModels.add(t.model);
+					const pricing = systemInfo.getModelPricing(t.model);
+					if (pricing) {
+						sections.push(
+							`  ${t.model} pricing: $${pricing.inputPerMillion}/M input, $${pricing.outputPerMillion}/M output`,
+						);
+					}
 				}
 			}
 		} catch {

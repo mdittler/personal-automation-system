@@ -1319,8 +1319,9 @@ describe('Chatbot App', () => {
 			expect(data).not.toContain('cost cap');
 			// provider list must be hidden from non-admins
 			expect(data).not.toContain('Configured providers');
-			// tier assignments (non-sensitive) remain visible
-			expect(data).toContain('fast: anthropic/claude-haiku');
+			// tier assignments remain visible but without provider prefix for non-admins
+			expect(data).toContain('fast: claude-haiku');
+			expect(data).not.toContain('fast: anthropic/claude-haiku');
 		});
 
 		it('admin: shows full system data', async () => {
@@ -1386,6 +1387,29 @@ describe('Chatbot App', () => {
 			expect(data).toContain('$12.0000');
 			// Own entry shown
 			expect(data).toContain('user1');
+		});
+
+		it('non-admin with undefined userId shows only total cost', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getCostSummary).mockReturnValue({
+				month: '2026-04',
+				monthlyTotal: 5.5,
+				perApp: { chatbot: 5.5 },
+				perUser: { user1: 5.5 },
+			});
+			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['costs']),
+				'how much does this cost?',
+				undefined,
+				false,
+			);
+			// Total is always shown
+			expect(data).toContain('$5.5000');
+			// Per-user line must NOT appear (no userId to match, and non-admin skips full breakdown)
+			expect(data).not.toContain('user1');
 		});
 	});
 
@@ -1501,7 +1525,9 @@ describe('Chatbot App', () => {
 			);
 
 			expect(prompt).toContain('Live system data');
-			expect(prompt).toContain('standard: anthropic/claude-sonnet');
+			// Non-admin (default mock) sees model name only — no provider prefix
+			expect(prompt).toContain('standard: claude-sonnet-4-20250514');
+			expect(prompt).not.toContain('standard: anthropic/claude-sonnet');
 		});
 
 		it('includes switch-model instruction for model questions', async () => {
