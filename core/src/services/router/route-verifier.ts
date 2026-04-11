@@ -19,6 +19,7 @@ import type { MessageContext, PhotoContext, SentMessage } from '../../types/tele
 import type { TelegramService } from '../../types/telegram.js';
 import type { AppRegistry } from '../app-registry/index.js';
 import { buildVerificationPrompt } from '../llm/prompt-templates.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { PendingEntry, PendingVerificationStore } from './pending-verification-store.js';
 import type { VerificationLogger } from './verification-logger.js';
 
@@ -53,11 +54,6 @@ interface VerifierResponse {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Escape special MarkdownV2 characters for Telegram. */
-function escapeMarkdown(text: string): string {
-	return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
-}
 
 /** Parse the verifier LLM's JSON response. Returns undefined if unparseable. */
 function parseVerifierResponse(raw: string): VerifierResponse | undefined {
