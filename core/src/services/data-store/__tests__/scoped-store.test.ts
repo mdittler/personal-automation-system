@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataChangedPayload } from '../../../types/data-events.js';
 import type { EventBusService } from '../../../types/events.js';
+import type { ManifestDataScope } from '../../../types/manifest.js';
 import { ChangeLog } from '../change-log.js';
-import { PathTraversalError } from '../paths.js';
+import { PathTraversalError, ScopeViolationError } from '../paths.js';
 import { ScopedStore } from '../scoped-store.js';
 
 let tempDir: string;
@@ -344,6 +345,121 @@ describe('ScopedStore', () => {
 			await store.write('sub/dir/file.md', 'ok');
 			const content = await store.read('sub/dir/file.md');
 			expect(content).toBe('ok');
+		});
+	});
+
+	describe('scope enforcement', () => {
+		let scopedStore: ScopedStore;
+
+		beforeEach(() => {
+			scopedStore = new ScopedStore({
+				baseDir: join(tempDir, 'scoped'),
+				appId: 'test-app',
+				userId: 'user-123',
+				changeLog,
+				scopes: [
+					{ path: 'notes/', access: 'read-write', description: 'Notes' },
+					{ path: 'config.yaml', access: 'read', description: 'Config' },
+					{ path: 'log.md', access: 'write', description: 'Log' },
+				],
+			});
+		});
+
+		it('allows write within declared read-write scope', async () => {
+			await scopedStore.write('notes/today.md', 'content');
+			expect(await scopedStore.read('notes/today.md')).toBe('content');
+		});
+
+		it('allows read within declared read-write scope', async () => {
+			await scopedStore.write('notes/today.md', 'content');
+			const content = await scopedStore.read('notes/today.md');
+			expect(content).toBe('content');
+		});
+
+		it('allows list within declared read-write scope', async () => {
+			await scopedStore.write('notes/a.md', 'a');
+			await scopedStore.write('notes/b.md', 'b');
+			const files = await scopedStore.list('notes');
+			expect(files).toEqual(['a.md', 'b.md']);
+		});
+
+		it('rejects write outside declared scopes', async () => {
+			await expect(scopedStore.write('secret.md', 'bad')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+
+		it('rejects read outside declared scopes', async () => {
+			await expect(scopedStore.read('secret.md')).rejects.toThrow(ScopeViolationError);
+		});
+
+		it('rejects list outside declared scopes', async () => {
+			await expect(scopedStore.list('private')).rejects.toThrow(ScopeViolationError);
+		});
+
+		it('allows read on read-only scope', async () => {
+			// Config is read-only — read should work (file won't exist, but should not throw scope error)
+			const content = await scopedStore.read('config.yaml');
+			expect(content).toBe('');
+		});
+
+		it('rejects write on read-only scope', async () => {
+			await expect(scopedStore.write('config.yaml', 'bad')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+
+		it('rejects append on read-only scope', async () => {
+			await expect(scopedStore.append('config.yaml', 'bad')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+
+		it('rejects archive on read-only scope', async () => {
+			await expect(scopedStore.archive('config.yaml')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+
+		it('allows write on write-only scope', async () => {
+			await scopedStore.write('log.md', 'entry');
+			// No throw = success
+		});
+
+		it('rejects read on write-only scope', async () => {
+			await expect(scopedStore.read('log.md')).rejects.toThrow(ScopeViolationError);
+		});
+
+		it('allows exists on read-only scope', async () => {
+			const result = await scopedStore.exists('config.yaml');
+			expect(result).toBe(false);
+		});
+
+		it('rejects exists on write-only scope', async () => {
+			await expect(scopedStore.exists('log.md')).rejects.toThrow(ScopeViolationError);
+		});
+
+		it('skips enforcement when scopes is undefined', async () => {
+			const unscoped = new ScopedStore({
+				baseDir: join(tempDir, 'unscoped'),
+				appId: 'test-app',
+				userId: 'user-123',
+				changeLog,
+			});
+			await unscoped.write('anything.md', 'ok');
+			expect(await unscoped.read('anything.md')).toBe('ok');
+		});
+
+		it('skips enforcement when scopes is empty array', async () => {
+			const emptyScopes = new ScopedStore({
+				baseDir: join(tempDir, 'empty-scopes'),
+				appId: 'test-app',
+				userId: 'user-123',
+				changeLog,
+				scopes: [],
+			});
+			await emptyScopes.write('anything.md', 'ok');
+			expect(await emptyScopes.read('anything.md')).toBe('ok');
 		});
 	});
 });

@@ -11,10 +11,11 @@ import { join } from 'node:path';
 import type { DataChangedPayload } from '../../types/data-events.js';
 import type { ScopedDataStore } from '../../types/data-store.js';
 import type { EventBusService } from '../../types/events.js';
+import type { ManifestDataScope } from '../../types/manifest.js';
 import { toArchiveTimestamp } from '../../utils/date.js';
 import { appendWithFrontmatter, atomicWrite, ensureDir } from '../../utils/file.js';
 import type { ChangeLog } from './change-log.js';
-import { resolveScopedPath } from './paths.js';
+import { ScopeViolationError, findMatchingScope, resolveScopedPath } from './paths.js';
 
 export interface ScopedStoreOptions {
 	/** Absolute path to the base directory for this scope. */
@@ -29,6 +30,8 @@ export interface ScopedStoreOptions {
 	spaceId?: string;
 	/** Event bus for emitting data:changed events (optional). */
 	eventBus?: EventBusService;
+	/** Manifest-declared scopes. Undefined or empty = no enforcement (API trust). */
+	scopes?: ManifestDataScope[];
 }
 
 export class ScopedStore implements ScopedDataStore {
@@ -38,6 +41,7 @@ export class ScopedStore implements ScopedDataStore {
 	private readonly changeLog: ChangeLog;
 	private readonly spaceId?: string;
 	private readonly eventBus?: EventBusService;
+	private readonly scopes?: ManifestDataScope[];
 
 	constructor(options: ScopedStoreOptions) {
 		this.baseDir = options.baseDir;
@@ -46,6 +50,27 @@ export class ScopedStore implements ScopedDataStore {
 		this.changeLog = options.changeLog;
 		this.spaceId = options.spaceId;
 		this.eventBus = options.eventBus;
+		this.scopes = options.scopes;
+	}
+
+	/**
+	 * Check that a path is within declared scopes and the operation is permitted.
+	 * Skips enforcement when scopes are undefined or empty (API trust bypass).
+	 */
+	private checkScope(path: string, operation: 'read' | 'write'): void {
+		if (!this.scopes || this.scopes.length === 0) return;
+
+		const scope = findMatchingScope(path, this.scopes);
+		if (!scope) {
+			throw new ScopeViolationError(path, operation, this.appId);
+		}
+
+		if (operation === 'write' && scope.access === 'read') {
+			throw new ScopeViolationError(path, operation, this.appId);
+		}
+		if (operation === 'read' && scope.access === 'write') {
+			throw new ScopeViolationError(path, operation, this.appId);
+		}
 	}
 
 	/** Emit a data:changed event (fire-and-forget). */
@@ -68,6 +93,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async read(path: string): Promise<string> {
+		this.checkScope(path, 'read');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 
 		const fileExists = await stat(fullPath)
@@ -82,6 +108,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async write(path: string, content: string): Promise<void> {
+		this.checkScope(path, 'write');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 		await atomicWrite(fullPath, content);
 		await this.changeLog.record('write', path, this.appId, this.userId, this.spaceId);
@@ -89,6 +116,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async append(path: string, content: string, options?: { frontmatter?: string }): Promise<void> {
+		this.checkScope(path, 'write');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 		await ensureDir(join(fullPath, '..'));
 
@@ -106,6 +134,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async exists(path: string): Promise<boolean> {
+		this.checkScope(path, 'read');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 
 		return stat(fullPath)
@@ -114,6 +143,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async list(directory: string): Promise<string[]> {
+		this.checkScope(directory, 'read');
 		const fullPath = resolveScopedPath(this.baseDir, directory);
 
 		const dirExists = await stat(fullPath)
@@ -127,6 +157,7 @@ export class ScopedStore implements ScopedDataStore {
 	}
 
 	async archive(path: string): Promise<void> {
+		this.checkScope(path, 'write');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 
 		const fileExists = await stat(fullPath)
