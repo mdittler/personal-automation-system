@@ -622,6 +622,18 @@ export async function main(): Promise<void> {
 					const { entry } = resolved;
 					const appEntry = registry.getApp(chosenAppId);
 
+					// Verify user has access to the chosen app
+					if (chosenAppId !== 'chatbot') {
+						const enabledApps = userManager.getUserApps(userId);
+						if (!(await appToggle.isEnabled(userId, chosenAppId, enabledApps))) {
+							callbackLogger.debug(
+								{ chosenAppId, userId },
+								'Verification callback for disabled app',
+							);
+							return;
+						}
+					}
+
 					// Dispatch to chosen app (wrap in LLM context for cost tracking)
 					await requestContext.run({ userId }, async () => {
 						if (chosenAppId === 'chatbot' && chatbotApp) {

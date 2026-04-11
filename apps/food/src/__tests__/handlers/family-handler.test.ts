@@ -483,9 +483,10 @@ describe('family handler', () => {
 		it('warns about allergen wait window', async () => {
 			// Child has recent egg intro — new peanut intro should warn
 			// Use today's date minus 1 day so the wait window (5 days) is not met
+			const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 			const recentIntroYaml = MARGOT_WITH_INTRO_YAML.replace(
 				'date: "2026-04-01"',
-				'date: "2026-04-06"',
+				`date: "${yesterday}"`,
 			);
 			store.list.mockResolvedValue(['children/margot.yaml']);
 			store.read.mockResolvedValue(recentIntroYaml);

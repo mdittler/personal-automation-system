@@ -81,6 +81,7 @@ function createMockInviteService(
 ): InviteService {
 	return {
 		validateCode: vi.fn(async () => validateResult),
+		claimAndRedeem: vi.fn(async () => validateResult),
 		redeemCode: vi.fn(async () => {}),
 		createInvite: vi.fn().mockResolvedValue('d3f7a8c2'),
 		listInvites: vi.fn().mockResolvedValue({}),
@@ -162,7 +163,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', 'newuser');
 			expect(userMutationService.registerUser).toHaveBeenCalledWith(
 				expect.objectContaining({ id: 'newuser', name: 'Sarah' }),
 			);
@@ -176,7 +177,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', '/start a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', 'newuser');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'newuser',
 				expect.stringContaining('Welcome'),
@@ -187,14 +188,14 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', '  a1b2c3d4  ');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', 'newuser');
 		});
 
 		it('"/start  a1b2c3d4" — double space after /start from copy-paste', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', '/start  a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', 'newuser');
 		});
 	});
 
@@ -207,7 +208,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'hi');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 			expect(telegram.send).toHaveBeenCalledWith(
 				'newuser',
 				expect.stringContaining('not registered'),
@@ -221,28 +222,28 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 				'hello, my husband said I should use this app?',
 			);
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"how do I join?" — asks how to get started', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'how do I join?');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"my code is a1b2c3d4" — wraps the code in a sentence', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'my code is a1b2c3d4');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"Code: a1b2c3d4" — prefixes the code with a label', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'Code: a1b2c3d4');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"Here is my invite code: a1b2c3d4" — writes a full sentence', async () => {
@@ -252,49 +253,49 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 				'Here is my invite code: a1b2c3d4',
 			);
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"A1B2C3D4" — types the code in uppercase', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'A1B2C3D4');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"a1b2c3d" — only types 7 characters (one short)', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'a1b2c3d');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"a1b2c3d4e5" — types too many characters', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'a1b2c3d4e5');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"start a1b2c3d4" — forgets the slash on /start', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'start a1b2c3d4');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"I got sent a code" — mentions a code without providing it', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'I got sent a code');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 
 		it('"add me to the grocery list" — tries to use the app before registering', async () => {
 			const guard = buildGuard([], validInvite);
 			const result = await guard.checkUser('newuser', 'add me to the grocery list');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 	});
 
@@ -307,7 +308,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], expiredInvite);
 			const result = await guard.checkUser('newuser', 'deadbeef');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('deadbeef');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('deadbeef', 'newuser');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'newuser',
 				expect.stringContaining('expired'),
@@ -318,7 +319,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard([], expiredInvite);
 			const result = await guard.checkUser('newuser', '/start deadbeef');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('deadbeef');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('deadbeef', 'newuser');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'newuser',
 				expect.stringContaining('expired'),
@@ -365,7 +366,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard(['existing'], validInvite);
 			const result = await guard.checkUser('existing', 'a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 			expect(telegram.send).not.toHaveBeenCalled();
 		});
 
@@ -373,7 +374,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const guard = buildGuard(['existing'], validInvite);
 			const result = await guard.checkUser('existing', '/start a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 	});
 });
@@ -644,7 +645,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 				expect.stringContaining('already registered'),
 			);
 			// Should NOT redeem the code
-			expect(inviteService.redeemCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 	});
 

@@ -118,6 +118,7 @@ export class RouteVerifier {
 		ctx: MessageContext | PhotoContext,
 		classifierResult: { appId: string; intent: string; confidence: number },
 		photoPath?: string,
+		enabledApps?: string[],
 	): Promise<VerifyAction> {
 		const isPhoto = 'photo' in ctx;
 		const messageText = isPhoto
@@ -131,20 +132,30 @@ export class RouteVerifier {
 
 		const allApps = this.registry.getAll();
 
+		// Filter to user-enabled apps only (prevents LLM from suggesting inaccessible apps)
+		const accessibleApps = enabledApps
+			? allApps.filter((app) => {
+					const id = app.manifest.app.id;
+					return enabledApps.includes('*') || enabledApps.includes(id);
+				})
+			: allApps;
+
 		// Skip verification when there's 0–1 candidate apps (no alternatives to verify against)
-		if (allApps.length <= 1) {
-			this.logger.debug('RouteVerifier: skipping verification — 1 or fewer apps installed');
+		if (accessibleApps.length <= 1) {
+			this.logger.debug(
+				'RouteVerifier: skipping verification — 1 or fewer accessible apps',
+			);
 			return { action: 'route', appId: classifierResult.appId };
 		}
 
-		const candidateApps = allApps.map((app) => ({
+		const candidateApps = accessibleApps.map((app) => ({
 			appId: app.manifest.app.id,
 			appName: app.manifest.app.name,
 			appDescription: app.manifest.app.description,
 			intents: app.manifest.capabilities?.messages?.intents ?? [],
 		}));
 
-		const classifierApp = allApps.find((a) => a.manifest.app.id === classifierResult.appId);
+		const classifierApp = accessibleApps.find((a) => a.manifest.app.id === classifierResult.appId);
 		const classifierAppName = classifierApp?.manifest.app.name ?? classifierResult.appId;
 
 		const prompt = buildVerificationPrompt({
@@ -191,7 +202,7 @@ export class RouteVerifier {
 
 		// Verifier disagrees — validate suggested appId exists in registry
 		const rawSuggestedId = verifierResponse.suggestedAppId ?? 'chatbot';
-		const suggestedApp = allApps.find((a) => a.manifest.app.id === rawSuggestedId);
+		const suggestedApp = accessibleApps.find((a) => a.manifest.app.id === rawSuggestedId);
 
 		// If the LLM hallucinated an appId that doesn't exist, fall back to classifier's pick
 		if (!suggestedApp && rawSuggestedId !== 'chatbot') {

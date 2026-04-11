@@ -4,7 +4,7 @@
 
 A local-first home automation platform where users interact through a single Telegram bot. The infrastructure handles message routing, scheduling, data storage, LLM access, multi-user management, audio output, condition evaluation, and a management interface. Apps are modular plugins that implement specific functionality. Apps can be developed independently and shared between PAS instances as git repos.
 
-**Documentation maintenance rules are in the `pas-documentation-maintenance` skill. Testing standards are in the `pas-testing-standards` skill.**
+**Documentation maintenance rules are in the `pas-documentation-maintenance` skill. Testing patterns and standards are in the `pas-testing-standards` skill. URS workflow and traceability matrix are in the `pas-urs-workflow` skill.**
 
 ## Architecture Decisions
 
@@ -71,7 +71,9 @@ A local-first home automation platform where users interact through a single Tel
 
 ### Testing
 - **Vitest** for all tests. Mock `CoreServices` for app unit tests. Real filesystem (temp dirs) for DataStore tests
-- **Testing standards, URS workflow, and error fix tracking are in the `pas-testing-standards` skill**
+- **Zero failing tests policy** — the full test suite must pass with zero failures at all times. "Pre-existing failure" is not an excuse to leave tests broken. If you encounter a failing test, fix it — either fix the code or fix the test. Never skip, ignore, or dismiss test failures as someone else's problem.
+- **Time-sensitive tests** — never hardcode dates in tests that compare against "today". Use relative dates (e.g., `new Date(Date.now() - 86400000)`) so tests don't rot as time passes
+- **Testing patterns and standards are in the `pas-testing-standards` skill. URS workflow and traceability matrix are in the `pas-urs-workflow` skill.**
 
 ## Key File Paths
 
@@ -141,7 +143,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ## Implementation Status
 
-All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x, H11.z incl. iteration-2 hardening, H11.w, H11.y, H12a, H12b) are complete. **5422 tests passing across 222 test files.**
+All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6, H7, H8, H9, H10, H11, H11.x, H11.z incl. iteration-2 hardening, H11.w, H11.y, H12a, H12b) are complete. **5442 tests passing across 223 test files.**
 
 **GUI cleanup (2026-04-10):** Left sidebar navigation (all 10 nav items moved to sticky sidebar, top bar keeps PAS brand + Dashboard + theme + logout); Users page groups column replaced with space checkboxes (auto-save on toggle, linked to SpaceService.listSpaces()); admin self-removal UX protection (Remove button disabled for sole admin); scheduler lastRunAt persisted to `data/system/cron-last-run.json` (survives restarts); dashboard Claude Model now reads from ModelSelector instead of stale .env value.
 

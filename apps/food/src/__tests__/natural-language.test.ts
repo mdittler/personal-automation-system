@@ -292,7 +292,7 @@ const margotRecentIntro: ChildFoodLog = {
 		{
 			food: 'scrambled eggs',
 			allergenCategory: 'eggs',
-			date: '2026-04-06',
+			date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
 			reaction: 'none',
 			accepted: true,
 			notes: '',

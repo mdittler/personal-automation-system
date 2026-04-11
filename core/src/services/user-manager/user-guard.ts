@@ -68,9 +68,9 @@ export class UserGuard {
 			}
 
 			if (potentialCode) {
-				const result = await this.inviteService.validateCode(potentialCode);
+				const result = await this.inviteService.claimAndRedeem(potentialCode, userId);
 				if ('invite' in result) {
-					// Valid code — register the user
+					// Code claimed — register the user
 					const newUser = {
 						id: userId,
 						name: result.invite.name,
@@ -79,7 +79,6 @@ export class UserGuard {
 						sharedScopes: [] as string[],
 					};
 					await this.userMutationService.registerUser(newUser);
-					await this.inviteService.redeemCode(potentialCode, userId);
 					this.logger.info(
 						{ userId, name: result.invite.name },
 						'User registered via invite code',

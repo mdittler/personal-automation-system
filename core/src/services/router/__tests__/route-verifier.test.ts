@@ -618,6 +618,114 @@ describe('RouteVerifier', () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// enabledApps filtering
+	// -------------------------------------------------------------------------
+
+	it('filters candidate apps to only enabled apps', async () => {
+		// Registry has food and notes, but only food is enabled
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult, undefined, ['food']);
+
+		// With only 1 accessible app, verification is skipped (no LLM call)
+		expect(llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('includes all apps when enabledApps is wildcard', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult, undefined, ['*']);
+
+		// Both food and notes are accessible, so LLM is called
+		expect(llm.complete).toHaveBeenCalledOnce();
+	});
+
+	it('includes all apps when enabledApps is not provided', async () => {
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		// No enabledApps filter = all apps accessible, LLM is called
+		expect(llm.complete).toHaveBeenCalledOnce();
+	});
+
+	it('LLM prompt does not contain disabled app names', async () => {
+		// Add a third app to registry so filtering still leaves 2 apps
+		const threeAppRegistry = {
+			getAll: vi.fn().mockReturnValue([
+				{
+					manifest: {
+						app: {
+							id: 'food',
+							name: 'Food',
+							description: 'Food management',
+							version: '1.0.0',
+							author: 'test',
+						},
+						capabilities: { messages: { intents: ['grocery'] } },
+					},
+					module: {},
+					appDir: '/apps/food',
+				},
+				{
+					manifest: {
+						app: {
+							id: 'notes',
+							name: 'Notes',
+							description: 'Note taking',
+							version: '1.0.0',
+							author: 'test',
+						},
+						capabilities: { messages: { intents: ['save a note'] } },
+					},
+					module: {},
+					appDir: '/apps/notes',
+				},
+				{
+					manifest: {
+						app: {
+							id: 'secret',
+							name: 'Secret App',
+							description: 'Should not appear',
+							version: '1.0.0',
+							author: 'test',
+						},
+						capabilities: { messages: { intents: ['classified'] } },
+					},
+					module: {},
+					appDir: '/apps/secret',
+				},
+			]),
+			getApp: vi.fn(),
+			getManifestCache: vi.fn(),
+			getLoadedAppIds: vi.fn(),
+		} as unknown as AppRegistry;
+
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = new RouteVerifier({
+			llm,
+			telegram,
+			registry: threeAppRegistry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		// Only food and notes enabled, secret excluded
+		await verifier.verify(createTextCtx(), classifierResult, undefined, ['food', 'notes']);
+
+		expect(llm.complete).toHaveBeenCalledOnce();
+		const promptArg = mockArg<string>(llm.complete, 0);
+		expect(promptArg).toContain('Food');
+		expect(promptArg).toContain('Notes');
+		expect(promptArg).not.toContain('Secret App');
+		expect(promptArg).not.toContain('classified');
+	});
+
+	// -------------------------------------------------------------------------
 	// button deduplication
 	// -------------------------------------------------------------------------
 
