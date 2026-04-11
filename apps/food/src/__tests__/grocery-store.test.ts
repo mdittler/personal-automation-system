@@ -494,6 +494,20 @@ describe('grocery-store', () => {
 			const msg = formatGroceryMessage(list);
 			expect(msg).toContain('Other');
 		});
+
+		it('escapes Markdown control characters in item names', () => {
+			const list = makeList({
+				items: [makeItem({ name: '*Organic* [Spinach]', department: 'Produce', quantity: 1, unit: 'bag' })],
+			});
+
+			const msg = formatGroceryMessage(list);
+
+			// Apostrophes are not Markdown control chars — no escaping on those
+			expect(msg).toContain('\\*Organic\\*');
+			expect(msg).toContain('\\[Spinach\\]');
+			// Intentional department bold is server-authored — still present
+			expect(msg).toContain('*Produce*');
+		});
 	});
 
 	// ─── buildGroceryButtons ─────────────────────────────────────
