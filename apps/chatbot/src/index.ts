@@ -443,7 +443,8 @@ export async function buildAppAwareSystemPrompt(
 	// System data section (live data based on question categories)
 	const categories = categorizeQuestion(question);
 	if (categories.size > 0 && services.systemInfo) {
-		const systemData = await gatherSystemData(services.systemInfo, categories, question, userId);
+		const isAdmin = services.systemInfo?.isUserAdmin(userId ?? '') ?? false;
+		const systemData = await gatherSystemData(services.systemInfo, categories, question, userId, isAdmin);
 		if (systemData) {
 			parts.push('');
 			parts.push(
@@ -575,6 +576,7 @@ export async function gatherSystemData(
 	categories: Set<QuestionCategory>,
 	question: string,
 	userId?: string,
+	isAdmin?: boolean,
 ): Promise<string> {
 	const sections: string[] = [];
 
@@ -592,36 +594,41 @@ export async function gatherSystemData(
 				sections.push(`  ${t.tier}: ${t.provider}/${t.model}${priceStr}`);
 			}
 
-			// Providers
-			const providers = systemInfo.getProviders();
-			sections.push(
-				`Configured providers: ${providers.map((p) => `${p.id} (${p.type})`).join(', ')}`,
-			);
+			// Providers — admin only
+			if (isAdmin) {
+				const providers = systemInfo.getProviders();
+				sections.push(
+					`Configured providers: ${providers.map((p) => `${p.id} (${p.type})`).join(', ')}`,
+				);
+			}
 
 			// Available models (only when question seems to ask about switching or available models)
-			const lower = question.toLowerCase();
-			if (
-				lower.includes('available') ||
-				lower.includes('switch') ||
-				lower.includes('change') ||
-				lower.includes('list')
-			) {
-				try {
-					const models = await systemInfo.getAvailableModels();
-					if (models.length > 0) {
-						sections.push(
-							`Available models (${models.length} total, showing up to ${MAX_AVAILABLE_MODELS}):`,
-						);
-						for (const m of models.slice(0, MAX_AVAILABLE_MODELS)) {
-							const pricing = systemInfo.getModelPricing(m.id);
-							const priceStr = pricing
-								? ` ($${pricing.inputPerMillion}/$${pricing.outputPerMillion} per M tokens)`
-								: '';
-							sections.push(`  ${m.provider}/${m.id}${priceStr}`);
+			// Admin only — model list exposes provider/infrastructure details
+			if (isAdmin) {
+				const lower = question.toLowerCase();
+				if (
+					lower.includes('available') ||
+					lower.includes('switch') ||
+					lower.includes('change') ||
+					lower.includes('list')
+				) {
+					try {
+						const models = await systemInfo.getAvailableModels();
+						if (models.length > 0) {
+							sections.push(
+								`Available models (${models.length} total, showing up to ${MAX_AVAILABLE_MODELS}):`,
+							);
+							for (const m of models.slice(0, MAX_AVAILABLE_MODELS)) {
+								const pricing = systemInfo.getModelPricing(m.id);
+								const priceStr = pricing
+									? ` ($${pricing.inputPerMillion}/$${pricing.outputPerMillion} per M tokens)`
+									: '';
+								sections.push(`  ${m.provider}/${m.id}${priceStr}`);
+							}
 						}
+					} catch {
+						// Catalog fetch failed, skip
 					}
-				} catch {
-					// Catalog fetch failed, skip
 				}
 			}
 		} catch {
@@ -634,23 +641,33 @@ export async function gatherSystemData(
 			const costs = systemInfo.getCostSummary();
 			sections.push(`Monthly costs (${costs.month}):`);
 			sections.push(`  Total: $${costs.monthlyTotal.toFixed(4)}`);
-			const appEntries = Object.entries(costs.perApp);
-			if (appEntries.length > 0) {
-				sections.push('  Per app:');
-				for (const [appId, cost] of appEntries) {
-					sections.push(`    ${appId}: $${cost.toFixed(4)}`);
+
+			if (isAdmin) {
+				// Full per-app breakdown
+				const appEntries = Object.entries(costs.perApp);
+				if (appEntries.length > 0) {
+					sections.push('  Per app:');
+					for (const [appId, cost] of appEntries) {
+						sections.push(`    ${appId}: $${cost.toFixed(4)}`);
+					}
+				} else {
+					sections.push('  No per-app costs recorded yet.');
+				}
+
+				// Full per-user breakdown
+				const userEntries = Object.entries(costs.perUser);
+				if (userEntries.length > 0) {
+					sections.push('  Per user:');
+					for (const [uid, cost] of userEntries) {
+						const marker = uid === userId ? ' (this user)' : '';
+						sections.push(`    ${uid}${marker}: $${cost.toFixed(4)}`);
+					}
 				}
 			} else {
-				sections.push('  No per-app costs recorded yet.');
-			}
-
-			// Per-user cost breakdown
-			const userEntries = Object.entries(costs.perUser);
-			if (userEntries.length > 0) {
-				sections.push('  Per user:');
-				for (const [uid, cost] of userEntries) {
-					const marker = uid === userId ? ' (this user)' : '';
-					sections.push(`    ${uid}${marker}: $${cost.toFixed(4)}`);
+				// Non-admin: show only the current user's own cost line
+				if (userId && costs.perUser[userId] !== undefined) {
+					sections.push('  Your usage:');
+					sections.push(`    ${userId} (this user): $${costs.perUser[userId].toFixed(4)}`);
 				}
 			}
 
@@ -672,7 +689,7 @@ export async function gatherSystemData(
 		}
 	}
 
-	if (categories.has('scheduling')) {
+	if (categories.has('scheduling') && isAdmin) {
 		try {
 			const jobs = systemInfo.getScheduledJobs();
 			if (jobs.length > 0) {
@@ -696,18 +713,21 @@ export async function gatherSystemData(
 			sections.push('System status:');
 			sections.push(`  Uptime: ${uptimeStr}`);
 			sections.push(`  Apps loaded: ${status.appCount}`);
-			sections.push(`  Users: ${status.userCount}`);
-			sections.push(`  Cron jobs: ${status.cronJobCount}`);
 			sections.push(`  Timezone: ${status.timezone}`);
-			sections.push(`  Fallback mode: ${status.fallbackMode}`);
 
-			const safeguards = systemInfo.getSafeguardDefaults();
-			sections.push('LLM safeguard defaults:');
-			sections.push(
-				`  Rate limit: ${safeguards.rateLimit.maxRequests} requests per ${safeguards.rateLimit.windowSeconds}s`,
-			);
-			sections.push(`  Per-app monthly cost cap: $${safeguards.appMonthlyCostCap}`);
-			sections.push(`  Global monthly cost cap: $${safeguards.globalMonthlyCostCap}`);
+			if (isAdmin) {
+				sections.push(`  Users: ${status.userCount}`);
+				sections.push(`  Cron jobs: ${status.cronJobCount}`);
+				sections.push(`  Fallback mode: ${status.fallbackMode}`);
+
+				const safeguards = systemInfo.getSafeguardDefaults();
+				sections.push('LLM safeguard defaults:');
+				sections.push(
+					`  Rate limit: ${safeguards.rateLimit.maxRequests} requests per ${safeguards.rateLimit.windowSeconds}s`,
+				);
+				sections.push(`  Per-app monthly cost cap: $${safeguards.appMonthlyCostCap}`);
+				sections.push(`  Global monthly cost cap: $${safeguards.globalMonthlyCostCap}`);
+			}
 		} catch {
 			// System status fetch failed, skip
 		}

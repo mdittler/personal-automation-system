@@ -1162,7 +1162,7 @@ describe('Chatbot App', () => {
 			]);
 			vi.mocked(systemInfo.getProviders).mockReturnValue([{ id: 'anthropic', type: 'anthropic' }]);
 
-			const data = await gatherSystemData(systemInfo, new Set(['llm']), 'what model?');
+			const data = await gatherSystemData(systemInfo, new Set(['llm']), 'what model?', undefined, true);
 			expect(data).toContain('standard: anthropic/claude-sonnet');
 			expect(data).toContain('fast: anthropic/claude-haiku');
 			expect(data).toContain('Configured providers');
@@ -1178,7 +1178,7 @@ describe('Chatbot App', () => {
 			});
 			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
 
-			const data = await gatherSystemData(systemInfo, new Set(['costs']), 'how much?');
+			const data = await gatherSystemData(systemInfo, new Set(['costs']), 'how much?', undefined, true);
 			expect(data).toContain('$5.1234');
 			expect(data).toContain('chatbot');
 			expect(data).toContain('notes');
@@ -1195,7 +1195,7 @@ describe('Chatbot App', () => {
 			});
 			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
 
-			const data = await gatherSystemData(systemInfo, new Set(['costs']), 'how much?', '123456789');
+			const data = await gatherSystemData(systemInfo, new Set(['costs']), 'how much?', '123456789', true);
 			expect(data).toContain('123456789 (this user): $7.0000');
 			expect(data).toContain('987654321: $3.0000');
 			expect(data).not.toContain('987654321 (this user)');
@@ -1207,7 +1207,7 @@ describe('Chatbot App', () => {
 				{ key: 'system:daily-diff', appId: 'system', cron: '0 2 * * *', description: 'Daily diff' },
 			]);
 
-			const data = await gatherSystemData(systemInfo, new Set(['scheduling']), 'what jobs?');
+			const data = await gatherSystemData(systemInfo, new Set(['scheduling']), 'what jobs?', undefined, true);
 			expect(data).toContain('system:daily-diff');
 			expect(data).toContain('0 2 * * *');
 		});
@@ -1228,7 +1228,7 @@ describe('Chatbot App', () => {
 				globalMonthlyCostCap: 50,
 			});
 
-			const data = await gatherSystemData(systemInfo, new Set(['system']), 'status');
+			const data = await gatherSystemData(systemInfo, new Set(['system']), 'status', undefined, true);
 			expect(data).toContain('1h');
 			expect(data).toContain('Apps loaded: 3');
 			expect(data).toContain('Rate limit: 60');
@@ -1242,9 +1242,150 @@ describe('Chatbot App', () => {
 				{ id: 'claude-sonnet-4-20250514', provider: 'anthropic', displayName: 'Sonnet' },
 			]);
 
-			const data = await gatherSystemData(systemInfo, new Set(['llm']), 'switch the model');
+			const data = await gatherSystemData(systemInfo, new Set(['llm']), 'switch the model', undefined, true);
 			expect(data).toContain('Available models');
 			expect(data).toContain('claude-sonnet-4-20250514');
+		});
+
+		// --- Admin-gating tests ---
+
+		it('non-admin: excludes other users costs', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getCostSummary).mockReturnValue({
+				month: '2026-04',
+				monthlyTotal: 12.0,
+				perApp: { chatbot: 12.0 },
+				perUser: { user1: 9.0, user2: 3.0 },
+			});
+			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['costs']),
+				'how much?',
+				'user1',
+				false,
+			);
+			expect(data).toContain('user1');
+			expect(data).not.toContain('user2');
+		});
+
+		it('non-admin: excludes cron job details', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getScheduledJobs).mockReturnValue([
+				{ key: 'system:daily-diff', appId: 'system', cron: '0 2 * * *', description: 'Daily diff' },
+			]);
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['scheduling']),
+				'what jobs?',
+				'user1',
+				false,
+			);
+			expect(data).not.toContain('system:daily-diff');
+			expect(data).not.toContain('0 2 * * *');
+		});
+
+		it('non-admin: excludes safeguard config and provider details', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
+				{ tier: 'fast', provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+			]);
+			vi.mocked(systemInfo.getProviders).mockReturnValue([{ id: 'anthropic', type: 'anthropic' }]);
+			vi.mocked(systemInfo.getSystemStatus).mockReturnValue({
+				uptimeSeconds: 3661,
+				appCount: 3,
+				userCount: 2,
+				cronJobCount: 2,
+				timezone: 'UTC',
+				fallbackMode: 'chatbot',
+			});
+			vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
+				rateLimit: { maxRequests: 60, windowSeconds: 3600 },
+				appMonthlyCostCap: 10,
+				globalMonthlyCostCap: 50,
+			});
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['system', 'llm']),
+				'status',
+				'user1',
+				false,
+			);
+			// safeguard / rate limit info must be hidden from non-admins
+			expect(data).not.toContain('Rate limit');
+			expect(data).not.toContain('cost cap');
+			// provider list must be hidden from non-admins
+			expect(data).not.toContain('Configured providers');
+			// tier assignments (non-sensitive) remain visible
+			expect(data).toContain('fast: anthropic/claude-haiku');
+		});
+
+		it('admin: shows full system data', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
+				{ tier: 'standard', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+			]);
+			vi.mocked(systemInfo.getProviders).mockReturnValue([{ id: 'anthropic', type: 'anthropic' }]);
+			vi.mocked(systemInfo.getCostSummary).mockReturnValue({
+				month: '2026-04',
+				monthlyTotal: 12.0,
+				perApp: { chatbot: 12.0 },
+				perUser: { user1: 9.0, user2: 3.0 },
+			});
+			vi.mocked(systemInfo.getScheduledJobs).mockReturnValue([
+				{ key: 'system:daily-diff', appId: 'system', cron: '0 2 * * *', description: 'Daily diff' },
+			]);
+			vi.mocked(systemInfo.getSystemStatus).mockReturnValue({
+				uptimeSeconds: 7200,
+				appCount: 2,
+				userCount: 2,
+				cronJobCount: 1,
+				timezone: 'UTC',
+				fallbackMode: 'chatbot',
+			});
+			vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
+				rateLimit: { maxRequests: 60, windowSeconds: 3600 },
+				appMonthlyCostCap: 10,
+				globalMonthlyCostCap: 50,
+			});
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['llm', 'costs', 'scheduling', 'system']),
+				'everything',
+				'user1',
+				true,
+			);
+			expect(data).toContain('Configured providers');
+			expect(data).toContain('user2');
+			expect(data).toContain('system:daily-diff');
+			expect(data).toContain('Rate limit');
+		});
+
+		it('non-admin: shows own cost total', async () => {
+			const systemInfo = services.systemInfo;
+			vi.mocked(systemInfo.getCostSummary).mockReturnValue({
+				month: '2026-04',
+				monthlyTotal: 12.0,
+				perApp: { chatbot: 12.0 },
+				perUser: { user1: 9.0, user2: 3.0 },
+			});
+			vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
+
+			const data = await gatherSystemData(
+				systemInfo,
+				new Set(['costs']),
+				'my costs',
+				'user1',
+				false,
+			);
+			// Total is shown to everyone
+			expect(data).toContain('$12.0000');
+			// Own entry shown
+			expect(data).toContain('user1');
 		});
 	});
 
@@ -1460,6 +1601,8 @@ describe('Chatbot App', () => {
 				systemInfo,
 				new Set<'llm' | 'costs' | 'scheduling' | 'system'>(['costs', 'scheduling']),
 				'costs and jobs',
+				undefined,
+				true,
 			);
 			// Scheduling data should still be present despite cost error
 			expect(data).toContain('app:job');
@@ -1575,6 +1718,8 @@ describe('Chatbot App', () => {
 					'system',
 				]),
 				'everything',
+				undefined,
+				true,
 			);
 			expect(data).toContain('Active model tiers');
 			expect(data).toContain('Monthly costs');
