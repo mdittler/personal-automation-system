@@ -8,7 +8,7 @@ Status legend: `open`, `fixed`, `verified`.
 
 ### Finding 1: Route-verifier callback bypasses app access checks
 
-- Status: open
+- Status: fixed
 - Severity: high
 - Classification: security / missing validation
 - Location: `core/src/bootstrap.ts:619-626`
@@ -38,7 +38,7 @@ Suggested tests:
 
 ### Finding 2: Invite redemption is not atomic
 
-- Status: open
+- Status: fixed
 - Severity: high
 - Classification: race condition / security
 - Location: `core/src/services/invite/index.ts:70-105`
@@ -1078,7 +1078,167 @@ Phase 7 test evidence:
 
 ## Phase 8: Dependency, Configuration, Manifest, and Installation Integrity
 
-No phase-specific findings have been logged yet.
+### Finding 36: Production app loading skips compiled app entrypoints
+
+- Status: open
+- Severity: high
+- Classification: production packaging / module resolution
+- Location: `core/src/services/app-registry/loader.ts:107-143`
+- Related paths: `Dockerfile:51-80`, `apps/chatbot/src/index.ts:25`, `apps/food/src/index.ts:25-114`, `apps/chatbot/dist/index.js`, `apps/food/dist/index.js`
+
+`AppLoader.importModule()` only tries `index.js`, `index.ts`, `src/index.js`, and `src/index.ts`. It never tries the compiled app entrypoint at `dist/index.js`, even though every bundled app package declares `"main": "dist/index.js"` and the Docker runtime starts compiled core with `node core/dist/bootstrap.js` after `pnpm build`.
+
+Concrete failure path:
+
+1. The Docker build compiles app TypeScript to `apps/<app>/dist/index.js` and copies the app directories into the runtime image.
+2. Production starts `node core/dist/bootstrap.js`.
+3. The app loader checks the source entrypoints before any compiled app entrypoint and reaches `src/index.ts`.
+4. Native Node can load very simple `.ts` files, but it does not remap source imports that use compiled `.js` specifiers back to `.ts` files. Chatbot imports `./conversation-history.js`, and food imports many `./handlers/*.js` modules from `src/index.ts`.
+5. Chatbot and food are skipped with "No valid app module found" even though their compiled `dist/index.js` files exist.
+
+Direct smoke evidence from Node v22.18.0 in this workspace:
+
+- `AppLoader.importModule('apps/echo')` loaded.
+- `AppLoader.importModule('apps/notes')` loaded.
+- `AppLoader.importModule('apps/chatbot')` returned null.
+- `AppLoader.importModule('apps/food')` returned null.
+
+Correction notes:
+
+- Add `dist/index.js` to the candidate list, preferably before TypeScript source paths when `NODE_ENV=production` or when a compiled file exists.
+- Consider honoring each app package's `main` field if present, with a safe allowlist that keeps resolution inside the app directory.
+- Keep source `.ts` loading as the development fallback for `tsx watch`.
+- Add a production-mode loader test with both `src/index.ts` and `dist/index.js` present, where source imports would fail but compiled output loads.
+
+Suggested tests:
+
+- Add an `AppLoader.importModule()` test that creates `dist/index.js` and `src/index.ts`, asserts the compiled module is chosen in production-like conditions, and verifies the module initializes.
+- Add a startup-style registry test that built chatbot/food-like source imports do not prevent loading when `dist/index.js` exists.
+- Add a Docker/runtime smoke test or script that starts compiled core and asserts all bundled app IDs are loaded.
+
+### Finding 37: `condition-eval` manifests do not receive the condition evaluator service
+
+- Status: open
+- Severity: medium
+- Classification: manifest contract drift / service injection
+- Location: `core/src/bootstrap.ts:420-426`
+- Related paths: `core/src/schemas/app-manifest.schema.json:171`, `docs/MANIFEST_REFERENCE.md:154`
+
+The manifest schema and manifest reference document `condition-eval` as the valid service ID for receiving `services.conditionEvaluator`, but bootstrap checks for `declaredServices.has('condition-evaluator')`. A manifest-compliant app that declares `requirements.services: ['condition-eval']` validates successfully and appears to request the service, but receives `conditionEvaluator: undefined` at runtime.
+
+Concrete failure path:
+
+1. An app declares `condition-eval` in `requirements.services`, matching the JSON schema and manifest docs.
+2. The manifest validates and the app loads.
+3. `serviceFactory()` checks for `condition-evaluator` instead of `condition-eval`.
+4. The app's `services.conditionEvaluator` is undefined, so rule evaluation code fails when first used.
+
+Correction notes:
+
+- Either change bootstrap to check `condition-eval` or update schema/docs to the `condition-evaluator` spelling.
+- If backward compatibility matters, accept both spellings in bootstrap and normalize service IDs before service construction.
+- Add an injection test for every schema-listed service ID to catch future schema/bootstrap drift.
+
+Suggested tests:
+
+- Add a bootstrap/service-factory-level test with a manifest declaring `condition-eval` and assert `services.conditionEvaluator` is present.
+- Add a manifest/service table test that every enum value in `requirements.services` maps to the expected CoreServices property or is explicitly marked legacy.
+
+### Finding 38: Install permission review and `--yes` are not connected to installer side effects
+
+- Status: open
+- Severity: medium
+- Classification: installation flow / consent boundary
+- Location: `core/src/cli/install-app.ts:82-106`
+- Related paths: `core/src/services/app-installer/index.ts:306-346`, `docs/urs.md:2904-2915`, `docs/app-sharing-vision.md:67`, `docs/app-sharing-vision.md:195`
+
+The install CLI advertises `--yes, -y` as "Skip confirmation prompt", and the app-sharing docs describe a review-permissions-then-install flow. The actual CLI only extracts the first non-flag argument as the git URL, never reads `--yes` or `-y`, never prompts, and calls `installApp()` immediately. `installApp()` builds the permission summary, copies the app into `apps/<app-id>/`, runs `pnpm install`, and only then returns the summary that the CLI prints.
+
+Concrete failure path:
+
+1. A user runs `pnpm install-app https://github.com/some/app.git` without `--yes`.
+2. The CLI calls `installApp()` with no confirmation or review step.
+3. The app is copied into the workspace and dependency installation runs.
+4. Only after those side effects succeed does the CLI print the permission summary.
+
+Correction notes:
+
+- Split the installer into a validation/planning phase and a commit phase, or add a `dryRun`/`validateOnly` mode that returns the permission summary before copy/install.
+- Prompt for confirmation after validation and before side effects unless `--yes` or `-y` is present.
+- Make the CLI tests spawn or invoke the actual argument parser/main flow instead of only checking that an array contains `--yes`.
+- Consider inspecting package lifecycle scripts or running dependency installation with the intended script policy as part of the install trust boundary.
+
+Suggested tests:
+
+- Add a CLI test where `--yes` is absent and assert the install commit does not run until the confirmation path approves it.
+- Add a CLI test where `--yes` is present and assert the commit phase runs without prompting.
+- Add an installer service test that permission summary generation can complete without copying into `apps/` or running `pnpm install`.
+
+### Finding 39: The documented `register-app` command points to a missing file
+
+- Status: open
+- Severity: medium
+- Classification: broken CLI command / documentation drift
+- Location: `package.json:19`
+- Related paths: `README.md:207`
+
+The root package exposes `"register-app": "tsx core/src/cli/register-app.ts"`, and the README lists `pnpm register-app --name=<id>`. There is no `core/src/cli/register-app.ts` in the repository, so the command fails before it can validate anything.
+
+Concrete evidence:
+
+- Command: `pnpm register-app --help`
+- Result: `ERR_MODULE_NOT_FOUND` for `core/src/cli/register-app.ts`
+
+Correction notes:
+
+- Implement the CLI if it is still intended to exist, including tests that spawn or import the actual entrypoint.
+- Otherwise remove the root package script and README command-table entry so users do not follow a dead path.
+- If app registration is fully replaced by manifest discovery at startup, document that replacement clearly.
+
+Suggested tests:
+
+- Add a smoke test for each root `package.json` CLI script that at least verifies `--help` or missing-argument behavior reaches the intended entrypoint.
+- Add a README command-table check or lightweight script inventory test to catch documented commands without files.
+
+### Finding 40: Duplicate manifest app IDs are initialized and then overwritten
+
+- Status: open
+- Severity: medium
+- Classification: manifest identity integrity / lifecycle ordering
+- Location: `core/src/services/app-registry/index.ts:62-80`
+- Related paths: `core/src/services/app-registry/manifest-cache.ts:39`
+
+`AppRegistry.loadAll()` does not reject duplicate `manifest.app.id` values. It loads the manifest, imports the module, builds services, and calls `module.init()` before writing to the cache and app map. `ManifestCache.add()` and `this.apps.set()` both key by app ID, so a later duplicate silently overwrites the earlier registered entry after both modules have already run initialization side effects.
+
+Concrete failure path:
+
+1. Two app directories contain valid manifests with the same `app.id`, for example `apps/echo` and `apps/other-echo`.
+2. The registry loads and initializes the first app.
+3. The registry then loads and initializes the second app with the same ID.
+4. `cache.add()` and `apps.set()` overwrite the first entry with the second.
+5. Routing tables, app metadata, and shutdown lifecycle now refer to the later app, while the earlier app may already have registered state, timers, or event subscriptions during `init()`.
+
+Correction notes:
+
+- Check for duplicate `manifest.app.id` immediately after manifest validation and before importing or initializing the module.
+- Treat duplicates as skipped apps with an explicit error log that includes both app directories.
+- Preserve the first loaded app or fail the whole startup loudly; either policy is safer than initializing both and letting the last writer win.
+
+Suggested tests:
+
+- Add an `AppRegistry.loadAll()` test with two app directories sharing one manifest ID and assert only one module's `init()` is called.
+- Add a manifest-cache test documenting whether duplicate IDs are rejected or ignored before cache mutation.
+- Add an installer/scaffold check if non-CLI app placement is still supported, so duplicate manifest IDs are detected before restart.
+
+Phase 8 test evidence:
+
+- Sandboxed command hit esbuild `spawn EPERM` while loading `vitest.config.ts`; the same command passed when rerun with approval outside the sandbox.
+- Command: `.\node_modules\.bin\vitest.cmd run core/src/services/app-registry/__tests__/loader.test.ts core/src/schemas/__tests__/validate-manifest.test.ts core/src/services/app-installer/__tests__/installer.test.ts core/src/services/app-installer/__tests__/static-analyzer.test.ts core/src/cli/__tests__/install-app.test.ts core/src/cli/__tests__/scaffold-app.test.ts core/src/cli/__tests__/uninstall-app.test.ts core/src/services/config/__tests__/config.test.ts core/src/services/config/__tests__/app-config-service.test.ts core/src/services/config/__tests__/config-writer.test.ts`
+- Result: 10 test files passed, 175/175 tests passed. These suites do not cover the failing boundary cases above.
+- Direct smoke command: `node -e "import('./core/dist/services/app-registry/loader.js').then(async m=>{ const errors=[]; const logger={debug(){},info(){},warn(){},error(o,msg){errors.push([msg,o])}}; const loader=new m.AppLoader({appsDir:'apps',logger}); for (const app of ['apps/echo','apps/notes','apps/chatbot','apps/food']) { const mod=await loader.importModule(app); console.log(app, mod ? 'loaded' : 'null'); } console.log('errors', errors.map(e=>e[0]).join('|')); })"`
+- Result: echo and notes loaded; chatbot and food returned null with "No valid app module found — skipping".
+- Direct smoke command: `pnpm register-app --help`
+- Result: failed with `ERR_MODULE_NOT_FOUND` for `core/src/cli/register-app.ts`.
 
 ## Phase 9: Test Quality, False Confidence, and Missing Error Paths
 
@@ -1120,4 +1280,73 @@ Missing coverage:
 
 ## Phase 10: Cross-Module Correlated AI Errors and End-to-End Flow Pass
 
-No phase-specific findings have been logged yet.
+### Finding 41: Report and alert edit pages raw-embed JSON inside script blocks
+
+- Status: open
+- Severity: medium
+- Classification: XSS / script-context escaping
+- Location: `core/src/gui/views/report-edit.eta:241-242`
+- Related paths: `core/src/gui/views/alert-edit.eta:245-249`, `core/src/gui/views/report-edit.eta:260-273`, `core/src/gui/views/alert-edit.eta:269-291`
+
+The report and alert edit templates use raw Eta output (`<%~ ... %>`) to place `JSON.stringify(...)` results directly into executable `<script>` blocks. `JSON.stringify()` does not escape literal `<` or `</script>` sequences, so data from user names, third-party app manifest names, report names, n8n URLs, or saved alert action config can terminate the script tag and execute HTML/script in the authenticated GUI origin. The later client-side builders also concatenate those names into `innerHTML`, so the data needs both script-safe serialization and DOM-safe insertion.
+
+Concrete failure path:
+
+1. A registered user's display name, an installed app manifest name, a report name, or an alert action field contains `</script><script>...</script>`.
+2. An authenticated GUI user opens `/gui/reports/new`, `/gui/reports/<id>/edit`, `/gui/alerts/new`, or `/gui/alerts/<id>/edit`.
+3. The template emits the raw JSON literal inside `<script>`.
+4. The browser treats the embedded `</script>` as the end of the block and executes the attacker-controlled script in the GUI session.
+
+Correction notes:
+
+- Add a small `safeJsonForScript()` helper that JSON-serializes and escapes `<`, `>`, `&`, U+2028, and U+2029 before using raw output.
+- Prefer moving the data into `type="application/json"` script tags or data attributes with context-appropriate escaping, then parse it client-side.
+- Stop concatenating untrusted names into `innerHTML`; either build options with DOM APIs or use a client-side HTML escaper for text and attribute contexts.
+- Apply the same pattern anywhere future templates need server data in inline JavaScript.
+
+Suggested tests:
+
+- Add report and alert GUI render tests with a user/app/report/action value containing `</script><script>window.__pasXss=1</script>`.
+- Assert the response body does not contain a literal attacker-provided `</script><script>` sequence and that the serialized data uses escaped forms such as `\u003c/script`.
+- Add a client-builder regression for app/user/report names containing `<`, `"`, and `'` so dynamically inserted `<select>` options remain text, not markup.
+
+### Finding 42: Alert `write_data` file paths do not expand the documented `{date}` token
+
+- Status: open
+- Severity: medium
+- Classification: data correctness / GUI-runtime contract drift
+- Location: `core/src/services/alerts/alert-executor.ts:373`
+- Related paths: `core/src/services/reports/section-collector.ts:208-215`, `core/src/gui/views/alert-edit.eta:349`, `core/src/types/alert.ts:60`, `core/src/services/alerts/__tests__/alert-executor-enhanced.test.ts:346-427`
+
+The alert action UI and type contract tell users that `write_data.path` supports `{date}`. The executor passes the path through `resolveDateTokens()`, but that shared helper only replaces `{today}` and `{yesterday}`. A user following the GUI placeholder `alert-log/{date}.md` will therefore write to a literal brace-named file instead of a date-partitioned file.
+
+Concrete failure path:
+
+1. A user creates an alert with a `write_data` action and keeps the GUI-suggested path `alert-log/{date}.md`.
+2. The alert fires on April 11, 2026.
+3. `executeWriteData()` calls `resolveDateTokens()` and gets `alert-log/{date}.md` back unchanged.
+4. PAS writes or appends `data/users/<userId>/<appId>/alert-log/{date}.md`, and future runs continue reusing that literal file instead of daily files such as `alert-log/2026-04-11.md`.
+
+Correction notes:
+
+- Either change the GUI/type/docs to advertise only `{today}` and `{yesterday}`, or make the alert write path resolver expand `{date}` to today's date in the configured timezone.
+- If `{date}` is added to the shared `resolveDateTokens()` helper, confirm report app-data sections should inherit that alias too; otherwise keep an alert-specific resolver.
+- Keep content templating separate: `{date}` already works in action message/content through `resolveTemplate()`.
+
+Suggested tests:
+
+- Add an alert executor test with frozen time, `path: 'alert-log/{date}.md'`, and assert the created filename contains the resolved date, not braces.
+- Add a GUI contract test that the placeholder/documented token is covered by a runtime executor test.
+- Add a negative regression that unknown path tokens stay literal if that remains intended.
+
+Phase 10 test evidence:
+
+- Sandboxed command hit esbuild `spawn EPERM` while loading `vitest.config.ts`; the same command passed when rerun with approval outside the sandbox.
+- Command: `.\node_modules\.bin\vitest.cmd run core/src/gui/__tests__/reports.test.ts core/src/gui/__tests__/alerts.test.ts core/src/services/alerts/__tests__/alert-executor-enhanced.test.ts core/src/services/reports/__tests__/section-collector.test.ts`
+- Result: 4 test files passed, 118/118 tests passed. These suites do not cover the failing boundary cases above.
+
+Missing coverage:
+
+- No report or alert edit-page render test proves server data embedded in inline JavaScript is escaped for script context.
+- No client-side select-builder test proves app/user/report names inserted through `innerHTML` remain inert text.
+- No alert executor test proves `write_data.path` expands the GUI-documented `{date}` token.
