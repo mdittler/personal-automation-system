@@ -199,10 +199,13 @@ export class Router {
 			) {
 				const result = await this.routeVerifier.verify(enrichedCtx, match);
 				if (result.action === 'held') return;
-				// Verifier confirmed (possibly different app) — dispatch to its pick
-				const verifiedApp = this.registry.getApp(
-					(result as { action: 'route'; appId: string }).appId,
-				);
+				// Verifier confirmed (possibly different app) — check access before dispatch
+				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
+				if (!(await this.isAppEnabled(enrichedCtx.userId, verifiedAppId, user.enabledApps))) {
+					await this.trySend(enrichedCtx.userId, `You don't have access to the ${verifiedAppId} app.`);
+					return;
+				}
+				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp) {
 					await this.dispatchMessage(verifiedApp, enrichedCtx);
 					return;
@@ -272,9 +275,12 @@ export class Router {
 					confidence: match.confidence,
 				});
 				if (result.action === 'held') return;
-				const verifiedApp = this.registry.getApp(
-					(result as { action: 'route'; appId: string }).appId,
-				);
+				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
+				if (!(await this.isAppEnabled(ctx.userId, verifiedAppId, user.enabledApps))) {
+					await this.trySend(ctx.userId, `You don't have access to the ${verifiedAppId} app.`);
+					return;
+				}
+				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp?.module.handlePhoto) {
 					await this.dispatchPhoto(verifiedApp, ctx);
 					return;

@@ -298,6 +298,69 @@ describe('Router — grey-zone verification', () => {
 
 			expect(echoModule.handleMessage).toHaveBeenCalledOnce();
 		});
+
+		it('rejects verifier-selected app when user does not have access', async () => {
+			// User has echo enabled but NOT grocery
+			const restrictedUser = {
+				id: '123',
+				name: 'test',
+				isAdmin: false,
+				enabledApps: ['echo'],
+				sharedScopes: [] as string[],
+			};
+			const config = createMockConfig([restrictedUser]);
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			const groceryModule = createMockModule();
+			// Verifier disagrees with classifier and picks grocery
+			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+
+			const cache = new ManifestCache();
+			cache.add(echoManifest, '/apps/echo');
+			cache.add(groceryManifest, '/apps/grocery');
+
+			const apps = [
+				{ manifest: echoManifest, module: echoModule },
+				{ manifest: groceryManifest, module: groceryModule },
+			];
+			const registry = {
+				getApp: (id: string) => {
+					const app = apps.find((a) => a.manifest.app.id === id);
+					if (!app) return undefined;
+					return {
+						manifest: app.manifest,
+						module: app.module,
+						appDir: `/apps/${id}`,
+					} as RegisteredApp;
+				},
+				getManifestCache: () => cache,
+				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+			} as unknown as AppRegistry;
+
+			const telegram = createMockTelegram();
+			const router = new Router({
+				registry,
+				llm: greyZoneLlm,
+				telegram,
+				fallback: createMockFallback(),
+				config,
+				logger: createMockLogger(),
+				confidenceThreshold: 0.4,
+				routeVerifier: verifier,
+			});
+			router.buildRoutingTables();
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			// Verifier was called
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			// Grocery handler NOT called (user doesn't have access)
+			expect(groceryModule.handleMessage).not.toHaveBeenCalled();
+			// User told they don't have access
+			expect(telegram.send).toHaveBeenCalledWith(
+				'123',
+				expect.stringContaining("don't have access"),
+			);
+		});
 	});
 
 	describe('routePhoto', () => {
@@ -386,6 +449,66 @@ describe('Router — grey-zone verification', () => {
 
 			expect(verifier.verify).toHaveBeenCalledOnce();
 			expect(groceryModule.handlePhoto).not.toHaveBeenCalled();
+		});
+
+		it('rejects verifier-selected photo app when user does not have access', async () => {
+			const restrictedUser = {
+				id: '123',
+				name: 'test',
+				isAdmin: false,
+				enabledApps: ['photos'],
+				sharedScopes: [] as string[],
+			};
+			const config = createMockConfig([restrictedUser]);
+			const greyZoneLlm = createMockLLM({ category: 'landscape', confidence: 0.55 });
+			groceryModule = createMockModule();
+			photoModule2 = createMockModule();
+			// Verifier disagrees and picks grocery
+			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+
+			const cache = new ManifestCache();
+			cache.add(groceryManifest, '/apps/grocery');
+			cache.add(photoManifest2, '/apps/photos');
+
+			const apps = [
+				{ manifest: groceryManifest, module: groceryModule },
+				{ manifest: photoManifest2, module: photoModule2 },
+			];
+			const registry = {
+				getApp: (id: string) => {
+					const app = apps.find((a) => a.manifest.app.id === id);
+					if (!app) return undefined;
+					return {
+						manifest: app.manifest,
+						module: app.module,
+						appDir: `/apps/${id}`,
+					} as RegisteredApp;
+				},
+				getManifestCache: () => cache,
+				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+			} as unknown as AppRegistry;
+
+			const telegram = createMockTelegram();
+			const router = new Router({
+				registry,
+				llm: greyZoneLlm,
+				telegram,
+				fallback: createMockFallback(),
+				config,
+				logger: createMockLogger(),
+				confidenceThreshold: 0.4,
+				routeVerifier: verifier,
+			});
+			router.buildRoutingTables();
+
+			await router.routePhoto(createPhotoCtx('some receipt'));
+
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			expect(groceryModule.handlePhoto).not.toHaveBeenCalled();
+			expect(telegram.send).toHaveBeenCalledWith(
+				'123',
+				expect.stringContaining("don't have access"),
+			);
 		});
 	});
 });
