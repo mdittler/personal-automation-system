@@ -362,4 +362,71 @@ describe('InviteService', () => {
 			expect(result).toEqual({ error: 'This invite code has already been used.' });
 		});
 	});
+
+	// --- claimAndRedeem ---
+
+	describe('claimAndRedeem', () => {
+		it('atomically validates and redeems a code', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+
+			const result = await svc.claimAndRedeem(code, '111');
+			expect('invite' in result).toBe(true);
+
+			const store = await svc.listInvites();
+			expect(store[code].usedBy).toBe('111');
+			expect(store[code].usedAt).not.toBeNull();
+		});
+
+		it('rejects invalid codes', async () => {
+			const svc = makeService();
+			const result = await svc.claimAndRedeem('nonexistent', '111');
+			expect(result).toEqual({ error: 'Invalid invite code.' });
+		});
+
+		it('rejects expired codes', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+
+			// Force expiry by modifying the store directly
+			const store = await svc.listInvites();
+			store[code].expiresAt = new Date(Date.now() - 1000).toISOString();
+			const { writeYamlFile } = await import('../../../utils/yaml.js');
+			await writeYamlFile(join(tempDir, 'system', 'invites.yaml'), store);
+
+			const result = await svc.claimAndRedeem(code, '111');
+			expect(result).toEqual({
+				error: 'This invite code has expired. Ask the admin for a new one.',
+			});
+		});
+
+		it('rejects already-used codes', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+			await svc.claimAndRedeem(code, '111');
+
+			const result = await svc.claimAndRedeem(code, '222');
+			expect(result).toEqual({ error: 'This invite code has already been used.' });
+		});
+
+		it('allows exactly one winner in concurrent redemptions', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+
+			const results = await Promise.all([
+				svc.claimAndRedeem(code, '111'),
+				svc.claimAndRedeem(code, '222'),
+			]);
+
+			const successes = results.filter((r) => 'invite' in r);
+			const failures = results.filter((r) => 'error' in r);
+
+			expect(successes).toHaveLength(1);
+			expect(failures).toHaveLength(1);
+
+			// The winner's ID is persisted
+			const store = await svc.listInvites();
+			expect(store[code].usedBy).not.toBeNull();
+		});
+	});
 });

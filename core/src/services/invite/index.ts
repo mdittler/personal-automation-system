@@ -11,6 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
+import { AsyncLock } from '../../utils/async-lock.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
 
 export interface InviteCode {
@@ -33,6 +34,7 @@ export interface InviteServiceOptions {
 export class InviteService {
 	private readonly invitesPath: string;
 	private readonly logger: Logger;
+	private readonly lock = new AsyncLock();
 
 	constructor(options: InviteServiceOptions) {
 		this.invitesPath = join(options.dataDir, 'system', 'invites.yaml');
@@ -104,6 +106,43 @@ export class InviteService {
 
 		await this.writeStore(store);
 		this.logger.info({ code, usedBy }, 'Invite code redeemed');
+	}
+
+	/**
+	 * Atomically validate and redeem an invite code.
+	 * Returns the invite on success, or an error message on failure.
+	 * Serialized per-code to prevent race conditions.
+	 */
+	async claimAndRedeem(
+		code: string,
+		usedBy: string,
+	): Promise<{ invite: InviteCode } | { error: string }> {
+		return this.lock.run(`invite:${code}`, async () => {
+			const store = await this.readStore();
+			const invite = store[code];
+
+			if (!invite) {
+				return { error: 'Invalid invite code.' };
+			}
+
+			if (invite.usedBy !== null) {
+				return { error: 'This invite code has already been used.' };
+			}
+
+			if (new Date(invite.expiresAt) <= new Date()) {
+				return {
+					error: 'This invite code has expired. Ask the admin for a new one.',
+				};
+			}
+
+			invite.usedBy = usedBy;
+			invite.usedAt = new Date().toISOString();
+
+			await this.writeStore(store);
+			this.logger.info({ code, usedBy }, 'Invite code claimed and redeemed');
+
+			return { invite };
+		});
 	}
 
 	/**
