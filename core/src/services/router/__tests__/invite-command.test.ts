@@ -76,6 +76,9 @@ function createMockInviteService(overrides: Partial<InviteService> = {}): Invite
 		validateCode: vi.fn().mockResolvedValue({
 			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null },
 		}),
+		claimAndRedeem: vi.fn().mockResolvedValue({
+			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null },
+		}),
 		redeemCode: vi.fn().mockResolvedValue(undefined),
 		listInvites: vi.fn().mockResolvedValue({}),
 		cleanup: vi.fn().mockResolvedValue(undefined),
@@ -229,7 +232,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/start abc12345', 'newuser1'));
 
-			expect(inviteService.validateCode).toHaveBeenCalledWith('abc12345');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('abc12345', 'newuser1');
 			expect(userMutationService.registerUser).toHaveBeenCalledWith(
 				expect.objectContaining({
 					id: 'newuser1',
@@ -238,7 +241,6 @@ describe('Router — /invite command', () => {
 					enabledApps: ['*'],
 				}),
 			);
-			expect(inviteService.redeemCode).toHaveBeenCalledWith('abc12345', 'newuser1');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'newuser1',
 				expect.stringContaining('Welcome to PAS'),
@@ -248,6 +250,7 @@ describe('Router — /invite command', () => {
 		it('should send error for invalid invite code', async () => {
 			const badInviteService = createMockInviteService({
 				validateCode: vi.fn().mockResolvedValue({ error: 'Invalid invite code.' }),
+				claimAndRedeem: vi.fn().mockResolvedValue({ error: 'Invalid invite code.' }),
 			});
 			const router = buildRouter([], { inviteService: badInviteService, userMutationService });
 
@@ -286,7 +289,7 @@ describe('Router — /invite command', () => {
 				expect.stringContaining('already registered'),
 			);
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
-			expect(inviteService.redeemCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
 	});
 

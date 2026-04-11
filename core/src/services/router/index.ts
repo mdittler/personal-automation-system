@@ -753,7 +753,7 @@ export class Router {
 	private async handleInviteRedemption(code: string, userId: string): Promise<void> {
 		if (!this.inviteService || !this.userMutationService) return;
 
-		const result = await this.inviteService.validateCode(code);
+		const result = await this.inviteService.claimAndRedeem(code, userId);
 		if ('error' in result) {
 			await this.trySend(userId, result.error);
 			return;
@@ -768,7 +768,6 @@ export class Router {
 		};
 
 		await this.userMutationService.registerUser(newUser);
-		await this.inviteService.redeemCode(code, userId);
 		await this.trySend(
 			userId,
 			`Welcome to PAS, ${escapeMarkdown(result.invite.name)}\\! Type /help to see available commands\\.`,

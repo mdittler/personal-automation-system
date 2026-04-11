@@ -34,6 +34,7 @@ function createMockInviteService(
 	return {
 		validateCode: vi.fn(async () => validateResult),
 		redeemCode: vi.fn(async () => {}),
+		claimAndRedeem: vi.fn(async () => validateResult),
 		createInvite: vi.fn(),
 		listInvites: vi.fn(),
 		cleanup: vi.fn(),
@@ -133,7 +134,7 @@ describe('UserGuard', () => {
 			expect(userMutationService.registerUser).toHaveBeenCalledWith(
 				expect.objectContaining({ id: '999', name: 'Alice', isAdmin: false }),
 			);
-			expect(inviteService.redeemCode).toHaveBeenCalledWith('a1b2c3d4', '999');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', '999');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'999',
 				expect.stringContaining('Welcome to PAS, Alice'),
@@ -159,7 +160,6 @@ describe('UserGuard', () => {
 			const result = await guard.checkUser('999', 'deadbeef');
 			expect(result).toBe(false);
 			expect(userMutationService.registerUser).not.toHaveBeenCalled();
-			expect(inviteService.redeemCode).not.toHaveBeenCalled();
 			expect(telegram.send).toHaveBeenCalledWith(
 				'999',
 				'This invite code has expired. Ask the admin for a new one.',
@@ -182,7 +182,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999', 'hello world');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 			expect(telegram.send).toHaveBeenCalledWith('999', expect.stringContaining('not registered'));
 		});
 
@@ -202,7 +202,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 			expect(telegram.send).toHaveBeenCalledWith('999', expect.stringContaining('not registered'));
 		});
 
@@ -242,7 +242,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999', '  a1b2c3d4  ');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', '999');
 		});
 
 		it('handles welcome message send failure gracefully after successful registration', async () => {
@@ -273,7 +273,7 @@ describe('UserGuard', () => {
 			const result = await guard.checkUser('999', 'a1b2c3d4');
 			expect(result).toBe(true);
 			expect(userMutationService.registerUser).toHaveBeenCalled();
-			expect(inviteService.redeemCode).toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).toHaveBeenCalled();
 		});
 
 		it('redeems valid code when sent as /start <code> from unregistered user', async () => {
@@ -301,11 +301,10 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999', '/start a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', '999');
 			expect(userMutationService.registerUser).toHaveBeenCalledWith(
 				expect.objectContaining({ id: '999', name: 'Alice', isAdmin: false }),
 			);
-			expect(inviteService.redeemCode).toHaveBeenCalledWith('a1b2c3d4', '999');
 		});
 
 		it('sends invite error when /start <code> has expired code', async () => {
@@ -326,7 +325,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999', '/start deadbeef');
 			expect(result).toBe(false);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('deadbeef');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('deadbeef', '999');
 			expect(telegram.send).toHaveBeenCalledWith(
 				'999',
 				'This invite code has expired. Ask the admin for a new one.',
@@ -358,7 +357,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('999', '/start  a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).toHaveBeenCalledWith('a1b2c3d4');
+			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', '999');
 		});
 
 		it('does not attempt invite redemption for registered users', async () => {
@@ -377,7 +376,7 @@ describe('UserGuard', () => {
 
 			const result = await guard.checkUser('111', 'a1b2c3d4');
 			expect(result).toBe(true);
-			expect(inviteService.validateCode).not.toHaveBeenCalled();
+			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 			expect(telegram.send).not.toHaveBeenCalled();
 		});
 	});
