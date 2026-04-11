@@ -29,10 +29,10 @@ requirements:
     - system-info
   data:
     user_scopes:
-      - path: "chatbot/history.json"
+      - path: "history.json"
         access: read-write
         description: "Conversation history for context continuity"
-      - path: "chatbot/daily-notes/"
+      - path: "daily-notes/"
         access: read-write
         description: "Daily notes fallback logging"
   llm:

@@ -22,6 +22,6 @@ requirements:
     - data-store
   data:
     user_scopes:
-      - path: "echo/log.md"
+      - path: "log.md"
         access: read-write
         description: "Message echo log"

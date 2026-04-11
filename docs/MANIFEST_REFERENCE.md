@@ -302,7 +302,7 @@ requirements:
     - llm
   data:
     user_scopes:
-      - path: "notes/daily-notes/"
+      - path: "daily-notes/"
         access: read-write
         description: "Daily notes organized by date"
   llm:
