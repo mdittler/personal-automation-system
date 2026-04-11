@@ -202,6 +202,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		await mkdir(dir, { recursive: true });
 
 		const filePath = resolve(join(dir, `${slug}.md`));
+		// Unreachable given SLUG_PATTERN validation above; retained as defence-in-depth
 		const rel = relative(dir, filePath);
 		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			throw new Error('Path traversal detected');
@@ -222,6 +223,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 
 		const dir = this.userDir(userId);
 		const filePath = resolve(join(dir, `${slug}.md`));
+		// Unreachable given SLUG_PATTERN validation above; retained as defence-in-depth
 		const rel = relative(dir, filePath);
 		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			throw new Error('Path traversal detected');
@@ -248,6 +250,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		}
 
 		const filePath = resolve(join(dir, `${slug}.md`));
+		// Unreachable given SLUG_PATTERN validation above; retained as defence-in-depth
 		const rel = relative(dir, filePath);
 		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			this.logger.warn({ key }, 'Context store key attempted path traversal');
