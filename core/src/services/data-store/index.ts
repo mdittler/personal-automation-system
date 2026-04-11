@@ -23,7 +23,6 @@ import type { ManifestDataScope } from '../../types/manifest.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { ChangeLog } from './change-log.js';
-import { isWithinDeclaredScopes } from './paths.js';
 import { ScopedStore } from './scoped-store.js';
 
 /** Error thrown when a user is not a member of a requested space. */
@@ -57,8 +56,8 @@ export interface DataStoreServiceOptions {
 export class DataStoreServiceImpl implements DataStoreService {
 	private readonly dataDir: string;
 	private readonly appId: string;
-	private readonly userScopePaths: string[];
-	private readonly sharedScopePaths: string[];
+	private readonly userScopes: ManifestDataScope[];
+	private readonly sharedScopes: ManifestDataScope[];
 	private readonly changeLog: ChangeLog;
 	private readonly spaceService?: SpaceService;
 	private readonly eventBus?: EventBusService;
@@ -66,8 +65,8 @@ export class DataStoreServiceImpl implements DataStoreService {
 	constructor(options: DataStoreServiceOptions) {
 		this.dataDir = options.dataDir;
 		this.appId = options.appId;
-		this.userScopePaths = options.userScopes.map((s) => s.path);
-		this.sharedScopePaths = options.sharedScopes.map((s) => s.path);
+		this.userScopes = options.userScopes;
+		this.sharedScopes = options.sharedScopes;
 		this.changeLog = options.changeLog;
 		this.spaceService = options.spaceService;
 		this.eventBus = options.eventBus;
@@ -81,6 +80,7 @@ export class DataStoreServiceImpl implements DataStoreService {
 			userId,
 			changeLog: this.changeLog,
 			eventBus: this.eventBus,
+			scopes: this.userScopes,
 		});
 	}
 
@@ -92,6 +92,7 @@ export class DataStoreServiceImpl implements DataStoreService {
 			userId: null,
 			changeLog: this.changeLog,
 			eventBus: this.eventBus,
+			scopes: this.sharedScopes,
 		});
 	}
 
@@ -114,32 +115,10 @@ export class DataStoreServiceImpl implements DataStoreService {
 			changeLog: this.changeLog,
 			spaceId,
 			eventBus: this.eventBus,
+			scopes: this.sharedScopes,
 		});
-	}
-
-	/**
-	 * Check whether a user-scoped path is within the app's declared scopes.
-	 *
-	 * NOTE: Scope enforcement is intentionally NOT wired into ScopedStore
-	 * operations here. It will be enforced in Phase 5 (bootstrap) when the
-	 * infrastructure constructs per-app DataStoreService instances. The
-	 * bootstrap layer will validate that apps only access paths declared in
-	 * their manifest data scopes, including checking the access level
-	 * (read/write/read-write) from ManifestDataScope.
-	 */
-	isAllowedUserPath(path: string): boolean {
-		return isWithinDeclaredScopes(path, this.userScopePaths);
-	}
-
-	/**
-	 * Check whether a shared-scoped path is within the app's declared scopes.
-	 *
-	 * See isAllowedUserPath() for enforcement strategy notes.
-	 */
-	isAllowedSharedPath(path: string): boolean {
-		return isWithinDeclaredScopes(path, this.sharedScopePaths);
 	}
 }
 
 export { ChangeLog } from './change-log.js';
-export { PathTraversalError } from './paths.js';
+export { PathTraversalError, ScopeViolationError } from './paths.js';

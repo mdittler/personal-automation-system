@@ -394,7 +394,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 		const service = new DataStoreServiceImpl({
 			dataDir,
 			appId: 'notes',
-			userScopes: [{ path: 'notes/', access: 'read-write' }],
+			userScopes: [],
 			sharedScopes: [],
 			changeLog,
 		});
