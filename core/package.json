@@ -31,6 +31,10 @@
 			"import": "./dist/utils/cron-describe.js",
 			"types": "./dist/utils/cron-describe.d.ts"
 		},
+		"./utils/escape-markdown": {
+			"import": "./dist/utils/escape-markdown.js",
+			"types": "./dist/utils/escape-markdown.d.ts"
+		},
 		"./testing": {
 			"import": "./dist/testing/mock-services.js",
 			"types": "./dist/testing/mock-services.d.ts"
