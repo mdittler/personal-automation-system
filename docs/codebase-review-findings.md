@@ -167,7 +167,7 @@ Suggested tests:
 
 ### Finding 3: Manifest data scopes are advisory only
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: missing validation / data boundary
 - Location: `core/src/services/data-store/index.ts:76-84`
@@ -204,7 +204,7 @@ Suggested tests:
 
 ### Finding 7: Manifest data scope paths use mixed coordinate systems
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: data boundary / manifest contract drift
 - Location: `core/src/types/manifest.ts:172-174`
@@ -234,7 +234,7 @@ Suggested tests:
 
 ### Finding 8: Context store read containment uses a prefix check
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: path traversal / data boundary
 - Location: `core/src/services/context-store/index.ts:241-246`
