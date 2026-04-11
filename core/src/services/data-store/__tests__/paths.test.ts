@@ -79,7 +79,37 @@ describe('ScopeViolationError', () => {
 });
 
 describe('warnScopePathPrefix', () => {
-	it('is exported from paths.ts', () => {
-		expect(typeof warnScopePathPrefix).toBe('function');
+	it('returns warnings for paths starting with appId/', () => {
+		const warnings = warnScopePathPrefix('echo', [
+			{ path: 'echo/log.md', access: 'read-write', description: 'Log' },
+		]);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain('echo/log.md');
+	});
+
+	it('returns empty array for correctly scoped paths', () => {
+		const warnings = warnScopePathPrefix('echo', [
+			{ path: 'log.md', access: 'read-write', description: 'Log' },
+		]);
+		expect(warnings).toHaveLength(0);
+	});
+
+	it('does not warn for paths that merely contain the appId', () => {
+		const warnings = warnScopePathPrefix('notes', [
+			{ path: 'release-notes/', access: 'read-write', description: 'Release notes' },
+		]);
+		expect(warnings).toHaveLength(0);
+	});
+
+	it('handles empty scopes array', () => {
+		expect(warnScopePathPrefix('echo', [])).toHaveLength(0);
+	});
+
+	it('warns for multiple offending paths', () => {
+		const warnings = warnScopePathPrefix('chatbot', [
+			{ path: 'chatbot/history.json', access: 'read-write', description: 'History' },
+			{ path: 'chatbot/daily-notes/', access: 'read-write', description: 'Notes' },
+		]);
+		expect(warnings).toHaveLength(2);
 	});
 });

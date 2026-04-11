@@ -14,6 +14,7 @@ import { validateManifest } from '../../schemas/validate-manifest.js';
 import type { AppModule } from '../../types/app-module.js';
 import type { AppManifest } from '../../types/manifest.js';
 import { readYamlFile } from '../../utils/yaml.js';
+import { warnScopePathPrefix } from '../data-store/paths.js';
 
 /** A successfully loaded app with its manifest and module. */
 export interface LoadedApp {
@@ -96,7 +97,21 @@ export class AppLoader {
 			return null;
 		}
 
-		return result.manifest;
+		const manifest = result.manifest;
+
+		// Warn about scope paths using the {appId}/ prefix convention (F7)
+		const appId = manifest.app.id;
+		const userScopes = manifest.requirements?.data?.user_scopes ?? [];
+		const sharedScopes = manifest.requirements?.data?.shared_scopes ?? [];
+		const scopeWarnings = [
+			...warnScopePathPrefix(appId, userScopes),
+			...warnScopePathPrefix(appId, sharedScopes),
+		];
+		for (const warning of scopeWarnings) {
+			this.logger.warn({ appId, path: manifestPath }, warning);
+		}
+
+		return manifest;
 	}
 
 	/**
