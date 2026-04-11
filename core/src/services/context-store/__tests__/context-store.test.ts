@@ -388,6 +388,59 @@ describe('ContextStoreServiceImpl', () => {
 		});
 	});
 
+	describe('path containment (F8)', () => {
+		it('get() reads via slugified key', async () => {
+			await writeFile(join(contextDir, 'my-notes.md'), 'Found via slug\n');
+
+			const result = await store.get('My Notes');
+			expect(result).toBe('Found via slug\n');
+		});
+
+		it('getForUser() reads via slugified key', async () => {
+			const userCtxDir = join(tempDir, 'users', 'user1', 'context');
+			await mkdir(userCtxDir, { recursive: true });
+			await writeFile(join(userCtxDir, 'my-notes.md'), 'User notes\n');
+
+			const result = await store.getForUser('My Notes', 'user1');
+			expect(result).toBe('User notes\n');
+		});
+
+		it('get() returns null for ../context2/secret even when sibling exists', async () => {
+			const siblingDir = join(tempDir, 'system', 'context2');
+			await mkdir(siblingDir, { recursive: true });
+			await writeFile(join(siblingDir, 'secret.md'), 'SECRET\n');
+
+			const result = await store.get('../context2/secret');
+			expect(result).toBeNull();
+		});
+
+		it('getForUser() returns null for ../context2/secret even when sibling exists', async () => {
+			const userCtxDir = join(tempDir, 'users', 'user1', 'context');
+			await mkdir(userCtxDir, { recursive: true });
+			const siblingDir = join(tempDir, 'users', 'user1', 'context2');
+			await mkdir(siblingDir, { recursive: true });
+			await writeFile(join(siblingDir, 'secret.md'), 'SECRET\n');
+
+			const result = await store.getForUser('../context2/secret', 'user1');
+			expect(result).toBeNull();
+		});
+
+		it('save() path containment uses relative() check (defense-in-depth)', async () => {
+			// "../context2/evil" slugifies to "context2-evil" — safe
+			await store.save('user1', '../context2/evil', 'attempt');
+			const result = await store.getForUser('context2-evil', 'user1');
+			expect(result).toBe('attempt');
+		});
+
+		it('remove() path containment uses relative() check (defense-in-depth)', async () => {
+			await store.save('user1', 'test-entry', 'content');
+			// slugifyKey('../test-entry') = 'test-entry', so this removes the entry
+			await store.remove('user1', '../test-entry');
+			const result = await store.getForUser('test-entry', 'user1');
+			expect(result).toBeNull();
+		});
+	});
+
 	describe('slugifyKey', () => {
 		it('converts spaces to hyphens and lowercases', () => {
 			expect(slugifyKey('Food Preferences')).toBe('food-preferences');

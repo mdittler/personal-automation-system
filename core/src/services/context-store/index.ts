@@ -9,7 +9,7 @@
  */
 
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import type { Logger } from 'pino';
 import type { ContextEntry, ContextStoreService } from '../../types/context-store.js';
 import { atomicWrite } from '../../utils/file.js';
@@ -202,7 +202,8 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		await mkdir(dir, { recursive: true });
 
 		const filePath = resolve(join(dir, `${slug}.md`));
-		if (!filePath.startsWith(dir)) {
+		const rel = relative(dir, filePath);
+		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			throw new Error('Path traversal detected');
 		}
 
@@ -221,7 +222,8 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 
 		const dir = this.userDir(userId);
 		const filePath = resolve(join(dir, `${slug}.md`));
-		if (!filePath.startsWith(dir)) {
+		const rel = relative(dir, filePath);
+		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			throw new Error('Path traversal detected');
 		}
 
@@ -239,8 +241,15 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 	// --- Private helpers ---
 
 	private async readEntry(dir: string, key: string): Promise<string | null> {
-		const filePath = resolve(join(dir, `${key}.md`));
-		if (!filePath.startsWith(dir)) {
+		const slug = slugifyKey(key);
+		if (!slug || !SLUG_PATTERN.test(slug)) {
+			this.logger.warn({ key }, 'Context store key failed slug validation');
+			return null;
+		}
+
+		const filePath = resolve(join(dir, `${slug}.md`));
+		const rel = relative(dir, filePath);
+		if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 			this.logger.warn({ key }, 'Context store key attempted path traversal');
 			return null;
 		}
