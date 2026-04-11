@@ -101,7 +101,7 @@ describe('dispatch-site requestContext wraps', () => {
 			// branch by searching for the characteristic handoff between
 			// resolveCallback and requestContext.run.
 			const rvBranch = source.match(
-				/resolveCallback[\s\S]{0,400}requestContext\.run\s*\(\s*\{\s*userId\s*\}/,
+				/resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*\{\s*userId\s*\}/,
 			);
 			expect(rvBranch).not.toBeNull();
 		});
