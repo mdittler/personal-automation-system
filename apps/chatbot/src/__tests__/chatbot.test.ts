@@ -7,6 +7,7 @@ import {
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
 import * as chatbot from '../index.js';
 import {
+	MODEL_SWITCH_INTENT_REGEX,
 	buildAppAwareSystemPrompt,
 	buildSystemPrompt,
 	categorizeQuestion,
@@ -1625,8 +1626,7 @@ describe('Chatbot App', () => {
 
 			expect(services.systemInfo.setTierModel).not.toHaveBeenCalled();
 			expect(result.cleanedResponse).not.toContain('<switch-model');
-			expect(result.confirmations).toHaveLength(1);
-			expect(result.confirmations[0]).toContain('admin');
+			expect(result.confirmations).toHaveLength(0);
 		});
 
 		it('rejects when user message lacks model-switch intent', async () => {
@@ -1658,6 +1658,18 @@ describe('Chatbot App', () => {
 			expect(services.systemInfo.setTierModel).toHaveBeenCalledTimes(1);
 			expect(result.confirmations).toHaveLength(1);
 			expect(result.confirmations[0]).toContain('Switched fast tier');
+		});
+
+		it('strips tags when admin but no userMessage provided', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
+
+			const response =
+				'Here you go. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
+			const result = await processModelSwitchTags(response, { userId: 'admin-user' });
+
+			expect(services.systemInfo.setTierModel).not.toHaveBeenCalled();
+			expect(result.cleanedResponse).not.toContain('<switch-model');
+			expect(result.confirmations).toHaveLength(0);
 		});
 
 		it('handleMessage strips model-switch tags without executing', async () => {
@@ -1772,6 +1784,26 @@ describe('Chatbot App', () => {
 
 			const prompt = await buildAppAwareSystemPrompt('what did I eat?', 'user1', [], []);
 			expect(prompt).toContain('Cross-app data search will be available');
+		});
+	});
+
+	describe('MODEL_SWITCH_INTENT_REGEX', () => {
+		it.each([
+			'switch the fast model',
+			'change the reasoning tier',
+			'update the standard model',
+			'use haiku for fast tier',
+		])('matches intent: %s', (input) => {
+			expect(MODEL_SWITCH_INTENT_REGEX.test(input)).toBe(true);
+		});
+
+		it.each([
+			"what model is running?",
+			'tell me about tiers',
+			'I love this model',
+			'which provider is fastest?',
+		])('does not match non-intent: %s', (input) => {
+			expect(MODEL_SWITCH_INTENT_REGEX.test(input)).toBe(false);
 		});
 	});
 

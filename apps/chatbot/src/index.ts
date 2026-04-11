@@ -250,19 +250,16 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// 8. Strip model-switch tags without executing — admin actions via /ask only
 	const finalResponse = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
-	const confirmations: string[] = [];
 
-	// 9. Send response (without journal/switch tags, with confirmations)
-	const responseWithConfirmations =
-		confirmations.length > 0 ? `${finalResponse}\n\n${confirmations.join('\n')}` : finalResponse;
-	await services.telegram.send(ctx.userId, responseWithConfirmations);
+	// 9. Send response (without journal/switch tags)
+	await services.telegram.send(ctx.userId, finalResponse);
 
 	// 10. Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
 	const userTurn: ConversationTurn = { role: 'user', content: ctx.text, timestamp: now };
 	const assistantTurn: ConversationTurn = {
 		role: 'assistant',
-		content: responseWithConfirmations,
+		content: finalResponse,
 		timestamp: now,
 	};
 
@@ -867,12 +864,12 @@ export async function processModelSwitchTags(
 		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
 			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
-			confirmations: ['Model switching requires admin access.'],
+			confirmations,
 		};
 	}
 
 	// Guard: require explicit model-switch intent in the user message (only when tags present)
-	if (options?.userMessage && !MODEL_SWITCH_INTENT_REGEX.test(options.userMessage)) {
+	if (!options?.userMessage || !MODEL_SWITCH_INTENT_REGEX.test(options.userMessage)) {
 		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
 			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
