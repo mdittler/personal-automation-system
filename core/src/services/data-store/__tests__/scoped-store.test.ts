@@ -472,7 +472,7 @@ describe('ScopedStore', () => {
 				changeLog,
 				scopes: [{ path: 'log.md', access: 'read-write', description: 'Echo log' }],
 			});
-			await echoStore.append('log.md', '- [2026-04-11] hello\n');
+			await echoStore.append('log.md', '- hello\n');
 			const content = await echoStore.read('log.md');
 			expect(content).toContain('hello');
 		});
@@ -487,8 +487,8 @@ describe('ScopedStore', () => {
 					{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes' },
 				],
 			});
-			await notesStore.append('daily-notes/2026-04-11.md', '- note\n');
-			const content = await notesStore.read('daily-notes/2026-04-11.md');
+			await notesStore.append('daily-notes/test-entry.md', '- note\n');
+			const content = await notesStore.read('daily-notes/test-entry.md');
 			expect(content).toContain('note');
 		});
 
@@ -518,8 +518,8 @@ describe('ScopedStore', () => {
 					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
 				],
 			});
-			await chatbotStore.append('daily-notes/2026-04-11.md', '- note\n');
-			const content = await chatbotStore.read('daily-notes/2026-04-11.md');
+			await chatbotStore.append('daily-notes/test-entry.md', '- note\n');
+			const content = await chatbotStore.read('daily-notes/test-entry.md');
 			expect(content).toContain('note');
 		});
 
