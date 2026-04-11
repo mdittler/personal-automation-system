@@ -197,7 +197,12 @@ export class Router {
 				match.confidence >= this.confidenceThreshold &&
 				match.confidence < this.verificationUpperBound
 			) {
-				const result = await this.routeVerifier.verify(enrichedCtx, match);
+				const result = await this.routeVerifier.verify(
+					enrichedCtx,
+					match,
+					undefined,
+					user.enabledApps,
+				);
 				if (result.action === 'held') return;
 				// Verifier confirmed (possibly different app) — check access before dispatch
 				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
@@ -269,11 +274,16 @@ export class Router {
 				match.confidence >= this.confidenceThreshold &&
 				match.confidence < this.verificationUpperBound
 			) {
-				const result = await this.routeVerifier.verify(ctx, {
-					appId: match.appId,
-					intent: match.photoType,
-					confidence: match.confidence,
-				});
+				const result = await this.routeVerifier.verify(
+					ctx,
+					{
+						appId: match.appId,
+						intent: match.photoType,
+						confidence: match.confidence,
+					},
+					undefined,
+					user.enabledApps,
+				);
 				if (result.action === 'held') return;
 				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
 				if (!(await this.isAppEnabled(ctx.userId, verifiedAppId, user.enabledApps))) {
