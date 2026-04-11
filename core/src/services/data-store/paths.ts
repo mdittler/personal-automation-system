@@ -32,34 +32,6 @@ export function resolveScopedPath(baseDir: string, relativePath: string): string
 }
 
 /**
- * Check if a path is within a list of declared scopes.
- *
- * @param path - The file path to check (relative to app root in data dir)
- * @param declaredScopes - Paths declared in the app's manifest data scopes
- * @returns true if the path falls within any declared scope
- */
-export function isWithinDeclaredScopes(path: string, declaredScopes: string[]): boolean {
-	if (declaredScopes.length === 0) return false;
-
-	const normalizedPath = path.replace(/\\/g, '/');
-
-	return declaredScopes.some((scope) => {
-		const normalizedScope = scope.replace(/\\/g, '/');
-
-		// Exact file match
-		if (normalizedPath === normalizedScope) return true;
-
-		// Directory scope: path is under the scope directory
-		if (normalizedScope.endsWith('/')) {
-			return normalizedPath.startsWith(normalizedScope);
-		}
-
-		// File scope: check if the path matches the specific file
-		return normalizedPath === normalizedScope;
-	});
-}
-
-/**
  * Error thrown when a path traversal attempt is detected.
  */
 export class PathTraversalError extends Error {
