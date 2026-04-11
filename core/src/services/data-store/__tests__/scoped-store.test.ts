@@ -462,4 +462,97 @@ describe('ScopedStore', () => {
 			expect(await emptyScopes.read('anything.md')).toBe('ok');
 		});
 	});
+
+	describe('bundled app scope regression', () => {
+		it('echo: append to log.md succeeds with declared scope', async () => {
+			const echoStore = new ScopedStore({
+				baseDir: join(tempDir, 'echo-app'),
+				appId: 'echo',
+				userId: 'user-1',
+				changeLog,
+				scopes: [{ path: 'log.md', access: 'read-write', description: 'Echo log' }],
+			});
+			await echoStore.append('log.md', '- [2026-04-11] hello\n');
+			const content = await echoStore.read('log.md');
+			expect(content).toContain('hello');
+		});
+
+		it('notes: write to daily-notes/<date>.md succeeds with declared scope', async () => {
+			const notesStore = new ScopedStore({
+				baseDir: join(tempDir, 'notes-app'),
+				appId: 'notes',
+				userId: 'user-1',
+				changeLog,
+				scopes: [
+					{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes' },
+				],
+			});
+			await notesStore.append('daily-notes/2026-04-11.md', '- note\n');
+			const content = await notesStore.read('daily-notes/2026-04-11.md');
+			expect(content).toContain('note');
+		});
+
+		it('chatbot: write to history.json succeeds with declared scopes', async () => {
+			const chatbotStore = new ScopedStore({
+				baseDir: join(tempDir, 'chatbot-app'),
+				appId: 'chatbot',
+				userId: 'user-1',
+				changeLog,
+				scopes: [
+					{ path: 'history.json', access: 'read-write', description: 'History' },
+					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
+				],
+			});
+			await chatbotStore.write('history.json', '[]');
+			expect(await chatbotStore.read('history.json')).toBe('[]');
+		});
+
+		it('chatbot: append to daily-notes/<date>.md succeeds', async () => {
+			const chatbotStore = new ScopedStore({
+				baseDir: join(tempDir, 'chatbot-app2'),
+				appId: 'chatbot',
+				userId: 'user-1',
+				changeLog,
+				scopes: [
+					{ path: 'history.json', access: 'read-write', description: 'History' },
+					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
+				],
+			});
+			await chatbotStore.append('daily-notes/2026-04-11.md', '- note\n');
+			const content = await chatbotStore.read('daily-notes/2026-04-11.md');
+			expect(content).toContain('note');
+		});
+
+		it('chatbot: list daily-notes succeeds', async () => {
+			const chatbotStore = new ScopedStore({
+				baseDir: join(tempDir, 'chatbot-app3'),
+				appId: 'chatbot',
+				userId: 'user-1',
+				changeLog,
+				scopes: [
+					{ path: 'history.json', access: 'read-write', description: 'History' },
+					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
+				],
+			});
+			await chatbotStore.write('daily-notes/a.md', 'a');
+			const files = await chatbotStore.list('daily-notes');
+			expect(files).toEqual(['a.md']);
+		});
+
+		it('chatbot: rejects write to undeclared path', async () => {
+			const chatbotStore = new ScopedStore({
+				baseDir: join(tempDir, 'chatbot-app4'),
+				appId: 'chatbot',
+				userId: 'user-1',
+				changeLog,
+				scopes: [
+					{ path: 'history.json', access: 'read-write', description: 'History' },
+					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
+				],
+			});
+			await expect(chatbotStore.write('sneaky.md', 'bad')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+	});
 });

@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../../services/data-store/index.js';
-import { PathTraversalError } from '../../services/data-store/paths.js';
+import { PathTraversalError, ScopeViolationError } from '../../services/data-store/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { EventBusService } from '../../types/events.js';
@@ -124,6 +124,9 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 			}
 			if (err instanceof PathTraversalError) {
 				return reply.status(400).send({ ok: false, error: 'Invalid path: traversal detected.' });
+			}
+			if (err instanceof ScopeViolationError) {
+				return reply.status(403).send({ ok: false, error: 'Path not within declared scopes.' });
 			}
 			logger.error({ err, userId, appId, path }, 'API data write failed');
 			return reply.status(500).send({ ok: false, error: 'Internal server error.' });
