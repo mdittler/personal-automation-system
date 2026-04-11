@@ -170,6 +170,11 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 		};
 	}
 
+	isUserAdmin(userId: string): boolean {
+		const user = this.userManager.getUser(userId);
+		return user?.isAdmin === true;
+	}
+
 	async setTierModel(
 		tier: string,
 		provider: string,

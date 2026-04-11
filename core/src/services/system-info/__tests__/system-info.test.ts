@@ -338,4 +338,33 @@ describe('SystemInfoServiceImpl', () => {
 			expect(result.error).toContain('Write failed');
 		});
 	});
+
+	describe('isUserAdmin', () => {
+		it('returns true for admin user', () => {
+			const deps = createMockDeps();
+			(deps.userManager.getUser as ReturnType<typeof vi.fn>) = vi
+				.fn()
+				.mockReturnValue({ id: '123', name: 'Admin', isAdmin: true });
+			const svc = new SystemInfoServiceImpl(deps);
+			expect(svc.isUserAdmin('123')).toBe(true);
+		});
+
+		it('returns false for non-admin user', () => {
+			const deps = createMockDeps();
+			(deps.userManager.getUser as ReturnType<typeof vi.fn>) = vi
+				.fn()
+				.mockReturnValue({ id: '456', name: 'Regular', isAdmin: false });
+			const svc = new SystemInfoServiceImpl(deps);
+			expect(svc.isUserAdmin('456')).toBe(false);
+		});
+
+		it('returns false for unknown userId', () => {
+			const deps = createMockDeps();
+			(deps.userManager.getUser as ReturnType<typeof vi.fn>) = vi
+				.fn()
+				.mockReturnValue(undefined);
+			const svc = new SystemInfoServiceImpl(deps);
+			expect(svc.isUserAdmin('nonexistent')).toBe(false);
+		});
+	});
 });

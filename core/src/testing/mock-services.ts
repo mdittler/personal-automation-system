@@ -206,6 +206,7 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 				globalMonthlyCostCap: 50,
 			}),
 			setTierModel: vi.fn().mockResolvedValue({ success: true }),
+			isUserAdmin: vi.fn().mockReturnValue(false),
 			...overrides?.systemInfo,
 		} as SystemInfoService,
 		secrets: {

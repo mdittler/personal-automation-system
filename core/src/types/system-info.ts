@@ -102,4 +102,7 @@ export interface SystemInfoService {
 		provider: string,
 		model: string,
 	): Promise<{ success: boolean; error?: string }>;
+
+	/** Check whether a registered user has admin privileges. Returns false for unknown users. */
+	isUserAdmin(userId: string): boolean;
 }
