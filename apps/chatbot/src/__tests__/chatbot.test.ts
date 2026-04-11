@@ -1253,11 +1253,15 @@ describe('Chatbot App', () => {
 		});
 
 		it('extracts and processes switch-model tags', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
 			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({ success: true });
 
 			const response =
 				'I\'ll switch that for you. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
-			const result = await processModelSwitchTags(response);
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin-user',
+				userMessage: 'switch the fast model to claude haiku',
+			});
 
 			expect(result.cleanedResponse).toBe("I'll switch that for you.");
 			expect(result.confirmations).toHaveLength(1);
@@ -1270,13 +1274,17 @@ describe('Chatbot App', () => {
 		});
 
 		it('includes error message on switch failure', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
 			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({
 				success: false,
 				error: 'Provider not found',
 			});
 
 			const response = 'Switching. <switch-model tier="fast" provider="openai" model="gpt-4o"/>';
-			const result = await processModelSwitchTags(response);
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin-user',
+				userMessage: 'switch fast tier to gpt-4o',
+			});
 
 			expect(result.confirmations).toHaveLength(1);
 			expect(result.confirmations[0]).toContain('Failed');
@@ -1284,20 +1292,28 @@ describe('Chatbot App', () => {
 		});
 
 		it('handles multiple switch tags', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
 			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({ success: true });
 
 			const response =
 				'Done. <switch-model tier="fast" provider="anthropic" model="model-a"/> ' +
 				'<switch-model tier="standard" provider="anthropic" model="model-b"/>';
-			const result = await processModelSwitchTags(response);
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin-user',
+				userMessage: 'switch the fast and standard models',
+			});
 
 			expect(result.confirmations).toHaveLength(2);
 			expect(services.systemInfo.setTierModel).toHaveBeenCalledTimes(2);
 		});
 
 		it('passes through response without switch tags', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
 			const response = 'No switching needed here.';
-			const result = await processModelSwitchTags(response);
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin-user',
+				userMessage: 'switch the model',
+			});
 
 			expect(result.cleanedResponse).toBe('No switching needed here.');
 			expect(result.confirmations).toHaveLength(0);
@@ -1573,18 +1589,101 @@ describe('Chatbot App', () => {
 
 		it('validates parameters even when LLM echoes user switch-model tag', async () => {
 			// Simulate LLM echoing a user-crafted tag with an invalid provider
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
 			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({
 				success: false,
 				error: 'Provider "evil" not found.',
 			});
 
 			const response = 'Sure! <switch-model tier="fast" provider="evil" model="malicious-model"/>';
-			const result = await processModelSwitchTags(response);
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin-user',
+				userMessage: 'switch to evil provider model',
+			});
 
 			// Tag is still processed but validation catches it
 			expect(result.confirmations).toHaveLength(1);
 			expect(result.confirmations[0]).toContain('Failed');
 			expect(result.confirmations[0]).toContain('not found');
+		});
+	});
+
+	describe('processModelSwitchTags authorization', () => {
+		beforeEach(async () => {
+			await chatbot.init(services);
+		});
+
+		it('rejects switch when user is not admin', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(false);
+
+			const response =
+				'Here you go. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
+			const result = await processModelSwitchTags(response, {
+				userId: 'user1',
+				userMessage: 'switch to haiku',
+			});
+
+			expect(services.systemInfo.setTierModel).not.toHaveBeenCalled();
+			expect(result.cleanedResponse).not.toContain('<switch-model');
+			expect(result.confirmations).toHaveLength(1);
+			expect(result.confirmations[0]).toContain('admin');
+		});
+
+		it('rejects when user message lacks model-switch intent', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
+
+			const response =
+				'Nice weather! <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin1',
+				userMessage: "what's the weather like today?",
+			});
+
+			expect(services.systemInfo.setTierModel).not.toHaveBeenCalled();
+			expect(result.cleanedResponse).not.toContain('<switch-model');
+			expect(result.confirmations).toHaveLength(0);
+		});
+
+		it('executes when admin explicitly requests model switch', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
+			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({ success: true });
+
+			const response =
+				'Switching now. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
+			const result = await processModelSwitchTags(response, {
+				userId: 'admin1',
+				userMessage: 'switch the fast tier to claude haiku',
+			});
+
+			expect(services.systemInfo.setTierModel).toHaveBeenCalledTimes(1);
+			expect(result.confirmations).toHaveLength(1);
+			expect(result.confirmations[0]).toContain('Switched fast tier');
+		});
+
+		it('handleMessage strips model-switch tags without executing', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				'Here is the info. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/> Hope that helps!',
+			);
+
+			const ctx = createTestMessageContext({ text: 'tell me about models' });
+			await chatbot.handleMessage(ctx);
+
+			expect(services.systemInfo.setTierModel).not.toHaveBeenCalled();
+			const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
+			expect(sentMessage).not.toContain('<switch-model');
+		});
+
+		it('handleCommand /ask processes model-switch with admin authorization', async () => {
+			vi.mocked(services.systemInfo.isUserAdmin).mockReturnValue(true);
+			vi.mocked(services.systemInfo.setTierModel).mockResolvedValue({ success: true });
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				'Switching now. <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>',
+			);
+
+			const ctx = createTestMessageContext({ text: '/ask switch fast model to haiku' });
+			await chatbot.handleCommand?.('/ask', ['switch', 'fast', 'model', 'to', 'haiku'], ctx);
+
+			expect(services.systemInfo.setTierModel).toHaveBeenCalledTimes(1);
 		});
 	});
 

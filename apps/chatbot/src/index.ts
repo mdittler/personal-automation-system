@@ -58,6 +58,10 @@ const JOURNAL_TAG_REGEX = /<model-journal>([\s\S]*?)<\/model-journal>/g;
 const SWITCH_MODEL_TAG_REGEX =
 	/<switch-model\s+tier="([^"]+)"\s+provider="([^"]+)"\s+model="([^"]+)"\s*\/>/g;
 
+/** Regex to detect model-switch intent in the user's message. */
+export const MODEL_SWITCH_INTENT_REGEX =
+	/\b(switch|change|set|use|update)\b.*\b(model|tier|fast|standard|reasoning)\b/i;
+
 /** Static keywords that suggest a PAS-related question. */
 const PAS_KEYWORDS = [
 	'pas',
@@ -244,9 +248,9 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		extractJournalEntries(response);
 	await writeJournalEntries(modelSlug, journalEntries);
 
-	// 8. Process model switch tags (only from LLM response, never user input)
-	const { cleanedResponse: finalResponse, confirmations } =
-		await processModelSwitchTags(afterJournal);
+	// 8. Strip model-switch tags without executing — admin actions via /ask only
+	const finalResponse = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
+	const confirmations: string[] = [];
 
 	// 9. Send response (without journal/switch tags, with confirmations)
 	const responseWithConfirmations =
@@ -340,9 +344,9 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		extractJournalEntries(response);
 	await writeJournalEntries(modelSlug, journalEntries);
 
-	// Process model switch tags
+	// Process model switch tags (admin-only, requires explicit intent in question)
 	const { cleanedResponse: finalResponse, confirmations } =
-		await processModelSwitchTags(afterJournal);
+		await processModelSwitchTags(afterJournal, { userId: ctx.userId, userMessage: question });
 
 	const responseWithConfirmations =
 		confirmations.length > 0 ? `${finalResponse}\n\n${confirmations.join('\n')}` : finalResponse;
@@ -826,14 +830,49 @@ export function sanitizeInput(text: string, maxLength = MAX_INPUT_LENGTH): strin
  * Extract model switch tags from an LLM response.
  * Processes each tag via SystemInfoService.setTierModel() and returns
  * confirmations or errors.
+ *
+ * Guards:
+ * 1. systemInfo missing → strip tags silently
+ * 2. userId missing or not admin → strip tags, return admin-access notice
+ * 3. userMessage present but lacks model-switch intent → strip tags silently
  */
 export async function processModelSwitchTags(
 	response: string,
+	options?: { userId?: string; userMessage?: string },
 ): Promise<{ cleanedResponse: string; confirmations: string[] }> {
 	const confirmations: string[] = [];
 
+	// Fast pre-check: only apply guards when switch-model tags are actually present
+	const hasTags = response.includes('<switch-model');
+
+	if (!hasTags) {
+		// No tags: pass through without any processing
+		return {
+			cleanedResponse: response.replace(/\n{3,}/g, '\n\n').trim(),
+			confirmations,
+		};
+	}
+
 	if (!services.systemInfo) {
 		// Strip tags but don't process
+		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
+		return {
+			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+			confirmations,
+		};
+	}
+
+	// Guard: require admin (only when tags are present)
+	if (!options?.userId || !services.systemInfo.isUserAdmin(options.userId)) {
+		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
+		return {
+			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+			confirmations: ['Model switching requires admin access.'],
+		};
+	}
+
+	// Guard: require explicit model-switch intent in the user message (only when tags present)
+	if (options?.userMessage && !MODEL_SWITCH_INTENT_REGEX.test(options.userMessage)) {
 		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
 			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
