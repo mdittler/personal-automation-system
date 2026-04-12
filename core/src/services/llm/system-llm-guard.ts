@@ -25,6 +25,8 @@ export interface SystemLLMGuardOptions {
 	globalMonthlyCostCap: number;
 	/** Logger instance. */
 	logger: Logger;
+	/** App ID to attribute costs to. Defaults to 'system'. */
+	attributionId?: string;
 }
 
 export class SystemLLMGuard implements LLMService {
@@ -32,6 +34,7 @@ export class SystemLLMGuard implements LLMService {
 	private readonly costTracker: CostTracker;
 	private readonly globalMonthlyCostCap: number;
 	private readonly logger: Logger;
+	private readonly attributionId: string;
 
 	constructor(options: SystemLLMGuardOptions) {
 		if (!Number.isFinite(options.globalMonthlyCostCap) || options.globalMonthlyCostCap <= 0) {
@@ -43,18 +46,19 @@ export class SystemLLMGuard implements LLMService {
 		this.costTracker = options.costTracker;
 		this.globalMonthlyCostCap = options.globalMonthlyCostCap;
 		this.logger = options.logger;
+		this.attributionId = options.attributionId ?? 'system';
 	}
 
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
 		this.checkGlobalCap();
-		return this.inner.complete(prompt, { ...options, _appId: 'system' });
+		return this.inner.complete(prompt, { ...options, _appId: this.attributionId });
 	}
 
 	async classify(text: string, categories: string[]): Promise<ClassifyResult> {
 		this.checkGlobalCap();
 		const client = {
 			complete: (prompt: string, opts?: LLMCompletionOptions) =>
-				this.inner.complete(prompt, { ...opts, _appId: 'system' }),
+				this.inner.complete(prompt, { ...opts, _appId: this.attributionId }),
 		};
 		return classify(text, categories, client, this.logger);
 	}
@@ -63,7 +67,7 @@ export class SystemLLMGuard implements LLMService {
 		this.checkGlobalCap();
 		const client = {
 			complete: (prompt: string, opts?: LLMCompletionOptions) =>
-				this.inner.complete(prompt, { ...opts, _appId: 'system' }),
+				this.inner.complete(prompt, { ...opts, _appId: this.attributionId }),
 		};
 		return extractStructured<T>(text, schema, client, this.logger);
 	}
@@ -73,7 +77,7 @@ export class SystemLLMGuard implements LLMService {
 		if (totalCost >= this.globalMonthlyCostCap) {
 			this.logger.warn(
 				{ totalCost, cap: this.globalMonthlyCostCap },
-				'Global monthly LLM cost cap exceeded (system call)',
+				`Global monthly LLM cost cap exceeded (${this.attributionId} call)`,
 			);
 			throw new LLMCostCapError('global', totalCost, this.globalMonthlyCostCap);
 		}

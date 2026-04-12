@@ -296,7 +296,7 @@ Suggested tests:
 
 ### Finding 10: Unpriced remote models are tracked as free
 
-- Status: open
+- Status: fixed
 - Severity: high
 - Classification: cost cap / financial safeguard fail-open
 - Location: `core/src/services/llm/model-pricing.ts:57-58`
@@ -328,7 +328,7 @@ Suggested tests:
 
 ### Finding 11: Anthropic remains a hard startup requirement despite multi-provider routing
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: configuration / provider availability
 - Location: `core/src/services/config/index.ts:101-116`
@@ -358,7 +358,7 @@ Suggested tests:
 
 ### Finding 12: Saved tier selections can pin the system to providers that no longer load
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: outage behavior / stale runtime configuration
 - Location: `core/src/services/llm/model-selector.ts:62-93`
@@ -389,7 +389,7 @@ Suggested tests:
 
 ### Finding 13: Monthly cost cap state resets when the cache file is missing or malformed
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: cost cap / persistence fail-open
 - Location: `core/src/services/llm/cost-tracker.ts:67-95`
@@ -419,7 +419,7 @@ Suggested tests:
 
 ### Finding 14: API LLM calls are tested as `api` but recorded as `system` in production wiring
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: cost attribution / test gap
 - Location: `core/src/services/llm/system-llm-guard.ts:48-50`

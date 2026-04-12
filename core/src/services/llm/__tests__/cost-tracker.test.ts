@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -104,13 +104,22 @@ describe('CostTracker', () => {
 		expect(cost).toBe(15.0 + 75.0);
 	});
 
-	it('returns zero cost for unknown models', () => {
+	it('returns zero cost for unknown ollama models', () => {
 		const tracker = new CostTracker(tempDir, logger);
 
-		const cost = tracker.estimateCost('unknown-model', 1_000_000, 1_000_000);
+		const cost = tracker.estimateCost('some-local-model', 1_000_000, 1_000_000, 'ollama');
 
-		// Unknown models return 0 (no pricing data)
+		// Ollama is locally hosted — always free
 		expect(cost).toBe(0);
+	});
+
+	it('returns conservative fallback cost for unknown remote models', () => {
+		const tracker = new CostTracker(tempDir, logger);
+
+		const cost = tracker.estimateCost('unknown-remote-model', 1_000_000, 1_000_000);
+
+		// Unknown remote models use DEFAULT_REMOTE_PRICING, not $0
+		expect(cost).toBeGreaterThan(0);
 	});
 
 	it('readUsage returns empty string when file does not exist', async () => {
@@ -291,8 +300,8 @@ describe('CostTracker', () => {
 		});
 	});
 
-	describe('unknown model warning (D1)', () => {
-		it('logs warning when cost is 0 for non-empty model', async () => {
+	describe('unknown model warning (D1/F10)', () => {
+		it('logs warning with fallback cost for unknown remote model', async () => {
 			const warnLogger = pino({ level: 'silent' });
 			const warnSpy = vi.spyOn(warnLogger, 'warn');
 			const tracker = new CostTracker(tempDir, warnLogger);
@@ -302,10 +311,15 @@ describe('CostTracker', () => {
 				inputTokens: 100,
 				outputTokens: 50,
 				provider: 'custom',
+				providerType: 'openai-compatible',
 			});
 
 			expect(warnSpy).toHaveBeenCalledWith(
-				expect.objectContaining({ model: 'totally-unknown-model', provider: 'custom' }),
+				expect.objectContaining({
+					model: 'totally-unknown-model',
+					provider: 'custom',
+					fallbackCost: expect.any(Number),
+				}),
 				expect.stringContaining('Unknown model pricing'),
 			);
 		});
@@ -319,6 +333,25 @@ describe('CostTracker', () => {
 				model: 'claude-sonnet-4-20250514',
 				inputTokens: 100,
 				outputTokens: 50,
+			});
+
+			expect(warnSpy).not.toHaveBeenCalledWith(
+				expect.anything(),
+				expect.stringContaining('Unknown model pricing'),
+			);
+		});
+
+		it('does not warn for ollama models (ollama is free by design)', async () => {
+			const warnLogger = pino({ level: 'silent' });
+			const warnSpy = vi.spyOn(warnLogger, 'warn');
+			const tracker = new CostTracker(tempDir, warnLogger);
+
+			await tracker.record({
+				model: 'llama3.2:3b',
+				inputTokens: 100,
+				outputTokens: 50,
+				provider: 'ollama',
+				providerType: 'ollama',
 			});
 
 			expect(warnSpy).not.toHaveBeenCalledWith(
@@ -467,6 +500,151 @@ describe('CostTracker', () => {
 
 			const content = await readFile(join(tempDir, 'system', 'monthly-costs.yaml'), 'utf-8');
 			expect(content).toContain('user-a');
+		});
+	});
+
+	describe('rebuildFromLog (F13)', () => {
+		const currentMonth = new Date().toISOString().slice(0, 7);
+
+		/** Write a minimal valid usage log with given table rows. */
+		async function writeUsageLog(systemDir: string, rows: string[]): Promise<void> {
+			await mkdir(systemDir, { recursive: true });
+			const header = [
+				'# LLM Usage Log',
+				'',
+				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |',
+				'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
+				'',
+			].join('\n');
+			const body = rows.join('\n') + '\n';
+			await writeFile(join(systemDir, 'llm-usage.md'), header + body, 'utf-8');
+		}
+
+		it('rebuilds totals from usage log when YAML cache is missing', async () => {
+			const systemDir = join(tempDir, 'system');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-10T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 1000 | 500 | 0.010500 | chatbot | user-a |`,
+				`| ${currentMonth}-10T13:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 500 | 200 | 0.004500 | food | user-b |`,
+			]);
+			// No monthly-costs.yaml
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.015, 5);
+			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.0105, 6);
+			expect(t.getMonthlyAppCost('food')).toBeCloseTo(0.0045, 6);
+			expect(t.getMonthlyUserCost('user-a')).toBeCloseTo(0.0105, 6);
+			expect(t.getMonthlyUserCost('user-b')).toBeCloseTo(0.0045, 6);
+		});
+
+		it('rebuilds when YAML cache is corrupt/malformed', async () => {
+			const systemDir = join(tempDir, 'system');
+			await mkdir(systemDir, { recursive: true });
+			await writeFile(join(systemDir, 'monthly-costs.yaml'), '{{{{ bad yaml: [[[', 'utf-8');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-11T09:00:00.000Z | google | gemini-2.0-flash | 2000 | 1000 | 0.000600 | notes | user-c |`,
+			]);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.0006, 6);
+			expect(t.getMonthlyAppCost('notes')).toBeCloseTo(0.0006, 6);
+			expect(t.getMonthlyUserCost('user-c')).toBeCloseTo(0.0006, 6);
+		});
+
+		it('rebuilds when YAML cache is from a different (old) month', async () => {
+			const systemDir = join(tempDir, 'system');
+			await mkdir(systemDir, { recursive: true });
+			// Write an old-month cache
+			await writeYamlFile(join(systemDir, 'monthly-costs.yaml'), {
+				month: '2020-01',
+				apps: { chatbot: 99.0 },
+				users: {},
+				total: 99.0,
+			});
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-05T10:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 500 | 200 | 0.003000 | chatbot | - |`,
+			]);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			// Should use current-month log data, NOT the old $99 from the stale cache
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.003, 6);
+			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.003, 6);
+		});
+
+		it('only includes current-month entries during rebuild', async () => {
+			const systemDir = join(tempDir, 'system');
+			const lastMonth = new Date(new Date().setMonth(new Date().getMonth() - 1))
+				.toISOString()
+				.slice(0, 7);
+
+			await writeUsageLog(systemDir, [
+				`| ${lastMonth}-15T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 1000 | 500 | 5.000000 | chatbot | user-a |`,
+				`| ${currentMonth}-10T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 100 | 50 | 0.001050 | chatbot | user-a |`,
+			]);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			// Only the current-month entry should be counted
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.00105, 6);
+		});
+
+		it('handles empty usage log gracefully (starts fresh)', async () => {
+			const systemDir = join(tempDir, 'system');
+			await mkdir(systemDir, { recursive: true });
+			await writeFile(join(systemDir, 'llm-usage.md'), '', 'utf-8');
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyTotalCost()).toBe(0);
+			expect(t.getMonthlyAppCosts().size).toBe(0);
+		});
+
+		it('starts fresh on clean install (no files at all)', async () => {
+			// tempDir exists but no 'system' subdirectory — clean install
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyTotalCost()).toBe(0);
+		});
+
+		it('persists rebuilt cache to YAML after rebuild', async () => {
+			const systemDir = join(tempDir, 'system');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-10T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 1000 | 500 | 0.010500 | chatbot | - |`,
+			]);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+			await t.flush();
+
+			const raw = await readFile(join(systemDir, 'monthly-costs.yaml'), 'utf-8');
+			expect(raw).toContain(currentMonth);
+			expect(raw).toContain('chatbot');
+		});
+
+		it('ignores malformed log lines (missing columns, non-numeric cost)', async () => {
+			const systemDir = join(tempDir, 'system');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-10T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 1000 | 500 | 0.010500 | chatbot | user-a |`,
+				`| ${currentMonth}-10T13:00:00.000Z | oops malformed line without correct columns |`,
+				`| ${currentMonth}-10T14:00:00.000Z | anthropic | model | 100 | 50 | not-a-number | app | user |`,
+				`| ${currentMonth}-10T15:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 200 | 100 | 0.001000 | notes | - |`,
+			]);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			// Only the two valid lines should be counted
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.0115, 5);
+			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.0105, 6);
+			expect(t.getMonthlyAppCost('notes')).toBeCloseTo(0.001, 6);
 		});
 	});
 });

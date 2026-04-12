@@ -205,4 +205,160 @@ describe('ModelSelector', () => {
 		expect(selector.getReasoningRef()).toBeUndefined();
 		expect(selector.getTierRef('reasoning')).toBeUndefined();
 	});
+
+	describe('reconcile()', () => {
+		it('keeps tiers when all providers are available', async () => {
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			selector.reconcile(new Set(['anthropic', 'google']));
+
+			expect(selector.getStandardRef().provider).toBe('anthropic');
+			expect(selector.getFastRef().provider).toBe('anthropic');
+		});
+
+		it('reverts standard tier to default when saved provider is unavailable', async () => {
+			// Simulate a saved selection pointing to 'openai'
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'openai', model: 'gpt-4.1' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+				}),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			// OpenAI is not available, but anthropic (the default) is
+			selector.reconcile(new Set(['anthropic']));
+
+			expect(selector.getStandardRef().provider).toBe('anthropic');
+			expect(selector.getStandardRef().model).toBe(defaultStandard.model);
+			// Fast tier was already anthropic, unchanged
+			expect(selector.getFastRef().provider).toBe('anthropic');
+		});
+
+		it('reverts fast tier to default when saved provider is unavailable', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					fast: { provider: 'google', model: 'gemini-2.0-flash' },
+				}),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			// Google is not available, anthropic is
+			selector.reconcile(new Set(['anthropic']));
+
+			expect(selector.getFastRef().provider).toBe('anthropic');
+			expect(selector.getFastRef().model).toBe(defaultFast.model);
+		});
+
+		it('throws when both saved and default standard provider are unavailable', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'openai', model: 'gpt-4.1' },
+					fast: { provider: 'openai', model: 'gpt-4.1-mini' },
+				}),
+				'utf-8',
+			);
+
+			// Default is anthropic, saved is openai, but only google is available
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard, // anthropic
+				defaultFast, // anthropic
+				logger,
+			});
+			await selector.load();
+
+			expect(() => selector.reconcile(new Set(['google']))).toThrow(
+				/Saved standard tier uses provider 'openai'.*neither is available/,
+			);
+		});
+
+		it('clears reasoning tier when saved provider is unavailable and no fallback', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+					reasoning: { provider: 'openai', model: 'o3' },
+				}),
+				'utf-8',
+			);
+
+			// No defaultReasoning, openai not available
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			selector.reconcile(new Set(['anthropic']));
+
+			expect(selector.getReasoningRef()).toBeUndefined();
+		});
+
+		it('reverts reasoning tier to default when default provider is available', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+					reasoning: { provider: 'openai', model: 'o3' },
+				}),
+				'utf-8',
+			);
+
+			const defaultReasoning: ModelRef = { provider: 'anthropic', model: 'claude-opus-4-6' };
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				defaultReasoning,
+				logger,
+			});
+			await selector.load();
+
+			// OpenAI unavailable, but anthropic (default reasoning) is available
+			selector.reconcile(new Set(['anthropic']));
+
+			expect(selector.getReasoningRef()).toEqual(defaultReasoning);
+		});
+	});
 });

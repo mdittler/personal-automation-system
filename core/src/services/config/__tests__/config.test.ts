@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { loadSystemConfig } from '../index.js';
 
@@ -289,11 +289,21 @@ describe('loadSystemConfig', () => {
 		const envPath = join(tempDir, '.env');
 		const yamlPath = join(tempDir, 'pas.yaml');
 
-		await writeEnvFile(envPath, requiredEnvVars);
+		// Groq needs credentials — define it as a custom provider with its own API key
+		await writeEnvFile(envPath, { ...requiredEnvVars, GROQ_API_KEY: 'test-groq-key' });
 		await writeFile(
 			yamlPath,
 			stringify({
 				llm: {
+					providers: {
+						groq: {
+							type: 'openai-compatible',
+							name: 'Groq',
+							api_key_env: 'GROQ_API_KEY',
+							base_url: 'https://api.groq.com/openai/v1',
+							default_model: 'llama-3.3-70b',
+						},
+					},
 					tiers: {
 						fast: { provider: 'groq', model: 'llama-3.3-70b' },
 						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
@@ -313,6 +323,30 @@ describe('loadSystemConfig', () => {
 			provider: 'anthropic',
 			model: 'claude-sonnet-4-20250514',
 		});
+	});
+
+	it('throws when explicit tier provider has no credentials', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		// groq is pinned in tiers but no GROQ_API_KEY set and no custom provider definition
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					tiers: {
+						fast: { provider: 'groq', model: 'llama-3.3-70b' },
+						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			/LLM tier 'fast' is pinned to provider 'groq'.*no valid credentials/,
+		);
 	});
 
 	it('parses safeguards config from pas.yaml', async () => {
@@ -502,5 +536,77 @@ describe('loadSystemConfig', () => {
 		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
 
 		expect(config.routing?.verification?.upperBound).toBe(0);
+	});
+
+	// --- F11: Optional Anthropic / multi-provider startup tests ---
+
+	it('starts with only GOOGLE_AI_API_KEY and no ANTHROPIC_API_KEY', async () => {
+		// Stub env to ensure only Google key is present — prevents leakage from prior tests
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
+		vi.stubEnv('GOOGLE_AI_API_KEY', 'test-google-key');
+		vi.stubEnv('OPENAI_API_KEY', '');
+		vi.stubEnv('OLLAMA_URL', '');
+
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, {
+			TELEGRAM_BOT_TOKEN: 'test-bot-token',
+			GUI_AUTH_TOKEN: 'test-gui-token',
+			GOOGLE_AI_API_KEY: 'test-google-key',
+		});
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+		});
+
+		// Tiers should auto-assign to google (not anthropic)
+		expect(config.llm?.tiers.standard.provider).toBe('google');
+		expect(config.llm?.tiers.fast.provider).toBe('google');
+		expect(config.claude?.apiKey).toBe('');
+
+		vi.unstubAllEnvs();
+	});
+
+	it('starts with only OPENAI_API_KEY and no ANTHROPIC_API_KEY', async () => {
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
+		vi.stubEnv('GOOGLE_AI_API_KEY', '');
+		vi.stubEnv('OPENAI_API_KEY', 'test-openai-key');
+		vi.stubEnv('OLLAMA_URL', '');
+
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, {
+			TELEGRAM_BOT_TOKEN: 'test-bot-token',
+			GUI_AUTH_TOKEN: 'test-gui-token',
+			OPENAI_API_KEY: 'test-openai-key',
+		});
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+		});
+
+		expect(config.llm?.tiers.standard.provider).toBe('openai');
+		expect(config.llm?.tiers.fast.provider).toBe('openai');
+
+		vi.unstubAllEnvs();
+	});
+
+	it('throws when no LLM provider keys are set', async () => {
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
+		vi.stubEnv('GOOGLE_AI_API_KEY', '');
+		vi.stubEnv('OPENAI_API_KEY', '');
+		vi.stubEnv('OLLAMA_URL', '');
+
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, {
+			TELEGRAM_BOT_TOKEN: 'test-bot-token',
+			GUI_AUTH_TOKEN: 'test-gui-token',
+		});
+
+		await expect(
+			loadSystemConfig({ envPath, configPath: join(tempDir, 'nonexistent.yaml') }),
+		).rejects.toThrow(/No LLM providers available/);
+
+		vi.unstubAllEnvs();
 	});
 });

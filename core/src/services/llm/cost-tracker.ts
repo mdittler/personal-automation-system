@@ -11,10 +11,12 @@
 import { appendFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
+import { parse as parseYaml } from 'yaml';
+import type { ProviderType } from '../../types/llm.js';
 import { toISO } from '../../utils/date.js';
 import { ensureDir } from '../../utils/file.js';
-import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
-import { estimateCallCost } from './model-pricing.js';
+import { writeYamlFile } from '../../utils/yaml.js';
+import { estimateCallCost, hasPricing } from './model-pricing.js';
 
 export interface UsageEntry {
 	timestamp: string;
@@ -25,6 +27,8 @@ export interface UsageEntry {
 	appId?: string;
 	/** Provider key (e.g. 'anthropic', 'openai'). */
 	provider?: string;
+	/** Provider backend type — used for pricing fallback (e.g. 'ollama' is free). */
+	providerType?: ProviderType;
 	/** User ID from LLM request context. */
 	userId?: string;
 }
@@ -63,12 +67,34 @@ export class CostTracker {
 
 	/**
 	 * Load the monthly cost cache from disk. Call once at startup.
+	 *
+	 * Three paths:
+	 * (a) Valid YAML with matching month  → load from cache
+	 * (b) Valid YAML with different month → rebuild from usage log (month rolled over)
+	 * (c) Missing or corrupt YAML         → rebuild from usage log (or start fresh on clean install)
 	 */
 	async loadMonthlyCache(): Promise<void> {
 		this.currentMonth = getCurrentMonth();
+
+		// Attempt to read the YAML cache directly to distinguish missing vs corrupt
+		let yamlLoaded = false;
+		let fileMissing = false;
+
 		try {
-			const data = await readYamlFile<MonthlyCostData>(this.monthlyCostPath);
+			const raw = await readFile(this.monthlyCostPath, 'utf-8');
+			// File exists — try to parse it
+			let data: MonthlyCostData | null = null;
+			try {
+				data = parseYaml(raw) as MonthlyCostData;
+			} catch {
+				this.logger.warn(
+					{ path: this.monthlyCostPath },
+					'Monthly cost cache YAML is malformed — will attempt rebuild from usage log',
+				);
+			}
+
 			if (data && data.month === this.currentMonth) {
+				// (a) Cache matches current month — load it
 				for (const [appId, cost] of Object.entries(data.apps ?? {})) {
 					if (typeof cost === 'number') {
 						this.monthlyCosts.set(appId, cost);
@@ -84,15 +110,101 @@ export class CostTracker {
 					{ month: this.currentMonth, total: this.monthlyTotal, apps: this.monthlyCosts.size },
 					'Monthly cost cache loaded',
 				);
+				yamlLoaded = true;
+			} else if (data) {
+				// (b) Cache is for a different month (month rolled over)
+				this.logger.info(
+					{ cached: data.month, current: this.currentMonth },
+					'Monthly cost cache is from a different month — rebuilding from usage log',
+				);
+			}
+			// If data is null (malformed), fall through to rebuild
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				fileMissing = true;
+			} else {
+				this.logger.warn(
+					{ error: err instanceof Error ? err.message : String(err) },
+					'Failed to read monthly cost cache — will attempt rebuild from usage log',
+				);
+			}
+		}
+
+		if (!yamlLoaded) {
+			const rebuilt = await this.rebuildFromLog();
+			if (rebuilt) {
+				this.logger.info(
+					{
+						month: this.currentMonth,
+						total: this.monthlyTotal,
+						apps: this.monthlyCosts.size,
+						users: this.monthlyUserCosts.size,
+					},
+					'Monthly cost cache rebuilt from usage log',
+				);
+				this.schedulePersist(); // Write back a fresh cache
+			} else if (fileMissing) {
+				this.logger.info(
+					{ month: this.currentMonth },
+					'Monthly cost cache starting fresh (clean install)',
+				);
 			} else {
 				this.logger.info(
 					{ month: this.currentMonth },
-					'Monthly cost cache reset (new month or missing file)',
+					'Monthly cost cache starting fresh (no current-month entries in usage log)',
 				);
 			}
-		} catch {
-			this.logger.warn('Failed to load monthly cost cache, starting fresh');
 		}
+	}
+
+	/**
+	 * Rebuild monthly cost totals from the llm-usage.md append-only log.
+	 * Returns true if any current-month entries were found.
+	 */
+	private async rebuildFromLog(): Promise<boolean> {
+		let content: string;
+		try {
+			content = await readFile(this.usageFilePath, 'utf-8');
+		} catch {
+			return false; // No log file — clean install
+		}
+
+		if (!content.trim()) return false;
+
+		const lines = content.split('\n');
+		let rebuilt = false;
+
+		for (const line of lines) {
+			// Match markdown table data rows: must start with '| 20' (timestamp prefix)
+			if (!line.startsWith('| 20')) continue;
+
+			const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
+			if (cells.length < 8) continue;
+
+			const timestamp = cells[0]; // e.g. "2026-04-10T14:30:00.000Z"
+			// Only count entries for the current month
+			if (!timestamp.startsWith(this.currentMonth)) continue;
+
+			const cost = parseFloat(cells[5]);
+			if (!Number.isFinite(cost) || cost < 0) continue;
+
+			const appId = cells[6] === '-' ? undefined : cells[6];
+			const userId = cells[7] === '-' ? undefined : cells[7];
+
+			if (appId) {
+				const current = this.monthlyCosts.get(appId) ?? 0;
+				this.monthlyCosts.set(appId, Math.round((current + cost) * 1e6) / 1e6);
+			}
+			if (userId) {
+				const current = this.monthlyUserCosts.get(userId) ?? 0;
+				this.monthlyUserCosts.set(userId, Math.round((current + cost) * 1e6) / 1e6);
+			}
+			this.monthlyTotal = Math.round((this.monthlyTotal + cost) * 1e6) / 1e6;
+			rebuilt = true;
+		}
+
+		return rebuilt;
 	}
 
 	/**
@@ -138,20 +250,30 @@ export class CostTracker {
 	/**
 	 * Estimate the cost of an LLM API call.
 	 */
-	estimateCost(model: string, inputTokens: number, outputTokens: number): number {
-		return estimateCallCost(model, inputTokens, outputTokens);
+	estimateCost(
+		model: string,
+		inputTokens: number,
+		outputTokens: number,
+		providerType?: ProviderType,
+	): number {
+		return estimateCallCost(model, inputTokens, outputTokens, providerType);
 	}
 
 	/**
 	 * Record an LLM API usage entry.
 	 */
 	async record(entry: Omit<UsageEntry, 'timestamp' | 'estimatedCost'>): Promise<void> {
-		const estimatedCost = this.estimateCost(entry.model, entry.inputTokens, entry.outputTokens);
+		const estimatedCost = this.estimateCost(
+			entry.model,
+			entry.inputTokens,
+			entry.outputTokens,
+			entry.providerType,
+		);
 
-		if (estimatedCost === 0 && entry.model) {
+		if (entry.model && !hasPricing(entry.model, entry.providerType)) {
 			this.logger.warn(
-				{ model: entry.model, provider: entry.provider },
-				'Unknown model pricing — cost tracked as $0',
+				{ model: entry.model, provider: entry.provider, fallbackCost: estimatedCost },
+				'Unknown model pricing — using conservative fallback estimate',
 			);
 		}
 

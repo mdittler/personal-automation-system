@@ -100,7 +100,7 @@ export async function loadSystemConfig(options?: {
 	// Validate required env vars
 	const env = cleanEnv(process.env, {
 		TELEGRAM_BOT_TOKEN: str({ desc: 'Telegram Bot API token from @BotFather' }),
-		ANTHROPIC_API_KEY: str({ desc: 'Anthropic Claude API key' }),
+		ANTHROPIC_API_KEY: str({ default: '', desc: 'Anthropic Claude API key (optional when other providers configured)' }),
 		GUI_AUTH_TOKEN: str({ desc: 'Management GUI authentication token' }),
 		OLLAMA_URL: str({
 			default: '',
@@ -240,17 +240,46 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 		}
 	}
 
+	// Determine which providers actually have credentials — used for tier validation
+	const available = getAvailableProviderIds(providers, env);
+
+	// Require at least one usable provider
+	if (available.size === 0) {
+		throw new Error(
+			'No LLM providers available. Set at least one of: ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, OPENAI_API_KEY, or configure Ollama via OLLAMA_URL.',
+		);
+	}
+
 	// Parse explicit tier assignments from YAML
 	let tiers: TierAssignment | undefined;
 	if (yamlLLM?.tiers) {
 		const fast = yamlLLM.tiers.fast;
 		const standard = yamlLLM.tiers.standard;
 		if (fast && standard) {
+			// Validate that explicitly-configured tier providers are actually available
+			if (!available.has(fast.provider)) {
+				throw new Error(
+					`LLM tier 'fast' is pinned to provider '${fast.provider}' in pas.yaml, but that provider has no valid credentials. ` +
+						`Check the corresponding API key or remove the explicit tier assignment.`,
+				);
+			}
+			if (!available.has(standard.provider)) {
+				throw new Error(
+					`LLM tier 'standard' is pinned to provider '${standard.provider}' in pas.yaml, but that provider has no valid credentials. ` +
+						`Check the corresponding API key or remove the explicit tier assignment.`,
+				);
+			}
 			tiers = {
 				fast: { provider: fast.provider, model: fast.model },
 				standard: { provider: standard.provider, model: standard.model },
 			};
 			if (yamlLLM.tiers.reasoning) {
+				if (!available.has(yamlLLM.tiers.reasoning.provider)) {
+					throw new Error(
+						`LLM tier 'reasoning' is pinned to provider '${yamlLLM.tiers.reasoning.provider}' in pas.yaml, but that provider has no valid credentials. ` +
+							`Check the corresponding API key or remove the explicit tier assignment.`,
+					);
+				}
 				tiers.reasoning = {
 					provider: yamlLLM.tiers.reasoning.provider,
 					model: yamlLLM.tiers.reasoning.model,
@@ -261,7 +290,7 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 
 	// Auto-assign tiers if not explicitly configured
 	if (!tiers) {
-		tiers = autoAssignTiers(providers, env);
+		tiers = autoAssignTiers(providers, available, env);
 	}
 
 	// Parse safeguards
@@ -285,13 +314,14 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
  * Priority for standard: anthropic > openai > google > ollama
  * Priority for fast: google > openai > anthropic (fast model) > ollama
  * Priority for reasoning: anthropic (opus) > openai (o3)
+ *
+ * Throws if no providers are available (caller should validate before calling).
  */
 function autoAssignTiers(
 	providers: Record<string, LLMProviderConfig>,
-	env: Record<string, string>,
+	available: Set<string>,
+	env: Record<string, string> = {},
 ): TierAssignment {
-	const available = getAvailableProviderIds(providers, env);
-
 	const standardRef = pickFirstAvailable(available, providers, [
 		'anthropic',
 		'openai',
@@ -299,12 +329,19 @@ function autoAssignTiers(
 		'ollama',
 	]);
 
+	if (!standardRef) {
+		// Should not happen since caller validates available.size > 0, but be explicit
+		throw new Error(
+			'Cannot auto-assign LLM tiers: no providers are available. Configure at least one provider.',
+		);
+	}
+
 	// For fast tier, prefer cheap/fast models
 	const fastRef = pickFastTier(available, providers, env);
 
 	return {
-		fast: fastRef ?? standardRef ?? { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
-		standard: standardRef ?? { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+		fast: fastRef ?? standardRef,
+		standard: standardRef,
 	};
 }
 
@@ -352,7 +389,7 @@ function pickFirstAvailable(
 function pickFastTier(
 	available: Set<string>,
 	providers: Record<string, LLMProviderConfig>,
-	env: Record<string, string>,
+	env: Record<string, string> = {},
 ): ModelRef | undefined {
 	// Google Gemini Flash is very fast and cheap
 	if (available.has('google')) {

@@ -211,4 +211,78 @@ describe('SystemLLMGuard', () => {
 			await expect(guard.complete('hello')).rejects.toThrow('Provider unavailable');
 		});
 	});
+
+	describe('attributionId', () => {
+		it('defaults to system when attributionId not provided', async () => {
+			await guard.complete('hello');
+			const callArgs = (inner.complete as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(callArgs[1]?._appId).toBe('system');
+		});
+
+		it('uses custom attributionId in complete()', async () => {
+			const apiGuard = new SystemLLMGuard({
+				inner,
+				costTracker,
+				globalMonthlyCostCap: 50.0,
+				logger,
+				attributionId: 'api',
+			});
+
+			await apiGuard.complete('hello', { tier: 'fast' });
+
+			expect(inner.complete).toHaveBeenCalledWith('hello', {
+				tier: 'fast',
+				_appId: 'api',
+			});
+		});
+
+		it('uses custom attributionId in classify()', async () => {
+			const apiGuard = new SystemLLMGuard({
+				inner,
+				costTracker,
+				globalMonthlyCostCap: 50.0,
+				logger,
+				attributionId: 'api',
+			});
+
+			await apiGuard.classify('classify this', ['cat1', 'cat2']);
+
+			expect(inner.complete).toHaveBeenCalled();
+			const callArgs = (inner.complete as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(callArgs[1]?._appId).toBe('api');
+		});
+
+		it('uses custom attributionId in extractStructured()', async () => {
+			const apiGuard = new SystemLLMGuard({
+				inner,
+				costTracker,
+				globalMonthlyCostCap: 50.0,
+				logger,
+				attributionId: 'api',
+			});
+
+			await apiGuard.extractStructured('extract this', { type: 'object' });
+
+			expect(inner.complete).toHaveBeenCalled();
+			const callArgs = (inner.complete as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(callArgs[1]?._appId).toBe('api');
+		});
+
+		it('uses attributionId in cost cap log message', async () => {
+			const warnSpy = vi.spyOn(logger, 'warn');
+			const apiGuard = new SystemLLMGuard({
+				inner,
+				costTracker: createMockCostTracker(50.0),
+				globalMonthlyCostCap: 50.0,
+				logger,
+				attributionId: 'api',
+			});
+
+			await expect(apiGuard.complete('hello')).rejects.toThrow(LLMCostCapError);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ totalCost: 50.0 }),
+				expect.stringContaining('api call'),
+			);
+		});
+	});
 });

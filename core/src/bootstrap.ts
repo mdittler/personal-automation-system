@@ -132,6 +132,8 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'model-selector' }),
 	});
 	await modelSelector.load();
+	// Reconcile saved tier selections against registered providers (F12 fix)
+	modelSelector.reconcile(new Set(providerRegistry.getProviderIds()));
 
 	const modelCatalog = new ModelCatalog({
 		apiKey: config.claude.apiKey,
@@ -155,6 +157,15 @@ export async function main(): Promise<void> {
 		costTracker,
 		globalMonthlyCostCap: config.llm?.safeguards?.globalMonthlyCostCap ?? 50.0,
 		logger: createChildLogger(logger, { service: 'system-llm-guard' }),
+	});
+
+	// API-level LLM guard — same global cap but attributes costs to 'api' (F14 fix)
+	const apiLlm = new SystemLLMGuard({
+		inner: llm,
+		costTracker,
+		globalMonthlyCostCap: config.llm?.safeguards?.globalMonthlyCostCap ?? 50.0,
+		logger: createChildLogger(logger, { service: 'api-llm-guard' }),
+		attributionId: 'api',
 	});
 
 	// 4. Scheduler
@@ -759,7 +770,7 @@ export async function main(): Promise<void> {
 			reportService,
 			alertService,
 			telegram: telegramService,
-			llm: systemLlm,
+			llm: apiLlm,
 		});
 	} else {
 		logger.info('API routes disabled (API_TOKEN not set)');
