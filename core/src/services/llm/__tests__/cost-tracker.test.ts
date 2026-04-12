@@ -163,6 +163,37 @@ describe('CostTracker', () => {
 		expect(content).not.toContain('claude-opus-4-6');
 	});
 
+	it('writeQueue .then(fn,fn) design: in-memory cost cache is updated even when file write fails', async () => {
+		// CostTracker.appendEntry() uses a write queue with this shape:
+		//   const p = this.writeQueue.then(() => doAppendEntry(e), () => doAppendEntry(e));
+		//   this.writeQueue = p.then(() => {}, () => {});  // tail always resolves
+		//
+		// Key design property: updateMonthlyCache() runs BEFORE appendEntry() in record().
+		// So even when the file write fails, the in-memory monthly cost cache is updated.
+		// This means LLMGuard cost caps still accumulate correctly even under I/O failures.
+		//
+		// Note: vi.spyOn on node:fs/promises is not possible in ESM (namespace is not
+		// configurable), so we inject the failure via filesystem structure.
+
+		const tracker = new CostTracker(tempDir, logger);
+		await tracker.loadMonthlyCache();
+
+		// Block system dir with a file to cause doAppendEntry to fail
+		await writeFile(join(tempDir, 'system'), 'blocking-file', 'utf-8');
+
+		// record() fails at file write level, but in-memory cost cache must still be updated
+		await tracker.record({
+			model: 'claude-sonnet-4-20250514',
+			inputTokens: 1_000_000,
+			outputTokens: 1_000_000,
+			appId: 'test-app',
+		});
+
+		// In-memory cache was updated despite the file write failure
+		expect(tracker.getMonthlyAppCost('test-app')).toBeGreaterThan(0);
+		expect(tracker.getMonthlyTotalCost()).toBeGreaterThan(0);
+	});
+
 	it('serializes concurrent writes correctly (no duplicate headers)', async () => {
 		const tracker = new CostTracker(tempDir, logger);
 
