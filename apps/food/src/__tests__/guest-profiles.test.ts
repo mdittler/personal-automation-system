@@ -222,6 +222,27 @@ describe('guest-profiles', () => {
 			expect(result).toContain('Sarah Johnson');
 			expect(result).toContain('No restrictions');
 		});
+
+		it('escapes Markdown control characters in guest fields', () => {
+			const guest: GuestProfile = {
+				name: 'John *The Chef* Doe',
+				dietaryRestrictions: ['no_pork'],
+				allergies: ['shellfish [anaphylaxis]'],
+				notes: 'Prefers `raw` vegetables',
+				slug: 'john-the-chef-doe',
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+			};
+
+			const text = formatGuestProfile(guest);
+
+			expect(text).toContain('\\*The Chef\\*');
+			expect(text).toContain('no\\_pork');
+			expect(text).toContain('\\[anaphylaxis\\]');
+			expect(text).toContain('Prefers \\`raw\\` vegetables');
+			// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
+			// mismatch deferred to Finding 21. Only assert data-field escaping here.
+		});
 	});
 
 	// ─── formatGuestList ──────────────────────────────────────

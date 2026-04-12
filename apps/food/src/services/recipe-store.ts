@@ -10,6 +10,7 @@ import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/u
 import { parse, stringify } from 'yaml';
 import type { ParsedRecipe, Recipe, RecipeSearchQuery, RecipeSearchResult } from '../types.js';
 import { generateId, isoNow } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const RECIPES_DIR = 'recipes';
 
@@ -214,9 +215,9 @@ export function searchRecipes(recipes: Recipe[], query: RecipeSearchQuery): Reci
 export function formatRecipe(recipe: Recipe, brief?: boolean): string {
 	const lines: string[] = [];
 	const status = recipe.status === 'draft' ? ' (draft)' : '';
-	lines.push(`**${recipe.title}**${status}`);
+	lines.push(`**${escapeMarkdown(recipe.title)}**${status}`);
 
-	if (recipe.cuisine) lines.push(`Cuisine: ${recipe.cuisine}`);
+	if (recipe.cuisine) lines.push(`Cuisine: ${escapeMarkdown(recipe.cuisine)}`);
 
 	const time: string[] = [];
 	if (recipe.prepTime) time.push(`prep ${recipe.prepTime}min`);
@@ -225,7 +226,7 @@ export function formatRecipe(recipe: Recipe, brief?: boolean): string {
 
 	lines.push(`Servings: ${recipe.servings}`);
 
-	if (recipe.tags.length) lines.push(`Tags: ${recipe.tags.join(', ')}`);
+	if (recipe.tags.length) lines.push(`Tags: ${recipe.tags.map(escapeMarkdown).join(', ')}`);
 
 	if (recipe.ratings.length) {
 		const avg = recipe.ratings.reduce((s, r) => s + r.score, 0) / recipe.ratings.length;
@@ -239,16 +240,16 @@ export function formatRecipe(recipe: Recipe, brief?: boolean): string {
 	lines.push('**Ingredients:**');
 	for (const ing of recipe.ingredients) {
 		const qty = ing.quantity != null ? `${ing.quantity}` : '';
-		const unit = ing.unit ?? '';
+		const unit = ing.unit ? escapeMarkdown(ing.unit) : '';
 		const prefix = [qty, unit].filter(Boolean).join(' ');
-		const note = ing.notes ? ` (${ing.notes})` : '';
-		lines.push(`• ${prefix ? `${prefix} ` : ''}${ing.name}${note}`);
+		const note = ing.notes ? ` (${escapeMarkdown(ing.notes)})` : '';
+		lines.push(`• ${prefix ? `${prefix} ` : ''}${escapeMarkdown(ing.name)}${note}`);
 	}
 
 	lines.push('');
 	lines.push('**Instructions:**');
 	recipe.instructions.forEach((step, i) => {
-		lines.push(`${i + 1}. ${step}`);
+		lines.push(`${i + 1}. ${escapeMarkdown(step)}`);
 	});
 
 	if (recipe.macros) {
@@ -281,7 +282,7 @@ export function formatSearchResults(results: RecipeSearchResult[]): string {
 		const rating = recipe.ratings.length
 			? ` ★${(recipe.ratings.reduce((s: number, r: { score: number }) => s + r.score, 0) / recipe.ratings.length).toFixed(1)}`
 			: '';
-		lines.push(`${i + 1}. **${recipe.title}**${status}${rating} — ${relevance}`);
+		lines.push(`${i + 1}. **${escapeMarkdown(recipe.title)}**${status}${rating} — ${escapeMarkdown(relevance)}`);
 	}
 	lines.push('\nReply with a number to see the full recipe.');
 	return lines.join('\n');

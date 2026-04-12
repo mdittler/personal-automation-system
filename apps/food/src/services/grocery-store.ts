@@ -10,6 +10,7 @@ import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/u
 import { parse, stringify } from 'yaml';
 import type { GroceryItem, GroceryList } from '../types.js';
 import { generateId, isoNow, todayDate } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { DEPARTMENT_EMOJI } from './item-parser.js';
 
 const ACTIVE_PATH = 'grocery/active.yaml';
@@ -153,11 +154,11 @@ export function formatGroceryMessage(list: GroceryList): string {
 		if (!items?.length) continue;
 
 		const emoji = DEPARTMENT_EMOJI[dept] ?? '📦';
-		lines.push(`${emoji} *${dept}*`);
+		lines.push(`${emoji} *${escapeMarkdown(dept)}*`);
 		for (const item of items) {
 			const check = item.purchased ? '✅' : '☐';
 			const qty = formatItemQty(item);
-			lines.push(`${check} ${item.name}${qty}`);
+			lines.push(`${check} ${escapeMarkdown(item.name)}${qty}`);
 		}
 		lines.push('');
 	}
@@ -170,7 +171,7 @@ function formatItemQty(item: GroceryItem): string {
 	if (item.quantity == null && !item.unit) return '';
 	const parts: string[] = [];
 	if (item.quantity != null) parts.push(String(item.quantity));
-	if (item.unit) parts.push(item.unit);
+	if (item.unit) parts.push(escapeMarkdown(item.unit));
 	return parts.length ? ` — ${parts.join(' ')}` : '';
 }
 

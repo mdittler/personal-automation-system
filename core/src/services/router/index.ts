@@ -20,16 +20,12 @@ import type { InviteService } from '../invite/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
 import type { RouteVerifier } from './route-verifier.js';
-
-/** Escape Telegram MarkdownV2 special characters in user-controlled text. */
-function escapeMarkdown(text: string): string {
-	return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
-}
 
 /** Default confidence threshold for intent classification. */
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;

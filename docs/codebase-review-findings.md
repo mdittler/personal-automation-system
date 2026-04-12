@@ -264,7 +264,7 @@ Suggested tests:
 
 ### Finding 9: Telegram Markdown escaping is still inconsistent for stored app output
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: output escaping / Markdown integrity
 - Location: `core/src/services/telegram/index.ts:41-46`

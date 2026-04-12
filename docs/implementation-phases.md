@@ -47,6 +47,7 @@
 | R1 | Security: Access Control | **Complete** | ~8 | Route-verifier app access check (F1), atomic invite redemption (F2) |
 | R2 | Security: Chatbot LLM Trust | **Complete** | ~6 | Model-switch admin+intent gating (F4), history anti-instruction framing (F5), system data admin gating (F6) |
 | R3 | Security: Data Boundaries | **Complete** | ~8 | Manifest scope enforcement (F3), scope path normalization (F7), context store path containment (F8) |
+| F9 | Security: Telegram Markdown Escaping | **Complete** | ~11 | Shared `escapeMarkdown` utility in core; applied to 8 food formatters, echo/notes apps, reports (`formatReportForTelegram`), and alerts; router/verifier migrated from MarkdownV2 to legacy set |
 
 ### Dependency Graph
 

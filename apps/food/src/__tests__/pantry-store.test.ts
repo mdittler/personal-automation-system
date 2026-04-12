@@ -536,6 +536,23 @@ describe('pantry-store', () => {
 			const result = formatPantry(items);
 			expect(result).toContain('Other');
 		});
+
+		it('escapes Markdown control characters in item names and categories', () => {
+			const items: PantryItem[] = [
+				{
+					name: '*Organic* Brown Sugar',
+					quantity: '2 bags',
+					addedDate: '2026-04-11',
+					category: 'Baking',
+				},
+			];
+
+			const text = formatPantry(items);
+
+			expect(text).toContain('\\*Organic\\*');
+			// Intentional category bold preserved
+			expect(text).toContain('*Baking*');
+		});
 	});
 
 	// ── parsePantryItems ────────────────────────────────────────

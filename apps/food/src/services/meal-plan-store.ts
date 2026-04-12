@@ -10,6 +10,7 @@ import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/u
 import { parse, stringify } from 'yaml';
 import type { MealPlan, PlannedMeal, Recipe } from '../types.js';
 import { isoNow } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const CURRENT_PATH = 'meal-plans/current.yaml';
 const ARCHIVE_DIR = 'meal-plans/archive';
@@ -145,7 +146,7 @@ export function formatPlanMessage(plan: MealPlan, recipes: Recipe[], location: s
 		const day = dayAbbrev(meal.date);
 		const newTag = meal.isNew ? ' ✨' : '';
 		const newLabel = meal.isNew ? ' (new)' : '';
-		lines.push(`${day} —${newTag} ${meal.recipeTitle}${newLabel}`);
+		lines.push(`${day} —${newTag} ${escapeMarkdown(meal.recipeTitle)}${newLabel}`);
 
 		if (!meal.isNew) {
 			// Show recipe details from the library
@@ -154,14 +155,14 @@ export function formatPlanMessage(plan: MealPlan, recipes: Recipe[], location: s
 				const parts: string[] = [];
 				const totalMin = (recipe.prepTime ?? 0) + (recipe.cookTime ?? 0);
 				if (totalMin > 0) parts.push(`🕒 ${totalMin} min`);
-				if (recipe.cuisine) parts.push(recipe.cuisine);
+				if (recipe.cuisine) parts.push(escapeMarkdown(recipe.cuisine));
 				const rating = avgRating(recipe);
 				if (rating !== null) parts.push(`⭐ ${rating.toFixed(1)}`);
 				if (parts.length) lines.push(parts.join(' • '));
 			}
 		} else if (meal.description) {
 			// Show LLM-provided description for new suggestions
-			lines.push(meal.description);
+			lines.push(escapeMarkdown(meal.description));
 		}
 
 		lines.push('');
@@ -188,7 +189,7 @@ export function formatPlanMessage(plan: MealPlan, recipes: Recipe[], location: s
 export function formatTonightMessage(meal: PlannedMeal, recipe: Recipe | null): string {
 	const lines: string[] = [];
 
-	lines.push(`🍽 Tonight: ${meal.recipeTitle}`);
+	lines.push(`🍽 Tonight: ${escapeMarkdown(meal.recipeTitle)}`);
 
 	if (recipe) {
 		// Time and servings line
@@ -209,11 +210,11 @@ export function formatTonightMessage(meal: PlannedMeal, recipe: Recipe | null): 
 		const firstStep = recipe.instructions[0];
 		if (firstStep) {
 			const truncated = firstStep.length > 120 ? firstStep.slice(0, 119) + '…' : firstStep;
-			lines.push(`Quick prep: ${truncated}`);
+			lines.push(`Quick prep: ${escapeMarkdown(truncated)}`);
 		}
 	} else if (meal.description) {
 		// New suggestion — show description
-		lines.push(meal.description);
+		lines.push(escapeMarkdown(meal.description));
 	}
 
 	return lines.join('\n');

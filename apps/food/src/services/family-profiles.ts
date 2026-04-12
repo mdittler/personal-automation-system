@@ -9,6 +9,7 @@ import type { ScopedDataStore } from '@pas/core/types';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { ChildFoodLog, ChildProfile } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const SAFE_SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -158,18 +159,18 @@ export function formatChildProfile(log: ChildFoodLog, today: string): string {
 	const age = computeAgeDisplay(profile.birthDate, today);
 
 	const lines = [
-		`**${profile.name}** (${age})`,
+		`**${escapeMarkdown(profile.name)}** (${age})`,
 		`Stage: ${profile.allergenStage}`,
 	];
 
 	if (profile.knownAllergens.length > 0) {
-		lines.push(`Safe allergens: ${profile.knownAllergens.join(', ')}`);
+		lines.push(`Safe allergens: ${profile.knownAllergens.map(escapeMarkdown).join(', ')}`);
 	}
 	if (profile.avoidAllergens.length > 0) {
-		lines.push(`Avoid: ${profile.avoidAllergens.join(', ')}`);
+		lines.push(`Avoid: ${profile.avoidAllergens.map(escapeMarkdown).join(', ')}`);
 	}
 	if (profile.dietaryNotes) {
-		lines.push(`Notes: ${profile.dietaryNotes}`);
+		lines.push(`Notes: ${escapeMarkdown(profile.dietaryNotes)}`);
 	}
 
 	lines.push('');
@@ -180,8 +181,8 @@ export function formatChildProfile(log: ChildFoodLog, today: string): string {
 		const recent = introductions.slice(-5);
 		for (const intro of recent) {
 			const emoji = intro.accepted ? '✅' : '❌';
-			const allergen = intro.allergenCategory ? ` (${intro.allergenCategory})` : '';
-			lines.push(`${emoji} ${intro.food}${allergen} — ${intro.date}`);
+			const allergen = intro.allergenCategory ? ` (${escapeMarkdown(intro.allergenCategory)})` : '';
+			lines.push(`${emoji} ${escapeMarkdown(intro.food)}${allergen} — ${intro.date}`);
 		}
 	}
 

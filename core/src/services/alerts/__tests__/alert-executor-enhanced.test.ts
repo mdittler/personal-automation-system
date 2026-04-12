@@ -725,6 +725,51 @@ describe('executeActions — edge cases', () => {
 
 		expect(deps.telegram.send).toHaveBeenCalledWith('user1', 'Plain text, no variables here.');
 	});
+
+	it('escapes {data} and {alert_name} in Telegram message', async () => {
+		const deps = makeDeps();
+		const actions: AlertAction[] = [
+			{ type: 'telegram_message', config: { message: 'Alert: {alert_name} — {data}' } },
+		];
+		const ctx = makeContext({ data: 'Price *dropped* for [item]', alertName: 'My *Alert*' });
+
+		await executeActions(actions, ['user1'], deps, ctx);
+
+		const sentText = (deps.telegram.send as any).mock.calls[0][1];
+		// data and alertName are escaped
+		expect(sentText).toContain('\\*dropped\\*');
+		expect(sentText).toContain('\\[item\\]');
+		expect(sentText).toContain('My \\*Alert\\*');
+	});
+
+	it('resolveTemplate itself never escapes — summary and template stay raw', () => {
+		// The escaping contract: executeTelegramMessage pre-escapes data/alertName
+		// before calling resolveTemplate. resolveTemplate is a pure substitution function
+		// with no knowledge of Markdown escaping. This guards against adding escaping there.
+		const result = resolveTemplate('Alert: {alert_name}. Summary: {summary}', {
+			data: '',
+			summary: '*Bold* LLM output',
+			alertName: 'My Alert',
+			date: '2026-04-11',
+		});
+
+		// resolveTemplate must not escape anything — callers pre-escape what they need
+		expect(result).toBe('Alert: My Alert. Summary: *Bold* LLM output');
+		expect(result).not.toContain('\\*');
+	});
+
+	it('does not escape in resolveTemplate (shared with non-Telegram actions)', () => {
+		const result = resolveTemplate('Data: {data}', {
+			data: 'Price *dropped*',
+			summary: '',
+			alertName: 'test',
+			date: '2026-04-11',
+		});
+
+		// resolveTemplate should NOT escape — it's shared with write_data, audio, dispatch
+		expect(result).toBe('Data: Price *dropped*');
+		expect(result).not.toContain('\\*');
+	});
 });
 
 // --- Security ---

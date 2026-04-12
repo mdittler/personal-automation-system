@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CollectedSection, ReportDefinition } from '../../../types/report.js';
-import { formatForTelegram, formatReport } from '../report-formatter.js';
+import { formatForTelegram, formatReport, formatReportForTelegram } from '../report-formatter.js';
 
 function makeReport(overrides: Partial<ReportDefinition> = {}): ReportDefinition {
 	return {
@@ -100,6 +100,70 @@ describe('formatReport', () => {
 		const thirdIdx = result.indexOf('## Third');
 		expect(firstIdx).toBeLessThan(secondIdx);
 		expect(secondIdx).toBeLessThan(thirdIdx);
+	});
+});
+
+describe('formatReportForTelegram', () => {
+	it('escapes data fields: report name, description, section label, section content', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data [section]', content: 'Price is *high*', isEmpty: false },
+		];
+
+		const result = formatReportForTelegram(
+			makeReport({ name: 'Budget *Report*', description: 'Covers [all] categories' }),
+			sections,
+		);
+
+		expect(result).toContain('\\*Report\\*');
+		expect(result).toContain('Covers \\[all\\] categories');
+		expect(result).toContain('Data \\[section\\]');
+		expect(result).toContain('Price is \\*high\\*');
+	});
+
+	it('does NOT escape LLM summary', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data', content: 'some data', isEmpty: false },
+		];
+		const summary = '*Bold* summary from _LLM_';
+
+		const result = formatReportForTelegram(makeReport(), sections, summary);
+
+		// LLM summary is trusted formatter output — preserved as-is
+		expect(result).toContain('*Bold* summary from _LLM_');
+		expect(result).not.toContain('\\*Bold\\*');
+	});
+
+	it('does not affect formatReport output (unescaped canonical markdown)', () => {
+		const sections: CollectedSection[] = [
+			{ label: 'Data', content: 'Price is *high*', isEmpty: false },
+		];
+		const markdown = formatReport(makeReport({ name: 'Budget *Report*' }), sections);
+
+		// formatReport is for history/API — must stay unescaped
+		expect(markdown).toContain('Budget *Report*');
+		expect(markdown).toContain('Price is *high*');
+	});
+
+	it('truncates long reports and does not split escape sequences', () => {
+		// Section content with special chars — after escaping adds backslashes,
+		// pushing the total past 4000 chars
+		const filler = 'x'.repeat(3990);
+		const sections: CollectedSection[] = [
+			{ label: 'S', content: filler + ' *end*', isEmpty: false },
+		];
+
+		const result = formatReportForTelegram(makeReport({ name: 'R', description: undefined }), sections);
+
+		expect(result).toContain('...report truncated');
+		// The content just before the truncation notice must not end with a lone backslash
+		const beforeNotice = result.split('\n\n_...report truncated_')[0] ?? '';
+		expect(beforeNotice).not.toMatch(/\\$/);
+	});
+
+	it('formatForTelegram remains a pure truncation helper (no escaping)', () => {
+		const msg = 'Data with *asterisks* and _underscores_';
+		// formatForTelegram must NOT escape — it is used for other purposes
+		expect(formatForTelegram(msg)).toBe(msg);
 	});
 });
 

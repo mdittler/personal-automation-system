@@ -21,6 +21,7 @@ import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
 import type { Router } from '../router/index.js';
@@ -269,7 +270,14 @@ async function executeTelegramMessage(
 	delivery: string[],
 	deps: ExecutorDeps,
 ): Promise<void> {
-	let text = resolveTemplate(config.message, vars);
+	// Escape data-origin vars to prevent Markdown parse errors.
+	// summary (LLM output) and config.message (server-authored template) are left raw.
+	const escapedVars = {
+		...vars,
+		data: escapeMarkdown(vars.data),
+		alertName: escapeMarkdown(vars.alertName),
+	};
+	let text = resolveTemplate(config.message, escapedVars);
 
 	// Truncate to Telegram limit
 	if (text.length > MAX_TELEGRAM_LENGTH) {

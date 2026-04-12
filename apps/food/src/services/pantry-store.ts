@@ -9,6 +9,7 @@ import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/u
 import { parse, stringify } from 'yaml';
 import type { GroceryItem, PantryItem } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { normalizeIngredientName } from './ingredient-normalizer.js';
 import { DEPARTMENT_EMOJI, assignDepartment } from './item-parser.js';
@@ -221,9 +222,9 @@ export function formatPantry(items: PantryItem[]): string {
 		if (!deptItems?.length) continue;
 
 		const emoji = DEPARTMENT_EMOJI[dept] ?? '📦';
-		lines.push(`${emoji} *${dept}*`);
+		lines.push(`${emoji} *${escapeMarkdown(dept)}*`);
 		for (const item of deptItems) {
-			lines.push(`• ${item.name} — ${item.quantity}`);
+			lines.push(`• ${escapeMarkdown(item.name)} — ${escapeMarkdown(item.quantity)}`);
 		}
 		lines.push('');
 	}
@@ -231,9 +232,9 @@ export function formatPantry(items: PantryItem[]): string {
 	// Show any categories not in the standard order
 	for (const [cat, catItems] of groups) {
 		if (DEPT_ORDER.includes(cat)) continue;
-		lines.push(`📦 *${cat}*`);
+		lines.push(`📦 *${escapeMarkdown(cat)}*`);
 		for (const item of catItems) {
-			lines.push(`• ${item.name} — ${item.quantity}`);
+			lines.push(`• ${escapeMarkdown(item.name)} — ${escapeMarkdown(item.quantity)}`);
 		}
 		lines.push('');
 	}
