@@ -7,6 +7,19 @@ import { OneOffManager } from '../oneoff-manager.js';
 
 const logger = pino({ level: 'silent' });
 
+/** Build a minimal mock logger with spies on warn and error. */
+function makeMockLogger() {
+	return {
+		warn: vi.fn(),
+		error: vi.fn(),
+		info: vi.fn(),
+		debug: vi.fn(),
+		trace: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
+	} as unknown as pino.Logger;
+}
+
 let tempDir: string;
 let manager: OneOffManager;
 
@@ -140,26 +153,38 @@ describe('OneOffManager', () => {
 	});
 
 	it('due tasks without resolver stay pending (not deleted)', async () => {
-		// No setHandlerResolver called
-		await manager.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+		// No setHandlerResolver called — manager must warn and keep task
+		const mockLogger = makeMockLogger();
+		const managerNoResolver = new OneOffManager(tempDir, mockLogger);
 
-		await manager.checkAndExecute();
+		await managerNoResolver.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+		await managerNoResolver.checkAndExecute();
 
-		const pending = await manager.getPendingTasks();
+		const pending = await managerNoResolver.getPendingTasks();
 		expect(pending).toHaveLength(1);
+		expect(mockLogger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ appId: 'app-1', jobId: 'job-1' }),
+			expect.stringContaining('No handler resolver'),
+		);
 	});
 
 	it('due task with throwing resolver stays pending (unresolvable)', async () => {
-		await manager.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+		const mockLogger = makeMockLogger();
+		const managerThrows = new OneOffManager(tempDir, mockLogger);
 
-		manager.setHandlerResolver(() => {
+		await managerThrows.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+		managerThrows.setHandlerResolver(() => {
 			throw new Error('App not found');
 		});
 
-		await manager.checkAndExecute();
+		await managerThrows.checkAndExecute();
 
-		const pending = await manager.getPendingTasks();
+		const pending = await managerThrows.getPendingTasks();
 		expect(pending).toHaveLength(1);
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ appId: 'app-1', jobId: 'job-1', error: 'App not found' }),
+			expect.stringContaining('Handler resolver failed'),
+		);
 	});
 
 	it('due task with resolved handler that throws is removed (execution failure)', async () => {

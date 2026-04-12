@@ -501,6 +501,9 @@ export async function main(): Promise<void> {
 	// for it. If the app is gone, it throws — OneOffManager will keep the task
 	// pending for retry rather than silently deleting it.
 	scheduler.oneOff.setHandlerResolver((appId, _handler, jobId) => {
+		// _handler is the job's handler path (stored in YAML for readability),
+		// but dispatch always uses appModule.handleScheduledJob(jobId) — the
+		// handler path is not dynamically loaded at runtime.
 		const entry = registry.getApp(appId);
 		if (!entry?.module.handleScheduledJob) {
 			throw new Error(`App "${appId}" not found or has no handleScheduledJob`);
@@ -508,6 +511,9 @@ export async function main(): Promise<void> {
 		return buildScheduledJobHandler({
 			appId,
 			jobId,
+			// One-off tasks have no user_scope field in their schema; 'system' runs
+			// the job once without per-user context. If per-user one-off tasks are
+			// needed in future, add user_scope to the OneOffTask schema.
 			userScope: 'system',
 			appModule: entry.module,
 			userProvider: userManager,

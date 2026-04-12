@@ -45,6 +45,11 @@ export class OneOffManager {
 	 * Set the handler resolver. Called by bootstrap after app loading.
 	 * The resolver receives appId, handler path, and jobId, and returns
 	 * the TaskHandler to execute. It should throw if the app is not found.
+	 *
+	 * Note: one-off tasks have no `user_scope` field in their schema. The
+	 * bootstrap always passes `userScope: 'system'`, meaning the job runs
+	 * once without per-user context. If per-user one-off tasks are needed
+	 * in future, the `OneOffTask` schema must be extended with `user_scope`.
 	 */
 	setHandlerResolver(resolver: (appId: string, handler: string, jobId: string) => TaskHandler): void {
 		this.handlerResolver = resolver;
