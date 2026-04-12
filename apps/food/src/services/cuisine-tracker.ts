@@ -12,6 +12,7 @@ import { parseJsonResponse } from './recipe-parser.js';
 import type { CuisineClassification, PlannedMeal } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 export interface CuisineRepetition {
 	cuisine: string;
@@ -103,7 +104,7 @@ export async function checkCuisineDiversity(
 	const lines: string[] = ['🌍 Cuisine Diversity Check', ''];
 	for (const rep of repetitions) {
 		lines.push(
-			`Your meal plan has ${rep.cuisine} ${rep.count} times this week — consider mixing in some variety next time!`,
+			`Your meal plan has ${escapeMarkdown(rep.cuisine)} ${rep.count} times this week — consider mixing in some variety next time!`,
 		);
 	}
 

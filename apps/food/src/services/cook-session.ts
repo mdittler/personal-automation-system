@@ -9,6 +9,7 @@ import type { InlineButton } from '@pas/core/types';
 import type { CookSession, Recipe, ScaledIngredient } from '../types.js';
 import type { ParsedTimer } from './timer-parser.js';
 import { formatDuration } from './timer-parser.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 // Node timer globals — not in ES2024 lib, so we declare them here.
 declare function clearTimeout(id: unknown): void;
@@ -112,7 +113,7 @@ export function cleanExpiredSessions(): number {
 export function formatStepMessage(session: CookSession): string {
 	const stepNum = session.currentStep + 1; // 1-indexed for display
 	const instruction = session.instructions[session.currentStep];
-	return `Step ${stepNum} of ${session.totalSteps}\n\n${instruction}`;
+	return `Step ${stepNum} of ${session.totalSteps}\n\n${escapeMarkdown(instruction)}`;
 }
 
 export function buildStepButtons(session: CookSession, timer?: ParsedTimer | null): InlineButton[][] {
@@ -147,5 +148,5 @@ export function buildStepButtons(session: CookSession, timer?: ParsedTimer | nul
 }
 
 export function formatCompletionMessage(session: CookSession): string {
-	return `✅ All done with ${session.recipeTitle}! Hope it turned out great.\n\nThe nightly rating prompt will ask you how it was, or you can mark it cooked from /mealplan.`;
+	return `✅ All done with ${escapeMarkdown(session.recipeTitle)}! Hope it turned out great.\n\nThe nightly rating prompt will ask you how it was, or you can mark it cooked from /mealplan.`;
 }

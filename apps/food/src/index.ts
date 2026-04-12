@@ -208,6 +208,7 @@ import {
 import { appendWaste } from './services/waste-store.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
 import { todayDate } from './utils/date.js';
+import { escapeMarkdown } from './utils/escape-markdown.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
@@ -1876,14 +1877,14 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 		const recipe = findRecipeByTitle(recipes, query);
 
 		if (!recipe) {
-			await services.telegram.send(ctx.userId, `Couldn't find a recipe matching "${query}".`);
+			await services.telegram.send(ctx.userId, `Couldn't find a recipe matching "${escapeMarkdown(query)}".`);
 			return;
 		}
 
 		if (!recipe.sourcePhoto) {
 			await services.telegram.send(
 				ctx.userId,
-				`"${recipe.title}" wasn't saved from a photo, so there's no original photo to show.`,
+				`"${escapeMarkdown(recipe.title)}" wasn't saved from a photo, so there's no original photo to show.`,
 			);
 			return;
 		}
@@ -1892,7 +1893,7 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 		if (!photo) {
 			await services.telegram.send(
 				ctx.userId,
-				`The photo for "${recipe.title}" could not be found. It may have been removed.`,
+				`The photo for "${escapeMarkdown(recipe.title)}" could not be found. It may have been removed.`,
 			);
 			return;
 		}
@@ -2352,12 +2353,12 @@ async function handlePantryRemove(text: string, ctx: MessageContext): Promise<vo
 	const updated = removePantryItem(existing, itemName);
 
 	if (updated.length === existing.length) {
-		await services.telegram.send(ctx.userId, `"${itemName}" wasn't in the pantry.`);
+		await services.telegram.send(ctx.userId, `"${escapeMarkdown(itemName)}" wasn't in the pantry.`);
 		return;
 	}
 
 	await savePantry(hh.sharedStore, updated);
-	await services.telegram.send(ctx.userId, `Removed "${itemName}" from pantry.`);
+	await services.telegram.send(ctx.userId, `Removed "${escapeMarkdown(itemName)}" from pantry.`);
 	services.logger.info('Removed pantry item "%s" for %s', itemName, ctx.userId);
 }
 
@@ -3306,7 +3307,7 @@ async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promis
 	const updated = addFreezerItem(existing, item);
 	await saveFreezer(hh.sharedStore, updated);
 
-	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${item.name} — ${item.quantity}`);
+	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
 	services.logger.info('Added freezer item "%s" for %s', item.name, ctx.userId);
 }
 
@@ -3321,7 +3322,7 @@ async function handlePendingFreezerAdd(text: string, ctx: MessageContext): Promi
 	const updated = addFreezerItem(existing, item);
 	await saveFreezer(hh.sharedStore, updated);
 
-	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${item.name} — ${item.quantity}`);
+	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
 }
 
 // ─── H6: Waste Intent Handler ──────────────────────────────────
@@ -3371,7 +3372,7 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 		await savePantry(hh.sharedStore, updated);
 	}
 
-	await services.telegram.send(ctx.userId, `🗑 Logged waste: ${itemText}. Sorry about that!`);
+	await services.telegram.send(ctx.userId, `🗑 Logged waste: ${escapeMarkdown(itemText)}. Sorry about that!`);
 	services.logger.info('Logged food waste "%s" for %s', itemText, ctx.userId);
 }
 

@@ -102,7 +102,9 @@ export function formatReportForTelegram(
 	for (const section of sections) {
 		lines.push('', `## ${escapeMarkdown(section.label)}`);
 		if (section.isEmpty) {
-			lines.push('', `_${escapeMarkdown(section.content)}_`);
+			if (section.content) {
+				lines.push('', `_${escapeMarkdown(section.content)}_`);
+			}
 		} else {
 			lines.push('', escapeMarkdown(section.content));
 		}
@@ -115,6 +117,6 @@ export function formatReportForTelegram(
 	const maxLength = 4000;
 	if (text.length <= maxLength) return text;
 	let cutAt = maxLength;
-	if (text[cutAt - 1] === '\\') cutAt--;
+	while (cutAt > 0 && text[cutAt - 1] === '\\') cutAt--;
 	return `${text.slice(0, cutAt)}\n\n_...report truncated_`;
 }

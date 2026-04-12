@@ -319,7 +319,7 @@ export class Router {
 		// Built-in /start command (Telegram sends this when a user first opens the bot)
 		if (parsed.command === '/start') {
 			if (parsed.rawArgs.trim() && this.inviteService) {
-				await this.trySend(ctx.userId, "You're already registered\\! Type /help to get started\\.");
+				await this.trySend(ctx.userId, "You're already registered! Type /help to get started.");
 				return;
 			}
 			await this.trySend(ctx.userId, 'Welcome to PAS! Type /help to see available commands.');
@@ -510,17 +510,17 @@ export class Router {
 
 		lines.push('');
 		if (userSpaces.length === 0) {
-			lines.push('You are not a member of any spaces\\.');
+			lines.push('You are not a member of any spaces.');
 		} else {
 			lines.push('*Your spaces:*');
 			for (const space of userSpaces) {
-				const marker = space.id === activeSpaceId ? ' \\(active\\)' : '';
+				const marker = space.id === activeSpaceId ? ' (active)' : '';
 				lines.push(`  ${escapeMarkdown(space.id)} — ${escapeMarkdown(space.name)}${marker}`);
 			}
 		}
 
 		lines.push('');
-		lines.push('Use `/space <id>` to enter a space, `/space off` to return to personal mode\\.');
+		lines.push('Use `/space <id>` to enter a space, `/space off` to return to personal mode.');
 
 		await this.trySend(ctx.userId, lines.join('\n'));
 	}
@@ -535,18 +535,18 @@ export class Router {
 		const space = this.spaces.getSpace(spaceId);
 		await this.trySend(
 			ctx.userId,
-			`Entered space: *${escapeMarkdown(space?.name ?? spaceId)}*\\. Your messages now go to this shared space\\.`,
+			`Entered space: *${escapeMarkdown(space?.name ?? spaceId)}*. Your messages now go to this shared space.`,
 		);
 	}
 
 	private async handleSpaceOff(ctx: MessageContext): Promise<void> {
 		await this.spaces.setActiveSpace(ctx.userId, null);
-		await this.trySend(ctx.userId, 'Back to personal mode\\.');
+		await this.trySend(ctx.userId, 'Back to personal mode.');
 	}
 
 	private async handleSpaceCreate(parts: string[], ctx: MessageContext): Promise<void> {
 		if (parts.length < 2) {
-			await this.trySend(ctx.userId, 'Usage: `/space create <id> <name\\.\\.\\.>`');
+			await this.trySend(ctx.userId, 'Usage: `/space create <id> <name...>`');
 			return;
 		}
 
@@ -572,7 +572,7 @@ export class Router {
 
 		await this.trySend(
 			ctx.userId,
-			`Space *${escapeMarkdown(name)}* created\\. Use \`/space ${escapeMarkdown(id)}\` to enter it\\.`,
+			`Space *${escapeMarkdown(name)}* created. Use \`/space ${escapeMarkdown(id)}\` to enter it.`,
 		);
 	}
 
@@ -584,13 +584,13 @@ export class Router {
 
 		const space = this.spaces.getSpace(spaceId);
 		if (!space) {
-			await this.trySend(ctx.userId, 'Space not found\\.');
+			await this.trySend(ctx.userId, 'Space not found.');
 			return;
 		}
 
 		// Only the creator can delete
 		if (space.createdBy !== ctx.userId) {
-			await this.trySend(ctx.userId, 'Only the space creator can delete it\\.');
+			await this.trySend(ctx.userId, 'Only the space creator can delete it.');
 			return;
 		}
 
@@ -598,10 +598,10 @@ export class Router {
 		if (deleted) {
 			await this.trySend(
 				ctx.userId,
-				`Space *${escapeMarkdown(space.name)}* deleted\\. Data is preserved on disk\\.`,
+				`Space *${escapeMarkdown(space.name)}* deleted. Data is preserved on disk.`,
 			);
 		} else {
-			await this.trySend(ctx.userId, 'Failed to delete space\\.');
+			await this.trySend(ctx.userId, 'Failed to delete space.');
 		}
 	}
 
@@ -611,19 +611,19 @@ export class Router {
 		ctx: MessageContext,
 	): Promise<void> {
 		if (!spaceId || !userName) {
-			await this.trySend(ctx.userId, 'Usage: `/space invite <space\\-id> <username>`');
+			await this.trySend(ctx.userId, 'Usage: `/space invite <space-id> <username>`');
 			return;
 		}
 
 		const space = this.spaces.getSpace(spaceId);
 		if (!space) {
-			await this.trySend(ctx.userId, 'Space not found\\.');
+			await this.trySend(ctx.userId, 'Space not found.');
 			return;
 		}
 
 		// Authorization: caller must be a member of the space
 		if (!space.members.includes(ctx.userId)) {
-			await this.trySend(ctx.userId, 'You must be a member of this space to invite others\\.');
+			await this.trySend(ctx.userId, 'You must be a member of this space to invite others.');
 			return;
 		}
 
@@ -634,7 +634,7 @@ export class Router {
 		if (!targetUser) {
 			await this.trySend(
 				ctx.userId,
-				`User "${escapeMarkdown(userName)}" not found\\. Check the name and try again\\.`,
+				`User "${escapeMarkdown(userName)}" not found. Check the name and try again.`,
 			);
 			return;
 		}
@@ -647,7 +647,7 @@ export class Router {
 
 		await this.trySend(
 			ctx.userId,
-			`${escapeMarkdown(targetUser.name)} added to *${escapeMarkdown(space.name)}*\\.`,
+			`${escapeMarkdown(targetUser.name)} added to *${escapeMarkdown(space.name)}*.`,
 		);
 	}
 
@@ -657,19 +657,19 @@ export class Router {
 		ctx: MessageContext,
 	): Promise<void> {
 		if (!spaceId || !userName) {
-			await this.trySend(ctx.userId, 'Usage: `/space kick <space\\-id> <username>`');
+			await this.trySend(ctx.userId, 'Usage: `/space kick <space-id> <username>`');
 			return;
 		}
 
 		const space = this.spaces.getSpace(spaceId);
 		if (!space) {
-			await this.trySend(ctx.userId, 'Space not found\\.');
+			await this.trySend(ctx.userId, 'Space not found.');
 			return;
 		}
 
 		// Authorization: caller must be a member of the space
 		if (!space.members.includes(ctx.userId)) {
-			await this.trySend(ctx.userId, 'You must be a member of this space to remove others\\.');
+			await this.trySend(ctx.userId, 'You must be a member of this space to remove others.');
 			return;
 		}
 
@@ -677,7 +677,7 @@ export class Router {
 			?.getAllUsers()
 			.find((u) => u.name.toLowerCase() === userName.toLowerCase());
 		if (!targetUser) {
-			await this.trySend(ctx.userId, `User "${escapeMarkdown(userName)}" not found\\.`);
+			await this.trySend(ctx.userId, `User "${escapeMarkdown(userName)}" not found.`);
 			return;
 		}
 
@@ -689,7 +689,7 @@ export class Router {
 
 		await this.trySend(
 			ctx.userId,
-			`${escapeMarkdown(targetUser.name)} removed from *${escapeMarkdown(space.name)}*\\.`,
+			`${escapeMarkdown(targetUser.name)} removed from *${escapeMarkdown(space.name)}*.`,
 		);
 	}
 
@@ -698,13 +698,13 @@ export class Router {
 		ctx: MessageContext,
 	): Promise<void> {
 		if (!spaceId) {
-			await this.trySend(ctx.userId, 'Usage: `/space members <space\\-id>`');
+			await this.trySend(ctx.userId, 'Usage: `/space members <space-id>`');
 			return;
 		}
 
 		const space = this.spaces.getSpace(spaceId);
 		if (!space) {
-			await this.trySend(ctx.userId, 'Space not found\\.');
+			await this.trySend(ctx.userId, 'Space not found.');
 			return;
 		}
 
@@ -712,7 +712,7 @@ export class Router {
 		for (const memberId of space.members) {
 			const user = this.userManager?.getUser(memberId);
 			const name = user ? escapeMarkdown(user.name) : memberId;
-			const creator = memberId === space.createdBy ? ' \\(creator\\)' : '';
+			const creator = memberId === space.createdBy ? ' (creator)' : '';
 			lines.push(`  ${name}${creator}`);
 		}
 
@@ -741,7 +741,7 @@ export class Router {
 		const code = await this.inviteService.createInvite(name, ctx.userId);
 		await this.trySend(
 			ctx.userId,
-			`Invite code for *${escapeMarkdown(name)}*: \`${code}\`\n\nShare this code\\. They should send \`/start ${code}\` to the bot\\. Expires in 24 hours\\.`,
+			`Invite code for *${escapeMarkdown(name)}*: \`${code}\`\n\nShare this code. They should send \`/start ${code}\` to the bot. Expires in 24 hours.`,
 		);
 	}
 
@@ -766,7 +766,7 @@ export class Router {
 		await this.userMutationService.registerUser(newUser);
 		await this.trySend(
 			userId,
-			`Welcome to PAS, ${escapeMarkdown(result.invite.name)}\\! Type /help to see available commands\\.`,
+			`Welcome to PAS, ${escapeMarkdown(result.invite.name)}! Type /help to see available commands.`,
 		);
 	}
 
