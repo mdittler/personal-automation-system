@@ -107,10 +107,17 @@ export class CronManager {
 					this.lastRunAt.set(jobKey, new Date());
 					this.persistLastRunData();
 
-					if (result.success) {
-						this.notifier?.onSuccess(job.appId, job.id);
-					} else {
-						await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+					try {
+						if (result.success) {
+							this.notifier?.onSuccess(job.appId, job.id);
+						} else {
+							await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+						}
+					} catch (err) {
+						this.logger.error(
+							{ appId: job.appId, jobId: job.id, error: err instanceof Error ? err.message : String(err) },
+							'Notifier threw during job lifecycle callback — ignoring',
+						);
 					}
 				} finally {
 					this.inFlightCount--;

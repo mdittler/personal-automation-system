@@ -144,6 +144,25 @@ describe('EventBusService', () => {
 		expect(calls).toEqual([]);
 	});
 
+	it('clearAll() removes handlers from all events', async () => {
+		const bus = new EventBusServiceImpl();
+		const calls: string[] = [];
+		const handlerA = async (data: unknown) => { calls.push(`a:${data as string}`); };
+		const handlerB = async (data: unknown) => { calls.push(`b:${data as string}`); };
+
+		bus.on('event-a', handlerA);
+		bus.on('event-b', handlerB);
+		bus.on('event-a', handlerB); // handlerB on two events
+
+		bus.clearAll();
+
+		bus.emit('event-a', 'payload-a');
+		bus.emit('event-b', 'payload-b');
+		await new Promise(r => setTimeout(r, 10));
+
+		expect(calls).toHaveLength(0);
+	});
+
 	it('off() for unregistered event is a no-op', async () => {
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
