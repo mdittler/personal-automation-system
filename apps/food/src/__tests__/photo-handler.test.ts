@@ -429,6 +429,19 @@ describe('Photo Handler', () => {
 			expect(writeCalls.some(([path]) => (path as string).includes('grocery'))).toBe(true);
 			expect(writeCalls.some(([path]) => (path as string).includes('recipes/'))).toBe(false);
 		});
+
+		it('sends targeted error and does not send success message when saveGroceryList throws', async () => {
+			const { services, sharedStore } = createMockServices(validGroceryWithBadRecipe);
+			(sharedStore.write as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('EPERM: disk full'));
+
+			await handlePhoto(services, createPhotoCtx('add to grocery list'));
+
+			const sentMessages = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls.map(
+				([, msg]) => msg as string,
+			);
+			expect(sentMessages.some((m) => m.includes('couldn\'t save the grocery list'))).toBe(true);
+			expect(sentMessages.some((m) => m.includes('bread'))).toBe(false);
+		});
 	});
 
 	// ─── F15: Household membership guard ───────────────────────────

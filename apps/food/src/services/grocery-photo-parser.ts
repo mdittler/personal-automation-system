@@ -78,9 +78,7 @@ export async function parseGroceryFromPhoto(
 		.map((item) => ({
 			name: item.name,
 			quantity: (item.quantity !== undefined && item.quantity !== null) ? item.quantity : null,
-			unit: typeof (item as Record<string, unknown>)['unit'] === 'string'
-				? ((item as Record<string, unknown>)['unit'] as string)
-				: null,
+			unit: item.unit ?? null,
 		}));
 
 	const isRecipe = parsed.isRecipe === true;

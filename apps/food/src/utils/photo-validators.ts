@@ -5,8 +5,6 @@
  * items from photo parsers before they are persisted to data stores.
  */
 
-import type { PantryItem } from '../types.js';
-
 /** Guard for pantry photo items. Rejects missing/non-string names. */
 export function isValidPantryPhotoItem(
 	item: unknown,
@@ -23,7 +21,7 @@ export function isValidPantryPhotoItem(
  */
 export function isValidGroceryPhotoItem(
 	item: unknown,
-): item is { name: string; quantity: number | null; unit: unknown } {
+): item is { name: string; quantity: number | null; unit: string | null } {
 	if (!item || typeof item !== 'object') return false;
 	const record = item as Record<string, unknown>;
 	if (typeof record['name'] !== 'string' || record['name'].trim() === '') return false;
@@ -32,6 +30,9 @@ export function isValidGroceryPhotoItem(
 	if (q !== undefined && q !== null && (typeof q !== 'number' || !Number.isFinite(q))) {
 		return false;
 	}
+	// Unit must be absent, null, or a string
+	const u = record['unit'];
+	if (u !== undefined && u !== null && typeof u !== 'string') return false;
 	return true;
 }
 

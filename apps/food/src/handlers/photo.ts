@@ -286,7 +286,13 @@ async function handleGroceryPhoto(
 	}));
 
 	list = addItems(list, groceryItems);
-	await saveGroceryList(store, list);
+	try {
+		await saveGroceryList(store, list);
+	} catch (err) {
+		services.logger.error('Failed to save grocery list from photo: %s', err);
+		await services.telegram.send(ctx.userId, '⚠️ I recognised the items but couldn\'t save the grocery list. Please try again.');
+		return;
+	}
 
 	const itemNames = result.items.map((i) => {
 		const qty = i.quantity != null ? ` (${i.quantity}${i.unit ? ' ' + escapeMarkdown(i.unit) : ''})` : '';
