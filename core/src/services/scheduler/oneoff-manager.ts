@@ -29,8 +29,6 @@ export class OneOffManager {
 	private readonly logger: Logger;
 	private checkInterval: ReturnType<typeof setInterval> | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
-	private inFlightCount = 0;
-	private readonly drainResolvers: Array<() => void> = [];
 	private stopping = false;
 
 	private notifier: SchedulerJobNotifier | null = null;
@@ -115,8 +113,9 @@ export class OneOffManager {
 			this.checkInterval = null;
 		}
 
-		// Await the writeQueue tail — a checkAndExecute may be queued but not started yet.
-		// inFlightCount alone is insufficient when the check hasn't begun executing.
+		// Awaiting the writeQueue tail is sufficient: doCheckAndExecute() runs
+		// inside the queue chain and awaits any handler it dispatches. By the
+		// time this resolves, all in-flight handlers are done.
 		try {
 			await Promise.race([
 				this.writeQueue,
@@ -126,19 +125,6 @@ export class OneOffManager {
 			]);
 		} catch {
 			// Ignore — writeQueue tail rejection means the operation was already handled
-		}
-
-		// Await in-flight jobs
-		if (this.inFlightCount > 0) {
-			this.logger.info({ inFlight: this.inFlightCount }, 'Waiting for in-flight one-off tasks...');
-			await Promise.race([
-				new Promise<void>((resolve) => {
-					this.drainResolvers.push(resolve);
-				}),
-				new Promise<void>((resolve) => {
-					setTimeout(resolve, 30_000);
-				}),
-			]);
 		}
 
 		this.logger.info('One-off task checker stopped');
@@ -240,21 +226,12 @@ export class OneOffManager {
 
 			// Execute. Whether it succeeds or fails, the task was attempted
 			// and should be removed (not added to remaining).
-			this.inFlightCount++;
-			try {
-				const result = await runTask(task.appId, task.jobId, handler, this.logger);
+			const result = await runTask(task.appId, task.jobId, handler, this.logger);
 
-				if (result.success) {
-					this.notifier?.onSuccess(task.appId, task.jobId);
-				} else {
-					await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
-				}
-			} finally {
-				this.inFlightCount--;
-				if (this.inFlightCount === 0) {
-					for (const resolve of this.drainResolvers) resolve();
-					this.drainResolvers.length = 0;
-				}
+			if (result.success) {
+				this.notifier?.onSuccess(task.appId, task.jobId);
+			} else {
+				await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
 			}
 			// Task intentionally NOT added to remaining — it has been attempted
 		}

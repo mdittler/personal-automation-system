@@ -30,7 +30,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-	manager.stop();
+	await manager.stop();
 	await rm(tempDir, { recursive: true, force: true });
 });
 
