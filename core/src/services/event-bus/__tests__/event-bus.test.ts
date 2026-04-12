@@ -102,4 +102,56 @@ describe('EventBusService', () => {
 
 		expect(results).toEqual(['value']);
 	});
+
+	it('same handler on two events: both receive events', async () => {
+		const bus = new EventBusServiceImpl();
+		// Documents the intended contract (may already pass, keep as regression)
+		const calls: string[] = [];
+		const handler = async (data: unknown) => { calls.push(data as string); };
+		bus.on('event-a', handler);
+		bus.on('event-b', handler);
+		bus.emit('event-a', 'a-payload');
+		bus.emit('event-b', 'b-payload');
+		await new Promise(r => setTimeout(r, 50));
+		expect(calls).toContain('a-payload');
+		expect(calls).toContain('b-payload');
+	});
+
+	it('off(eventA) does not affect eventB subscription', async () => {
+		const bus = new EventBusServiceImpl();
+		const calls: string[] = [];
+		const handler = async (data: unknown) => { calls.push(data as string); };
+		bus.on('event-a', handler);
+		bus.on('event-b', handler);
+		bus.off('event-a', handler);
+		bus.emit('event-a', 'a-payload');
+		bus.emit('event-b', 'b-payload');
+		await new Promise(r => setTimeout(r, 50));
+		expect(calls).toEqual(['b-payload']);
+	});
+
+	it('off() both events removes handler from both', async () => {
+		const bus = new EventBusServiceImpl();
+		const calls: string[] = [];
+		const handler = async (data: unknown) => { calls.push(data as string); };
+		bus.on('event-a', handler);
+		bus.on('event-b', handler);
+		bus.off('event-a', handler);
+		bus.off('event-b', handler);
+		bus.emit('event-a', 'a-payload');
+		bus.emit('event-b', 'b-payload');
+		await new Promise(r => setTimeout(r, 50));
+		expect(calls).toEqual([]);
+	});
+
+	it('off() for unregistered event is a no-op', async () => {
+		const bus = new EventBusServiceImpl();
+		const calls: string[] = [];
+		const handler = async (data: unknown) => { calls.push(data as string); };
+		bus.on('event-b', handler);
+		bus.off('event-a', handler); // not registered on event-a
+		bus.emit('event-b', 'b-payload');
+		await new Promise(r => setTimeout(r, 50));
+		expect(calls).toEqual(['b-payload']);
+	});
 });

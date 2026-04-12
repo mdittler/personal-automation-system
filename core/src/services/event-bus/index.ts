@@ -18,10 +18,11 @@ export class EventBusServiceImpl implements EventBusService {
 	private readonly logger: Logger | null;
 
 	/**
-	 * Maps event names to sets of wrapped handlers.
-	 * We need this to match the original handler reference when calling off().
+	 * Maps event name → (original handler → wrapped handler).
+	 * Keyed by event name first so the same handler function can be registered
+	 * on multiple events without the entries colliding or overwriting each other.
 	 */
-	private readonly handlerMap = new Map<EventHandler, (data: unknown) => Promise<void>>();
+	private readonly handlerMap = new Map<string, Map<EventHandler, (data: unknown) => Promise<void>>>();
 
 	constructor(logger?: Logger) {
 		this.emitter = new Emittery();
@@ -49,15 +50,25 @@ export class EventBusServiceImpl implements EventBusService {
 			}
 		};
 
-		this.handlerMap.set(handler, wrappedHandler);
+		let eventMap = this.handlerMap.get(event);
+		if (!eventMap) {
+			eventMap = new Map();
+			this.handlerMap.set(event, eventMap);
+		}
+		eventMap.set(handler, wrappedHandler);
 		this.emitter.on(event, wrappedHandler);
 	}
 
 	off(event: string, handler: EventHandler): void {
-		const wrappedHandler = this.handlerMap.get(handler);
+		const eventMap = this.handlerMap.get(event);
+		if (!eventMap) return;
+		const wrappedHandler = eventMap.get(handler);
 		if (wrappedHandler) {
 			this.emitter.off(event, wrappedHandler);
-			this.handlerMap.delete(handler);
+			eventMap.delete(handler);
+			if (eventMap.size === 0) {
+				this.handlerMap.delete(event);
+			}
 		}
 	}
 
