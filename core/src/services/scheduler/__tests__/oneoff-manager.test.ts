@@ -367,7 +367,8 @@ describe('OneOffManager', () => {
 		vi.useFakeTimers();
 		try {
 			// Start checkAndExecute (will block on blockForever)
-			void localManager.checkAndExecute();
+			const checkPromise = localManager.checkAndExecute();
+			checkPromise.catch(() => {}); // prevent unhandled rejection after stop() timeout
 
 			// Drain microtasks so the handler starts executing inside the queue chain
 			await Promise.resolve();
