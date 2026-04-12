@@ -48,6 +48,8 @@
 | R2 | Security: Chatbot LLM Trust | **Complete** | ~6 | Model-switch admin+intent gating (F4), history anti-instruction framing (F5), system data admin gating (F6) |
 | R3 | Security: Data Boundaries | **Complete** | ~8 | Manifest scope enforcement (F3), scope path normalization (F7), context store path containment (F8) |
 | F9 | Security: Telegram Markdown Escaping | **Complete** | ~11 | Shared `escapeMarkdown` utility in core; applied to 8 food formatters, echo/notes apps, reports (`formatReportForTelegram`), and alerts; router/verifier migrated from MarkdownV2 to legacy set |
+| R4 | Security: LLM Routing & Cost Caps | **Complete** | ~8 | F10 (unknown model pricing), F11 (optional Anthropic key), F12 (stale tier selections), F13 (cost cap cache miss), F14 (API attribution) |
+| R5 | Security: Food Photo/Vision | **Complete** | ~12 | F15 (household guard), F16 (strict vision classification), F17 (caption injection hardening), F18 (canonical ingredient names), F19 (grocery-photo atomic writes), F20 (malformed LLM output guards), F21 (photo handler Markdown escaping) |
 
 ### Dependency Graph
 

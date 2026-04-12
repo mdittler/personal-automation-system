@@ -21,8 +21,13 @@ import type { CoreServices, PhotoContext } from '@pas/core/types';
 
 const testPhoto = Buffer.from('fake-jpeg-data');
 
-function createMockStore() {
-	const storage = new Map<string, string>();
+function makeHouseholdYaml(memberUserIds: string[]): string {
+	const membersYaml = memberUserIds.map((id) => `  - ${id}`).join('\n');
+	return `id: household-1\nname: Test Household\ncreatedBy: user-1\nmembers:\n${membersYaml}\njoinCode: ABCDEF\ncreatedAt: '2026-01-01'\n`;
+}
+
+function createMockStore(initialData: Record<string, string> = {}) {
+	const storage = new Map<string, string>(Object.entries(initialData));
 	return {
 		read: vi.fn(async (path: string) => storage.get(path) ?? null),
 		write: vi.fn(async (path: string, content: string) => {
@@ -35,7 +40,7 @@ function createMockStore() {
 }
 
 function mockServices(llmResponse: string | ((...args: unknown[]) => string)) {
-	const sharedStore = createMockStore();
+	const sharedStore = createMockStore({ 'household.yaml': makeHouseholdYaml(['user-1']) });
 	const completeFn = typeof llmResponse === 'function'
 		? vi.fn(llmResponse)
 		: vi.fn().mockResolvedValue(llmResponse);

@@ -8,8 +8,14 @@ import type { CoreServices, PhotoContext, ScopedDataStore } from '@pas/core/type
 
 const testPhoto = Buffer.from('fake-jpeg-data');
 
-function createMockStore() {
-	const storage = new Map<string, string>();
+/** Minimal household YAML (no frontmatter — stripFrontmatter passes it through as-is). */
+function makeHouseholdYaml(memberUserIds: string[]): string {
+	const membersYaml = memberUserIds.map((id) => `  - ${id}`).join('\n');
+	return `id: household-1\nname: Test Household\ncreatedBy: user-1\nmembers:\n${membersYaml}\njoinCode: ABCDEF\ncreatedAt: '2026-01-01'\n`;
+}
+
+function createMockStore(initialData: Record<string, string> = {}) {
+	const storage = new Map<string, string>(Object.entries(initialData));
 	return {
 		read: vi.fn(async (path: string) => storage.get(path) ?? null),
 		write: vi.fn(async (path: string, content: string) => {
@@ -21,8 +27,21 @@ function createMockStore() {
 	};
 }
 
-function createMockServices(llmResponse: string) {
-	const sharedStore = createMockStore();
+/**
+ * Create mock services. By default, sets up a valid household with user-1 as a member.
+ * Pass `householdMembers: null` to omit household entirely.
+ * Pass `householdMembers: []` (or other IDs) to test non-membership.
+ */
+function createMockServices(
+	llmResponse: string,
+	opts: { householdMembers?: string[] | null } = {},
+) {
+	const householdMembers = opts.householdMembers === undefined ? ['user-1'] : opts.householdMembers;
+	const initialData: Record<string, string> = {};
+	if (householdMembers !== null) {
+		initialData['household.yaml'] = makeHouseholdYaml(householdMembers);
+	}
+	const sharedStore = createMockStore(initialData);
 	return {
 		services: {
 			llm: {
@@ -260,6 +279,285 @@ describe('Photo Handler', () => {
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'user-1',
 				expect.stringContaining('Sorry'),
+			);
+		});
+	});
+
+	// ─── F21: Telegram Markdown formatting ────────────────────────
+
+	describe('Telegram Markdown formatting (F21)', () => {
+		it('escapes special chars in recipe title', async () => {
+			const specialRecipe = JSON.stringify({
+				title: 'Mom*s _Best_ [Pasta]',
+				source: 'photo',
+				ingredients: [{ name: 'flour', quantity: 1, unit: 'cup' }],
+				instructions: ['Mix'],
+				servings: 2,
+				tags: [],
+				allergens: [],
+			});
+			// LLM: first call = recipe parse, subsequent = normalizer
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce(specialRecipe)
+				.mockResolvedValue('{"canonical":"flour","display":"Flour"}');
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx('save this recipe'));
+
+			const msg = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+			expect(msg).toContain('Mom\\*s \\_Best\\_ \\[Pasta\\]');
+		});
+
+		it('does not use double-asterisk bold in recipe message', async () => {
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce(validRecipeJson)
+				.mockResolvedValue('{"canonical":"flour","display":"Flour"}');
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx('save this recipe'));
+
+			const msg = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+			expect(msg).not.toMatch(/\*\*.+\*\*/);
+		});
+
+		it('escapes special chars in receipt store name', async () => {
+			const specialReceipt = JSON.stringify({
+				store: "Bob*s [Grocery] Store",
+				date: '2026-04-05',
+				lineItems: [{ name: 'Milk', quantity: 1, totalPrice: 3.99 }],
+				total: 3.99,
+			});
+			const { services } = createMockServices(specialReceipt);
+
+			await handlePhoto(services, createPhotoCtx('grocery receipt'));
+
+			const msg = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+			expect(msg).toContain('Bob\\*s \\[Grocery\\] Store');
+		});
+
+		it('escapes special chars in pantry item names', async () => {
+			const specialPantry = JSON.stringify([
+				{ name: 'Tom*to Sauce [brand]', quantity: '2 cans', category: 'canned' },
+			]);
+			const { services } = createMockServices(specialPantry);
+
+			await handlePhoto(services, createPhotoCtx("what's in my fridge"));
+
+			const msg = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+			expect(msg).toContain('Tom\\*to Sauce \\[brand\\]');
+		});
+
+		it('escapes special chars in grocery item names', async () => {
+			const specialGrocery = JSON.stringify({
+				items: [{ name: 'O_rganic [Milk]', quantity: 1, unit: 'gallon' }],
+				isRecipe: false,
+			});
+			const { services } = createMockServices(specialGrocery);
+
+			await handlePhoto(services, createPhotoCtx('add to grocery list'));
+
+			const msg = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+			expect(msg).toContain('O\\_rganic \\[Milk\\]');
+		});
+	});
+
+	// ─── F19: Grocery-photo atomic writes ──────────────────────────
+
+	describe('grocery-photo atomic writes (F19)', () => {
+		const validGroceryWithBadRecipe = JSON.stringify({
+			items: [{ name: 'bread', quantity: 1, unit: 'loaf' }],
+			isRecipe: true,
+			parsedRecipe: { title: '' },  // malformed: no ingredients/instructions
+		});
+
+		it('saves grocery items when parsedRecipe is malformed, skips recipe save with warning', async () => {
+			const { services, sharedStore } = createMockServices(validGroceryWithBadRecipe);
+
+			await handlePhoto(services, createPhotoCtx('add to grocery list'));
+
+			// Grocery list should be saved
+			expect(sharedStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('grocery'),
+				expect.any(String),
+			);
+			// User should get a warning, not a generic error
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('bread'),
+			);
+			// No recipe file written
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as string[][];
+			const recipeCalls = writeCalls.filter(([path]) => path.includes('recipes/'));
+			expect(recipeCalls).toHaveLength(0);
+		});
+
+		it('saves both grocery items and recipe when parsedRecipe is valid', async () => {
+			const validBoth = JSON.stringify({
+				items: [{ name: 'flour', quantity: 2, unit: 'cups' }],
+				isRecipe: true,
+				parsedRecipe: {
+					title: 'Quick Bread',
+					source: 'photo',
+					ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
+					instructions: ['Mix', 'Bake'],
+					servings: 4,
+					tags: [],
+					allergens: [],
+				},
+			});
+			// Need LLM to handle both grocery parse and ingredient normalization
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce(validBoth)                           // grocery parse
+				.mockResolvedValue('{"canonical":"flour","display":"Flour"}'); // normalizer calls
+			const { services, sharedStore } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx('add to grocery list'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as string[][];
+			expect(writeCalls.some(([path]) => (path as string).includes('grocery'))).toBe(true);
+			expect(writeCalls.some(([path]) => (path as string).includes('recipes/'))).toBe(true);
+		});
+
+		it('saves grocery items only when isRecipe is false', async () => {
+			const { services, sharedStore } = createMockServices(validGroceryJson);
+			await handlePhoto(services, createPhotoCtx('add to grocery list'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as string[][];
+			expect(writeCalls.some(([path]) => (path as string).includes('grocery'))).toBe(true);
+			expect(writeCalls.some(([path]) => (path as string).includes('recipes/'))).toBe(false);
+		});
+	});
+
+	// ─── F15: Household membership guard ───────────────────────────
+
+	describe('household membership guard (F15)', () => {
+		it('rejects photo from user with no household and makes no LLM calls', async () => {
+			const { services } = createMockServices(validRecipeJson, { householdMembers: null });
+			const ctx = createPhotoCtx('save this recipe');
+
+			await handlePhoto(services, ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('household'),
+			);
+			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
+
+		it('rejects photo from user who is not a household member and makes no LLM calls', async () => {
+			// household exists, but only 'other-user' is a member — not 'user-1'
+			const { services } = createMockServices(validRecipeJson, { householdMembers: ['other-user'] });
+			const ctx = createPhotoCtx('save this recipe');
+
+			await handlePhoto(services, ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('household'),
+			);
+			expect(services.llm.complete).not.toHaveBeenCalled();
+		});
+
+		it('does not write to shared store when user is not a household member', async () => {
+			const { services, sharedStore } = createMockServices(validRecipeJson, { householdMembers: null });
+			const ctx = createPhotoCtx('save this recipe');
+
+			await handlePhoto(services, ctx);
+
+			// Only household.yaml read is expected; no writes for photo/recipe/etc.
+			expect(sharedStore.write).not.toHaveBeenCalled();
+		});
+
+		it('allows photo from a valid household member', async () => {
+			const { services } = createMockServices(validRecipeJson);
+			const ctx = createPhotoCtx('save this recipe');
+
+			await handlePhoto(services, ctx);
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('Test Recipe'),
+			);
+		});
+	});
+
+	// ─── F16: Strict vision classification ─────────────────────────
+
+	describe('strict vision classification (F16)', () => {
+		it('treats negated response "not a recipe, this is a receipt" as unrecognized and asks for caption', async () => {
+			const completeFn = vi.fn().mockResolvedValueOnce('not a recipe, this is a receipt');
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('not sure what kind of photo'),
+			);
+			// Only one LLM call (classification), no parse call
+			expect(completeFn).toHaveBeenCalledTimes(1);
+		});
+
+		it('treats verbose response "I do not see a grocery list" as unrecognized', async () => {
+			const completeFn = vi.fn().mockResolvedValueOnce('I do not see a grocery list');
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('not sure what kind of photo'),
+			);
+			expect(completeFn).toHaveBeenCalledTimes(1);
+		});
+
+		it('accepts exact single-word "receipt"', async () => {
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce('receipt')
+				.mockResolvedValueOnce(validReceiptJson);
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('Grocery Store'),
+			);
+		});
+
+		it('accepts "Recipe" (capitalized)', async () => {
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce('Recipe')
+				.mockResolvedValueOnce(validRecipeJson);
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('Test Recipe'),
+			);
+		});
+
+		it('accepts "recipe." (with trailing punctuation)', async () => {
+			const completeFn = vi.fn()
+				.mockResolvedValueOnce('recipe.')
+				.mockResolvedValueOnce(validRecipeJson);
+			const { services } = createMockServices('');
+			services.llm.complete = completeFn;
+
+			await handlePhoto(services, createPhotoCtx());
+
+			expect(services.telegram.send).toHaveBeenCalledWith(
+				'user-1',
+				expect.stringContaining('Test Recipe'),
 			);
 		});
 	});

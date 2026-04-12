@@ -5,7 +5,8 @@
 import type { CoreServices } from '@pas/core/types';
 import type { ReceiptLineItem } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
-import { sanitizeInput } from '../utils/sanitize.js';
+import { fenceCaption } from '../utils/sanitize.js';
+import { isValidReceiptLineItem, isValidReceiptAmount } from '../utils/photo-validators.js';
 
 /** Parsed receipt data (before ID/path assignment). */
 export interface ParsedReceipt {
@@ -48,8 +49,7 @@ export async function parseReceiptFromPhoto(
 	mimeType: string,
 	caption?: string,
 ): Promise<ParsedReceipt> {
-	const safeCaption = caption ? sanitizeInput(caption, 200) : '';
-	const captionContext = safeCaption ? `\n\nThe user provided this caption: "${safeCaption}"` : '';
+	const captionContext = fenceCaption(caption);
 	const result = await services.llm.complete(
 		`${RECEIPT_PROMPT}${captionContext}\n\nExtract the receipt data from the attached photo.`,
 		{
@@ -60,16 +60,20 @@ export async function parseReceiptFromPhoto(
 
 	const parsed = parseJsonResponse(result, 'receipt parse') as Record<string, unknown>;
 
-	if (typeof parsed.total !== 'number') {
+	if (!isValidReceiptAmount(parsed.total)) {
 		throw new Error('Could not extract a total from the receipt. Please ensure the receipt is clearly visible.');
 	}
+
+	const lineItems = Array.isArray(parsed.lineItems)
+		? (parsed.lineItems as unknown[]).filter(isValidReceiptLineItem) as ReceiptLineItem[]
+		: [];
 
 	return {
 		store: typeof parsed.store === 'string' ? parsed.store : 'Unknown',
 		date: typeof parsed.date === 'string' ? parsed.date : new Date().toISOString().slice(0, 10),
-		lineItems: Array.isArray(parsed.lineItems) ? (parsed.lineItems as ReceiptLineItem[]) : [],
-		subtotal: typeof parsed.subtotal === 'number' ? parsed.subtotal : null,
-		tax: typeof parsed.tax === 'number' ? parsed.tax : null,
-		total: parsed.total as number,
+		lineItems,
+		subtotal: isValidReceiptAmount(parsed.subtotal) ? parsed.subtotal : null,
+		tax: isValidReceiptAmount(parsed.tax) ? parsed.tax : null,
+		total: parsed.total,
 	};
 }

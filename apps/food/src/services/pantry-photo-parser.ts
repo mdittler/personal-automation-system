@@ -5,6 +5,7 @@
 import type { CoreServices } from '@pas/core/types';
 import type { PantryItem } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
+import { isValidPantryPhotoItem } from '../utils/photo-validators.js';
 
 const PANTRY_PHOTO_PROMPT = `You are a pantry inventory assistant. Identify all food items visible in this photo of a pantry, fridge, or freezer.
 
@@ -44,10 +45,12 @@ export async function parsePantryFromPhoto(
 
 	const today = new Date().toISOString().slice(0, 10);
 
-	return parsed.map((item: Record<string, unknown>) => ({
-		name: typeof item.name === 'string' ? item.name : 'unknown item',
-		quantity: typeof item.quantity === 'string' ? item.quantity : '1',
-		addedDate: today,
-		category: typeof item.category === 'string' ? item.category : 'other',
-	}));
+	return (parsed as unknown[])
+		.filter(isValidPantryPhotoItem)
+		.map((item) => ({
+			name: item.name,
+			quantity: typeof item.quantity === 'string' ? item.quantity : '1',
+			addedDate: today,
+			category: typeof item.category === 'string' ? item.category : 'other',
+		}));
 }
