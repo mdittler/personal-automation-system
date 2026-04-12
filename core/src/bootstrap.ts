@@ -121,19 +121,23 @@ export async function main(): Promise<void> {
 
 	const modelSelector = new ModelSelector({
 		dataDir: config.dataDir,
-		defaultStandard: llmConfig?.tiers.standard ?? {
+		defaultStandard: llmConfig?.tiers?.standard ?? {
 			provider: 'anthropic',
 			model: config.claude.model,
 		},
-		defaultFast: llmConfig?.tiers.fast ?? {
+		defaultFast: llmConfig?.tiers?.fast ?? {
 			provider: 'anthropic',
 			model: config.claude.fastModel ?? 'claude-haiku-4-5-20251001',
 		},
-		defaultReasoning: llmConfig?.tiers.reasoning,
+		defaultReasoning: llmConfig?.tiers?.reasoning,
 		logger: createChildLogger(logger, { service: 'model-selector' }),
 	});
 	await modelSelector.load();
-	// Reconcile saved tier selections against registered providers (F12 fix)
+	// Reconcile saved tier selections against registered providers (F12 fix).
+	// Note: providerRegistry.getProviderIds() contains only providers where createProvider()
+	// succeeded — this is the correct availability set. F11's getAvailableProviderIds() is a
+	// pre-flight credential check; some configured providers may still fail to instantiate
+	// (e.g. wrong type string), so the registry set is authoritative here.
 	modelSelector.reconcile(new Set(providerRegistry.getProviderIds()));
 
 	const modelCatalog = new ModelCatalog({

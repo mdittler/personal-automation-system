@@ -95,12 +95,13 @@ export function registerLlmRoute(server: FastifyInstance, options: LlmRouteOptio
 		}
 
 		try {
+			// Note: _appId attribution is NOT set here — the bootstrap wires a SystemLLMGuard
+			// with attributionId: 'api' around the LLM, so the guard stamps _appId reliably.
 			const result = await llm.complete(body.prompt, {
 				tier,
 				systemPrompt: body.systemPrompt,
 				maxTokens: body.maxTokens,
 				temperature: body.temperature,
-				_appId: 'api',
 			});
 
 			logger.info({ tier, promptLength: body.prompt.length }, 'API LLM completion');

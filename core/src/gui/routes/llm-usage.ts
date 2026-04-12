@@ -11,7 +11,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
-import { MODEL_PRICING } from '../../services/llm/model-pricing.js';
+import { DEFAULT_REMOTE_PRICING, MODEL_PRICING, getModelPricing } from '../../services/llm/model-pricing.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import type { ModelRef, ModelTier } from '../../types/llm.js';
@@ -327,8 +327,24 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 				for (const model of providerModels) {
 					const safeId = escapeHtml(model.id);
 					const safeName = escapeHtml(model.displayName);
-					const inputPrice = model.pricing ? `$${model.pricing.input.toFixed(2)}` : 'N/A';
-					const outputPrice = model.pricing ? `$${model.pricing.output.toFixed(2)}` : 'N/A';
+
+					// Show the pricing that CostTracker will actually use for this model:
+					// catalog pricing > MODEL_PRICING table > DEFAULT_REMOTE_PRICING (for non-Ollama)
+					const isOllama = model.providerType === 'ollama';
+					const knownPricing = model.pricing ?? getModelPricing(model.id);
+					let inputPrice: string;
+					let outputPrice: string;
+					if (isOllama) {
+						inputPrice = '$0.00';
+						outputPrice = '$0.00';
+					} else if (knownPricing) {
+						inputPrice = `$${knownPricing.input.toFixed(2)}`;
+						outputPrice = `$${knownPricing.output.toFixed(2)}`;
+					} else {
+						// No exact pricing — CostTracker falls back to DEFAULT_REMOTE_PRICING
+						inputPrice = `~$${DEFAULT_REMOTE_PRICING.input.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
+						outputPrice = `~$${DEFAULT_REMOTE_PRICING.output.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
+					}
 
 					const isStandard = isModelRefActive(model, standardRef);
 					const isFast = isModelRefActive(model, fastRef);
