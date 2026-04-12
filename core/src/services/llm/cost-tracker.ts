@@ -402,9 +402,18 @@ export class CostTracker {
 
 	private appendEntry(entry: UsageEntry): Promise<void> {
 		// Serialize writes through a promise chain to prevent race conditions
-		// (concurrent record() calls can't interleave read-then-write)
-		this.writeQueue = this.writeQueue.then(() => this.doAppendEntry(entry));
-		return this.writeQueue;
+		// (concurrent record() calls can't interleave read-then-write).
+		// Use .then(fn, fn) so a failed write does not poison the queue —
+		// the tail always resolves, allowing subsequent entries to proceed.
+		const p = this.writeQueue.then(
+			() => this.doAppendEntry(entry),
+			() => this.doAppendEntry(entry),
+		);
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
+		return p;
 	}
 
 	private async doAppendEntry(entry: UsageEntry): Promise<void> {

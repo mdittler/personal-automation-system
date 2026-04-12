@@ -51,16 +51,30 @@ export class OneOffManager {
 	 * Schedule a one-off task.
 	 */
 	async schedule(appId: string, jobId: string, runAt: Date, handler: string): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doSchedule(appId, jobId, runAt, handler));
-		return this.writeQueue;
+		const p = this.writeQueue.then(
+			() => this.doSchedule(appId, jobId, runAt, handler),
+			() => this.doSchedule(appId, jobId, runAt, handler),
+		);
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
+		return p;
 	}
 
 	/**
 	 * Cancel a pending one-off task.
 	 */
 	async cancel(appId: string, jobId: string): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doCancel(appId, jobId));
-		return this.writeQueue;
+		const p = this.writeQueue.then(
+			() => this.doCancel(appId, jobId),
+			() => this.doCancel(appId, jobId),
+		);
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
+		return p;
 	}
 
 	/**
@@ -93,8 +107,15 @@ export class OneOffManager {
 	 * Check for due tasks and execute them.
 	 */
 	async checkAndExecute(): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doCheckAndExecute());
-		return this.writeQueue;
+		const p = this.writeQueue.then(
+			() => this.doCheckAndExecute(),
+			() => this.doCheckAndExecute(),
+		);
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
+		return p;
 	}
 
 	private async doSchedule(

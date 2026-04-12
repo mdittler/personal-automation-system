@@ -125,6 +125,20 @@ describe('OneOffManager', () => {
 		expect(pending).toHaveLength(5);
 	});
 
+	it('writeQueue recovers after a failed schedule', async () => {
+		// Use an invalid Date — NaN date causes toISOString() to throw in saveTasks
+		const invalidDate = new Date('not-a-date');
+		await expect(manager.schedule('app1', 'job1', invalidDate, 'handler.js')).rejects.toThrow();
+
+		// Second schedule with valid date should still work
+		const futureDate = new Date(Date.now() + 60_000);
+		await manager.schedule('app2', 'job2', futureDate, 'handler.js');
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(1);
+		expect(pending[0].jobId).toBe('job2');
+	});
+
 	it('concurrent schedule and cancel serialize correctly', async () => {
 		const futureDate = new Date(Date.now() + 300_000);
 
