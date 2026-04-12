@@ -693,6 +693,21 @@ describe('CostTracker', () => {
 			expect(raw).toContain('chatbot');
 		});
 
+		it('is idempotent — repeated loadMonthlyCache calls do not double-count', async () => {
+			const systemDir = join(tempDir, 'system');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-10T12:00:00.000Z | anthropic | claude-sonnet-4-20250514 | 1000 | 500 | 0.010500 | chatbot | user-a |`,
+			]);
+			// No YAML cache — will rebuild from log both times
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache(); // first rebuild
+			await t.loadMonthlyCache(); // second call — should reset, not double-count
+
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.0105, 6);
+			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.0105, 6);
+		});
+
 		it('ignores malformed log lines (missing columns, non-numeric cost)', async () => {
 			const systemDir = join(tempDir, 'system');
 			await writeUsageLog(systemDir, [

@@ -163,18 +163,9 @@ describe('API LLM Route', () => {
 		);
 	});
 
-	it('sets _appId to api', async () => {
-		await app.inject({
-			method: 'POST',
-			url: '/api/llm/complete',
-			headers: authHeaders(),
-			payload: { prompt: 'Test' },
-		});
-		expect(mockLlm.complete).toHaveBeenCalledWith(
-			'Test',
-			expect.objectContaining({ _appId: 'api' }),
-		);
-	});
+	// _appId attribution is handled by the SystemLLMGuard (attributionId: 'api') wired in
+	// bootstrap — the route itself does not stamp _appId. The guard behaviour is verified in
+	// the 'API LLM Route — SystemLLMGuard integration (F14)' describe block below.
 
 	it('returns 400 for missing prompt', async () => {
 		const res = await app.inject({

@@ -171,6 +171,11 @@ export class CostTracker {
 
 		if (!content.trim()) return false;
 
+		// Reset accumulators so this method is idempotent (safe to call multiple times)
+		this.monthlyCosts.clear();
+		this.monthlyUserCosts.clear();
+		this.monthlyTotal = 0;
+
 		const lines = content.split('\n');
 		let rebuilt = false;
 

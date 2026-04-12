@@ -255,6 +255,17 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 	if (yamlLLM?.tiers) {
 		const fast = yamlLLM.tiers.fast;
 		const standard = yamlLLM.tiers.standard;
+		// Require both fast and standard to be specified together (or neither)
+		if (fast && !standard) {
+			throw new Error(
+				"pas.yaml specifies 'tiers.fast' without 'tiers.standard'. Either specify both tiers or neither.",
+			);
+		}
+		if (standard && !fast) {
+			throw new Error(
+				"pas.yaml specifies 'tiers.standard' without 'tiers.fast'. Either specify both tiers or neither.",
+			);
+		}
 		if (fast && standard) {
 			// Validate that explicitly-configured tier providers are actually available
 			if (!available.has(fast.provider)) {

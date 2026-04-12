@@ -609,4 +609,48 @@ describe('loadSystemConfig', () => {
 
 		vi.unstubAllEnvs();
 	});
+
+	it('throws when only tiers.fast is specified without tiers.standard (F11)', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					tiers: {
+						fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+						// standard intentionally omitted
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			/tiers.fast.*without.*tiers.standard|either specify both/i,
+		);
+	});
+
+	it('throws when only tiers.standard is specified without tiers.fast (F11)', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					tiers: {
+						standard: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+						// fast intentionally omitted
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			/tiers.standard.*without.*tiers.fast|either specify both/i,
+		);
+	});
 });

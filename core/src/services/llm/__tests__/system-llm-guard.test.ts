@@ -85,9 +85,14 @@ describe('SystemLLMGuard', () => {
 				logger,
 			});
 
-			await expect(guard.complete('hello')).rejects.toThrow(LLMCostCapError);
-			const err = await guard.complete('hello').catch((e) => e);
-			expect(err.scope).toBe('global');
+			let caughtErr: unknown;
+			try {
+				await guard.complete('hello');
+			} catch (e) {
+				caughtErr = e;
+			}
+			expect(caughtErr).toBeInstanceOf(LLMCostCapError);
+			expect((caughtErr as LLMCostCapError).scope).toBe('global');
 		});
 
 		it('blocks when cost is exactly at cap (>=)', async () => {
@@ -279,9 +284,11 @@ describe('SystemLLMGuard', () => {
 			});
 
 			await expect(apiGuard.complete('hello')).rejects.toThrow(LLMCostCapError);
+			// Match '(api call)' specifically to verify attributionId appears in the log message
+			// and to distinguish from the default 'system' attribution
 			expect(warnSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ totalCost: 50.0 }),
-				expect.stringContaining('api call'),
+				expect.stringContaining('(api call)'),
 			);
 		});
 	});
