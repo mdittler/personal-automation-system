@@ -278,4 +278,81 @@ describe('CronManager', () => {
 		await manager.stop();
 		expect(Date.now() - start).toBeLessThan(200);
 	});
+
+	// --- notifier exception resilience ---
+
+	it('continues without crashing if notifier.onFailure throws', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockRejectedValue(new Error('notifier exploded')),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+
+		const throwingHandler = vi.fn().mockRejectedValue(new Error('handler crash'));
+		manager.register(makeJob(), () => throwingHandler);
+
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		// Should not throw even though notifier.onFailure rejects
+		await expect(cronCallback()).resolves.toBeUndefined();
+
+		expect(notifier.onFailure).toHaveBeenCalledWith('test-app', 'test-job', 'handler crash');
+
+		createTaskSpy.mockRestore();
+		manager.stop();
+	});
+
+	// --- stop() timeout path ---
+
+	it('stop() resolves after 30s timeout if in-flight job never completes', async () => {
+		// Provide a release handle so we can unblock the handler after the test
+		let releaseHandler!: () => void;
+		const blockForever = new Promise<void>((resolve) => {
+			releaseHandler = resolve;
+		});
+
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		// Register a handler that blocks until released
+		manager.register(
+			makeJob(),
+			() =>
+				async () => {
+					await blockForever;
+				},
+		);
+
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		vi.useFakeTimers();
+		try {
+			// Start cron callback (will block on blockForever)
+			void cronCallback();
+
+			// Drain microtasks so inFlightCount is incremented
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// stop() should resolve via 30s timeout
+			const stopPromise = manager.stop();
+
+			// Advance 30 seconds — fires the setTimeout(resolve, 30_000) in stop()
+			await vi.advanceTimersByTimeAsync(30_000);
+
+			await expect(stopPromise).resolves.toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+			// Unblock the handler so in-flight work can complete
+			releaseHandler();
+			createTaskSpy.mockRestore();
+		}
+	});
 });

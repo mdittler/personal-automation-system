@@ -311,6 +311,93 @@ describe('OneOffManager', () => {
 		expect(Date.now() - start).toBeLessThan(200);
 	});
 
+	// --- notifier exception resilience ---
+
+	it('continues processing remaining tasks if notifier.onFailure throws', async () => {
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockRejectedValue(new Error('notifier exploded')),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+		manager.setHandlerResolver(() => async () => { throw new Error('handler crash'); });
+
+		const pastDate = new Date(Date.now() - 60_000);
+		// Schedule TWO tasks — if the loop aborts on first notifier failure, second is lost
+		await manager.schedule('app1', 'job1', pastDate, 'handler.js');
+		await manager.schedule('app1', 'job2', pastDate, 'handler.js');
+		await manager.checkAndExecute();
+
+		// Both tasks attempted and removed (notifier throw should not affect task removal)
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(0);
+	});
+
+	// --- stop() timeout path ---
+
+	it('stop() resolves after 30s timeout if in-flight job never completes', async () => {
+		// Use a separate manager so the module-level afterEach is not affected
+		const localManager = new OneOffManager(tempDir + '-timeout', logger);
+
+		// Provide a release handle so we can unblock the handler after the test
+		let releaseHandler!: () => void;
+		const blockForever = new Promise<void>((resolve) => {
+			releaseHandler = resolve;
+		});
+
+		localManager.setHandlerResolver(
+			() =>
+				async () => {
+					await blockForever;
+				},
+		);
+
+		const pastDate = new Date(Date.now() - 60_000);
+		await localManager.schedule('app1', 'job1', pastDate, 'handler.js');
+
+		vi.useFakeTimers();
+		try {
+			// Start checkAndExecute (will block on blockForever)
+			void localManager.checkAndExecute();
+
+			// Drain microtasks so the handler starts executing inside the queue chain
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// Call stop() — should resolve via 30s timeout
+			const stopPromise = localManager.stop();
+
+			// Advance 30 seconds — fires the setTimeout(resolve, 30_000) in stop()
+			await vi.advanceTimersByTimeAsync(30_000);
+
+			// stop() should now resolve (via timeout)
+			await expect(stopPromise).resolves.toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+			// Unblock the handler so the queue can drain and temp files can be cleaned up
+			releaseHandler();
+		}
+	});
+
+	// --- stopping flag ---
+
+	it('checkAndExecute() is a no-op after stop() is called', async () => {
+		manager.setHandlerResolver(() => async () => {});
+
+		const pastDate = new Date(Date.now() - 60_000);
+		await manager.schedule('app1', 'job1', pastDate, 'handler.js');
+
+		// stop() sets stopping = true
+		await manager.stop();
+
+		// checkAndExecute should be a no-op — no tasks should be removed
+		await manager.checkAndExecute();
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(1); // task remains because stopping=true prevented execution
+	});
+
 	it('concurrent schedule and cancel serialize correctly', async () => {
 		const futureDate = new Date(Date.now() + 300_000);
 

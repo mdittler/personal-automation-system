@@ -228,10 +228,17 @@ export class OneOffManager {
 			// and should be removed (not added to remaining).
 			const result = await runTask(task.appId, task.jobId, handler, this.logger);
 
-			if (result.success) {
-				this.notifier?.onSuccess(task.appId, task.jobId);
-			} else {
-				await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+			try {
+				if (result.success) {
+					this.notifier?.onSuccess(task.appId, task.jobId);
+				} else {
+					await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+				}
+			} catch (err) {
+				this.logger.error(
+					{ appId: task.appId, jobId: task.jobId, error: err instanceof Error ? err.message : String(err) },
+					'Notifier threw during job lifecycle callback — ignoring',
+				);
 			}
 			// Task intentionally NOT added to remaining — it has been attempted
 		}
