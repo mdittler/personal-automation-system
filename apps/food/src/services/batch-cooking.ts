@@ -12,6 +12,7 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { BatchAnalysis, FreezerItem, MealPlan, PlannedMeal, Recipe } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { loadFreezer } from './freezer-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
 
@@ -185,7 +186,7 @@ export function formatDefrostMessage(matches: DefrostMatch[]): string {
 	];
 
 	for (const match of matches) {
-		lines.push(`• ${match.freezerItem.name} → ${match.meal.recipeTitle}`);
+		lines.push(`• ${escapeMarkdown(match.freezerItem.name)} → ${escapeMarkdown(match.meal.recipeTitle)}`);
 	}
 
 	return lines.join('\n');
