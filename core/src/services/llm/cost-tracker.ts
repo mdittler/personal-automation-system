@@ -182,11 +182,11 @@ export class CostTracker {
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 
-			const timestamp = cells[0]; // e.g. "2026-04-10T14:30:00.000Z"
+			const timestamp = cells[0]!; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
 			// Only count entries for the current month
 			if (!timestamp.startsWith(this.currentMonth)) continue;
 
-			const cost = parseFloat(cells[5]);
+			const cost = parseFloat(cells[5]!);
 			if (!Number.isFinite(cost) || cost < 0) continue;
 
 			const appId = cells[6] === '-' ? undefined : cells[6];
@@ -402,9 +402,18 @@ export class CostTracker {
 
 	private appendEntry(entry: UsageEntry): Promise<void> {
 		// Serialize writes through a promise chain to prevent race conditions
-		// (concurrent record() calls can't interleave read-then-write)
-		this.writeQueue = this.writeQueue.then(() => this.doAppendEntry(entry));
-		return this.writeQueue;
+		// (concurrent record() calls can't interleave read-then-write).
+		// Use .then(fn, fn) so a failed write does not poison the queue —
+		// the tail always resolves, allowing subsequent entries to proceed.
+		const p = this.writeQueue.then(
+			() => this.doAppendEntry(entry),
+			() => this.doAppendEntry(entry),
+		);
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
+		return p;
 	}
 
 	private async doAppendEntry(entry: UsageEntry): Promise<void> {

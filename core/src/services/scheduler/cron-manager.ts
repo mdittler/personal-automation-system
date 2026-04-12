@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Logger } from 'pino';
 import type { ScheduledJob } from '../../types/scheduler.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import { type TaskHandler, runTask } from './task-runner.js';
 
 interface RegisteredCronJob {
@@ -24,12 +25,19 @@ export class CronManager {
 	private readonly logger: Logger;
 	private readonly timezone: string;
 	private readonly persistPath: string;
+	private notifier: SchedulerJobNotifier | null = null;
+	private inFlightCount = 0;
+	private readonly drainResolvers: Array<() => void> = [];
 
 	constructor(logger: Logger, timezone: string, dataDir: string) {
 		this.logger = logger;
 		this.timezone = timezone;
 		this.persistPath = join(dataDir, 'system', 'cron-last-run.json');
 		this.loadLastRunData();
+	}
+
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.notifier = notifier;
 	}
 
 	private loadLastRunData(): void {
@@ -86,10 +94,31 @@ export class CronManager {
 		const task = cron.createTask(
 			job.cron,
 			async () => {
-				const handler = handlerResolver();
-				await runTask(job.appId, job.id, handler, this.logger);
-				this.lastRunAt.set(jobKey, new Date());
-				this.persistLastRunData();
+				if (this.notifier?.isDisabled(job.appId, job.id)) {
+					this.logger.warn({ jobKey }, 'Cron job is disabled, skipping execution');
+					return;
+				}
+
+				this.inFlightCount++;
+				try {
+					const handler = handlerResolver();
+					const result = await runTask(job.appId, job.id, handler, this.logger);
+
+					this.lastRunAt.set(jobKey, new Date());
+					this.persistLastRunData();
+
+					if (result.success) {
+						this.notifier?.onSuccess(job.appId, job.id);
+					} else {
+						await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+					}
+				} finally {
+					this.inFlightCount--;
+					if (this.inFlightCount === 0) {
+						for (const resolve of this.drainResolvers) resolve();
+						this.drainResolvers.length = 0;
+					}
+				}
 			},
 			{ timezone: this.timezone },
 		);
@@ -112,12 +141,24 @@ export class CronManager {
 	}
 
 	/**
-	 * Stop all registered cron jobs.
+	 * Stop all registered cron jobs and wait for any in-flight executions to complete.
+	 * Waits up to 30 seconds for in-flight jobs before returning.
 	 */
-	stop(): void {
+	async stop(): Promise<void> {
 		for (const [key, { task }] of this.jobs) {
 			task.stop();
 			this.logger.debug({ jobKey: key }, 'Cron job stopped');
+		}
+		if (this.inFlightCount > 0) {
+			this.logger.info({ inFlight: this.inFlightCount }, 'Waiting for in-flight cron jobs...');
+			await Promise.race([
+				new Promise<void>((resolve) => {
+					this.drainResolvers.push(resolve);
+				}),
+				new Promise<void>((resolve) => {
+					setTimeout(resolve, 30_000);
+				}),
+			]);
 		}
 	}
 

@@ -80,6 +80,47 @@ describe('ShutdownManager', () => {
 		expect(result).toBe(42);
 	});
 
+	it('shutdown awaits async scheduler.stop()', async () => {
+		const logger = createMockLogger();
+		const manager = new ShutdownManager({ logger });
+		const order: string[] = [];
+
+		let resolveSchedulerStop!: () => void;
+		const schedulerStopDone = new Promise<void>((resolve) => {
+			resolveSchedulerStop = resolve;
+		});
+
+		const services = createMockServices({
+			scheduler: {
+				stop: vi.fn(async () => {
+					await schedulerStopDone;
+					order.push('scheduler.stop');
+				}),
+			},
+			telegram: { cleanup: vi.fn(() => order.push('telegram.cleanup')) },
+		});
+
+		manager.registerServices(services);
+
+		// Start shutdown — it should wait for the async scheduler.stop()
+		const shutdownPromise = manager.shutdown('SIGTERM').catch(() => {});
+
+		// Give shutdown a moment to call scheduler.stop()
+		await new Promise((r) => setTimeout(r, 10));
+
+		// telegram.cleanup should NOT have run yet (scheduler hasn't finished)
+		expect(order).not.toContain('telegram.cleanup');
+
+		// Let scheduler finish
+		resolveSchedulerStop();
+		await shutdownPromise;
+
+		// Now both should have run in order
+		expect(order).toContain('scheduler.stop');
+		expect(order).toContain('telegram.cleanup');
+		expect(order.indexOf('scheduler.stop')).toBeLessThan(order.indexOf('telegram.cleanup'));
+	});
+
 	it('shutdown calls all service teardown methods in order', async () => {
 		const logger = createMockLogger();
 		const manager = new ShutdownManager({ logger });

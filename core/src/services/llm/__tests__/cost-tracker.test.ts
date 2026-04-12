@@ -130,6 +130,39 @@ describe('CostTracker', () => {
 		expect(content).toBe('');
 	});
 
+	it('writeQueue recovers after a failed write', async () => {
+		const tracker = new CostTracker(tempDir, logger);
+
+		// Create `tempDir/system` as a FILE to block the directory path
+		await writeFile(join(tempDir, 'system'), 'blocking-file', 'utf-8');
+
+		// First record fails internally (record() swallows errors via appendEntry)
+		// Use a distinct model name so we can assert it is absent from the recovered file
+		await tracker.record({
+			model: 'claude-opus-4-6',
+			inputTokens: 100,
+			outputTokens: 50,
+		});
+
+		// Remove the blocking file and create the directory properly
+		const { unlink } = await import('node:fs/promises');
+		await unlink(join(tempDir, 'system'));
+		await mkdir(join(tempDir, 'system'), { recursive: true });
+
+		// Second record should succeed even though first failed
+		await tracker.record({
+			model: 'claude-sonnet-4-20250514',
+			inputTokens: 200,
+			outputTokens: 100,
+		});
+
+		const content = await readFile(join(tempDir, 'system', 'llm-usage.md'), 'utf-8');
+		expect(content).toContain('# LLM Usage Log');
+		expect(content).toContain('claude-sonnet-4-20250514');
+		// The first (failed) record's data must NOT appear — the queue recovered cleanly
+		expect(content).not.toContain('claude-opus-4-6');
+	});
+
 	it('serializes concurrent writes correctly (no duplicate headers)', async () => {
 		const tracker = new CostTracker(tempDir, logger);
 

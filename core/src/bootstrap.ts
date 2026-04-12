@@ -51,6 +51,7 @@ import { Router } from './services/router/index.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
 import { VerificationLogger } from './services/router/verification-logger.js';
+import { JobFailureNotifier } from './services/scheduler/job-failure-notifier.js';
 import { SchedulerServiceImpl } from './services/scheduler/index.js';
 import { buildScheduledJobHandler } from './services/scheduler/per-user-dispatch.js';
 import { SecretsServiceImpl } from './services/secrets/index.js';
@@ -492,6 +493,51 @@ export async function main(): Promise<void> {
 				schedules.length,
 			);
 		}
+	}
+
+	// 9b-ii. Wire one-off task handler resolver (F31)
+	//
+	// Without this, due one-off tasks have no handler to invoke. The resolver
+	// looks up the app in the registry and returns a buildScheduledJobHandler
+	// for it. If the app is gone, it throws — OneOffManager will keep the task
+	// pending for retry rather than silently deleting it.
+	scheduler.oneOff.setHandlerResolver((appId, _handler, jobId) => {
+		// _handler is the job's handler path (stored in YAML for readability),
+		// but dispatch always uses appModule.handleScheduledJob(jobId) — the
+		// handler path is not dynamically loaded at runtime.
+		const entry = registry.getApp(appId);
+		if (!entry?.module.handleScheduledJob) {
+			throw new Error(`App "${appId}" not found or has no handleScheduledJob`);
+		}
+		return buildScheduledJobHandler({
+			appId,
+			jobId,
+			// One-off tasks have no user_scope field in their schema; 'system' runs
+			// the job once without per-user context. If per-user one-off tasks are
+			// needed in future, add user_scope to the OneOffTask schema.
+			userScope: 'system',
+			appModule: entry.module,
+			userProvider: userManager,
+			logger: createChildLogger(logger, { service: 'scheduled-job', appId }),
+		});
+	});
+
+	// 9b-iii. Wire job failure notifications (F33)
+	//
+	// JobFailureNotifier was fully implemented but never instantiated.
+	// Without this, job failures generate no Telegram notifications and
+	// auto-disable never triggers. Requires an admin user to know where
+	// to send notifications.
+	const adminUser = userManager.getAllUsers().find((u) => u.isAdmin);
+	if (adminUser) {
+		const jobFailureNotifier = new JobFailureNotifier({
+			logger: createChildLogger(logger, { service: 'job-failure-notifier' }),
+			sender: telegramService,
+			adminChatId: adminUser.id,
+		});
+		scheduler.setNotifier(jobFailureNotifier);
+	} else {
+		logger.warn('No admin user found — job failure notifications disabled');
 	}
 
 	// 9c. Index app documentation after all apps are loaded

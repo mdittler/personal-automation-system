@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { OneOffTask } from '../../types/scheduler.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import { type TaskHandler, runTask } from './task-runner.js';
 
 /** Serializable form of a one-off task for YAML storage. */
@@ -28,12 +29,16 @@ export class OneOffManager {
 	private readonly logger: Logger;
 	private checkInterval: ReturnType<typeof setInterval> | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
+	private stopping = false;
+
+	private notifier: SchedulerJobNotifier | null = null;
 
 	/**
-	 * Handler resolver: given an appId and handler path,
+	 * Handler resolver: given an appId, handler path, and jobId,
 	 * returns the function to execute. Set by the bootstrap.
+	 * Throws if the app is not found or has no handleScheduledJob.
 	 */
-	private handlerResolver: ((appId: string, handler: string) => TaskHandler) | null = null;
+	private handlerResolver: ((appId: string, handler: string, jobId: string) => TaskHandler) | null = null;
 
 	constructor(dataDir: string, logger: Logger) {
 		this.yamlPath = join(dataDir, 'system', 'scheduled-jobs.yaml');
@@ -42,25 +47,43 @@ export class OneOffManager {
 
 	/**
 	 * Set the handler resolver. Called by bootstrap after app loading.
+	 * The resolver receives appId, handler path, and jobId, and returns
+	 * the TaskHandler to execute. It should throw if the app is not found.
+	 *
+	 * Note: one-off tasks have no `user_scope` field in their schema. The
+	 * bootstrap always passes `userScope: 'system'`, meaning the job runs
+	 * once without per-user context. If per-user one-off tasks are needed
+	 * in future, the `OneOffTask` schema must be extended with `user_scope`.
 	 */
-	setHandlerResolver(resolver: (appId: string, handler: string) => TaskHandler): void {
+	setHandlerResolver(resolver: (appId: string, handler: string, jobId: string) => TaskHandler): void {
 		this.handlerResolver = resolver;
+	}
+
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.notifier = notifier;
+	}
+
+	/**
+	 * Enqueue a write operation, ensuring serial execution even after failures.
+	 */
+	private enqueue(fn: () => Promise<void>): Promise<void> {
+		const p = this.writeQueue.then(fn, fn);
+		this.writeQueue = p.then(() => {}, () => {});
+		return p;
 	}
 
 	/**
 	 * Schedule a one-off task.
 	 */
 	async schedule(appId: string, jobId: string, runAt: Date, handler: string): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doSchedule(appId, jobId, runAt, handler));
-		return this.writeQueue;
+		return this.enqueue(() => this.doSchedule(appId, jobId, runAt, handler));
 	}
 
 	/**
 	 * Cancel a pending one-off task.
 	 */
 	async cancel(appId: string, jobId: string): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doCancel(appId, jobId));
-		return this.writeQueue;
+		return this.enqueue(() => this.doCancel(appId, jobId));
 	}
 
 	/**
@@ -79,22 +102,39 @@ export class OneOffManager {
 	}
 
 	/**
-	 * Stop the interval check.
+	 * Stop the interval check and wait for any in-flight executions to complete.
+	 * Also drains the writeQueue in case a checkAndExecute is queued but not yet started.
+	 * Waits up to 30 seconds for in-flight tasks before returning.
 	 */
-	stop(): void {
-		if (this.checkInterval) {
+	async stop(): Promise<void> {
+		this.stopping = true;
+		if (this.checkInterval !== null) {
 			clearInterval(this.checkInterval);
 			this.checkInterval = null;
-			this.logger.info('One-off task checker stopped');
 		}
+
+		// Awaiting the writeQueue tail is sufficient: doCheckAndExecute() runs
+		// inside the queue chain and awaits any handler it dispatches. By the
+		// time this resolves, all in-flight handlers are done.
+		try {
+			await Promise.race([
+				this.writeQueue,
+				new Promise<void>((resolve) => {
+					setTimeout(resolve, 30_000);
+				}),
+			]);
+		} catch {
+			// Ignore — writeQueue tail rejection means the operation was already handled
+		}
+
+		this.logger.info('One-off task checker stopped');
 	}
 
 	/**
 	 * Check for due tasks and execute them.
 	 */
 	async checkAndExecute(): Promise<void> {
-		this.writeQueue = this.writeQueue.then(() => this.doCheckAndExecute());
-		return this.writeQueue;
+		return this.enqueue(() => this.doCheckAndExecute());
 	}
 
 	private async doSchedule(
@@ -134,37 +174,71 @@ export class OneOffManager {
 	}
 
 	private async doCheckAndExecute(): Promise<void> {
+		if (this.stopping) return;
+
 		const tasks = await this.loadTasks();
 		const now = new Date();
-		const due: OneOffTask[] = [];
 		const remaining: OneOffTask[] = [];
 
 		for (const task of tasks) {
-			if (task.runAt <= now) {
-				due.push(task);
-			} else {
+			if (task.runAt > now) {
 				remaining.push(task);
+				continue;
 			}
-		}
 
-		if (due.length === 0) return;
-
-		this.logger.debug({ count: due.length }, 'Executing due one-off tasks');
-
-		for (const task of due) {
-			if (this.handlerResolver) {
-				const handler = this.handlerResolver(task.appId, task.handler);
-				await runTask(task.appId, task.jobId, handler, this.logger);
-			} else {
+			// Due task — attempt execution
+			if (!this.handlerResolver) {
+				// No resolver set: keep pending, warn
 				this.logger.warn(
 					{ appId: task.appId, jobId: task.jobId },
-					'No handler resolver set, skipping one-off task',
+					'No handler resolver set, keeping one-off task pending',
 				);
+				remaining.push(task);
+				continue;
 			}
+
+			let handler: TaskHandler;
+			try {
+				handler = this.handlerResolver(task.appId, task.handler, task.jobId);
+			} catch (err) {
+				// Resolver threw: infrastructure issue, keep pending for retry
+				this.logger.error(
+					{
+						appId: task.appId,
+						jobId: task.jobId,
+						error: err instanceof Error ? err.message : String(err),
+					},
+					'Handler resolver failed, keeping one-off task pending',
+				);
+				remaining.push(task);
+				continue;
+			}
+
+			// Handler resolved: check if job is disabled before executing
+			if (this.notifier?.isDisabled(task.appId, task.jobId)) {
+				this.logger.warn(
+					{ appId: task.appId, jobId: task.jobId },
+					'One-off task is disabled, keeping pending',
+				);
+				remaining.push(task);
+				continue;
+			}
+
+			// Execute. Whether it succeeds or fails, the task was attempted
+			// and should be removed (not added to remaining).
+			const result = await runTask(task.appId, task.jobId, handler, this.logger);
+
+			if (result.success) {
+				this.notifier?.onSuccess(task.appId, task.jobId);
+			} else {
+				await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+			}
+			// Task intentionally NOT added to remaining — it has been attempted
 		}
 
-		// Remove executed tasks from YAML
-		await this.saveTasks(remaining);
+		if (remaining.length !== tasks.length) {
+			await this.saveTasks(remaining);
+		}
 	}
 
 	/**

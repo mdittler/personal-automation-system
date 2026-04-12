@@ -12,6 +12,7 @@ import type { AppManifest } from '../../types/manifest.js';
 import type { ScheduledJob, SchedulerService } from '../../types/scheduler.js';
 import { CronManager } from './cron-manager.js';
 import { OneOffManager } from './oneoff-manager.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import type { TaskHandler } from './task-runner.js';
 
 export interface SchedulerServiceOptions {
@@ -62,6 +63,14 @@ export class SchedulerServiceImpl implements SchedulerService {
 	}
 
 	/**
+	 * Wire a job failure notifier into both sub-managers.
+	 */
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.cron.setNotifier(notifier);
+		this.oneOff.setNotifier(notifier);
+	}
+
+	/**
 	 * Start all cron jobs and the one-off task checker.
 	 */
 	start(): void {
@@ -71,10 +80,10 @@ export class SchedulerServiceImpl implements SchedulerService {
 
 	/**
 	 * Stop all cron jobs and the one-off task checker.
+	 * Awaits both sub-managers so in-flight jobs complete before returning.
 	 */
-	stop(): void {
-		this.cron.stop();
-		this.oneOff.stop();
+	async stop(): Promise<void> {
+		await Promise.all([this.cron.stop(), this.oneOff.stop()]);
 	}
 }
 

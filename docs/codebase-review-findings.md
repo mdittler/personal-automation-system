@@ -920,7 +920,7 @@ Phase 6 test evidence:
 
 ### Finding 31: One-off scheduled tasks have no production handler resolver and are dropped
 
-- Status: open
+- Status: fixed
 - Severity: high
 - Classification: scheduling / production wiring
 - Location: `core/src/services/scheduler/oneoff-manager.ts:36-47`
@@ -950,7 +950,7 @@ Suggested tests:
 
 ### Finding 32: One-off scheduler promise queue can be permanently poisoned by one failure
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: async resilience / queue poisoning
 - Location: `core/src/services/scheduler/oneoff-manager.ts:53-63`
@@ -979,7 +979,7 @@ Suggested tests:
 
 ### Finding 33: Scheduled job failure notification and auto-disable are not connected to execution
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: resilience / dead infrastructure
 - Location: `core/src/services/scheduler/job-failure-notifier.ts:69-145`
@@ -1010,7 +1010,7 @@ Suggested tests:
 
 ### Finding 34: EventBus cannot correctly unsubscribe the same handler from multiple events
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: event lifecycle / subscription leak
 - Location: `core/src/services/event-bus/index.ts:24`
@@ -1040,7 +1040,7 @@ Suggested tests:
 
 ### Finding 35: In-flight scheduled jobs are not drained during graceful shutdown
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: shutdown resilience / lifecycle coordination
 - Location: `core/src/middleware/shutdown.ts:58-66`

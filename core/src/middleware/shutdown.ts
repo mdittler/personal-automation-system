@@ -11,7 +11,7 @@ import type { RateLimiter } from './rate-limiter.js';
 
 /** Services that the shutdown manager needs to tear down. */
 export interface ShutdownServices {
-	scheduler: { stop(): void };
+	scheduler: { stop(): void | Promise<void> };
 	telegram: { cleanup(): void };
 	registry: { shutdownAll(): Promise<void> };
 	eventBus: { clearAll(): void };
@@ -92,7 +92,7 @@ export class ShutdownManager {
 				bot.stop();
 			}
 
-			scheduler.stop();
+			await scheduler.stop();
 			telegram.cleanup();
 			await registry.shutdownAll();
 			eventBus.clearAll();

@@ -14,6 +14,7 @@
  */
 
 import type { Logger } from 'pino';
+import type { SchedulerJobNotifier } from './notifier.js';
 
 /** Minimal Telegram send interface to avoid circular dependencies. */
 export interface NotificationSender {
@@ -38,7 +39,7 @@ interface JobFailureState {
 	consecutiveFailures: number;
 }
 
-export class JobFailureNotifier {
+export class JobFailureNotifier implements SchedulerJobNotifier {
 	private readonly logger: Logger;
 	private readonly sender: NotificationSender;
 	private readonly adminChatId: string;
