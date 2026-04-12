@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Logger } from 'pino';
 import type { ScheduledJob } from '../../types/scheduler.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import { type TaskHandler, runTask } from './task-runner.js';
 
 interface RegisteredCronJob {
@@ -24,12 +25,17 @@ export class CronManager {
 	private readonly logger: Logger;
 	private readonly timezone: string;
 	private readonly persistPath: string;
+	private notifier: SchedulerJobNotifier | null = null;
 
 	constructor(logger: Logger, timezone: string, dataDir: string) {
 		this.logger = logger;
 		this.timezone = timezone;
 		this.persistPath = join(dataDir, 'system', 'cron-last-run.json');
 		this.loadLastRunData();
+	}
+
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.notifier = notifier;
 	}
 
 	private loadLastRunData(): void {
@@ -86,10 +92,22 @@ export class CronManager {
 		const task = cron.createTask(
 			job.cron,
 			async () => {
+				if (this.notifier?.isDisabled(job.appId, job.id)) {
+					this.logger.warn({ jobKey }, 'Cron job is disabled, skipping execution');
+					return;
+				}
+
 				const handler = handlerResolver();
-				await runTask(job.appId, job.id, handler, this.logger);
+				const result = await runTask(job.appId, job.id, handler, this.logger);
+
 				this.lastRunAt.set(jobKey, new Date());
 				this.persistLastRunData();
+
+				if (result.success) {
+					this.notifier?.onSuccess(job.appId, job.id);
+				} else {
+					await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+				}
 			},
 			{ timezone: this.timezone },
 		);

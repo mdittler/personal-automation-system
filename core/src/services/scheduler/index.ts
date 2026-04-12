@@ -12,6 +12,7 @@ import type { AppManifest } from '../../types/manifest.js';
 import type { ScheduledJob, SchedulerService } from '../../types/scheduler.js';
 import { CronManager } from './cron-manager.js';
 import { OneOffManager } from './oneoff-manager.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import type { TaskHandler } from './task-runner.js';
 
 export interface SchedulerServiceOptions {
@@ -59,6 +60,14 @@ export class SchedulerServiceImpl implements SchedulerService {
 
 	async cancelOnce(appId: string, jobId: string): Promise<void> {
 		await this.oneOff.cancel(appId, jobId);
+	}
+
+	/**
+	 * Wire a job failure notifier into both sub-managers.
+	 */
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.cron.setNotifier(notifier);
+		this.oneOff.setNotifier(notifier);
 	}
 
 	/**

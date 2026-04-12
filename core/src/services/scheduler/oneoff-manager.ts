@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { OneOffTask } from '../../types/scheduler.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import type { SchedulerJobNotifier } from './notifier.js';
 import { type TaskHandler, runTask } from './task-runner.js';
 
 /** Serializable form of a one-off task for YAML storage. */
@@ -28,6 +29,8 @@ export class OneOffManager {
 	private readonly logger: Logger;
 	private checkInterval: ReturnType<typeof setInterval> | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
+
+	private notifier: SchedulerJobNotifier | null = null;
 
 	/**
 	 * Handler resolver: given an appId, handler path, and jobId,
@@ -53,6 +56,10 @@ export class OneOffManager {
 	 */
 	setHandlerResolver(resolver: (appId: string, handler: string, jobId: string) => TaskHandler): void {
 		this.handlerResolver = resolver;
+	}
+
+	setNotifier(notifier: SchedulerJobNotifier): void {
+		this.notifier = notifier;
 	}
 
 	/**
@@ -186,9 +193,25 @@ export class OneOffManager {
 				continue;
 			}
 
-			// Handler resolved: execute. Whether it succeeds or fails,
-			// the task was attempted and should be removed.
-			await runTask(task.appId, task.jobId, handler, this.logger);
+			// Handler resolved: check if job is disabled before executing
+			if (this.notifier?.isDisabled(task.appId, task.jobId)) {
+				this.logger.warn(
+					{ appId: task.appId, jobId: task.jobId },
+					'One-off task is disabled, keeping pending',
+				);
+				remaining.push(task);
+				continue;
+			}
+
+			// Execute. Whether it succeeds or fails, the task was attempted
+			// and should be removed (not added to remaining).
+			const result = await runTask(task.appId, task.jobId, handler, this.logger);
+
+			if (result.success) {
+				this.notifier?.onSuccess(task.appId, task.jobId);
+			} else {
+				await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+			}
 			// Task intentionally NOT added to remaining — it has been attempted
 		}
 

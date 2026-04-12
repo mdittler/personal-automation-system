@@ -4,6 +4,7 @@ import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { ScheduledJob } from '../../../types/scheduler.js';
 import { CronManager } from '../cron-manager.js';
+import type { SchedulerJobNotifier } from '../notifier.js';
 
 const logger = pino({ level: 'silent' });
 const testDataDir = tmpdir();
@@ -135,6 +136,91 @@ describe('CronManager', () => {
 		expect(createTaskSpy).toHaveBeenCalledWith('*/5 * * * *', expect.any(Function), {
 			timezone: 'Europe/London',
 		});
+
+		createTaskSpy.mockRestore();
+		manager.stop();
+	});
+
+	// --- notifier integration ---
+
+	it('calls notifier.onFailure when cron handler throws', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+
+		const throwingHandler = vi.fn().mockRejectedValue(new Error('cron boom'));
+		manager.register(makeJob(), () => throwingHandler);
+
+		// Capture the cron callback registered by createTask
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		await cronCallback();
+
+		expect(notifier.isDisabled).toHaveBeenCalledWith('test-app', 'test-job');
+		expect(notifier.onFailure).toHaveBeenCalledWith('test-app', 'test-job', 'cron boom');
+		expect(notifier.onSuccess).not.toHaveBeenCalled();
+
+		createTaskSpy.mockRestore();
+		manager.stop();
+	});
+
+	it('calls notifier.onSuccess when cron handler succeeds', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+
+		const successHandler = vi.fn().mockResolvedValue(undefined);
+		manager.register(makeJob(), () => successHandler);
+
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		await cronCallback();
+
+		expect(notifier.isDisabled).toHaveBeenCalledWith('test-app', 'test-job');
+		expect(notifier.onSuccess).toHaveBeenCalledWith('test-app', 'test-job');
+		expect(notifier.onFailure).not.toHaveBeenCalled();
+
+		createTaskSpy.mockRestore();
+		manager.stop();
+	});
+
+	it('skips execution when job is disabled', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(true),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+
+		const handler = vi.fn();
+		manager.register(makeJob(), () => handler);
+
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		await cronCallback();
+
+		expect(notifier.isDisabled).toHaveBeenCalledWith('test-app', 'test-job');
+		expect(handler).not.toHaveBeenCalled();
+		expect(notifier.onSuccess).not.toHaveBeenCalled();
+		expect(notifier.onFailure).not.toHaveBeenCalled();
 
 		createTaskSpy.mockRestore();
 		manager.stop();

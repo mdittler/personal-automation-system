@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OneOffManager } from '../oneoff-manager.js';
+import type { SchedulerJobNotifier } from '../notifier.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -198,6 +199,75 @@ describe('OneOffManager', () => {
 
 		const pending = await manager.getPendingTasks();
 		expect(pending).toHaveLength(0);
+	});
+
+	// --- notifier integration ---
+
+	it('calls notifier.onFailure when one-off task handler throws', async () => {
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+		manager.setHandlerResolver(() => async () => {
+			throw new Error('boom');
+		});
+
+		await manager.schedule('app1', 'job1', new Date(Date.now() - 60_000), 'handler.js');
+		await manager.checkAndExecute();
+
+		expect(notifier.onFailure).toHaveBeenCalledWith('app1', 'job1', expect.stringContaining('boom'));
+		expect(notifier.onSuccess).not.toHaveBeenCalled();
+
+		// Task should be removed (attempted)
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(0);
+	});
+
+	it('calls notifier.onSuccess on successful one-off task', async () => {
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(false),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+		manager.setHandlerResolver(() => async () => {
+			// success — do nothing
+		});
+
+		await manager.schedule('app1', 'job1', new Date(Date.now() - 60_000), 'handler.js');
+		await manager.checkAndExecute();
+
+		expect(notifier.onSuccess).toHaveBeenCalledWith('app1', 'job1');
+		expect(notifier.onFailure).not.toHaveBeenCalled();
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(0);
+	});
+
+	it('skips disabled one-off task and keeps it pending', async () => {
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(true),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+		};
+		manager.setNotifier(notifier);
+
+		const handler = vi.fn();
+		manager.setHandlerResolver(() => handler);
+
+		await manager.schedule('app1', 'job1', new Date(Date.now() - 60_000), 'handler.js');
+		await manager.checkAndExecute();
+
+		expect(notifier.isDisabled).toHaveBeenCalledWith('app1', 'job1');
+		expect(handler).not.toHaveBeenCalled();
+		expect(notifier.onSuccess).not.toHaveBeenCalled();
+		expect(notifier.onFailure).not.toHaveBeenCalled();
+
+		// Task should remain pending since it was skipped
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(1);
 	});
 
 	it('concurrent schedule and cancel serialize correctly', async () => {
