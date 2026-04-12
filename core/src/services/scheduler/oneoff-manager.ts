@@ -48,33 +48,26 @@ export class OneOffManager {
 	}
 
 	/**
+	 * Enqueue a write operation, ensuring serial execution even after failures.
+	 */
+	private enqueue(fn: () => Promise<void>): Promise<void> {
+		const p = this.writeQueue.then(fn, fn);
+		this.writeQueue = p.then(() => {}, () => {});
+		return p;
+	}
+
+	/**
 	 * Schedule a one-off task.
 	 */
 	async schedule(appId: string, jobId: string, runAt: Date, handler: string): Promise<void> {
-		const p = this.writeQueue.then(
-			() => this.doSchedule(appId, jobId, runAt, handler),
-			() => this.doSchedule(appId, jobId, runAt, handler),
-		);
-		this.writeQueue = p.then(
-			() => {},
-			() => {},
-		);
-		return p;
+		return this.enqueue(() => this.doSchedule(appId, jobId, runAt, handler));
 	}
 
 	/**
 	 * Cancel a pending one-off task.
 	 */
 	async cancel(appId: string, jobId: string): Promise<void> {
-		const p = this.writeQueue.then(
-			() => this.doCancel(appId, jobId),
-			() => this.doCancel(appId, jobId),
-		);
-		this.writeQueue = p.then(
-			() => {},
-			() => {},
-		);
-		return p;
+		return this.enqueue(() => this.doCancel(appId, jobId));
 	}
 
 	/**
@@ -107,15 +100,7 @@ export class OneOffManager {
 	 * Check for due tasks and execute them.
 	 */
 	async checkAndExecute(): Promise<void> {
-		const p = this.writeQueue.then(
-			() => this.doCheckAndExecute(),
-			() => this.doCheckAndExecute(),
-		);
-		this.writeQueue = p.then(
-			() => {},
-			() => {},
-		);
-		return p;
+		return this.enqueue(() => this.doCheckAndExecute());
 	}
 
 	private async doSchedule(

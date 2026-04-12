@@ -137,8 +137,9 @@ describe('CostTracker', () => {
 		await writeFile(join(tempDir, 'system'), 'blocking-file', 'utf-8');
 
 		// First record fails internally (record() swallows errors via appendEntry)
+		// Use a distinct model name so we can assert it is absent from the recovered file
 		await tracker.record({
-			model: 'claude-sonnet-4-20250514',
+			model: 'claude-opus-4-6',
 			inputTokens: 100,
 			outputTokens: 50,
 		});
@@ -158,6 +159,8 @@ describe('CostTracker', () => {
 		const content = await readFile(join(tempDir, 'system', 'llm-usage.md'), 'utf-8');
 		expect(content).toContain('# LLM Usage Log');
 		expect(content).toContain('claude-sonnet-4-20250514');
+		// The first (failed) record's data must NOT appear — the queue recovered cleanly
+		expect(content).not.toContain('claude-opus-4-6');
 	});
 
 	it('serializes concurrent writes correctly (no duplicate headers)', async () => {
