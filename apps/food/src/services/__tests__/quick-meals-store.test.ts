@@ -181,7 +181,7 @@ describe('quick-meals-store', () => {
     }
 
     // A sidecar .corrupt-<ts> file should have been written with the original.
-    const sidecar = writes.find(([p]) => p.startsWith('quick-meals.yaml.corrupt-'));
+    const sidecar = writes.find(([p]) => p.startsWith('corrupt/quick-meals-'));
     expect(sidecar).toBeDefined();
     expect(sidecar?.[1]).toBe(corrupt);
   });

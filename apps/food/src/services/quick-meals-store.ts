@@ -101,7 +101,7 @@ async function preserveCorruptFile(
 	err: unknown,
 ): Promise<void> {
 	const ts = new Date().toISOString().replace(/[:.]/g, '-');
-	const corruptPath = `${QUICK_MEALS_FILE}.corrupt-${ts}`;
+	const corruptPath = `corrupt/${QUICK_MEALS_FILE.replace('.yaml', '')}-${ts}.yaml`;
 	try {
 		await store.write(corruptPath, raw);
 	} catch {

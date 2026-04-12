@@ -215,6 +215,12 @@ requirements:
       - path: "waste-log.yaml"
         access: read-write
         description: "Food waste tracking"
+      - path: "prices/"
+        access: read-write
+        description: "Per-store price database files"
+      - path: "cost-history/"
+        access: read-write
+        description: "Weekly grocery cost history summaries"
     user_scopes:
       - path: "preferences.yaml"
         access: read-write
@@ -225,6 +231,18 @@ requirements:
       - path: "shopping-sessions/"
         access: read-write
         description: "Shopping mode session history"
+      - path: "health/"
+        access: read-write
+        description: "Per-user monthly health metrics from cross-app events"
+      - path: "ad-hoc-history.yaml"
+        access: read-write
+        description: "Rolling 30-day ad-hoc meal log dedup history"
+      - path: "quick-meals.yaml"
+        access: read-write
+        description: "Quick-meal templates and archive"
+      - path: "corrupt/"
+        access: read-write
+        description: "Corrupt YAML recovery sidecars (rare, written only on YAML parse failure)"
   llm:
     tier: standard
     rate_limit:
