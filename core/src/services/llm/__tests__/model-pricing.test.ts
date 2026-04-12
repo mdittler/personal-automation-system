@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_PRICING, estimateCallCost, getModelPricing } from '../model-pricing.js';
+import {
+	DEFAULT_REMOTE_PRICING,
+	MODEL_PRICING,
+	estimateCallCost,
+	getModelPricing,
+	hasPricing,
+} from '../model-pricing.js';
 
 describe('model-pricing', () => {
 	describe('getModelPricing', () => {
@@ -39,8 +45,28 @@ describe('model-pricing', () => {
 			expect(cost).toBeCloseTo(expected, 10);
 		});
 
-		it('returns 0 for an unknown model', () => {
-			expect(estimateCallCost('nonexistent-model', 1000, 500)).toBe(0);
+		it('returns 0 for an unknown ollama model', () => {
+			expect(estimateCallCost('nonexistent-model', 1000, 500, 'ollama')).toBe(0);
+		});
+
+		it('returns fallback cost for unknown remote model (no providerType)', () => {
+			const cost = estimateCallCost('nonexistent-model', 1000, 500);
+			const expected =
+				(1000 * DEFAULT_REMOTE_PRICING.input + 500 * DEFAULT_REMOTE_PRICING.output) / 1_000_000;
+			expect(cost).toBeCloseTo(expected, 10);
+			expect(cost).toBeGreaterThan(0);
+		});
+
+		it('returns fallback cost for unknown remote model with anthropic providerType', () => {
+			const cost = estimateCallCost('some-new-model', 1000, 500, 'anthropic');
+			const expected =
+				(1000 * DEFAULT_REMOTE_PRICING.input + 500 * DEFAULT_REMOTE_PRICING.output) / 1_000_000;
+			expect(cost).toBeCloseTo(expected, 10);
+		});
+
+		it('returns 0 for ollama even if model name matches a priced remote model', () => {
+			// 'gpt-4.1' is in MODEL_PRICING but if providerType is ollama, should return 0
+			expect(estimateCallCost('gpt-4.1', 1000, 500, 'ollama')).toBe(0);
 		});
 
 		it('returns 0 when tokens are 0', () => {
@@ -65,6 +91,35 @@ describe('model-pricing', () => {
 			const str = cost.toString();
 			const decimalPart = str.split('.')[1] ?? '';
 			expect(decimalPart.length).toBeLessThanOrEqual(6);
+		});
+	});
+
+	describe('hasPricing', () => {
+		it('returns true for a known model', () => {
+			expect(hasPricing('claude-sonnet-4-6')).toBe(true);
+		});
+
+		it('returns false for an unknown non-ollama model', () => {
+			expect(hasPricing('some-unknown-model')).toBe(false);
+		});
+
+		it('returns false for unknown model with remote providerType', () => {
+			expect(hasPricing('some-unknown-model', 'anthropic')).toBe(false);
+		});
+
+		it('returns true for ollama (always free regardless of model name)', () => {
+			expect(hasPricing('nonexistent-model', 'ollama')).toBe(true);
+		});
+
+		it('returns true for known ollama-served model name', () => {
+			expect(hasPricing('llama3.2:3b', 'ollama')).toBe(true);
+		});
+	});
+
+	describe('DEFAULT_REMOTE_PRICING', () => {
+		it('exports conservative fallback pricing', () => {
+			expect(DEFAULT_REMOTE_PRICING.input).toBeGreaterThan(0);
+			expect(DEFAULT_REMOTE_PRICING.output).toBeGreaterThan(0);
 		});
 	});
 

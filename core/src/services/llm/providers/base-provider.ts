@@ -96,6 +96,7 @@ export abstract class BaseProvider implements LLMProviderClient {
 				.record({
 					model: result.model,
 					provider: result.provider,
+					providerType: this.providerType,
 					inputTokens: result.usage.inputTokens,
 					outputTokens: result.usage.outputTokens,
 					appId: extractAppId(options),

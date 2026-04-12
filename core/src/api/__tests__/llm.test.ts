@@ -2,9 +2,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
+import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
 import { ChangeLog } from '../../services/data-store/change-log.js';
+import type { CostTracker } from '../../services/llm/cost-tracker.js';
+import { SystemLLMGuard } from '../../services/llm/system-llm-guard.js';
 import { registerApiRoutes } from '../index.js';
 
 const API_TOKEN = 'test-api-secret';
@@ -280,5 +283,81 @@ describe('API LLM Route', () => {
 			payload: { prompt: 'Test' },
 		});
 		expect(res.statusCode).toBe(401);
+	});
+});
+
+describe('API LLM Route — SystemLLMGuard integration (F14)', () => {
+	let app: ReturnType<typeof Fastify>;
+	let dataDir: string;
+	let innerLlm: any;
+
+	beforeEach(async () => {
+		dataDir = await mkdtemp(join(tmpdir(), 'pas-api-llm-guard-'));
+		const mocks = createMocks();
+
+		innerLlm = {
+			complete: vi.fn(() => 'response'),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		};
+
+		const mockCostTracker = {
+			getMonthlyTotalCost: vi.fn(() => 0),
+			record: vi.fn().mockResolvedValue(undefined),
+			estimateCost: vi.fn(() => 0),
+			readUsage: vi.fn().mockResolvedValue(''),
+			loadMonthlyCache: vi.fn().mockResolvedValue(undefined),
+			flush: vi.fn().mockResolvedValue(undefined),
+			getMonthlyAppCost: vi.fn(() => 0),
+			getMonthlyAppCosts: vi.fn(() => new Map()),
+			getMonthlyUserCost: vi.fn(() => 0),
+			getMonthlyUserCosts: vi.fn(() => new Map()),
+		} as unknown as CostTracker;
+
+		// Wire through the real SystemLLMGuard with attributionId: 'api' — same as bootstrap
+		const apiLlm = new SystemLLMGuard({
+			inner: innerLlm,
+			costTracker: mockCostTracker,
+			globalMonthlyCostCap: 50.0,
+			logger: pino({ level: 'silent' }),
+			attributionId: 'api',
+		});
+
+		app = Fastify({ logger: false });
+		await registerApiRoutes(app, {
+			apiToken: API_TOKEN,
+			rateLimiter: new RateLimiter({ maxAttempts: 100, windowMs: 60_000 }),
+			dataDir,
+			changeLog: new ChangeLog(dataDir),
+			spaceService: mocks.spaceService as any,
+			userManager: mocks.userManager as any,
+			router: mocks.router as any,
+			cronManager: mocks.cronManager as any,
+			timezone: 'America/New_York',
+			logger: pino({ level: 'silent' }) as any,
+			reportService: mocks.reportService as any,
+			alertService: mocks.alertService as any,
+			telegram: mocks.telegram as any,
+			llm: apiLlm,
+		});
+	});
+
+	afterEach(async () => {
+		await app?.close();
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	it('routes through SystemLLMGuard and attributes cost to api not system', async () => {
+		await app.inject({
+			method: 'POST',
+			url: '/api/llm/complete',
+			headers: { authorization: `Bearer ${API_TOKEN}` },
+			payload: { prompt: 'Test' },
+		});
+
+		expect(innerLlm.complete).toHaveBeenCalled();
+		const callArgs = (innerLlm.complete as ReturnType<typeof vi.fn>).mock.calls[0];
+		// The guard must stamp _appId: 'api', not 'system'
+		expect(callArgs[1]?._appId).toBe('api');
 	});
 });

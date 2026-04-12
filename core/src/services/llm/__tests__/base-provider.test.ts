@@ -97,9 +97,11 @@ describe('BaseProvider', () => {
 		expect(mockCostTracker.record).toHaveBeenCalledWith({
 			model: 'test-model',
 			provider: 'test',
+			providerType: 'anthropic',
 			inputTokens: 10,
 			outputTokens: 20,
 			appId: undefined,
+			userId: undefined,
 		});
 	});
 

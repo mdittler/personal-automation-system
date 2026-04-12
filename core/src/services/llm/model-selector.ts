@@ -45,6 +45,7 @@ export class ModelSelector {
 	private reasoning: ModelRef | undefined;
 	private readonly filePath: string;
 	private readonly logger: Logger;
+	private readonly defaults: { standard: ModelRef; fast: ModelRef; reasoning?: ModelRef };
 
 	constructor(options: ModelSelectorOptions) {
 		this.standard = options.defaultStandard;
@@ -52,6 +53,11 @@ export class ModelSelector {
 		this.reasoning = options.defaultReasoning;
 		this.filePath = join(options.dataDir, 'system', 'model-selection.yaml');
 		this.logger = options.logger;
+		this.defaults = {
+			standard: { ...options.defaultStandard },
+			fast: { ...options.defaultFast },
+			reasoning: options.defaultReasoning ? { ...options.defaultReasoning } : undefined,
+		};
 	}
 
 	/**
@@ -186,6 +192,67 @@ export class ModelSelector {
 		this.fast = { ...this.fast, model: modelId };
 		await this.save();
 		this.logger.info({ fast: modelId }, 'Fast model updated');
+	}
+
+	/**
+	 * Reconcile saved tier selections against available providers.
+	 *
+	 * Call after load() once the ProviderRegistry is populated. For each tier,
+	 * if the current provider is not in availableProviders, attempts to revert
+	 * to the config default. If the default is also unavailable, throws for
+	 * required tiers (standard/fast) and unsets optional tiers (reasoning).
+	 *
+	 * Does NOT persist changes — if the missing provider comes back on next restart,
+	 * the saved selection will be used again.
+	 */
+	reconcile(availableProviders: Set<string>): void {
+		// Standard tier (required)
+		if (!availableProviders.has(this.standard.provider)) {
+			if (!availableProviders.has(this.defaults.standard.provider)) {
+				throw new Error(
+					`Saved standard tier uses provider '${this.standard.provider}' and config default uses ` +
+						`'${this.defaults.standard.provider}' — neither is available. Check your API keys.`,
+				);
+			}
+			this.logger.warn(
+				{ saved: this.standard, fallback: this.defaults.standard },
+				'Saved standard tier provider not available — reverting to config default',
+			);
+			this.standard = { ...this.defaults.standard };
+		}
+
+		// Fast tier (required)
+		if (!availableProviders.has(this.fast.provider)) {
+			if (!availableProviders.has(this.defaults.fast.provider)) {
+				throw new Error(
+					`Saved fast tier uses provider '${this.fast.provider}' and config default uses ` +
+						`'${this.defaults.fast.provider}' — neither is available. Check your API keys.`,
+				);
+			}
+			this.logger.warn(
+				{ saved: this.fast, fallback: this.defaults.fast },
+				'Saved fast tier provider not available — reverting to config default',
+			);
+			this.fast = { ...this.defaults.fast };
+		}
+
+		// Reasoning tier (optional — unset if unavailable)
+		if (this.reasoning && !availableProviders.has(this.reasoning.provider)) {
+			const defaultReasoning = this.defaults.reasoning;
+			if (defaultReasoning && availableProviders.has(defaultReasoning.provider)) {
+				this.logger.warn(
+					{ saved: this.reasoning, fallback: defaultReasoning },
+					'Saved reasoning tier provider not available — reverting to config default',
+				);
+				this.reasoning = { ...defaultReasoning };
+			} else {
+				this.logger.warn(
+					{ saved: this.reasoning },
+					'Saved reasoning tier provider not available — clearing reasoning tier',
+				);
+				this.reasoning = undefined;
+			}
+		}
 	}
 
 	private async save(): Promise<void> {
