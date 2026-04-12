@@ -29,6 +29,9 @@ export class OneOffManager {
 	private readonly logger: Logger;
 	private checkInterval: ReturnType<typeof setInterval> | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
+	private inFlightCount = 0;
+	private readonly drainResolvers: Array<() => void> = [];
+	private stopping = false;
 
 	private notifier: SchedulerJobNotifier | null = null;
 
@@ -101,14 +104,44 @@ export class OneOffManager {
 	}
 
 	/**
-	 * Stop the interval check.
+	 * Stop the interval check and wait for any in-flight executions to complete.
+	 * Also drains the writeQueue in case a checkAndExecute is queued but not yet started.
+	 * Waits up to 30 seconds for in-flight tasks before returning.
 	 */
-	stop(): void {
-		if (this.checkInterval) {
+	async stop(): Promise<void> {
+		this.stopping = true;
+		if (this.checkInterval !== null) {
 			clearInterval(this.checkInterval);
 			this.checkInterval = null;
-			this.logger.info('One-off task checker stopped');
 		}
+
+		// Await the writeQueue tail — a checkAndExecute may be queued but not started yet.
+		// inFlightCount alone is insufficient when the check hasn't begun executing.
+		try {
+			await Promise.race([
+				this.writeQueue,
+				new Promise<void>((resolve) => {
+					setTimeout(resolve, 30_000);
+				}),
+			]);
+		} catch {
+			// Ignore — writeQueue tail rejection means the operation was already handled
+		}
+
+		// Await in-flight jobs
+		if (this.inFlightCount > 0) {
+			this.logger.info({ inFlight: this.inFlightCount }, 'Waiting for in-flight one-off tasks...');
+			await Promise.race([
+				new Promise<void>((resolve) => {
+					this.drainResolvers.push(resolve);
+				}),
+				new Promise<void>((resolve) => {
+					setTimeout(resolve, 30_000);
+				}),
+			]);
+		}
+
+		this.logger.info('One-off task checker stopped');
 	}
 
 	/**
@@ -155,6 +188,8 @@ export class OneOffManager {
 	}
 
 	private async doCheckAndExecute(): Promise<void> {
+		if (this.stopping) return;
+
 		const tasks = await this.loadTasks();
 		const now = new Date();
 		const remaining: OneOffTask[] = [];
@@ -205,12 +240,21 @@ export class OneOffManager {
 
 			// Execute. Whether it succeeds or fails, the task was attempted
 			// and should be removed (not added to remaining).
-			const result = await runTask(task.appId, task.jobId, handler, this.logger);
+			this.inFlightCount++;
+			try {
+				const result = await runTask(task.appId, task.jobId, handler, this.logger);
 
-			if (result.success) {
-				this.notifier?.onSuccess(task.appId, task.jobId);
-			} else {
-				await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+				if (result.success) {
+					this.notifier?.onSuccess(task.appId, task.jobId);
+				} else {
+					await this.notifier?.onFailure(task.appId, task.jobId, result.error ?? 'Unknown error');
+				}
+			} finally {
+				this.inFlightCount--;
+				if (this.inFlightCount === 0) {
+					for (const resolve of this.drainResolvers) resolve();
+					this.drainResolvers.length = 0;
+				}
 			}
 			// Task intentionally NOT added to remaining — it has been attempted
 		}

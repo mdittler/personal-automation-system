@@ -26,6 +26,8 @@ export class CronManager {
 	private readonly timezone: string;
 	private readonly persistPath: string;
 	private notifier: SchedulerJobNotifier | null = null;
+	private inFlightCount = 0;
+	private readonly drainResolvers: Array<() => void> = [];
 
 	constructor(logger: Logger, timezone: string, dataDir: string) {
 		this.logger = logger;
@@ -97,16 +99,25 @@ export class CronManager {
 					return;
 				}
 
-				const handler = handlerResolver();
-				const result = await runTask(job.appId, job.id, handler, this.logger);
+				this.inFlightCount++;
+				try {
+					const handler = handlerResolver();
+					const result = await runTask(job.appId, job.id, handler, this.logger);
 
-				this.lastRunAt.set(jobKey, new Date());
-				this.persistLastRunData();
+					this.lastRunAt.set(jobKey, new Date());
+					this.persistLastRunData();
 
-				if (result.success) {
-					this.notifier?.onSuccess(job.appId, job.id);
-				} else {
-					await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+					if (result.success) {
+						this.notifier?.onSuccess(job.appId, job.id);
+					} else {
+						await this.notifier?.onFailure(job.appId, job.id, result.error ?? 'Unknown error');
+					}
+				} finally {
+					this.inFlightCount--;
+					if (this.inFlightCount === 0) {
+						for (const resolve of this.drainResolvers) resolve();
+						this.drainResolvers.length = 0;
+					}
 				}
 			},
 			{ timezone: this.timezone },
@@ -130,12 +141,24 @@ export class CronManager {
 	}
 
 	/**
-	 * Stop all registered cron jobs.
+	 * Stop all registered cron jobs and wait for any in-flight executions to complete.
+	 * Waits up to 30 seconds for in-flight jobs before returning.
 	 */
-	stop(): void {
+	async stop(): Promise<void> {
 		for (const [key, { task }] of this.jobs) {
 			task.stop();
 			this.logger.debug({ jobKey: key }, 'Cron job stopped');
+		}
+		if (this.inFlightCount > 0) {
+			this.logger.info({ inFlight: this.inFlightCount }, 'Waiting for in-flight cron jobs...');
+			await Promise.race([
+				new Promise<void>((resolve) => {
+					this.drainResolvers.push(resolve);
+				}),
+				new Promise<void>((resolve) => {
+					setTimeout(resolve, 30_000);
+				}),
+			]);
 		}
 	}
 

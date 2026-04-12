@@ -225,4 +225,57 @@ describe('CronManager', () => {
 		createTaskSpy.mockRestore();
 		manager.stop();
 	});
+
+	// --- in-flight drain ---
+
+	it('stop() awaits in-flight job before resolving', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		let handlerFinished = false;
+		let resolveHandler!: () => void;
+		const handlerDone = new Promise<void>((resolve) => {
+			resolveHandler = resolve;
+		});
+
+		manager.register(
+			makeJob(),
+			() =>
+				async () => {
+					await handlerDone;
+					handlerFinished = true;
+				},
+		);
+
+		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
+		expect(cronCallback).toBeDefined();
+
+		// Start cron callback (it will block waiting for handlerDone)
+		void cronCallback();
+
+		// Give the callback a tick to reach in-flight state
+		await new Promise((r) => setTimeout(r, 10));
+		expect(handlerFinished).toBe(false); // sanity check: handler is still running
+
+		// stop() must not resolve until the in-flight job completes
+		const stopPromise = manager.stop();
+
+		// Give stop a tick to set up drain
+		await new Promise((r) => setTimeout(r, 10));
+		expect(handlerFinished).toBe(false); // handler still blocking stop
+
+		resolveHandler(); // let handler finish
+		await stopPromise; // stop() should now resolve
+		expect(handlerFinished).toBe(true); // handler completed before stop() resolved
+
+		createTaskSpy.mockRestore();
+	});
+
+	it('stop() resolves immediately when no jobs are in flight', async () => {
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+		// Don't trigger any cron callback
+		const start = Date.now();
+		await manager.stop();
+		expect(Date.now() - start).toBeLessThan(200);
+	});
 });

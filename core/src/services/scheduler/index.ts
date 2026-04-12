@@ -80,10 +80,10 @@ export class SchedulerServiceImpl implements SchedulerService {
 
 	/**
 	 * Stop all cron jobs and the one-off task checker.
+	 * Awaits both sub-managers so in-flight jobs complete before returning.
 	 */
-	stop(): void {
-		this.cron.stop();
-		this.oneOff.stop();
+	async stop(): Promise<void> {
+		await Promise.all([this.cron.stop(), this.oneOff.stop()]);
 	}
 }
 

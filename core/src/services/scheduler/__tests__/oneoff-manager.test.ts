@@ -270,6 +270,47 @@ describe('OneOffManager', () => {
 		expect(pending).toHaveLength(1);
 	});
 
+	// --- in-flight drain ---
+
+	it('stop() awaits in-flight one-off task before resolving', async () => {
+		let handlerFinished = false;
+		let resolveHandler!: () => void;
+		const handlerDone = new Promise<void>((resolve) => {
+			resolveHandler = resolve;
+		});
+
+		manager.setHandlerResolver(() => async () => {
+			await handlerDone;
+			handlerFinished = true;
+		});
+
+		const pastDate = new Date(Date.now() - 60_000);
+		await manager.schedule('app1', 'job1', pastDate, 'handler.js');
+
+		// Start checkAndExecute without awaiting (it will block on handler)
+		void manager.checkAndExecute();
+
+		// Give checkAndExecute a moment to start executing
+		await new Promise((r) => setTimeout(r, 20));
+		expect(handlerFinished).toBe(false); // sanity check: handler still running
+
+		// stop() must not resolve until the in-flight handler completes
+		const stopPromise = manager.stop();
+
+		await new Promise((r) => setTimeout(r, 10));
+		expect(handlerFinished).toBe(false); // handler still blocking stop
+
+		resolveHandler(); // let handler finish
+		await stopPromise; // stop() should now resolve
+		expect(handlerFinished).toBe(true); // handler completed before stop() resolved
+	});
+
+	it('stop() resolves immediately when idle', async () => {
+		const start = Date.now();
+		await manager.stop();
+		expect(Date.now() - start).toBeLessThan(200);
+	});
+
 	it('concurrent schedule and cancel serialize correctly', async () => {
 		const futureDate = new Date(Date.now() + 300_000);
 
