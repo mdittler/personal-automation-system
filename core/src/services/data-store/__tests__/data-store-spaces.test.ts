@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpaceService } from '../../spaces/index.js';
 import { ChangeLog } from '../change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../index.js';
-import { PathTraversalError } from '../paths.js';
+import { PathTraversalError, ScopeViolationError } from '../paths.js';
 
 let tempDir: string;
 let dataDir: string;
@@ -407,5 +407,37 @@ describe('ScopedStore passes spaceId to change log', () => {
 		expect(entry.spaceId).toBeUndefined();
 		expect(entry.appId).toBe('notes');
 		expect(entry.userId).toBe('user-1');
+	});
+});
+
+describe('forSpace() scope enforcement', () => {
+	it('throws ScopeViolationError when writing outside sharedScopes', async () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [{ path: 'allowed/', access: 'read-write', description: '' }],
+			changeLog,
+			spaceService: mockSpaceService,
+		});
+		const spaceStore = service.forSpace('family', 'user-1');
+		await expect(spaceStore.write('forbidden.md', 'x')).rejects.toThrow(ScopeViolationError);
+	});
+
+	it('permits write within sharedScopes for forSpace()', async () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [{ path: 'allowed/', access: 'read-write', description: '' }],
+			changeLog,
+			spaceService: mockSpaceService,
+		});
+		const spaceStore = service.forSpace('family', 'user-1');
+		await expect(spaceStore.write('allowed/note.md', 'x')).resolves.toBeUndefined();
 	});
 });

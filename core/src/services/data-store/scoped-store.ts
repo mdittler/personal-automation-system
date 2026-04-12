@@ -174,6 +174,7 @@ export class ScopedStore implements ScopedDataStore {
 				? `${path.slice(0, dotIndex)}.${timestamp}${path.slice(dotIndex)}`
 				: `${path}.${timestamp}`;
 
+		this.checkScope(archivePath, 'write'); // also check the timestamped destination
 		const archiveFullPath = resolveScopedPath(this.baseDir, archivePath);
 		await ensureDir(join(archiveFullPath, '..'));
 		await rename(fullPath, archiveFullPath);

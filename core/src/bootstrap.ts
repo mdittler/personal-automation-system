@@ -433,6 +433,9 @@ export async function main(): Promise<void> {
 			llm: appLlm,
 			data: declaredServices.has('data-store') ? dataStore : undefined,
 			scheduler: declaredServices.has('scheduler') ? scheduler : undefined,
+			// Note: condition evaluator's data store is user-scoped ('system') with the
+			// app's declared userScopes enforced. Apps that need to evaluate shared data
+			// paths must use separate store access outside the condition evaluator.
 			conditionEvaluator: declaredServices.has('condition-evaluator')
 				? new ConditionEvaluatorServiceImpl({
 						dataStore: dataStore.forUser('system'),

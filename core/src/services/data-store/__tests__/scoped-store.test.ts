@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -448,6 +448,21 @@ describe('ScopedStore', () => {
 			});
 			await unscoped.write('anything.md', 'ok');
 			expect(await unscoped.read('anything.md')).toBe('ok');
+		});
+
+		it('archive() throws ScopeViolationError on destination when scope is exact-file', async () => {
+			// exact-file scope: only 'data.yaml' is declared, not 'data.<timestamp>.yaml'
+			const archiveBaseDir = join(tempDir, 'archive-scope-test');
+			const store2 = new ScopedStore({
+				baseDir: archiveBaseDir,
+				appId: 'testapp',
+				userId: 'user1',
+				scopes: [{ path: 'data.yaml', access: 'read-write', description: '' }],
+				changeLog,
+			});
+			await mkdir(archiveBaseDir, { recursive: true });
+			await writeFile(join(archiveBaseDir, 'data.yaml'), 'content');
+			await expect(store2.archive('data.yaml')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('skips enforcement when scopes is empty array', async () => {

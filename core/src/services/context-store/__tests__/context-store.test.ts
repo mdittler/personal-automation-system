@@ -470,6 +470,15 @@ describe('ContextStoreServiceImpl', () => {
 			const long = 'a'.repeat(200);
 			expect(slugifyKey(long).length).toBeLessThanOrEqual(100);
 		});
+
+		it('does not produce trailing hyphens when truncated at 100 chars', () => {
+			// 98 'a' chars + '  extra stuff' → slug has hyphen at position 98 after replace
+			// slice(0,100) yields 'aaa...aaa--extra-stu' but with 98 a's + hyphen boundary
+			const input = 'a'.repeat(98) + '  extra stuff';
+			const result = slugifyKey(input);
+			expect(result).not.toMatch(/-$/);
+			expect(result.length).toBeLessThanOrEqual(100);
+		});
 	});
 });
 
