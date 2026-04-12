@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -336,8 +337,14 @@ describe('OneOffManager', () => {
 	// --- stop() timeout path ---
 
 	it('stop() resolves after 30s timeout if in-flight job never completes', async () => {
-		// Use a separate manager so the module-level afterEach is not affected
-		const localManager = new OneOffManager(tempDir + '-timeout', logger);
+		// Use a separate manager so the module-level afterEach is not affected.
+		// Explicitly create the data directory so loadTasks() finds the YAML and
+		// the blocking handler is genuinely invoked (without this, the dir would
+		// be created lazily by atomicWrite on the first save, but only if schedule()
+		// runs before any fault; making it explicit keeps the intent crystal-clear).
+		const localDataDir = join(tempDir, 'timeout-subdir');
+		mkdirSync(localDataDir, { recursive: true });
+		const localManager = new OneOffManager(localDataDir, logger);
 
 		// Provide a release handle so we can unblock the handler after the test
 		let releaseHandler!: () => void;
@@ -353,6 +360,8 @@ describe('OneOffManager', () => {
 		);
 
 		const pastDate = new Date(Date.now() - 60_000);
+		// Schedule a past-due task — this persists the YAML so doCheckAndExecute
+		// will load it, invoke the handler, and block on blockForever.
 		await localManager.schedule('app1', 'job1', pastDate, 'handler.js');
 
 		vi.useFakeTimers();
@@ -377,6 +386,7 @@ describe('OneOffManager', () => {
 			vi.useRealTimers();
 			// Unblock the handler so the queue can drain and temp files can be cleaned up
 			releaseHandler();
+			// localDataDir is a subdirectory of tempDir, so the afterEach rm() covers it
 		}
 	});
 
