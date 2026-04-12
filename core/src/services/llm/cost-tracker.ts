@@ -182,11 +182,11 @@ export class CostTracker {
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 
-			const timestamp = cells[0]; // e.g. "2026-04-10T14:30:00.000Z"
+			const timestamp = cells[0]!; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
 			// Only count entries for the current month
 			if (!timestamp.startsWith(this.currentMonth)) continue;
 
-			const cost = parseFloat(cells[5]);
+			const cost = parseFloat(cells[5]!);
 			if (!Number.isFinite(cost) || cost < 0) continue;
 
 			const appId = cells[6] === '-' ? undefined : cells[6];
