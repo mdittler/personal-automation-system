@@ -452,7 +452,7 @@ Suggested tests:
 
 ### Finding 15: Photo uploads bypass household membership checks
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: authorization / data boundary
 - Location: `apps/food/src/handlers/photo.ts:105-119`
@@ -480,7 +480,7 @@ Suggested tests:
 
 ### Finding 16: Vision classification accepts negated or verbose model output as a route
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: input parsing / LLM output validation
 - Location: `apps/food/src/handlers/photo.ts:68-72`
@@ -507,7 +507,7 @@ Suggested tests:
 
 ### Finding 17: Photo captions are inserted into vision prompts without untrusted-data framing
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: prompt injection / LLM trust boundary
 - Location: `apps/food/src/services/recipe-photo-parser.ts:48-50`
@@ -535,7 +535,7 @@ Suggested tests:
 
 ### Finding 18: Photo-derived recipes skip the canonical ingredient normalization contract
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: data integrity / parser contract drift
 - Location: `apps/food/src/services/recipe-photo-parser.ts:65-70`
@@ -563,7 +563,8 @@ Suggested tests:
 
 ### Finding 19: Grocery-photo recipe extraction can leave partial side effects on invalid recipe JSON
 
-- Status: open
+- Status: fixed
+- Note: The fix validates recipe shape before calling `saveRecipe()`, preventing the throw-after-grocery-write scenario. Valid grocery items are still saved when recipe is malformed; only the recipe save is skipped with a user-visible warning. This diverges from the originally suggested "reject all writes" approach in favor of better UX (valid grocery data is not discarded because of a bad recipe).
 - Severity: medium
 - Classification: LLM output validation / partial write
 - Location: `apps/food/src/services/grocery-photo-parser.ts:75-84`
@@ -591,7 +592,7 @@ Suggested tests:
 
 ### Finding 20: Photo item parsers persist malformed items instead of filtering or rejecting them
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: LLM output validation / data integrity
 - Location: `apps/food/src/services/pantry-photo-parser.ts:47-52`
@@ -625,7 +626,7 @@ Suggested tests:
 
 ### Finding 21: Food Telegram output mixes GitHub-style Markdown with Telegram legacy Markdown
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: Telegram rendering / output escaping
 - Location: `apps/food/src/handlers/photo.ts:151-156`

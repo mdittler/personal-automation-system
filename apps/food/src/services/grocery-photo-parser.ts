@@ -5,8 +5,9 @@
 
 import type { CoreServices } from '@pas/core/types';
 import type { ParsedRecipe } from '../types.js';
-import { parseJsonResponse } from './recipe-parser.js';
-import { sanitizeInput } from '../utils/sanitize.js';
+import { parseJsonResponse, attachCanonicalNames } from './recipe-parser.js';
+import { fenceCaption } from '../utils/sanitize.js';
+import { isValidGroceryPhotoItem } from '../utils/photo-validators.js';
 
 /** Result of parsing a grocery photo. */
 export interface GroceryPhotoResult {
@@ -60,8 +61,7 @@ export async function parseGroceryFromPhoto(
 	mimeType: string,
 	caption?: string,
 ): Promise<GroceryPhotoResult> {
-	const safeCaption = caption ? sanitizeInput(caption, 200) : '';
-	const captionContext = safeCaption ? `\n\nThe user provided this caption: "${safeCaption}"` : '';
+	const captionContext = fenceCaption(caption);
 	const result = await services.llm.complete(
 		`${GROCERY_PHOTO_PROMPT}${captionContext}\n\nExtract grocery items from the attached photo.`,
 		{
@@ -72,14 +72,29 @@ export async function parseGroceryFromPhoto(
 
 	const parsed = parseJsonResponse(result, 'grocery photo parse') as Record<string, unknown>;
 
-	const items = Array.isArray(parsed.items)
-		? (parsed.items as Array<{ name: string; quantity: number | null; unit: string | null }>)
-		: [];
+	const rawItems = Array.isArray(parsed.items) ? (parsed.items as unknown[]) : [];
+	const items = rawItems
+		.filter(isValidGroceryPhotoItem)
+		.map((item) => ({
+			name: item.name,
+			quantity: (item.quantity !== undefined && item.quantity !== null) ? item.quantity : null,
+			unit: typeof (item as Record<string, unknown>)['unit'] === 'string'
+				? ((item as Record<string, unknown>)['unit'] as string)
+				: null,
+		}));
 
 	const isRecipe = parsed.isRecipe === true;
-	const parsedRecipe = isRecipe && parsed.parsedRecipe
+	let parsedRecipe = isRecipe && parsed.parsedRecipe
 		? (parsed.parsedRecipe as ParsedRecipe)
 		: undefined;
+
+	// F18: attach canonical names to photo-derived recipe ingredients (guard for malformed parsedRecipe)
+	if (parsedRecipe && Array.isArray(parsedRecipe.ingredients)) {
+		parsedRecipe.ingredients = parsedRecipe.ingredients.filter(
+			(ing) => typeof ing.name === 'string' && ing.name.trim() !== '',
+		);
+		parsedRecipe.ingredients = await attachCanonicalNames(services, parsedRecipe.ingredients);
+	}
 
 	return { items, isRecipe, parsedRecipe };
 }

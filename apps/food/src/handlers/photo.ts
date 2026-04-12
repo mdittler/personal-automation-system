@@ -23,6 +23,8 @@ import { addItems, loadGroceryList, saveGroceryList, createEmptyList } from '../
 import { isoNow } from '../utils/date.js';
 import type { Receipt } from '../types.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
+import { requireHousehold } from '../utils/household-guard.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
 
@@ -65,13 +67,10 @@ async function classifyByVision(
 		images: [{ data: photo, mimeType }],
 	});
 
-	const lower = result.trim().toLowerCase();
-	if (lower.includes('recipe')) return 'recipe';
-	if (lower.includes('receipt')) return 'receipt';
-	if (lower.includes('pantry') || lower.includes('fridge') || lower.includes('freezer')) return 'pantry';
-	if (lower.includes('grocery') || lower.includes('list') || lower.includes('shopping')) return 'grocery';
-
-	return null;
+	// F16: require exact single-token match; reject negated or verbose responses
+	const VALID_PHOTO_TYPES = new Set<PhotoType>(['recipe', 'receipt', 'pantry', 'grocery']);
+	const normalized = result.trim().toLowerCase().replace(/[^a-z]/g, '');
+	return VALID_PHOTO_TYPES.has(normalized as PhotoType) ? (normalized as PhotoType) : null;
 }
 
 // ─── Main handler ───────────────────────────────────────────────
@@ -81,6 +80,17 @@ export async function handlePhoto(
 	ctx: PhotoContext,
 ): Promise<void> {
 	try {
+		// F15: require household membership before any LLM call or store write
+		const hh = await requireHousehold(services, ctx.userId);
+		if (!hh) {
+			await services.telegram.send(
+				ctx.userId,
+				'You need to set up or join a household before using photo features. ' +
+				'Use /food household to get started.',
+			);
+			return;
+		}
+
 		// Classify the photo type
 		let photoType: PhotoType | null;
 		if (ctx.caption) {
@@ -102,7 +112,7 @@ export async function handlePhoto(
 			return;
 		}
 
-		const sharedStore = services.data.forShared('shared');
+		const sharedStore = hh.sharedStore;
 
 		switch (photoType) {
 			case 'recipe':
@@ -148,11 +158,11 @@ async function handleRecipePhoto(
 
 	await services.telegram.send(
 		ctx.userId,
-		`📷 Recipe saved from photo!\n\n**${recipe.title}**\n` +
+		`📷 Recipe saved from photo!\n\n*${escapeMarkdown(recipe.title)}*\n` +
 		`• ${recipe.ingredients.length} ingredients\n` +
 		`• ${recipe.instructions.length} steps\n` +
 		`• Servings: ${recipe.servings}\n` +
-		(recipe.cuisine ? `• Cuisine: ${recipe.cuisine}\n` : '') +
+		(recipe.cuisine ? `• Cuisine: ${escapeMarkdown(recipe.cuisine)}\n` : '') +
 		`\nStatus: draft (will be confirmed after you cook and rate it)`,
 	);
 }
@@ -207,7 +217,7 @@ async function handleReceiptPhoto(
 	await services.telegram.send(
 		ctx.userId,
 		`🧾 Receipt captured!\n\n` +
-		`**${parsed.store}** — ${parsed.date}\n` +
+		`*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n` +
 		`• ${parsed.lineItems.length} items\n` +
 		`• Total: $${parsed.total.toFixed(2)}\n` +
 		(parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : '') +
@@ -236,7 +246,7 @@ async function handlePantryPhoto(
 	const updated = addPantryItems(pantry, normalized);
 	await savePantry(store, updated);
 
-	const itemNames = items.map((i) => `• ${i.name} (${i.quantity})`).join('\n');
+	const itemNames = items.map((i) => `• ${escapeMarkdown(i.name)} (${escapeMarkdown(i.quantity)})`).join('\n');
 	await services.telegram.send(
 		ctx.userId,
 		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}\n\n` +
@@ -278,13 +288,30 @@ async function handleGroceryPhoto(
 	list = addItems(list, groceryItems);
 	await saveGroceryList(store, list);
 
-	const itemNames = result.items.map((i) => `• ${i.name}${i.quantity ? ` (${i.quantity}${i.unit ? ' ' + i.unit : ''})` : ''}`).join('\n');
+	const itemNames = result.items.map((i) => {
+		const qty = i.quantity != null ? ` (${i.quantity}${i.unit ? ' ' + escapeMarkdown(i.unit) : ''})` : '';
+		return `• ${escapeMarkdown(i.name)}${qty}`;
+	}).join('\n');
 	let message = `🛒 Added ${result.items.length} items to grocery list from photo:\n\n${itemNames}`;
 
+	// F19: validate recipe shape before saveRecipe() to prevent partial side effects
 	if (result.isRecipe && result.parsedRecipe) {
-		message += '\n\nThis looks like a recipe! I\'ll save it too.';
-		const recipe = await saveRecipe(store, result.parsedRecipe, ctx.userId);
-		message += `\n📖 Saved: **${recipe.title}** (draft)`;
+		const pr = result.parsedRecipe;
+		const recipeValid = pr.title?.trim() &&
+			Array.isArray(pr.ingredients) && pr.ingredients.length > 0 &&
+			Array.isArray(pr.instructions) && pr.instructions.length > 0;
+
+		if (recipeValid) {
+			try {
+				const recipe = await saveRecipe(store, pr, ctx.userId);
+				message += `\n\n📖 Also saved as recipe: *${escapeMarkdown(recipe.title)}* (draft)`;
+			} catch (err) {
+				services.logger.error('Failed to save recipe from grocery photo: %s', err);
+				message += '\n\n⚠️ I spotted a recipe but couldn\'t save it completely.';
+			}
+		} else {
+			message += '\n\n⚠️ I spotted a recipe but couldn\'t parse it completely.';
+		}
 	}
 
 	await services.telegram.send(ctx.userId, message);
