@@ -30,10 +30,11 @@ export class OneOffManager {
 	private writeQueue: Promise<void> = Promise.resolve();
 
 	/**
-	 * Handler resolver: given an appId and handler path,
+	 * Handler resolver: given an appId, handler path, and jobId,
 	 * returns the function to execute. Set by the bootstrap.
+	 * Throws if the app is not found or has no handleScheduledJob.
 	 */
-	private handlerResolver: ((appId: string, handler: string) => TaskHandler) | null = null;
+	private handlerResolver: ((appId: string, handler: string, jobId: string) => TaskHandler) | null = null;
 
 	constructor(dataDir: string, logger: Logger) {
 		this.yamlPath = join(dataDir, 'system', 'scheduled-jobs.yaml');
@@ -42,8 +43,10 @@ export class OneOffManager {
 
 	/**
 	 * Set the handler resolver. Called by bootstrap after app loading.
+	 * The resolver receives appId, handler path, and jobId, and returns
+	 * the TaskHandler to execute. It should throw if the app is not found.
 	 */
-	setHandlerResolver(resolver: (appId: string, handler: string) => TaskHandler): void {
+	setHandlerResolver(resolver: (appId: string, handler: string, jobId: string) => TaskHandler): void {
 		this.handlerResolver = resolver;
 	}
 
@@ -142,35 +145,51 @@ export class OneOffManager {
 	private async doCheckAndExecute(): Promise<void> {
 		const tasks = await this.loadTasks();
 		const now = new Date();
-		const due: OneOffTask[] = [];
 		const remaining: OneOffTask[] = [];
 
 		for (const task of tasks) {
-			if (task.runAt <= now) {
-				due.push(task);
-			} else {
+			if (task.runAt > now) {
 				remaining.push(task);
+				continue;
 			}
-		}
 
-		if (due.length === 0) return;
-
-		this.logger.debug({ count: due.length }, 'Executing due one-off tasks');
-
-		for (const task of due) {
-			if (this.handlerResolver) {
-				const handler = this.handlerResolver(task.appId, task.handler);
-				await runTask(task.appId, task.jobId, handler, this.logger);
-			} else {
+			// Due task — attempt execution
+			if (!this.handlerResolver) {
+				// No resolver set: keep pending, warn
 				this.logger.warn(
 					{ appId: task.appId, jobId: task.jobId },
-					'No handler resolver set, skipping one-off task',
+					'No handler resolver set, keeping one-off task pending',
 				);
+				remaining.push(task);
+				continue;
 			}
+
+			let handler: TaskHandler;
+			try {
+				handler = this.handlerResolver(task.appId, task.handler, task.jobId);
+			} catch (err) {
+				// Resolver threw: infrastructure issue, keep pending for retry
+				this.logger.error(
+					{
+						appId: task.appId,
+						jobId: task.jobId,
+						error: err instanceof Error ? err.message : String(err),
+					},
+					'Handler resolver failed, keeping one-off task pending',
+				);
+				remaining.push(task);
+				continue;
+			}
+
+			// Handler resolved: execute. Whether it succeeds or fails,
+			// the task was attempted and should be removed.
+			await runTask(task.appId, task.jobId, handler, this.logger);
+			// Task intentionally NOT added to remaining — it has been attempted
 		}
 
-		// Remove executed tasks from YAML
-		await this.saveTasks(remaining);
+		if (remaining.length !== tasks.length) {
+			await this.saveTasks(remaining);
+		}
 	}
 
 	/**

@@ -139,6 +139,42 @@ describe('OneOffManager', () => {
 		expect(pending[0].jobId).toBe('job2');
 	});
 
+	it('due tasks without resolver stay pending (not deleted)', async () => {
+		// No setHandlerResolver called
+		await manager.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+
+		await manager.checkAndExecute();
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(1);
+	});
+
+	it('due task with throwing resolver stays pending (unresolvable)', async () => {
+		await manager.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+
+		manager.setHandlerResolver(() => {
+			throw new Error('App not found');
+		});
+
+		await manager.checkAndExecute();
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(1);
+	});
+
+	it('due task with resolved handler that throws is removed (execution failure)', async () => {
+		await manager.schedule('app-1', 'job-1', new Date(Date.now() - 1000), 'handler.ts');
+
+		manager.setHandlerResolver(() => async () => {
+			throw new Error('handler crash');
+		});
+
+		await manager.checkAndExecute();
+
+		const pending = await manager.getPendingTasks();
+		expect(pending).toHaveLength(0);
+	});
+
 	it('concurrent schedule and cancel serialize correctly', async () => {
 		const futureDate = new Date(Date.now() + 300_000);
 

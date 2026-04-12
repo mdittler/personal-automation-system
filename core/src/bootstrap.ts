@@ -494,6 +494,27 @@ export async function main(): Promise<void> {
 		}
 	}
 
+	// 9b-ii. Wire one-off task handler resolver (F31)
+	//
+	// Without this, due one-off tasks have no handler to invoke. The resolver
+	// looks up the app in the registry and returns a buildScheduledJobHandler
+	// for it. If the app is gone, it throws — OneOffManager will keep the task
+	// pending for retry rather than silently deleting it.
+	scheduler.oneOff.setHandlerResolver((appId, _handler, jobId) => {
+		const entry = registry.getApp(appId);
+		if (!entry?.module.handleScheduledJob) {
+			throw new Error(`App "${appId}" not found or has no handleScheduledJob`);
+		}
+		return buildScheduledJobHandler({
+			appId,
+			jobId,
+			userScope: 'system',
+			appModule: entry.module,
+			userProvider: userManager,
+			logger: createChildLogger(logger, { service: 'scheduled-job', appId }),
+		});
+	});
+
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
 
