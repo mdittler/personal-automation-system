@@ -192,4 +192,15 @@ describe('dispatch-site requestContext wraps', () => {
 			expect(source).toMatch(/\bgetCurrentUserId\s*\(/);
 		});
 	});
+
+	describe('bootstrap.ts — F37: condition-eval service name', () => {
+		it('uses "condition-eval" (not "condition-evaluator") to guard conditionEvaluator injection', async () => {
+			const source = stripComments(await readSource('bootstrap.ts'));
+			// The schema only allows "condition-eval" in requirements.services.
+			// If bootstrap checks for "condition-evaluator" instead, no app can ever
+			// receive the conditionEvaluator service.
+			expect(source).toMatch(/declaredServices\.has\s*\(\s*['"]condition-eval['"]\s*\)/);
+			expect(source).not.toMatch(/declaredServices\.has\s*\(\s*['"]condition-evaluator['"]\s*\)/);
+		});
+	});
 });

@@ -436,7 +436,7 @@ export async function main(): Promise<void> {
 			// Note: condition evaluator's data store is user-scoped ('system') with the
 			// app's declared userScopes enforced. Apps that need to evaluate shared data
 			// paths must use separate store access outside the condition evaluator.
-			conditionEvaluator: declaredServices.has('condition-evaluator')
+			conditionEvaluator: declaredServices.has('condition-eval')
 				? new ConditionEvaluatorServiceImpl({
 						dataStore: dataStore.forUser('system'),
 						llm: appLlm ?? systemLlm,

@@ -254,4 +254,42 @@ describe('AppRegistry', () => {
 
 		expect(registry.getApp('nonexistent-app')).toBeUndefined();
 	});
+
+	it('should reject duplicate app IDs: only the first app is loaded and logger.error is called', async () => {
+		// Create two app directories that both declare app.id = "echo"
+		const appDir1 = join(tempDir, 'echo-first');
+		await mkdir(appDir1, { recursive: true });
+		await writeFile(join(appDir1, 'manifest.yaml'), validManifestYaml);
+		await writeFile(
+			join(appDir1, 'index.ts'),
+			`export default { async init() {}, async handleMessage() {} };`,
+		);
+
+		const appDir2 = join(tempDir, 'echo-second');
+		await mkdir(appDir2, { recursive: true });
+		// Same app.id ("echo") as the first directory
+		await writeFile(join(appDir2, 'manifest.yaml'), validManifestYaml);
+		await writeFile(
+			join(appDir2, 'index.ts'),
+			`export default { async init() {}, async handleMessage() {} };`,
+		);
+
+		const registry = new AppRegistry({ appsDir: tempDir, config, logger });
+		const serviceFactory = createMockServiceFactory();
+		await registry.loadAll(serviceFactory);
+
+		// Only one app should be registered
+		expect(registry.getLoadedAppIds()).toHaveLength(1);
+		expect(registry.getLoadedAppIds()).toContain('echo');
+
+		// The service factory should only have been called once (duplicate never reaches init)
+		expect(serviceFactory).toHaveBeenCalledOnce();
+
+		// logger.error must have been called with a message containing "Duplicate"
+		const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
+		const duplicateError = errorCalls.find(
+			(args: unknown[]) => typeof args[1] === 'string' && args[1].includes('Duplicate'),
+		);
+		expect(duplicateError).toBeDefined();
+	});
 });

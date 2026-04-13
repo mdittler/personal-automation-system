@@ -65,6 +65,16 @@ export class AppRegistry {
 				continue;
 			}
 
+			// Reject duplicate app IDs — the first app loaded wins.
+			if (this.apps.has(manifest.app.id)) {
+				this.logger.error(
+					{ appId: manifest.app.id, appDir },
+					`Duplicate app ID "${manifest.app.id}" — skipping "${appDir}"`,
+				);
+				skipped.push({ dir: appDir, reason: 'duplicate app ID' });
+				continue;
+			}
+
 			// Build scoped CoreServices for this app
 			const services = serviceFactory(manifest, appDir);
 
