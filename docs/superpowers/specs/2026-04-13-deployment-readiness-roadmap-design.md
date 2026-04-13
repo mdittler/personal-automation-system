@@ -25,20 +25,22 @@ The system has not been used in production yet. The target deployment is a Mac M
 ### Changes
 
 **1. LLM-based PAS context detection** (replaces 66+ hardcoded keywords)
-- Remove the static `PAS_KEYWORDS` list in the chatbot
-- Use a fast-tier LLM call to classify whether a message is PAS-related
-- If PAS-related, inject the app-aware system prompt; otherwise use the basic conversational prompt
-- Key file: `apps/chatbot/src/index.ts` (the `isPASRelated()` / auto-detect logic)
+- Only runs when `auto_detect_pas` is enabled (change default from `false` to `true`). `/ask` stays unconditionally app-aware
+- Remove the static `PAS_KEYWORDS` list and keyword-matching logic
+- Fast-tier LLM classifier with compact prompt (user message + PAS definition + optional enabled app names). No large app metadata in classifier prompt
+- Returns extensible classification object: `{ pasRelated: boolean, dataQueryCandidate?: boolean }`. Only `pasRelated` wired in D1; `dataQueryCandidate` is the D2 hook
+- Robust output parsing (handle "YES.", "no", JSON variants). Fail-open to PAS context on LLM failure, with warn-level logging
+- Key file: `apps/chatbot/src/index.ts`
 
 **2. Conversation quality improvements**
-- Validate the existing recency-weighting fix in `conversation-history.ts` — test that recent messages are prioritized
-- Raise the 1024 token response cap to 2048. Add Telegram message splitting (Telegram max is 4096 chars) — if response exceeds limit, split at paragraph boundaries and send as multiple messages. Do not remove the cap entirely (cost control + UX)
-- Inject user profile context into system prompt: user's name, household members, active space, recent app activity summary
+- Define explicit recency labeling in prompt construction: last N turns under "Recent conversation:" heading, older turns under "Earlier context:". Verify if any recency labeling already exists before implementing
+- Raise the 1024 token response cap to 2048. Add Telegram message splitting at ~3800-4000 chars: split by paragraphs first, then lines, then hard chunks. Handle MarkdownV2 formatting safety at split boundaries. Keep splitting local to chatbot, do not change global TelegramService
 - Key file: `apps/chatbot/src/conversation-history.ts`
 
 **3. User profile grounding**
-- Chatbot system prompt includes: user display name, household context (space membership), which apps are active, and a brief "recent activity" summary (last 3-5 app interactions)
-- This makes responses feel personalized rather than generic
+- Use already-available data: `MessageContext.spaceName`/`spaceId` for household context, `services.appMetadata.getEnabledApps(userId)` for active apps. Do NOT add SpaceService or UserManager to chatbot CoreServices — use what's in ctx and existing services
+- Do not include display name unless already available through an existing service interface
+- Apply grounding to both regular fallback chat (when app-aware) AND `/ask`
 
 ### What doesn't change
 - Message routing priority unchanged (commands → photos → LLM classification → chatbot fallback)
