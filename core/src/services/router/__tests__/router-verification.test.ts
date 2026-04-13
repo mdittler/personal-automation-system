@@ -13,6 +13,7 @@ import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, PhotoContext, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
+import type { AppToggleStore } from '../../app-toggle/index.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 import type { RouteVerifier, VerifyAction } from '../route-verifier.js';
@@ -360,6 +361,72 @@ describe('Router — grey-zone verification', () => {
 				'123',
 				expect.stringContaining("don't have access"),
 			);
+		});
+
+		it('excludes appToggle-overridden apps from verifier enabledApps', async () => {
+			// User has enabledApps: ['*'] but grocery is explicitly toggled off
+			const userWithWildcard = {
+				id: '123',
+				name: 'test',
+				isAdmin: false,
+				enabledApps: ['*'] as string[],
+				sharedScopes: [] as string[],
+			};
+			const config = createMockConfig([userWithWildcard]);
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			const groceryModule = createMockModule();
+
+			// appToggle says grocery is off for this user
+			const appToggle: AppToggleStore = {
+				isEnabled: vi.fn(async (_userId, appId, defaults) => {
+					if (appId === 'grocery') return false;
+					return defaults.includes('*') || defaults.includes(appId);
+				}),
+				getOverrides: vi.fn(async () => ({ grocery: false })),
+			} as unknown as AppToggleStore;
+
+			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+			const cache = new ManifestCache();
+			cache.add(echoManifest, '/apps/echo');
+			cache.add(groceryManifest, '/apps/grocery');
+
+			const apps = [
+				{ manifest: echoManifest, module: echoModule },
+				{ manifest: groceryManifest, module: groceryModule },
+			];
+			const registry = {
+				getApp: (id: string) => {
+					const app = apps.find((a) => a.manifest.app.id === id);
+					if (!app) return undefined;
+					return { manifest: app.manifest, module: app.module, appDir: `/apps/${id}` } as RegisteredApp;
+				},
+				getAll: () =>
+					apps.map((a) => ({ manifest: a.manifest, module: a.module, appDir: `/apps/${a.manifest.app.id}` })),
+				getManifestCache: () => cache,
+				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+			} as unknown as AppRegistry;
+
+			const router = new Router({
+				registry,
+				llm: greyZoneLlm,
+				telegram: createMockTelegram(),
+				fallback: createMockFallback(),
+				config,
+				logger: createMockLogger(),
+				confidenceThreshold: 0.4,
+				routeVerifier: verifier,
+				appToggle,
+			});
+			router.buildRoutingTables();
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			// Verifier should have been called with enabledApps that excludes grocery
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			const verifyCall = vi.mocked(verifier.verify).mock.calls[0]!;
+			const passedEnabledApps = verifyCall[3] as string[];
+			expect(passedEnabledApps).not.toContain('grocery');
+			expect(passedEnabledApps).toContain('echo');
 		});
 	});
 

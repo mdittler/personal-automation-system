@@ -430,6 +430,23 @@ describe('InviteService', () => {
 			expect(result).toEqual({ error: 'This invite code has already been used.' });
 		});
 
+		it('same user retrying after registration failure gets success (idempotent)', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin');
+
+			// First claim succeeds
+			const first = await svc.claimAndRedeem(code, '111');
+			expect(first).toHaveProperty('invite');
+
+			// Same user retrying — should succeed, not error
+			const retry = await svc.claimAndRedeem(code, '111');
+			expect(retry).toHaveProperty('invite');
+
+			// Different user still rejected
+			const other = await svc.claimAndRedeem(code, '222');
+			expect(other).toEqual({ error: 'This invite code has already been used.' });
+		});
+
 		it('allows exactly one winner in concurrent redemptions', async () => {
 			const svc = makeService();
 			const code = await svc.createInvite('Alice', 'admin');

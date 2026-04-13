@@ -124,6 +124,42 @@ describe('dispatch-site requestContext wraps', () => {
 			// The old llmContext import path must not reappear
 			expect(source).not.toMatch(/from\s+['"][^'"]*llm\/llm-context/);
 		});
+
+		it('access check runs BEFORE resolveCallback in the rv: branch (H1 fix)', async () => {
+			const source = stripComments(await readSource('bootstrap.ts'));
+
+			// The isEnabled guard must appear before resolveCallback so the pending
+			// entry is NOT consumed when access is denied. We assert that within
+			// the rv: branch, isEnabled(...) precedes resolveCallback(...).
+			const accessBeforeResolve = source.match(
+				/isEnabled\s*\([^)]*\)[\s\S]{0,600}resolveCallback\s*\(/,
+			);
+			expect(accessBeforeResolve).not.toBeNull();
+		});
+
+		it('no chatbot exemption in the rv: branch access check (L4 fix)', async () => {
+			const source = stripComments(await readSource('bootstrap.ts'));
+
+			// The old code skipped the access check for chatbot with:
+			//   if (chosenAppId !== 'chatbot') { ... isEnabled ... }
+			// All apps including chatbot must now pass through the same check.
+			// We assert the exemption pattern does not appear near the rv: branch.
+			const rvIdx = source.indexOf("data.startsWith('rv:')");
+			expect(rvIdx).toBeGreaterThan(-1);
+			const rvSection = source.slice(rvIdx, rvIdx + 1000);
+			expect(rvSection).not.toMatch(/chosenAppId\s*!==\s*['"]chatbot['"]/);
+		});
+
+		it('answeredCallback flag prevents double answerCallbackQuery (M2 fix)', async () => {
+			const source = stripComments(await readSource('bootstrap.ts'));
+
+			// The denial path sets answeredCallback = true and calls
+			// answerCallbackQuery with a user-facing text message. The finally
+			// block checks this flag before calling the bare answerCallbackQuery.
+			expect(source).toMatch(/answeredCallback\s*=\s*true/);
+			expect(source).toMatch(/answerCallbackQuery\s*\(\s*\{[^}]*You no longer have access/);
+			expect(source).toMatch(/if\s*\(\s*!answeredCallback\s*\)[\s\S]{0,200}answerCallbackQuery/);
+		});
 	});
 
 	describe('api/routes/messages.ts', () => {

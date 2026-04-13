@@ -156,6 +156,26 @@ describe('registerUser', () => {
 		});
 	});
 
+	it('rolls back in-memory state if config sync fails', async () => {
+		const newUser: RegisteredUser = {
+			id: '333',
+			name: 'Carol',
+			isAdmin: false,
+			enabledApps: ['notes'],
+			sharedScopes: [],
+		};
+
+		// Make the config path unwritable by removing the file and replacing with a directory
+		await rm(configPath, { force: true });
+		const { mkdir } = await import('node:fs/promises');
+		await mkdir(configPath);
+
+		await expect(service.registerUser(newUser)).rejects.toThrow();
+
+		// In-memory state must be rolled back
+		expect(userManager.isRegistered('333')).toBe(false);
+	});
+
 	it('preserves other config sections when syncing', async () => {
 		const newUser: RegisteredUser = {
 			id: '444',

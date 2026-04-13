@@ -725,6 +725,24 @@ describe('RouteVerifier', () => {
 		expect(promptArg).not.toContain('classified');
 	});
 
+	it('returns the sole accessible app when classifier picked a disabled app', async () => {
+		// Classifier picked 'food' but only 'notes' is in enabledApps — with 1 accessible app
+		// the verifier should skip LLM and return 'notes', not 'food'
+		const llm = createMockLLM('{"agrees": true}');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(
+			createTextCtx(),
+			{ appId: 'food', intent: 'grocery', confidence: 0.55 },
+			undefined,
+			['notes'], // only notes enabled
+		);
+
+		// LLM should NOT be called (only 1 accessible app)
+		expect(llm.complete).not.toHaveBeenCalled();
+		expect(result).toEqual({ action: 'route', appId: 'notes' });
+	});
+
 	// -------------------------------------------------------------------------
 	// button deduplication
 	// -------------------------------------------------------------------------
