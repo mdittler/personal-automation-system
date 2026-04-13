@@ -13,18 +13,13 @@ import type { BatchAnalysis, FreezerItem, MealPlan, PlannedMeal, Recipe } from '
 import { sanitizeInput } from '../utils/sanitize.js';
 import { loadHousehold } from '../utils/household-guard.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { addDays } from '../utils/date.js';
 import { loadFreezer } from './freezer-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
 
 export interface DefrostMatch {
 	freezerItem: FreezerItem;
 	meal: PlannedMeal;
-}
-
-function addDays(isoDate: string, days: number): string {
-	const [y, m, d] = isoDate.split('-').map(Number) as [number, number, number];
-	const date = new Date(Date.UTC(y, m - 1, d + days));
-	return date.toISOString().slice(0, 10);
 }
 
 /**

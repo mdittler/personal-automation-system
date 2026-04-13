@@ -14,6 +14,7 @@ import { loadMacrosForPeriod } from './macro-tracker.js';
 import { loadHealthForPeriod } from './health-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
 import { sanitizeInput } from '../utils/sanitize.js';
+import { addDays } from '../utils/date.js';
 
 const MIN_NUTRITION_DAYS = 5;
 const MAX_INSIGHTS = 3;
@@ -45,7 +46,7 @@ export async function correlateHealth(
 	const endDate = new Date().toISOString().slice(0, 10);
 	// -periodDays + 1: both startDate and endDate are inclusive, so this gives
 	// an exact [periodDays]-day window (e.g. -13 offset → 14-day inclusive range)
-	const startDate = offsetDate(endDate, -periodDays + 1);
+	const startDate = addDays(endDate, -periodDays + 1);
 
 	const [macroEntries, healthEntries] = await Promise.all([
 		loadMacrosForPeriod(userStore, startDate, endDate),
@@ -133,8 +134,3 @@ function isCorrelationInsight(x: unknown): x is CorrelationInsight {
 		&& typeof v['disclaimer'] === 'string' && v['disclaimer'].length > 0 && v['disclaimer'].length <= 250;
 }
 
-function offsetDate(dateStr: string, days: number): string {
-	const d = new Date(dateStr);
-	d.setUTCDate(d.getUTCDate() + days);
-	return d.toISOString().slice(0, 10);
-}
