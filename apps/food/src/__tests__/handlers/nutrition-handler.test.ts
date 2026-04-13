@@ -656,4 +656,51 @@ describe('nutrition handler', () => {
 			expect(services.telegram.send).toHaveBeenCalledOnce();
 		});
 	});
+
+	// ─── H6: Markdown escaping in label interpolations ───────────────────────
+	describe('H6: label markdown escaping', () => {
+		beforeEach(() => {
+			vi.clearAllMocks();
+		});
+
+		it('escapes markdown-special chars in "no quick-meal matches" error (meals remove)', async () => {
+			const services = createMockServices();
+			// Return empty raw yaml so loadQuickMeals returns [] → no match taken.
+			const userStore = services.data.forUser('user1');
+			userStore.read.mockResolvedValue('');
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue(''),
+				list: vi.fn().mockResolvedValue([]),
+			});
+			await handleNutritionCommand(
+				services as never,
+				['meals', 'remove', 'chicken *bold* label'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			// Raw asterisk must not appear — must be backslash-escaped
+			expect(msg).not.toMatch(/(?<!\\)\*/);
+			expect(msg).toContain('\\*');
+		});
+
+		it('escapes markdown-special chars in "no quick-meal matches" error (meals edit)', async () => {
+			const services = createMockServices();
+			const userStore = services.data.forUser('user1');
+			userStore.read.mockResolvedValue('');
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue(''),
+				list: vi.fn().mockResolvedValue([]),
+			});
+			await handleNutritionCommand(
+				services as never,
+				['meals', 'edit', 'chicken *bold* label'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).not.toMatch(/(?<!\\)\*/);
+			expect(msg).toContain('\\*');
+		});
+	});
 });

@@ -449,11 +449,11 @@ export async function handleNutritionCommand(
 					if (byLabel) targetId = byLabel.id;
 				}
 				if (!targetId) {
-					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
+					await services.telegram.send(userId, `No quick-meal matches '${escapeMarkdown(label)}'.`);
 					return;
 				}
 				await archiveQuickMeal(userStore, targetId);
-				await services.telegram.send(userId, `Removed quick-meal: ${label}`);
+				await services.telegram.send(userId, `Removed quick-meal: ${escapeMarkdown(label)}`);
 				return;
 			}
 
@@ -480,7 +480,7 @@ export async function handleNutritionCommand(
 					existing = all.find(t => t.label.toLowerCase() === needle);
 				}
 				if (!existing) {
-					await services.telegram.send(userId, `No quick-meal matches '${label}'.`);
+					await services.telegram.send(userId, `No quick-meal matches '${escapeMarkdown(label)}'.`);
 					return;
 				}
 				await beginQuickMealEdit(services, userId, existing);
@@ -886,7 +886,7 @@ async function dispatchSmartLog(
 	if (!est.ok) {
 		await services.telegram.send(
 			userId,
-			`Couldn't estimate macros for '${labelText}': ${est.error}. Try rephrasing or use \`/nutrition meals add\` to save a quick-meal.`,
+			`Couldn't estimate macros for '${escapeMarkdown(labelText)}': ${est.error}. Try rephrasing or use \`/nutrition meals add\` to save a quick-meal.`,
 		);
 		return;
 	}

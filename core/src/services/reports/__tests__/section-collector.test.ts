@@ -382,6 +382,12 @@ describe('collectSection — error handling', () => {
 });
 
 describe('resolveDateTokens', () => {
+	it('resolves {date} token (alias for {today})', () => {
+		const result = resolveDateTokens('log/{date}.md', 'UTC');
+		const todayStr = new Date().toISOString().slice(0, 10);
+		expect(result).toBe(`log/${todayStr}.md`);
+	});
+
 	it('resolves {today} token', () => {
 		const result = resolveDateTokens('notes/{today}.md', 'UTC');
 		const todayStr = new Date().toISOString().slice(0, 10);

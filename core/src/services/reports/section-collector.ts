@@ -203,7 +203,8 @@ function collectCustomSection(label: string, config: CustomSectionConfig): Colle
 }
 
 /**
- * Resolve date tokens ({today}, {yesterday}) in a path string.
+ * Resolve date tokens ({date}, {today}, {yesterday}) in a path string.
+ * {date} is an alias for {today}.
  */
 export function resolveDateTokens(path: string, timezone: string): string {
 	const now = new Date();
@@ -212,7 +213,10 @@ export function resolveDateTokens(path: string, timezone: string): string {
 	const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 	const yesterdayStr = formatDate(yesterday, timezone);
 
-	return path.replace(/\{today\}/g, todayStr).replace(/\{yesterday\}/g, yesterdayStr);
+	return path
+		.replace(/\{date\}/g, todayStr)
+		.replace(/\{today\}/g, todayStr)
+		.replace(/\{yesterday\}/g, yesterdayStr);
 }
 
 function formatDate(date: Date, timezone: string): string {
