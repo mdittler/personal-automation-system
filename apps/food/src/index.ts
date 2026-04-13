@@ -210,6 +210,7 @@ import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from '
 import { todayDate } from './utils/date.js';
 import { escapeMarkdown } from './utils/escape-markdown.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
+import { parseStrictInt } from './utils/parse-int-strict.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
 let services: CoreServices;
@@ -3180,9 +3181,10 @@ async function estimateLeftoverExpiry(storedDate: string, foodName: string): Pro
 			`How many days does ${sanitizeInput(foodName)} last in the fridge? Reply with just a number.`,
 			{ tier: 'fast' },
 		);
-		const days = Number.parseInt(daysStr.trim(), 10);
+		const parsed = parseStrictInt(daysStr.trim());
+		const days = parsed !== null && parsed > 0 ? Math.min(parsed, 14) : 3;
 		const expiry = new Date(`${storedDate}T00:00:00Z`);
-		expiry.setUTCDate(expiry.getUTCDate() + (Number.isNaN(days) || days <= 0 ? 3 : days));
+		expiry.setUTCDate(expiry.getUTCDate() + days);
 		return expiry.toISOString().slice(0, 10);
 	} catch {
 		services.logger.warn('LLM expiry estimation failed for "%s", defaulting to 3 days', foodName);

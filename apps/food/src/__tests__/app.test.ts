@@ -2475,4 +2475,114 @@ describe('Food App', () => {
 			);
 		});
 	});
+
+	// ─── estimateLeftoverExpiry — LLM output caps ───────────────────
+
+	describe('estimateLeftoverExpiry — LLM shelf-life caps', () => {
+		beforeEach(() => {
+			sharedStore.read.mockImplementation(async (path: string) => {
+				if (path === 'household.yaml') return stringify(sampleHousehold);
+				if (path === 'leftovers.yaml') return '';
+				return null;
+			});
+		});
+
+		it('caps LLM shelf-life at 14 days when LLM returns "999"', async () => {
+			// First LLM call = expiry estimate ("999"), second might be classification
+			vi.mocked(services.llm.complete).mockResolvedValue('999');
+
+			const ctx = createTestMessageContext({ text: 'I have leftover pasta', userId: 'user1' });
+			await handleMessage(ctx);
+
+			const msg = vi.mocked(services.telegram.send).mock.calls.find(
+				(c) => String(c[1]).includes('use by'),
+			);
+			expect(msg).toBeDefined();
+			// Expiry should be stored at most 14 days from today
+			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
+			expect(expiryMatch).toBeTruthy();
+			const expiryDate = new Date(`${expiryMatch![1]}T00:00:00Z`);
+			const today = new Date();
+			today.setUTCHours(0, 0, 0, 0);
+			const diffDays = Math.round((expiryDate.getTime() - today.getTime()) / 86400000);
+			expect(diffDays).toBeLessThanOrEqual(14);
+			expect(diffDays).toBeGreaterThan(0);
+		});
+
+		it('uses exact LLM shelf-life when within cap (LLM returns "3")', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue('3');
+
+			const ctx = createTestMessageContext({ text: 'I have leftover chili', userId: 'user1' });
+			await handleMessage(ctx);
+
+			const msg = vi.mocked(services.telegram.send).mock.calls.find(
+				(c) => String(c[1]).includes('use by'),
+			);
+			expect(msg).toBeDefined();
+			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
+			expect(expiryMatch).toBeTruthy();
+			const expiryDate = new Date(`${expiryMatch![1]}T00:00:00Z`);
+			const today = new Date();
+			today.setUTCHours(0, 0, 0, 0);
+			const diffDays = Math.round((expiryDate.getTime() - today.getTime()) / 86400000);
+			expect(diffDays).toBe(3);
+		});
+
+		it('defaults to 3 days when LLM returns "0"', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue('0');
+
+			const ctx = createTestMessageContext({ text: 'I have leftover rice', userId: 'user1' });
+			await handleMessage(ctx);
+
+			const msg = vi.mocked(services.telegram.send).mock.calls.find(
+				(c) => String(c[1]).includes('use by'),
+			);
+			expect(msg).toBeDefined();
+			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
+			expect(expiryMatch).toBeTruthy();
+			const expiryDate = new Date(`${expiryMatch![1]}T00:00:00Z`);
+			const today = new Date();
+			today.setUTCHours(0, 0, 0, 0);
+			const diffDays = Math.round((expiryDate.getTime() - today.getTime()) / 86400000);
+			expect(diffDays).toBe(3);
+		});
+
+		it('defaults to 3 days when LLM returns "5 days" (non-digit string)', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue('5 days');
+
+			const ctx = createTestMessageContext({ text: 'I have leftover soup', userId: 'user1' });
+			await handleMessage(ctx);
+
+			const msg = vi.mocked(services.telegram.send).mock.calls.find(
+				(c) => String(c[1]).includes('use by'),
+			);
+			expect(msg).toBeDefined();
+			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
+			expect(expiryMatch).toBeTruthy();
+			const expiryDate = new Date(`${expiryMatch![1]}T00:00:00Z`);
+			const today = new Date();
+			today.setUTCHours(0, 0, 0, 0);
+			const diffDays = Math.round((expiryDate.getTime() - today.getTime()) / 86400000);
+			expect(diffDays).toBe(3);
+		});
+
+		it('defaults to 3 days when LLM returns "3-5" (range string)', async () => {
+			vi.mocked(services.llm.complete).mockResolvedValue('3-5');
+
+			const ctx = createTestMessageContext({ text: 'I have leftover stew', userId: 'user1' });
+			await handleMessage(ctx);
+
+			const msg = vi.mocked(services.telegram.send).mock.calls.find(
+				(c) => String(c[1]).includes('use by'),
+			);
+			expect(msg).toBeDefined();
+			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
+			expect(expiryMatch).toBeTruthy();
+			const expiryDate = new Date(`${expiryMatch![1]}T00:00:00Z`);
+			const today = new Date();
+			today.setUTCHours(0, 0, 0, 0);
+			const diffDays = Math.round((expiryDate.getTime() - today.getTime()) / 86400000);
+			expect(diffDays).toBe(3);
+		});
+	});
 });

@@ -10,6 +10,7 @@ import { parse, stringify } from 'yaml';
 import type { GroceryItem, PantryItem } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { parseStrictInt } from '../utils/parse-int-strict.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { normalizeIngredientName } from './ingredient-normalizer.js';
 import { DEPARTMENT_EMOJI, assignDepartment } from './item-parser.js';
@@ -277,10 +278,11 @@ export async function enrichWithExpiry(
 				`How many days does ${sanitizeInput(item.name)} last in the fridge after purchase? Reply with just a number.`,
 				{ tier: 'fast' },
 			);
-			const days = Number.parseInt(daysStr.trim(), 10);
-			if (!Number.isNaN(days) && days > 0) {
+			const parsed = parseStrictInt(daysStr.trim());
+			if (parsed !== null && parsed > 0) {
+				const cappedDays = Math.min(parsed, 365);
 				const expiry = new Date(`${item.addedDate}T00:00:00Z`);
-				expiry.setUTCDate(expiry.getUTCDate() + days);
+				expiry.setUTCDate(expiry.getUTCDate() + cappedDays);
 				result[i] = { ...item, expiryEstimate: expiry.toISOString().slice(0, 10) };
 			}
 		} catch {
