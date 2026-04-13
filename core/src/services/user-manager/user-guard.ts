@@ -12,6 +12,7 @@
 import type { Logger } from 'pino';
 import type { TelegramService } from '../../types/telegram.js';
 import type { InviteService } from '../invite/index.js';
+import { redeemInviteAndRegister } from '../invite/redeem-and-register.js';
 import type { UserManager } from './index.js';
 import type { UserMutationService } from './user-mutation-service.js';
 
@@ -68,35 +69,23 @@ export class UserGuard {
 			}
 
 			if (potentialCode) {
-				const result = await this.inviteService.claimAndRedeem(potentialCode, userId);
-				if ('invite' in result) {
-					// Code claimed — register the user
-					const newUser = {
-						id: userId,
-						name: result.invite.name,
-						isAdmin: false,
-						enabledApps: ['*'] as string[],
-						sharedScopes: [] as string[],
-					};
-					await this.userMutationService.registerUser(newUser);
-					this.logger.info(
-						{ userId, name: result.invite.name },
-						'User registered via invite code',
-					);
-					try {
-						await this.telegram.send(
-							userId,
-							`Welcome to PAS, ${result.invite.name}! Type /help to see available commands.`,
-						);
-					} catch (error) {
-						this.logger.error({ userId, error }, 'Failed to send welcome message');
-					}
+				const outcome = await redeemInviteAndRegister(
+					{
+						inviteService: this.inviteService,
+						userMutationService: this.userMutationService,
+						telegram: this.telegram,
+						logger: this.logger,
+					},
+					potentialCode,
+					userId,
+				);
+				if (outcome.success) {
 					return true;
 				}
 				// Code-shaped but invalid — send specific invite error
 				this.logger.warn({ userId }, 'Rejected invite code from unregistered user');
 				try {
-					await this.telegram.send(userId, result.error);
+					await this.telegram.send(userId, outcome.error);
 				} catch (error) {
 					this.logger.error({ userId, error }, 'Failed to send invite error message');
 				}

@@ -20,6 +20,7 @@ import type { InviteService } from '../invite/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import { redeemInviteAndRegister } from '../invite/redeem-and-register.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
@@ -749,25 +750,20 @@ export class Router {
 	private async handleInviteRedemption(code: string, userId: string): Promise<void> {
 		if (!this.inviteService || !this.userMutationService) return;
 
-		const result = await this.inviteService.claimAndRedeem(code, userId);
-		if ('error' in result) {
-			await this.trySend(userId, result.error);
-			return;
-		}
-
-		const newUser = {
-			id: userId,
-			name: result.invite.name,
-			isAdmin: false,
-			enabledApps: ['*'] as string[],
-			sharedScopes: [] as string[],
-		};
-
-		await this.userMutationService.registerUser(newUser);
-		await this.trySend(
+		const outcome = await redeemInviteAndRegister(
+			{
+				inviteService: this.inviteService,
+				userMutationService: this.userMutationService,
+				telegram: this.telegram,
+				logger: this.logger,
+			},
+			code,
 			userId,
-			`Welcome to PAS, ${escapeMarkdown(result.invite.name)}! Type /help to see available commands.`,
 		);
+
+		if (!outcome.success) {
+			await this.trySend(userId, outcome.error);
+		}
 	}
 
 	/** Find a registered user by Telegram user ID. */
