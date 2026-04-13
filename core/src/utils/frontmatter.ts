@@ -10,7 +10,7 @@ export interface FrontmatterMeta {
 	date?: string;
 	created?: string;
 	tags?: string[];
-	type?: 'daily-note' | 'report' | 'alert' | 'journal' | 'diff' | 'log';
+	type?: string;
 	app?: string;
 	user?: string;
 	source?: string;
