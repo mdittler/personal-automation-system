@@ -904,14 +904,14 @@ export async function buildUserContext(ctx: MessageContext, svc: CoreServices): 
 	const parts: string[] = [];
 
 	if (ctx.spaceName) {
-		parts.push(`User is a member of the "${ctx.spaceName}" household.`);
+		parts.push(`User is a member of the "${sanitizeInput(ctx.spaceName, 200)}" household.`);
 	}
 
 	try {
 		if (svc.appMetadata) {
 			const apps = await svc.appMetadata.getEnabledApps(ctx.userId);
 			if (apps.length > 0) {
-				parts.push(`Active apps: ${apps.map((a) => a.name).join(', ')}.`);
+				parts.push(`Active apps: ${apps.map((a) => sanitizeInput(a.name, 100)).join(', ')}.`);
 			}
 		}
 	} catch {
