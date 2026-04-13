@@ -59,6 +59,22 @@ describe('classifyPASMessage', () => {
 		expect(result.pasRelated).toBe(false);
 	});
 
+	it('parses "YES - this is PAS-related" (multi-word response) as true', async () => {
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES - this is PAS-related');
+
+		const result = await classifyPASMessage('what apps do I have?', services);
+
+		expect(result.pasRelated).toBe(true);
+	});
+
+	it('parses "NO, not PAS-related" (multi-word response) as false', async () => {
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO, not PAS-related');
+
+		const result = await classifyPASMessage('tell me a joke', services);
+
+		expect(result.pasRelated).toBe(false);
+	});
+
 	it('uses fast tier for classification call', async () => {
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES');
 

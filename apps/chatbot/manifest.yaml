@@ -38,7 +38,9 @@ requirements:
   llm:
     tier: standard
     rate_limit:
-      max_requests: 30
+      # 60 req/hour: auto_detect_pas (default on) makes 2 LLM calls per message
+      # (fast-tier classifier + standard-tier response), so 60 preserves ~30 effective messages/hour
+      max_requests: 60
       window_seconds: 3600
     monthly_cost_cap: 15.00
 
