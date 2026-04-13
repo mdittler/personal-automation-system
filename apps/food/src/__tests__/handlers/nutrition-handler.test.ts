@@ -702,5 +702,78 @@ describe('nutrition handler', () => {
 			expect(msg).not.toMatch(/(?<!\\)\*/);
 			expect(msg).toContain('\\*');
 		});
+
+		it('escapes markdown-special chars in "Removed quick-meal" confirmation (meals remove)', async () => {
+			const services = createMockServices();
+			const userStore = services.data.forUser('user1');
+			// Return YAML with a quick-meal whose label contains markdown-special
+			// characters. The store schema validates on write, not on read, so this
+			// is a realistic corruption or legacy-migration scenario.
+			const quickMealYaml = [
+				'active:',
+				'  - id: chicken-special',
+				'    userId: user1',
+				'    label: "chicken *special*"',
+				'    kind: other',
+				'    ingredients:',
+				'      - chicken',
+				'    estimatedMacros:',
+				'      calories: 300',
+				'      protein: 30',
+				'      carbs: 10',
+				'      fat: 10',
+				'      fiber: 0',
+				'    confidence: 0.8',
+				'    llmModel: test-model',
+				'    usageCount: 0',
+				'    createdAt: "2026-01-01T00:00:00.000Z"',
+				'    updatedAt: "2026-01-01T00:00:00.000Z"',
+				'archive: []',
+			].join('\n');
+			userStore.read.mockResolvedValue(quickMealYaml);
+			const store = createMockScopedStore({
+				list: vi.fn().mockResolvedValue([]),
+			});
+			// The label "chicken *special*" slugifies to "chicken-special",
+			// which matches the id above → archive path is taken → confirmation sent.
+			await handleNutritionCommand(
+				services as never,
+				['meals', 'remove', 'chicken *special*'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			// Must start with "Removed quick-meal:" (not an error message)
+			expect(msg).toMatch(/^Removed quick-meal:/);
+			// Raw asterisk must not appear — must be backslash-escaped
+			expect(msg).not.toMatch(/(?<!\\)\*/);
+			expect(msg).toContain('\\*');
+		});
+
+		it('escapes markdown-special chars in "Couldn\'t estimate macros" error (log)', async () => {
+			const services = createMockServices();
+			const userStore = services.data.forUser('user1');
+			// Empty quick-meals store → no quick-meal match.
+			userStore.read.mockResolvedValue('');
+			// Empty recipe store → no recipe match.
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue(''),
+				list: vi.fn().mockResolvedValue([]),
+			});
+			// Make the LLM throw so estimateMacros returns { ok: false }.
+			services.llm.complete.mockRejectedValue(new Error('provider unavailable'));
+			await handleNutritionCommand(
+				services as never,
+				['log', 'chicken *wings*'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			// Must start with "Couldn't estimate macros" (not a generic error)
+			expect(msg).toMatch(/^Couldn't estimate macros/);
+			// Raw asterisk must not appear — must be backslash-escaped
+			expect(msg).not.toMatch(/(?<!\\)\*/);
+			expect(msg).toContain('\\*');
+		});
 	});
 });
