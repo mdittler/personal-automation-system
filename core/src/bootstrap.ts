@@ -663,6 +663,7 @@ export async function main(): Promise<void> {
 
 	const callbackLogger = createChildLogger(logger, { service: 'callback-router' });
 	bot.on('callback_query:data', async (ctx) => {
+		let answeredCallback = false;
 		try {
 			await shutdownManager.trackRequest(async () => {
 				const userId = extractUserId(ctx);
@@ -680,23 +681,25 @@ export async function main(): Promise<void> {
 					const chosenAppId = parts[2];
 					if (!pendingId || !chosenAppId) return;
 
+					// Access check BEFORE resolveCallback — pending entry is NOT consumed on denial
+					const enabledApps = userManager.getUserApps(userId);
+					if (!(await appToggle.isEnabled(userId, chosenAppId, enabledApps))) {
+						callbackLogger.debug(
+							{ chosenAppId, userId },
+							'Verification callback for disabled app',
+						);
+						answeredCallback = true;
+						await ctx
+							.answerCallbackQuery({ text: 'You no longer have access to this app.' })
+							.catch(() => {});
+						return;
+					}
+
 					const resolved = await routeVerifier.resolveCallback(pendingId, chosenAppId);
 					if (!resolved) return;
 
 					const { entry } = resolved;
 					const appEntry = registry.getApp(chosenAppId);
-
-					// Verify user has access to the chosen app
-					if (chosenAppId !== 'chatbot') {
-						const enabledApps = userManager.getUserApps(userId);
-						if (!(await appToggle.isEnabled(userId, chosenAppId, enabledApps))) {
-							callbackLogger.debug(
-								{ chosenAppId, userId },
-								'Verification callback for disabled app',
-							);
-							return;
-						}
-					}
 
 					// Dispatch to chosen app (wrap in LLM context for cost tracking)
 					await requestContext.run({ userId }, async () => {
@@ -754,7 +757,9 @@ export async function main(): Promise<void> {
 				telegramService.handleCallbackQuery(userId, data);
 			});
 		} finally {
-			await ctx.answerCallbackQuery().catch(() => {});
+			if (!answeredCallback) {
+				await ctx.answerCallbackQuery().catch(() => {});
+			}
 		}
 	});
 
