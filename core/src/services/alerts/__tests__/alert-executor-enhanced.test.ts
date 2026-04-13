@@ -476,6 +476,40 @@ describe('executeActions — write_data', () => {
 		const content = await readFile(filePath, 'utf-8');
 		expect(content).toBe('Data: evaluated content');
 	});
+
+	it('expands {date} token in path to today\'s date (Gap 14)', async () => {
+		// Both the executor (via timezone param) and todayStr below use UTC,
+		// so this test is safe across timezone boundaries.
+		const deps = makeDeps({ dataDir: tempDir, timezone: 'UTC' });
+		const actions: AlertAction[] = [
+			{
+				type: 'write_data',
+				config: {
+					app_id: 'notes',
+					user_id: 'user1',
+					path: 'alert-log/{date}.md',
+					content: 'fired',
+					mode: 'write',
+				},
+			},
+		];
+
+		const result = await executeActions(actions, ['user1'], deps, makeContext());
+
+		expect(result.successCount).toBe(1);
+
+		// File must be written at the resolved date path, not the literal '{date}' path
+		const todayStr = new Date().toISOString().slice(0, 10);
+		const expectedPath = join(tempDir, 'users', 'user1', 'notes', 'alert-log', `${todayStr}.md`);
+		const literalPath = join(tempDir, 'users', 'user1', 'notes', 'alert-log', '{date}.md');
+
+		const content = await readFile(expectedPath, 'utf-8');
+		expect(content).toBe('fired');
+
+		// Confirm the literal brace path was NOT created
+		const { stat: fsStat } = await import('node:fs/promises');
+		await expect(fsStat(literalPath)).rejects.toThrow();
+	});
 });
 
 // --- Audio ---

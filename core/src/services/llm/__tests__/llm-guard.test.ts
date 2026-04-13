@@ -1,7 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
-import type { CostTracker } from '../cost-tracker.js';
+import { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
 import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
 
@@ -364,5 +367,62 @@ describe('LLMGuard', () => {
 			expect(err.message).toContain('Global');
 			expect(err.message).toContain('$55.00');
 		});
+	});
+});
+
+// Gap 8: integration test with real CostTracker — unknown-model conservative pricing blocks the guard
+describe('LLMGuard + CostTracker — unknown-model cost cap integration (Gap 8)', () => {
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = await mkdtemp(join(tmpdir(), 'pas-guard-cost-'));
+	});
+
+	afterEach(async () => {
+		await rm(tempDir, { recursive: true, force: true });
+	});
+
+	it('blocks calls after unknown-model usage accumulates conservative cost past the per-app cap', async () => {
+		const realTracker = new CostTracker(tempDir, pino({ level: 'silent' }));
+		await realTracker.loadMonthlyCache();
+
+		// DEFAULT_REMOTE_PRICING = $3/M input + $15/M output.
+		// 1000 in + 1000 out ≈ $0.018 — above the tiny $0.01 cap below.
+		await realTracker.record({
+			appId: 'unknown-app',
+			model: 'unknown-remote-gpt-xyz',
+			provider: 'openai',
+			inputTokens: 1000,
+			outputTokens: 1000,
+		});
+
+		// Accumulated cost should be non-zero (conservative fallback was applied)
+		expect(realTracker.getMonthlyAppCost('unknown-app')).toBeGreaterThan(0);
+
+		const inner: LLMService = {
+			complete: vi.fn().mockResolvedValue('ok'),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		};
+		const guard = new LLMGuard({
+			inner,
+			appId: 'unknown-app',
+			costTracker: realTracker,
+			config: {
+				maxRequests: 100,
+				windowSeconds: 60,
+				monthlyCostCap: 0.01, // below the ~$0.018 already accumulated
+				globalMonthlyCostCap: 100.0,
+			},
+			logger: pino({ level: 'silent' }),
+		});
+
+		// Guard reads accumulated cost ≥ cap → blocks the call
+		const err = await guard.complete('hello').catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(LLMCostCapError);
+		expect((err as LLMCostCapError).scope).toBe('app');
+
+		guard.dispose();
+		await realTracker.flush();
 	});
 });

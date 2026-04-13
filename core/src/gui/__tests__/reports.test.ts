@@ -497,5 +497,78 @@ describe('Report GUI Routes', () => {
 			expect(res.body).not.toContain('<img onerror');
 			expect(res.body).toContain('&lt;img');
 		});
+
+		it('safeJsonForScript escapes </script> breakout in report edit-page PAS_APPS inline JSON (Gap 12+13)', async () => {
+			// PAS_APPS in the report-edit template embeds app names via safeJsonForScript.
+			// Build a dedicated Fastify app with a malicious app name to test the vector.
+			const maliciousRegistry = {
+				getAll: () => [
+					{
+						manifest: {
+							app: {
+								id: 'evil',
+								name: '</script><script>window.__pasXss=1</script>',
+							},
+						},
+					},
+				],
+			};
+
+			const maliciousApp = Fastify({ logger: false });
+			await maliciousApp.register(fastifyCookie, { secret: AUTH_TOKEN });
+			const eta2 = new Eta();
+			await maliciousApp.register(fastifyView, {
+				engine: { eta: eta2 },
+				root: viewsDir,
+				viewExt: 'eta',
+				layout: 'layout',
+			});
+			await maliciousApp.register(
+				async (gui) => {
+					await registerAuth(gui, { authToken: AUTH_TOKEN });
+					await registerCsrfProtection(gui);
+					registerReportRoutes(gui, {
+						reportService,
+						userManager: makeUserManager(),
+						registry: maliciousRegistry,
+						dataDir: tempDir,
+						timezone: 'UTC',
+						logger,
+					});
+				},
+				{ prefix: '/gui' },
+			);
+
+			await reportService.saveReport({
+				id: 'xss-apps',
+				name: 'Safe Report',
+				description: 'test',
+				enabled: true,
+				schedule: '0 9 * * 1',
+				delivery: ['123456789'],
+				sections: [{ type: 'custom', label: 'X', config: { text: 'safe' } }],
+				llm: { enabled: false },
+			});
+
+			const loginRes = await maliciousApp.inject({
+				method: 'POST',
+				url: '/gui/login',
+				payload: { token: AUTH_TOKEN },
+			});
+			const cookies = collectCookies(loginRes);
+			const res = await maliciousApp.inject({
+				method: 'GET',
+				url: '/gui/reports/xss-apps/edit',
+				cookies,
+			});
+
+			expect(res.statusCode).toBe(200);
+			// Literal attacker payload must not appear in the page
+			expect(res.body).not.toContain('</script><script>window.__pasXss=1</script>');
+			// The '<' in the app name must be escaped as \u003c in PAS_APPS
+			expect(res.body).toContain('\\u003c');
+
+			await maliciousApp.close();
+		});
 	});
 });

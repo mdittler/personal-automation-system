@@ -570,4 +570,28 @@ describe('ScopedStore', () => {
 			);
 		});
 	});
+
+	describe('scope parent-traversal regression (Gap 4)', () => {
+		it('declared logs/ scope does not permit ../sibling-app/logs/ access', async () => {
+			const appStore = new ScopedStore({
+				baseDir: join(tempDir, 'gap4-app'),
+				appId: 'app1',
+				userId: 'user-1',
+				changeLog,
+				scopes: [{ path: 'logs/', access: 'read-write', description: 'App logs' }],
+			});
+
+			// Direct access within the declared scope succeeds
+			await appStore.write('logs/entry.md', 'ok');
+			expect(await appStore.read('logs/entry.md')).toBe('ok');
+
+			// Parent-traversal path does not match 'logs/' scope — scope check fires first
+			await expect(appStore.write('../other-app/logs/entry.md', 'evil')).rejects.toThrow(
+				ScopeViolationError,
+			);
+			await expect(appStore.read('../other-app/logs/entry.md')).rejects.toThrow(
+				ScopeViolationError,
+			);
+		});
+	});
 });

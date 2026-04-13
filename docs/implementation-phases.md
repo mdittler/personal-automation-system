@@ -4,7 +4,7 @@
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
 | **Status** | Phases 0–28 complete (except 27A-Vaults, 27B, 27C planned) |
-| **Last Updated** | 2026-04-08 |
+| **Last Updated** | 2026-04-13 |
 
 ---
 
@@ -50,6 +50,12 @@
 | F9 | Security: Telegram Markdown Escaping | **Complete** | ~11 | Shared `escapeMarkdown` utility in core; applied to 8 food formatters, echo/notes apps, reports (`formatReportForTelegram`), and alerts; router/verifier migrated from MarkdownV2 to legacy set |
 | R4 | Security: LLM Routing & Cost Caps | **Complete** | ~8 | F10 (unknown model pricing), F11 (optional Anthropic key), F12 (stale tier selections), F13 (cost cap cache miss), F14 (API attribution) |
 | R5 | Security: Food Photo/Vision | **Complete** | ~12 | F15 (household guard), F16 (strict vision classification), F17 (caption injection hardening), F18 (canonical ingredient names), F19 (grocery-photo atomic writes), F20 (malformed LLM output guards), F21 (photo handler Markdown escaping) |
+| R6 | Security: Async/Scheduling/Events | **Complete** | ~6 | F31 (one-off resolver), F32 (promise queue poisoning), F33 (job failure notifier), F34 (event bus handler map), F35 (in-flight shutdown drain) |
+| R7 | Test Gap Audit: Notifier Resilience | **Complete** | ~4 | Notifier exception resilience in CronManager/OneOffManager; EventBus.clearAll(), CostTracker queue, 30s drain timeout, stopping flag isolation |
+| CR6 | Arithmetic/Date/Cost/Schedule Calculations | **Complete** | ~14 | F22 (parseInt), F23 (DST-safe addDays), F24 (timezone todayDate), F25 (ISO week 53), F26 (boundary-week budget), F27 (cost estimate validation), F28 (price store guard), F29 (shelf-life caps), F30 (dead config cleanup) |
+| CR8 | Remaining Review Findings | **Complete** | ~8 | F37 (condition-eval), F38 (install prompt), F39 (dead register-app), F40 (duplicate app IDs), F41 (GUI XSS safeJsonForScript), F42 ({date} token alias) |
+| R1-post | R1 Post-Review Hardening | **Complete** | ~6 | H1 (resolveCallback access check), H2 (claimAndRedeem idempotency + rollback), L1-L6, M1-M3 |
+| CR9 | Test Coverage Gaps (Review Phases 9+10) | **Complete** | ~5 | 14 test gaps from review Phases 9-10: 5 new tests (Gaps 4, 6, 8, 12+13, 14) + 9 already covered |
 
 ### Dependency Graph
 

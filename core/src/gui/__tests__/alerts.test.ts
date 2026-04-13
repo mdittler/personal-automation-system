@@ -522,5 +522,39 @@ describe('Alert GUI Routes', () => {
 			const res = await authenticatedPost('/gui/alerts/xss-test2/test', {});
 			expect(res.body).not.toContain('<img onerror');
 		});
+
+		it('safeJsonForScript escapes </script> breakout in alert edit-page PAS_EXISTING_ACTIONS inline JSON (Gap 12+13)', async () => {
+			// PAS_EXISTING_ACTIONS in alert-edit embeds action configs via safeJsonForScript.
+			// A telegram_message action with a malicious message is a direct injection vector.
+			await alertService.saveAlert({
+				id: 'xss-edit',
+				name: 'Safe Alert Name',
+				description: 'test',
+				enabled: true,
+				schedule: '0 18 * * *',
+				delivery: ['123456789'],
+				condition: {
+					type: 'deterministic',
+					expression: 'not empty',
+					data_sources: [{ app_id: 'a', user_id: '123456789', path: 'x.md' }],
+				},
+				actions: [
+					{
+						type: 'telegram_message',
+						config: { message: '</script><script>window.__pasXss=1</script>' },
+					},
+				],
+				cooldown: '24 hours',
+			});
+
+			const res = await authenticatedGet('/gui/alerts/xss-edit/edit');
+			expect(res.statusCode).toBe(200);
+
+			// Literal attacker payload must not appear in the page
+			expect(res.body).not.toContain('</script><script>window.__pasXss=1</script>');
+
+			// The '<' in the action message must be escaped as \u003c in PAS_EXISTING_ACTIONS
+			expect(res.body).toContain('\\u003c');
+		});
 	});
 });

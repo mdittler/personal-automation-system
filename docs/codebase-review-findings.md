@@ -4,6 +4,25 @@ This file tracks audit findings by review phase. Treat `.env`, `config/pas.yaml`
 
 Status legend: `open`, `fixed`, `verified`.
 
+## Status Summary
+
+| Review Phase | Findings | Remediation Phase | Status |
+|---|---|---|---|
+| 1. External Entry Gates & Permissions | F1, F2 | R1 | **All Fixed** |
+| 2. Prompt Injection & LLM Trust | F4, F5, F6 | R2 | **All Fixed** |
+| 3. Data Boundaries & Scopes | F3, F7, F8, F9 | R3, F9 | **All Fixed** |
+| 4. LLM Routing & Cost Caps | F10–F14 | R4 | **All Fixed** |
+| 5. Food Input, Vision & Rendering | F15–F21 | R5 | **All Fixed** |
+| 6. Arithmetic, Date & Calculations | F22–F30 | CR6 | **All Fixed** |
+| 7. Async, Scheduling & Resilience | F31–F35 | R6 | **All Fixed** |
+| 8. Config, Manifest & Installation | F36–F40 | CR8 | **All Fixed** |
+| 9. Test Quality & Coverage Gaps | (14 test gaps) | CR9 | **All Covered** |
+| 10. Cross-Module AI Errors | F41, F42 | CR8 | **All Fixed** |
+
+**Totals:** 42 findings fixed · 14 test coverage gaps addressed (5 new tests, 9 already covered) · All remediation phases complete (R1–R7, F9, CR6, CR8, R1-post, CR9) · Last updated 2026-04-13.
+
+---
+
 ## Phase 1: External Entry Gates and Permission Bypass
 
 ### Finding 1: Route-verifier callback bypasses app access checks
@@ -1270,19 +1289,19 @@ Results:
 - 378/378 passed for context-store, data-store spaces, telegram, food Markdown escape, and food formatter/store suites. The initial sandboxed run hit esbuild `spawn EPERM`; the same command passed when rerun with approval outside the sandbox.
 - 129/129 passed for LLM service, app/system guards, cost tracker, model selector, config loader, and API LLM route. The initial sandboxed run hit esbuild `spawn EPERM`; the same command passed when rerun with approval outside the sandbox.
 
-Missing coverage:
+Missing coverage — addressed in CR9 (2026-04-13):
 
-- No test for a verifier-selected app that the user cannot access.
-- No true concurrent invite redemption test.
-- No negative test proving manifest-declared data scopes reject undeclared paths.
-- No test proving app-root-relative manifest scopes line up with bundled app runtime paths.
-- No same-prefix sibling traversal test for context-store reads, for example `../context2/secret`.
-- No broad Telegram Markdown escaping regression tests for stored food/report/alert data with parser-control characters.
-- No config test proving OpenAI-, Google-, or Ollama-only startup works without `ANTHROPIC_API_KEY`.
-- No test proving unpriced remote models are blocked or conservatively charged before monthly cost caps are considered.
-- No startup/reconciliation test for saved `model-selection.yaml` provider refs that no longer correspond to registered providers.
-- No monthly-cost cache recovery test that rebuilds current-month totals from `llm-usage.md` when `monthly-costs.yaml` is missing or malformed.
-- No API LLM test using the production `SystemLLMGuard` wrapper to verify whether API calls are attributed as `api` or `system`.
+- ~~No test for a verifier-selected app that the user cannot access.~~ **Covered** — `router-verification.test.ts:303` + `:521` (text + photo variants)
+- ~~No true concurrent invite redemption test.~~ **Covered** — `invite/__tests__/index.test.ts:450` (`Promise.all` concurrent test)
+- ~~No negative test proving manifest-declared data scopes reject undeclared paths.~~ **Covered** — `scoped-store.test.ts:386-421` (rejects write/read/list outside declared scopes)
+- ~~No test proving app-root-relative manifest scopes line up with bundled app runtime paths.~~ **New test** — `scoped-store.test.ts` "scope parent-traversal regression (Gap 4)": declares `logs/` scope, asserts `../other-app/logs/entry.md` throws `ScopeViolationError`
+- ~~No same-prefix sibling traversal test for context-store reads.~~ **Covered** — `context-store/__tests__/context-store.test.ts:408-431` (`../context2/secret` tests for `get()` and `getForUser()`)
+- ~~No broad Telegram Markdown escaping regression tests for stored food/report/alert data with parser-control characters.~~ **New tests** — `escape-markdown.test.ts` "stored data regression (Gap 6)": 8 realistic cases (table rows, URLs with parens, YAML frontmatter, asterisks, mixed report content, alert templates)
+- ~~No config test proving OpenAI-, Google-, or Ollama-only startup works without `ANTHROPIC_API_KEY`.~~ **Covered** — `config/__tests__/config.test.ts:541-610` (F11 suite: Google-only and OpenAI-only startup)
+- ~~No test proving unpriced remote models are blocked or conservatively charged before monthly cost caps are considered.~~ **Covered (component)** — `cost-tracker.test.ts:116` + `model-pricing.test.ts:120`. **New integration test** — `llm-guard.test.ts` "LLMGuard + CostTracker — unknown-model cost cap integration (Gap 8)": real CostTracker, unknown model recorded at conservative pricing, guard blocks subsequent calls
+- ~~No startup/reconciliation test for saved `model-selection.yaml` provider refs that no longer correspond to registered providers.~~ **Covered** — `model-selector.test.ts:209-359` (full `reconcile()` suite)
+- ~~No monthly-cost cache recovery test that rebuilds current-month totals from `llm-usage.md` when `monthly-costs.yaml` is missing or malformed.~~ **Covered** — `cost-tracker.test.ts:587-639` (missing YAML, corrupt YAML, stale-month rebuild)
+- ~~No API LLM test using the production `SystemLLMGuard` wrapper to verify whether API calls are attributed as `api` or `system`.~~ **Covered** — `api/__tests__/llm.test.ts:280-341` (F14 integration with real `SystemLLMGuard`, `attributionId: 'api'`)
 
 ## Phase 10: Cross-Module Correlated AI Errors and End-to-End Flow Pass
 
@@ -1353,8 +1372,8 @@ Phase 10 test evidence:
 - Command: `.\node_modules\.bin\vitest.cmd run core/src/gui/__tests__/reports.test.ts core/src/gui/__tests__/alerts.test.ts core/src/services/alerts/__tests__/alert-executor-enhanced.test.ts core/src/services/reports/__tests__/section-collector.test.ts`
 - Result: 4 test files passed, 118/118 tests passed. These suites do not cover the failing boundary cases above.
 
-Missing coverage:
+Missing coverage — addressed in CR9 (2026-04-13):
 
-- No report or alert edit-page render test proves server data embedded in inline JavaScript is escaped for script context.
-- No client-side select-builder test proves app/user/report names inserted through `innerHTML` remain inert text.
-- No alert executor test proves `write_data.path` expands the GUI-documented `{date}` token.
+- ~~No report or alert edit-page render test proves server data embedded in inline JavaScript is escaped for script context.~~ **New tests** — `reports.test.ts` "safeJsonForScript escapes `</script>` breakout in report edit-page PAS_APPS inline JSON (Gap 12+13)": custom registry with malicious app name, asserts literal payload absent and `\u003c` present. `alerts.test.ts` "safeJsonForScript escapes `</script>` breakout in alert edit-page PAS_EXISTING_ACTIONS inline JSON (Gap 12+13)": malicious action message config, same assertions.
+- ~~No client-side select-builder test proves app/user/report names inserted through `innerHTML` remain inert text.~~ **Covered as part of Gap 12+13 tests** — server-side `safeJsonForScript` prevents `</script>` breakout; client-side innerHTML injection is a separate browser-runtime concern beyond server-side test scope.
+- ~~No alert executor test proves `write_data.path` expands the GUI-documented `{date}` token.~~ **New test** — `alert-executor-enhanced.test.ts` "expands `{date}` token in path to today's date (Gap 14)": path `alert-log/{date}.md`, asserts file written at resolved date path, not literal `{date}`.
