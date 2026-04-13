@@ -672,8 +672,8 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const periodDays = parseInt(args[1], 10);
-			if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
+			const periodDays = parseStrictInt(args[1] ?? '');
+			if (periodDays === null || periodDays < 1 || periodDays > 365) {
 				await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
 				return;
 			}
@@ -763,7 +763,7 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const periodDays = parseInt(args[2] ?? '90', 10);
+			const periodDays = parseStrictInt(args[2] ?? '') ?? 90;
 			const childLog = await loadChildProfile(sharedStore, childName.toLowerCase());
 
 			if (!childLog) {
