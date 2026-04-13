@@ -657,7 +657,7 @@ Suggested tests:
 
 ### Finding 22: Manual macro and target values accept numeric-prefix garbage
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: input validation / nutrition arithmetic
 - Location: `apps/food/src/handlers/nutrition.ts:532-583`
@@ -685,7 +685,7 @@ Suggested tests:
 
 ### Finding 23: Local-date range math can shift by a day across DST boundaries
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: date calculation / timezone boundary
 - Location: `apps/food/src/handlers/nutrition.ts:395-397`
@@ -713,7 +713,7 @@ Suggested tests:
 
 ### Finding 24: Health correlation uses UTC today instead of the configured timezone
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: date calculation / timezone mismatch
 - Location: `apps/food/src/services/health-correlator.ts:39-52`
@@ -741,7 +741,7 @@ Suggested tests:
 
 ### Finding 25: Previous-week budget comparison misses ISO week 53
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: date calculation / ISO week arithmetic
 - Location: `apps/food/src/handlers/budget.ts:101-125`
@@ -768,7 +768,7 @@ Suggested tests:
 
 ### Finding 26: Budget month and year reports account for boundary weeks inconsistently
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: cost calculation / date aggregation
 - Location: `apps/food/src/handlers/budget.ts:159-170`
@@ -796,7 +796,7 @@ Suggested tests:
 
 ### Finding 27: LLM cost estimates are trusted as numeric operands
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: LLM output validation / cost arithmetic
 - Location: `apps/food/src/services/cost-estimator.ts:99-115`
@@ -829,7 +829,7 @@ Suggested tests:
 
 ### Finding 28: Text price updates can persist invalid prices from model output
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: LLM output validation / price arithmetic
 - Location: `apps/food/src/services/price-store.ts:270-282`
@@ -857,7 +857,7 @@ Suggested tests:
 
 ### Finding 29: LLM shelf-life estimates are uncapped before expiry-date arithmetic
 
-- Status: open
+- Status: fixed
 - Severity: low
 - Classification: date calculation / LLM output validation
 - Location: `apps/food/src/index.ts:3175-3185`
@@ -884,7 +884,7 @@ Suggested tests:
 
 ### Finding 30: Meal-plan schedule and period config is exposed but not applied
 
-- Status: open
+- Status: fixed
 - Severity: medium
 - Classification: schedule calculation / configuration drift
 - Location: `apps/food/manifest.yaml:86-91`
