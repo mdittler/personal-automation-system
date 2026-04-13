@@ -7,7 +7,7 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { DailyMacroEntry, MacroTargets } from '../types.js';
-import { addDays } from '../utils/date.js';
+import { addDays, todayDate } from '../utils/date.js';
 import {
 	loadMacrosForPeriod,
 	computeProgress,
@@ -145,7 +145,7 @@ export async function generateWeeklyDigest(
 	targets: MacroTargets,
 	today?: string,
 ): Promise<string> {
-	const endDate = today ?? new Date().toISOString().slice(0, 10);
+	const endDate = today ?? todayDate(services.timezone);
 	const startDate = addDays(endDate, -7);
 
 	return generatePersonalSummary(services, store, userId, startDate, endDate, targets);

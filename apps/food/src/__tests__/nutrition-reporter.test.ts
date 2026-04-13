@@ -5,6 +5,7 @@ import {
 	generatePersonalSummary,
 	generateWeeklyDigest,
 } from '../services/nutrition-reporter.js';
+import * as macroTracker from '../services/macro-tracker.js';
 import type { DailyMacroEntry, MacroTargets } from '../types.js';
 
 function createMockServices(llmResponse = 'Great week of eating!') {
@@ -384,24 +385,15 @@ describe('nutrition-reporter', () => {
 		// arithmetic shifts midnight UTC to the previous day around the transition.
 		it('computes correct 7-day window start across fall DST boundary (F23)', async () => {
 			const services = createMockServices('DST-safe digest');
-			let capturedStartDate: string | undefined;
-			let capturedEndDate: string | undefined;
-			const store = createMockScopedStore({
-				// Capture the dates generatePersonalSummary passes to loadMacrosForPeriod
-				// by recording the read() calls (loadMacrosForPeriod calls store.read with a month key)
-				read: vi.fn().mockImplementation((path: string) => {
-					// path is like "nutrition/YYYY-MM.yaml" — just return null (no data)
-					void path;
-					return Promise.resolve(null);
-				}),
-			});
+			const store = createMockScopedStore();
 
-			// Spy on generatePersonalSummary indirectly by observing what period is requested.
-			// Since loadMacrosForPeriod calls store.read for each month in [start..end], and
-			// the only month here is October 2026, one read call will happen. The cleanest
-			// callsite check is to verify the startDate passed to generateWeeklyDigest
-			// produces the right window via a real call that returns "no data" quickly.
-			// We verify by checking the read path includes the October 2026 month file.
+			// Spy on loadMacrosForPeriod so we can capture the exact startDate string
+			// that generateWeeklyDigest computes and passes through generatePersonalSummary.
+			// This is the only reliable way to distinguish '2026-10-25' (wrong, DST bug)
+			// from '2026-10-26' (correct, UTC-safe addDays), since both fall in October
+			// and a month-level check cannot tell them apart.
+			const spy = vi.spyOn(macroTracker, 'loadMacrosForPeriod').mockResolvedValue([]);
+
 			await generateWeeklyDigest(
 				services as never,
 				store as never,
@@ -410,48 +402,14 @@ describe('nutrition-reporter', () => {
 				'2026-11-02',
 			);
 
-			// loadMacrosForPeriod reads month files; both October and November should be checked.
-			const readCalls = (store.read as ReturnType<typeof vi.fn>).mock.calls.map(
-				(c: unknown[]) => c[0] as string,
-			);
-			// October 2026 must be in the read calls — start date should be 2026-10-26
-			expect(readCalls.some((p: string) => p.includes('2026-10'))).toBe(true);
-			// If the bug were present (start = 2026-10-25), we'd still read October, so
-			// we also verify November is read (end = 2026-11-02) confirming the window
-			expect(readCalls.some((p: string) => p.includes('2026-11'))).toBe(true);
+			expect(spy).toHaveBeenCalledOnce();
+			const [, startDate, endDate] = spy.mock.calls[0]!;
+			// Given today='2026-11-02' and a 7-day window, addDays('2026-11-02', -7)
+			// must return '2026-10-26', not '2026-10-25' (the DST-shifted UTC result).
+			expect(startDate).toBe('2026-10-26');
+			expect(endDate).toBe('2026-11-02');
 
-			// For direct verification, capture startDate via a wrapper
-			capturedStartDate = undefined;
-			capturedEndDate = undefined;
-			const storeCapture = {
-				...store,
-				read: vi.fn().mockImplementation((path: string) => {
-					// Extract month from path pattern nutrition/YYYY-MM.yaml
-					const m = path.match(/(\d{4}-\d{2})\.yaml$/);
-					if (m) {
-						const month = m[1]!;
-						if (!capturedStartDate || month < capturedStartDate) capturedStartDate = month;
-						if (!capturedEndDate || month > capturedEndDate) capturedEndDate = month;
-					}
-					return Promise.resolve(null);
-				}),
-			};
-
-			await generateWeeklyDigest(
-				services as never,
-				storeCapture as never,
-				'user1',
-				{},
-				'2026-11-02',
-			);
-
-			// The earliest month read must be October 2026 (start = 2026-10-26)
-			// NOT September 2026 (which would happen if start were 2026-10-25... still Oct)
-			// The real DST bug would give '2026-10-25' vs correct '2026-10-26'.
-			// Both fall in October so we verify the window explicitly via the end date:
-			// endDate must be '2026-11-02', which confirms November is read.
-			expect(capturedEndDate).toBe('2026-11');
-			expect(capturedStartDate).toBe('2026-10');
+			spy.mockRestore();
 		});
 	});
 });
