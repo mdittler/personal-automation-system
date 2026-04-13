@@ -43,6 +43,14 @@ app: food
 ## Items
 - Chicken $5.99`;
 
+const DATED_CONTENT = `---
+title: March Nutrition
+type: nutrition-log
+date: 2026-03-15
+app: food
+---
+March nutrition data.`;
+
 const makeScopes = (userPaths: string[], sharedPaths: string[]): { user: ManifestDataScope[]; shared: ManifestDataScope[] } => ({
   user: userPaths.map(path => ({ path, access: 'read-write' as const, description: '' })),
   shared: sharedPaths.map(path => ({ path, access: 'read-write' as const, description: '' })),
@@ -178,6 +186,24 @@ describe('FileIndexService', () => {
       expect(entries).toHaveLength(1);
       expect(entries[0].owner).toBe('family');
     });
+
+    it('reindexByPath updates an existing entry', async () => {
+      await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.yaml', RECIPE_CONTENT);
+      await service.rebuild();
+      expect(service.getEntries({ appId: 'food' })).toHaveLength(1);
+      expect(service.getEntries({ appId: 'food' })[0]!.title).toBe('Chicken Tacos');
+
+      // Update the file on disk
+      const updated = RECIPE_CONTENT.replace('Chicken Tacos', 'Updated Chicken Tacos');
+      await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.yaml', updated);
+
+      // Reindex via the public method
+      await service.reindexByPath('users/matt/food/recipes/tacos.yaml');
+
+      const entries = service.getEntries({ appId: 'food' });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.title).toBe('Updated Chicken Tacos');
+    });
   });
 
   describe('getEntries filter', () => {
@@ -208,6 +234,33 @@ describe('FileIndexService', () => {
 
     it('no filter returns all entries', () => {
       expect(service.getEntries()).toHaveLength(2);
+    });
+
+    describe('date range filtering', () => {
+      beforeEach(async () => {
+        await writeDataFile(dataDir, 'users/matt/food/nutrition/2026-03.yaml', DATED_CONTENT);
+        await service.rebuild();
+      });
+
+      it('dateFrom includes file when dateFrom is before latest date', () => {
+        // File dated 2026-03-15; dateFrom 2026-03-01 → latest (2026-03-15) >= dateFrom → included
+        expect(service.getEntries({ appId: 'food', dateFrom: '2026-03-01' }).some(e => e.type === 'nutrition-log')).toBe(true);
+      });
+
+      it('dateFrom excludes file when dateFrom is after latest date', () => {
+        // File dated 2026-03-15; dateFrom 2026-04-01 → latest (2026-03-15) < dateFrom → excluded
+        expect(service.getEntries({ appId: 'food', dateFrom: '2026-04-01' }).some(e => e.type === 'nutrition-log')).toBe(false);
+      });
+
+      it('dateTo includes file when dateTo is after earliest date', () => {
+        // File dated 2026-03-15; dateTo 2026-04-01 → earliest (2026-03-15) <= dateTo → included
+        expect(service.getEntries({ appId: 'food', dateTo: '2026-04-01' }).some(e => e.type === 'nutrition-log')).toBe(true);
+      });
+
+      it('dateTo excludes file when dateTo is before earliest date', () => {
+        // File dated 2026-03-15; dateTo 2026-03-01 → earliest (2026-03-15) > dateTo → excluded
+        expect(service.getEntries({ appId: 'food', dateTo: '2026-03-01' }).some(e => e.type === 'nutrition-log')).toBe(false);
+      });
     });
   });
 
