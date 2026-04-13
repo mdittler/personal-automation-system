@@ -1069,7 +1069,7 @@ Suggested tests:
 - Add a one-off manager shutdown test proving an in-progress `checkAndExecute()` is either awaited or intentionally marked incomplete.
 - Add a cron manager test proving `stop()` prevents new ticks but does not lose a current task's completion bookkeeping under the chosen policy.
 
-Cross-phase revisit: Phase 1 Finding 2 is still open. `InviteService.validateCode()` and `redeemCode()` remain separate read/write operations, and the current "concurrent redemption" test at `core/src/services/invite/__tests__/index.test.ts:357-363` is sequential: it redeems first, then validates. It does not exercise two simultaneous `/start <code>` requests.
+Cross-phase revisit: Phase 1 Finding 2 is **fixed**. `InviteService.claimAndRedeem()` atomically validates and redeems under a per-code `AsyncLock`. Both `UserGuard` and `Router` now use `claimAndRedeem` via the shared `redeemInviteAndRegister` helper. The concurrent redemption test in `core/src/services/invite/__tests__/index.test.ts` uses `Promise.all` with two simultaneous calls and verifies exactly one succeeds.
 
 Phase 7 test evidence:
 

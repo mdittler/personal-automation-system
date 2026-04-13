@@ -98,7 +98,7 @@ describe('Invite lifecycle integration', () => {
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	it('admin creates invite → new user redeems → user is active → config persisted', async () => {
+	it('admin creates invite → new user redeems → user is active → config persisted (legacy two-step)', async () => {
 		// 1. Admin creates an invite for Sarah
 		const code = await inviteService.createInvite('Sarah', '111');
 		expect(code).toHaveLength(8);
@@ -133,6 +133,42 @@ describe('Invite lifecycle integration', () => {
 		const reuse = await inviteService.validateCode(code);
 		expect(reuse).toHaveProperty('error');
 		expect((reuse as { error: string }).error).toMatch(/already been used/i);
+	});
+
+	it('admin creates invite → new user claims atomically → user is active → config persisted', async () => {
+		// 1. Admin creates an invite for Alex
+		const code = await inviteService.createInvite('Alex', '111');
+		expect(code).toHaveLength(8);
+
+		// 2. Atomically claim and redeem
+		const result = await inviteService.claimAndRedeem(code, '333');
+		expect(result).toHaveProperty('invite');
+		const invite = (result as { invite: { name: string } }).invite;
+		expect(invite.name).toBe('Alex');
+
+		// 3. Register the user
+		await mutationService.registerUser({
+			id: '333',
+			name: invite.name,
+			isAdmin: false,
+			enabledApps: ['*'],
+			sharedScopes: [],
+		});
+
+		// 4. Verify user is registered in memory and config
+		expect(userManager.isRegistered('333')).toBe(true);
+		const configContent = await readFile(configPath, 'utf-8');
+		expect(configContent).toContain('Alex');
+		expect(configContent).toContain('333');
+
+		// 5. Retry with same userId (idempotent) — should succeed
+		const retry = await inviteService.claimAndRedeem(code, '333');
+		expect(retry).toHaveProperty('invite');
+
+		// 6. Different user cannot claim the same code
+		const contested = await inviteService.claimAndRedeem(code, '444');
+		expect(contested).toHaveProperty('error');
+		expect((contested as { error: string }).error).toMatch(/already been used/i);
 	});
 
 	it('removing user updates memory and config', async () => {
