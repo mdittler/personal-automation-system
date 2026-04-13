@@ -1,129 +1,172 @@
 # PAS User Guide
 
-Everything you do in PAS happens through your Telegram bot. This guide covers how to interact with the system and what it can do for you.
+PAS is a personal automation system you use through a Telegram bot. Most day-to-day work happens in Telegram; the management GUI is for configuration, data browsing, and admin tasks.
 
-## Sending messages
+## Getting Started
 
-There are three ways to communicate with PAS:
+1. Open the PAS bot in Telegram.
+2. Send `/help` to see the commands available to you.
+3. Send a normal message, command, or photo.
 
-### Slash commands
+If the bot says you are not registered, ask an admin for an invite code. Send either `/start <code>` or the raw 8-character code to the bot. Invite codes can only be used once and expire after 24 hours.
 
-Type `/` followed by a command name to trigger a specific action. Each app provides its own commands.
+## Sending Messages
 
-```
-/help                    Show all available commands
-/ask what apps do I have?    Ask the PAS assistant a question
-/recipes chicken             Search recipes for "chicken"
-/mealplan                    View the current meal plan
-```
+You can talk to PAS in three ways.
 
-Use `/help` to see every command available to you.
+### Slash Commands
 
-### Natural language
+Use commands when you know exactly what you want:
 
-Just type what you want in plain English. PAS uses AI to figure out which app should handle your message and routes it automatically.
-
-```
-"Save a recipe for chicken stir fry"       → Food app
-"What's for dinner tonight?"                → Food app
-"Remind me to call the vet"                 → Notes app (if configured)
-"What's the weather like?"                  → Chatbot fallback
+```text
+/help
+/ask what apps do I have?
+/recipes chicken
+/mealplan
 ```
 
-You don't need to think about which app handles what — just say what you need.
+`/help` lists the commands your account can use, including commands from installed apps.
+
+### Natural Language
+
+You can also write normally. PAS classifies the message and sends it to the best app.
+
+```text
+Save a recipe for chicken stir fry
+What's for dinner tonight?
+Remind me to call the vet
+What's the weather like?
+```
+
+If PAS is unsure, it may ask you to choose the right app.
 
 ### Photos
 
-Send a photo and PAS classifies it and routes to the right app. Adding a caption helps with classification but isn't required.
+Send a photo when the thing you want to process is visual. A short caption helps PAS route it correctly.
 
+```text
+[cookbook page] save this recipe
+[grocery receipt]
+[fridge photo] what can I make with this?
 ```
-[photo of a cookbook page] + "save this recipe"    → Extracts and saves the recipe
-[photo of a grocery receipt]                       → Extracts items and prices
-[photo of your fridge]  + "what's in my fridge"    → Identifies items for inventory
-```
 
-If multiple apps handle photos and PAS can't determine which one you mean, it will ask you to add a caption.
+If multiple apps can handle the photo and the intent is unclear, send the photo again with a caption.
 
-## How routing works
+## How Routing Works
 
-PAS processes your messages in this order:
+PAS handles messages in this order:
 
-1. **Commands** — if your message starts with `/`, it goes directly to the app that owns that command
-2. **Photos** — if you send a photo, it's classified by type and routed to the matching app
-3. **Natural language** — for regular text, AI classification determines the best app
-4. **Fallback** — if no app matches, the built-in chatbot responds as a general-purpose AI assistant
+1. Commands go to the app that owns the command.
+2. Photos are classified and routed to a photo-capable app.
+3. Normal text is classified and routed to the best app.
+4. If no app matches, the chatbot answers as the fallback.
 
-## The chatbot and /ask
+App access is per user. If a command or feature is missing from `/help`, your account may not have that app enabled.
 
-When no app matches your message, PAS has a built-in conversational AI chatbot. It maintains conversation history (up to 20 turns per user) and can answer general questions.
+## Chatbot and `/ask`
 
-The `/ask` command is special — it gives the chatbot awareness of your entire PAS system:
+The built-in chatbot answers general questions when no app matches. It keeps a short conversation history for each user.
 
-```
+Use `/ask` for questions about PAS itself:
+
+```text
 /ask what apps do I have?
-/ask how does meal planning work?
 /ask what commands can I use?
+/ask how does meal planning work?
 /ask show my recent activity
 ```
 
-Use `/ask` when you want help understanding PAS itself.
+Admins may see more system-level information than regular users.
 
-## Shared data spaces
+## Shared Spaces
 
-Spaces let you share data with specific people. For example, share a grocery list with your family or project notes with a group.
+Spaces let a group work on shared data instead of personal data. For example, a family can share a grocery list or a project group can share notes.
 
-| Command | Description |
-|---------|-------------|
-| `/space` | Show your current mode and list your spaces |
-| `/space <id>` | Enter a shared space |
+| Command | What it does |
+| --- | --- |
+| `/space` | Show your current mode and spaces |
+| `/space <id>` | Enter a space |
 | `/space off` | Return to personal mode |
-| `/space create <id> <name>` | Create a new space |
-| `/space invite <id> <username>` | Add a member |
-| `/space members <id>` | List members |
+| `/space create <id> <name>` | Create a space |
+| `/space invite <id> <username>` | Add a registered user by name |
+| `/space members <id>` | List space members |
 
-When you're in a space, your messages operate on shared data within that space instead of your personal data.
+When you are in a space, supported apps read and write that space's shared data. Use `/space off` to return to your personal data.
 
-## Scheduled automation
+## Management GUI
 
-Apps can run tasks on a schedule without you doing anything. For example, the Food app automatically:
+Open the GUI at `http://<your-server>:3000/gui` and sign in with the GUI auth token.
 
-- Generates weekly meal plans on Sunday mornings
-- Sends rating prompts each evening
-- Alerts you when pantry items are approaching expiry
-- Sends weekly nutrition summaries
+Use it to:
 
-You'll receive these as Telegram messages from your bot at the scheduled times. Schedules are configured per-app and can be viewed in the management GUI.
+- View users and adjust their app access
+- Add or remove space access for users
+- Browse data files
+- View schedules, reports, alerts, and LLM cost tracking
+- Edit app and system settings exposed by the GUI
 
-## Per-user settings
+The GUI writes user app access and space membership changes back to `config/pas.yaml`.
 
-Each app can offer configurable settings (dietary preferences, notification timing, default behaviors, etc.). Configure these through the **management GUI** at `http://<your-server>:3000/gui`.
+## Admin: Add a New User
 
-The GUI also lets you:
+The preferred flow is invite-based registration through Telegram:
 
-- Browse and manage your data files
-- View LLM cost tracking and model configuration
-- Manage shared spaces and members
-- View and edit app configurations
+1. In Telegram, send `/invite <name>` to the PAS bot.
+2. Copy the invite code from the bot's reply.
+3. Send the code to the new user.
+4. Ask them to send `/start <code>` to the PAS bot. Sending the raw code also works.
+5. After they register, open the GUI Users page and adjust their enabled apps or space access if needed.
 
-## Multi-user
+New invite-registered users are created as non-admin users with all apps enabled and no shared spaces. Registration is saved to `config/pas.yaml`.
 
-Multiple Telegram users can share the same PAS instance. Each user has:
+To make the new user an admin, edit `config/pas.yaml`, set `is_admin: true` for that user, and restart PAS. Admin promotion is not currently exposed in the GUI.
 
-- Their own data directory (isolated from other users)
-- Their own app configurations and preferences
-- Their own conversation history with the chatbot
-- Access to shared data through spaces or app-level sharing (like the Food app's household feature)
+Manual registration is also possible by editing `config/pas.yaml` directly:
 
-Users are registered by a system administrator through the configuration file.
+```yaml
+users:
+  - id: "123456789"
+    name: "New User"
+    is_admin: false
+    enabled_apps: ["*"]
+    shared_scopes: []
+```
 
-## Obsidian integration
+Use the person's Telegram user ID, not their username. They can find it by messaging `@userinfobot`, or you can check PAS logs after they message the bot. Restart PAS after manual edits.
 
-All PAS data is stored as markdown and YAML files on disk. If you use Obsidian, you can point a vault at your data directory and browse, search, and link to your data directly. Space data appears under `_spaces/` and shared data under `_shared/`.
+## Admin: Manage Users
+
+In the GUI Users page, admins can:
+
+- Toggle which apps a user can access
+- Add or remove a user from existing spaces
+- Remove users
+
+The GUI prevents removing the only admin. Keep at least one admin account with working Telegram and GUI access.
+
+## Scheduled Automation
+
+Apps can run scheduled jobs without a user message. For example, the Food app may send meal plan reminders, expiry alerts, rating prompts, or nutrition summaries.
+
+Schedules are configured by apps and can be viewed in the GUI. Scheduled messages arrive in Telegram from the same PAS bot.
+
+## Data and Obsidian
+
+PAS stores data as markdown, YAML, and related files on disk. You can browse these files through the GUI or point Obsidian at the data directory.
+
+Common locations:
+
+- Personal data: `data/users/<user-id>/<app-id>/`
+- Shared app data: `data/users/shared/<app-id>/`
+- Space data: `data/spaces/<space-id>/<app-id>/`
+- System data: `data/system/`
+
+Prefer using PAS or the GUI for changes when possible. If you edit files directly, keep the existing file format intact.
 
 ## Tips
 
-- **Captions on photos** help classification — "save this recipe" or "receipt" gives PAS a strong hint
-- **"What can I make?"** searches recipes matching your current pantry inventory
-- **`/ask`** is your go-to for system questions — it knows about all installed apps and their capabilities
-- **You can mix commands and natural language** — use whatever feels natural in the moment
-- **Spaces** are optional — most features work fine in personal mode
+- Use `/help` first when you are unsure what is available.
+- Add captions to photos, especially receipts, recipes, pantry photos, or ambiguous images.
+- Use `/ask` for questions about PAS, installed apps, commands, and recent activity.
+- Use spaces only when you want shared data; personal mode is the default.
+- If a feature is missing, ask an admin to check your enabled apps in the GUI.

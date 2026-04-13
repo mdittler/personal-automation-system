@@ -130,28 +130,86 @@ The .md/YAML files remain the authoritative data store. A derived, disposable in
 #### Frontmatter enrichment (on future writes)
 
 - Modify existing write operations (recipe creation, grocery list generation, price logging, etc.) to include richer frontmatter:
-  - `type:` field — use the existing `FrontmatterMeta.type` field. Currently a union of 6 literals; widen to `string` to support app-defined types (recipe, price-list, grocery-list, nutrition-log, meal-plan, etc.). The index signature `[key: string]: unknown` already allows extra fields, but `type` should be first-class
+  - `type:` field — use the existing `FrontmatterMeta.type` field. Currently a union of 6 literals; widen to `string` to support app-defined types (recipe, price-list, grocery-list, nutrition-log, meal-plan, receipt, etc.). The index signature `[key: string]: unknown` already allows extra fields, but `type` should be first-class
   - `entity_keys:` for searchable entities (ingredient names, store names) — new custom frontmatter field
   - `related:` for explicit cross-file relationships — already in `FrontmatterMeta`
   - `aliases:` for alternative names — already in `FrontmatterMeta`
+- **Receipt files explicitly included:** `receipts/{id}.yaml` must be written with frontmatter: `type: receipt`, `entity_keys:` (store name + item names), `date:` (receipt date). These are currently write-only — D2 must make them indexable and queryable.
 - No v1 migration of existing files — they work with path-convention and filename-based indexing. Enrichment happens naturally on new writes
 - Optional backfill script for existing files (run once, low priority)
+
+### Last Interaction Context
+
+**Problem:** Both the router IntentClassifier and the chatbot PAS/data-query classifier are stateless. Deictic references ("those costs", "that recipe") are unresolvable without knowing what the user was just doing. This is not a chatbot-only gap — apps themselves receive contextual follow-ups they cannot handle.
+
+**Solution:** A lightweight per-user interaction log maintained by the router.
+
+**`InteractionContextService` (new core service or router-owned utility):**
+- In-memory store: last 3–5 interactions per user, auto-expire after 10 minutes
+- Each entry (structured fields, not a summary — the file path/entity ID is what makes data reads reliable):
+  ```
+  {
+    appId: string,
+    action: string,           // 'receipt_captured', 'recipe_saved', 'grocery_updated'
+    entityType?: string,      // 'receipt', 'recipe', 'grocery-list'
+    entityId?: string,        // receipt ID, recipe slug, etc.
+    filePaths?: string[],     // actual file paths written during this interaction
+    scope?: string,           // 'user' | 'shared' | 'space'
+    metadata?: Record<string, unknown>, // app-specific: store, total, lineItemCount
+    timestamp: number
+  }
+  ```
+- Apps record entries via `CoreServices.interactionContext.record()` at canonical action completion points (e.g. after `handleReceiptPhoto` saves the receipt YAML)
+- **Answer must come from file content, never from the stored summary** — the summary helps the LLM resolve "those" to the right file; the actual answer is built by reading `filePaths`
+
+**Both classifiers receive this context:**
+- **Router IntentClassifier** — inject recent entries into classify prompt so "those costs" biases toward the last-active app. **As part of D2, drop the grey-zone lower bound from 0.4 to 0.0** — the verifier currently only runs at confidence 0.4–0.7 and never fires on null/low-confidence contextual follow-ups, which is exactly where these messages land. Once last-interaction context is available the verifier can correctly resolve "those costs" to the food app even at 0.0 confidence. Cost is negligible (fast/local model, only fires on non-obvious messages). Change: set `confidenceThreshold` (lower bound for verification) to `0.0` in `core/src/services/router/index.ts`, keeping the upper bound (`verificationUpperBound: 0.7`) so high-confidence matches still skip verification.
+- **Chatbot `classifyPASMessage`** — inject entries into the PAS-classification prompt so `dataQueryCandidate` detection works even when the user's message is an indirect reference
+- **DataQueryService** — use `filePaths` from the matching interaction record for targeted initial file selection (bypasses the general metadata scan for the common case)
+
+### Core Data Query Fallback (App-Level)
+
+**Problem:** If the router sends a contextual message to the food app (or any app), the chatbot never gets a chance to handle it. D2 wiring only into the chatbot would not fix "can you show a breakdown of those costs?" reaching `apps/food/src/index.ts:647` and hitting the generic fallback.
+
+**Solution:** Every app's generic fallback path must delegate to the core NL data query path before sending "I'm not sure what you'd like to do."
+
+Two acceptable approaches (choose one at D2 implementation time):
+1. **In-app delegation:** Before the app's final fallback `telegram.send()`, call `CoreServices.dataQuery?.query(text, userId)`. If it returns results, send those. If not (or service not yet wired), fall through to the existing generic message.
+2. **Router signal:** App returns `{ handled: false }` from `handleMessage`. Router checks interaction context and, if a recent interaction exists, delegates to DataQueryService via the chatbot or a new core handler. Requires a change to the `AppModule.handleMessage` return type signature.
+
+Option 1 is simpler and keeps the change isolated to each app's fallback. Option 2 is cleaner architecturally but requires a type-level change. **D2 must pick one and apply it to the food app's fallback at minimum.**
 
 ### Integration with chatbot
 
 The chatbot's `/ask` command and regular chat both gain data access. The flow:
-1. LLM classifies message as PAS-related (Phase D1)
-2. If data-query detected, DataQueryService provides context
-3. Chatbot LLM answers with data context in system prompt
+1. LLM classifies message as PAS-related (Phase D1) — with recent interaction context now available
+2. If data-query detected, DataQueryService provides context — using `filePaths` from interaction record for targeted selection when available
+3. Chatbot LLM answers with file content in system prompt
 4. Response clearly indicates data source ("Based on your Costco price history..." or "From your nutrition log for March...")
 
+**Cross-app awareness:** The chatbot system prompt must include recent interaction context under a "Recent activity:" section (last 1–2 entries, capped to avoid prompt bloat). This is the only mechanism by which the chatbot can resolve references to things that happened in other apps (photo capture, recipe saves, etc.).
+
 ### Verification
+
+**Core data query tests:**
 - Test: "Compare orange prices between stores" → reads prices/*.md, returns comparison
 - Test: "What did I eat last week?" → reads nutrition/YYYY-MM.yaml, filters to last 7 days
 - Test: user A cannot see user B's personal health data via chatbot query
 - Test: shared data accessible to all household members
 - Test: file index rebuilds correctly from cold start
 - Test: file index updates on write without full re-scan
+
+**Contextual follow-up regression test (the receipt scenario):**
+- Receipt photo captured → food app responds "Receipt captured: Costco, 12 items, $47.82"
+- User immediately sends "can you show a breakdown of those costs?"
+- Expected: system reads `receipts/{id}.yaml` for that user and returns line items + subtotal/tax/total (not a summary — actual file content)
+- Confirm message does NOT hit the food app's generic "I'm not sure what you'd like to do" fallback
+
+**Safety/negative tests:**
+- Expired context (>10 min since last interaction) → system asks a clarifying question rather than guessing
+- Unrelated newer interaction does not hijack reference: user captures receipt, then adds grocery items, then asks "those costs" → asks which action they mean OR uses most recent receipt (not grocery list)
+- User A cannot resolve "those costs" to user B's most recent receipt (per-user interaction log, not shared)
+- Shared receipt (household space scope) → follow-up query from another household member returns receipt correctly, subject to space membership check
 
 ---
 
