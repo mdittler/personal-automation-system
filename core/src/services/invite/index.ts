@@ -94,26 +94,28 @@ export class InviteService {
 	 * Redeem an invite code, marking it as used by the given userId.
 	 */
 	async redeemCode(code: string, usedBy: string): Promise<void> {
-		const store = await this.readStore();
-		const invite = store[code];
+		return this.lock.run(`invite:${code}`, async () => {
+			const store = await this.readStore();
+			const invite = store[code];
 
-		if (!invite) {
-			throw new Error(`Invite code not found: ${code}`);
-		}
+			if (!invite) {
+				throw new Error(`Invite code not found: ${code}`);
+			}
 
-		if (invite.usedBy !== null) {
-			throw new Error(`Invite code already used: ${code}`);
-		}
+			if (invite.usedBy !== null) {
+				throw new Error(`Invite code already used: ${code}`);
+			}
 
-		if (new Date(invite.expiresAt) <= new Date()) {
-			throw new Error(`Invite code expired: ${code}`);
-		}
+			if (new Date(invite.expiresAt) <= new Date()) {
+				throw new Error(`Invite code expired: ${code}`);
+			}
 
-		invite.usedBy = usedBy;
-		invite.usedAt = new Date().toISOString();
+			invite.usedBy = usedBy;
+			invite.usedAt = new Date().toISOString();
 
-		await this.writeStore(store);
-		this.logger.info({ code, usedBy }, 'Invite code redeemed');
+			await this.writeStore(store);
+			this.logger.info({ code, usedBy }, 'Invite code redeemed');
+		});
 	}
 
 	/**
