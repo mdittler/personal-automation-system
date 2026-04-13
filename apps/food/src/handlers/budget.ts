@@ -19,7 +19,7 @@ import {
 import { loadCurrentPlan } from '../services/meal-plan-store.js';
 import { loadStorePrices, listStores, getStoreSlug } from '../services/price-store.js';
 import { loadAllRecipes } from '../services/recipe-store.js';
-import { todayDate } from '../utils/date.js';
+import { todayDate, getIsoWeekId } from '../utils/date.js';
 
 // Re-export for unified intent surface
 export { isPriceUpdateIntent } from '../services/price-store.js';
@@ -111,9 +111,9 @@ async function handleWeeklyBudget(
 
 /**
  * Compute the ISO week ID for the week before the given weekId.
- * e.g. "2026-W15" → "2026-W14", "2026-W01" → "2025-W52" (approx)
+ * e.g. "2026-W15" → "2026-W14", "2026-W01" → "2025-W52" or "2020-W53" (proper ISO computation)
  */
-function getPrevWeekId(weekId: string): string {
+export function getPrevWeekId(weekId: string): string {
 	const match = weekId.match(/^(\d{4})-W(\d{2})$/);
 	if (!match) return weekId;
 	const year = parseInt(match[1]!, 10);
@@ -121,8 +121,8 @@ function getPrevWeekId(weekId: string): string {
 	if (week > 1) {
 		return `${year}-W${String(week - 1).padStart(2, '0')}`;
 	}
-	// Approximate: go back to week 52 of the prior year
-	return `${year - 1}-W52`;
+	// Dec 28 always falls in the last ISO week of its year
+	return getIsoWeekId(`${year - 1}-12-28`);
 }
 
 // ─── Monthly Report ───────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ async function handleMonthlyBudget(
 	await services.telegram.send(userId, message);
 }
 
-async function loadWeeksForMonth(
+export async function loadWeeksForMonth(
 	store: ScopedDataStore,
 	allWeekIds: string[],
 	monthPrefix: string,
@@ -165,8 +165,8 @@ async function loadWeeksForMonth(
 	for (const weekId of allWeekIds) {
 		const week = await loadWeeklyHistory(store, weekId);
 		if (!week) continue;
-		// Include if startDate or endDate falls within the month
-		if (week.startDate.startsWith(monthPrefix) || week.endDate.startsWith(monthPrefix)) {
+		// Include only if startDate falls within the month (avoids boundary-week double-counting)
+		if (week.startDate.startsWith(monthPrefix)) {
 			results.push(week);
 		}
 	}
@@ -189,19 +189,23 @@ async function handleYearlyBudget(
 	const currentYear = today.slice(0, 4); // "YYYY"
 
 	const allWeekIds = await listWeeklyHistories(store);
-	const yearWeekIds = allWeekIds.filter((id) => id.startsWith(currentYear));
 
-	if (yearWeekIds.length === 0) {
+	// Load all weeks and filter by startDate to avoid ISO year / calendar year boundary issues
+	const allWeeks = (await Promise.all(
+		allWeekIds.map((id) => loadWeeklyHistory(store, id)),
+	)).filter((w): w is import('../types.js').CostHistoryWeek => w !== null && w !== undefined);
+
+	const yearWeeks = allWeeks.filter((w) => w.startDate.startsWith(currentYear));
+
+	if (yearWeeks.length === 0) {
 		await services.telegram.send(userId, `No food budget data for ${currentYear} yet. Run /foodbudget to generate weekly reports first.`);
 		return;
 	}
 
-	// Load all weeks for the year and aggregate by month
+	// Aggregate by month
 	const monthMap = new Map<string, { totalCost: number; mealCount: number }>();
 
-	for (const weekId of yearWeekIds) {
-		const week = await loadWeeklyHistory(store, weekId);
-		if (!week) continue;
+	for (const week of yearWeeks) {
 		const monthKey = week.startDate.slice(0, 7);
 		const existing = monthMap.get(monthKey) ?? { totalCost: 0, mealCount: 0 };
 		monthMap.set(monthKey, {
