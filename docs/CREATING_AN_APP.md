@@ -153,6 +153,10 @@ export const handleCommand: AppModule['handleCommand'] = async (command, args, c
 // Optional: handles photo messages (requires accepts_photos: true in manifest).
 // export const handlePhoto: AppModule['handlePhoto'] = async (ctx) => { ... };
 
+// Optional: handles inline keyboard button taps.
+// The router strips the 'app:<appId>:' prefix before calling this.
+// export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (data, ctx) => { ... };
+
 // Optional: called on shutdown. Clean up resources.
 // export const shutdown: AppModule['shutdown'] = async () => { ... };
 ```
@@ -175,6 +179,60 @@ interface MessageContext {
 
 `spaceId` and `spaceName` are set by the router when the user has an active shared space (set via the `/space` command). If the user is not in a space, both are `undefined`. Use `spaceName` for user-facing labels; use `spaceId` with `services.data.forSpace(spaceId, userId)` to read/write space-scoped data.
 
+### PhotoContext
+
+Apps declaring `accepts_photos: true` in the manifest receive a `PhotoContext`:
+
+```typescript
+interface PhotoContext {
+  userId: string;       // Telegram user ID
+  photo: Buffer;        // Raw photo bytes
+  caption?: string;     // Optional caption attached to the photo
+  mimeType: string;     // e.g. 'image/jpeg'
+  timestamp: Date;      // When the photo was sent
+  chatId: number;       // Telegram chat ID
+  messageId: number;    // Telegram message ID
+}
+```
+
+### CallbackContext
+
+Apps using inline keyboard buttons receive a `CallbackContext` in `handleCallbackQuery`:
+
+```typescript
+interface CallbackContext {
+  userId: string;   // Telegram user ID who tapped the button
+  chatId: number;   // Chat containing the message
+  messageId: number; // The message the button was on (use with editMessage)
+}
+```
+
+**Callback flow pattern:**
+
+```typescript
+import type { AppModule, CallbackContext } from '@pas/core/types';
+
+// 1. Send a message with buttons
+export const handleCommand: AppModule['handleCommand'] = async (command, _args, ctx) => {
+  const sent = await services.telegram.sendWithButtons(ctx.userId, 'Delete this item?', [
+    [{ text: 'Yes, delete', callbackData: 'app:my-app:delete:confirm' }],
+    [{ text: 'Cancel',      callbackData: 'app:my-app:delete:cancel'  }],
+  ]);
+  // Optionally store sent.chatId/messageId to edit the message later
+};
+
+// 2. Handle the button tap
+export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (data, ctx) => {
+  // 'data' is the portion after 'app:my-app:' (router strips the prefix)
+  if (data === 'delete:confirm') {
+    await deleteItem();
+    await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'Item deleted.');
+  } else if (data === 'delete:cancel') {
+    await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'Cancelled.');
+  }
+};
+```
+
 ## Using CoreServices
 
 You only receive the services declared in `requirements.services`. Undeclared services will be `undefined`. Four services are always provided regardless of declarations: `config`, `secrets`, `timezone`, and `logger` (see [Always-Provided Services](MANIFEST_REFERENCE.md#always-provided-services)).
@@ -182,14 +240,55 @@ You only receive the services declared in `requirements.services`. Undeclared se
 ### Sending Messages
 
 ```typescript
-// Send text
+// Send text (supports Telegram legacy Markdown: *bold*, _italic_, `code`)
 await services.telegram.send(ctx.userId, 'Hello!');
 
-// Send with inline keyboard
-await services.telegram.sendOptions(ctx.userId, 'Choose:', {
-  reply_markup: { inline_keyboard: [[{ text: 'Yes', callback_data: 'yes' }]] }
-});
+// Send a photo with optional caption
+await services.telegram.sendPhoto(ctx.userId, imageBuffer, 'Here is your image');
+
+// Send with a simple option picker (returns the text of the selected option)
+const choice = await services.telegram.sendOptions(ctx.userId, 'Choose one:', ['Option A', 'Option B']);
+
+// Send with a custom inline keyboard (returns SentMessage for later editing)
+import type { InlineButton, SentMessage } from '@pas/core/types';
+
+const sent: SentMessage = await services.telegram.sendWithButtons(ctx.userId, 'Confirm?', [
+  [{ text: 'Yes', callbackData: 'app:my-app:confirm:yes' }],
+  [{ text: 'No',  callbackData: 'app:my-app:confirm:no'  }],
+]);
+
+// Edit a previously sent message (e.g. after handling a callback)
+await services.telegram.editMessage(sent.chatId, sent.messageId, 'Done!');
 ```
+
+**Callback data format:** prefix with `app:<appId>:` so the router strips the prefix before passing `data` to your `handleCallbackQuery`. Telegram limits the full `callbackData` payload to 64 bytes, including the `app:<appId>:` prefix.
+
+**Message length:** Telegram limits messages to 4096 characters. If you send longer responses (e.g. LLM completions, data dumps), split them first:
+
+```typescript
+function splitMessage(text: string, maxLength = 3800): string[] {
+  if (text.length <= maxLength) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    // Split at paragraph boundary, then line, then hard-cut
+    let split = remaining.lastIndexOf('\n\n', maxLength);
+    if (split === -1) split = remaining.lastIndexOf('\n', maxLength);
+    if (split === -1) split = maxLength;
+    chunks.push(remaining.slice(0, split));
+    remaining = remaining.slice(split).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+const parts = splitMessage(longResponse);
+for (const part of parts) {
+  await services.telegram.send(ctx.userId, part);
+}
+```
+
+See `apps/chatbot/src/index.ts` for the production `splitTelegramMessage()` implementation that the chatbot uses.
 
 ### Storing Data
 
@@ -205,7 +304,22 @@ const exists = await store.exists('config.yaml');
 const files = await store.list('notes/');
 
 // Shared data (scoped to data/users/shared/<appId>/)
-const shared = services.data.forShared();
+const shared = services.data.forShared('shared');
+
+// Space-scoped data (scoped to data/spaces/<spaceId>/<appId>/)
+// spaceId comes from MessageContext — only defined when user is in space mode
+if (ctx.spaceId) {
+  const spaceStore = services.data.forSpace(ctx.spaceId, ctx.userId);
+  await spaceStore.write('shared-list.yaml', content);
+} else {
+  // Fall back to per-user data when not in a space
+  const userStore = services.data.forUser(ctx.userId);
+  await userStore.write('my-list.yaml', content);
+}
+// Note: forSpace() throws SpaceMembershipError if the user is not a member of that space.
+
+// Archive a file by moving it to a timestamped filename in the same directory
+await store.archive('items.md');
 ```
 
 ### Timezone
@@ -280,6 +394,40 @@ The classifier detects these categories:
 | `unknown` | Anything else | "Could not process your request right now." |
 
 The returned `LLMErrorInfo` also includes `isRetryable: boolean` so you can decide whether to offer a retry.
+
+### Security Utilities
+
+**Always escape user/stored data before sending Telegram messages. Always sanitize user input before LLM prompts.**
+
+**Escaping for Telegram:**
+
+```typescript
+import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
+
+// Escape user input or stored data before interpolating into Telegram Markdown
+const title = escapeMarkdown(userProvidedTitle); // escapes *, _, [, ], (, ), etc.
+await services.telegram.send(ctx.userId, `Your item: *${title}*`);
+```
+
+Without escaping, a user named "John *Smith*" would corrupt your message formatting — or worse, a malicious input could close/open formatting spans to inject bold or italic spans.
+
+**Sanitizing for LLM prompts:**
+
+When user text is interpolated into an LLM prompt, sanitize it first to prevent prompt injection (users trying to override your instructions by hiding commands inside their input):
+
+```typescript
+// Baseline sanitizer — truncates and neutralizes backtick sequences.
+// Safe for most prompts where the user text is system-framed (not fence-delimited).
+function sanitizeInput(text: string, maxLength = 10000): string {
+  const truncated = text.length > maxLength ? text.slice(0, maxLength) : text;
+  return truncated.replace(/[\u0060\uFF40]{3,}/g, '`');
+}
+
+const safeText = sanitizeInput(ctx.text);
+const answer = await services.llm.complete(`Summarize: ${safeText}`, { tier: 'standard' });
+```
+
+For prompts that delimit the user section with fence sentinels (e.g. `--- BEGIN user input ---`), copy or adapt the hardened pattern from the food app (`apps/food/src/utils/sanitize.ts`), which also strips newlines and scrubs fence strings from user input. Do not import from another app at runtime.
 
 ### Logging
 
@@ -548,6 +696,19 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 
 For `user_scope: shared` or `system` jobs the handler runs once with `userId` undefined; cross-user iteration (if any) is your app's responsibility, but you can wrap each iteration in `services` calls normally — the scheduled-job context already has no user bound, so you get manifest defaults unless you iterate users explicitly.
 
+### Other Available Services
+
+These services are available to apps that declare them in `requirements.services`. See [MANIFEST_REFERENCE.md](MANIFEST_REFERENCE.md) for the manifest keys.
+
+| Service | Manifest key | When to use |
+|---------|-------------|------------|
+| `services.audio` | `audio` | Text-to-speech via Piper TTS, optionally cast to Chromecast. `speak(text, device?)` for fire-and-forget delivery; `tts(text)` to get raw audio bytes. |
+| `services.conditionEvaluator` | `condition-eval` | Programmatic evaluation of rule files (deterministic or fuzzy/LLM conditions). `evaluate(ruleId)` returns true/false. |
+| `services.appMetadata` | `app-metadata` | Read-only metadata about installed apps. `getEnabledApps(userId)` returns apps enabled for a user; useful for building context-aware responses. |
+| `services.appKnowledge` | `app-knowledge` | Full-text search over app help files and docs. `search(query, userId?)` — same index the `/ask` chatbot uses. |
+| `services.modelJournal` | `model-journal` | Persistent per-model markdown files the LLM can write to. `append(modelSlug, content)` and `read(modelSlug)`. Useful for apps that want the AI to keep notes across sessions. |
+| `services.systemInfo` | `system-info` | Read-only system introspection: `getTierAssignments()`, `getCostSummary()`, `getScheduledJobs()`, `getSystemStatus()`, `isUserAdmin(userId)`. Write: `setTierModel(tier, provider, model)`. |
+
 ## Testing
 
 Tests use Vitest with mock CoreServices.
@@ -627,6 +788,71 @@ For each requirement, consider tests across these categories (not all apply ever
 
 See the Food app (`apps/food/docs/urs.md`) for a real-world example with 72 requirements across 17 areas, or the infrastructure URS (`docs/urs.md` at the project root) for a fully implemented example.
 
+### Context Store
+
+The context store is a lightweight per-user + system knowledge base for storing preferences, facts, and notes that the chatbot and other apps can reference. Apps can read system context, search user + system context, and save/remove per-user entries.
+
+```yaml
+# manifest.yaml
+requirements:
+  services:
+    - context-store
+```
+
+```typescript
+// Save a user preference or fact
+await services.contextStore.save(ctx.userId, 'preferred-units', 'metric');
+
+// Read with user-first fallback (user override > system default)
+const units = await services.contextStore.getForUser('preferred-units', ctx.userId);
+
+// Search the knowledge base (returns entries matching the query)
+const results = await services.contextStore.searchForUser('dietary restrictions', ctx.userId);
+for (const entry of results) {
+  // entry.key, entry.content, entry.lastUpdated
+}
+
+// Remove an entry
+await services.contextStore.remove(ctx.userId, 'preferred-units');
+```
+
+Context store entries are short-lived facts ("user is vegetarian", "user prefers metric units"). For structured app data (lists, logs, configurations), use the data store instead.
+
+### Dynamic Scheduling
+
+For one-off delayed actions (reminders, follow-up messages, retry timers), use `services.scheduler`:
+
+```yaml
+# manifest.yaml
+requirements:
+  services:
+    - scheduler
+```
+
+```typescript
+// Schedule a one-off job
+const runAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+await services.scheduler.scheduleOnce('my-app', 'reminder-123', runAt, 'reminder');
+// The 4th argument is stored with the task for readability, but dispatch still
+// calls your app's handleScheduledJob(jobId).
+
+// Cancel a pending job (e.g. user cancelled the action)
+await services.scheduler.cancelOnce('my-app', 'reminder-123');
+```
+
+When the job fires, the infrastructure runs it as system scope and calls `handleScheduledJob(jobId)` on your app. Use a unique `jobId` per instance (e.g. include the userId or item ID):
+
+```typescript
+export const handleScheduledJob: AppModule['handleScheduledJob'] = async (jobId) => {
+  if (jobId.startsWith('reminder-')) {
+    const userId = jobId.replace('reminder-', '');
+    await services.telegram.send(userId, 'Reminder: check your items!');
+  }
+};
+```
+
+One-off jobs always run as system scope (no userId in context). For short in-process timers (< 1 minute, not needing persistence across restarts), `setTimeout` is simpler and sufficient.
+
 ## External Integration & n8n
 
 PAS has a REST API (`/api/*`) that external tools like n8n can use to read and write your app's data. This happens automatically — no extra code needed in your app.
@@ -657,12 +883,44 @@ The event payload includes `{ operation, appId, userId, path, spaceId? }`.
 
 ### Custom Events
 
-If your app needs to signal domain-specific events, declare `event-bus` in your manifest and emit custom events:
+**Emitting events** — declare `event-bus` in requirements and emit with the `{appId}:{action}` convention:
 
 ```typescript
 // In your app code
 services.eventBus.emit('my-app:item-created', { itemId: '123', name: 'New Item' });
 ```
+
+**Subscribing to events** — declare subscriptions in your manifest and handle them in `init()`:
+
+```yaml
+# manifest.yaml
+capabilities:
+  events:
+    emits:
+      - id: my-app:item-created
+        description: "Fired when a new item is created"
+    subscribes:
+      - event: other-app:data-ready
+        handler: handleDataReady
+        required: false  # false = optional dependency; app loads even if other-app is absent
+```
+
+```typescript
+// src/index.ts
+export const init: AppModule['init'] = async (s) => {
+  services = s;
+
+  // Wire up event subscriptions manually in init()
+  services.eventBus.on('other-app:data-ready', async (payload) => {
+    const data = payload as { userId: string; items: string[] };
+    await processItems(data.userId, data.items);
+  });
+};
+```
+
+The `subscribes` manifest declaration is informational (documents dependencies) — you still wire up handlers manually in `init()`. The `required` flag is metadata for dependency intent; it is not currently enforced at runtime or install time.
+
+**`data:changed` events** fire automatically on every `write()`, `append()`, and `archive()` call — your app does not need to emit these manually. See [Automatic Change Events](#automatic-change-events) for the payload shape.
 
 Use the naming convention `{appId}:{action}` for custom events. The host can subscribe webhooks to your custom events the same way as built-in events.
 

@@ -24,7 +24,7 @@
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `{{APP_ID}}.example.event` | `{ ... }` | (When is this emitted?) |
+| `{{APP_ID}}:example-event` | `{ ... }` | (When is this emitted?) |
 
 ---
 

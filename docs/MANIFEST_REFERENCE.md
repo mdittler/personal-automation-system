@@ -139,6 +139,8 @@ capabilities:
         required: false
 ```
 
+`emits` and `subscribes` document event contracts and make dependencies visible in app metadata. Current app code must still register handlers with `services.eventBus.on(...)` during `init()`; the `handler` field is metadata and is not dynamically imported at runtime.
+
 ## `requirements` Block
 
 ### `services`
@@ -154,10 +156,10 @@ Infrastructure services your app needs. Only declared services are injected — 
 | `condition-eval` | `conditionEvaluator` | Programmatic condition checking |
 | `audio` | `audio` | Text-to-speech and Chromecast casting |
 | `event-bus` | `eventBus` | In-process event pub/sub. Emit custom events for n8n webhook integration |
-| `context-store` | `contextStore` | Read-only user preferences knowledge base |
+| `context-store` | `contextStore` | User + system context knowledge base. Read/search system and user context; save/remove per-user entries |
 | `app-metadata` | `appMetadata` | Read-only metadata about installed apps |
 | `app-knowledge` | `appKnowledge` | Read-only app and infra documentation search |
-| `model-journal` | `modelJournal` | Persistent model journal (read, append, archive) |
+| `model-journal` | `modelJournal` | Persistent model journal (`read`, `append`, `listArchives`, `readArchive`, `listModels`) |
 | `system-info` | `systemInfo` | Read-only system introspection (models, costs, scheduling, status) + model switching |
 
 Legacy service IDs `llm:ollama` and `llm:claude` are still accepted but map to the same `llm` service.
