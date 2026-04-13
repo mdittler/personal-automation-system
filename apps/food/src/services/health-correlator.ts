@@ -14,7 +14,7 @@ import { loadMacrosForPeriod } from './macro-tracker.js';
 import { loadHealthForPeriod } from './health-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
 import { sanitizeInput } from '../utils/sanitize.js';
-import { addDays } from '../utils/date.js';
+import { addDays, todayDate } from '../utils/date.js';
 
 const MIN_NUTRITION_DAYS = 5;
 const MAX_INSIGHTS = 3;
@@ -43,7 +43,7 @@ export async function correlateHealth(
 	_sharedStore: ScopedDataStore,
 	periodDays = 14,
 ): Promise<CorrelationInsight[] | null> {
-	const endDate = new Date().toISOString().slice(0, 10);
+	const endDate = todayDate(services.timezone);
 	// -periodDays + 1: both startDate and endDate are inclusive, so this gives
 	// an exact [periodDays]-day window (e.g. -13 offset → 14-day inclusive range)
 	const startDate = addDays(endDate, -periodDays + 1);

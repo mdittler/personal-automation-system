@@ -31,10 +31,17 @@ vi.mock('../services/health-store.js', () => ({
 	upsertDailyHealth: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Partial mock of date utils — lets us override todayDate per-test while keeping addDays real
+vi.mock('../utils/date.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../utils/date.js')>();
+	return { ...original, todayDate: vi.fn(original.todayDate) };
+});
+
 // Import after mocking
 const { correlateHealth } = await import('../services/health-correlator.js');
 const { loadMacrosForPeriod } = await import('../services/macro-tracker.js');
 const { loadHealthForPeriod } = await import('../services/health-store.js');
+const { todayDate } = await import('../utils/date.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -386,5 +393,38 @@ describe('correlateHealth', () => {
 
 		expect(result).toHaveLength(1);
 		expect(result![0]!.pattern).toBe('Pattern 1');
+	});
+
+	// ─── Timezone boundary ────────────────────────────────────────────────
+
+	it('uses local date (not UTC date) as endDate when system time is just past midnight UTC', async () => {
+		// 2026-04-11T02:00:00Z is 2026-04-10 in America/New_York (UTC-4).
+		// We verify the correlator calls todayDate(timezone) — not new Date().toISOString() — by
+		// having the todayDate spy return the expected local date directly.
+		(services as CoreServices & { timezone: string }).timezone = 'America/New_York';
+		vi.mocked(todayDate).mockReturnValueOnce('2026-04-10');
+
+		// 14 days of macro data ending on 2026-04-10 → startDate should be 2026-03-28
+		const dates = makeDates('2026-03-28', 14);
+		vi.mocked(loadMacrosForPeriod).mockResolvedValue(dates.map(makeMacroEntry));
+		vi.mocked(loadHealthForPeriod).mockResolvedValue([]);
+		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(makeInsights(1)));
+
+		await correlateHealth(
+			services,
+			userStore as unknown as ScopedDataStore,
+			sharedStore as unknown as ScopedDataStore,
+		);
+
+		// todayDate must have been called with the configured timezone
+		expect(vi.mocked(todayDate)).toHaveBeenCalledWith('America/New_York');
+
+		// loadMacrosForPeriod is called with (userStore, startDate, endDate)
+		// endDate must be the local date '2026-04-10', not the UTC date '2026-04-11'
+		// Use .at(-1) — mock.calls accumulates across tests since beforeEach doesn't clear it
+		const lastCall = vi.mocked(loadMacrosForPeriod).mock.calls.at(-1)!;
+		const [, startArg, endArg] = lastCall;
+		expect(endArg).toBe('2026-04-10');
+		expect(startArg).toBe('2026-03-28'); // 14-day inclusive window: -13 days from 2026-04-10
 	});
 });
