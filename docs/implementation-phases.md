@@ -86,7 +86,7 @@ Audio/Ctx   GUI    Docker/Users
 
 | File | Purpose |
 |------|---------|
-| `package.json` | Root workspace, pnpm scripts (build, lint, test, dev, register-app, scaffold-app) |
+| `package.json` | Root workspace, pnpm scripts (build, lint, test, dev, scaffold-app) |
 | `pnpm-workspace.yaml` | Declares `core/` and `apps/*` as workspace members |
 | `tsconfig.base.json` | Strict TS 5, ESM, Node16 module resolution, composite |
 | `biome.json` | Lint + format: tabs, single quotes, semicolons, trailing commas |

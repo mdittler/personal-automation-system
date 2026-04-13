@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseYesFlag } from '../install-app.js';
 
 // We test the formatting and validation logic that install-app.ts uses,
 // rather than spawning the CLI process (which would require git)
@@ -53,20 +54,32 @@ describe('install-app CLI', () => {
 			expect(gitUrl).toBe('https://github.com/user/repo.git');
 		});
 
-		it('should detect --yes flag', () => {
-			const args = ['https://github.com/user/repo.git', '--yes'];
-			expect(args.includes('--yes')).toBe(true);
-		});
-
-		it('should detect -y flag', () => {
-			const args = ['-y', 'https://github.com/user/repo.git'];
-			expect(args.includes('-y')).toBe(true);
-		});
-
 		it('should handle missing URL', () => {
 			const args = ['--yes'];
 			const gitUrl = args.find((a) => !a.startsWith('-'));
 			expect(gitUrl).toBeUndefined();
+		});
+	});
+
+	describe('parseYesFlag', () => {
+		it('returns true when --yes is present', () => {
+			expect(parseYesFlag(['https://github.com/user/repo.git', '--yes'])).toBe(true);
+		});
+
+		it('returns true when -y is present', () => {
+			expect(parseYesFlag(['-y', 'https://github.com/user/repo.git'])).toBe(true);
+		});
+
+		it('returns false when neither flag is present', () => {
+			expect(parseYesFlag(['https://github.com/user/repo.git'])).toBe(false);
+		});
+
+		it('returns false for empty args', () => {
+			expect(parseYesFlag([])).toBe(false);
+		});
+
+		it('is not confused by other flags', () => {
+			expect(parseYesFlag(['--verbose', '--dry-run'])).toBe(false);
 		});
 	});
 });

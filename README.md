@@ -204,7 +204,6 @@ For full architecture details, see `CLAUDE.md`.
 | `pnpm scaffold-app --name=<id>` | Generate a new app skeleton |
 | `pnpm install-app <git-url>` | Install a shared app from a git repo |
 | `pnpm uninstall-app <app-id>` | Remove an installed app |
-| `pnpm register-app --name=<id>` | Validate manifest and update app registry |
 
 ## License
 

@@ -6,6 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installApp } from '../services/app-installer/index.js';
@@ -74,6 +75,13 @@ function formatErrors(result: InstallResult, appName?: string): string {
 	return lines.join('\n');
 }
 
+/**
+ * Exported for testing: parses the --yes / -y flag from an args array.
+ */
+export function parseYesFlag(args: string[]): boolean {
+	return args.includes('--yes') || args.includes('-y');
+}
+
 async function main() {
 	const args = process.argv.slice(2);
 	const gitUrl = args.find((a) => !a.startsWith('-'));
@@ -86,15 +94,34 @@ async function main() {
 		process.exit(1);
 	}
 
+	const skipConfirm = parseYesFlag(args);
 	const coreVersion = getCoreVersion();
 	const appsDir = getAppsDir();
 
-	console.log(`Installing app from ${gitUrl}...`);
+	console.log(`About to install app from: ${gitUrl}`);
 	console.log(`CoreServices version: ${coreVersion}`);
 	console.log('');
+	console.log('The app will be cloned, validated, and its dependencies installed.');
+	console.log('PAS will need to be restarted to load the new app.');
+	console.log('');
 
-	// First pass: validate only (don't install deps yet)
-	// We do the full install in one shot since installApp handles the pipeline
+	if (!skipConfirm) {
+		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		let answer = '';
+		try {
+			answer = await rl.question('Proceed with installation? [y/N] ');
+		} finally {
+			rl.close();
+		}
+		if (answer.trim().toLowerCase() !== 'y') {
+			console.log('Installation cancelled.');
+			process.exit(0);
+		}
+	}
+
+	console.log(`Installing app from ${gitUrl}...`);
+	console.log('');
+
 	const result = await installApp({ gitUrl, appsDir, coreVersion });
 
 	if (!result.success) {
@@ -110,7 +137,11 @@ async function main() {
 	console.log('Restart PAS to load the new app.');
 }
 
-main().catch((err) => {
-	console.error('Unexpected error:', err);
-	process.exit(1);
-});
+// Only run when executed directly (not imported for testing)
+const isDirectRun = process.argv[1]?.includes('install-app');
+if (isDirectRun) {
+	main().catch((err) => {
+		console.error('Unexpected error:', err);
+		process.exit(1);
+	});
+}
