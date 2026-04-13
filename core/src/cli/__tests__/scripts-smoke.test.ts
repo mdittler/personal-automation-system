@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Resolve path to repo root package.json (5 levels up from __tests__/)
+// Resolve path to repo root package.json (4 levels up from __tests__/)
 // core/src/cli/__tests__ → core/src/cli → core/src → core → repo root
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 
