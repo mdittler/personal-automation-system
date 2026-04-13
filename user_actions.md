@@ -38,10 +38,10 @@ Items that require manual action from the system owner. These cannot be automate
 
 ## n8n Integration (Optional)
 
-- [ ] **Install n8n** — Run n8n on the same machine as PAS. See [n8n docs](https://docs.n8n.io/hosting/).
-- [ ] **Configure dispatch URL** — Add `n8n: { dispatch_url: "http://localhost:5678/webhook/pas-dispatch" }` to `config/pas.yaml`. Leave empty for internal execution (default).
-- [ ] **Create n8n receiver workflow** — Import or create a workflow that receives PAS dispatch webhooks and calls the appropriate PAS API endpoints. See `docs/n8n-integration.md` for details.
-- [ ] **Test dispatch** — Verify that reports/alerts fire via n8n by checking n8n execution history. PAS falls back to internal execution if n8n is unavailable.
+- [x] **Install n8n** — Installed and running at localhost:5678
+- [x] **Configure dispatch URL** — `n8n.dispatch_url: http://localhost:5678/webhook/pas-dispatch` set in `config/pas.yaml`
+- [x] **Create n8n receiver workflow** — Workflow verified and tested
+- [x] **Test dispatch** — Verified working; 3 outbound webhooks configured (n8n-data, n8n-alerts, n8n-reports)
 
 ## Multi-Provider LLM Setup (Optional)
 
