@@ -725,49 +725,71 @@ describe('Chatbot App', () => {
 
 			await chatbot.handleMessage(ctx);
 
+			// auto_detect off → only one LLM call (the main response, no classifier)
+			expect(services.llm.complete).toHaveBeenCalledTimes(1);
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 			expect(prompt).toContain('helpful, friendly AI assistant');
-			expect(prompt).not.toContain('PAS');
+			expect(prompt).not.toContain('PAS (Personal Automation System) assistant');
 		});
 
-		it('uses app-aware prompt when auto-detect is on and message is PAS-relevant', async () => {
+		it('uses app-aware prompt when auto-detect is on and LLM classifier returns PAS-relevant', async () => {
 			vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
 			vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
+			// First call: classifier returns YES; second call: main response
+			vi.mocked(services.llm.complete)
+				.mockResolvedValueOnce('YES')
+				.mockResolvedValueOnce('I can help with that!');
 			const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 			await chatbot.handleMessage(ctx);
 
-			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-			expect(prompt).toContain('PAS');
+			// call[0] = classifier (fast tier), call[1] = main response (standard tier)
+			expect(services.llm.complete).toHaveBeenCalledTimes(2);
+			const classifierCall = vi.mocked(services.llm.complete).mock.calls[0];
+			expect(classifierCall[1]?.tier).toBe('fast');
+
+			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
+			expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
 		});
 
-		it('uses regular prompt when auto-detect is on but message is not PAS-relevant', async () => {
+		it('uses regular prompt when auto-detect is on and LLM classifier returns not PAS-relevant', async () => {
 			vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
+			// First call: classifier returns NO; second call: main response
+			vi.mocked(services.llm.complete)
+				.mockResolvedValueOnce('NO')
+				.mockResolvedValueOnce('Here is a cat joke!');
 			const ctx = createTestMessageContext({ text: 'tell me a joke about cats' });
 
 			await chatbot.handleMessage(ctx);
 
-			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-			expect(prompt).toContain('helpful, friendly AI assistant');
+			// call[0] = classifier, call[1] = main response
+			expect(services.llm.complete).toHaveBeenCalledTimes(2);
+			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
+			expect(mainPrompt).toContain('helpful, friendly AI assistant');
 		});
 
 		it('handles auto-detect config value as string "true"', async () => {
 			vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: 'true' });
 			vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
+			vi.mocked(services.llm.complete)
+				.mockResolvedValueOnce('YES')
+				.mockResolvedValueOnce('I can help with that!');
 			const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 			await chatbot.handleMessage(ctx);
 
-			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-			expect(prompt).toContain('PAS');
+			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
+			expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
 		});
 
-		it('defaults to false when config.getAll throws', async () => {
+		it('defaults to false when config.getAll throws (no classifier call, basic prompt)', async () => {
 			vi.mocked(services.config.getAll).mockRejectedValue(new Error('config error'));
 			const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 			await chatbot.handleMessage(ctx);
 
+			// auto_detect defaults to false on error → only one LLM call (no classifier)
+			expect(services.llm.complete).toHaveBeenCalledTimes(1);
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 			expect(prompt).toContain('helpful, friendly AI assistant');
 		});

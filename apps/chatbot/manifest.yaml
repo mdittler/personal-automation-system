@@ -45,5 +45,5 @@ requirements:
 user_config:
   - key: auto_detect_pas
     type: boolean
-    default: false
-    description: "Automatically detect PAS-related questions and include app info in responses (uses more tokens)"
+    default: true
+    description: "Automatically detect PAS-related questions and include app info in responses (uses LLM classification; disable to use basic conversational mode)"

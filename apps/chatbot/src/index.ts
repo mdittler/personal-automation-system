@@ -208,20 +208,27 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	const modelId = services.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
 
-	// 5. Check if auto-detect is on and message is PAS-relevant
+	// 5. Check if auto-detect is on and classify message relevance
 	let systemPrompt: string;
 	const autoDetect = await getAutoDetectSetting(ctx.userId);
+	const userCtx = await buildUserContext(ctx, services);
 
-	if (autoDetect && isPasRelevant(ctx.text)) {
-		systemPrompt = await buildAppAwareSystemPrompt(
-			ctx.text,
-			ctx.userId,
-			contextEntries,
-			turns,
-			modelSlug,
-		);
+	if (autoDetect) {
+		const classification = await classifyPASMessage(ctx.text, services);
+		if (classification.pasRelated) {
+			systemPrompt = await buildAppAwareSystemPrompt(
+				ctx.text,
+				ctx.userId,
+				contextEntries,
+				turns,
+				modelSlug,
+				userCtx,
+			);
+		} else {
+			systemPrompt = await buildSystemPrompt(contextEntries, turns, modelSlug, userCtx);
+		}
 	} else {
-		systemPrompt = await buildSystemPrompt(contextEntries, turns, modelSlug);
+		systemPrompt = await buildSystemPrompt(contextEntries, turns, modelSlug, userCtx);
 	}
 
 	// 6. Call LLM
@@ -230,7 +237,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		response = await services.llm.complete(sanitizeInput(ctx.text), {
 			tier: 'standard',
 			systemPrompt,
-			maxTokens: 1024,
+			maxTokens: 2048,
 			temperature: 0.7,
 		});
 	} catch (error) {
@@ -251,8 +258,11 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// 8. Strip model-switch tags without executing — admin actions via /ask only
 	const finalResponse = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
 
-	// 9. Send response (without journal/switch tags)
-	await services.telegram.send(ctx.userId, finalResponse);
+	// 9. Send response, splitting if over Telegram message limit
+	const messageParts = splitTelegramMessage(finalResponse);
+	for (const part of messageParts) {
+		await services.telegram.send(ctx.userId, part);
+	}
 
 	// 10. Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
@@ -311,13 +321,15 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	const modelId = services.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
 
-	// Build app-aware prompt
+	// Build app-aware prompt (always app-aware for /ask, no classification needed)
+	const userCtx = await buildUserContext(ctx, services);
 	const systemPrompt = await buildAppAwareSystemPrompt(
 		question,
 		ctx.userId,
 		contextEntries,
 		turns,
 		modelSlug,
+		userCtx,
 	);
 
 	// Call LLM
@@ -326,7 +338,7 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		response = await services.llm.complete(sanitizeInput(question), {
 			tier: 'standard',
 			systemPrompt,
-			maxTokens: 1024,
+			maxTokens: 2048,
 			temperature: 0.7,
 		});
 	} catch (error) {
@@ -347,7 +359,12 @@ export const handleCommand: AppModule['handleCommand'] = async (
 
 	const responseWithConfirmations =
 		confirmations.length > 0 ? `${finalResponse}\n\n${confirmations.join('\n')}` : finalResponse;
-	await services.telegram.send(ctx.userId, responseWithConfirmations);
+
+	// Send response, splitting if over Telegram message limit
+	const messageParts = splitTelegramMessage(responseWithConfirmations);
+	for (const part of messageParts) {
+		await services.telegram.send(ctx.userId, part);
+	}
 
 	// Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
@@ -392,6 +409,7 @@ export async function buildAppAwareSystemPrompt(
 	contextEntries: string[],
 	turns: ConversationTurn[],
 	modelSlug?: string,
+	userCtx?: string,
 ): Promise<string> {
 	// Gather model info if available
 	const standardModel = services.llm.getModelForTier?.('standard') ?? 'unknown';
@@ -404,6 +422,11 @@ export async function buildAppAwareSystemPrompt(
 		`The chatbot uses the standard tier model "${standardModel}" and the fast tier (for routing/classification) uses "${fastModel}".`,
 		'Be concise but thorough.',
 	];
+
+	if (userCtx) {
+		parts.push('');
+		parts.push(userCtx);
+	}
 
 	// App metadata section
 	const appInfos = await getEnabledAppInfos(userId);
@@ -509,6 +532,7 @@ export async function buildSystemPrompt(
 	contextEntries: string[],
 	turns: ConversationTurn[],
 	modelSlug?: string,
+	userCtx?: string,
 ): Promise<string> {
 	const standardModel = services.llm.getModelForTier?.('standard') ?? 'unknown';
 	const fastModel = services.llm.getModelForTier?.('fast') ?? 'unknown';
@@ -518,6 +542,11 @@ export async function buildSystemPrompt(
 		`When the user asks what model you are or what model is running, tell them: the chatbot uses the standard tier model "${standardModel}" and the fast tier (for routing/classification) uses "${fastModel}".`,
 		'Answer questions on any topic. Be concise but thorough.',
 	];
+
+	if (userCtx) {
+		parts.push('');
+		parts.push(userCtx);
+	}
 
 	if (contextEntries.length > 0) {
 		parts.push('');
@@ -810,8 +839,140 @@ async function gatherUserDataOverview(userId: string): Promise<string> {
 }
 
 /**
+ * Classification result from LLM-based PAS relevance check.
+ * Extensible for future D2 data-query detection.
+ */
+export interface PASClassification {
+	/** Whether the message is PAS-related (home automation, apps, data). */
+	pasRelated: boolean;
+	/** Whether the message appears to be a data query (reserved for D2 wiring). */
+	dataQueryCandidate?: boolean;
+}
+
+/**
+ * Classify a message as PAS-related using a fast-tier LLM call.
+ *
+ * Replaces the static PAS_KEYWORDS heuristic. Returns fail-open (pasRelated: true)
+ * on LLM error so users with auto_detect_pas on still get helpful responses.
+ *
+ * Only call when auto_detect_pas is enabled — /ask is always app-aware.
+ */
+export async function classifyPASMessage(
+	text: string,
+	svc: CoreServices,
+): Promise<PASClassification> {
+	if (!text.trim()) return { pasRelated: false };
+
+	// Build compact classifier prompt — no large app metadata
+	const appNames = svc.appMetadata
+		? svc.appMetadata
+				.getInstalledApps()
+				.map((a) => a.name)
+				.join(', ')
+		: '';
+	const appHint = appNames ? ` Installed apps: ${appNames}.` : '';
+
+	const systemPrompt =
+		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
+		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.${appHint}` +
+		` Reply with exactly YES or NO.`;
+
+	try {
+		const response = await svc.llm.complete(text, {
+			tier: 'fast',
+			systemPrompt,
+			maxTokens: 5,
+			temperature: 0,
+		});
+
+		const normalized = response.trim().toLowerCase().replace(/[^a-z]/g, '');
+		return { pasRelated: normalized === 'yes' };
+	} catch (error) {
+		svc.logger.warn('PAS classification failed, defaulting to app-aware context: %s', error);
+		return { pasRelated: true };
+	}
+}
+
+/**
+ * Build a concise user profile context string for system prompt injection.
+ *
+ * Uses MessageContext (spaceId/spaceName) and appMetadata.getEnabledApps().
+ * Does NOT call SpaceService or UserManager directly.
+ * Returns empty string when no useful context is available.
+ */
+export async function buildUserContext(ctx: MessageContext, svc: CoreServices): Promise<string> {
+	const parts: string[] = [];
+
+	if (ctx.spaceName) {
+		parts.push(`User is a member of the "${ctx.spaceName}" household.`);
+	}
+
+	try {
+		if (svc.appMetadata) {
+			const apps = await svc.appMetadata.getEnabledApps(ctx.userId);
+			if (apps.length > 0) {
+				parts.push(`Active apps: ${apps.map((a) => a.name).join(', ')}.`);
+			}
+		}
+	} catch {
+		// graceful — missing app list is not fatal
+	}
+
+	return parts.join(' ');
+}
+
+/**
+ * Split a long message into Telegram-safe chunks (max 4096 chars).
+ *
+ * Splitting priority:
+ *   1. Paragraph boundaries (\n\n)
+ *   2. Line boundaries (\n)
+ *   3. Hard chunk at maxLength
+ *
+ * @param text   The full response text.
+ * @param maxLength  Split threshold (default 3800, below Telegram's 4096 limit).
+ */
+export function splitTelegramMessage(text: string, maxLength = 3800): string[] {
+	if (text.length <= maxLength) return [text];
+
+	const parts: string[] = [];
+	let remaining = text;
+
+	while (remaining.length > maxLength) {
+		const chunk = remaining.slice(0, maxLength);
+
+		// Try paragraph boundary
+		const paraIdx = chunk.lastIndexOf('\n\n');
+		if (paraIdx > 0) {
+			parts.push(remaining.slice(0, paraIdx).trim());
+			remaining = remaining.slice(paraIdx + 2).trim();
+			continue;
+		}
+
+		// Try line boundary
+		const lineIdx = chunk.lastIndexOf('\n');
+		if (lineIdx > 0) {
+			parts.push(remaining.slice(0, lineIdx).trim());
+			remaining = remaining.slice(lineIdx + 1).trim();
+			continue;
+		}
+
+		// Hard chunk
+		parts.push(chunk);
+		remaining = remaining.slice(maxLength);
+	}
+
+	if (remaining.trim()) {
+		parts.push(remaining.trim());
+	}
+
+	return parts.filter((p) => p.trim() !== '');
+}
+
+/**
  * Check if a message text is likely PAS-related.
  * Uses keyword heuristics — no LLM cost.
+ * @deprecated Use classifyPASMessage() for LLM-based classification.
  */
 export function isPasRelevant(text: string): boolean {
 	if (!text.trim()) return false;
