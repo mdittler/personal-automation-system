@@ -172,13 +172,38 @@ describe('price-store', () => {
 			expect(updated.items).toHaveLength(1);
 			expect(updated.items[0]?.name).toBe('Bananas (3 lb)');
 		});
-		it('preserves items when adding entry with zero price', () => {
+		it('rejects entry with zero price and returns data unchanged', () => {
 			const data: StorePriceData = {
 				store: 'Test', slug: 'test', lastUpdated: '2026-04-01',
 				items: [makeEntry({ name: 'Eggs (60ct)', price: 7.99 })],
 			};
 			const updated = addOrUpdatePrice(data, makeEntry({ name: 'Free Item', price: 0 }));
-			expect(updated.items).toHaveLength(2);
+			expect(updated.items).toHaveLength(1);
+			expect(updated).toBe(data);
+		});
+		it('rejects entry with negative price and returns data unchanged', () => {
+			const data: StorePriceData = { store: 'Test', slug: 'test', lastUpdated: '2026-04-01', items: [] };
+			const updated = addOrUpdatePrice(data, makeEntry({ price: -3.50 }));
+			expect(updated.items).toHaveLength(0);
+			expect(updated).toBe(data);
+		});
+		it('rejects entry with price > 9999 and returns data unchanged', () => {
+			const data: StorePriceData = { store: 'Test', slug: 'test', lastUpdated: '2026-04-01', items: [] };
+			const updated = addOrUpdatePrice(data, makeEntry({ price: 10000 }));
+			expect(updated.items).toHaveLength(0);
+			expect(updated).toBe(data);
+		});
+		it('rejects entry with empty name and returns data unchanged', () => {
+			const data: StorePriceData = { store: 'Test', slug: 'test', lastUpdated: '2026-04-01', items: [] };
+			const updated = addOrUpdatePrice(data, makeEntry({ name: '' }));
+			expect(updated.items).toHaveLength(0);
+			expect(updated).toBe(data);
+		});
+		it('accepts valid entry and proceeds normally', () => {
+			const data: StorePriceData = { store: 'Test', slug: 'test', lastUpdated: '2026-04-01', items: [] };
+			const updated = addOrUpdatePrice(data, makeEntry({ name: 'Butter (1 lb)', price: 4.99 }));
+			expect(updated.items).toHaveLength(1);
+			expect(updated.items[0]?.name).toBe('Butter (1 lb)');
 		});
 		it('updates existing item by name (case-insensitive)', () => {
 			const data: StorePriceData = { store: 'Costco', slug: 'costco', lastUpdated: '2026-04-07', items: [makeEntry({ name: 'Eggs (60ct)', price: 7.99 })] };
@@ -337,6 +362,42 @@ describe('price-store', () => {
 			const svc = createMockServices();
 			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs' }));
 			const result = await parsePriceUpdateText(svc, 'eggs are $3.50 at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns negative price', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs (60ct)', price: -3.50, store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'eggs are $3.50 at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns zero price', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs (60ct)', price: 0, store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'eggs at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns price > 9999', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs (60ct)', price: 9999.01, store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'eggs at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns string price', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: 'Eggs (60ct)', price: '8.49', store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'eggs are $8.49 at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns empty item name', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ item: '', price: 3.50, store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'something at costco');
+			expect(result).toBeNull();
+		});
+		it('returns null when LLM returns missing item', async () => {
+			const svc = createMockServices();
+			vi.mocked(svc.llm.complete).mockResolvedValue(JSON.stringify({ price: 3.50, store: 'Costco', unit: '60ct', department: 'Dairy' }));
+			const result = await parsePriceUpdateText(svc, 'something at costco');
 			expect(result).toBeNull();
 		});
 	});
