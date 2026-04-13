@@ -566,8 +566,11 @@ export async function main(): Promise<void> {
 	await fileIndex.rebuild();
 	logger.info({ count: fileIndex.size }, 'FileIndexService: initial index built');
 
-	const onDataChanged = (payload: unknown) =>
-		void fileIndex.handleDataChanged(payload as DataChangedPayload);
+	const onDataChanged = (payload: unknown) => {
+		fileIndex.handleDataChanged(payload as DataChangedPayload).catch((err) => {
+			logger.warn({ err }, 'FileIndexService: failed to handle data:changed');
+		});
+	};
 	eventBus.on('data:changed', onDataChanged);
 
 	// 9d. Vault service — per-user Obsidian vault directories with symlinks
