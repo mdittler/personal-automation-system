@@ -176,7 +176,7 @@ import {
 	logMealMacros,
 	loadMacrosForPeriod,
 } from '../services/macro-tracker.js';
-import { todayDate } from '../utils/date.js';
+import { addDays, todayDate } from '../utils/date.js';
 import type { MacroTargets, MealMacroEntry } from '../types.js';
 
 // ─── Intent Detection ────��──────────────────────────��─────────────────────────
@@ -393,9 +393,7 @@ export async function handleNutritionCommand(
 			const targets = await loadTargets(services, userStore);
 			const today = todayDate(services.timezone);
 			const endDate = today;
-			const start = new Date(today);
-			start.setDate(start.getDate() - 30);
-			const startDate = start.toISOString().slice(0, 10);
+			const startDate = addDays(today, -30);
 
 			const summary = await generatePersonalSummary(services, userStore, userId, startDate, endDate, targets);
 			await services.telegram.send(userId, summary);
@@ -678,11 +676,8 @@ export async function handleNutritionCommand(
 				return;
 			}
 			const today = todayDate(services.timezone);
-			const end = new Date(today);
-			const start = new Date(today);
-			start.setDate(start.getDate() - (periodDays - 1));
-			const startDate = start.toISOString().slice(0, 10);
-			const endDate = end.toISOString().slice(0, 10);
+			const endDate = today;
+			const startDate = addDays(today, -(periodDays - 1));
 
 			const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
 			if (entries.length === 0) {
@@ -1042,11 +1037,8 @@ export async function handleAdherencePeriodCallback(
 	}
 
 	const today = todayDate(services.timezone);
-	const end = new Date(today);
-	const start = new Date(today);
-	start.setDate(start.getDate() - (periodDays - 1));
-	const startDate = start.toISOString().slice(0, 10);
-	const endDate = end.toISOString().slice(0, 10);
+	const endDate = today;
+	const startDate = addDays(today, -(periodDays - 1));
 
 	const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
 	if (entries.length === 0) {

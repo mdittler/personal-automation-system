@@ -62,6 +62,21 @@ function makeChildLog(
 describe('pediatrician-report', () => {
 	// ─── computeFoodVariety ───────────────────────────────────
 	describe('computeFoodVariety', () => {
+		// DST regression: 2026-11-02 is the day after fall DST in the US.
+		// The old `new Date(today) + setDate() + toISOString()` pattern would
+		// produce a cutoff of '2026-10-18' instead of '2026-10-19' because local
+		// timezone arithmetic shifts midnight UTC around DST transitions (F23).
+		it('uses DST-safe cutoff for 14-day period across fall DST boundary (F23)', () => {
+			const intros = [
+				makeIntroduction({ food: 'on-the-boundary', date: '2026-10-19' }), // exactly at cutoff
+				makeIntroduction({ food: 'one-day-before', date: '2026-10-18' }), // must be excluded
+			];
+			// today = 2026-11-02, period = 14 → correct cutoff = addDays('2026-11-02', -14) = '2026-10-19'
+			const result = computeFoodVariety(intros, 14, '2026-11-02');
+			expect(result.foods).toContain('on-the-boundary');
+			expect(result.foods).not.toContain('one-day-before');
+		});
+
 		it('counts unique foods within period', () => {
 			const intros = [
 				makeIntroduction({ food: 'scrambled eggs', date: '2026-03-20' }),
