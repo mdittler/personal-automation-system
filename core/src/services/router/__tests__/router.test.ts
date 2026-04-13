@@ -185,7 +185,7 @@ describe('Router', () => {
 			await router.routeMessage(createTextCtx('/echo hello world'));
 
 			expect(echoModule.handleCommand).toHaveBeenCalledWith(
-				'/echo',
+				'echo',
 				['hello', 'world'],
 				expect.objectContaining({ text: '/echo hello world' }),
 			);

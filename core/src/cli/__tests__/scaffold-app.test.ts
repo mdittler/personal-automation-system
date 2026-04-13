@@ -123,7 +123,7 @@ describe('scaffold-app', () => {
 
 			const reqs = await readFile(join(tempDir, 'my-app', 'docs', 'requirements.md'), 'utf-8');
 			expect(reqs).toContain('# My App Requirements');
-			expect(reqs).toContain('my-app.example.event');
+			expect(reqs).toContain('my-app:example-event');
 			expect(reqs).not.toContain('{{');
 		});
 

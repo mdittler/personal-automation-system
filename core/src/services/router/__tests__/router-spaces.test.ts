@@ -222,7 +222,7 @@ describe('Router — /space command and active space injection', () => {
 
 			// handleCommand receives the enriched ctx
 			expect(echoModule.handleCommand).toHaveBeenCalledWith(
-				'/echo',
+				'echo',
 				['hello'],
 				expect.objectContaining({ spaceId: 'family', spaceName: 'Family' }),
 			);

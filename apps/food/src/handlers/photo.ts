@@ -86,7 +86,7 @@ export async function handlePhoto(
 			await services.telegram.send(
 				ctx.userId,
 				'You need to set up or join a household before using photo features. ' +
-				'Use /food household to get started.',
+				'Use /household to get started.',
 			);
 			return;
 		}

@@ -356,7 +356,7 @@ export class Router {
 
 		if (app.module.handleCommand) {
 			try {
-				await app.module.handleCommand(result.command.name, result.parsedArgs, ctx);
+				await app.module.handleCommand(result.command.name.replace(/^\//, ''), result.parsedArgs, ctx);
 			} catch (error) {
 				this.logger.error(
 					{ appId: result.appId, command: result.command.name, error },
