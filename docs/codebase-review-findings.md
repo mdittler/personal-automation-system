@@ -1081,7 +1081,8 @@ Phase 7 test evidence:
 
 ### Finding 36: Production app loading skips compiled app entrypoints
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — `.js`-first candidate ordering in `AppLoader.importModule()` means compiled output (`dist/index.js`) is tried before source paths, so production Docker builds load chatbot and food correctly.
 - Severity: high
 - Classification: production packaging / module resolution
 - Location: `core/src/services/app-registry/loader.ts:107-143`
@@ -1119,7 +1120,8 @@ Suggested tests:
 
 ### Finding 37: `condition-eval` manifests do not receive the condition evaluator service
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — `bootstrap.ts:439` changed from `condition-evaluator` to `condition-eval` to match the schema and manifest reference docs.
 - Severity: medium
 - Classification: manifest contract drift / service injection
 - Location: `core/src/bootstrap.ts:420-426`
@@ -1147,7 +1149,8 @@ Suggested tests:
 
 ### Finding 38: Install permission review and `--yes` are not connected to installer side effects
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — confirmation prompt added before `installApp()` call; `--yes`/`-y` skips it. The installer now shows the permission summary first and only proceeds on explicit confirmation.
 - Severity: medium
 - Classification: installation flow / consent boundary
 - Location: `core/src/cli/install-app.ts:82-106`
@@ -1177,7 +1180,8 @@ Suggested tests:
 
 ### Finding 39: The documented `register-app` command points to a missing file
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — `register-app` script removed from `package.json`, `README.md`, and `docs/implementation-phases.md`. App registration is fully replaced by manifest discovery at startup.
 - Severity: medium
 - Classification: broken CLI command / documentation drift
 - Location: `package.json:19`
@@ -1203,7 +1207,8 @@ Suggested tests:
 
 ### Finding 40: Duplicate manifest app IDs are initialized and then overwritten
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — duplicate app ID guard added in `AppRegistry.loadAll()` before `init()` is called; duplicate is logged as an error and skipped, preserving the first-loaded app.
 - Severity: medium
 - Classification: manifest identity integrity / lifecycle ordering
 - Location: `core/src/services/app-registry/index.ts:62-80`
@@ -1283,7 +1288,8 @@ Missing coverage:
 
 ### Finding 41: Report and alert edit pages raw-embed JSON inside script blocks
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — `safeJsonForScript()` helper added to `core/src/gui/utils/safe-json.ts` and used in all 7 `<%~` JSON embeds in the report-edit and alert-edit templates, escaping `<`, `>`, `&`, U+2028, and U+2029.
 - Severity: medium
 - Classification: XSS / script-context escaping
 - Location: `core/src/gui/views/report-edit.eta:241-242`
@@ -1313,7 +1319,8 @@ Suggested tests:
 
 ### Finding 42: Alert `write_data` file paths do not expand the documented `{date}` token
 
-- Status: open
+- Status: fixed
+- **Status:** Fixed — `{date}` added as an alias for `{today}` in `resolveDateTokens()`, so `alert-log/{date}.md` now expands to today's date just like `{today}`.
 - Severity: medium
 - Classification: data correctness / GUI-runtime contract drift
 - Location: `core/src/services/alerts/alert-executor.ts:373`
