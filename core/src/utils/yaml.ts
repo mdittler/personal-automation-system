@@ -46,3 +46,38 @@ export async function writeYamlFile(filePath: string, data: unknown): Promise<vo
 	const content = stringify(data);
 	await atomicWrite(filePath, content);
 }
+
+/**
+ * Result from readYamlFileStrict when the file exists.
+ * Either parsed data (unknown) or a parse error message.
+ */
+export type StrictYamlResult = { data: unknown } | { error: string };
+
+/**
+ * Read and parse a YAML file with explicit error reporting.
+ *
+ * Unlike readYamlFile(), this function distinguishes between:
+ * - File not found → returns null
+ * - YAML parse error → returns { error: string } with filename-specific message
+ * - Success → returns { data: unknown } (never cast — caller must validate shape)
+ */
+export async function readYamlFileStrict(filePath: string): Promise<StrictYamlResult | null> {
+	const exists = await stat(filePath)
+		.then((s) => s.isFile())
+		.catch(() => false);
+	if (!exists) return null;
+
+	let content: string;
+	try {
+		content = await readFile(filePath, 'utf-8');
+	} catch (err) {
+		return { error: `Failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+	}
+
+	try {
+		const data = parse(content);
+		return { data };
+	} catch (err) {
+		return { error: `YAML parse error in ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}

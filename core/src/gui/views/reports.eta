@@ -25,6 +25,9 @@
         <tr>
           <td>
             <strong><%= report.name %></strong>
+            <% if (report.validationErrors && report.validationErrors.length > 0) { %>
+              <span style="color:var(--pico-color-red-500);margin-left:0.4rem" title="<%= report.validationErrors.map(function(e){return e.field+': '+e.message}).join('; ') %>">&#9888; Invalid</span>
+            <% } %>
             <% if (report.description) { %>
               <br><small><%= report.description %></small>
             <% } %>

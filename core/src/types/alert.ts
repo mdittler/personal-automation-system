@@ -169,6 +169,12 @@ export interface AlertDefinition {
 	lastFired?: string | null;
 	/** ISO timestamp of creation/update. */
 	updatedAt?: string;
+	/**
+	 * Transient runtime field — never persisted to disk.
+	 * Set when the definition loaded from disk fails validation.
+	 * Alerts with errors are shown in the GUI but not scheduled or executed.
+	 */
+	_validationErrors?: AlertValidationError[];
 }
 
 // ---------------------------------------------------------------------------

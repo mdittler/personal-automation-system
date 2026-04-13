@@ -23,7 +23,7 @@ import type { TelegramService } from '../../types/telegram.js';
 import { formatDateTime } from '../../utils/cron-describe.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter } from '../../utils/frontmatter.js';
-import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import { readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import type { ChangeLog } from '../data-store/change-log.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { N8nDispatcher } from '../n8n/index.js';
@@ -88,7 +88,7 @@ export class ReportService {
 		let registered = 0;
 
 		for (const report of reports) {
-			if (report.enabled) {
+			if (report.enabled && !report._validationErrors?.length) {
 				this.registerCronJob(report);
 				registered++;
 			}
@@ -107,10 +107,24 @@ export class ReportService {
 
 			for (const file of files) {
 				if (!file.endsWith('.yaml')) continue;
-				const report = await readYamlFile<ReportDefinition>(join(this.reportsDir, file));
-				if (report?.id) {
-					reports.push(report);
+				const result = await readYamlFileStrict(join(this.reportsDir, file));
+				if (result === null) continue; // file disappeared
+				if ('error' in result) {
+					this.logger.warn({ file, error: result.error }, 'Skipping report: YAML parse error');
+					continue;
 				}
+				const validated = safeValidateReport(result.data, this.userManager);
+				if (validated === null) {
+					this.logger.warn({ file }, 'Skipping report: not a valid object');
+					continue;
+				}
+				if (validated.errors.length > 0) {
+					this.logger.warn(
+						{ file, reportId: validated.report.id, errors: validated.errors },
+						'Report loaded with validation errors — will not be scheduled',
+					);
+				}
+				reports.push(validated.report);
 			}
 
 			return reports.sort((a, b) => a.name.localeCompare(b.name));
@@ -122,7 +136,22 @@ export class ReportService {
 
 	async getReport(id: string): Promise<ReportDefinition | null> {
 		if (!REPORT_ID_PATTERN.test(id)) return null;
-		return readYamlFile<ReportDefinition>(join(this.reportsDir, `${id}.yaml`));
+		const filePath = join(this.reportsDir, `${id}.yaml`);
+		const result = await readYamlFileStrict(filePath);
+		if (result === null) return null;
+		if ('error' in result) {
+			this.logger.warn({ reportId: id, error: result.error }, 'Report YAML parse error');
+			return null;
+		}
+		const validated = safeValidateReport(result.data, this.userManager);
+		if (validated === null) return null;
+		if (validated.errors.length > 0) {
+			this.logger.warn(
+				{ reportId: id, errors: validated.errors },
+				'Report loaded with validation errors',
+			);
+		}
+		return validated.report;
 	}
 
 	/**
@@ -145,7 +174,9 @@ export class ReportService {
 		def.updatedAt = new Date().toISOString();
 
 		await ensureDir(this.reportsDir);
-		await writeYamlFile(join(this.reportsDir, `${def.id}.yaml`), def);
+		// Strip transient runtime fields before persisting
+		const { _validationErrors: _dropped, ...persistable } = def;
+		await writeYamlFile(join(this.reportsDir, `${def.id}.yaml`), persistable);
 
 		// Update cron job
 		this.syncCronJob(def);
@@ -182,6 +213,14 @@ export class ReportService {
 		const report = await this.getReport(reportId);
 		if (!report) {
 			this.logger.warn({ reportId }, 'Report not found');
+			return null;
+		}
+
+		if (report._validationErrors?.length) {
+			this.logger.error(
+				{ reportId, errors: report._validationErrors },
+				'Refusing to run report with validation errors',
+			);
 			return null;
 		}
 
@@ -397,4 +436,32 @@ export class ReportService {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && 'code' in error;
+}
+
+/**
+ * Safely validate an unknown value as a ReportDefinition.
+ *
+ * Returns null if the value is not even an object with an id string.
+ * Returns the report with _validationErrors attached (empty = valid).
+ * Wraps validateReport() in try-catch to guard against validator exceptions
+ * on garbage primitive types (e.g. name: 123, sections: [null]).
+ */
+function safeValidateReport(
+	data: unknown,
+	userManager: UserManager,
+): { report: ReportDefinition; errors: ReportValidationError[] } | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const obj = data as Record<string, unknown>;
+	if (typeof obj['id'] !== 'string' || !obj['id']) return null;
+
+	const report = data as ReportDefinition;
+	let errors: ReportValidationError[];
+	try {
+		errors = validateReport(report, userManager);
+	} catch {
+		errors = [{ field: 'unknown', message: 'Validator threw an exception on malformed data' }];
+	}
+
+	report._validationErrors = errors.length > 0 ? errors : undefined;
+	return { report, errors };
 }

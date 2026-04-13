@@ -801,4 +801,83 @@ describe('SpaceService', () => {
 			expect(errors[0]?.message).toContain('not found');
 		});
 	});
+
+	// --- D14: Load-time space validation ---
+
+	describe('init() space entry validation (D14)', () => {
+		it('excludes invalid space entries (missing name) from operational map', async () => {
+			const warnSpy = vi.fn();
+			const testLogger = pino({ level: 'silent' });
+			testLogger.warn = warnSpy;
+
+			const { writeFile, mkdir } = await import('node:fs/promises');
+			await mkdir(join(tempDir, 'system'), { recursive: true });
+			// Write a spaces.yaml with one valid and one invalid entry
+			await writeFile(
+				join(tempDir, 'system', 'spaces.yaml'),
+				[
+					'family:',
+					'  id: family',
+					'  name: Family Space',
+					'  members: [111]',
+					'  createdBy: "111"',
+					'bad-entry:',
+					'  id: bad-entry',
+					'  members: [111]',
+					'  createdBy: "111"',
+					// missing 'name' field
+				].join('\n'),
+			);
+
+			const svc = new SpaceService({ dataDir: tempDir, userManager: makeUserManager(), logger: testLogger });
+			await svc.init();
+
+			// Valid space is present
+			expect(svc.getSpace('family')).not.toBeNull();
+			// Invalid space is excluded
+			expect(svc.getSpace('bad-entry')).toBeNull();
+			// Warning was logged
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ spaceKey: 'bad-entry' }),
+				expect.stringContaining('invalid space entry'),
+			);
+		});
+
+		it('excludes space entry where id does not match key', async () => {
+			const { writeFile, mkdir } = await import('node:fs/promises');
+			await mkdir(join(tempDir, 'system'), { recursive: true });
+			await writeFile(
+				join(tempDir, 'system', 'spaces.yaml'),
+				[
+					'family:',
+					'  id: wrong-id',
+					'  name: Family Space',
+					'  members: [111]',
+					'  createdBy: "111"',
+				].join('\n'),
+			);
+
+			const svc = makeService();
+			await svc.init();
+			expect(svc.getSpace('family')).toBeNull();
+		});
+
+		it('logs warning and loads no spaces when spaces.yaml has corrupt YAML', async () => {
+			const warnMessages: string[] = [];
+			const testLogger = pino({ level: 'silent' });
+			testLogger.warn = vi.fn((_obj: unknown, msg?: string) => {
+				if (msg) warnMessages.push(msg);
+			}) as any;
+
+			const { writeFile, mkdir } = await import('node:fs/promises');
+			await mkdir(join(tempDir, 'system'), { recursive: true });
+			await writeFile(join(tempDir, 'system', 'spaces.yaml'), '{{invalid: [[[corrupt yaml');
+
+			const svc = new SpaceService({ dataDir: tempDir, userManager: makeUserManager(), logger: testLogger });
+			await svc.init();
+
+			expect(svc.listSpaces()).toHaveLength(0);
+			expect(warnMessages.some((m) => m.includes('spaces.yaml'))).toBe(true);
+		});
+	});
 });

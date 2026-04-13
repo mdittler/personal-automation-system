@@ -24,7 +24,7 @@ import type { AudioService } from '../../types/audio.js';
 import type { TelegramService } from '../../types/telegram.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter, stripFrontmatter } from '../../utils/frontmatter.js';
-import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import { readYamlFile, readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import { canFire, parseCooldown } from '../condition-evaluator/cooldown-tracker.js';
 import { evaluateDeterministic, evaluateFuzzy } from '../condition-evaluator/evaluator.js';
 import type { EvaluatorDeps } from '../condition-evaluator/evaluator.js';
@@ -106,7 +106,7 @@ export class AlertService {
 		let registered = 0;
 
 		for (const alert of alerts) {
-			if (alert.enabled) {
+			if (alert.enabled && !alert._validationErrors?.length) {
 				this.registerTrigger(alert);
 				registered++;
 			}
@@ -125,14 +125,28 @@ export class AlertService {
 
 			for (const file of files) {
 				if (!file.endsWith('.yaml')) continue;
-				const alert = await readYamlFile<AlertDefinition>(join(this.alertsDir, file));
-				if (alert?.id) {
-					// Compute cooldownMs on load
-					if (alert.cooldown) {
-						alert.cooldownMs = parseCooldown(alert.cooldown);
-					}
-					alerts.push(alert);
+				const result = await readYamlFileStrict(join(this.alertsDir, file));
+				if (result === null) continue; // file disappeared
+				if ('error' in result) {
+					this.logger.warn({ file, error: result.error }, 'Skipping alert: YAML parse error');
+					continue;
 				}
+				const validated = safeValidateAlert(result.data, this.userManager);
+				if (validated === null) {
+					this.logger.warn({ file }, 'Skipping alert: not a valid object');
+					continue;
+				}
+				if (validated.errors.length > 0) {
+					this.logger.warn(
+						{ file, alertId: validated.alert.id, errors: validated.errors },
+						'Alert loaded with validation errors — will not be scheduled',
+					);
+				}
+				// Compute cooldownMs on load (even for invalid — it may still be displayable)
+				if (validated.alert.cooldown) {
+					validated.alert.cooldownMs = parseCooldown(validated.alert.cooldown);
+				}
+				alerts.push(validated.alert);
 			}
 
 			return alerts.sort((a, b) => a.name.localeCompare(b.name));
@@ -144,11 +158,25 @@ export class AlertService {
 
 	async getAlert(id: string): Promise<AlertDefinition | null> {
 		if (!ALERT_ID_PATTERN.test(id)) return null;
-		const alert = await readYamlFile<AlertDefinition>(join(this.alertsDir, `${id}.yaml`));
-		if (alert?.cooldown) {
-			alert.cooldownMs = parseCooldown(alert.cooldown);
+		const filePath = join(this.alertsDir, `${id}.yaml`);
+		const result = await readYamlFileStrict(filePath);
+		if (result === null) return null;
+		if ('error' in result) {
+			this.logger.warn({ alertId: id, error: result.error }, 'Alert YAML parse error');
+			return null;
 		}
-		return alert;
+		const validated = safeValidateAlert(result.data, this.userManager);
+		if (validated === null) return null;
+		if (validated.errors.length > 0) {
+			this.logger.warn(
+				{ alertId: id, errors: validated.errors },
+				'Alert loaded with validation errors',
+			);
+		}
+		if (validated.alert.cooldown) {
+			validated.alert.cooldownMs = parseCooldown(validated.alert.cooldown);
+		}
+		return validated.alert;
 	}
 
 	/**
@@ -179,12 +207,12 @@ export class AlertService {
 			}
 		}
 
-		// Compute cooldownMs before saving
-		def.cooldownMs = parseCooldown(def.cooldown);
 		def.updatedAt = new Date().toISOString();
 
 		await ensureDir(this.alertsDir);
-		await writeYamlFile(join(this.alertsDir, `${def.id}.yaml`), def);
+		// Strip transient runtime fields before persisting
+		const { _validationErrors: _dropped, cooldownMs: _ms, ...persistable } = def;
+		await writeYamlFile(join(this.alertsDir, `${def.id}.yaml`), persistable);
 
 		// Update trigger (cron or event)
 		this.syncTrigger(def);
@@ -226,6 +254,20 @@ export class AlertService {
 				actionTriggered: false,
 				actionsExecuted: 0,
 				error: 'Alert not found',
+			};
+		}
+
+		if (alert._validationErrors?.length) {
+			this.logger.error(
+				{ alertId, errors: alert._validationErrors },
+				'Refusing to evaluate alert with validation errors',
+			);
+			return {
+				alertId,
+				conditionMet: false,
+				actionTriggered: false,
+				actionsExecuted: 0,
+				error: 'Alert has validation errors',
 			};
 		}
 
@@ -579,4 +621,32 @@ export class AlertService {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && 'code' in error;
+}
+
+/**
+ * Safely validate an unknown value as an AlertDefinition.
+ *
+ * Returns null if the value is not even an object with an id string.
+ * Returns the alert with _validationErrors attached (empty = valid).
+ * Wraps validateAlert() in try-catch to guard against validator exceptions
+ * on garbage primitive types.
+ */
+function safeValidateAlert(
+	data: unknown,
+	userManager: UserManager,
+): { alert: AlertDefinition; errors: AlertValidationError[] } | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const obj = data as Record<string, unknown>;
+	if (typeof obj['id'] !== 'string' || !obj['id']) return null;
+
+	const alert = data as AlertDefinition;
+	let errors: AlertValidationError[];
+	try {
+		errors = validateAlert(alert, userManager);
+	} catch {
+		errors = [{ field: 'unknown', message: 'Validator threw an exception on malformed data' }];
+	}
+
+	alert._validationErrors = errors.length > 0 ? errors : undefined;
+	return { alert, errors };
 }

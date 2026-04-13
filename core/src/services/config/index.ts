@@ -21,7 +21,8 @@ import type {
 import type { ModelRef } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
-import { readYamlFile } from '../../utils/yaml.js';
+import { readYamlFileStrict } from '../../utils/yaml.js';
+import { parsePasYamlConfig } from './pas-yaml-schema.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
 
 /** Shape of an LLM provider entry in pas.yaml. */
@@ -130,7 +131,15 @@ export async function loadSystemConfig(options?: {
 
 	// Load pas.yaml
 	const configPath = options?.configPath ?? resolve('config', 'pas.yaml');
-	const yamlConfig = await readYamlFile<PasYamlConfig>(configPath);
+	const strictResult = await readYamlFileStrict(configPath);
+	let yamlConfig: PasYamlConfig | null = null;
+	if (strictResult !== null) {
+		if ('error' in strictResult) {
+			throw new Error(`Failed to parse pas.yaml: ${strictResult.error}`);
+		}
+		// Validate structure — throws with a clear message on invalid config
+		yamlConfig = parsePasYamlConfig(strictResult.data) as PasYamlConfig;
+	}
 
 	// Parse registered users from YAML
 	const users: RegisteredUser[] = (yamlConfig?.users ?? []).map((u) => ({

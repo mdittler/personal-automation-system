@@ -21,7 +21,7 @@ import {
 	SPACE_ID_PATTERN,
 } from '../../types/spaces.js';
 import { ensureDir } from '../../utils/file.js';
-import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import { readYamlFile, readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { VaultService } from '../vault/index.js';
 
@@ -70,7 +70,28 @@ export class SpaceService {
 	/** Load space definitions and active spaces from disk. */
 	async init(): Promise<void> {
 		await ensureDir(join(this.dataDir, 'system'));
-		this.spaces = (await readYamlFile<SpaceData>(this.spacesPath)) ?? {};
+
+		const strictResult = await readYamlFileStrict(this.spacesPath);
+		if (strictResult === null) {
+			// File doesn't exist — no spaces configured
+		} else if ('error' in strictResult) {
+			this.logger.warn(
+				{ error: strictResult.error },
+				'Failed to parse spaces.yaml — treating as empty',
+			);
+		} else {
+			const rawSpaces = (strictResult.data as Record<string, unknown>) ?? {};
+			const validSpaces: SpaceData = {};
+			for (const [key, value] of Object.entries(rawSpaces)) {
+				if (!isValidSpaceEntry(key, value)) {
+					this.logger.warn({ spaceKey: key }, 'Excluding invalid space entry from operational map');
+					continue;
+				}
+				validSpaces[key] = value as SpaceDefinition;
+			}
+			this.spaces = validSpaces;
+		}
+
 		this.activeSpaces = (await readYamlFile<ActiveSpaceData>(this.activeSpacesPath)) ?? {};
 		this.logger.info({ count: Object.keys(this.spaces).length }, 'Space service initialized');
 	}
@@ -404,4 +425,21 @@ class SpaceLimitError extends Error {
 		super(message);
 		this.name = 'SpaceLimitError';
 	}
+}
+
+/**
+ * Validate a raw space entry from YAML: must be an object with required string fields.
+ * Excludes malformed entries from the operational space map.
+ */
+function isValidSpaceEntry(key: string, value: unknown): boolean {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return (
+		typeof v['id'] === 'string' &&
+		v['id'] === key &&
+		typeof v['name'] === 'string' &&
+		v['name'].length > 0 &&
+		Array.isArray(v['members']) &&
+		typeof v['createdBy'] === 'string'
+	);
 }

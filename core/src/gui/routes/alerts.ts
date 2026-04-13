@@ -31,6 +31,7 @@ export interface AlertRoutesOptions {
 	userManager: UserManager;
 	registry?: { getAll(): Array<{ manifest: { app: { id: string; name: string } } }> };
 	reportService?: { listReports(): Promise<Array<{ id: string; name: string }>> };
+	spaceService?: { listSpaces(): Array<{ id: string; name: string }> };
 	n8nDispatchUrl?: string;
 	dataDir: string;
 	timezone: string;
@@ -57,8 +58,9 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 		const reports = reportService
 			? (await reportService.listReports()).map((r) => ({ id: r.id, name: r.name }))
 			: [];
+		const spaces = options.spaceService?.listSpaces() ?? [];
 		const n8nUrl = options.n8nDispatchUrl || '';
-		return { users, apps, reports, n8nUrl, safeJsonForScript };
+		return { users, apps, reports, spaces, n8nUrl, safeJsonForScript };
 	}
 
 	// --- List ---
@@ -71,11 +73,14 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 			activePage: 'alerts',
 			alerts: alerts.map((a) => {
 				const isEvent = a.trigger?.type === 'event';
-				const schedule = a.trigger?.schedule ?? a.schedule;
-				const nextRun = !isEvent && a.enabled ? getNextRun(schedule, timezone) : null;
+				const schedule = a.trigger?.schedule ?? a.schedule ?? '';
+				const nextRun =
+					!isEvent && a.enabled && !a._validationErrors?.length
+						? getNextRun(schedule, timezone)
+						: null;
 				return {
 					id: a.id,
-					name: a.name,
+					name: a.name ?? a.id,
 					description: a.description,
 					schedule,
 					humanSchedule: isEvent
@@ -88,7 +93,8 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 					actionCount: a.actions?.length ?? 0,
 					cooldown: a.cooldown,
 					lastFired: a.lastFired ? formatDateTime(new Date(a.lastFired), timezone) : 'Never',
-					enabled: a.enabled,
+					enabled: a.enabled ?? false,
+					validationErrors: a._validationErrors ?? [],
 				};
 			}),
 		});
@@ -347,11 +353,17 @@ function parseFormToAlert(body: Record<string, string>): AlertDefinition {
 	for (let i = 0; i < 20; i++) {
 		const appId = body[`ds_app_id_${i}`];
 		if (!appId) continue;
-		dataSources.push({
-			app_id: appId,
-			user_id: body[`ds_user_id_${i}`] || '',
-			path: body[`ds_path_${i}`] || '',
-		});
+		const scope = body[`ds_scope_${i}`];
+		const spaceId = body[`ds_space_id_${i}`] || '';
+		if (scope === 'space' || (!scope && spaceId)) {
+			dataSources.push({ app_id: appId, space_id: spaceId, path: body[`ds_path_${i}`] || '' });
+		} else {
+			dataSources.push({
+				app_id: appId,
+				user_id: body[`ds_user_id_${i}`] || '',
+				path: body[`ds_path_${i}`] || '',
+			});
+		}
 	}
 
 	// Parse condition

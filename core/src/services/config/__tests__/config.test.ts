@@ -379,18 +379,17 @@ describe('loadSystemConfig', () => {
 		expect(config.llm?.safeguards?.globalMonthlyCostCap).toBe(25.0);
 	});
 
-	it('treats malformed pas.yaml as empty config (uses defaults)', async () => {
+	it('throws on malformed pas.yaml (fail fast)', async () => {
 		const envPath = join(tempDir, '.env');
 		const yamlPath = join(tempDir, 'pas.yaml');
 
 		await writeEnvFile(envPath, requiredEnvVars);
 		await writeFile(yamlPath, '{{{{invalid yaml: [[[', 'utf-8');
 
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
-
-		// readYamlFile returns null on parse error, so config uses defaults
-		expect(config.users).toEqual([]);
-		expect(config.timezone).toBe('UTC');
+		// D14 fix: malformed YAML now fails fast at startup instead of silently using defaults
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			'Failed to parse pas.yaml',
+		);
 	});
 
 	// --- Fallback config tests ---

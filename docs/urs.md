@@ -928,9 +928,29 @@ The system must load configuration from `.env` files and `pas.yaml`. Environment
 - `config.test.ts` > applies CLAUDE_MODEL env override to anthropic provider defaultModel
 
 **Error handling tests:**
-- `config.test.ts` > treats malformed pas.yaml as empty config (uses defaults)
+- `config.test.ts` > throws on malformed pas.yaml (fail fast)
 
-**Fixes:** None
+**Edge case tests (pas-yaml-schema.test.ts):**
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts a valid minimal config (empty)
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts a valid config with users
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts unknown top-level keys (passthrough)
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts valid LLM provider config
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts webhook with valid URL
+- `pas-yaml-schema.test.ts` > parsePasYamlConfig() > returns parsed config for valid input
+- `pas-yaml-schema.test.ts` > parsePasYamlConfig() > passes through unknown keys
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects a user missing required id
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects a user with empty id
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects a user missing required name
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects null input
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects undefined input
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects non-object input (number)
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects LLM provider missing api_key_env
+- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects webhook with invalid URL
+- `pas-yaml-schema.test.ts` > parsePasYamlConfig() > throws a formatted Error on invalid input
+- `pas-yaml-schema.test.ts` > parsePasYamlConfig() > error message includes path and reason
+
+**Fixes:**
+- **D14 (2026-04-13):** Malformed pas.yaml now fails fast at startup — `readYamlFileStrict()` catches YAML syntax errors before Zod runs, and Zod validates object shape. Added Zod schema validation (`pas-yaml-schema.ts`) for users, LLM providers, webhooks, and all top-level config sections. CL: D14-fix.
 
 ### REQ-CONFIG-002: Built-in provider defaults
 
@@ -3492,6 +3512,22 @@ ReportService provides CRUD (save/get/list/delete) with YAML persistence, report
 - `report-service.test.ts` > ReportService — LLM summarization > skips summarization when all sections are empty
 - `report-service.test.ts` > ReportService — LLM summarization > sanitizes data before LLM prompt
 
+**Edge case tests (D14 load-time validation):**
+- `report-load-validation.test.ts` > listReports() > skips files with corrupt YAML (parse error)
+- `report-load-validation.test.ts` > listReports() > skips files that are not objects
+- `report-load-validation.test.ts` > listReports() > skips files with no id field
+- `report-load-validation.test.ts` > listReports() > includes structurally invalid report with _validationErrors attached
+- `report-load-validation.test.ts` > listReports() > returns valid reports without _validationErrors
+- `report-load-validation.test.ts` > getReport() > returns null for corrupt YAML
+- `report-load-validation.test.ts` > getReport() > attaches _validationErrors for invalid definition
+- `report-load-validation.test.ts` > getReport() > returns valid report without _validationErrors
+- `report-load-validation.test.ts` > run() execution gate > refuses to run a report with validation errors
+- `report-load-validation.test.ts` > run() execution gate > runs a valid report normally
+- `report-load-validation.test.ts` > saveReport() strips _validationErrors > does not persist _validationErrors to disk
+
+**Fixes:**
+- **D14 (2026-04-13):** Report loading now uses `readYamlFileStrict()` + `safeValidateReport()`. Corrupt YAML is skipped with logged warning. Invalid definitions are included in lists with `_validationErrors` attached but cannot be executed via `run()`. `_validationErrors` is stripped before persisting to disk. CL: D14-fix.
+
 ---
 
 ### REQ-REPORT-005: Report cron lifecycle
@@ -3551,6 +3587,22 @@ GUI provides list, create, edit, delete, toggle (htmx), preview (htmx), and hist
 - `reports.test.ts` > Report GUI Routes > GET /gui/reports/:id/history/:file > returns 404 for missing history file
 - `reports.test.ts` > Report GUI Routes > XSS protection > escapes HTML in toggle response
 - `reports.test.ts` > Report GUI Routes > XSS protection > escapes HTML in preview response
+
+**Standard tests (D39 space_id support):**
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > scope=space parsing > parses space scope — space_id set, user_id omitted
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > scope=user parsing > parses user scope — user_id set, space_id omitted
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > fallback scope detection > treats as space scope when scope field absent but space_id present
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > D39 regression: API-created space-scoped report round-trip > retains space_id after GUI edit and save
+
+**Edge case tests (D39 + D14 GUI robustness):**
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > space dropdown > edit page includes space options when spaceService is provided
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > space dropdown > edit page renders without errors when spaceService is absent
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > D14: list route tolerance > renders list page without crash when a structurally invalid report exists on disk
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > D14: validation error banner > edit page shows structural error banner for an invalid report
+- `report-space-id.test.ts` > D39: Report form space_id round-trip > D39: empty space_id edge case > rejects empty space_id — re-renders form with validation errors, no redirect
+
+**Fixes:**
+- **D39 (2026-04-13):** Report edit form now exposes scope radio (user/space) + space dropdown. `parseFormToReport` handles `section_scope_*` / `section_space_id_*` with user_id/space_id mutual exclusion and fallback for missing scope field. SpaceService wired into route registration. Validation error banners in edit views, warning badges in list views. CL: D39-fix.
 
 ---
 
@@ -3662,6 +3714,18 @@ AlertService manages alert definitions (CRUD), scheduled condition evaluation, c
 
 **Security tests:**
 - `alert-service.test.ts` > preview ignores cooldown > preview returns conditionMet true even when in cooldown
+
+**Edge case tests (D14 load-time validation):**
+- `alert-load-validation.test.ts` > listAlerts() > skips files with corrupt YAML
+- `alert-load-validation.test.ts` > listAlerts() > includes structurally invalid alert with _validationErrors
+- `alert-load-validation.test.ts` > listAlerts() > returns valid alerts without _validationErrors
+- `alert-load-validation.test.ts` > getAlert() > returns null for corrupt YAML
+- `alert-load-validation.test.ts` > getAlert() > attaches _validationErrors for invalid definition
+- `alert-load-validation.test.ts` > evaluate() execution gate > refuses to evaluate an alert with validation errors
+- `alert-load-validation.test.ts` > saveAlert() strips _validationErrors > does not persist _validationErrors to disk
+
+**Fixes:**
+- **D14 (2026-04-13):** Alert loading now uses `readYamlFileStrict()` + `safeValidateAlert()`. Corrupt YAML is skipped with logged warning. Invalid definitions are included in lists with `_validationErrors` attached but cannot be evaluated via `evaluate()`. `_validationErrors` is stripped before persisting to disk. CL: D14-fix.
 
 ### REQ-ALERT-004: Alert cron lifecycle
 
@@ -3832,6 +3896,21 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 - `alerts.test.ts` > XSS protection > escapes HTML in toggle response
 - `alerts.test.ts` > XSS protection > escapes HTML in test response
 
+**Standard tests (D39 space_id support):**
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > scope=space parsing > parses space scope — space_id set, user_id omitted
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > scope=user parsing > parses user scope — user_id set, space_id omitted
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > fallback scope detection > treats as space scope when scope field absent but space_id present
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > D39 regression: API-created space-scoped alert round-trip > retains space_id after GUI edit and save
+
+**Edge case tests (D39 + D14 GUI robustness):**
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > space dropdown > edit page includes space options when spaceService is provided
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > D14: list route tolerance > renders list page without crash when a structurally invalid alert exists on disk
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > D14: validation error banner > edit page shows structural error banner for an invalid alert
+- `alert-space-id.test.ts` > D39: Alert form space_id round-trip > D39: empty space_id edge case > rejects empty space_id — re-renders form with validation errors, no redirect
+
+**Fixes:**
+- **D39 (2026-04-13):** Alert edit form now exposes scope radio (user/space) + space dropdown. `parseFormToAlert` handles `ds_scope_*` / `ds_space_id_*` with user_id/space_id mutual exclusion and fallback for missing scope field. SpaceService wired into route registration. Validation error banners in edit views, warning badges in list views. CL: D39-fix.
+
 ---
 
 ## Phase 23: Shared Data Spaces
@@ -3865,6 +3944,14 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 - `spaces.test.ts` > validation > rejects members exceeding max limit on create
 - `spaces.test.ts` > edge cases > saveSpace enforces max spaces limit
 - `spaces.test.ts` > edge cases > saveSpace allows update when at limit
+
+**Edge case tests (D14 load-time validation):**
+- `spaces.test.ts` > init() space entry validation (D14) > excludes invalid space entries (missing name) from operational map
+- `spaces.test.ts` > init() space entry validation (D14) > excludes space entry where id does not match key
+- `spaces.test.ts` > init() space entry validation (D14) > logs warning and loads no spaces when spaces.yaml has corrupt YAML
+
+**Fixes:**
+- **D14 (2026-04-13):** Space `init()` now uses `readYamlFileStrict()` — corrupt `spaces.yaml` logs a warning instead of silently loading as empty. Each entry's structure (`id`, `name`, `members`, `createdBy`) is validated and invalid entries are excluded from the operational map with a logged warning. CL: D14-fix.
 
 ### REQ-SPACE-002: Membership management
 **Status:** Implemented
@@ -4612,7 +4699,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-018 | model-catalog.test.ts | 5 | 4 | Implemented |
 | REQ-LLM-019 | model-pricing.test.ts | 8 | 6 | Implemented |
 | REQ-LLM-020 | anthropic-provider.test.ts | 9 | 6 | Implemented |
-| REQ-CONFIG-001 | config.test.ts | 8 | 8 | Implemented |
+| REQ-CONFIG-001 | config.test.ts, pas-yaml-schema.test.ts | 15 | 18 | Implemented |
 | REQ-CONFIG-002 | default-providers.test.ts | 5 | 3 | Implemented |
 | REQ-CONFIG-003 | app-config-service.test.ts | 5 | 7 | Implemented |
 | REQ-ROUTE-001 | command-parser.test.ts, router.test.ts | 9 | 7 | Implemented |
@@ -4716,18 +4803,18 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-REPORT-001 | report-validator.test.ts | 8 | 33 | Implemented |
 | REQ-REPORT-002 | section-collector.test.ts | 10 | 12 | Implemented |
 | REQ-REPORT-003 | report-formatter.test.ts | 7 | 4 | Implemented |
-| REQ-REPORT-004 | report-service.test.ts | 10 | 13 | Implemented |
+| REQ-REPORT-004 | report-service.test.ts, report-load-validation.test.ts | 10 | 24 | Implemented |
 | REQ-REPORT-005 | report-service.test.ts, cron-manager.test.ts | 5 | 6 | Implemented |
-| REQ-REPORT-006 | reports.test.ts | 13 | 12 | Implemented |
+| REQ-REPORT-006 | reports.test.ts, report-space-id.test.ts | 17 | 17 | Implemented |
 | REQ-ALERT-001 | alert-validator.test.ts | 19 | 30 | Implemented |
 | REQ-ALERT-002 | alert-executor.test.ts | 4 | 7 | Implemented |
-| REQ-ALERT-003 | alert-service.test.ts | 14 | 18 | Implemented |
+| REQ-ALERT-003 | alert-service.test.ts, alert-load-validation.test.ts | 14 | 25 | Implemented |
 | REQ-ALERT-004 | alert-service.test.ts | 5 | 0 | Implemented |
 | REQ-ALERT-005 | alert-service.test.ts, alert-validator.test.ts | 10 | 9 | Implemented |
 | REQ-ALERT-006 | alert-executor-enhanced.test.ts | 20 | 20 | Implemented |
 | REQ-ALERT-007 | alert-validator-actions.test.ts | 15 | 19 | Implemented |
-| REQ-ALERT-GUI-001 | alerts.test.ts | 10 | 13 | Implemented |
-| REQ-SPACE-001 | spaces.test.ts | 11 | 13 | Implemented |
+| REQ-ALERT-GUI-001 | alerts.test.ts, alert-space-id.test.ts | 14 | 17 | Implemented |
+| REQ-SPACE-001 | spaces.test.ts | 11 | 16 | Implemented |
 | REQ-SPACE-002 | spaces.test.ts | 9 | 6 | Implemented |
 | REQ-SPACE-003 | spaces.test.ts | 5 | 6 | Implemented |
 | REQ-SPACE-004 | router-spaces.test.ts | 17 | 8 | Implemented |
@@ -4770,4 +4857,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-VAULT-004 | vault.test.ts | 3 | 1 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **121 test files** | **928** | **1131** | **2156 tests** |
+| **Totals** | **126 test files** | **943** | **1171** | **2211 tests** |
