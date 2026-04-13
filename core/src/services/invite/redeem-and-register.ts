@@ -8,7 +8,7 @@
 import type { Logger } from 'pino';
 import type { InviteService } from './index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import type { TelegramService } from '../telegram/index.js';
+import type { TelegramService } from '../../types/telegram.js';
 
 export interface RedeemAndRegisterDeps {
 	inviteService: InviteService;
