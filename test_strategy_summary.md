@@ -322,7 +322,7 @@ Missing tests:
 - Startup-style smoke tests after build that confirm bundled app IDs load under compiled core.
 - CLI tests invoking the actual `install-app` main flow, proving permission review happens before copy/install unless `--yes` or `-y` is present.
 - Installer planning/dry-run tests proving a permission summary can be generated without copying to `apps/` or running `pnpm install`.
-- Root `package.json` script smoke tests verifying documented commands such as `pnpm register-app --help` resolve to real files.
+- Root `package.json` script smoke tests verifying all documented CLI script entries resolve to files that exist on disk, and that removed commands (e.g., `register-app`) are absent from the scripts object.
 
 Good nearby coverage:
 

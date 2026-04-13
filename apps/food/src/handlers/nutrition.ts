@@ -575,7 +575,7 @@ export async function handleNutritionCommand(
 					const val = parseStrictInt(spec.raw);
 					if (val === null || val < 0 || val > 99999) {
 						await services.telegram.send(userId,
-							`Invalid ${spec.name} value: '${spec.raw}'. Must be a number between 0 and 99999.`);
+							`Invalid ${spec.name} value: '${escapeMarkdown(spec.raw)}'. Must be a number between 0 and 99999.`);
 						return;
 					}
 					parsed[spec.name] = val;
