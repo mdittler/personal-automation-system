@@ -1289,7 +1289,7 @@ Missing coverage:
 ### Finding 41: Report and alert edit pages raw-embed JSON inside script blocks
 
 - Status: fixed
-- **Status:** Fixed — `safeJsonForScript()` helper added to `core/src/gui/utils/safe-json.ts` and used in all 7 `<%~` JSON embeds in the report-edit and alert-edit templates, escaping `<`, `>`, `&`, U+2028, and U+2029.
+- **Status:** Fixed — `safeJsonForScript()` helper added to `core/src/utils/escape-html.ts` (alongside `escapeHtml`) and used in all 7 `<%~` JSON embeds in the report-edit and alert-edit templates. Replaces `<` with `\u003c` to prevent `</script>` breakout.
 - Severity: medium
 - Classification: XSS / script-context escaping
 - Location: `core/src/gui/views/report-edit.eta:241-242`
