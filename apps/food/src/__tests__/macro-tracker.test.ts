@@ -729,4 +729,138 @@ describe('macro-tracker', () => {
 			expect(result).toBeNull();
 		});
 	});
+
+	// ─── H3: Corrupt YAML preservation ───────────────────────
+	describe('loadMonthlyLog — corrupt YAML preservation (H3)', () => {
+		it('preserves corrupt YAML to corrupt/ sidecar and returns null', async () => {
+			const corruptContent = 'not: valid: yaml: [[[';
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue(corruptContent),
+				write: vi.fn().mockResolvedValue(undefined),
+			});
+			const result = await loadMonthlyLog(store as never, '2026-04');
+			expect(result).toBeNull();
+			// Must have written the sidecar — do NOT overwrite the original
+			expect(store.write).toHaveBeenCalledOnce();
+			const [path, content] = store.write.mock.calls[0]!;
+			expect(path).toMatch(/^corrupt\/nutrition-2026-04-/);
+			expect(path).toMatch(/\.yaml$/);
+			// Sidecar must contain the original bytes unchanged
+			expect(content).toBe(corruptContent);
+		});
+
+		it('preserves schema-invalid but nonempty YAML (missing "month" field)', async () => {
+			// Parses OK but data.month is missing — should preserve and return null
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue('userId: user1\ndays: []'),
+				write: vi.fn().mockResolvedValue(undefined),
+			});
+			const result = await loadMonthlyLog(store as never, '2026-07');
+			expect(result).toBeNull();
+			expect(store.write).toHaveBeenCalledOnce();
+			const [path] = store.write.mock.calls[0]!;
+			expect(path).toMatch(/^corrupt\/nutrition-2026-07-/);
+		});
+
+		it('does not write sidecar for empty content', async () => {
+			// Empty file (whitespace only) is not corruption — just no data yet
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue('   '),
+				write: vi.fn().mockResolvedValue(undefined),
+			});
+			const result = await loadMonthlyLog(store as never, '2026-04');
+			expect(result).toBeNull();
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('does not write sidecar when file does not exist', async () => {
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue(null),
+				write: vi.fn().mockResolvedValue(undefined),
+			});
+			const result = await loadMonthlyLog(store as never, '2026-04');
+			expect(result).toBeNull();
+			expect(store.write).not.toHaveBeenCalled();
+		});
+	});
+
+	// ─── M2: Write-time validation in logMealMacros ──────────
+	describe('logMealMacros — write-time validation (M2)', () => {
+		it('rejects entry with empty recipeTitle', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			await logMealMacros(store as never, 'u1', makeMealEntry({ recipeTitle: '' }), '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects entry with recipeTitle exceeding 200 chars', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			await logMealMacros(store as never, 'u1', makeMealEntry({ recipeTitle: 'a'.repeat(201) }), '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects entry with negative calories', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			await logMealMacros(store as never, 'u1', makeMealEntry({ macros: { calories: -1 } }), '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects entry with servingsEaten of zero', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			await logMealMacros(store as never, 'u1', makeMealEntry({ servingsEaten: 0 }), '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects entry with servingsEaten exceeding 100', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			await logMealMacros(store as never, 'u1', makeMealEntry({ servingsEaten: 101 }), '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+
+		it('normalizes missing macro fields to 0 (defaults)', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			// Entry with partial macros — fiber omitted
+			const entry = makeMealEntry({ macros: { calories: 400, protein: 30, carbs: 50, fat: 10 } });
+			await logMealMacros(store as never, 'u1', entry, '2026-04-01');
+			expect(store.write).toHaveBeenCalledOnce();
+			const written = store.write.mock.calls[0]![1] as string;
+			// fiber should appear as 0 in the output after normalization
+			expect(written).toContain('fiber: 0');
+		});
+
+		it('accepts valid entry with all optional fields', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			const entry: MealMacroEntry = {
+				recipeId: 'r1',
+				recipeTitle: 'Chicken Bowl',
+				mealType: 'lunch',
+				servingsEaten: 1,
+				macros: { calories: 500, protein: 40, carbs: 45, fat: 15, fiber: 8 },
+				estimationKind: 'recipe',
+				confidence: 0.9,
+				sourceId: 'r1',
+			};
+			await logMealMacros(store as never, 'u1', entry, '2026-04-01');
+			expect(store.write).toHaveBeenCalledOnce();
+		});
+
+		it('rejects invalid estimationKind enum value', async () => {
+			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
+			const entry = makeMealEntry({ estimationKind: 'unknown' as never });
+			await logMealMacros(store as never, 'u1', entry, '2026-04-01');
+			expect(store.write).not.toHaveBeenCalled();
+		});
+	});
+
+	// ─── H3: preserveCorruptFile swallows write errors ────────
+	describe('loadMonthlyLog — sidecar preservation failure is swallowed (H3)', () => {
+		it('returns null gracefully even when the sidecar write itself throws', async () => {
+			const store = createMockScopedStore({
+				read: vi.fn().mockResolvedValue('not: valid: yaml: [[['),
+				write: vi.fn().mockRejectedValue(new Error('disk full')),
+			});
+			// Must not throw — the inner catch in preserveCorruptFile swallows the write error
+			const result = await loadMonthlyLog(store as never, '2026-04');
+			expect(result).toBeNull();
+		});
+	});
 });

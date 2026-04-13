@@ -1304,14 +1304,20 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		// ─── H11.w: Quick-meal guided add callbacks ──────────
 		if (data.startsWith('app:food:nut:meals:add:')) {
 			const userStore = services.data.forUser(ctx.userId);
-			await handleQuickMealAddCallback(services, userStore, ctx.userId, data);
+			const handled = await handleQuickMealAddCallback(services, userStore, ctx.userId, data);
+			if (!handled) {
+				services.logger.warn({ data }, 'quick-meal add callback not handled');
+			}
 			return;
 		}
 
 		// ─── H11.w: Quick-meal guided edit callbacks ─────────
 		if (data.startsWith('app:food:nut:meals:edit:')) {
 			const userStore = services.data.forUser(ctx.userId);
-			await handleQuickMealEditCallback(services, userStore, ctx.userId, data);
+			const handled = await handleQuickMealEditCallback(services, userStore, ctx.userId, data);
+			if (!handled) {
+				services.logger.warn({ data }, 'quick-meal edit callback not handled');
+			}
 			return;
 		}
 
@@ -1321,7 +1327,10 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			data === 'app:food:nut:log:adhoc-prompt'
 		) {
 			const userStore = services.data.forUser(ctx.userId);
-			await handleQuickMealLogCallback(services, userStore, ctx.userId, data);
+			const handled = await handleQuickMealLogCallback(services, userStore, ctx.userId, data);
+			if (!handled) {
+				services.logger.warn({ data }, 'quick-meal log callback not handled');
+			}
 			return;
 		}
 

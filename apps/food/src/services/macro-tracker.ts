@@ -8,6 +8,7 @@
 import type { ScopedDataStore } from '@pas/core/types';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
+import { z } from 'zod';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type {
 	DailyMacroEntry,
@@ -38,6 +39,57 @@ function nutritionPath(month: string): string {
 		throw new Error(`Invalid month format: expected YYYY-MM`);
 	}
 	return `nutrition/${month}.yaml`;
+}
+
+/** Zod schema for write-time validation of MealMacroEntry (M2). */
+const MacroDataSchema = z.object({
+	calories: z.number().nonnegative().max(99999).optional().default(0),
+	protein: z.number().nonnegative().max(99999).optional().default(0),
+	carbs: z.number().nonnegative().max(99999).optional().default(0),
+	fat: z.number().nonnegative().max(99999).optional().default(0),
+	fiber: z.number().nonnegative().max(99999).optional().default(0),
+});
+
+const MealMacroEntrySchema = z.object({
+	recipeId: z.string().min(1).max(200),
+	recipeTitle: z.string().min(1).max(200),
+	mealType: z.string().min(1).max(50),
+	servingsEaten: z.number().positive().max(100),
+	macros: MacroDataSchema,
+	estimationKind: z.enum(['recipe', 'quick-meal', 'llm-ad-hoc', 'manual']).optional(),
+	confidence: z.number().min(0).max(1).optional(),
+	sourceId: z.string().max(200).optional(),
+});
+
+/**
+ * Preserve a corrupt nutrition file as a sidecar in `corrupt/` so it can be
+ * recovered manually. Returns without throwing — the caller always gets null.
+ * H3 fix: prevents silent data loss when YAML is malformed or schema-invalid.
+ *
+ * NOTE: ScopedDataStore has no rename/delete operation, so the original corrupt
+ * file is not quarantined — it remains in place. Each subsequent loadMonthlyLog
+ * call on the same corrupt month will write another sidecar with a new timestamp.
+ * Sidecars accumulate until the corrupt original is manually removed. This is a
+ * known limitation; true quarantine would require extending ScopedDataStore.
+ */
+async function preserveCorruptFile(
+	store: ScopedDataStore,
+	raw: string,
+	month: string,
+	err: unknown,
+): Promise<void> {
+	const ts = new Date().toISOString().replace(/[:.]/g, '-');
+	const corruptPath = `corrupt/nutrition-${month}-${ts}.yaml`;
+	try {
+		await store.write(corruptPath, raw);
+	} catch {
+		// If we cannot preserve, swallow — surfacing this would obscure the original error.
+	}
+	// eslint-disable-next-line no-console
+	console.error(
+		`[macro-tracker] Corrupt YAML for ${month} preserved as ${corruptPath}:`,
+		(err as Error)?.message ?? err,
+	);
 }
 
 export function sumMacros(...entries: MacroData[]): MacroData {
@@ -89,13 +141,18 @@ export async function loadMonthlyLog(
 		const content = stripFrontmatter(raw);
 		if (!content.trim()) return null;
 		const data = parse(content) as MonthlyMacroLog;
-		if (!data?.month) return null;
+		// Schema-invalid but non-empty YAML: preserve before discarding (H3).
+		if (!data?.month) {
+			await preserveCorruptFile(store, raw, month, new Error('parsed YAML missing required "month" field'));
+			return null;
+		}
 		return {
 			month: data.month,
 			userId: data.userId,
 			days: data.days ?? [],
 		};
-	} catch {
+	} catch (err) {
+		await preserveCorruptFile(store, raw, month, err);
 		return null;
 	}
 }
@@ -127,6 +184,15 @@ export async function logMealMacros(
 	entry: MealMacroEntry,
 	date: string,
 ): Promise<void> {
+	// M2: validate and normalize the entry before persisting
+	const parsed = MealMacroEntrySchema.safeParse(entry);
+	if (!parsed.success) {
+		// eslint-disable-next-line no-console
+		console.error('[macro-tracker] logMealMacros: invalid entry, skipping write:', parsed.error.flatten());
+		return;
+	}
+	const validEntry = parsed.data as MealMacroEntry;
+
 	const month = date.slice(0, 7); // YYYY-MM
 	let log = await loadMonthlyLog(store, month);
 	if (!log) {
@@ -139,7 +205,7 @@ export async function logMealMacros(
 		log.days.push(day);
 	}
 
-	day.meals.push(entry);
+	day.meals.push(validEntry);
 	day.totals = sumMacros(...day.meals.map(m => m.macros));
 
 	await saveMonthlyLog(store, log);

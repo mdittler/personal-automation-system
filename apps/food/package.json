@@ -12,7 +12,8 @@
 	},
 	"dependencies": {
 		"@pas/core": "workspace:*",
-		"yaml": "^2.8.2"
+		"yaml": "^2.8.2",
+		"zod": "^3.25.23"
 	},
 	"devDependencies": {
 		"@types/node": "^25.3.2"

@@ -33,6 +33,7 @@ import {
 	hasPendingQuickMealEdit,
 	__resetQuickMealFlowForTests,
 } from '../../handlers/quick-meal-flow.js';
+import { handleQuickMealLogCallback } from '../../handlers/quick-meal-log.js';
 import type { Recipe, MonthlyMacroLog, QuickMealTemplate } from '../../types.js';
 
 // Mock loadAllRecipes so each test can control the recipe library without
@@ -1564,5 +1565,121 @@ describe('H11.w — per-user isolation', () => {
 		const allText =
 			telegram.messages.map((m) => m.text).join('\n') + (telegram.lastMessage ?? '');
 		expect(allText).not.toContain('Chipotle bowl');
+	});
+});
+
+// ─── L2: handleQuickMealAddCallback returns false for unrecognised sub-prefix ─
+describe('L2 — handleQuickMealAddCallback returns false for unrecognised sub-prefix', () => {
+	beforeEach(() => __resetQuickMealFlowForTests());
+
+	it('returns false when a pending flow exists but sub-prefix is unrecognised', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		// Seed a pending add flow so the function reaches the sub-prefix check
+		// (without pending state it returns true on the "flow expired" guard)
+		await dispatchAs('u1', () => beginQuickMealAdd(services as never, 'u1'));
+		expect(hasPendingQuickMealAdd('u1')).toBe(true);
+
+		// Now send a garbage sub-prefix — the handler should return false
+		const handled = await dispatchAs('u1', () =>
+			handleQuickMealAddCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:add:garbage:unknown',
+			),
+		);
+		expect(handled).toBe(false);
+	});
+
+	it('returns true for a recognised sub-prefix (kind step)', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		await dispatchAs('u1', () => beginQuickMealAdd(services as never, 'u1'));
+		// Advance to awaiting_kind step
+		await dispatchAs('u1', () =>
+			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'My test meal'),
+		);
+
+		const handled = await dispatchAs('u1', () =>
+			handleQuickMealAddCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:add:kind:home',
+			),
+		);
+		expect(handled).toBe(true);
+	});
+});
+
+// ─── L2: handleQuickMealEditCallback returns false for unrecognised sub-prefix ─
+describe('L2 — handleQuickMealEditCallback returns false for unrecognised sub-prefix', () => {
+	beforeEach(() => __resetQuickMealFlowForTests());
+
+	it('returns false when pending edit flow exists but sub-prefix is unrecognised', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		// Seed a pending edit state
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({ id: 'test-meal', label: 'Test meal', kind: 'home' }),
+		);
+		await dispatchAs('u1', () =>
+			beginQuickMealEdit(services as never, 'u1', quickMealFixture({ id: 'test-meal', label: 'Test meal', kind: 'home' })),
+		);
+		expect(hasPendingQuickMealEdit('u1')).toBe(true);
+
+		const handled = await dispatchAs('u1', () =>
+			handleQuickMealEditCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:meals:edit:garbage:unknown',
+			),
+		);
+		expect(handled).toBe(false);
+	});
+});
+
+// ─── L2: handleQuickMealLogCallback returns false for unrecognised data ──────
+describe('L2 — handleQuickMealLogCallback returns false for unrecognised data', () => {
+	it('returns false for data that matches neither adhoc-prompt nor quickmeal pattern', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		// No pending state needed — the log callback does not guard on pending state
+		const handled = await dispatchAs('u1', () =>
+			handleQuickMealLogCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:log:garbage',
+			),
+		);
+		expect(handled).toBe(false);
+	});
+
+	it('returns true for the adhoc-prompt callback', async () => {
+		const userStore = buildUserStore();
+		const telegram = buildTelegramSpy();
+		const services = buildServices(userStore, telegram);
+
+		const handled = await dispatchAs('u1', () =>
+			handleQuickMealLogCallback(
+				services as never,
+				userStore as never,
+				'u1',
+				'app:food:nut:log:adhoc-prompt',
+			),
+		);
+		expect(handled).toBe(true);
 	});
 });

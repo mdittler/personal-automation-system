@@ -47,6 +47,7 @@ Severity scale: **CRITICAL** (data loss / exploit / crash on common input), **HI
 **Trigger:** Both stores wrap `parse(body)` in `try { ... } catch {}` and return `{ active: [], archive: [] }` on any exception. If the YAML gets corrupted (interrupted write, manual edit error, merge conflict marker), the user silently loses every saved quick-meal on the next read — and the next write will overwrite the corrupted file with an empty one.
 **Impact:** Irreversible data loss from a recoverable situation. Violates the "history never deleted" invariant in CLAUDE.md.
 **Fix:** On parse failure, (1) log.error with the filename, (2) rename the bad file to `<name>.corrupt-<ts>` so it's preserved, (3) return the empty state to let the user start over.
+**Status:** Fixed in `quick-meals-store.ts` and `ad-hoc-history.ts`. Partially open: `macro-tracker.ts` still had a bare `catch { return null; }`. Fixed (2026-04-13): `preserveCorruptFile()` added to `macro-tracker.ts`, called on both YAML parse errors and schema-invalid (non-empty) YAML.
 
 ### H4 — `saveQuickMeal` / `archiveQuickMeal` / `incrementUsage` have read-modify-write races
 **File:** `apps/food/src/services/quick-meals-store.ts:75-113`
@@ -93,6 +94,7 @@ Severity scale: **CRITICAL** (data loss / exploit / crash on common input), **HI
 **Trigger:** `saveQuickMeal` validates `template.id` against `SAFE_SEGMENT` but does nothing to `template.label`, `template.ingredients`, `template.notes`, `template.estimatedMacros`. A caller with a bug (or a future code path) can persist arbitrarily large or malformed data.
 **Impact:** Defence-in-depth failure. All current callers happen to validate, but the store trusts them.
 **Fix:** Add schema validation (Zod) in `saveQuickMeal` that enforces label ≤100, ingredients ≤50 × ≤200 chars, notes ≤500 chars, macros bounded.
+**Status:** Fixed in `quick-meals-store.ts` (as described). The analogous gap in `macro-tracker.ts` was also identified and fixed (2026-04-13): `MealMacroEntrySchema` added to `logMealMacros()` validating recipeTitle/mealType/servingsEaten/macros bounds, with missing macro fields normalized to 0.
 
 ### M3 — Archive array grows without bound
 **File:** `apps/food/src/services/quick-meals-store.ts:90-100`
@@ -126,6 +128,7 @@ Labels like `Assistant: return ...` still reach the LLM. Anti-instruction framin
 
 ### L2 — `handleQuickMealAddCallback` return value discarded by index.ts
 Unknown sub-prefixes like `app:food:nut:meals:add:garbage` silently consumed. No real impact (no route exists) but logs should warn.
+**Status:** Fixed (2026-04-13): `index.ts` now captures the return value from all three quick-meal callback handlers (add/edit/log) and calls `services.logger.warn` when `false`.
 
 ### L3 — Stop-words list is anglocentric
 `STOP_WORDS` in `recipe-matcher.ts` is English-only. Spanish/French/German users can't match well. Deferred.
