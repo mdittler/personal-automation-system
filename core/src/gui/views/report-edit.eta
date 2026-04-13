@@ -12,6 +12,16 @@
     </ul>
   </div>
 <% } %>
+<% if (it.report && it.report._validationErrors && it.report._validationErrors.length > 0) { %>
+  <div class="alert-banner alert-banner-error">
+    <strong>&#9888; This report has structural errors and cannot be run until they are fixed:</strong>
+    <ul style="margin-bottom: 0">
+      <% for (const err of it.report._validationErrors) { %>
+        <li><%= err.field %>: <%= err.message %></li>
+      <% } %>
+    </ul>
+  </div>
+<% } %>
 
 <% if (it.isNew) { %>
   <div class="card">
@@ -125,6 +135,7 @@
               <% } } %>
             </div>
           <% } else if (section.type === 'app-data') { %>
+            <% const isSpaceScope = !!section.config.space_id; %>
             <div class="grid">
               <label>
                 App ID
@@ -136,6 +147,19 @@
                 </select>
               </label>
               <label>
+                Scope
+                <div>
+                  <label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem">
+                    <input type="radio" name="section_scope_<%= i %>" value="user" <%= !isSpaceScope ? 'checked' : '' %> onchange="toggleScope(<%= i %>,'section')" /> User
+                  </label>
+                  <label style="display:inline-flex;align-items:center;gap:0.4rem">
+                    <input type="radio" name="section_scope_<%= i %>" value="space" <%= isSpaceScope ? 'checked' : '' %> onchange="toggleScope(<%= i %>,'section')" /> Space
+                  </label>
+                </div>
+              </label>
+            </div>
+            <div id="section-user-wrap-<%= i %>" class="grid">
+              <label>
                 User ID
                 <select name="section_user_id_<%= i %>">
                   <option value="">-- Select user --</option>
@@ -144,6 +168,19 @@
                   <% } } %>
                 </select>
               </label>
+            </div>
+            <div id="section-space-wrap-<%= i %>" class="grid">
+              <label>
+                Space
+                <select name="section_space_id_<%= i %>">
+                  <option value="">-- Select space --</option>
+                  <% if (it.spaces) { for (const space of it.spaces) { %>
+                    <option value="<%= space.id %>" <%= section.config.space_id === space.id ? 'selected' : '' %>><%= space.name %> (<%= space.id %>)</option>
+                  <% } } %>
+                </select>
+              </label>
+            </div>
+            <div class="grid">
               <label>
                 Path
                 <input type="text" name="section_path_<%= i %>" value="<%= section.config.path || '' %>" required
@@ -152,8 +189,9 @@
               </label>
             </div>
             <button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem"
-                    onclick="browseFiles('section_path_<%= i %>','section_app_id_<%= i %>','section_user_id_<%= i %>')">Browse files</button>
+                    onclick="browseFiles('section_path_<%= i %>','section_app_id_<%= i %>','section_scope_<%= i %>','section_user_id_<%= i %>','section_space_id_<%= i %>')">Browse files</button>
             <div id="fb-section_path_<%= i %>"></div>
+            <script>toggleScope(<%= i %>, 'section');</script>
           <% } else if (section.type === 'context') { %>
             <label>
               Key prefix
@@ -240,6 +278,7 @@
 <script>
 var PAS_USERS = <%~ it.safeJsonForScript((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
 var PAS_APPS = <%~ it.safeJsonForScript((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
+var PAS_SPACES = <%~ it.safeJsonForScript((it.spaces || []).map(function(s) { return { id: s.id, name: s.name }; })) %>;
 
 function syncDelivery() {
   var cbs = document.querySelectorAll('.delivery-cb:checked');
@@ -273,6 +312,25 @@ function buildUserSelect(name, selectedVal) {
   return html;
 }
 
+function buildSpaceSelect(name, selectedVal) {
+  var html = '<select name="' + name + '"><option value="">-- Select space --</option>';
+  PAS_SPACES.forEach(function(s) {
+    html += '<option value="' + s.id + '"' + (s.id === selectedVal ? ' selected' : '') + '>' + s.name + ' (' + s.id + ')</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function toggleScope(i, prefix) {
+  var radios = document.querySelectorAll('[name="' + prefix + '_scope_' + i + '"]');
+  var scope = 'user';
+  radios.forEach(function(r) { if (r.checked) scope = r.value; });
+  var userWrap = document.getElementById(prefix + '-user-wrap-' + i);
+  var spaceWrap = document.getElementById(prefix + '-space-wrap-' + i);
+  if (userWrap) userWrap.style.display = scope === 'user' ? '' : 'none';
+  if (spaceWrap) spaceWrap.style.display = scope === 'space' ? '' : 'none';
+}
+
 function addSection() {
   var type = document.getElementById('new-section-type').value;
   var container = document.getElementById('sections-container');
@@ -296,9 +354,14 @@ function addSection() {
     html += '</div>';
   } else if (type === 'app-data') {
     html += '<div class="grid"><label>App ID' + buildAppSelect('section_app_id_' + i, '') + '</label>';
-    html += '<label>User ID' + buildUserSelect('section_user_id_' + i, '') + '</label>';
-    html += '<label>Path<input type="text" name="section_path_' + i + '" required placeholder="daily-notes/{today}.md" /><small>File or folder (reads most recent). Supports {today} and {yesterday} tokens.</small></label></div>';
-    html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'section_path_' + i + '\',\'section_app_id_' + i + '\',\'section_user_id_' + i + '\')">Browse files</button>';
+    html += '<label>Scope<div>';
+    html += '<label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem"><input type="radio" name="section_scope_' + i + '" value="user" checked onchange="toggleScope(' + i + ',\'section\')" /> User</label>';
+    html += '<label style="display:inline-flex;align-items:center;gap:0.4rem"><input type="radio" name="section_scope_' + i + '" value="space" onchange="toggleScope(' + i + ',\'section\')" /> Space</label>';
+    html += '</div></label></div>';
+    html += '<div id="section-user-wrap-' + i + '" class="grid"><label>User ID' + buildUserSelect('section_user_id_' + i, '') + '</label></div>';
+    html += '<div id="section-space-wrap-' + i + '" class="grid" style="display:none"><label>Space' + buildSpaceSelect('section_space_id_' + i, '') + '</label></div>';
+    html += '<div class="grid"><label>Path<input type="text" name="section_path_' + i + '" required placeholder="daily-notes/{today}.md" /><small>File or folder (reads most recent). Supports {today} and {yesterday} tokens.</small></label></div>';
+    html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'section_path_' + i + '\',\'section_app_id_' + i + '\',\'section_scope_' + i + '\',\'section_user_id_' + i + '\',\'section_space_id_' + i + '\')">Browse files</button>';
     html += '<div id="fb-section_path_' + i + '"></div>';
   } else if (type === 'context') {
     html += '<label>Key prefix<input type="text" name="section_key_prefix_' + i + '" required /></label>';
@@ -345,15 +408,26 @@ function applyTemplate(name) {
   });
 }
 
-function browseFiles(pathName, appSelect, userSelect) {
+function browseFiles(pathName, appSelect, scopeRadioName, userSelect, spaceSelect) {
   var appId = document.querySelector('[name="' + appSelect + '"]').value;
-  var userId = document.querySelector('[name="' + userSelect + '"]').value;
   var target = document.getElementById('fb-' + pathName);
-  if (!appId || !userId) {
-    target.innerHTML = '<small><em>Select an app and user first.</em></small>';
-    return;
+  var scopeEl = document.querySelector('[name="' + scopeRadioName + '"]:checked');
+  var scope = scopeEl ? scopeEl.value : 'user';
+  if (scope === 'space') {
+    var spaceId = document.querySelector('[name="' + spaceSelect + '"]').value;
+    if (!appId || !spaceId) {
+      target.innerHTML = '<small><em>Select an app and space first.</em></small>';
+      return;
+    }
+    htmx.ajax('GET', '/gui/data/files?scope=space&userId=' + encodeURIComponent(spaceId) + '&appId=' + encodeURIComponent(appId) + '&target=' + encodeURIComponent(pathName), { target: target, swap: 'innerHTML' });
+  } else {
+    var userId = document.querySelector('[name="' + userSelect + '"]').value;
+    if (!appId || !userId) {
+      target.innerHTML = '<small><em>Select an app and user first.</em></small>';
+      return;
+    }
+    htmx.ajax('GET', '/gui/data/files?scope=user&userId=' + encodeURIComponent(userId) + '&appId=' + encodeURIComponent(appId) + '&target=' + encodeURIComponent(pathName), { target: target, swap: 'innerHTML' });
   }
-  htmx.ajax('GET', '/gui/data/files?scope=user&userId=' + encodeURIComponent(userId) + '&appId=' + encodeURIComponent(appId) + '&target=' + encodeURIComponent(pathName), { target: target, swap: 'innerHTML' });
 }
 
 initFrequencyPicker('schedule');

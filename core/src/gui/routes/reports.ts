@@ -28,6 +28,7 @@ export interface ReportRoutesOptions {
 	reportService: ReportService;
 	userManager: UserManager;
 	registry?: { getAll(): Array<{ manifest: { app: { id: string; name: string } } }> };
+	spaceService?: { listSpaces(): Array<{ id: string; name: string }> };
 	dataDir: string;
 	timezone: string;
 	logger: Logger;
@@ -50,7 +51,8 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		const apps = registry
 			? registry.getAll().map((a) => ({ id: a.manifest.app.id, name: a.manifest.app.name }))
 			: [];
-		return { users, apps, safeJsonForScript };
+		const spaces = options.spaceService?.listSpaces() ?? [];
+		return { users, apps, spaces, safeJsonForScript };
 	}
 
 	// --- List ---
@@ -62,18 +64,20 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			title: 'Reports — PAS',
 			activePage: 'reports',
 			reports: reports.map((r) => {
-				const nextRun = r.enabled ? getNextRun(r.schedule, timezone) : null;
+				const schedule = r.schedule ?? '';
+				const nextRun = r.enabled && !r._validationErrors?.length ? getNextRun(schedule, timezone) : null;
 				return {
 					id: r.id,
-					name: r.name,
+					name: r.name ?? r.id,
 					description: r.description,
-					schedule: r.schedule,
-					humanSchedule: describeCron(r.schedule),
+					schedule,
+					humanSchedule: describeCron(schedule),
 					nextRun: nextRun ? formatDateTime(nextRun, timezone) : null,
 					nextRunRelative: nextRun ? formatRelativeTime(nextRun, now) : null,
-					sectionCount: r.sections.length,
+					sectionCount: r.sections?.length ?? 0,
 					llmEnabled: r.llm?.enabled ?? false,
-					enabled: r.enabled,
+					enabled: r.enabled ?? false,
+					validationErrors: r._validationErrors ?? [],
 				};
 			}),
 		});
@@ -333,13 +337,18 @@ function parseFormToReport(body: Record<string, string>): ReportDefinition {
 						.filter(Boolean),
 				};
 				break;
-			case 'app-data':
-				config = {
-					app_id: body[`section_app_id_${i}`] || '',
-					user_id: body[`section_user_id_${i}`] || '',
-					path: body[`section_path_${i}`] || '',
-				};
+			case 'app-data': {
+				const appId = body[`section_app_id_${i}`] || '';
+				const path = body[`section_path_${i}`] || '';
+				const scope = body[`section_scope_${i}`];
+				const spaceId = body[`section_space_id_${i}`] || '';
+				if (scope === 'space' || (!scope && spaceId)) {
+					config = { app_id: appId, space_id: spaceId, path };
+				} else {
+					config = { app_id: appId, user_id: body[`section_user_id_${i}`] || '', path };
+				}
 				break;
+			}
 			case 'context':
 				config = {
 					key_prefix: body[`section_key_prefix_${i}`] || '',

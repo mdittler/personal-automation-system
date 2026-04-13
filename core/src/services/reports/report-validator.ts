@@ -220,8 +220,8 @@ function validateAppDataConfig(
 		}
 	}
 
-	// user_id is required only when space_id is NOT set
-	if (!config.space_id) {
+	// user_id is required only when space_id is NOT set (use !== undefined to treat '' as "space scope with invalid value")
+	if (config.space_id === undefined) {
 		if (!config.user_id) {
 			errors.push({
 				field: `${prefix}.config.user_id`,

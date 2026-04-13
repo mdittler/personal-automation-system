@@ -93,6 +93,12 @@ export interface ReportDefinition {
 	llm: ReportLLMConfig;
 	/** ISO timestamp of last creation/update. */
 	updatedAt?: string;
+	/**
+	 * Transient runtime field — never persisted to disk.
+	 * Set when the definition loaded from disk fails validation.
+	 * Reports with errors are shown in the GUI but not scheduled or executed.
+	 */
+	_validationErrors?: ReportValidationError[];
 }
 
 // ---------------------------------------------------------------------------

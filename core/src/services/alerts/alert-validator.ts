@@ -228,8 +228,8 @@ function validateDataSource(
 		}
 	}
 
-	// user_id is required only when space_id is NOT set
-	if (!source.space_id) {
+	// user_id is required only when space_id is NOT set (use !== undefined to treat '' as "space scope with invalid value")
+	if (source.space_id === undefined) {
 		if (!source.user_id) {
 			errors.push({
 				field: `${prefix}.user_id`,
