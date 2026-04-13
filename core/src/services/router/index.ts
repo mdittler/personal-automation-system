@@ -194,11 +194,13 @@ export class Router {
 				match.confidence >= this.confidenceThreshold &&
 				match.confidence < this.verificationUpperBound
 			) {
+				// Resolve effective app list (raw enabledApps + appToggle overrides)
+				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(
 					enrichedCtx,
 					match,
 					undefined,
-					user.enabledApps,
+					resolvedApps,
 				);
 				if (result.action === 'held') return;
 				if (result.action !== 'route') return;
@@ -272,6 +274,8 @@ export class Router {
 				match.confidence >= this.confidenceThreshold &&
 				match.confidence < this.verificationUpperBound
 			) {
+				// Resolve effective app list (raw enabledApps + appToggle overrides)
+				const resolvedApps = await this.resolveEnabledApps(ctx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(
 					ctx,
 					{
@@ -280,7 +284,7 @@ export class Router {
 						confidence: match.confidence,
 					},
 					undefined,
-					user.enabledApps,
+					resolvedApps,
 				);
 				if (result.action === 'held') return;
 				if (result.action !== 'route') return;
@@ -785,6 +789,28 @@ export class Router {
 			return this.appToggle.isEnabled(userId, appId, enabledApps);
 		}
 		return enabledApps.includes('*') || enabledApps.includes(appId);
+	}
+
+	/**
+	 * Resolve the effective list of enabled app IDs for a user, accounting for
+	 * appToggle overrides on top of the raw enabledApps config value.
+	 *
+	 * If enabledApps is ['*'], starts from all registered app IDs and removes
+	 * any explicitly toggled off. Otherwise filters the explicit list.
+	 */
+	private async resolveEnabledApps(userId: string, enabledApps: string[]): Promise<string[]> {
+		if (!this.appToggle) return enabledApps;
+		const overrides = await this.appToggle.getOverrides(userId);
+		if (Object.keys(overrides).length === 0) return enabledApps;
+
+		if (enabledApps.includes('*')) {
+			// All apps enabled by default — exclude explicitly toggled-off apps
+			const allAppIds = this.registry.getAll().map((a) => a.manifest.app.id);
+			return allAppIds.filter((id) => overrides[id] !== false);
+		}
+
+		// Explicit list — exclude overridden-off entries
+		return enabledApps.filter((id) => overrides[id] !== false);
 	}
 
 	/** Try to send a message, logging errors but not throwing. */
