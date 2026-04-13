@@ -139,6 +139,23 @@ describe('savePlan', () => {
 		expect(written).toContain('app: food');
 	});
 
+	it('includes type: meal-plan in frontmatter', async () => {
+		const store = createMockScopedStore();
+		const plan = makePlan();
+		await savePlan(store as any, plan);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('type: meal-plan');
+	});
+
+	it('includes entity_keys with the week identifier in frontmatter', async () => {
+		const store = createMockScopedStore();
+		const plan = makePlan({ startDate: '2026-03-30' }); // 2026-W14
+		await savePlan(store as any, plan);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('entity_keys:');
+		expect(written).toContain('2026-W14');
+	});
+
 	it('updates updatedAt timestamp', async () => {
 		const store = createMockScopedStore();
 		const plan = makePlan();
@@ -182,6 +199,23 @@ describe('archivePlan', () => {
 		await archivePlan(store as any, plan);
 		const written = store.write.mock.calls[0][1] as string;
 		expect(written).toMatch(/^---\n/);
+	});
+
+	it('includes type: meal-plan in frontmatter', async () => {
+		const store = createMockScopedStore();
+		const plan = makePlan({ startDate: '2026-03-30' }); // 2026-W14
+		await archivePlan(store as any, plan);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('type: meal-plan');
+	});
+
+	it('includes entity_keys with the week identifier in archivePlan frontmatter', async () => {
+		const store = createMockScopedStore();
+		const plan = makePlan({ startDate: '2026-03-30' }); // 2026-W14
+		await archivePlan(store as any, plan);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('entity_keys:');
+		expect(written).toContain('2026-W14');
 	});
 
 	it('includes plan data in body', async () => {

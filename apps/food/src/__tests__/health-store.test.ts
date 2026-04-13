@@ -144,6 +144,13 @@ describe('saveMonthlyHealth', () => {
 		expect(written).toContain('health');
 	});
 
+	it('includes type: health-metrics in frontmatter', async () => {
+		const log = makeLog('2026-04', 'alice');
+		await saveMonthlyHealth(store as unknown as ScopedDataStore, log);
+		const written = vi.mocked(store.write).mock.calls[0]![1] as string;
+		expect(written).toContain('type: health-metrics');
+	});
+
 	it('round-trips day entries through save and load', async () => {
 		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-05', { metrics: { sleepHours: 8, weightKg: 72 } })]);
 

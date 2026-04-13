@@ -135,6 +135,13 @@ describe('pantry-store', () => {
 			const written = store.write.mock.calls[0][1] as string;
 			expect(written).toContain('items: []');
 		});
+
+		it('includes type: pantry in frontmatter', async () => {
+			const store = mockStore();
+			await savePantry(store as never, [makePantryItem()]);
+			const written = store.write.mock.calls[0][1] as string;
+			expect(written).toContain('type: pantry');
+		});
 	});
 
 	// ── addPantryItems ──────────────────────────────────────────

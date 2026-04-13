@@ -53,6 +53,7 @@ export async function savePantry(store: ScopedDataStore, items: PantryItem[]): P
 		date: isoNow(),
 		tags: buildAppTags('food', 'pantry'),
 		app: 'food',
+		type: 'pantry',
 	});
 	await store.write(PANTRY_PATH, fm + stringify({ items }));
 }

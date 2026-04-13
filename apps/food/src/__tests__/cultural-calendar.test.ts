@@ -258,6 +258,14 @@ describe('ensureCalendar', () => {
 		expect(result.holidays[0]).toMatchObject({ id: expect.any(String), name: expect.any(String) });
 	});
 
+	it('includes type: cultural-calendar in frontmatter when writing', async () => {
+		store.read.mockResolvedValue(null);
+
+		await ensureCalendar(store as unknown as ScopedDataStore);
+		const written = vi.mocked(store.write).mock.calls[0]![1] as string;
+		expect(written).toContain('type: cultural-calendar');
+	});
+
 	it('returns existing calendar without overwriting when file exists', async () => {
 		const existing: CulturalCalendar = makeCalendar([{ id: 'custom-holiday', name: 'Custom' }]);
 		store.read.mockResolvedValue(serializeCalendar(existing));

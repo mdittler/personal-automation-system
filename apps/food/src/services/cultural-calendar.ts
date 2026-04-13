@@ -364,6 +364,7 @@ async function saveCalendar(store: ScopedDataStore, calendar: CulturalCalendar):
 		title: 'Cultural Calendar',
 		date: new Date().toISOString(),
 		tags: ['food', 'cultural-calendar'],
+		type: 'cultural-calendar',
 	});
 	await store.write(CALENDAR_PATH, fm + stringify({ holidays: calendar.holidays }));
 }

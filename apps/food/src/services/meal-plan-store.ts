@@ -32,11 +32,14 @@ export async function loadCurrentPlan(store: ScopedDataStore): Promise<MealPlan 
 /** Save the current meal plan, updating updatedAt. */
 export async function savePlan(store: ScopedDataStore, plan: MealPlan): Promise<void> {
 	plan.updatedAt = isoNow();
+	const weekId = getIsoWeekId(plan.startDate);
 	const fm = generateFrontmatter({
 		title: `Meal Plan ${plan.startDate} to ${plan.endDate}`,
 		date: plan.createdAt,
 		tags: buildAppTags('food', 'meal-plan'),
 		app: 'food',
+		type: 'meal-plan',
+		entity_keys: [weekId],
 	});
 	await store.write(CURRENT_PATH, fm + stringify(plan));
 }
@@ -51,6 +54,8 @@ export async function archivePlan(store: ScopedDataStore, plan: MealPlan): Promi
 		date: plan.createdAt,
 		tags: buildAppTags('food', 'meal-plan-archive'),
 		app: 'food',
+		type: 'meal-plan',
+		entity_keys: [weekId],
 	});
 	await store.write(archivePath, fm + stringify(plan));
 }
