@@ -22,6 +22,7 @@ import {
 	formatRelativeTime,
 	getNextRun,
 } from '../../utils/cron-describe.js';
+import { safeJsonForScript } from '../../utils/escape-html.js';
 
 export interface ReportRoutesOptions {
 	reportService: ReportService;
@@ -49,7 +50,7 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		const apps = registry
 			? registry.getAll().map((a) => ({ id: a.manifest.app.id, name: a.manifest.app.name }))
 			: [];
-		return { users, apps };
+		return { users, apps, safeJsonForScript };
 	}
 
 	// --- List ---

@@ -24,6 +24,7 @@ import {
 	formatRelativeTime,
 	getNextRun,
 } from '../../utils/cron-describe.js';
+import { safeJsonForScript } from '../../utils/escape-html.js';
 
 export interface AlertRoutesOptions {
 	alertService: AlertService;
@@ -57,7 +58,7 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 			? (await reportService.listReports()).map((r) => ({ id: r.id, name: r.name }))
 			: [];
 		const n8nUrl = options.n8nDispatchUrl || '';
-		return { users, apps, reports, n8nUrl };
+		return { users, apps, reports, n8nUrl, safeJsonForScript };
 	}
 
 	// --- List ---

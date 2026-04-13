@@ -242,11 +242,11 @@
 
 <script src="/gui/public/frequency-picker.js"></script>
 <script>
-var PAS_USERS = <%~ JSON.stringify((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
-var PAS_APPS = <%~ JSON.stringify((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
-var PAS_REPORTS = <%~ JSON.stringify((it.reports || []).map(function(r) { return { id: r.id, name: r.name }; })) %>;
-var PAS_N8N_URL = <%~ JSON.stringify(it.n8nUrl || '') %>;
-var PAS_EXISTING_ACTIONS = <%~ JSON.stringify((it.alert.actions || []).map(function(a) { return { type: a.type, config: a.config }; })) %>;
+var PAS_USERS = <%~ it.safeJsonForScript((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
+var PAS_APPS = <%~ it.safeJsonForScript((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
+var PAS_REPORTS = <%~ it.safeJsonForScript((it.reports || []).map(function(r) { return { id: r.id, name: r.name }; })) %>;
+var PAS_N8N_URL = <%~ it.safeJsonForScript(it.n8nUrl || '') %>;
+var PAS_EXISTING_ACTIONS = <%~ it.safeJsonForScript((it.alert.actions || []).map(function(a) { return { type: a.type, config: a.config }; })) %>;
 
 function syncDelivery() {
   var cbs = document.querySelectorAll('.delivery-cb:checked');

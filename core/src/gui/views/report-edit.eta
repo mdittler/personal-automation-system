@@ -238,8 +238,8 @@
 
 <script src="/gui/public/frequency-picker.js"></script>
 <script>
-var PAS_USERS = <%~ JSON.stringify((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
-var PAS_APPS = <%~ JSON.stringify((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
+var PAS_USERS = <%~ it.safeJsonForScript((it.users || []).map(function(u) { return { id: u.id, name: u.name }; })) %>;
+var PAS_APPS = <%~ it.safeJsonForScript((it.apps || []).map(function(a) { return { id: a.id, name: a.name }; })) %>;
 
 function syncDelivery() {
   var cbs = document.querySelectorAll('.delivery-cb:checked');
