@@ -365,14 +365,10 @@ describe('long chatbot responses are split for Telegram', () => {
 
 	it('a detailed multi-section response is delivered as multiple messages', async () => {
 		// Simulate a long response a user might get when asking about all their apps
-		const longResponse =
-			'Here is a summary of everything in your system:\n\n' +
-			'## Food App\n' +
-			'The Food app tracks your meals, grocery lists, and recipes. '.repeat(30) +
-			'\n\n## Notes App\n' +
-			'The Notes app stores your daily thoughts and reminders. '.repeat(30) +
-			'\n\n## System Status\n' +
-			'Everything is running smoothly. Your current model is claude-sonnet. '.repeat(20);
+		const foodSection = `## Food App\n${'The Food app tracks your meals, grocery lists, and recipes. '.repeat(30)}`;
+		const notesSection = `## Notes App\n${'The Notes app stores your daily thoughts and reminders. '.repeat(30)}`;
+		const systemSection = `## System Status\n${'Everything is running smoothly. Your current model is claude-sonnet. '.repeat(20)}`;
+		const longResponse = `Here is a summary of everything in your system:\n\n${foodSection}\n\n${notesSection}\n\n${systemSection}`;
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES')

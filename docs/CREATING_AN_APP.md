@@ -168,8 +168,12 @@ interface MessageContext {
   timestamp: Date;      // When the message was sent
   chatId: number;       // Telegram chat ID
   messageId: number;    // Telegram message ID
+  spaceId?: string;     // Active space ID (set when user is in space mode)
+  spaceName?: string;   // Active space display name (for labels in responses)
 }
 ```
+
+`spaceId` and `spaceName` are set by the router when the user has an active shared space (set via the `/space` command). If the user is not in a space, both are `undefined`. Use `spaceName` for user-facing labels; use `spaceId` with `services.data.forSpace(spaceId, userId)` to read/write space-scoped data.
 
 ## Using CoreServices
 
@@ -463,26 +467,21 @@ These enable Dataview queries like:
 
 Any frontmatter key is automatically queryable — add whatever fields make sense for your domain.
 
-### Cross-App Integration (Future)
+### Cross-App Integration (Phase D2, upcoming)
 
-PAS has planned infrastructure for programmatic cross-app data discovery. While not yet implemented, designing your data with these conventions makes your app ready:
+PAS has planned infrastructure for programmatic cross-app data discovery via the **FileIndexService** (Phase D2). While not yet implemented, designing your data with these conventions makes your app ready:
 
-**FileIndexService (Phase 27B, planned)** — an in-memory index of all markdown file frontmatter across all apps. Will enable apps to search by tags, text, and backlinks across app boundaries:
+**FileIndexService (Phase D2)** — a metadata-based index of all markdown file frontmatter across all apps. Built from existing frontmatter at startup, updated via `data:changed` events. Will enable scope-aware natural language queries about your app's data:
 
 ```typescript
-// Future API (not yet available)
+// Future API (not yet available in D1)
 const recipes = await services.fileIndex.searchByTags(['ingredient/chicken'], userId);
 const backlinks = await services.fileIndex.getBacklinks('food-tracker/recipes/stir-fry.md', userId);
 ```
 
-**CrossAppDataService (Phase 27C, planned)** — read-only access to other apps' data directories, gated by manifest `integrations` declaration:
+The index is derived and disposable — `.md` files are always the source of truth, and the index can be rebuilt from them at any time.
 
-```typescript
-// Future API (not yet available)
-const content = await services.crossAppData.readFile('food-tracker', userId, 'recipes/stir-fry.md');
-```
-
-**What to do now:** Use wiki-links, hierarchical tags, aliases, and Dataview-friendly fields in your frontmatter. These work in Obsidian immediately and will be indexed by the FileIndexService when it ships.
+**What to do now:** Use wiki-links, hierarchical tags, aliases, and Dataview-friendly fields in your frontmatter. These work in Obsidian immediately and will be indexed by the FileIndexService when it ships in D2.
 
 ### Using External APIs
 
@@ -713,4 +712,4 @@ Apps must not import LLM SDKs or dangerous modules directly. These are detected 
 
 - **Echo** (`apps/echo/`) — minimal example: echoes messages back. ~30 lines of code.
 - **Notes** (`apps/notes/`) — practical example: save, list, and summarize notes. Demonstrates commands, intents, data storage, LLM, and user config.
-- **Chatbot** (`apps/chatbot/`) — advanced example: conversational AI with context awareness, conversation history, and app metadata integration.
+- **Chatbot** (`apps/chatbot/`) — advanced example: conversational AI with LLM-based message classification, household context injection, conversation history, app metadata integration, and Telegram message splitting.
