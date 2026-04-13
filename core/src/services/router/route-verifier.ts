@@ -141,7 +141,12 @@ export class RouteVerifier {
 			this.logger.debug(
 				'RouteVerifier: skipping verification — 1 or fewer accessible apps',
 			);
-			return { action: 'route', appId: classifierResult.appId };
+			// Return the single accessible app's ID, not the classifier's pick (which may not be accessible)
+			const fallbackId =
+				accessibleApps.length === 1
+					? accessibleApps[0]!.manifest.app.id
+					: classifierResult.appId;
+			return { action: 'route', appId: fallbackId };
 		}
 
 		const candidateApps = accessibleApps.map((app) => ({

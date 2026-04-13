@@ -201,8 +201,9 @@ export class Router {
 					user.enabledApps,
 				);
 				if (result.action === 'held') return;
+				if (result.action !== 'route') return;
 				// Verifier confirmed (possibly different app) — check access before dispatch
-				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
+				const verifiedAppId = result.appId;
 				if (!(await this.isAppEnabled(enrichedCtx.userId, verifiedAppId, user.enabledApps))) {
 					await this.trySend(enrichedCtx.userId, `You don't have access to the ${verifiedAppId} app.`);
 					return;
@@ -282,7 +283,8 @@ export class Router {
 					user.enabledApps,
 				);
 				if (result.action === 'held') return;
-				const verifiedAppId = (result as { action: 'route'; appId: string }).appId;
+				if (result.action !== 'route') return;
+				const verifiedAppId = result.appId;
 				if (!(await this.isAppEnabled(ctx.userId, verifiedAppId, user.enabledApps))) {
 					await this.trySend(ctx.userId, `You don't have access to the ${verifiedAppId} app.`);
 					return;
