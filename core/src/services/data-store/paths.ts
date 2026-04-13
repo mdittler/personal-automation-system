@@ -5,7 +5,7 @@
  * and rejects any path that would escape the expected scope.
  */
 
-import { relative, resolve, sep } from 'node:path';
+import { posix, relative, resolve, sep } from 'node:path';
 import type { ManifestDataScope } from '../../types/manifest.js';
 
 /**
@@ -61,6 +61,15 @@ export class ScopeViolationError extends Error {
 }
 
 /**
+ * Normalize a path using virtual POSIX rules (no OS cwd resolution).
+ * Replaces backslashes, collapses . and .. segments, strips leading ./.
+ */
+function normalizePosix(p: string): string {
+	const normalized = posix.normalize(p.replace(/\\/g, '/'));
+	return normalized.startsWith('./') ? normalized.slice(2) : normalized;
+}
+
+/**
  * Find the first declared scope that matches a given path.
  *
  * @param path - The file path to check (relative to app data root)
@@ -73,20 +82,26 @@ export function findMatchingScope(
 ): ManifestDataScope | undefined {
 	if (scopes.length === 0) return undefined;
 
-	const normalizedPath = path.replace(/\\/g, '/');
+	const normalizedPath = normalizePosix(path);
+
+	// Reject paths that escape upward (resolved to ../something)
+	if (normalizedPath.startsWith('..')) return undefined;
 
 	return scopes.find((scope) => {
-		const normalizedScope = scope.path.replace(/\\/g, '/');
+		const normalizedScope = normalizePosix(scope.path);
+		// Re-append trailing / if the original scope had it (directory semantics)
+		const scopeDir =
+			scope.path.endsWith('/') && !normalizedScope.endsWith('/')
+				? normalizedScope + '/'
+				: normalizedScope;
 
 		// Exact file match
-		if (normalizedPath === normalizedScope) return true;
+		if (normalizedPath === scopeDir) return true;
 
 		// Directory scope: path is under the scope directory
-		if (normalizedScope.endsWith('/')) {
-			// Match files within the directory
-			if (normalizedPath.startsWith(normalizedScope)) return true;
-			// Match the directory itself (for list operations, which omit trailing slash)
-			if (normalizedPath === normalizedScope.slice(0, -1)) return true;
+		if (scopeDir.endsWith('/')) {
+			if (normalizedPath.startsWith(scopeDir)) return true;
+			if (normalizedPath === scopeDir.slice(0, -1)) return true;
 		}
 
 		return false;

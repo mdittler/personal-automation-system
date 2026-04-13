@@ -63,6 +63,55 @@ describe('findMatchingScope', () => {
 		expect(findMatchingScope('history.json', scopes)).toEqual(scopes[0]);
 		expect(findMatchingScope('daily-notes/today.md', scopes)).toEqual(scopes[1]);
 	});
+
+	it('rejects traversal out of directory scope via ..', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery/../pantry.yaml', scopes)).toBeUndefined();
+	});
+
+	it('rejects traversal with backslashes', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery\\..\\pantry.yaml', scopes)).toBeUndefined();
+	});
+
+	it('resolves . segments and still matches', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery/./list.md', scopes)).toEqual(scopes[0]);
+	});
+
+	it('resolves nested .. that stays within scope', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery/sub/../list.md', scopes)).toEqual(scopes[0]);
+	});
+
+	it('rejects double traversal escaping scope entirely', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery/../../secret.md', scopes)).toBeUndefined();
+	});
+
+	it('rejects traversal from different scope', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'logs/', access: 'read-write', description: 'Logs' },
+		];
+		expect(findMatchingScope('logs/../secret.md', scopes)).toBeUndefined();
+	});
+
+	it('exact file scope with normalized path still matches', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/items.yaml', access: 'read-write', description: 'Items' },
+		];
+		expect(findMatchingScope('grocery/items.yaml', scopes)).toEqual(scopes[0]);
+	});
 });
 
 describe('ScopeViolationError', () => {
