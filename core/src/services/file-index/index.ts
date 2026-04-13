@@ -1,0 +1,199 @@
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join, basename } from 'node:path';
+import type { DataChangedPayload } from '../../types/data-events.js';
+import type { ManifestDataScope } from '../../types/manifest.js';
+import { findMatchingScope } from '../data-store/paths.js';
+import { parsePathMeta, parseFileContent, isArchived } from './entry-parser.js';
+import type { FileIndexEntry, FileIndexFilter } from './types.js';
+
+export { type FileIndexEntry, type FileIndexFilter } from './types.js';
+
+export class FileIndexService {
+  private readonly entries = new Map<string, FileIndexEntry>();
+
+  /**
+   * @param dataDir - Absolute path to the data root
+   * @param appScopes - Map of appId → { user: ManifestDataScope[], shared: ManifestDataScope[] }
+   *   from the app manifest registry. Files are only indexed if they fall within a registered
+   *   app's declared scopes. For space-scoped paths, shared_scopes are used.
+   */
+  constructor(
+    private readonly dataDir: string,
+    private readonly appScopes: Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>,
+  ) {}
+
+  /** Full scan of data directories. Replaces current index. */
+  async rebuild(): Promise<void> {
+    this.entries.clear();
+
+    for (const topDir of ['users', 'spaces']) {
+      const fullDir = join(this.dataDir, topDir);
+      await this.scanDirectory(fullDir, topDir);
+    }
+  }
+
+  private async scanDirectory(dirPath: string, prefix: string): Promise<void> {
+    let dirEntries;
+    try {
+      dirEntries = await readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of dirEntries) {
+      const entryPath = join(dirPath, entry.name);
+      const relativePath = `${prefix}/${entry.name}`;
+
+      if (entry.isDirectory()) {
+        await this.scanDirectory(entryPath, relativePath);
+      } else if (entry.isFile() && this.isIndexable(entry.name)) {
+        await this.indexFile(entryPath, relativePath);
+      }
+    }
+  }
+
+  private isIndexable(filename: string): boolean {
+    if (isArchived(filename)) return false;
+    return filename.endsWith('.md') || filename.endsWith('.yaml') || filename.endsWith('.yml');
+  }
+
+  private async indexFile(absolutePath: string, relativePath: string): Promise<void> {
+    try {
+      const pathMeta = parsePathMeta(relativePath);
+
+      // Skip files from unregistered apps
+      if (!this.appScopes.has(pathMeta.appId)) return;
+
+      // Skip files outside declared manifest scopes
+      const scopes = this.appScopes.get(pathMeta.appId)!;
+      // Space-scoped paths use shared scopes (matches DataStoreServiceImpl.forSpace behavior)
+      const scopeList = pathMeta.scope === 'user' ? scopes.user : scopes.shared;
+      // Derive app-relative path: strip the first 3 segments
+      // e.g. "users/matt/food/recipes/tacos.yaml" → "recipes/tacos.yaml"
+      //      "users/shared/food/prices/costco.md" → "prices/costco.md"
+      //      "spaces/family/food/recipes/pasta.yaml" → "recipes/pasta.yaml"
+      const appRelativePath = relativePath.split('/').slice(3).join('/');
+      if (scopeList.length > 0 && !findMatchingScope(appRelativePath, scopeList)) return;
+
+      const [content, fileStat] = await Promise.all([
+        readFile(absolutePath, 'utf-8'),
+        stat(absolutePath),
+      ]);
+
+      const parsed = parseFileContent(content);
+
+      // Supplement dates from filename if frontmatter dates are absent
+      const dates = { ...parsed.dates };
+      const filenameDate = this.extractDateFromFilename(basename(absolutePath));
+      if (filenameDate) {
+        if (!dates.earliest || filenameDate < dates.earliest) dates.earliest = filenameDate;
+        if (!dates.latest || filenameDate > dates.latest) dates.latest = filenameDate;
+      }
+
+      const entry: FileIndexEntry = {
+        path: relativePath,
+        appId: pathMeta.appId,
+        scope: pathMeta.scope,
+        owner: pathMeta.owner,
+        type: parsed.type,
+        title: parsed.title,
+        tags: parsed.tags,
+        aliases: parsed.aliases,
+        entityKeys: parsed.entityKeys,
+        dates,
+        relationships: parsed.relationships,
+        wikiLinks: parsed.wikiLinks,
+        size: fileStat.size,
+        modifiedAt: fileStat.mtime,
+        summary: parsed.summary,
+      };
+
+      this.entries.set(relativePath, entry);
+    } catch {
+      // File read error — skip silently
+    }
+  }
+
+  private extractDateFromFilename(filename: string): string | null {
+    const match = filename.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Handle a data:changed event. Reconstructs the data-root-relative path
+   * from the payload and re-indexes or removes accordingly.
+   */
+  async handleDataChanged(payload: DataChangedPayload): Promise<void> {
+    const relativePath = this.payloadToRelativePath(payload);
+
+    if (payload.operation === 'archive') {
+      this.entries.delete(relativePath);
+      return;
+    }
+
+    // write or append — re-index the file
+    const absolutePath = join(this.dataDir, relativePath);
+    await this.indexFile(absolutePath, relativePath);
+  }
+
+  /** Reconstruct data-root-relative path from DataChangedPayload fields. */
+  private payloadToRelativePath(payload: DataChangedPayload): string {
+    if (payload.spaceId) {
+      return `spaces/${payload.spaceId}/${payload.appId}/${payload.path}`;
+    }
+    if (payload.userId) {
+      return `users/${payload.userId}/${payload.appId}/${payload.path}`;
+    }
+    return `users/shared/${payload.appId}/${payload.path}`;
+  }
+
+  /** Re-index a single file by its data-root-relative path. */
+  async reindexByPath(dataRootRelativePath: string): Promise<void> {
+    const absolutePath = join(this.dataDir, dataRootRelativePath);
+    await this.indexFile(absolutePath, dataRootRelativePath);
+  }
+
+  /** Query the index with optional filters. No filter returns all entries. */
+  getEntries(filter: FileIndexFilter = {}): FileIndexEntry[] {
+    const results: FileIndexEntry[] = [];
+
+    for (const entry of this.entries.values()) {
+      if (filter.scope && entry.scope !== filter.scope) continue;
+      if (filter.appId && entry.appId !== filter.appId) continue;
+      if (filter.owner && entry.owner !== filter.owner) continue;
+      if (filter.type && entry.type !== filter.type) continue;
+      if (filter.tags && !filter.tags.every((t) => entry.tags.includes(t))) continue;
+
+      if (filter.dateFrom && (!entry.dates.latest || entry.dates.latest < filter.dateFrom)) continue;
+      if (filter.dateTo && (!entry.dates.earliest || entry.dates.earliest > filter.dateTo)) continue;
+
+      if (filter.text) {
+        const needle = filter.text.toLowerCase();
+        const haystack = [entry.title ?? '', ...entry.entityKeys, ...entry.aliases]
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(needle)) continue;
+      }
+
+      results.push(entry);
+    }
+
+    return results;
+  }
+
+  /** Get graph neighbors: frontmatter relationship edges + wiki-link edges. */
+  getRelated(path: string): Array<{ target: string; type: string }> {
+    const entry = this.entries.get(path);
+    if (!entry) return [];
+
+    return [
+      ...entry.relationships,
+      ...entry.wikiLinks.map((target) => ({ target, type: 'wiki-link' })),
+    ];
+  }
+
+  /** Total number of indexed files. */
+  get size(): number {
+    return this.entries.size;
+  }
+}
