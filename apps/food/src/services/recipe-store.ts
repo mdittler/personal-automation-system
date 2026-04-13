@@ -74,6 +74,8 @@ export async function saveRecipe(
 		title: recipe.title,
 		date: recipe.createdAt,
 		tags: buildAppTags('food', 'recipe', recipe.tags),
+		type: 'recipe',
+		entity_keys: [recipe.title.toLowerCase(), ...recipe.ingredients.map(i => i.name.toLowerCase())],
 		app: 'food',
 	});
 	await store.write(recipePath(id), fm + stringify(recipe));
@@ -99,6 +101,8 @@ export async function updateRecipe(store: ScopedDataStore, recipe: Recipe): Prom
 		title: recipe.title,
 		date: recipe.createdAt,
 		tags: buildAppTags('food', 'recipe', recipe.tags),
+		type: 'recipe',
+		entity_keys: [recipe.title.toLowerCase(), ...recipe.ingredients.map(i => i.name.toLowerCase())],
 		app: 'food',
 	});
 	await store.write(recipePath(recipe.id), fm + stringify(recipe));

@@ -522,6 +522,59 @@ describe('loadRecipe — frontmatter handling', () => {
 	});
 });
 
+describe('saveRecipe — D2a frontmatter enrichment', () => {
+	it('writes type: recipe in frontmatter', async () => {
+		const store = createMockScopedStore();
+		await saveRecipe(store as any, sampleParsed, 'user1');
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('type: recipe');
+	});
+
+	it('writes entity_keys containing lowercased title in frontmatter', async () => {
+		const store = createMockScopedStore();
+		await saveRecipe(store as any, sampleParsed, 'user1');
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('chicken stir fry');
+	});
+
+	it('writes entity_keys containing lowercased ingredient names in frontmatter', async () => {
+		const store = createMockScopedStore();
+		await saveRecipe(store as any, sampleParsed, 'user1');
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('chicken breast');
+		expect(written).toContain('broccoli');
+		expect(written).toContain('soy sauce');
+	});
+});
+
+describe('updateRecipe — D2a frontmatter enrichment', () => {
+	it('writes type: recipe in frontmatter after update', async () => {
+		const store = createMockScopedStore();
+		const recipe = makeSampleRecipe();
+		await updateRecipe(store as any, recipe);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('type: recipe');
+	});
+
+	it('writes entity_keys with lowercased title after update', async () => {
+		const store = createMockScopedStore();
+		const recipe = makeSampleRecipe();
+		await updateRecipe(store as any, recipe);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('chicken stir fry');
+	});
+
+	it('writes entity_keys with lowercased ingredient names after update', async () => {
+		const store = createMockScopedStore();
+		const recipe = makeSampleRecipe();
+		await updateRecipe(store as any, recipe);
+		const written = store.write.mock.calls[0][1] as string;
+		expect(written).toContain('chicken breast');
+		expect(written).toContain('broccoli');
+		expect(written).toContain('soy sauce');
+	});
+});
+
 describe('formatSearchResults — numbered', () => {
 	it('uses numbered list instead of bullets', () => {
 		const results: RecipeSearchResult[] = [
