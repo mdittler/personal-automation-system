@@ -149,12 +149,14 @@ All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6,
 
 **Phase D1 (2026-04-13):** Chatbot context & conversation quality — `classifyPASMessage()` replaces 66-keyword static list with fast-tier LLM classifier (fail-open, extensible for D2); `buildUserContext()` injects spaceName + enabled apps into both prompt paths; `splitTelegramMessage()` splits at paragraph → line → hard chunk under 3800 chars; `maxTokens` raised 1024 → 2048; `auto_detect_pas` default changed `false` → `true`; all strings sanitized before LLM injection. **202 chatbot tests / 5900+ total tests passing.**
 
+**Phase D2a complete (2026-04-13):** Scope normalization fix (virtual POSIX normalization in `findMatchingScope`), FileIndexService (in-memory file metadata index, startup rebuild, `data:changed` event subscription, path/scope/tag/date queries), frontmatter enrichment on food app write sites (recipe, receipt, price-list, grocery-list, grocery-history, nutrition-log, meal-plan, pantry, health-metrics, cultural-calendar). **5994 tests passing across 241 test files.**
+
 See `docs/implementation-phases.md` for detailed phase guide.
 
 ### Deployment Readiness Roadmap (D1-D6)
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. Target: Mac Mini deployment for owner's household, scaling to 5-10 households (15-40 users).
 - **Phase D1** — Chatbot Context & Conversation Quality: LLM-based PAS context detection (replaces 66+ hardcoded keywords), user profile grounding (spaceName + enabled apps), token cap raise to 2048 + Telegram message splitting. **Status: complete (2026-04-13).**
-- **Phase D2** — NL Data Access: FileIndexService (metadata-based file-native graph), DataQueryService (scope-aware NL querying), frontmatter enrichment on writes. Scope normalization fix (Codex finding #2) as first D2 task. **Status: next up.**
+- **Phase D2** — NL Data Access: decomposed into D2a/D2b/D2c. **D2a complete (2026-04-13):** FileIndexService (in-memory file metadata index, startup rebuild, `data:changed` event subscription), scope normalization fix in `findMatchingScope`, frontmatter enrichment on all food app write sites. **D2b next:** DataQueryService + chatbot wiring.
 - **Phase D3** — Data Modification via `/edit` command with preview + confirmation + stale-write protection.
 - **Phase D4** — Security Hardening: secure cookie, scope normalization, inline JS escaping, Docker workspace fix.
 - **Phase D5** — Concurrency & Ops: FileMutex (reuse AsyncLock), health endpoint upgrade, backup mechanism, deployment docs.
