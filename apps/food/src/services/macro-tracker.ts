@@ -166,6 +166,7 @@ export async function saveMonthlyLog(
 		date: new Date().toISOString(),
 		tags: buildAppTags('food', 'nutrition'),
 		type: 'nutrition-log',
+		app: 'food',
 	});
 	const body = stringify({
 		month: log.month,
