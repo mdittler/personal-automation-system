@@ -19,4 +19,16 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
 	'i', 'me', 'we', 'us', 'you',
 	// Generic glue
 	'and', 'or', 'with', 'of', 'for', 'from', 'in', 'on', 'at', 'to',
+
+	// German glue words (articles, pronouns, conjunctions, meal verbs)
+	'das', 'der', 'die', 'ein', 'eine', 'und', 'mit', 'ich', 'habe', 'hatte',
+	'zum', 'vom', 'beim',
+
+	// French glue words (articles, pronouns, conjunctions, meal verbs)
+	'le', 'la', 'les', 'un', 'une', 'du', 'des', 'et', 'avec', 'ai',
+	'mange', 'repas', 'pour', 'mon', 'ma',
+
+	// Spanish glue words (articles, pronouns, conjunctions, meal verbs)
+	'el', 'los', 'las', 'una', 'del', 'con', 'para', 'comi', 'comida',
+	'por', 'mi', 'mis', 'fue',
 ]);
