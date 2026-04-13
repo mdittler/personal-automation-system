@@ -31,7 +31,9 @@ export function parsePathMeta(relativePath: string): PathMeta {
     return { appId: parts[2] ?? 'unknown', scope: 'space', owner: parts[1] ?? null };
   }
 
-  return { appId: 'unknown', scope: 'user', owner: null };
+  // Unrecognized path structure — FileIndexService will skip this entry since
+  // 'unknown' will not match any registered appId in the scope map.
+  return { appId: 'unknown', scope: 'shared', owner: null };
 }
 
 interface ParsedContent {
