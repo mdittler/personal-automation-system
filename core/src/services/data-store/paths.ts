@@ -84,8 +84,8 @@ export function findMatchingScope(
 
 	const normalizedPath = normalizePosix(path);
 
-	// Reject paths that escape upward (resolved to ../something)
-	if (normalizedPath.startsWith('..')) return undefined;
+	// Reject paths that escape upward or are absolute
+	if (normalizedPath.startsWith('..') || normalizedPath.startsWith('/')) return undefined;
 
 	return scopes.find((scope) => {
 		const normalizedScope = normalizePosix(scope.path);

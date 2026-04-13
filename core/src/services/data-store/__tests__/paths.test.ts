@@ -112,6 +112,20 @@ describe('findMatchingScope', () => {
 		];
 		expect(findMatchingScope('grocery/items.yaml', scopes)).toEqual(scopes[0]);
 	});
+
+	it('rejects absolute path input', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('/etc/passwd', scopes)).toBeUndefined();
+	});
+
+	it('rejects bare . input', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('.', scopes)).toBeUndefined();
+	});
 });
 
 describe('ScopeViolationError', () => {
