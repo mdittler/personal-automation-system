@@ -24,12 +24,15 @@ This is a declared-scope bypass within the app's data root (not a base-directory
 
 ### Fix
 
-Apply **virtual POSIX normalization** to the input path before the prefix comparison. Do not use OS `path.resolve()` (which resolves against cwd). Instead:
+Apply **virtual POSIX normalization** to both the input path and declared scope path before the prefix comparison. Do not use OS `path.resolve()` (which resolves against cwd). Instead:
 
 1. Replace `\` with `/`
 2. Collapse `.` and `..` segments using `path.posix.normalize()` (or manual equivalent)
 3. Strip leading `./` if present
-4. Then perform the existing `startsWith` comparison
+4. Preserve trailing `/` on scope paths (directory-scope semantics)
+5. Then perform the existing `startsWith` comparison
+
+Both the input path and the manifest scope path are normalized, ensuring consistent matching regardless of how either side is expressed.
 
 **File:** `core/src/services/data-store/paths.ts` — modify `findMatchingScope()`
 
@@ -63,7 +66,9 @@ An in-memory index of all `.md` and `.yaml` data files, rebuilt from the filesys
 - **Internal-only:** Not added to `CoreServices` in D2a. No manifest enum, no DI wiring to apps. The service is instantiated in bootstrap and passed to DataQueryService in D2b. If apps need direct access later, it can be promoted to `CoreServices` with manifest gating at that time.
 - **No disk persistence:** Index rebuilds from filesystem at startup. Target PAS data volumes (a few hundred files per household) rebuild in well under 1 second.
 - **Archived files excluded:** Files matching the archive naming pattern (`*.YYYYMMDD-HHmmss.*`) are excluded from indexing at both startup scan and `data:changed` event processing. This ensures cold-start rebuild and live-event behavior are consistent.
-- **Conservative graph edges:** No directory-sibling edges (too noisy). Only: frontmatter `related`/`source` fields, wiki-links, and entity-key matches across files.
+- **Conservative graph edges:** No directory-sibling edges (too noisy). D2a stores `entityKeys` and path-derived metadata as index fields, but `getRelated()` only returns explicit frontmatter `related`/`source` edges and wiki-link edges. Entity-key matching and path-convention semantic edges are D2b concerns.
+- **Manifest-aware indexing:** FileIndexService receives the app manifest registry at construction. Files whose derived `appId` does not match any registered app are indexed with `appId: 'unknown'` — D2b's DataQueryService will exclude these from query results by default.
+- **Bootstrap lifecycle:** Instantiated after app registry load (needs manifests for validation) and before Telegram/router handling begins. Subscribes to `data:changed` via EventBus; unsubscribes on shutdown via ShutdownManager.
 
 ### Index Entry Schema
 
@@ -98,16 +103,14 @@ interface FileIndexEntry {
    - Extract dates from frontmatter `date`/`created` fields and filename patterns (e.g., `YYYY-MM-DD.md`, `YYYY-MM.yaml`)
    - Build `FileIndexEntry`
 
-### Graph Edge Derivation
+### Graph Edges (D2a scope)
 
-Deterministic, no LLM. Four edge types:
+D2a implements only explicit, deterministic edges — no semantic inference:
 
 1. **Frontmatter relationships** — `related: [path1, path2]` and `source: path` fields create explicit edges
 2. **Wiki-links** — `[[target]]` creates a "references" edge
-3. **Entity-key matching** — if file A has `entity_keys: [chicken, rice]` and file B has `entity_keys: [chicken]`, they share a "shared-entity:chicken" edge
-4. **Path conventions** — `prices/{store}.md` → entity type "store", `nutrition/YYYY-MM.yaml` → entity type "nutrition-period", `recipes/{slug}.yaml` → entity type "recipe"
 
-Entity-key matching is deferred to query time (computed lazily by DataQueryService in D2b) rather than pre-computed in the graph, to avoid O(n^2) edge explosion.
+`entityKeys` and path-derived metadata (e.g., `prices/{store}.md` → entity type "store") are stored as index fields for D2b's DataQueryService to use for semantic matching at query time. They are NOT pre-computed as graph edges in D2a to avoid O(n^2) edge explosion.
 
 ### Index Refresh
 
@@ -117,10 +120,11 @@ Subscribe to `data:changed` events (already emitted by ScopedStore):
 - **archive** → remove the entry for the original path (the renamed archive file is excluded by naming pattern)
 
 Expose:
-- `reindexFile(absolutePath: string)` — re-read and update a single entry
+- `handleDataChanged(payload: DataChangedPayload)` — event handler wired to `data:changed`. Reconstructs the data-root-relative path from payload fields (`appId`, `userId`, `path`, `spaceId`) and re-indexes or removes accordingly
+- `reindexByPath(dataRootRelativePath: string)` — re-read and update a single entry by its data-root-relative path (for manual/programmatic use)
 - `rebuild()` — full rescan (used at startup)
 - `getEntries(filter?: FileIndexFilter)` — query the index with optional filters (scope, appId, type, owner, tags, date range, text search on title/entityKeys/aliases)
-- `getRelated(path: string)` — return graph neighbors (frontmatter relationships + wiki-links)
+- `getRelated(path: string)` — return graph neighbors (frontmatter relationships + wiki-link targets only in D2a)
 
 ### File: `core/src/services/file-index/index.ts`
 
@@ -144,15 +148,19 @@ Only new writes are enriched — no migration of existing files. The specific wr
 
 | Write site | File | Add to frontmatter |
 |-----------|------|-------------------|
-| Recipe creation | `services/recipe-store.ts` | `type: 'recipe'`, `entity_keys: [recipe name, ...main ingredients]` |
+| Recipe save (create + update) | `services/recipe-store.ts` (`saveRecipe` + `updateRecipe`) | `type: 'recipe'`, `entity_keys: [recipe name, ...main ingredients]` |
 | Receipt capture | `handlers/photo.ts` | `type: 'receipt'`, `entity_keys: [store name]`, `date: receiptDate` |
 | Price logging | `services/price-store.ts` | `type: 'price-list'`, `entity_keys: [store name, store slug]` |
 | Grocery list | `services/grocery-store.ts` | `type: 'grocery-list'`, `entity_keys: [list name or date]` |
 | Nutrition logging | `services/macro-tracker.ts` | `type: 'nutrition-log'` (no entity_keys — monthly files) |
-| Meal plan | `services/meal-planner.ts` | `type: 'meal-plan'`, `entity_keys: [week identifier]` |
+| Meal plan (save + archive) | `services/meal-plan-store.ts` (`savePlan` + `archivePlan`) | `type: 'meal-plan'`, `entity_keys: [week identifier]` |
 | Pantry | `services/pantry-store.ts` | `type: 'pantry'` |
 | Health metrics | `services/health-store.ts` | `type: 'health-metrics'` (no entity_keys — monthly files) |
 | Cultural calendar | `services/cultural-calendar.ts` | `type: 'cultural-calendar'` |
+
+**Important: enrich both creation and update writes.** Any store that rewrites the entire file (e.g., `updateRecipe()`, `archivePlan()`) must include the enriched frontmatter, otherwise an update would regress the index by dropping `type`/`entity_keys` fields.
+
+**Non-target food write sites (D2a scope):** The following food stores are NOT enriched in D2a and remain indexed by path/title/existing-frontmatter only: freezer, leftovers, waste log, budget history, quick meals, guests, family profiles, ingredient cache. These are lower-priority for NL querying. They can be enriched in a follow-up if D2b reveals gaps.
 
 **Price file entity_keys rule:** Include store name, slug, and top-level category keys only — NOT individual item names. Price files can grow large; the indexer can derive item-level detail from file body if needed in D2b.
 
@@ -175,12 +183,12 @@ No changes to the function itself needed — it already supports arbitrary keys 
 | `core/src/services/file-index/index.ts` | **New file** — FileIndexService |
 | `core/src/services/file-index/__tests__/file-index.test.ts` | **New file** — FileIndexService tests |
 | `core/src/services/data-store/__tests__/paths.test.ts` | Scope normalization regression tests |
-| `apps/food/src/services/recipe-store.ts` | Frontmatter enrichment |
+| `apps/food/src/services/recipe-store.ts` | Frontmatter enrichment (`saveRecipe` + `updateRecipe`) |
 | `apps/food/src/handlers/photo.ts` | Receipt frontmatter enrichment |
 | `apps/food/src/services/price-store.ts` | Price frontmatter enrichment |
 | `apps/food/src/services/grocery-store.ts` | Grocery list frontmatter enrichment |
 | `apps/food/src/services/macro-tracker.ts` | Nutrition log frontmatter enrichment |
-| `apps/food/src/services/meal-planner.ts` | Meal plan frontmatter enrichment |
+| `apps/food/src/services/meal-plan-store.ts` | Meal plan frontmatter enrichment (`savePlan` + `archivePlan`) |
 | `apps/food/src/services/pantry-store.ts` | Pantry frontmatter enrichment |
 | `apps/food/src/services/health-store.ts` | Health metrics frontmatter enrichment |
 | `apps/food/src/services/cultural-calendar.ts` | Cultural calendar frontmatter enrichment |
@@ -194,14 +202,15 @@ No changes to the function itself needed — it already supports arbitrary keys 
 ### FileIndexService tests
 - **Startup rebuild:** Create temp data directory with user/shared/space files, verify index entries have correct scope, owner, appId, type, tags, entityKeys
 - **Archive exclusion:** Place an archived file (e.g., `recipe.20260413-143022.yaml`) in the scan directory, verify it is NOT indexed
-- **Event-driven reindex on write:** Simulate `data:changed` event with operation=write, verify entry updated
+- **Manifest-aware indexing:** Files under an unregistered app path are indexed with `appId: 'unknown'`
+- **Event-driven reindex on write:** Simulate `data:changed` event via `handleDataChanged()`, verify entry updated
 - **Event-driven removal on archive:** Simulate `data:changed` event with operation=archive, verify entry removed
 - **Rebuild consistency:** Index a file, archive it via event, rebuild from scratch — verify same result (no archived file in index)
 - **Frontmatter extraction:** File with `type`, `entity_keys`, `tags`, `related`, `aliases` — verify all fields extracted correctly
 - **Wiki-link extraction:** File with `[[target]]` links — verify wikiLinks populated
 - **Date extraction:** File named `2026-03-15.md` with frontmatter `date: 2026-03-15` — verify dates.earliest and dates.latest
 - **Filter queries:** Test `getEntries()` with scope, appId, type, owner, and text search filters
-- **Related query:** Test `getRelated()` returns frontmatter relationships and wiki-link targets
+- **Related query:** Test `getRelated()` returns frontmatter relationships and wiki-link targets only (no entity-key edges)
 
 ### Frontmatter enrichment tests
 - Recipe write includes `type: recipe` and `entity_keys` in frontmatter
