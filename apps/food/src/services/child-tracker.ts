@@ -5,6 +5,7 @@
  */
 
 import type { ChildFoodLog, FoodIntroduction } from '../types.js';
+import { addDays } from '../utils/date.js';
 
 export const ALLERGEN_CATEGORIES = [
 	'milk', 'eggs', 'peanuts', 'tree_nuts', 'wheat',
@@ -122,9 +123,8 @@ export function getRecentIntroductions(
 	days: number,
 	today: string,
 ): FoodIntroduction[] {
-	const cutoff = new Date(today);
-	cutoff.setDate(cutoff.getDate() - days);
-	return log.introductions.filter((i) => new Date(i.date) >= cutoff);
+	const cutoffStr = addDays(today, -days);
+	return log.introductions.filter((i) => i.date >= cutoffStr);
 }
 
 export function getAllergenHistory(

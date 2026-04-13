@@ -9,30 +9,11 @@ import type { InlineButton, ScopedDataStore } from '@pas/core/types';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { MealPlan, PlannedMeal, Recipe } from '../types.js';
-import { isoNow } from '../utils/date.js';
+import { isoNow, getIsoWeekId } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const CURRENT_PATH = 'meal-plans/current.yaml';
 const ARCHIVE_DIR = 'meal-plans/archive';
-
-// ─── ISO Week Helpers ────────────────────────────────────────────────────────
-
-/**
- * Compute ISO week number and year for a given date string (YYYY-MM-DD).
- * Returns { year, week } where week is 1-53 padded to 2 digits.
- */
-function isoWeek(dateStr: string): { year: number; week: string } {
-	const d = new Date(dateStr + 'T00:00:00Z');
-	// ISO week: Thursday is the reference day
-	const dayOfWeek = d.getUTCDay() || 7; // Mon=1 ... Sun=7
-	d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek); // Set to Thursday of this week
-	const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-	const weekNum = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-	return {
-		year: d.getUTCFullYear(),
-		week: String(weekNum).padStart(2, '0'),
-	};
-}
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
@@ -62,11 +43,11 @@ export async function savePlan(store: ScopedDataStore, plan: MealPlan): Promise<
 
 /** Archive the current plan to meal-plans/archive/YYYY-Www.yaml. */
 export async function archivePlan(store: ScopedDataStore, plan: MealPlan): Promise<void> {
-	const { year, week } = isoWeek(plan.startDate);
-	const filename = `${year}-W${week}.yaml`;
+	const weekId = getIsoWeekId(plan.startDate);
+	const filename = `${weekId}.yaml`;
 	const archivePath = `${ARCHIVE_DIR}/${filename}`;
 	const fm = generateFrontmatter({
-		title: `Meal Plan Archive ${year}-W${week}`,
+		title: `Meal Plan Archive ${weekId}`,
 		date: plan.createdAt,
 		tags: buildAppTags('food', 'meal-plan-archive'),
 		app: 'food',

@@ -231,6 +231,21 @@ describe('child-tracker', () => {
 			const recent = getRecentIntroductions(log, 7, '2026-04-07');
 			expect(recent).toEqual([]);
 		});
+
+		// DST regression: 2026-11-02 is the day after fall DST in the US.
+		// The old `new Date(today) + setDate()` pattern would compute the wrong
+		// cutoff date around DST transitions (F23). With 14 days subtracted from
+		// '2026-11-02', the correct cutoff is '2026-10-19'; the buggy version
+		// would produce '2026-10-18', wrongly excluding '2026-10-19'.
+		it('uses DST-safe cutoff across fall DST boundary (F23)', () => {
+			const log = makeLog([
+				makeIntro({ food: 'boundary food', date: '2026-10-19' }), // at correct cutoff — must be included
+				makeIntro({ food: 'day before cutoff', date: '2026-10-18' }), // must be excluded
+			]);
+			const recent = getRecentIntroductions(log, 14, '2026-11-02');
+			expect(recent.map(i => i.food)).toContain('boundary food');
+			expect(recent.map(i => i.food)).not.toContain('day before cutoff');
+		});
 	});
 
 	// ─── getAllergenHistory ───────────────────────────────────────

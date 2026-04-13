@@ -27,6 +27,7 @@ import { logQuickMeal } from './quick-meal-log.js';
 import { estimateMacros } from '../services/macro-estimator.js';
 import { recordAdHocLog, findSimilarAdHoc } from '../services/ad-hoc-history.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { parseStrictInt } from '../utils/parse-int-strict.js';
 
 // ─── Task 14: Ad-hoc dedup promotion pending state ──────────────────────────
 
@@ -175,7 +176,7 @@ import {
 	logMealMacros,
 	loadMacrosForPeriod,
 } from '../services/macro-tracker.js';
-import { todayDate } from '../utils/date.js';
+import { addDays, todayDate } from '../utils/date.js';
 import type { MacroTargets, MealMacroEntry } from '../types.js';
 
 // ─── Intent Detection ────��──────────────────────────��─────────────────────────
@@ -392,9 +393,7 @@ export async function handleNutritionCommand(
 			const targets = await loadTargets(services, userStore);
 			const today = todayDate(services.timezone);
 			const endDate = today;
-			const start = new Date(today);
-			start.setDate(start.getDate() - 30);
-			const startDate = start.toISOString().slice(0, 10);
+			const startDate = addDays(today, -30);
 
 			const summary = await generatePersonalSummary(services, userStore, userId, startDate, endDate, targets);
 			await services.telegram.send(userId, summary);
@@ -573,8 +572,8 @@ export async function handleNutritionCommand(
 							`Invalid ${spec.name} value: ''. Must be a number between 0 and 99999.`);
 						return;
 					}
-					const val = parseInt(spec.raw, 10);
-					if (isNaN(val) || val < 0 || val > 99999) {
+					const val = parseStrictInt(spec.raw);
+					if (val === null || val < 0 || val > 99999) {
 						await services.telegram.send(userId,
 							`Invalid ${spec.name} value: '${spec.raw}'. Must be a number between 0 and 99999.`);
 						return;
@@ -671,17 +670,14 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const periodDays = parseInt(args[1], 10);
-			if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
+			const periodDays = parseStrictInt(args[1] ?? '');
+			if (periodDays === null || periodDays < 1 || periodDays > 365) {
 				await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
 				return;
 			}
 			const today = todayDate(services.timezone);
-			const end = new Date(today);
-			const start = new Date(today);
-			start.setDate(start.getDate() - (periodDays - 1));
-			const startDate = start.toISOString().slice(0, 10);
-			const endDate = end.toISOString().slice(0, 10);
+			const endDate = today;
+			const startDate = addDays(today, -(periodDays - 1));
 
 			const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
 			if (entries.length === 0) {
@@ -704,18 +700,24 @@ export async function handleNutritionCommand(
 				}
 
 				// Advanced shortcut: positional args provided.
-				const calories = parseInt(args[2], 10);
-				const protein = parseInt(args[3] ?? '0', 10);
-				const carbs = parseInt(args[4] ?? '0', 10);
-				const fat = parseInt(args[5] ?? '0', 10);
-				const fiber = args[6] !== undefined ? parseInt(args[6], 10) : 0;
+				const calories = parseStrictInt(args[2] ?? '');
+				const protein = parseStrictInt(args[3] ?? '0');
+				const carbs = parseStrictInt(args[4] ?? '0');
+				const fat = parseStrictInt(args[5] ?? '0');
+				const fiber = args[6] !== undefined ? parseStrictInt(args[6]) : 0;
 
-				if ([calories, protein, carbs, fat, fiber].some(v => isNaN(v) || v < 0 || v > 99999)) {
+				if ([calories, protein, carbs, fat, fiber].some(v => v === null || (v as number) < 0 || (v as number) > 99999)) {
 					await services.telegram.send(userId, 'Invalid targets. Values must be numbers between 0 and 99999.');
 					return;
 				}
 
-				await saveTargets(services, userStore, userId, { calories, protein, carbs, fat, fiber });
+				await saveTargets(services, userStore, userId, {
+					calories: calories as number,
+					protein: protein as number,
+					carbs: carbs as number,
+					fat: fat as number,
+					fiber: fiber as number,
+				});
 
 				await services.telegram.send(userId,
 					`Macro targets updated:\nCalories: ${calories}\nProtein: ${protein}g\nCarbs: ${carbs}g\nFat: ${fat}g\nFiber: ${fiber}g`);
@@ -756,7 +758,7 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			const periodDays = parseInt(args[2] ?? '90', 10);
+			const periodDays = parseStrictInt(args[2] ?? '') ?? 90;
 			const childLog = await loadChildProfile(sharedStore, childName.toLowerCase());
 
 			if (!childLog) {
@@ -1035,11 +1037,8 @@ export async function handleAdherencePeriodCallback(
 	}
 
 	const today = todayDate(services.timezone);
-	const end = new Date(today);
-	const start = new Date(today);
-	start.setDate(start.getDate() - (periodDays - 1));
-	const startDate = start.toISOString().slice(0, 10);
-	const endDate = end.toISOString().slice(0, 10);
+	const endDate = today;
+	const startDate = addDays(today, -(periodDays - 1));
 
 	const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
 	if (entries.length === 0) {

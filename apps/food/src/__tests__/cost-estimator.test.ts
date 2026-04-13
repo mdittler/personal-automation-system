@@ -123,6 +123,65 @@ describe('estimateRecipeCost', () => {
 		expect(result.perServingCost).toBe(0);
 		expect(result.ingredientCosts).toEqual([]);
 	});
+
+	it('drops entry with negative portionCost (-5)', async () => {
+		const bad = JSON.stringify([
+			{ ingredientName: 'flour', matchedItem: null, portionCost: -5, isEstimate: true },
+		]);
+		const services = createMockServices(bad);
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.ingredientCosts).toHaveLength(0);
+		expect(result.totalCost).toBe(0);
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('drops entry with string portionCost ("8.49")', async () => {
+		const bad = JSON.stringify([
+			{ ingredientName: 'flour', matchedItem: null, portionCost: '8.49', isEstimate: true },
+		]);
+		const services = createMockServices(bad);
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.ingredientCosts).toHaveLength(0);
+		expect(result.totalCost).toBe(0);
+	});
+
+	it('drops entry with non-finite portionCost (Infinity via 1e309)', async () => {
+		// 1e309 exceeds IEEE 754 max and parses to Infinity
+		const bad = '[{"ingredientName":"flour","matchedItem":null,"portionCost":1e309,"isEstimate":true}]';
+		const services = createMockServices(bad);
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.ingredientCosts).toHaveLength(0);
+		expect(result.totalCost).toBe(0);
+	});
+
+	it('drops entry with portionCost > 500', async () => {
+		const bad = JSON.stringify([
+			{ ingredientName: 'truffle', matchedItem: null, portionCost: 999, isEstimate: true },
+		]);
+		const services = createMockServices(bad);
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.ingredientCosts).toHaveLength(0);
+		expect(result.totalCost).toBe(0);
+	});
+
+	it('returns fallback when LLM returns non-array JSON ({})', async () => {
+		const services = createMockServices('{}');
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.totalCost).toBe(0);
+		expect(result.ingredientCosts).toHaveLength(0);
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('counts only valid entries in mixed valid/invalid array', async () => {
+		const mixed = JSON.stringify([
+			{ ingredientName: 'flour', matchedItem: null, portionCost: 5, isEstimate: false },
+			{ ingredientName: 'unicorn tears', matchedItem: null, portionCost: -10, isEstimate: true },
+		]);
+		const services = createMockServices(mixed);
+		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
+		expect(result.ingredientCosts).toHaveLength(1);
+		expect(result.totalCost).toBeCloseTo(5, 5);
+	});
 });
 
 // ─── estimatePlanCost ─────────────────────────────────────────────────────────
@@ -256,6 +315,58 @@ describe('estimateGroceryListCost', () => {
 		expect(result.items[0]?.estimatedCost).toBe(8.99);
 		expect(result.total).toBeCloseTo(8.99 + 8.49, 2);
 		expect(result.store).toBe('Costco');
+	});
+
+	it('drops entry with negative estimatedCost (-5)', async () => {
+		const bad = JSON.stringify([{ name: 'Flour', matchedItem: null, estimatedCost: -5 }]);
+		const services = createMockServices(bad);
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.items).toHaveLength(0);
+		expect(result.total).toBe(0);
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('drops entry with string estimatedCost ("8.49")', async () => {
+		const bad = JSON.stringify([{ name: 'Flour', matchedItem: null, estimatedCost: '8.49' }]);
+		const services = createMockServices(bad);
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.items).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('drops entry with non-finite estimatedCost (Infinity via 1e309)', async () => {
+		const bad = '[{"name":"Flour","matchedItem":null,"estimatedCost":1e309}]';
+		const services = createMockServices(bad);
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.items).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('drops entry with estimatedCost > 500', async () => {
+		const bad = JSON.stringify([{ name: 'Wagyu', matchedItem: null, estimatedCost: 999 }]);
+		const services = createMockServices(bad);
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.items).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('returns fallback when LLM returns non-array JSON ({})', async () => {
+		const services = createMockServices('{}');
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.total).toBe(0);
+		expect(result.items).toHaveLength(0);
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('counts only valid entries in mixed valid/invalid array', async () => {
+		const mixed = JSON.stringify([
+			{ name: 'Eggs', matchedItem: 'Eggs (60ct)', estimatedCost: 5 },
+			{ name: 'Phantom', matchedItem: null, estimatedCost: -10 },
+		]);
+		const services = createMockServices(mixed);
+		const result = await estimateGroceryListCost(services, groceryItems, priceItems, 'Costco');
+		expect(result.items).toHaveLength(1);
+		expect(result.total).toBeCloseTo(5, 5);
 	});
 });
 

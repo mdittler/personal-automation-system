@@ -9,31 +9,14 @@ import type { ScopedDataStore } from '@pas/core/types';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { CostHistoryMonth, CostHistoryWeek, MealCostEstimate, MealPlan } from '../types.js';
+import { getIsoWeekId } from '../utils/date.js';
 
 const COST_HISTORY_DIR = 'cost-history';
 
 // ─── ISO Week Helpers ─────────────────────────────────────────────────────────
 
-/**
- * Compute the ISO 8601 week ID (e.g. "2026-W15") for a given YYYY-MM-DD date.
- * Uses the Thursday rule: a week belongs to the year containing its Thursday.
- */
-export function getIsoWeekId(dateStr: string): string {
-	const d = new Date(`${dateStr}T00:00:00Z`);
-	// Day of week: 0 = Sunday … 6 = Saturday. Shift to Mon=0 … Sun=6.
-	const dayOfWeek = (d.getUTCDay() + 6) % 7;
-	// Find Thursday of this week
-	const thursday = new Date(d);
-	thursday.setUTCDate(d.getUTCDate() - dayOfWeek + 3);
-	// Jan 4 is always in week 1
-	const jan4 = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
-	const jan4DayOfWeek = (jan4.getUTCDay() + 6) % 7;
-	const week1Monday = new Date(jan4);
-	week1Monday.setUTCDate(jan4.getUTCDate() - jan4DayOfWeek);
-	const weekNumber = Math.round((thursday.getTime() - week1Monday.getTime()) / (7 * 24 * 3600 * 1000)) + 1;
-	const year = thursday.getUTCFullYear();
-	return `${year}-W${String(weekNumber).padStart(2, '0')}`;
-}
+// Re-export for backward compatibility — canonical implementation is in utils/date.ts
+export { getIsoWeekId } from '../utils/date.js';
 
 /** Format a YYYY-MM-DD date as e.g. "Apr 7" */
 function formatShortDate(dateStr: string): string {

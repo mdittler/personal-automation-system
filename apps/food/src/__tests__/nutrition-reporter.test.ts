@@ -5,6 +5,7 @@ import {
 	generatePersonalSummary,
 	generateWeeklyDigest,
 } from '../services/nutrition-reporter.js';
+import * as macroTracker from '../services/macro-tracker.js';
 import type { DailyMacroEntry, MacroTargets } from '../types.js';
 
 function createMockServices(llmResponse = 'Great week of eating!') {
@@ -376,6 +377,39 @@ describe('nutrition-reporter', () => {
 			);
 
 			expect(result).toContain('Weekly summary');
+		});
+
+		// DST regression: 2026-11-02 is the day after fall DST in the US.
+		// The old pattern (new Date(today) + setDate() + toISOString()) would
+		// produce '2026-10-25' instead of '2026-10-26' because local-timezone
+		// arithmetic shifts midnight UTC to the previous day around the transition.
+		it('computes correct 7-day window start across fall DST boundary (F23)', async () => {
+			const services = createMockServices('DST-safe digest');
+			const store = createMockScopedStore();
+
+			// Spy on loadMacrosForPeriod so we can capture the exact startDate string
+			// that generateWeeklyDigest computes and passes through generatePersonalSummary.
+			// This is the only reliable way to distinguish '2026-10-25' (wrong, DST bug)
+			// from '2026-10-26' (correct, UTC-safe addDays), since both fall in October
+			// and a month-level check cannot tell them apart.
+			const spy = vi.spyOn(macroTracker, 'loadMacrosForPeriod').mockResolvedValue([]);
+
+			await generateWeeklyDigest(
+				services as never,
+				store as never,
+				'user1',
+				{},
+				'2026-11-02',
+			);
+
+			expect(spy).toHaveBeenCalledOnce();
+			const [, startDate, endDate] = spy.mock.calls[0]!;
+			// Given today='2026-11-02' and a 7-day window, addDays('2026-11-02', -7)
+			// must return '2026-10-26', not '2026-10-25' (the DST-shifted UTC result).
+			expect(startDate).toBe('2026-10-26');
+			expect(endDate).toBe('2026-11-02');
+
+			spy.mockRestore();
 		});
 	});
 });

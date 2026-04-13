@@ -676,5 +676,79 @@ describe('pantry-store', () => {
 			const result = await enrichWithExpiry(mockServices, items);
 			expect(result[0]?.expiryEstimate).toBeUndefined();
 		});
+
+		// ── LLM output caps / parseStrictInt guards ─────────────────
+
+		it('caps LLM shelf-life at 365 days (9999 → 365)', async () => {
+			const items = [
+				makePantryItem({ name: 'Honey', category: 'Pantry & Dry Goods' }),
+			];
+			// Override: Pantry & Dry Goods is non-perishable, use Produce instead
+			const perishableItems = [
+				makePantryItem({ name: 'Honey', category: 'Produce', addedDate: '2026-01-01' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('9999') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, perishableItems);
+			// 365 days from 2026-01-01 = 2026-12-31 (not 2026 + 27 years)
+			const expiry = new Date('2026-01-01T00:00:00Z');
+			expiry.setUTCDate(expiry.getUTCDate() + 365);
+			expect(result[0]?.expiryEstimate).toBe(expiry.toISOString().slice(0, 10));
+		});
+
+		it('uses LLM shelf-life unchanged when within 365-day cap', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood', addedDate: '2026-04-01' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('30') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBe('2026-05-01');
+		});
+
+		it('skips enrichment when LLM returns negative number string ("-1")', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood', addedDate: '2026-04-01' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('-1') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBeUndefined();
+		});
+
+		it('skips enrichment when LLM returns string with letters ("5 days")', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood', addedDate: '2026-04-01' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('5 days') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBeUndefined();
+		});
+
+		it('skips enrichment when LLM returns a range string ("3-5")', async () => {
+			const items = [
+				makePantryItem({ name: 'Chicken', category: 'Meat & Seafood', addedDate: '2026-04-01' }),
+			];
+			const mockServices = {
+				llm: { complete: vi.fn().mockResolvedValue('3-5') },
+				timezone: 'UTC',
+			};
+
+			const result = await enrichWithExpiry(mockServices, items);
+			expect(result[0]?.expiryEstimate).toBeUndefined();
+		});
 	});
 });

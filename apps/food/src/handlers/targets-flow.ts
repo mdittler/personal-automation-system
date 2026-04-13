@@ -15,6 +15,7 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { saveTargets } from './nutrition.js';
+import { parseStrictInt } from '../utils/parse-int-strict.js';
 
 type TargetsStep =
 	| 'awaiting_calories'
@@ -218,8 +219,8 @@ export async function handleTargetsFlowReply(
 		return true;
 	}
 
-	const val = parseInt(raw, 10);
-	if (isNaN(val) || val < 0 || val > 99999) {
+	const val = parseStrictInt(raw);
+	if (val === null || val < 0 || val > 99999) {
 		await services.telegram.send(
 			userId,
 			`Invalid value: '${raw}'. Must be a whole number between 0 and 99999. Try again, or reply "cancel" to abort.`,

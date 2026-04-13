@@ -7,6 +7,7 @@
 
 import type { ScopedDataStore } from '@pas/core/types';
 import type { ChildFoodLog, DailyMacroEntry, FoodIntroduction, MacroData, Recipe } from '../types.js';
+import { addDays } from '../utils/date.js';
 import { computeAgeDisplay } from './family-profiles.js';
 import { averageMacros, loadMacrosForPeriod } from './macro-tracker.js';
 
@@ -50,9 +51,7 @@ export function computeFoodVariety(
 	periodDays: number,
 	today: string,
 ): FoodVarietyResult {
-	const cutoff = new Date(today);
-	cutoff.setDate(cutoff.getDate() - periodDays);
-	const cutoffStr = cutoff.toISOString().slice(0, 10);
+	const cutoffStr = addDays(today, -periodDays);
 
 	const recentFoods = introductions
 		.filter(i => i.date >= cutoffStr)
@@ -205,9 +204,7 @@ export async function generatePediatricianReport(
 
 	// Load macro data for the period
 	const endDate = today;
-	const startDate = new Date(today);
-	startDate.setDate(startDate.getDate() - periodDays);
-	const startStr = startDate.toISOString().slice(0, 10);
+	const startStr = addDays(today, -periodDays);
 
 	const macroEntries = await loadMacrosForPeriod(userStore, startStr, endDate);
 	const macroBalance = computeMacroBalance(macroEntries);

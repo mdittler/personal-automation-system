@@ -282,6 +282,60 @@ describe('targets-flow', () => {
 			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
 		});
 
+		// F22 — parseStrictInt: reject numeric-prefix garbage in targets flow
+		it('rejects "150g" in custom input (numeric-prefix garbage)', async () => {
+			const services = createMockServices();
+			const userStore = createMockUserStore();
+
+			await beginTargetsFlow(services as never, USER_ID);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:custom',
+			);
+			vi.clearAllMocks();
+
+			const consumed = await handleTargetsFlowReply(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'150g',
+			);
+			expect(consumed).toBe(true);
+			expect(services.telegram.send).toHaveBeenCalledOnce();
+			const errMsg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(errMsg).toMatch(/invalid/i);
+			expect(hasPendingTargetsFlow(USER_ID)).toBe(true);
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+		});
+
+		it('accepts plain "150" in custom input (positive)', async () => {
+			const services = createMockServices();
+			const userStore = createMockUserStore();
+
+			await beginTargetsFlow(services as never, USER_ID);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:custom',
+			);
+			vi.clearAllMocks();
+
+			const consumed = await handleTargetsFlowReply(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'150',
+			);
+			expect(consumed).toBe(true);
+			// Should have advanced to protein step (sendWithButtons)
+			expect(services.telegram.sendWithButtons).toHaveBeenCalledOnce();
+			const proteinMsg = services.telegram.sendWithButtons.mock.calls[0]![1] as string;
+			expect(proteinMsg).toContain('Step 2/5');
+		});
+
 		it('ignores text reply when NOT in awaitingCustomInput mode', async () => {
 			const services = createMockServices();
 			const userStore = createMockUserStore();

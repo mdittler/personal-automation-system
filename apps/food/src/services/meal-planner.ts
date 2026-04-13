@@ -5,7 +5,7 @@
 
 import type { CoreServices } from '@pas/core/types';
 import type { MealPlan, PantryItem, ParsedRecipe, PlannedMeal, Recipe } from '../types.js';
-import { generateId, isoNow } from '../utils/date.js';
+import { generateId, isoNow, addDays } from '../utils/date.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { parseJsonResponse } from './recipe-parser.js';
 
@@ -92,13 +92,6 @@ function buildRecipeSummary(recipe: Recipe): string {
 	const lastCookedEntry = recipe.history.length > 0 ? recipe.history[recipe.history.length - 1] : undefined;
 	const lastCooked = lastCookedEntry?.date ?? 'never';
 	return `- ${recipe.id}: "${safeTitle}"${tags}${cuisine} rating=${avgRating} lastCooked=${lastCooked}`;
-}
-
-/** Add 6 days to a YYYY-MM-DD string. */
-function addDays(dateStr: string, days: number): string {
-	const d = new Date(`${dateStr}T00:00:00Z`);
-	d.setUTCDate(d.getUTCDate() + days);
-	return d.toISOString().slice(0, 10);
 }
 
 /** Normalise a raw LLM meal object into a full PlannedMeal. */

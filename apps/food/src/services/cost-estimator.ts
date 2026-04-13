@@ -99,16 +99,35 @@ export async function estimateRecipeCost(
 	try {
 		const result = await services.llm.complete(prompt, { tier: 'standard' });
 		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-		const parsed = JSON.parse(cleaned) as IngredientCost[];
+		const parsed: unknown = JSON.parse(cleaned);
 
-		const totalCost = parsed.reduce((sum, c) => sum + (c.portionCost ?? 0), 0);
+		if (!Array.isArray(parsed)) {
+			services.logger.warn('estimateRecipeCost: LLM returned non-array JSON for %s', recipe.title);
+			return emptyResult;
+		}
+
+		const validCosts = (parsed as IngredientCost[]).filter((c) => {
+			const cost = c?.portionCost;
+			return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 && cost <= 500;
+		});
+
+		const dropped = parsed.length - validCosts.length;
+		if (dropped > 0) {
+			services.logger.warn(
+				'estimateRecipeCost: dropped %d invalid cost entries for %s',
+				dropped,
+				recipe.title,
+			);
+		}
+
+		const totalCost = validCosts.reduce((sum, c) => sum + c.portionCost, 0);
 		const perServingCost = recipe.servings > 0 ? totalCost / recipe.servings : 0;
 
 		return {
 			recipeId: recipe.id,
 			recipeTitle: recipe.title,
 			store: storeName,
-			ingredientCosts: parsed,
+			ingredientCosts: validCosts,
 			totalCost,
 			perServingCost,
 			servings: recipe.servings,
@@ -182,15 +201,27 @@ export async function estimateGroceryListCost(
 	try {
 		const result = await services.llm.complete(prompt, { tier: 'standard' });
 		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-		const parsed = JSON.parse(cleaned) as Array<{
-			name: string;
-			matchedItem: string | null;
-			estimatedCost: number;
-		}>;
+		const parsed: unknown = JSON.parse(cleaned);
 
-		const total = parsed.reduce((sum, item) => sum + (item.estimatedCost ?? 0), 0);
+		if (!Array.isArray(parsed)) {
+			services.logger.warn('estimateGroceryListCost: LLM returned non-array JSON');
+			return emptyResult;
+		}
 
-		return { items: parsed, total, store: storeName };
+		type RawItem = { name: string; matchedItem: string | null; estimatedCost: number };
+		const validItems = (parsed as RawItem[]).filter((item) => {
+			const cost = item?.estimatedCost;
+			return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 && cost <= 500;
+		});
+
+		const dropped = parsed.length - validItems.length;
+		if (dropped > 0) {
+			services.logger.warn('estimateGroceryListCost: dropped %d invalid cost entries', dropped);
+		}
+
+		const total = validItems.reduce((sum, item) => sum + item.estimatedCost, 0);
+
+		return { items: validItems, total, store: storeName };
 	} catch (err) {
 		services.logger.error('estimateGroceryListCost failed: %s', err);
 		return emptyResult;

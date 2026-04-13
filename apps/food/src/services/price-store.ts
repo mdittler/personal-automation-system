@@ -116,6 +116,11 @@ export async function saveStorePrices(store: ScopedDataStore, data: StorePriceDa
 }
 
 export function addOrUpdatePrice(data: StorePriceData, entry: PriceEntry): StorePriceData {
+	if (!isValidPriceEntry({ item: entry.name, price: entry.price, unit: entry.unit, department: entry.department })) {
+		// Log is unavailable here (pure function); caller should validate before calling
+		return data;
+	}
+
 	const lowerName = entry.name.toLowerCase();
 	const idx = data.items.findIndex((i) => i.name.toLowerCase() === lowerName);
 
@@ -132,6 +137,21 @@ export function addOrUpdatePrice(data: StorePriceData, entry: PriceEntry): Store
 export function lookupPrice(items: PriceEntry[], name: string): PriceEntry | null {
 	const lower = name.toLowerCase();
 	return items.find((i) => i.name.toLowerCase() === lower) ?? null;
+}
+
+function isValidPriceEntry(entry: {
+	item?: unknown;
+	price?: unknown;
+	store?: unknown;
+	unit?: unknown;
+	department?: unknown;
+}): boolean {
+	if (typeof entry.item !== 'string' || entry.item.trim() === '') return false;
+	if (typeof entry.price !== 'number' || !Number.isFinite(entry.price) || entry.price <= 0 || entry.price > 9999) return false;
+	if (entry.store !== undefined && typeof entry.store !== 'string') return false;
+	if (entry.unit !== undefined && typeof entry.unit !== 'string') return false;
+	if (entry.department !== undefined && typeof entry.department !== 'string') return false;
+	return true;
 }
 
 export async function listStores(store: ScopedDataStore): Promise<string[]> {
@@ -278,7 +298,7 @@ export async function parsePriceUpdateText(
 		);
 		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
 		const parsed = JSON.parse(cleaned) as ParsedPriceUpdate;
-		if (!parsed.item || typeof parsed.price !== 'number') return null;
+		if (!isValidPriceEntry(parsed)) return null;
 		return parsed;
 	} catch (err) {
 		services.logger.error('Failed to parse price update text: %s', err);

@@ -187,6 +187,74 @@ describe('nutrition handler', () => {
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/invalid/i);
 		});
+
+		// F22 — parseStrictInt: reject numeric-prefix garbage
+		it('rejects targets shortcut with numeric-prefix string "2000cal" for calories', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(services as never, ['targets', 'set', '2000cal', '150', '200', '70'], 'user1', store as never);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).toMatch(/invalid/i);
+			const userStore = services.data.forUser('user1');
+			expect(userStore.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects /nutrition log with "600abc" for calories', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(
+				services as never,
+				['log', 'lunch', '600abc', '40', '50', '20'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).toMatch(/invalid/i);
+			expect(msg.toLowerCase()).toContain('calories');
+			const userStore = services.data.forUser('user1');
+			expect(userStore.write).not.toHaveBeenCalled();
+		});
+
+		it('rejects /nutrition log with "2000cal" for calories', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(
+				services as never,
+				['log', 'lunch', '2000cal', '40', '50', '20'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).toMatch(/invalid/i);
+		});
+
+		it('rejects /nutrition log with "1e3" for calories', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(
+				services as never,
+				['log', 'lunch', '1e3', '40', '50', '20'],
+				'user1',
+				store as never,
+			);
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).toMatch(/invalid/i);
+		});
+
+		it('accepts /nutrition log with plain "600" for calories (positive)', async () => {
+			const services = createMockServices();
+			const store = createMockScopedStore();
+			await handleNutritionCommand(
+				services as never,
+				['log', 'lunch', '600', '40', '50', '20'],
+				'user1',
+				store as never,
+			);
+			const userStore = services.data.forUser('user1');
+			expect(userStore.write).toHaveBeenCalled();
+			const msg = services.telegram.send.mock.calls[0]![1] as string;
+			expect(msg).toContain('600');
+		});
 	});
 
 	// ─── H11.x additions ──────────────────────────────────────
