@@ -1306,7 +1306,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const userStore = services.data.forUser(ctx.userId);
 			const handled = await handleQuickMealAddCallback(services, userStore, ctx.userId, data);
 			if (!handled) {
-				services.logger.warn({ data }, 'quick-meal add callback not handled');
+				services.logger.warn('quick-meal add callback not handled: %s', data);
 			}
 			return;
 		}
@@ -1316,7 +1316,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const userStore = services.data.forUser(ctx.userId);
 			const handled = await handleQuickMealEditCallback(services, userStore, ctx.userId, data);
 			if (!handled) {
-				services.logger.warn({ data }, 'quick-meal edit callback not handled');
+				services.logger.warn('quick-meal edit callback not handled: %s', data);
 			}
 			return;
 		}
@@ -1329,7 +1329,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 			const userStore = services.data.forUser(ctx.userId);
 			const handled = await handleQuickMealLogCallback(services, userStore, ctx.userId, data);
 			if (!handled) {
-				services.logger.warn({ data }, 'quick-meal log callback not handled');
+				services.logger.warn('quick-meal log callback not handled: %s', data);
 			}
 			return;
 		}

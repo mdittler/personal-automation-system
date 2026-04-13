@@ -112,7 +112,7 @@ export function cleanExpiredSessions(): number {
 
 export function formatStepMessage(session: CookSession): string {
 	const stepNum = session.currentStep + 1; // 1-indexed for display
-	const instruction = session.instructions[session.currentStep];
+	const instruction = session.instructions[session.currentStep] ?? '';
 	return `Step ${stepNum} of ${session.totalSteps}\n\n${escapeMarkdown(instruction)}`;
 }
 

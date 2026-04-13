@@ -67,9 +67,12 @@ import {
 import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
+import { FileIndexService } from './services/file-index/index.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
+import type { DataChangedPayload } from './types/data-events.js';
+import type { ManifestDataScope } from './types/manifest.js';
 
 export async function main(): Promise<void> {
 	// 1. Config + Logger
@@ -550,6 +553,23 @@ export async function main(): Promise<void> {
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
 
+	// 9c-ii. File index — metadata-based graph over all data files
+	const appScopes = new Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>();
+	for (const app of registry.getAll()) {
+		const data = app.manifest.requirements?.data;
+		appScopes.set(app.manifest.app.id, {
+			user: data?.user_scopes ?? [],
+			shared: data?.shared_scopes ?? [],
+		});
+	}
+	const fileIndex = new FileIndexService(config.dataDir, appScopes);
+	await fileIndex.rebuild();
+	logger.info({ count: fileIndex.size }, 'FileIndexService: initial index built');
+
+	const onDataChanged = (payload: unknown) =>
+		void fileIndex.handleDataChanged(payload as DataChangedPayload);
+	eventBus.on('data:changed', onDataChanged);
+
 	// 9d. Vault service — per-user Obsidian vault directories with symlinks
 	const vaultService = new VaultService({
 		dataDir: config.dataDir,
@@ -923,6 +943,8 @@ export async function main(): Promise<void> {
 			() => costTracker.flush(),
 			// Dispose webhook service event subscriptions
 			...(webhookService ? [() => webhookService.dispose()] : []),
+			// Unsubscribe FileIndexService from data:changed events
+			() => eventBus.off('data:changed', onDataChanged),
 		],
 	});
 	shutdownManager.register();

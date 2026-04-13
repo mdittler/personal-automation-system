@@ -892,7 +892,7 @@ export async function classifyPASMessage(
 		});
 
 		// Extract first word only — handles "YES - this is PAS-related", "yes.", "NO.", etc.
-		const firstWord = response.trim().split(/\s/)[0].toLowerCase().replace(/[^a-z]/g, '');
+		const firstWord = (response.trim().split(/\s/)[0] ?? '').toLowerCase().replace(/[^a-z]/g, '');
 		return { pasRelated: firstWord === 'yes' };
 	} catch (error) {
 		svc.logger.warn('PAS classification failed, defaulting to app-aware context: %s', error);

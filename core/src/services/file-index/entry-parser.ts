@@ -70,7 +70,7 @@ export function parseFileContent(content: string): ParsedContent {
   let title: string | null = (meta.title as string) ?? null;
   if (!title) {
     const headingMatch = body.match(/^#\s+(.+)$/m);
-    if (headingMatch) title = headingMatch[1].trim();
+    if (headingMatch?.[1]) title = headingMatch[1].trim();
   }
 
   const type = typeof meta.type === 'string' ? meta.type : null;
