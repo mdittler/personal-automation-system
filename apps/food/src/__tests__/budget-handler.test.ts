@@ -62,56 +62,113 @@ describe('budget-handler', () => {
 	});
 
 	describe('loadWeeksForMonth', () => {
-		it('includes boundary week when startDate is in the month', async () => {
-			// Week starts 2026-03-30 (March), ends 2026-04-05 (April)
-			const boundaryWeek = makeWeek('2026-W14', '2026-03-30', '2026-04-05');
-			const store = {
-				read: vi.fn().mockResolvedValue(JSON.stringify(boundaryWeek)),
+		// The boundary week: startDate in March (2026-03-30), endDate in April (2026-04-05).
+		// loadWeeklyHistory strips frontmatter then yaml.parse()s the body, so the mock
+		// must return YAML that parses to a CostHistoryWeek with a valid weekId string.
+		const boundaryWeekYaml = [
+			'weekId: "2026-W14"',
+			'startDate: "2026-03-30"',
+			'endDate: "2026-04-05"',
+			'totalCost: 150',
+			'mealCount: 7',
+			'avgPerMeal: 21.43',
+			'avgPerServing: 10.71',
+			'meals: []',
+		].join('\n');
+
+		function makeBoundaryStore() {
+			return {
+				read: vi.fn().mockResolvedValue(boundaryWeekYaml),
 				write: vi.fn(),
 				append: vi.fn(),
 				exists: vi.fn().mockResolvedValue(true),
 				list: vi.fn().mockResolvedValue([]),
 				archive: vi.fn(),
 			};
-			// loadWeeksForMonth delegates to loadWeeklyHistory which reads from store;
-			// we test by constructing a store that returns the week for the given weekId
+		}
+
+		it('includes boundary week in March because startDate is 2026-03-30', async () => {
+			const store = makeBoundaryStore();
 			const results = await loadWeeksForMonth(store as never, ['2026-W14'], '2026-03');
-			// Should include: startDate '2026-03-30' starts with '2026-03'
-			expect(results.length).toBeGreaterThanOrEqual(0); // store mock may return null — covered below
+			expect(results).toHaveLength(1);
+			expect(results[0]!.weekId).toBe('2026-W14');
 		});
 
-		it('filters by startDate only — boundary week excluded from April', async () => {
-			// startDate=2026-03-30 should NOT appear in April results
-			const results: CostHistoryWeek[] = [];
-			// Simulate the filter logic directly
-			const week = makeWeek('2026-W14', '2026-03-30', '2026-04-05');
-			if (week.startDate.startsWith('2026-04')) results.push(week);
+		it('excludes boundary week from April because startDate is 2026-03-30, not April', async () => {
+			const store = makeBoundaryStore();
+			const results = await loadWeeksForMonth(store as never, ['2026-W14'], '2026-04');
 			expect(results).toHaveLength(0);
 		});
 
-		it('filters by startDate only — boundary week included in March', () => {
-			const week = makeWeek('2026-W14', '2026-03-30', '2026-04-05');
-			const results: CostHistoryWeek[] = [];
-			if (week.startDate.startsWith('2026-03')) results.push(week);
-			expect(results).toHaveLength(1);
+		it('returns empty array when no weekIds are provided', async () => {
+			const store = makeBoundaryStore();
+			const results = await loadWeeksForMonth(store as never, [], '2026-03');
+			expect(results).toHaveLength(0);
+		});
+
+		it('skips weeks whose store.read returns null (missing files)', async () => {
+			const store = {
+				...makeBoundaryStore(),
+				read: vi.fn().mockResolvedValue(null),
+			};
+			const results = await loadWeeksForMonth(store as never, ['2026-W14'], '2026-03');
+			expect(results).toHaveLength(0);
 		});
 	});
 
-	describe('yearly aggregation boundary week logic', () => {
-		it('includes week with startDate in 2025 under 2025 yearly even with W53 weekId', () => {
-			const week = makeWeek('2025-W53', '2025-12-29', '2026-01-04');
-			const yearWeeks = [week].filter((w) => w.startDate.startsWith('2025'));
-			expect(yearWeeks).toHaveLength(1);
+	describe('yearly aggregation boundary week logic via loadWeeksForMonth', () => {
+		// 2025-W53: startDate 2025-12-29 (calendar year 2025), endDate 2026-01-04 (calendar year 2026)
+		const w53Yaml = [
+			'weekId: "2025-W53"',
+			'startDate: "2025-12-29"',
+			'endDate: "2026-01-04"',
+			'totalCost: 100',
+			'mealCount: 7',
+			'avgPerMeal: 14.29',
+			'avgPerServing: 7.14',
+			'meals: []',
+		].join('\n');
+
+		// 2026-W01: startDate 2026-01-02, endDate 2026-01-08 — fully in 2026
+		const w01Yaml = [
+			'weekId: "2026-W01"',
+			'startDate: "2026-01-02"',
+			'endDate: "2026-01-08"',
+			'totalCost: 120',
+			'mealCount: 7',
+			'avgPerMeal: 17.14',
+			'avgPerServing: 8.57',
+			'meals: []',
+		].join('\n');
+
+		it('includes W53 week in 2025 yearly because startDate is 2025-12-29', async () => {
+			const store = {
+				read: vi.fn().mockResolvedValue(w53Yaml),
+				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+			};
+			// Use a month prefix of '2025' to simulate yearly filtering (startDate.startsWith('2025'))
+			const results = await loadWeeksForMonth(store as never, ['2025-W53'], '2025');
+			expect(results).toHaveLength(1);
+			expect(results[0]!.weekId).toBe('2025-W53');
 		});
-		it('excludes same W53 week from 2026 yearly (startDate is 2025-12-29)', () => {
-			const week = makeWeek('2025-W53', '2025-12-29', '2026-01-04');
-			const yearWeeks = [week].filter((w) => w.startDate.startsWith('2026'));
-			expect(yearWeeks).toHaveLength(0);
+
+		it('excludes W53 week from 2026 yearly because startDate is 2025-12-29, not 2026', async () => {
+			const store = {
+				read: vi.fn().mockResolvedValue(w53Yaml),
+				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+			};
+			const results = await loadWeeksForMonth(store as never, ['2025-W53'], '2026');
+			expect(results).toHaveLength(0);
 		});
-		it('includes a week with startDate 2026-01-02 in 2026 yearly', () => {
-			const week = makeWeek('2026-W01', '2026-01-02', '2026-01-08');
-			const yearWeeks = [week].filter((w) => w.startDate.startsWith('2026'));
-			expect(yearWeeks).toHaveLength(1);
+
+		it('includes W01 week in 2026 yearly because startDate is 2026-01-02', async () => {
+			const store = {
+				read: vi.fn().mockResolvedValue(w01Yaml),
+				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+			};
+			const results = await loadWeeksForMonth(store as never, ['2026-W01'], '2026');
+			expect(results).toHaveLength(1);
+			expect(results[0]!.weekId).toBe('2026-W01');
 		});
 	});
 
