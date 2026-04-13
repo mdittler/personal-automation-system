@@ -251,15 +251,10 @@ requirements:
     monthly_cost_cap: 15.00
 
 user_config:
-  - key: meal_types
-    type: string
-    default: "dinners:5,lunches:5"
-    description: "Meal types and counts per planning period (format: type:count,type:count)"
-  - key: planning_period
-    type: select
-    default: "weekly"
-    description: "How often to generate meal plans"
-    options: ["weekly", "biweekly"]
+  - key: meal_plan_dinners
+    type: number
+    default: 5
+    description: "Number of dinners to plan per week"
   - key: new_recipe_ratio
     type: number
     default: 40
@@ -272,11 +267,6 @@ user_config:
     type: string
     default: ""
     description: "Comma-separated dietary restrictions (e.g., no red meat on weekdays)"
-  - key: plan_generation_day
-    type: select
-    default: "Sunday"
-    description: "Day of week to auto-generate the meal plan"
-    options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
   - key: voting_window_hours
     type: number
     default: 12
