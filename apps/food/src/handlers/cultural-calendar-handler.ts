@@ -11,6 +11,7 @@
  */
 
 import type { CoreServices, MessageContext } from '@pas/core/types';
+import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
 import { loadAllRecipes } from '../services/recipe-store.js';
 import {
@@ -69,7 +70,7 @@ export async function handleCulturalCalendarJob(services: CoreServices): Promise
 
 	try {
 		const calendar = await ensureCalendar(sharedStore);
-		const today = new Date().toISOString().slice(0, 10);
+		const today = todayDate(services.timezone);
 		const upcoming = getUpcomingHolidays(calendar, today, WINDOW_DAYS);
 
 		if (upcoming.length === 0) return;
@@ -105,7 +106,7 @@ export async function handleCulturalCalendarMessage(
 
 	try {
 		const calendar = await ensureCalendar(sharedStore);
-		const today = new Date().toISOString().slice(0, 10);
+		const today = todayDate(services.timezone);
 
 		// Try to find a specific holiday mentioned in the message
 		const lowerText = (ctx.text ?? '').toLowerCase();

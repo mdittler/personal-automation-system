@@ -207,7 +207,7 @@ import {
 } from './services/recipe-store.js';
 import { appendWaste } from './services/waste-store.js';
 import type { FreezerItem, GroceryItem, Leftover, Recipe, WasteLogEntry } from './types.js';
-import { todayDate } from './utils/date.js';
+import { addDays, todayDate } from './utils/date.js';
 import { escapeMarkdown } from './utils/escape-markdown.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { parseStrictInt } from './utils/parse-int-strict.js';
@@ -2638,9 +2638,7 @@ async function handleMealSwap(text: string, ctx: MessageContext): Promise<void> 
 	if (dayName === 'today') {
 		targetDate = todayDate(services.timezone);
 	} else if (dayName === 'tomorrow') {
-		const today = new Date(`${todayDate(services.timezone)}T00:00:00Z`);
-		today.setUTCDate(today.getUTCDate() + 1);
-		targetDate = today.toISOString().slice(0, 10);
+		targetDate = addDays(todayDate(services.timezone), 1);
 	} else {
 		// Find the matching date in the plan
 		const dayOfWeekMap: Record<string, number> = {
@@ -2710,8 +2708,7 @@ function nextMonday(dateStr: string): string {
 	const d = new Date(`${dateStr}T00:00:00Z`);
 	const dow = d.getUTCDay(); // 0=Sun ... 6=Sat
 	const daysUntilMonday = dow === 0 ? 1 : dow === 1 ? 0 : 8 - dow;
-	d.setUTCDate(d.getUTCDate() + daysUntilMonday);
-	return d.toISOString().slice(0, 10);
+	return addDays(dateStr, daysUntilMonday);
 }
 
 // ─── Scheduled Job Handler ──────────────────────────────────────
