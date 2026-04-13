@@ -299,27 +299,27 @@ export async function handleTargetsFlowCallback(
 	// Quick-pick values for each step.
 	const calMatch = data.match(/^app:food:nut:tgt:cal:(\d+)$/);
 	if (calMatch && state.step === 'awaiting_calories') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(calMatch[1]!, 10));
+		return await applyValueAndAdvance(services, userStore, userId, state, parseStrictInt(calMatch[1]!) ?? 0);
 	}
 
 	const proMatch = data.match(/^app:food:nut:tgt:pro:(\d+)$/);
 	if (proMatch && state.step === 'awaiting_protein') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(proMatch[1]!, 10));
+		return await applyValueAndAdvance(services, userStore, userId, state, parseStrictInt(proMatch[1]!) ?? 0);
 	}
 
 	const carbMatch = data.match(/^app:food:nut:tgt:carb:(\d+)$/);
 	if (carbMatch && state.step === 'awaiting_carbs') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(carbMatch[1]!, 10));
+		return await applyValueAndAdvance(services, userStore, userId, state, parseStrictInt(carbMatch[1]!) ?? 0);
 	}
 
 	const fatMatch = data.match(/^app:food:nut:tgt:fat:(\d+)$/);
 	if (fatMatch && state.step === 'awaiting_fat') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(fatMatch[1]!, 10));
+		return await applyValueAndAdvance(services, userStore, userId, state, parseStrictInt(fatMatch[1]!) ?? 0);
 	}
 
 	const fibMatch = data.match(/^app:food:nut:tgt:fib:(\d+)$/);
 	if (fibMatch && state.step === 'awaiting_fiber') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(fibMatch[1]!, 10));
+		return await applyValueAndAdvance(services, userStore, userId, state, parseStrictInt(fibMatch[1]!) ?? 0);
 	}
 
 	return false;
