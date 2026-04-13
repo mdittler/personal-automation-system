@@ -132,7 +132,7 @@ Key implementation notes:
 - Store entries in a `Map<string, FileIndexEntry>` keyed by relative path
 - Path derivation: `data/users/<userId>/<appId>/...` → scope=user, owner=userId, appId from path segment. `data/users/shared/<appId>/...` → scope=shared. `data/spaces/<spaceId>/<appId>/...` → scope=space, owner=spaceId
 - Use `fs.readdir` recursive for startup scan
-- Archive pattern regex: `/\.\d{8}-\d{6}\./` (matches `.20260413-143022.` in archived filenames)
+- Archive pattern regex: `/\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\./` (matches `.2026-04-13_14-30-22.` in archived filenames, from `toArchiveTimestamp()`)
 
 ## 3. Frontmatter Enrichment
 
