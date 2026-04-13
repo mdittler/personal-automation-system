@@ -65,6 +65,8 @@ export class ScopeViolationError extends Error {
  * Replaces backslashes, collapses . and .. segments, strips leading ./.
  */
 function normalizePosix(p: string): string {
+	// Reject null bytes — they can interfere with string comparison
+	if (p.includes('\0')) return '..'; // forces rejection by the caller's startsWith('..') check
 	const normalized = posix.normalize(p.replace(/\\/g, '/'));
 	return normalized.startsWith('./') ? normalized.slice(2) : normalized;
 }

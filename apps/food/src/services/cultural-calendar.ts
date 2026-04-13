@@ -8,7 +8,7 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
+import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { Holiday, HolidayDateRule, CulturalCalendar } from '../types.js';
 import { sanitizeForPrompt } from '../utils/sanitize.js';
@@ -363,8 +363,9 @@ async function saveCalendar(store: ScopedDataStore, calendar: CulturalCalendar):
 	const fm = generateFrontmatter({
 		title: 'Cultural Calendar',
 		date: new Date().toISOString(),
-		tags: ['food', 'cultural-calendar'],
+		tags: buildAppTags('food', 'cultural-calendar'),
 		type: 'cultural-calendar',
+		app: 'food',
 	});
 	await store.write(CALENDAR_PATH, fm + stringify({ holidays: calendar.holidays }));
 }

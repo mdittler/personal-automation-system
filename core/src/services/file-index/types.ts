@@ -1,3 +1,11 @@
+/**
+ * A single indexed data file's metadata.
+ *
+ * **UNTRUSTED DATA:** Fields like `title`, `summary`, `entityKeys`, `wikiLinks`,
+ * and `aliases` originate from user-controlled file content (including LLM/OCR output).
+ * Consumers (especially D2b DataQueryService) MUST sanitize/frame these values
+ * before including them in LLM prompts to prevent prompt injection.
+ */
 export interface FileIndexEntry {
   /** Relative to data root (e.g., "users/matt/food/recipes/tacos.yaml") */
   path: string;

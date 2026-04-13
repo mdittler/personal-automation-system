@@ -50,7 +50,7 @@ interface ParsedContent {
 
 /** Extract date string if it looks like an ISO date (YYYY-MM-DD...) */
 function toDateString(val: unknown): string | null {
-  if (typeof val === 'string' && /^\d{4}-\d{2}/.test(val)) return val.slice(0, 10);
+  if (typeof val === 'string' && /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/.test(val)) return val.slice(0, 10);
   return null;
 }
 

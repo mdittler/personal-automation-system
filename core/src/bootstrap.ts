@@ -562,7 +562,9 @@ export async function main(): Promise<void> {
 			shared: data?.shared_scopes ?? [],
 		});
 	}
-	const fileIndex = new FileIndexService(config.dataDir, appScopes);
+	const fileIndex = new FileIndexService(config.dataDir, appScopes, (path, err) => {
+		logger.warn({ path, err }, 'FileIndexService: skipped file during indexing');
+	});
 	await fileIndex.rebuild();
 	logger.info({ count: fileIndex.size }, 'FileIndexService: initial index built');
 

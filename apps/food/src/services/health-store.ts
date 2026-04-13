@@ -62,6 +62,7 @@ export async function saveMonthlyHealth(
 		date: new Date().toISOString(),
 		tags: buildAppTags('food', 'health'),
 		type: 'health-metrics',
+		app: 'food',
 	});
 	const body = stringify({
 		month: log.month,

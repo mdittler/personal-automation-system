@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { join, basename, posix } from 'node:path';
 import type { DataChangedPayload } from '../../types/data-events.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { findMatchingScope } from '../data-store/paths.js';
@@ -7,6 +7,9 @@ import { parsePathMeta, parseFileContent, isArchived } from './entry-parser.js';
 import type { FileIndexEntry, FileIndexFilter } from './types.js';
 
 export { type FileIndexEntry, type FileIndexFilter } from './types.js';
+
+/** Pattern for safe userId/appId/spaceId segments — matches PAS convention. */
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 export class FileIndexService {
   private readonly entries = new Map<string, FileIndexEntry>();
@@ -16,10 +19,12 @@ export class FileIndexService {
    * @param appScopes - Map of appId → { user: ManifestDataScope[], shared: ManifestDataScope[] }
    *   from the app manifest registry. Files are only indexed if they fall within a registered
    *   app's declared scopes. For space-scoped paths, shared_scopes are used.
+   * @param onSkip - Optional callback invoked when a file is skipped due to a read error.
    */
   constructor(
     private readonly dataDir: string,
     private readonly appScopes: Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>,
+    private readonly onSkip?: (path: string, err: unknown) => void,
   ) {}
 
   /** Full scan of data directories. Replaces current index. */
@@ -73,7 +78,7 @@ export class FileIndexService {
       //      "users/shared/food/prices/costco.md" → "prices/costco.md"
       //      "spaces/family/food/recipes/pasta.yaml" → "recipes/pasta.yaml"
       const appRelativePath = relativePath.split('/').slice(3).join('/');
-      if (scopeList.length > 0 && !findMatchingScope(appRelativePath, scopeList)) return;
+      if (!findMatchingScope(appRelativePath, scopeList)) return;
 
       const [content, fileStat] = await Promise.all([
         readFile(absolutePath, 'utf-8'),
@@ -109,8 +114,8 @@ export class FileIndexService {
       };
 
       this.entries.set(relativePath, entry);
-    } catch {
-      // File read error — skip silently
+    } catch (err) {
+      this.onSkip?.(relativePath, err);
     }
   }
 
@@ -120,10 +125,43 @@ export class FileIndexService {
   }
 
   /**
+   * Validate DataChangedPayload fields for safe path construction.
+   * Rejects payloads with invalid operation, unsafe segments, or traversal in path.
+   */
+  private isValidPayload(payload: DataChangedPayload): boolean {
+    // Reject empty or trivially-normalized paths
+    if (!payload.path || payload.path === '.') return false;
+
+    // Validate operation is a known value
+    if (!['write', 'append', 'archive'].includes(payload.operation)) return false;
+
+    // Validate appId
+    if (!payload.appId || !SAFE_SEGMENT.test(payload.appId)) return false;
+
+    // Validate userId if present
+    if (payload.userId !== null && payload.userId !== undefined) {
+      if (!SAFE_SEGMENT.test(payload.userId)) return false;
+    }
+
+    // Validate spaceId if present
+    if (payload.spaceId !== undefined) {
+      if (!SAFE_SEGMENT.test(payload.spaceId)) return false;
+    }
+
+    // Validate path: use POSIX normalization, reject if it resolves upward or is absolute
+    const normalizedPath = posix.normalize(payload.path.replace(/\\/g, '/'));
+    if (normalizedPath.startsWith('..') || normalizedPath.startsWith('/') || /^[a-zA-Z]:/.test(normalizedPath)) return false;
+
+    return true;
+  }
+
+  /**
    * Handle a data:changed event. Reconstructs the data-root-relative path
    * from the payload and re-indexes or removes accordingly.
    */
   async handleDataChanged(payload: DataChangedPayload): Promise<void> {
+    if (!payload || !this.isValidPayload(payload)) return;
+
     const relativePath = this.payloadToRelativePath(payload);
 
     if (payload.operation === 'archive') {
@@ -149,8 +187,10 @@ export class FileIndexService {
 
   /** Re-index a single file by its data-root-relative path. */
   async reindexByPath(dataRootRelativePath: string): Promise<void> {
-    const absolutePath = join(this.dataDir, dataRootRelativePath);
-    await this.indexFile(absolutePath, dataRootRelativePath);
+    const normalized = posix.normalize(dataRootRelativePath.replace(/\\/g, '/'));
+    if (!normalized || normalized === '.' || normalized.startsWith('..') || normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return;
+    const absolutePath = join(this.dataDir, normalized);
+    await this.indexFile(absolutePath, normalized);
   }
 
   /** Query the index with optional filters. No filter returns all entries. */
