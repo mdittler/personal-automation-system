@@ -134,6 +134,10 @@ export class InviteService {
 			}
 
 			if (invite.usedBy !== null) {
+				// Idempotent retry: same user retrying after a registration failure
+				if (invite.usedBy === usedBy) {
+					return { invite };
+				}
 				return { error: 'This invite code has already been used.' };
 			}
 

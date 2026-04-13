@@ -33,7 +33,14 @@ export class UserMutationService {
 	 */
 	async registerUser(user: RegisteredUser): Promise<void> {
 		this.userManager.addUser(user);
-		await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		try {
+			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		} catch (err) {
+			// Roll back in-memory state so the user doesn't appear registered after a restart
+			this.userManager.removeUser(user.id);
+			this.logger.error({ userId: user.id, err }, 'Config sync failed — registration rolled back');
+			throw err;
+		}
 		this.logger.info({ userId: user.id }, 'User registered and config synced');
 	}
 
