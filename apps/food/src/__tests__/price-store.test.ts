@@ -60,6 +60,34 @@ describe('price-store', () => {
 		});
 	});
 
+	// ─── D2a: Price-list frontmatter enrichment ───────────────────
+	describe('formatPriceFile frontmatter enrichment (D2a)', () => {
+		it('includes type: price-list in frontmatter', () => {
+			const data: StorePriceData = {
+				store: 'Costco', slug: 'costco', lastUpdated: '2026-04-07', items: [],
+			};
+			const result = formatPriceFile(data);
+			expect(result).toContain('type: price-list');
+		});
+
+		it('includes entity_keys with lowercased store name', () => {
+			const data: StorePriceData = {
+				store: 'Whole Foods', slug: 'whole-foods', lastUpdated: '2026-04-07', items: [],
+			};
+			const result = formatPriceFile(data);
+			expect(result).toContain('entity_keys:');
+			expect(result).toContain('whole foods');
+		});
+
+		it('includes entity_keys with slug', () => {
+			const data: StorePriceData = {
+				store: 'Whole Foods', slug: 'whole-foods', lastUpdated: '2026-04-07', items: [],
+			};
+			const result = formatPriceFile(data);
+			expect(result).toContain('whole-foods');
+		});
+	});
+
 	describe('formatPriceFile', () => {
 		it('formats items grouped by department', () => {
 			const data: StorePriceData = {

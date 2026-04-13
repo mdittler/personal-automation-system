@@ -49,6 +49,7 @@ export async function saveGroceryList(store: ScopedDataStore, list: GroceryList)
 		title: 'Grocery List',
 		date: list.createdAt,
 		tags: buildAppTags('food', 'grocery'),
+		type: 'grocery-list',
 		app: 'food',
 	});
 	await store.write(ACTIVE_PATH, fm + stringify(list));
@@ -124,6 +125,7 @@ export async function archivePurchased(
 		title: `Grocery History — ${date}`,
 		date: isoNow(),
 		tags: buildAppTags('food', 'grocery-history'),
+		type: 'grocery-history',
 		app: 'food',
 	});
 	await store.write(path, fm + stringify({ date, items }));

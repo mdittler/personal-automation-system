@@ -196,6 +196,8 @@ async function handleReceiptPhoto(
 		title: `Receipt: ${parsed.store}`,
 		date: parsed.date,
 		tags: ['food', 'receipt'],
+		type: 'receipt',
+		entity_keys: [parsed.store.toLowerCase()],
 		app: 'food',
 	});
 	await store.write(`receipts/${id}.yaml`, fm + stringify(receipt));

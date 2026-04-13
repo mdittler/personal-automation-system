@@ -192,6 +192,17 @@ describe('macro-tracker', () => {
 		});
 	});
 
+	// ─── D2a: Nutrition-log frontmatter enrichment ───────────────
+	describe('saveMonthlyLog frontmatter enrichment (D2a)', () => {
+		it('includes type: nutrition-log in frontmatter', async () => {
+			const store = createMockScopedStore();
+			const log = makeMonthlyLog({ days: [] });
+			await saveMonthlyLog(store as never, log);
+			const [, content] = store.write.mock.calls[0]!;
+			expect(content).toContain('type: nutrition-log');
+		});
+	});
+
 	describe('saveMonthlyLog', () => {
 		it('writes YAML with frontmatter', async () => {
 			const store = createMockScopedStore();

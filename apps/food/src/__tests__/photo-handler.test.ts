@@ -497,6 +497,32 @@ describe('Photo Handler', () => {
 		});
 	});
 
+	// ─── D2a: Receipt frontmatter enrichment ──────────────────────────
+
+	describe('receipt frontmatter enrichment (D2a)', () => {
+		it('writes type: receipt in receipt frontmatter', async () => {
+			const { services, sharedStore } = createMockServices(validReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
+			expect(receiptCall).toBeDefined();
+			expect(receiptCall![1]).toContain('type: receipt');
+		});
+
+		it('writes entity_keys with lowercased store name in receipt frontmatter', async () => {
+			const { services, sharedStore } = createMockServices(validReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
+			expect(receiptCall).toBeDefined();
+			// The store name "Grocery Store" should appear lowercased in entity_keys
+			expect(receiptCall![1]).toContain('entity_keys:');
+			expect(receiptCall![1]).toContain('grocery store');
+		});
+	});
+
 	// ─── F16: Strict vision classification ─────────────────────────
 
 	describe('strict vision classification (F16)', () => {

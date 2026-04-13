@@ -309,6 +309,29 @@ describe('grocery-store', () => {
 		});
 	});
 
+	// ─── D2a: Grocery frontmatter enrichment ────────────────────────
+
+	describe('saveGroceryList frontmatter enrichment (D2a)', () => {
+		it('includes type: grocery-list in frontmatter', async () => {
+			const write = vi.fn().mockResolvedValue(undefined);
+			const store = createMockStore({ write });
+			const list = makeList();
+			await saveGroceryList(store as never, list);
+			const written = write.mock.calls[0]![1] as string;
+			expect(written).toContain('type: grocery-list');
+		});
+	});
+
+	describe('archivePurchased frontmatter enrichment (D2a)', () => {
+		it('includes type: grocery-history in archive frontmatter', async () => {
+			const write = vi.fn().mockResolvedValue(undefined);
+			const store = createMockStore({ write });
+			await archivePurchased(store as never, [makeItem()], 'UTC');
+			const written = write.mock.calls[0]![1] as string;
+			expect(written).toContain('type: grocery-history');
+		});
+	});
+
 	// ─── saveGroceryList ─────────────────────────────────────────
 
 	describe('saveGroceryList', () => {

@@ -32,6 +32,8 @@ export function formatPriceFile(data: StorePriceData): string {
 		last_updated: data.lastUpdated,
 		item_count: data.items.length,
 		tags: buildAppTags('food', 'prices'),
+		type: 'price-list',
+		entity_keys: [data.store.toLowerCase(), data.slug],
 		app: 'food',
 	});
 
