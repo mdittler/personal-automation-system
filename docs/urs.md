@@ -2457,24 +2457,25 @@ The chatbot `/ask` command provides PAS-specific help using app metadata and inf
 
 ### REQ-CHATBOT-005: Auto-detect PAS-relevant questions
 
-**Phase:** 18 | **Status:** Implemented
+**Phase:** 18 → updated D1 | **Status:** Implemented
 
-When the per-user `auto_detect_pas` config is enabled, the chatbot uses keyword heuristics to detect PAS-related messages and automatically uses the app-aware system prompt instead of the generic one. Detection uses static PAS keywords plus dynamic app/command names from AppMetadataService. No LLM cost for detection. Default: off.
+When the per-user `auto_detect_pas` config is enabled, the chatbot uses an LLM classifier (`classifyPASMessage()`) to detect PAS-related messages and automatically uses the app-aware system prompt instead of the generic one. Classification uses a compact fast-tier LLM call (no large metadata). Fails open (defaults to app-aware context) on LLM error. Default changed from `false` → `true` in D1.
 
 **Standard tests:**
 - `chatbot.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is off (default)
-- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt when auto-detect is on and message is PAS-relevant
-- `chatbot.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is on but message is not PAS-relevant
+- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt when auto-detect is on and LLM classifier returns PAS-relevant
+- `chatbot.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is on and LLM classifier returns not PAS-relevant
 
 **Edge case tests:**
 - `chatbot.test.ts` > auto-detect PAS questions > handles auto-detect config value as string "true"
-- `chatbot.test.ts` > auto-detect PAS questions > defaults to false when config.getAll throws
+- `chatbot.test.ts` > auto-detect PAS questions > defaults to false when config.getAll throws (no classifier call, basic prompt)
+- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
 
 ### REQ-CHATBOT-006: PAS relevance detection (isPasRelevant)
 
-**Phase:** 18 | **Status:** Implemented
+**Phase:** 18 | **Status:** Implemented (deprecated in D1)
 
-The `isPasRelevant()` function determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost.
+The `isPasRelevant()` function determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost. **Deprecated in D1** — superseded by `classifyPASMessage()` (REQ-CHATBOT-012). Kept for backward compatibility; not called from active code paths.
 
 **Standard tests:**
 - `chatbot.test.ts` > isPasRelevant > detects "what apps do I have"
@@ -2597,15 +2598,93 @@ The chatbot extracts `<switch-model>` tags from LLM responses, validates paramet
 
 ### REQ-CHATBOT-010: isPasRelevant system keyword detection
 
-**Phase:** Post-19 | **Status:** Implemented
+**Phase:** Post-19 | **Status:** Implemented (deprecated in D1)
 
-The `isPasRelevant()` function detects system-related keywords (model, cost, usage, uptime) in addition to app-related keywords, ensuring auto-detect mode routes system questions to the app-aware prompt.
+The `isPasRelevant()` function detects system-related keywords (model, cost, usage, uptime) in addition to app-related keywords, ensuring auto-detect mode routes system questions to the app-aware prompt. **Deprecated in D1** — superseded by `classifyPASMessage()` (REQ-CHATBOT-012).
 
 **Standard tests:**
 - `chatbot.test.ts` > isPasRelevant with system keywords > detects model-related questions
 - `chatbot.test.ts` > isPasRelevant with system keywords > detects cost-related questions
 - `chatbot.test.ts` > isPasRelevant with system keywords > detects usage questions
 - `chatbot.test.ts` > isPasRelevant with system keywords > detects uptime questions
+
+### REQ-CHATBOT-012: LLM-based PAS message classification
+
+**Phase:** D1 | **Status:** Implemented
+
+The `classifyPASMessage()` function replaces the static `isPasRelevant()` keyword list. It uses a compact fast-tier LLM call to determine whether a message is PAS-related (home automation, installed apps, scheduling, data queries, system status, model/cost info). Returns an extensible `PASClassification { pasRelated: boolean, dataQueryCandidate?: boolean }` object for D2 wiring. Sanitizes user input and app names before LLM injection. Fails open (`pasRelated: true`) on LLM error so users with auto-detect on always get helpful responses. Short-circuits on empty/whitespace input without an LLM call. Only invoked when `auto_detect_pas` is enabled; `/ask` is always app-aware.
+
+**Standard tests:**
+- `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: true when LLM responds YES
+- `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: false when LLM responds NO
+- `pas-classifier.test.ts` > classifyPASMessage > parses "yes." (with period, lowercase)
+- `pas-classifier.test.ts` > classifyPASMessage > parses "YES." (with period, uppercase)
+- `pas-classifier.test.ts` > classifyPASMessage > parses "No." (with period, mixed case)
+- `pas-classifier.test.ts` > classifyPASMessage > uses fast tier for classification call
+- `pas-classifier.test.ts` > classifyPASMessage > includes dataQueryCandidate field in result
+
+**Edge case tests:**
+- `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: false for empty text without calling LLM
+- `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: false for whitespace-only text without calling LLM
+- `pas-classifier.test.ts` > classifyPASMessage > does not include large app metadata in classifier prompt
+- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
+
+**Error handling tests:**
+- `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: true (fail-open) when LLM throws
+- `pas-classifier.test.ts` > classifyPASMessage > logs a warning when LLM call fails
+
+**Security tests:**
+- `pas-classifier.test.ts` > classifyPASMessage > sanitizes user text before passing to LLM (security)
+- `pas-classifier.test.ts` > classifyPASMessage > sanitizes app names in classifier system prompt (security)
+
+### REQ-CHATBOT-013: User profile context injection
+
+**Phase:** D1 | **Status:** Implemented
+
+The `buildUserContext()` function builds a concise context string from `MessageContext.spaceName` and `services.appMetadata.getEnabledApps()`. Injected into both the basic system prompt and the app-aware system prompt, giving the LLM household and app awareness without requiring SpaceService or UserManager. All strings are sanitized with `sanitizeInput()` before injection. Returns empty string gracefully when no context is available.
+
+**Standard tests:**
+- `user-context.test.ts` > buildUserContext > includes space name when ctx.spaceName is provided
+- `user-context.test.ts` > buildUserContext > omits space line when ctx.spaceName is absent
+- `user-context.test.ts` > buildUserContext > includes enabled app names
+- `user-context.test.ts` > buildUserContext > returns empty string when no space and no apps
+- `chatbot.test.ts` > auto-detect PAS questions > includes user household context in basic system prompt
+- `chatbot.test.ts` > auto-detect PAS questions > includes user household context in app-aware system prompt
+- `chatbot.test.ts` > handleCommand /ask > includes user household context in /ask system prompt
+
+**Edge case tests:**
+- `user-context.test.ts` > buildUserContext > does not include display name (not available in MessageContext)
+- `user-context.test.ts` > buildUserContext > returns space name even when appMetadata.getEnabledApps throws
+
+**Security tests:**
+- `user-context.test.ts` > buildUserContext > sanitizes spaceName and app names to neutralize prompt injection attempts
+
+### REQ-CHATBOT-014: Telegram message splitting
+
+**Phase:** D1 | **Status:** Implemented
+
+The `splitTelegramMessage()` function splits long LLM responses into Telegram-safe chunks. Splitting priority: paragraph boundaries (`\n\n`) first, line boundaries (`\n`) second, hard chunk at maxLength as last resort. Default threshold: 3800 characters (below Telegram's 4096-character limit). Applied to both `handleMessage()` and `handleCommand()` output paths. Does not modify global TelegramService behavior.
+
+**Standard tests:**
+- `message-splitter.test.ts` > splitTelegramMessage > returns single-element array for short messages
+- `message-splitter.test.ts` > splitTelegramMessage > returns single-element array for message at exactly the limit
+- `message-splitter.test.ts` > splitTelegramMessage > splits at paragraph boundary for message over limit
+- `message-splitter.test.ts` > splitTelegramMessage > splits at line boundary when no paragraph fits
+- `message-splitter.test.ts` > splitTelegramMessage > falls back to hard chunk when no newlines exist
+- `message-splitter.test.ts` > splitTelegramMessage > accepts custom maxLength parameter
+
+**Edge case tests:**
+- `message-splitter.test.ts` > splitTelegramMessage > does not produce empty parts
+- `message-splitter.test.ts` > splitTelegramMessage > preserves all content across splits
+
+### REQ-CHATBOT-015: Extended LLM response token cap
+
+**Phase:** D1 | **Status:** Implemented
+
+The chatbot's LLM calls use `maxTokens: 2048` (raised from 1024 in Phase 16). Applied to both `handleMessage()` fallback responses and `handleCommand()` `/ask` responses. Combined with `splitTelegramMessage()`, this allows richer multi-paragraph answers without hitting Telegram's single-message limit.
+
+**Standard tests:**
+- `chatbot.test.ts` > handleMessage > calls LLM with standard tier (covers maxTokens via objectContaining check)
 
 ### REQ-APPMETA-001: App metadata service
 
@@ -4850,6 +4929,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 
 | REQ-FMATTER-004 | frontmatter.test.ts | 11 | 15 | Implemented |
 | REQ-CHATBOT-011 | chatbot.test.ts | 4 | 3 | Implemented |
+| REQ-CHATBOT-012 | pas-classifier.test.ts, chatbot.test.ts | 7 | 5 | Implemented |
+| REQ-CHATBOT-013 | user-context.test.ts, chatbot.test.ts | 7 | 2 | Implemented |
+| REQ-CHATBOT-014 | message-splitter.test.ts | 6 | 2 | Implemented |
+| REQ-CHATBOT-015 | chatbot.test.ts | 1 | 0 | Implemented |
 
 | REQ-VAULT-001 | vault.test.ts | 8 | 11 | Implemented |
 | REQ-VAULT-002 | vault.test.ts | 3 | 3 | Implemented |

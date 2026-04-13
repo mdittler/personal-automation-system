@@ -864,10 +864,12 @@ export async function classifyPASMessage(
 	if (!text.trim()) return { pasRelated: false };
 
 	// Build compact classifier prompt — no large app metadata
+	// Use installed (not just enabled) apps for classification — user may ask about disabled apps too.
+	// App names are sanitized to prevent injection into the system prompt.
 	const appNames = svc.appMetadata
 		? svc.appMetadata
 				.getInstalledApps()
-				.map((a) => a.name)
+				.map((a) => sanitizeInput(a.name, 100))
 				.join(', ')
 		: '';
 	const appHint = appNames ? ` Installed apps: ${appNames}.` : '';
@@ -878,7 +880,7 @@ export async function classifyPASMessage(
 		` Reply with exactly YES or NO.`;
 
 	try {
-		const response = await svc.llm.complete(text, {
+		const response = await svc.llm.complete(sanitizeInput(text), {
 			tier: 'fast',
 			systemPrompt,
 			maxTokens: 5,

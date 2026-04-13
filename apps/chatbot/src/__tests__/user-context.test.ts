@@ -84,6 +84,16 @@ describe('buildUserContext', () => {
 		expect(result).not.toContain('test-user');
 	});
 
+	it('returns space name even when appMetadata.getEnabledApps throws', async () => {
+		vi.mocked(services.appMetadata.getEnabledApps).mockRejectedValue(new Error('service down'));
+		const ctx = createTestMessageContext({ spaceName: 'My Household' });
+
+		const result = await buildUserContext(ctx, services);
+
+		// Should still include space name; app list failure is non-fatal
+		expect(result).toContain('My Household');
+	});
+
 	it('sanitizes spaceName and app names to neutralize prompt injection attempts', async () => {
 		vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([
 			{

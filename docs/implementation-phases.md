@@ -56,6 +56,7 @@
 | CR8 | Remaining Review Findings | **Complete** | ~8 | F37 (condition-eval), F38 (install prompt), F39 (dead register-app), F40 (duplicate app IDs), F41 (GUI XSS safeJsonForScript), F42 ({date} token alias) |
 | R1-post | R1 Post-Review Hardening | **Complete** | ~6 | H1 (resolveCallback access check), H2 (claimAndRedeem idempotency + rollback), L1-L6, M1-M3 |
 | CR9 | Test Coverage Gaps (Review Phases 9+10) | **Complete** | ~5 | 14 test gaps from review Phases 9-10: 5 new tests (Gaps 4, 6, 8, 12+13, 14) + 9 already covered |
+| D1 | Chatbot Context & Conversation Quality | **Complete** | ~8 | LLM classifier replaces keyword list, user context injection, message splitting, 2048 token cap |
 
 ### Dependency Graph
 
@@ -2085,6 +2086,50 @@ Replace manual Telegram-ID-based user registration with admin-generated invite c
 - Every `user_config` key across every app is now meaningfully per-user at runtime — no app code changes required
 - The former `llmContext` export no longer exists; any future `core/src/` code needing the current user's id should import `getCurrentUserId` from `core/src/services/context/request-context.ts`
 - `user_scope: all` scheduled jobs are now invoked once per registered user; app handlers filtering by their own household/membership criteria should early-return for users they don't own
+
+---
+
+## Phase D1: Chatbot Context & Conversation Quality
+
+**Date:** 2026-04-13  **Status:** Complete  **Part of:** Deployment Readiness Roadmap (D1–D6)
+
+### Motivation
+
+User testing revealed the chatbot felt disconnected — it didn't know who it was talking to, couldn't recognize PAS-related questions reliably (a 66+ keyword list was brittle), and hit Telegram's message limit on detailed answers.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| PAS classification | Replaced `PAS_KEYWORDS` static list with `classifyPASMessage()` — compact fast-tier LLM call. Extensible `PASClassification { pasRelated, dataQueryCandidate? }` object for D2 wiring. Fail-open on error. |
+| User context | Added `buildUserContext()` — injects `ctx.spaceName` and enabled app list into both basic and app-aware system prompts. |
+| Message splitting | Added `splitTelegramMessage()` — splits at paragraph → line → hard chunk, keeping parts under 3800 chars. Applied to both `handleMessage()` and `handleCommand()`. |
+| Token cap | Raised `maxTokens` from 1024 → 2048 in both response paths. |
+| Default config | `auto_detect_pas` default changed from `false` → `true` in `manifest.yaml`. |
+| Security | Sanitized user text and app names before classifier LLM injection (consistent with all other LLM call sites). Sanitized `ctx.spaceName` and app names in `buildUserContext()`. |
+
+### Files Touched
+
+- **Modified:** `apps/chatbot/src/index.ts` — `classifyPASMessage()`, `buildUserContext()`, `splitTelegramMessage()` added and wired into `handleMessage()` / `handleCommand()`. `isPasRelevant()` deprecated (not removed).
+- **Modified:** `apps/chatbot/manifest.yaml` — `auto_detect_pas` default: `false` → `true`.
+- **New:** `apps/chatbot/src/__tests__/pas-classifier.test.ts` — 14 tests for classifier (happy, edge, error, security).
+- **New:** `apps/chatbot/src/__tests__/user-context.test.ts` — 7 tests for user context (happy, edge, security).
+- **New:** `apps/chatbot/src/__tests__/message-splitter.test.ts` — 8 tests for message splitting.
+- **Modified:** `apps/chatbot/src/__tests__/chatbot.test.ts` — updated auto-detect integration tests for two-LLM-call flow; added classifier fail-open, user context in prompts, /ask context tests.
+- **Modified:** `docs/urs.md` — REQ-CHATBOT-005/006/010 updated; REQ-CHATBOT-012–015 added; traceability matrix updated.
+- **Modified:** `docs/implementation-phases.md` — this entry.
+- **Modified:** `CLAUDE.md` — D1 status updated to Complete.
+
+### Verification
+
+- `pnpm test` — 202 chatbot tests across 5 files, 5900+ total tests, all green
+- `pnpm lint` — clean
+
+### Consequences
+
+- Auto-detect now uses a fast-tier LLM call per non-PAS message (adds one LLM call when `auto_detect_pas` is true and message is general). Cost is minimal (maxTokens: 5).
+- `isPasRelevant()` is deprecated. Its tests remain for backward compat. Remove in a future cleanup once no callers remain.
+- `dataQueryCandidate` field on `PASClassification` is the D2 hook — currently always `undefined`.
 
 ---
 

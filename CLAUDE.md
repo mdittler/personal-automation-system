@@ -147,12 +147,14 @@ All infrastructure phases (0-30) and Food phases (H1, H2a, H3, H4, H5a, H5b, H6,
 
 **D14 + D39 fixes (2026-04-13):** D14 — strict load-time validation for reports, alerts, spaces, and pas.yaml. New `readYamlFileStrict()` discriminated-union loader; `safeValidateReport/Alert()` wrappers guard against validator exceptions on garbage input; `_validationErrors` transient field attached at load, stripped before write, gated in `run()`/`evaluate()`; invalid spaces excluded from operational map; pas.yaml validated with Zod (fail fast at startup). D39 — GUI report/alert edit forms now expose scope radio (user/space) + space dropdown; `parseFormToReport`/`parseFormToAlert` parse `section_scope_*/ds_scope_*` with space_id/user_id mutual exclusion; SpaceService wired into both route registrations; validation error banners in edit views + warning badges in list views. **5856 tests passing across 235 test files.**
 
+**Phase D1 (2026-04-13):** Chatbot context & conversation quality — `classifyPASMessage()` replaces 66-keyword static list with fast-tier LLM classifier (fail-open, extensible for D2); `buildUserContext()` injects spaceName + enabled apps into both prompt paths; `splitTelegramMessage()` splits at paragraph → line → hard chunk under 3800 chars; `maxTokens` raised 1024 → 2048; `auto_detect_pas` default changed `false` → `true`; all strings sanitized before LLM injection. **202 chatbot tests / 5900+ total tests passing.**
+
 See `docs/implementation-phases.md` for detailed phase guide.
 
 ### Deployment Readiness Roadmap (D1-D6)
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. Target: Mac Mini deployment for owner's household, scaling to 5-10 households (15-40 users).
-- **Phase D1** — Chatbot Context & Conversation Quality: LLM-based PAS context detection (replaces 66+ hardcoded keywords), conversation history recency labeling, user profile grounding, token cap raise to 2048 + Telegram message splitting. **Status: planned, next up.**
-- **Phase D2** — NL Data Access: FileIndexService (metadata-based file-native graph), DataQueryService (scope-aware NL querying), frontmatter enrichment on writes. Scope normalization fix (Codex finding #2) as first D2 task.
+- **Phase D1** — Chatbot Context & Conversation Quality: LLM-based PAS context detection (replaces 66+ hardcoded keywords), user profile grounding (spaceName + enabled apps), token cap raise to 2048 + Telegram message splitting. **Status: complete (2026-04-13).**
+- **Phase D2** — NL Data Access: FileIndexService (metadata-based file-native graph), DataQueryService (scope-aware NL querying), frontmatter enrichment on writes. Scope normalization fix (Codex finding #2) as first D2 task. **Status: next up.**
 - **Phase D3** — Data Modification via `/edit` command with preview + confirmation + stale-write protection.
 - **Phase D4** — Security Hardening: secure cookie, scope normalization, inline JS escaping, Docker workspace fix.
 - **Phase D5** — Concurrency & Ops: FileMutex (reuse AsyncLock), health endpoint upgrade, backup mechanism, deployment docs.
