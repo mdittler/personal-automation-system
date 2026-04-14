@@ -350,16 +350,16 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	// Uses LLM classifier (same as handleMessage) for consistent, broad coverage across
 	// all natural phrasings — not a narrow keyword gate.
 	// D2c: get recent interaction context for classifier + dataQuery context hints.
-	const askRecentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
-	const askRecentContextSummary = formatInteractionContextSummary(askRecentEntries);
-	const askRecentFilePaths = extractRecentFilePaths(askRecentEntries);
+	const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+	const recentContextSummary = formatInteractionContextSummary(recentEntries);
+	const recentFilePaths = extractRecentFilePaths(recentEntries);
 
 	let askDataContext = '';
-	const askClassification = await classifyPASMessage(question, services, askRecentContextSummary || undefined);
+	const askClassification = await classifyPASMessage(question, services, recentContextSummary || undefined);
 	if (askClassification.dataQueryCandidate && services.dataQuery) {
 		try {
-			const result = askRecentFilePaths.length > 0
-				? await services.dataQuery.query(question, ctx.userId, { recentFilePaths: askRecentFilePaths })
+			const result = recentFilePaths.length > 0
+				? await services.dataQuery.query(question, ctx.userId, { recentFilePaths: recentFilePaths })
 				: await services.dataQuery.query(question, ctx.userId);
 			if (!result.empty) {
 				askDataContext = formatDataQueryContext(result);
@@ -1013,7 +1013,7 @@ export async function classifyPASMessage(
 	// Append recent context when available — helps resolve follow-up queries
 	const contextHint =
 		recentContext && recentContext.trim()
-			? ` Recent user actions: ${sanitizeInput(recentContext, 500)}.`
+			? ` Recent user actions: ${recentContext}.`
 			: '';
 
 	const systemPrompt =

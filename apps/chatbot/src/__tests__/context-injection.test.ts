@@ -12,7 +12,7 @@
  */
 
 import type { CoreServices, DataQueryResult } from '@pas/core/types';
-import type { InteractionEntry } from '../../../../core/src/services/interaction-context/index.js';
+import type { InteractionEntry } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../../core/src/testing/mock-services.js';
 import {
