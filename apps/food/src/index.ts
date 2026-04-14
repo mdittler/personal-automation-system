@@ -649,6 +649,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (services.dataQuery) {
 		const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
 		const hasRecentFoodContext = recentEntries.some((e) => e.appId === 'food');
+		// Narrow set of data-question keywords — intentionally conservative to avoid false positives
 		const isDataQuestion = /\b(show|what|how much|how many|list|tell me about)\b/i.test(ctx.text);
 
 		if (hasRecentFoodContext || isDataQuestion) {

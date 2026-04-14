@@ -12,18 +12,10 @@
 import type { DataQueryResult } from '../types/data-query.js';
 import type { LLMService } from '../types/llm.js';
 import type { Logger } from 'pino';
+import { sanitizeInput } from '../services/llm/prompt-templates.js';
 
 const MAX_QUESTION_LENGTH = 500;
 const MAX_CONTENT_LENGTH = 6000;
-
-/**
- * Sanitize user-controlled text before injecting into an LLM prompt.
- * Neutralizes triple-backtick sequences that could escape code fences.
- */
-function sanitize(text: string, maxLength: number): string {
-	const truncated = text.length > maxLength ? text.slice(0, maxLength) : text;
-	return truncated.replace(/`{3,}/g, '`');
-}
 
 /**
  * Format a DataQueryResult into a natural language answer using an LLM.
@@ -45,18 +37,22 @@ export async function formatDataAnswer(
 	// Build a text representation of the retrieved files
 	const fileParts: string[] = [];
 	for (const file of dataResult.files) {
-		const header = [file.appId, file.type, file.title].filter(Boolean).join(' / ');
-		fileParts.push(`[${header}]\n${sanitize(file.content, MAX_CONTENT_LENGTH / dataResult.files.length)}`);
+		const safeAppId = sanitizeInput(file.appId, 50);
+		const safeType = sanitizeInput(file.type ?? '', 50);
+		const safeTitle = sanitizeInput(file.title ?? '', 100);
+		const header = [safeAppId, safeType, safeTitle].filter(Boolean).join(' / ');
+		const safeContent = sanitizeInput(file.content, Math.floor(MAX_CONTENT_LENGTH / dataResult.files.length));
+		fileParts.push(`[${header}]\n${safeContent}`);
 	}
 	const dataText = fileParts.join('\n\n');
 
 	const prompt = [
 		'Based on the following data, answer the user\'s question concisely.',
 		'',
-		`Question: ${sanitize(question, MAX_QUESTION_LENGTH)}`,
+		`Question: ${sanitizeInput(question, MAX_QUESTION_LENGTH)}`,
 		'',
 		'Data:',
-		sanitize(dataText, MAX_CONTENT_LENGTH),
+		dataText,
 		'',
 		'Provide a direct, concise answer based only on the data provided. If you cannot answer from the data, say so briefly.',
 	].join('\n');
