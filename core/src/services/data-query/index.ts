@@ -22,7 +22,7 @@ import type { FileIndexEntry } from '../file-index/types.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { LLMService } from '../../types/llm.js';
 import type { AppLogger } from '../../types/app-module.js';
-import type { DataQueryResult } from '../../types/data-query.js';
+import type { DataQueryResult, DataQueryOptions } from '../../types/data-query.js';
 import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 
@@ -72,21 +72,31 @@ export class DataQueryServiceImpl {
 		return this.realDataDir;
 	}
 
-	async query(question: string, userId: string): Promise<DataQueryResult> {
+	async query(question: string, userId: string, options?: DataQueryOptions): Promise<DataQueryResult> {
 		// Stage A: Scope filtering
 		const authorized = this.getAuthorizedEntries(userId);
 		if (authorized.length === 0) {
 			return { files: [], empty: true };
 		}
 
-		// Stage B: Pre-filter to candidates and build metadata prompt
-		const candidates = this.buildCandidates(authorized, question);
+		// Resolve priority candidates from recentFilePaths (intersected with authorized set)
+		const priorityPaths = new Set(options?.recentFilePaths ?? []);
+		const priorityCandidates =
+			priorityPaths.size > 0
+				? authorized.filter((e) => priorityPaths.has(e.path))
+				: [];
+
+		// Stage B: Pre-filter to candidates (priority candidates bypass pre-filter)
+		const candidates = this.buildCandidates(authorized, question, priorityCandidates);
 		if (candidates.length === 0) {
 			return { files: [], empty: true };
 		}
 
+		// Compute the set of indices (within candidates) that are priority entries
+		const priorityPathSet = new Set(priorityCandidates.map((e) => e.path));
+
 		// Stage C: LLM file selection
-		const selectedIds = await this.selectFiles(question, candidates);
+		const selectedIds = await this.selectFiles(question, candidates, priorityPathSet);
 		if (selectedIds.length === 0) {
 			return { files: [], empty: true };
 		}
@@ -125,12 +135,21 @@ export class DataQueryServiceImpl {
 	// Stage B: Pre-filter + build candidate array
 	// ---------------------------------------------------------------------------
 
-	private buildCandidates(authorized: FileIndexEntry[], question: string): FileIndexEntry[] {
+	private buildCandidates(
+		authorized: FileIndexEntry[],
+		question: string,
+		priorityCandidates: FileIndexEntry[] = [],
+	): FileIndexEntry[] {
 		if (authorized.length <= MAX_CANDIDATES) {
 			return authorized;
 		}
 
-		// Keyword overlap pre-filter: score each entry by overlap with question words
+		// Keyword overlap pre-filter: score each entry by overlap with question words.
+		// Priority candidates (from recentFilePaths) always pass through — they are
+		// excluded from the scored pool so they don't consume slots, then prepended.
+		const priorityPathSet = new Set(priorityCandidates.map((e) => e.path));
+		const nonPriority = authorized.filter((e) => !priorityPathSet.has(e.path));
+
 		const questionWords = new Set(
 			question
 				.toLowerCase()
@@ -138,7 +157,7 @@ export class DataQueryServiceImpl {
 				.filter((w) => w.length > 2),
 		);
 
-		const scored = authorized.map((entry) => {
+		const scored = nonPriority.map((entry) => {
 			const fields = [
 				entry.title ?? '',
 				...(entry.entityKeys ?? []),
@@ -150,16 +169,26 @@ export class DataQueryServiceImpl {
 			return { entry, score };
 		});
 
-		// Sort by score descending, take top MAX_CANDIDATES
+		// Sort by score descending, take top (MAX_CANDIDATES - priorityCandidates.length)
+		const remainingSlots = Math.max(0, MAX_CANDIDATES - priorityCandidates.length);
 		scored.sort((a, b) => b.score - a.score);
-		return scored.slice(0, MAX_CANDIDATES).map((s) => s.entry);
+		const filtered = scored.slice(0, remainingSlots).map((s) => s.entry);
+
+		// Priority candidates go first (in the pre-filter path) so their indices are predictable;
+		// in the <= MAX_CANDIDATES path, candidates are returned as-is and priority files may
+		// not be at index 0, but the [recent interaction] label in Stage C still biases the LLM
+		return [...priorityCandidates, ...filtered];
 	}
 
 	// ---------------------------------------------------------------------------
 	// Stage C: LLM file selection
 	// ---------------------------------------------------------------------------
 
-	private async selectFiles(question: string, candidates: FileIndexEntry[]): Promise<number[]> {
+	private async selectFiles(
+		question: string,
+		candidates: FileIndexEntry[],
+		priorityPathSet: Set<string> = new Set(),
+	): Promise<number[]> {
 		const metadataLines = candidates.map((entry, id) => {
 			const appType = [
 				sanitizeInput(entry.appId, MAX_META_TAG),
@@ -181,7 +210,8 @@ export class DataQueryServiceImpl {
 				.join('–');
 			const summary = entry.summary ? sanitizeInput(entry.summary, MAX_META_TITLE) : '';
 
-			const parts = [`[${id}] ${appType}: ${title}`];
+			const prefix = priorityPathSet.has(entry.path) ? '[recent interaction] ' : '';
+			const parts = [`${prefix}[${id}] ${appType}: ${title}`];
 			if (tags) parts.push(`tags: ${tags}`);
 			if (entities) parts.push(`entities: ${entities}`);
 			if (dates) parts.push(`dates: ${dates}`);

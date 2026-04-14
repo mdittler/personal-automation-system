@@ -35,6 +35,10 @@
 			"import": "./dist/utils/escape-markdown.js",
 			"types": "./dist/utils/escape-markdown.d.ts"
 		},
+		"./utils/data-answer-formatter": {
+			"import": "./dist/utils/data-answer-formatter.js",
+			"types": "./dist/utils/data-answer-formatter.d.ts"
+		},
 		"./testing": {
 			"import": "./dist/testing/mock-services.js",
 			"types": "./dist/testing/mock-services.d.ts"

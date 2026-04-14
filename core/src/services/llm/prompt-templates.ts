@@ -63,6 +63,8 @@ export interface VerificationPromptInput {
 		appDescription: string;
 		intents: string[];
 	}>;
+	/** Optional recent user activity context from InteractionContextService. */
+	recentInteractions?: string;
 }
 
 /**
@@ -76,7 +78,7 @@ export interface VerificationPromptInput {
  *   {"agrees": false, "suggestedAppId": "...", "suggestedIntent": "...", "reasoning": "..."}
  */
 export function buildVerificationPrompt(input: VerificationPromptInput): string {
-	const { originalText, classifierResult, candidateApps } = input;
+	const { originalText, classifierResult, candidateApps, recentInteractions } = input;
 	const sanitized = sanitizeInput(originalText);
 
 	const candidateList = candidateApps
@@ -94,7 +96,7 @@ export function buildVerificationPrompt(input: VerificationPromptInput): string 
 	const safeClassifierName = sanitizeInput(classifierResult.appName, 100);
 	const safeClassifierIntent = sanitizeInput(classifierResult.intent, 200);
 
-	return [
+	const lines = [
 		'You are verifying a routing decision for a message sent to a personal automation system.',
 		"A classifier has already chosen which app and intent should handle the user's message.",
 		'Your job is to decide whether that routing decision is correct.',
@@ -111,6 +113,15 @@ export function buildVerificationPrompt(input: VerificationPromptInput): string 
 		'```',
 		sanitized,
 		'```',
+	];
+
+	if (recentInteractions) {
+		lines.push('');
+		lines.push('Recent user activity (context for your decision):');
+		lines.push(sanitizeInput(recentInteractions, 500));
+	}
+
+	lines.push(
 		'',
 		'If you agree with the routing decision, respond with:',
 		'  {"agrees": true}',
@@ -119,7 +130,9 @@ export function buildVerificationPrompt(input: VerificationPromptInput): string 
 		'  {"agrees": false, "suggestedAppId": "<appId>", "suggestedIntent": "<intent>", "reasoning": "<brief explanation>"}',
 		'',
 		'Respond with ONLY a JSON object. Do not include any other text.',
-	].join('\n');
+	);
+
+	return lines.join('\n');
 }
 
 /**

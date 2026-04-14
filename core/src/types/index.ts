@@ -8,8 +8,14 @@
 // Core contract
 export type { AppModule, CoreServices, AppLogger } from './app-module.js';
 
-// Data query (D2b)
-export type { DataQueryResult, DataQueryFile, DataQueryService } from './data-query.js';
+// Data query (D2b/D2c)
+export type { DataQueryResult, DataQueryFile, DataQueryService, DataQueryOptions } from './data-query.js';
+
+// Interaction context (D2c)
+export type { InteractionEntry, InteractionContextService } from '../services/interaction-context/index.js';
+
+// Edit service (D2c)
+export type { EditProposal, EditError, ProposeEditResult, EditService } from '../services/edit/index.js';
 
 // Manifest
 export type {

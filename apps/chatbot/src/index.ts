@@ -18,15 +18,26 @@
 import type { AppInfo } from '@pas/core/types';
 import type { AppModule, CoreServices, MessageContext } from '@pas/core/types';
 import type { SystemInfoService } from '@pas/core/types';
-import type { DataQueryResult } from '@pas/core/types';
+import type { DataQueryResult, DataQueryOptions } from '@pas/core/types';
+import type { InteractionEntry } from '@pas/core/types';
+import type { EditProposal } from '@pas/core/types';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { slugifyModelId } from '@pas/core/utils/slugify';
 import { formatRelativeTime } from '@pas/core/utils/cron-describe';
+import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
 import { ConversationHistory, type ConversationTurn } from './conversation-history.js';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });
+
+/**
+ * In-memory pending edit proposals (userId → proposal).
+ * One pending edit per user. A new /edit call replaces any in-progress proposal;
+ * the Confirm/Cancel flow re-fetches at confirm time to pick up whichever proposal is current.
+ * TTL is enforced by the proposal's expiresAt field — checked in EditService.confirmEdit().
+ */
+export const pendingEdits = new Map<string, EditProposal>();
 
 /** Max context entries to include in system prompt. */
 const MAX_CONTEXT_ENTRIES = 3;
@@ -218,13 +229,20 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	const userCtx = await buildUserContext(ctx, services);
 
 	if (autoDetect) {
-		const classification = await classifyPASMessage(ctx.text, services);
+		// D2c: get recent interaction context for classifier + dataQuery context hints
+		const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+		const recentContextSummary = formatInteractionContextSummary(recentEntries);
+		const recentFilePaths = extractRecentFilePaths(recentEntries);
+
+		const classification = await classifyPASMessage(ctx.text, services, recentContextSummary || undefined);
 		if (classification.pasRelated) {
 			// D2b: call DataQueryService when message is a data query candidate
 			let dataContext = '';
 			if (classification.dataQueryCandidate && services.dataQuery) {
 				try {
-					const result = await services.dataQuery.query(ctx.text, ctx.userId);
+					const result = recentFilePaths.length > 0
+						? await services.dataQuery.query(ctx.text, ctx.userId, { recentFilePaths })
+						: await services.dataQuery.query(ctx.text, ctx.userId);
 					if (!result.empty) {
 						dataContext = formatDataQueryContext(result);
 					}
@@ -294,11 +312,88 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	}
 };
 
+/**
+ * Handle the /edit command — propose an LLM-assisted file edit, show a diff
+ * preview, and wait for the user to Confirm or Cancel.
+ */
+async function handleEditCommand(args: string[], ctx: MessageContext): Promise<void> {
+	const editService = services.editService;
+	if (!editService) {
+		await services.telegram.send(ctx.userId, 'Edit service is not available.');
+		return;
+	}
+
+	const description = args.join(' ').trim();
+	if (!description) {
+		await services.telegram.send(
+			ctx.userId,
+			'Usage: /edit <description of change>\nExample: /edit fix orange price at Costco to $4.99',
+		);
+		return;
+	}
+
+	// Propose an edit
+	const result = await editService.proposeEdit(description, ctx.userId);
+
+	if (result.kind === 'error') {
+		const messages: Record<string, string> = {
+			no_match: 'No matching files found for that description.',
+			ambiguous: 'Multiple files match — try being more specific.',
+			access_denied: 'That file cannot be edited.',
+			generation_failed: result.message,
+		};
+		await services.telegram.send(ctx.userId, messages[result.action] ?? result.message);
+		return;
+	}
+
+	// Store the pending proposal
+	pendingEdits.set(ctx.userId, result);
+
+	// Build diff preview message (plain text — sendOptions does not render Markdown)
+	const diffText = result.diff ? result.diff : '(no diff available)';
+	const previewMessage = `Edit preview for ${result.filePath}\n\n${diffText}\n\nApply this change?`;
+
+	// Present Confirm / Cancel to the user (blocks until the user responds)
+	try {
+		const choice = await services.telegram.sendOptions(ctx.userId, previewMessage, ['Confirm', 'Cancel']);
+
+		if (choice === 'Confirm') {
+			// Re-fetch the stored proposal (it may have been replaced by a newer /edit call)
+			const proposal = pendingEdits.get(ctx.userId);
+			if (!proposal) {
+				await services.telegram.send(ctx.userId, 'No pending edit found.');
+				return;
+			}
+			pendingEdits.delete(ctx.userId);
+
+			const confirmResult = await editService.confirmEdit(proposal);
+			if (confirmResult.ok) {
+				await services.telegram.send(ctx.userId, `✓ Applied to \`${escapeMarkdown(proposal.filePath)}\``);
+			} else {
+				await services.telegram.send(ctx.userId, `Edit failed: ${confirmResult.reason}`);
+			}
+		} else {
+			// Cancel or any other response
+			pendingEdits.delete(ctx.userId);
+			await services.telegram.send(ctx.userId, 'Edit cancelled.');
+		}
+	} catch {
+		// sendOptions timed out or threw — map is cleaned up in finally
+	} finally {
+		pendingEdits.delete(ctx.userId); // idempotent: no-op if already deleted
+	}
+}
+
 export const handleCommand: AppModule['handleCommand'] = async (
 	command: string,
 	args: string[],
 	ctx: MessageContext,
 ) => {
+	if (command === '/edit') {
+		await handleEditCommand(args, ctx);
+		return;
+	}
+
 	if (command !== '/ask') return;
 
 	const question = args.join(' ').trim();
@@ -338,14 +433,21 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	// Build app-aware prompt (always app-aware for /ask, no classification needed)
 	const userCtx = await buildUserContext(ctx, services);
 
-	// D2b: call DataQueryService for /ask when classifier detects a data query
+	// D2b/D2c: call DataQueryService for /ask when classifier detects a data query.
 	// Uses LLM classifier (same as handleMessage) for consistent, broad coverage across
 	// all natural phrasings — not a narrow keyword gate.
+	// D2c: get recent interaction context for classifier + dataQuery context hints.
+	const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+	const recentContextSummary = formatInteractionContextSummary(recentEntries);
+	const recentFilePaths = extractRecentFilePaths(recentEntries);
+
 	let askDataContext = '';
-	const askClassification = await classifyPASMessage(question, services);
+	const askClassification = await classifyPASMessage(question, services, recentContextSummary || undefined);
 	if (askClassification.dataQueryCandidate && services.dataQuery) {
 		try {
-			const result = await services.dataQuery.query(question, ctx.userId);
+			const result = recentFilePaths.length > 0
+				? await services.dataQuery.query(question, ctx.userId, { recentFilePaths: recentFilePaths })
+				: await services.dataQuery.query(question, ctx.userId);
 			if (!result.empty) {
 				askDataContext = formatDataQueryContext(result);
 			}
@@ -919,6 +1021,41 @@ async function gatherUserDataOverview(userId: string): Promise<string> {
 }
 
 /**
+ * Format recent interaction entries as a concise summary string for classifier injection.
+ *
+ * Example output: "receipt_captured (food, 2m ago), recipe_saved (food, 7m ago)"
+ *
+ * @param entries  Recent interaction entries (newest-first from getRecent()).
+ * @param now      Reference time for relative timestamps (injectable for testing).
+ */
+export function formatInteractionContextSummary(
+	entries: InteractionEntry[],
+	now: Date = new Date(),
+): string {
+	if (entries.length === 0) return '';
+	return entries
+		.map((e) => {
+			const relTime = formatRelativeTime(new Date(e.timestamp), now);
+			return `${sanitizeInput(e.action, 100)} (${sanitizeInput(e.appId, 50)}, ${relTime})`;
+		})
+		.join(', ');
+}
+
+/**
+ * Extract and deduplicate all filePaths from a list of interaction entries.
+ * Returns a flat, unique array of data-root-relative file paths.
+ */
+export function extractRecentFilePaths(entries: InteractionEntry[]): string[] {
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		for (const path of entry.filePaths ?? []) {
+			seen.add(path);
+		}
+	}
+	return [...seen];
+}
+
+/**
  * Classification result from LLM-based PAS relevance check.
  */
 export interface PASClassification {
@@ -935,10 +1072,17 @@ export interface PASClassification {
  * on LLM error so users with auto_detect_pas on still get helpful responses.
  *
  * Only call when auto_detect_pas is enabled — /ask is always app-aware.
+ *
+ * @param text           The user's message text.
+ * @param svc            CoreServices (for LLM + appMetadata access).
+ * @param recentContext  Optional summary of recent user interactions (from InteractionContextService).
+ *                       When provided and non-empty, appended to the classifier system prompt so
+ *                       the LLM can resolve follow-up references (e.g. "what did that cost?").
  */
 export async function classifyPASMessage(
 	text: string,
 	svc: CoreServices,
+	recentContext?: string,
 ): Promise<PASClassification> {
 	if (!text.trim()) return { pasRelated: false };
 
@@ -953,11 +1097,18 @@ export async function classifyPASMessage(
 		: '';
 	const appHint = appNames ? ` Installed apps: ${appNames}.` : '';
 
+	// Append recent context when available — helps resolve follow-up queries
+	const contextHint =
+		recentContext && recentContext.trim()
+			? ` Recent user actions: ${recentContext}.`
+			: '';
+
 	const systemPrompt =
 		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
 		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
 		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.${appHint}` +
-		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).`;
+		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).` +
+		contextHint;
 
 	try {
 		const response = await svc.llm.complete(sanitizeInput(text), {

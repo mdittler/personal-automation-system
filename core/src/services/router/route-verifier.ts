@@ -109,12 +109,16 @@ export class RouteVerifier {
 	 *
 	 * Returns `{ action: 'route', appId }` to proceed immediately, or
 	 * `{ action: 'held' }` if the message is waiting for user input.
+	 *
+	 * @param recentInteractions - Optional context string from InteractionContextService.
+	 *   Injected into the verification prompt to help the LLM make a better decision.
 	 */
 	async verify(
 		ctx: MessageContext | PhotoContext,
 		classifierResult: { appId: string; intent: string; confidence: number },
 		photoPath?: string,
 		enabledApps?: string[],
+		recentInteractions?: string,
 	): Promise<VerifyAction> {
 		const isPhoto = 'photo' in ctx;
 		const messageText = isPhoto
@@ -168,6 +172,7 @@ export class RouteVerifier {
 				confidence: classifierResult.confidence,
 			},
 			candidateApps,
+			recentInteractions,
 		});
 
 		// Call verifier LLM — degrade gracefully on any failure

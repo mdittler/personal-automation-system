@@ -16,6 +16,9 @@ capabilities:
       - name: /ask
         description: "Ask about PAS apps, commands, system status, costs, models, or how things work"
         args: ["question"]
+      - name: /edit
+        description: "Edit a data file using natural language"
+        args: ["description"]
 
 requirements:
   services:
@@ -28,6 +31,8 @@ requirements:
     - model-journal
     - system-info
     - data-query
+    - interaction-context
+    - edit-service
   data:
     user_scopes:
       - path: "history.json"

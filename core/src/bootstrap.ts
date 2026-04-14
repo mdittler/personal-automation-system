@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { registerApiRoutes } from './api/index.js';
 import { registerGuiRoutes } from './gui/index.js';
 import { registerGlobalErrorHandlers } from './middleware/error-handler.js';
@@ -69,6 +69,9 @@ import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { FileIndexService } from './services/file-index/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
+import type { DataQueryOptions } from './types/data-query.js';
+import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
+import { EditServiceImpl, EditLog } from './services/edit/index.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
@@ -376,6 +379,15 @@ export async function main(): Promise<void> {
 	// during message handling, not during init().
 	let dataQueryServiceImpl: DataQueryServiceImpl | undefined;
 
+	// D2c: Lazy facade for EditService.
+	// Same pattern as DataQueryService — EditService depends on DataQueryServiceImpl and
+	// FileIndexService, both of which are initialized after registry.loadAll() completes.
+	let editServiceImpl: EditServiceImpl | undefined;
+
+	// D2c: InteractionContextService — in-memory per-user interaction tracking.
+	// Created once and shared across all apps that declare 'interaction-context'.
+	const interactionContextService = new InteractionContextServiceImpl();
+
 	// Service factory: creates scoped CoreServices per app
 	const serviceFactory: ServiceFactory = (manifest, _appDir) => {
 		const declaredServices = new Set(manifest.requirements?.services ?? []);
@@ -463,12 +475,32 @@ export async function main(): Promise<void> {
 			systemInfo: declaredServices.has('system-info') ? systemInfoService : undefined,
 			dataQuery: declaredServices.has('data-query')
 				? {
-						query: (q: string, uid: string) => {
+						query: (q: string, uid: string, opts?: DataQueryOptions) => {
 							if (!dataQueryServiceImpl) {
 								logger.warn('DataQueryService called before initialization — returning empty result');
 								return Promise.resolve({ files: [], empty: true });
 							}
-							return dataQueryServiceImpl.query(q, uid);
+							return dataQueryServiceImpl.query(q, uid, opts);
+						},
+					}
+				: undefined,
+			interactionContext: declaredServices.has('interaction-context')
+				? interactionContextService
+				: undefined,
+			editService: declaredServices.has('edit-service')
+				? {
+						proposeEdit: (desc: string, uid: string) => {
+							if (!editServiceImpl) {
+								logger.warn('EditService called before initialization — returning error');
+								return Promise.resolve({ kind: 'error' as const, action: 'no_match' as const, message: 'Edit service not yet initialized.' });
+							}
+							return editServiceImpl.proposeEdit(desc, uid);
+						},
+						confirmEdit: (proposal: Parameters<EditServiceImpl['confirmEdit']>[0]) => {
+							if (!editServiceImpl) {
+								return Promise.resolve({ ok: false as const, reason: 'Edit service not yet initialized.' });
+							}
+							return editServiceImpl.confirmEdit(proposal);
 						},
 					}
 				: undefined,
@@ -606,6 +638,21 @@ export async function main(): Promise<void> {
 	});
 	logger.info('DataQueryService: initialized');
 
+	// D2c: EditService — LLM-assisted file editing with propose/confirm flow.
+	// Depends on DataQueryServiceImpl (for file discovery), AppRegistry (for access checks),
+	// and the system-level LLM guard. Must be initialized after DataQueryServiceImpl.
+	editServiceImpl = new EditServiceImpl({
+		dataQueryService: dataQueryServiceImpl,
+		appRegistry: registry,
+		llm: systemLlm,
+		changeLog,
+		eventBus,
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'edit-service' }),
+		editLog: new EditLog(join(config.dataDir, 'system', 'edit-log.jsonl')),
+	});
+	logger.info('EditService: initialized');
+
 	// 9d. Vault service — per-user Obsidian vault directories with symlinks
 	const vaultService = new VaultService({
 		dataDir: config.dataDir,
@@ -663,6 +710,7 @@ export async function main(): Promise<void> {
 		verificationUpperBound: verificationConfig?.upperBound,
 		inviteService,
 		userMutationService,
+		interactionContext: interactionContextService,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();

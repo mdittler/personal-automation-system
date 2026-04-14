@@ -28,13 +28,30 @@ export interface DataQueryResult {
 }
 
 /**
+ * Optional hints that bias DataQueryService file selection.
+ *
+ * D2c: recentFilePaths from InteractionContextService allows the chatbot
+ * to tell DataQueryService which files were recently interacted with, so
+ * that follow-up questions like "what did those cost?" prioritize the
+ * correct file rather than relying solely on keyword overlap.
+ */
+export interface DataQueryOptions {
+	/**
+	 * Data-root-relative paths recently interacted with by the user.
+	 * These hint the LLM toward the relevant files without bypassing
+	 * scope enforcement — unauthorized paths are silently dropped.
+	 */
+	recentFilePaths?: string[];
+}
+
+/**
  * Service interface for natural-language data queries over indexed files.
  *
  * Exposed to apps via CoreServices.dataQuery (optional — only injected when
  * the app declares "data-query" in manifest requirements.services).
  *
  * D2b: scope-filtered, LLM-selected, content-returned file queries.
- * D2c (future): contextual follow-up support via InteractionContextService.
+ * D2c: contextual follow-up support via DataQueryOptions.recentFilePaths.
  */
 export interface DataQueryService {
 	/**
@@ -48,7 +65,8 @@ export interface DataQueryService {
 	 *
 	 * @param question - Natural language question to answer
 	 * @param userId - ID of the querying user (for scope enforcement)
+	 * @param options - Optional hints (e.g., recentFilePaths for context bias)
 	 * @returns Relevant file contents, or { files: [], empty: true } if none found
 	 */
-	query(question: string, userId: string): Promise<DataQueryResult>;
+	query(question: string, userId: string, options?: DataQueryOptions): Promise<DataQueryResult>;
 }
