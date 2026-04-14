@@ -16,9 +16,7 @@ import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import type { DataQueryServiceImpl } from '../data-query/index.js';
-import type { FileIndexService } from '../file-index/index.js';
 import type { AppRegistry } from '../app-registry/index.js';
-import type { SpaceService } from '../spaces/index.js';
 import type { ChangeLog } from '../data-store/change-log.js';
 import type { LLMService } from '../../types/llm.js';
 import type { EventBusService } from '../../types/events.js';
@@ -88,9 +86,7 @@ export interface EditService {
 
 export interface EditServiceOptions {
   dataQueryService: DataQueryServiceImpl;
-  fileIndex: FileIndexService;
   appRegistry: AppRegistry;
-  spaceService: SpaceService;
   llm: LLMService;
   changeLog: ChangeLog;
   eventBus: EventBusService;
@@ -225,44 +221,27 @@ export class EditServiceImpl implements EditService {
     }
 
     // Step 3: Realpath + containment check
+    // Resolve ALL symlinks in the full path (including parent dirs) using realpath.
+    // This catches symlink/junction parent directories that resolve()+startsWith() would miss.
     const realDataDir = await this.getRealDataDir();
     let absolutePath: string;
     try {
-      absolutePath = resolve(this.dataDir, file.path);
-      // Check that the resolved path stays within dataDir (before realpath)
-      // Use the resolved path to handle .. segments
-      const rel = absolutePath.slice(realDataDir.length);
-      if (!absolutePath.startsWith(realDataDir + sep) && absolutePath !== realDataDir) {
-        // The unresolved path already escapes — reject
-        return {
-          kind: 'error',
-          action: 'access_denied',
-          message: 'File path escapes the data directory.',
-        };
-      }
+      absolutePath = await realpath(resolve(this.dataDir, file.path));
     } catch {
+      // File doesn't exist, is a broken symlink, or can't be resolved
       return {
         kind: 'error',
         action: 'access_denied',
-        message: 'Invalid file path.',
+        message: 'File path escapes the data directory.',
       };
     }
 
-    // Also check that resolve(dataDir, file.path) is within dataDir
-    // The path may contain ../ segments — verify post-resolution
-    const resolvedAbs = resolve(this.dataDir, file.path);
-    if (!resolvedAbs.startsWith(realDataDir + sep) && resolvedAbs !== realDataDir) {
-      // Try with normalized dataDir (without trailing sep concern)
-      const normalizedDataDir = realDataDir.endsWith(sep)
-        ? realDataDir.slice(0, -1)
-        : realDataDir;
-      if (!resolvedAbs.startsWith(normalizedDataDir + sep)) {
-        return {
-          kind: 'error',
-          action: 'access_denied',
-          message: 'File path escapes the data directory.',
-        };
-      }
+    if (!absolutePath.startsWith(realDataDir + sep) && absolutePath !== realDataDir) {
+      return {
+        kind: 'error',
+        action: 'access_denied',
+        message: 'File path escapes the data directory.',
+      };
     }
 
     // Step 4: Re-read the full raw file
@@ -327,6 +306,22 @@ export class EditServiceImpl implements EditService {
     const diff = generateDiff(beforeContent, afterContent, file.path);
 
     // Step 8: Build proposal
+    // Derive scope from the file path structure:
+    //   users/<userId>/...  → scope: 'user'
+    //   users/shared/...    → scope: 'shared'
+    //   spaces/<spaceId>/... → scope: 'space', spaceId: parts[1]
+    const pathParts = file.path.split('/');
+    let scope: string;
+    let spaceId: string | undefined;
+    if (pathParts[0] === 'spaces') {
+      scope = 'space';
+      spaceId = pathParts[1];
+    } else if (pathParts[0] === 'users' && pathParts[1] === 'shared') {
+      scope = 'shared';
+    } else {
+      scope = 'user';
+    }
+
     return {
       kind: 'proposal',
       filePath: file.path,
@@ -334,7 +329,8 @@ export class EditServiceImpl implements EditService {
       appId: file.appId,
       userId,
       description,
-      scope: file.appId, // will be overridden if we have scope info
+      scope,
+      ...(spaceId !== undefined ? { spaceId } : {}),
       beforeContent,
       afterContent,
       beforeHash,

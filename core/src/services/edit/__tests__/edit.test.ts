@@ -10,9 +10,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataQueryServiceImpl } from '../../data-query/index.js';
-import type { FileIndexService } from '../../file-index/index.js';
 import type { AppRegistry } from '../../app-registry/index.js';
-import type { SpaceService } from '../../spaces/index.js';
 import type { ChangeLog } from '../../data-store/change-log.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { EventBusService } from '../../../types/events.js';
@@ -97,29 +95,12 @@ function makeAppRegistry(opts: {
   } as unknown as AppRegistry;
 }
 
-function makeSpaceService(): SpaceService {
-  return {
-    isMember: vi.fn().mockReturnValue(true),
-    listSpaces: vi.fn().mockReturnValue([]),
-    getSpacesForUser: vi.fn().mockReturnValue([]),
-  } as unknown as SpaceService;
-}
-
 function makeLLM(returnValue: string): LLMService {
   return {
     complete: vi.fn().mockResolvedValue(returnValue),
     classify: vi.fn(),
     extractStructured: vi.fn(),
   } as unknown as LLMService;
-}
-
-function makeFileIndex(): FileIndexService {
-  return {
-    getEntries: vi.fn().mockReturnValue([]),
-    getEntriesByScope: vi.fn().mockReturnValue([]),
-    rebuild: vi.fn().mockResolvedValue(undefined),
-    reindexByPath: vi.fn().mockResolvedValue(undefined),
-  } as unknown as FileIndexService;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +147,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm,
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -203,9 +182,7 @@ describe('EditServiceImpl', () => {
     const dq = makeDataQueryService([]);
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' }),
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -231,9 +208,7 @@ describe('EditServiceImpl', () => {
     ]);
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' }),
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -263,9 +238,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM('new content'),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -293,9 +266,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM('new content'),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -305,10 +276,78 @@ describe('EditServiceImpl', () => {
     });
 
     const result = await svc.proposeEdit('edit system file', 'matt');
-    // The malicious path would escape dataDir OR not match any scope
+    // realpath on a path escaping dataDir throws → caught as access_denied
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
-    expect(['access_denied', 'no_match']).toContain(result.action);
+    expect(result.action).toBe('access_denied');
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 5b: scope derivation — 'shared' path → scope: 'shared'
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: shared path → EditProposal scope is "shared"', async () => {
+    const relativePath = 'users/shared/food/prices/costco.md';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/shared/food/prices'), { recursive: true });
+    const beforeContent = '---\ntitle: Costco Prices\n---\n\n## Active\n- Milk: $5\n';
+    const afterContent = '---\ntitle: Costco Prices\n---\n\n## Active\n- Milk: $5\n- Eggs: $8\n';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '(truncated)' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'prices/', access: 'read-write', scope: 'shared' });
+    const llm = makeLLM(afterContent);
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const result = await svc.proposeEdit('Add eggs to Costco prices', 'matt');
+    expect(result.kind).toBe('proposal');
+    if (result.kind !== 'proposal') return;
+    expect(result.scope).toBe('shared');
+    expect(result.spaceId).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 5c: scope derivation — 'user' path → scope: 'user'
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: user path → EditProposal scope is "user"', async () => {
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = '---\ntitle: Tacos\n---\n\n## Ingredients\n- beef\n';
+    const afterContent = '---\ntitle: Tacos\n---\n\n## Ingredients\n- beef\n- cheese\n';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '(truncated)' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+    const llm = makeLLM(afterContent);
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const result = await svc.proposeEdit('Add cheese to tacos', 'matt');
+    expect(result.kind).toBe('proposal');
+    if (result.kind !== 'proposal') return;
+    expect(result.scope).toBe('user');
+    expect(result.spaceId).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -328,9 +367,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm,
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -365,9 +402,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm,
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -402,9 +437,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: makeDataQueryService([]),
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog,
       eventBus,
@@ -472,9 +505,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: makeDataQueryService([]),
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -524,9 +555,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: makeDataQueryService([]),
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -577,9 +606,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: makeDataQueryService([]),
-      fileIndex: makeFileIndex(),
       appRegistry: revokedRegistry,
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -628,9 +655,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: makeDataQueryService([]),
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm: makeLLM(''),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
@@ -710,9 +735,7 @@ describe('EditServiceImpl', () => {
 
     const svc = new EditServiceImpl({
       dataQueryService: dq,
-      fileIndex: makeFileIndex(),
       appRegistry: registry,
-      spaceService: makeSpaceService(),
       llm,
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
