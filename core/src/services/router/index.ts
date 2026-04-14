@@ -867,9 +867,16 @@ export class Router {
 				return;
 			}
 
-			// Build a human-readable recent interactions string for the verifier prompt
+			// Build a human-readable recent interactions string for the verifier prompt.
+			// Strip newlines and control characters from app-supplied fields to prevent
+			// prompt injection via entityType or other user-controlled values.
+			const sanitizeEntryField = (v: string): string =>
+				v.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
 			const recentInteractions = recentEntries
-				.map((e) => `app=${e.appId} action=${e.action}${e.entityType ? ` entity=${e.entityType}` : ''}`)
+				.map(
+					(e) =>
+						`app=${sanitizeEntryField(e.appId)} action=${sanitizeEntryField(e.action)}${e.entityType ? ` entity=${sanitizeEntryField(e.entityType)}` : ''}`,
+				)
 				.join('; ');
 
 			// Resolve effective app list

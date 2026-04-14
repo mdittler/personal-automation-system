@@ -354,15 +354,19 @@ describe('Router context-aware promotion (Task 5a)', () => {
 		expect(fallback.handleUnrecognized).toHaveBeenCalledOnce();
 	});
 
-	it('TC5: low-confidence match + context for DIFFERENT appId → chatbot', async () => {
+	it('TC5: low-confidence match + context for DIFFERENT appId → chatbot (context-mismatch path)', async () => {
+		// Normal classify returns below-threshold (→ null), low-conf path returns food
 		const llm = createMockLLMWithLowConfidence(
 			{ category: 'log meal', confidence: 0.1 },   // normal: below threshold → null
 			{ category: 'log meal', confidence: 0.25 },  // low-conf: food
 		);
 
-		// Context is for 'notes', not 'food'
+		// Context is for 'notes', not 'food' — mismatch should prevent verifier call
 		const interactionContext = createMockInteractionContext([makeRecentEntry('notes')]);
 		const fallback = createMockFallback();
+		// Verifier is present so tryContextPromotion is actually entered, but the
+		// appId mismatch check happens before verify() is called.
+		const verifier = createMockVerifier({ action: 'route', appId: 'food' });
 
 		const router = buildRouter(
 			[
@@ -370,13 +374,14 @@ describe('Router context-aware promotion (Task 5a)', () => {
 				{ manifest: notesManifest, module: notesModule },
 			],
 			llm,
-			{ interactionContext, fallback },
-			// No verifier either — but even with one, shouldn't be called
+			{ verifier, interactionContext, fallback },
 		);
 		router.buildRoutingTables();
 
 		await router.routeMessage(createTextCtx('show me that recipe'));
 
+		// Context mismatch → verifier must NOT be called, falls through to chatbot
+		expect(verifier.verify).not.toHaveBeenCalled();
 		expect(foodModule.handleMessage).not.toHaveBeenCalled();
 		expect(notesModule.handleMessage).not.toHaveBeenCalled();
 		expect(fallback.handleUnrecognized).toHaveBeenCalledOnce();
