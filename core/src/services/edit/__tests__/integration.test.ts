@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -132,8 +132,10 @@ describe('EditService integration', () => {
     await mkdir(join(dataDir, 'system'), { recursive: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    vi.clearAllTimers();
     vi.useRealTimers();
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   // -------------------------------------------------------------------------
@@ -229,9 +231,11 @@ describe('EditService integration', () => {
   // -------------------------------------------------------------------------
   it('concurrent confirms: exactly one ok:true and one ok:false (stale)', async () => {
     const beforeContent = '# Receipt\n\nPrice: $5\n';
-    // Both LLM responses produce different final content (doesn't matter — first wins)
+    // The LLM stub always returns afterContent1; afterContent2 is a distinct string
+    // placed in proposal2 to make the proposals different. The actual written content
+    // is whichever proposal wins the race (first writer wins), so we only assert
+    // that exactly one confirm succeeds and one fails — not the final file content.
     const afterContent1 = '# Receipt\n\nPrice: $6\n';
-    const afterContent2 = '# Receipt\n\nPrice: $7\n';
     const relPath = 'users/user1/food/receipts/r002.md';
     const absPath = join(dataDir, relPath);
     await writeFile(absPath, beforeContent, 'utf-8');
@@ -253,7 +257,8 @@ describe('EditService integration', () => {
     };
 
     const proposal1: EditProposal = { ...sharedProposalBase, afterContent: afterContent1, diff: '...' };
-    const proposal2: EditProposal = { ...sharedProposalBase, afterContent: afterContent2, diff: '...' };
+    // proposal2 has a different afterContent string — the actual value doesn't matter since first writer wins
+    const proposal2: EditProposal = { ...sharedProposalBase, afterContent: '# Receipt\n\nPrice: $7\n', diff: '...' };
 
     const changeLog = makeChangeLog();
     const eventBus = makeEventBus();
