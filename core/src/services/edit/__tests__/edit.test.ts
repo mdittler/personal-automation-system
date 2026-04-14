@@ -4,10 +4,11 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile, mkdtemp, symlink } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { platform } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataQueryServiceImpl } from '../../data-query/index.js';
 import type { AppRegistry } from '../../app-registry/index.js';
@@ -254,14 +255,37 @@ describe('EditServiceImpl', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 5: Realpath escapes dataDir → access_denied
+  // Test 5: Realpath containment guard — symlink to outside file → access_denied
   // -------------------------------------------------------------------------
 
-  it('proposeEdit: symlink/path escaping dataDir → kind: error, action: access_denied', async () => {
-    // Craft a path that resolves outside dataDir via ..
-    const maliciousPath = 'users/matt/food/../../../etc/passwd';
+  it('proposeEdit: symlink resolves outside dataDir → kind: error, action: access_denied', async () => {
+    // Skip on systems that don't support symlinks (or are running as non-admin on Windows)
+    // We'll skip silently if symlink creation fails
+    const parentDir = await mkdtemp(join(tmpdir(), 'edit-test-parent-'));
+    const testDataDir = join(parentDir, 'data');
+    await mkdir(testDataDir, { recursive: true });
+    await mkdir(join(testDataDir, 'system'), { recursive: true });
+    await mkdir(join(testDataDir, 'users/matt/food/recipes'), { recursive: true });
 
-    const dq = makeDataQueryService([{ path: maliciousPath, appId: 'food', content: '' }]);
+    // Create a file outside dataDir (in parentDir)
+    const outsideFilePath = join(parentDir, 'outside.txt');
+    await writeFile(outsideFilePath, 'outside content', 'utf-8');
+
+    // Create a symlink inside dataDir that points to the outside file
+    const symlinkPath = join(testDataDir, 'users/matt/food/recipes/link-to-outside.txt');
+    try {
+      // Use junction on Windows, symlink on Unix
+      const isWin = platform() === 'win32';
+      await symlink(outsideFilePath, symlinkPath, isWin ? 'junction' : 'file');
+    } catch (err) {
+      // Skip the test if symlinks not supported
+      return;
+    }
+
+    // The path looks valid (inside data/users/matt/food/recipes/)
+    const validPath = 'users/matt/food/recipes/link-to-outside.txt';
+
+    const dq = makeDataQueryService([{ path: validPath, appId: 'food', content: '' }]);
     const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
 
     const svc = new EditServiceImpl({
@@ -270,16 +294,17 @@ describe('EditServiceImpl', () => {
       llm: makeLLM('new content'),
       changeLog: makeChangeLog(),
       eventBus: makeEventBus(),
-      dataDir,
+      dataDir: testDataDir,
       logger: makeLogger(),
       editLog: makeEditLog(),
     });
 
-    const result = await svc.proposeEdit('edit system file', 'matt');
-    // realpath on a path escaping dataDir throws → caught as access_denied
+    const result = await svc.proposeEdit('edit via symlink', 'matt');
+    // realpath follows the symlink and resolves to outside location → containment guard rejects
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
     expect(result.action).toBe('access_denied');
+    expect(result.message).toMatch(/escapes the data directory/i);
   });
 
   // -------------------------------------------------------------------------
@@ -348,6 +373,52 @@ describe('EditServiceImpl', () => {
     if (result.kind !== 'proposal') return;
     expect(result.scope).toBe('user');
     expect(result.spaceId).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 5d: scope derivation — 'space' path → scope: 'space' with spaceId
+  //         (Tests the scope parsing logic from the file path)
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: file at spaces/<spaceId>/... → scope is "space" with extracted spaceId', async () => {
+    // This test verifies the scope derivation logic:
+    // When a file is at spaces/<spaceId>/app/data, the proposal should have
+    // scope: 'space' and spaceId: <spaceId>
+    //
+    // The test uses a user scope in the manifest (since space_scopes isn't
+    // yet in the manifest type), but manually constructs a proposal scenario
+    // where the file happens to be under spaces/<spaceId>/...
+
+    const spaceId = 'family-household';
+    const relativePath = `spaces/${spaceId}/food/shopping-list.md`;
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, `spaces/${spaceId}/food`), { recursive: true });
+    const beforeContent = '---\ntitle: Shopping List\n---\n\n## Active\n- Milk\n';
+    const afterContent = '---\ntitle: Shopping List\n---\n\n## Active\n- Milk\n- Eggs\n';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    // Use user scope in manifest so the scope matching succeeds
+    // (spaces aren't yet in manifest types, but the derivation logic handles them)
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '(truncated)' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'shopping-list.md', access: 'read-write' });
+    const llm = makeLLM(afterContent);
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const result = await svc.proposeEdit('Add eggs to the list', 'matt');
+    expect(result.kind).toBe('proposal');
+    if (result.kind !== 'proposal') return;
+    expect(result.scope).toBe('space');
+    expect(result.spaceId).toBe(spaceId);
   });
 
   // -------------------------------------------------------------------------
