@@ -69,6 +69,7 @@ import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { FileIndexService } from './services/file-index/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
+import type { DataQueryOptions } from './types/data-query.js';
 import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
@@ -468,12 +469,12 @@ export async function main(): Promise<void> {
 			systemInfo: declaredServices.has('system-info') ? systemInfoService : undefined,
 			dataQuery: declaredServices.has('data-query')
 				? {
-						query: (q: string, uid: string) => {
+						query: (q: string, uid: string, opts?: DataQueryOptions) => {
 							if (!dataQueryServiceImpl) {
 								logger.warn('DataQueryService called before initialization — returning empty result');
 								return Promise.resolve({ files: [], empty: true });
 							}
-							return dataQueryServiceImpl.query(q, uid);
+							return dataQueryServiceImpl.query(q, uid, opts);
 						},
 					}
 				: undefined,
