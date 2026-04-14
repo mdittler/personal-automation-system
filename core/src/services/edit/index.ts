@@ -12,7 +12,7 @@
  * - LLM prompt uses anti-injection framing + sanitizeInput
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import type { DataQueryServiceImpl } from '../data-query/index.js';
@@ -37,9 +37,13 @@ export type { EditLogEntry, EditOutcome } from './edit-log.js';
 
 export interface EditProposal {
   kind: 'proposal';
+  /** Unique ID for this proposal. Used for supersession guard — more reliable than beforeHash
+   * because two proposals to the same unchanged file share the same beforeHash. */
+  proposalId: string;
   /** Data-root-relative file path. */
   filePath: string;
-  /** Resolved absolute path within dataDir. */
+  /** Resolved absolute path within dataDir at propose time. Not used for I/O in confirmEdit
+   * (which re-derives from filePath) — kept for diagnostics/logging only. */
   absolutePath: string;
   /** App that owns the file. */
   appId: string;
@@ -207,6 +211,18 @@ export class EditServiceImpl implements EditService {
       };
     }
 
+    // Defense-in-depth: verify user-scoped paths belong to the requesting user.
+    // DataQueryService is expected to enforce this, but EditService must not rely on it
+    // for write authorization — a caller bug could hand it another user's path.
+    const fileScopeSegments = file.path.split('/');
+    if (fileScopeSegments[0] === 'users' && fileScopeSegments[1] !== 'shared' && fileScopeSegments[1] !== userId) {
+      return {
+        kind: 'error',
+        action: 'access_denied',
+        message: 'File does not belong to the requesting user.',
+      };
+    }
+
     // Check both user_scopes and shared_scopes for write access
     const dataReqs = app.manifest.requirements?.data;
     const userScopes: ManifestDataScope[] = dataReqs?.user_scopes ?? [];
@@ -294,6 +310,20 @@ export class EditServiceImpl implements EditService {
       };
     }
 
+    // Strip code fences that LLMs commonly add despite "return ONLY the file content" instructions.
+    // Handles: ```yaml\n...\n``` or ```\n...\n``` with optional trailing whitespace.
+    // Guard: only strip when BOTH fences are present AND beforeContent was NOT already fence-wrapped.
+    // If beforeContent started with a fence, the afterContent fences are real file content, not a
+    // wrapper — stripping would corrupt the file.
+    {
+      const leadingFence = /^```[^\n]*\n/;
+      const trailingFence = /\n```\s*$/;
+      const beforeWasFenced = leadingFence.test(beforeContent) && trailingFence.test(beforeContent);
+      if (!beforeWasFenced && leadingFence.test(afterContent) && trailingFence.test(afterContent)) {
+        afterContent = afterContent.replace(leadingFence, '').replace(trailingFence, '');
+      }
+    }
+
     // Validate LLM output
     if (afterContent === beforeContent) {
       return {
@@ -333,6 +363,7 @@ export class EditServiceImpl implements EditService {
 
     return {
       kind: 'proposal',
+      proposalId: randomUUID(),
       filePath: file.path,
       absolutePath,
       appId: file.appId,
@@ -405,11 +436,12 @@ export class EditServiceImpl implements EditService {
       return { ok: false, reason: 'Access to this file has been revoked.' };
     }
 
-    // Step 3: Re-check realpath containment — re-resolve now that we are about to write
+    // Step 3: Re-check realpath containment — re-derive path from filePath (not absolutePath)
+    // to ensure the authorization check and I/O path are always derived from the same source.
     const realDataDir = await this.getRealDataDir();
     let realAbsPath: string;
     try {
-      realAbsPath = await realpath(proposal.absolutePath);
+      realAbsPath = await realpath(resolve(this.dataDir, proposal.filePath));
     } catch {
       return { ok: false, reason: 'File no longer exists.' };
     }
@@ -455,14 +487,30 @@ export class EditServiceImpl implements EditService {
         description: proposal.description,
       });
 
-      // b) Change log
-      await this.changeLog.record('write', proposal.filePath, proposal.appId, proposal.userId);
+      // b) Change log — use app-relative path and null userId for non-user scope,
+      //    matching ScopedStore.forShared() / forSpace() convention
+      const appRelPath = this.extractAppRelativePath(proposal.filePath) ?? proposal.filePath;
+      const changeLogUserId = proposal.scope === 'user' ? proposal.userId : null;
+      await this.changeLog.record('write', appRelPath, proposal.appId, changeLogUserId, proposal.spaceId);
 
-      // c) EventBus
-      this.eventBus.emit('data:changed', {
-        path: proposal.filePath,
+      // c) EventBus — reconstruct payload to match ScopedStore convention:
+      //    path is app-relative, userId is null for shared/space scope
+      const dataChangedPayload: {
+        operation: 'write';
+        appId: string;
+        userId: string | null;
+        path: string;
+        spaceId?: string;
+      } = {
+        operation: 'write',
         appId: proposal.appId,
-      });
+        userId: proposal.scope === 'user' ? proposal.userId : null,
+        path: appRelPath,
+      };
+      if (proposal.scope === 'space' && proposal.spaceId) {
+        dataChangedPayload.spaceId = proposal.spaceId;
+      }
+      this.eventBus.emit('data:changed', dataChangedPayload);
 
       return { ok: true };
     });

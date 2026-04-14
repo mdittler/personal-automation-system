@@ -490,6 +490,45 @@ describe('EditServiceImpl', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Test 7b: LLM output with only a leading code fence is NOT stripped (Bug 3 fix)
+  // Only strip when BOTH leading and trailing fences are present (LLM wrapper pattern)
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: LLM output with only a leading code fence is preserved as-is', async () => {
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = 'original content';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    // LLM returns content with a leading code fence but NO trailing fence.
+    // This could be legitimate markdown starting with a code block.
+    // The stripping logic must NOT remove the leading fence unless both are present.
+    const llmOutput = '```yaml\nupdated content';  // leading fence only
+    const llm = makeLLM(llmOutput);
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const result = await svc.proposeEdit('update content', 'matt');
+    expect(result.kind).toBe('proposal');
+    if (result.kind !== 'proposal') return;
+    // The leading fence must NOT have been stripped (only trailing-less fences should not be stripped)
+    expect(result.afterContent).toBe(llmOutput);
+    expect(result.afterContent).toContain('```yaml');
+  });
+
+  // -------------------------------------------------------------------------
   // Test 8: Confirm with matching hash → ok, file written, events fired
   // -------------------------------------------------------------------------
 
@@ -540,14 +579,16 @@ describe('EditServiceImpl', () => {
     const written = await readFile(absolutePath, 'utf-8');
     expect(written).toBe(afterContent);
 
-    // data:changed event emitted
+    // data:changed event emitted with correct ScopedStore-style payload
     expect(eventBus.emit).toHaveBeenCalledWith('data:changed', expect.objectContaining({
-      path: relativePath,
+      operation: 'write',
+      path: 'recipes/tacos.yaml', // app-relative (strips users/<userId>/food/)
       appId: 'food',
+      userId: 'matt',
     }));
 
-    // change log appended
-    expect(changeLog.record).toHaveBeenCalled();
+    // change log appended with app-relative path (Bug 2 fix: not full data-root-relative path)
+    expect(changeLog.record).toHaveBeenCalledWith('write', 'recipes/tacos.yaml', 'food', 'matt', undefined);
 
     // audit log appended
     expect(editLog.append).toHaveBeenCalledWith(expect.objectContaining({
@@ -556,6 +597,96 @@ describe('EditServiceImpl', () => {
       filePath: relativePath,
       appId: 'food',
     }));
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 8b: confirmEdit on a shared-scoped file passes null userId to changeLog
+  // -------------------------------------------------------------------------
+
+  it('confirmEdit: shared-scoped edit passes null userId to changeLog.record', async () => {
+    const relativePath = 'users/shared/food/prices/costco.md';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/shared/food/prices'), { recursive: true });
+    const beforeContent = '# Costco\n- Milk: $5\n';
+    const afterContent = '# Costco\n- Milk: $5\n- Eggs: $8\n';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    const changeLog = makeChangeLog();
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'prices/', access: 'read-write', scope: 'shared' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: makeDataQueryService([]),
+      appRegistry: registry,
+      llm: makeLLM(''),
+      changeLog,
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const proposal = {
+      kind: 'proposal' as const,
+      proposalId: 'test-shared-id',
+      filePath: relativePath,
+      absolutePath,
+      appId: 'food',
+      userId: 'matt',        // the requesting user
+      description: 'add eggs',
+      scope: 'shared',       // shared scope → changeLog.record userId must be null
+      beforeContent,
+      afterContent,
+      beforeHash: sha256(beforeContent),
+      diff: '...',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    const result = await svc.confirmEdit(proposal);
+    expect(result.ok).toBe(true);
+
+    // Shared scope → userId must be null in changeLog to match ScopedStore.forShared() convention
+    expect(changeLog.record).toHaveBeenCalledWith('write', 'prices/costco.md', 'food', null, undefined);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 7c: code fence stripping is skipped when beforeContent was already fence-wrapped
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: does NOT strip fences when beforeContent was already fence-wrapped', async () => {
+    // A file whose actual content is a single fenced code block (e.g. a code snippet file).
+    // The LLM correctly returns the updated content still wrapped in fences.
+    // Stripping would corrupt it — we must NOT strip when beforeContent had the same fence structure.
+    const relativePath = 'users/matt/food/recipes/snippet.md';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+
+    // beforeContent is legitimately fence-wrapped
+    const beforeContent = '```python\nprint("hello")\n```';
+    const afterContent  = '```python\nprint("hello world")\n```';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    const llm = makeLLM(afterContent);
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const result = await svc.proposeEdit('update the print statement', 'matt');
+    expect(result.kind).toBe('proposal');
+    if (result.kind !== 'proposal') return;
+    // Fences must be preserved — the LLM returned correct content, not a wrapper
+    expect(result.afterContent).toBe(afterContent);
+    expect(result.afterContent).toMatch(/^```python/);
+    expect(result.afterContent).toMatch(/```$/);
   });
 
   // -------------------------------------------------------------------------
@@ -830,6 +961,111 @@ describe('EditServiceImpl', () => {
       expect(result.beforeContent).toBe(fullContent);
       expect(result.beforeContent.length).toBeGreaterThan(4000);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 14: proposeEdit returns a unique proposalId per call (Bug 1 fix)
+  // Two proposals on the same unchanged file share beforeHash but differ in proposalId
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: two proposals to the same unchanged file have different proposalIds', async () => {
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = 'original content';
+    await writeFile(absolutePath, beforeContent, 'utf-8');
+
+    const afterContent = 'updated content';
+    const dq = makeDataQueryService([{ path: relativePath, appId: 'food', content: '' }]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+    const llm = makeLLM(afterContent);
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm,
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const r1 = await svc.proposeEdit('edit 1', 'matt');
+    const r2 = await svc.proposeEdit('edit 2', 'matt');
+
+    expect(r1.kind).toBe('proposal');
+    expect(r2.kind).toBe('proposal');
+    if (r1.kind !== 'proposal' || r2.kind !== 'proposal') return;
+
+    // Both share the same beforeHash (file unchanged)
+    expect(r1.beforeHash).toBe(r2.beforeHash);
+
+    // But proposalId must be unique to distinguish them
+    expect(r1.proposalId).toBeDefined();
+    expect(r2.proposalId).toBeDefined();
+    expect(r1.proposalId).not.toBe(r2.proposalId);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 15: confirmEdit uses filePath to derive the write path, not absolutePath (Bug 2 fix)
+  // A proposal with a mismatched absolutePath (pointing to a different file inside dataDir)
+  // must write to the file at filePath, not at the stored absolutePath.
+  // -------------------------------------------------------------------------
+
+  it('confirmEdit: writes to file at filePath, not at the stored absolutePath', async () => {
+    const authorizedRelPath = 'users/matt/food/recipes/tacos.yaml';
+    const decoyRelPath = 'users/matt/food/recipes/decoy.yaml';
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+
+    const beforeContent = 'original tacos';
+    const afterContent = 'updated tacos';
+    // Write the authorized file
+    await writeFile(join(dataDir, authorizedRelPath), beforeContent, 'utf-8');
+    // Write the decoy file (the stored absolutePath will point here)
+    await writeFile(join(dataDir, decoyRelPath), beforeContent, 'utf-8');
+
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: makeDataQueryService([]),
+      appRegistry: registry,
+      llm: makeLLM(''),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    // Construct a forged proposal: filePath points to tacos.yaml (authorized)
+    // but absolutePath points to decoy.yaml (a different file, also in dataDir)
+    const proposal = {
+      kind: 'proposal' as const,
+      filePath: authorizedRelPath,
+      absolutePath: join(dataDir, decoyRelPath), // mismatched!
+      proposalId: 'test-proposal-id',
+      appId: 'food',
+      userId: 'matt',
+      description: 'update tacos',
+      scope: 'user',
+      beforeContent,
+      afterContent,
+      beforeHash: sha256(beforeContent),
+      diff: '...',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    const result = await svc.confirmEdit(proposal);
+    expect(result.ok).toBe(true);
+
+    // The file at filePath should be updated
+    const tacosContent = await readFile(join(dataDir, authorizedRelPath), 'utf-8');
+    expect(tacosContent).toBe(afterContent);
+
+    // The decoy file must NOT be changed
+    const decoyContent = await readFile(join(dataDir, decoyRelPath), 'utf-8');
+    expect(decoyContent).toBe(beforeContent);
   });
 });
 

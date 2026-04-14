@@ -385,9 +385,9 @@ describe('interaction recording — recipe_saved via photo', () => {
 			entityType: 'recipe',
 			scope: 'shared',
 		});
-		// entityId and filePaths should be populated with the saved recipe ID
+		// entityId and filePaths should be populated with the saved recipe ID (data-root-relative)
 		expect(call[1].entityId).toBeTruthy();
-		expect(call[1].filePaths?.[0]).toMatch(/^recipes\/.+\.yaml$/);
+		expect(call[1].filePaths?.[0]).toMatch(/^users\/shared\/food\/recipes\/.+\.yaml$/);
 	});
 
 	it('does not throw when interactionContext is undefined', async () => {
@@ -464,7 +464,7 @@ describe('interaction recording — grocery_updated via photo', () => {
 			appId: 'food',
 			action: 'grocery_updated',
 			entityType: 'grocery-list',
-			filePaths: ['grocery/active.yaml'],
+			filePaths: ['users/shared/food/grocery/active.yaml'],
 			scope: 'shared',
 		});
 	});

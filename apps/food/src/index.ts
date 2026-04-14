@@ -1796,7 +1796,7 @@ async function handleSaveRecipe(text: string, ctx: MessageContext): Promise<void
 			action: 'recipe_saved',
 			entityType: 'recipe',
 			entityId: recipe.id,
-			filePaths: [`recipes/${recipe.id}.yaml`],
+			filePaths: [`users/shared/food/recipes/${recipe.id}.yaml`],
 			scope: 'shared',
 		});
 
@@ -2175,7 +2175,7 @@ async function handleGroceryAdd(text: string, ctx: MessageContext): Promise<void
 		appId: 'food',
 		action: 'grocery_updated',
 		entityType: 'grocery-list',
-		filePaths: ['grocery/active.yaml'],
+		filePaths: ['users/shared/food/grocery/active.yaml'],
 		scope: 'shared',
 	});
 
@@ -2476,7 +2476,7 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 			action: 'meal_plan_finalized',
 			entityType: 'meal-plan',
 			entityId: plan.id,
-			filePaths: ['meal-plans/current.yaml'],
+			filePaths: ['users/shared/food/meal-plans/current.yaml'],
 			scope: 'shared',
 		});
 
@@ -3051,7 +3051,7 @@ async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promi
 		appId: 'food',
 		action: 'price_updated',
 		entityType: 'price-list',
-		filePaths: [`prices/${slug}.md`],
+		filePaths: [`users/shared/food/prices/${slug}.md`],
 		scope: 'shared',
 	});
 

@@ -177,7 +177,8 @@
 							"model-journal",
 							"system-info",
 							"data-query",
-							"interaction-context"
+							"interaction-context",
+							"edit-service"
 						]
 					},
 					"description": "Infrastructure services this app uses."

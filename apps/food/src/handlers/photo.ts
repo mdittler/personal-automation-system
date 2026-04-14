@@ -162,7 +162,7 @@ async function handleRecipePhoto(
 		action: 'recipe_saved',
 		entityType: 'recipe',
 		entityId: recipe.id,
-		filePaths: [`recipes/${recipe.id}.yaml`],
+		filePaths: [`users/shared/food/recipes/${recipe.id}.yaml`],
 		scope: 'shared',
 	});
 
@@ -218,7 +218,7 @@ async function handleReceiptPhoto(
 		action: 'receipt_captured',
 		entityType: 'receipt',
 		entityId: id,
-		filePaths: [`receipts/${id}.yaml`],
+		filePaths: [`users/shared/food/receipts/${id}.yaml`],
 		scope: 'shared',
 	});
 
@@ -321,7 +321,7 @@ async function handleGroceryPhoto(
 		appId: 'food',
 		action: 'grocery_updated',
 		entityType: 'grocery-list',
-		filePaths: ['grocery/active.yaml'],
+		filePaths: ['users/shared/food/grocery/active.yaml'],
 		scope: 'shared',
 	});
 

@@ -181,16 +181,18 @@ describe('EditService integration', () => {
     const writtenContent = await readFile(absPath, 'utf-8');
     expect(writtenContent).toBe(afterContent);
 
-    // ChangeLog should have been called
+    // ChangeLog should have been called with app-relative path (not full data-root-relative)
     expect(changeLog.record).toHaveBeenCalledTimes(1);
-    expect(changeLog.record).toHaveBeenCalledWith('write', relPath, 'food', 'user1');
+    expect(changeLog.record).toHaveBeenCalledWith('write', 'receipts/r001.md', 'food', 'user1', undefined);
 
-    // EventBus should emit data:changed
+    // EventBus should emit data:changed with correct ScopedStore-style payload
     expect(eventBus.emitCalls).toHaveLength(1);
     const [eventName, payload] = eventBus.emitCalls[0];
     expect(eventName).toBe('data:changed');
-    expect((payload as any).path).toBe(relPath);
+    expect((payload as any).operation).toBe('write');
+    expect((payload as any).path).toBe('receipts/r001.md'); // app-relative
     expect((payload as any).appId).toBe('food');
+    expect((payload as any).userId).toBe('user1');
 
     // Audit log should contain a 'confirmed' entry
     const logContent = await readFile(editLogPath, 'utf-8');
@@ -317,8 +319,10 @@ describe('EditService integration', () => {
     await editService.confirmEdit(proposal);
 
     expect(eventBus.emit).toHaveBeenCalledWith('data:changed', {
-      path: relPath,
+      operation: 'write',
+      path: 'receipts/notes.md', // app-relative (strips users/user1/food/)
       appId: 'food',
+      userId: 'user1',
     });
   });
 

@@ -63,8 +63,8 @@ function makeFoodInteractionEntry(): InteractionEntry {
 		action: 'recipe_saved',
 		entityType: 'recipe',
 		scope: 'shared',
-		timestamp: new Date().toISOString(),
-		filePaths: ['recipes/tacos.yaml'],
+		timestamp: Date.now(),
+		filePaths: ['users/shared/food/recipes/tacos.yaml'],
 	};
 }
 
@@ -132,7 +132,7 @@ describe('food app data query fallback', () => {
 		expect(mockDataQuery.query).toHaveBeenCalledWith(
 			'something unmatched xyzzy',
 			'user1',
-			{ recentFilePaths: ['recipes/tacos.yaml'] },
+			{ recentFilePaths: ['users/shared/food/recipes/tacos.yaml'] },
 		);
 	});
 

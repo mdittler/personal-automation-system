@@ -896,8 +896,11 @@ export class Router {
 				return;
 			}
 
-			if (result.action === 'route' && result.appId === lowMatch.appId) {
-				// Verifier confirmed the low-confidence appId — check access and dispatch
+			if (result.action === 'route') {
+				// Verifier confirmed routing to an app — honor it regardless of whether
+				// it matches the low-confidence classifier's pick. The verifier is the
+				// stronger signal; dispatching a verifier-confirmed app is safe (same as
+				// the normal grey-zone path). Safety invariant: we still check access.
 				if (!(await this.isAppEnabled(ctx.userId, result.appId, enabledApps))) {
 					await this.trySend(ctx.userId, `You don't have access to the ${result.appId} app.`);
 					return;
@@ -909,7 +912,7 @@ export class Router {
 				}
 			}
 
-			// Verifier suggested a different app or returned an unexpected result → fall through
+			// Verifier returned an unexpected result or app not found → fall through
 			await this.sendToFallback(ctx, enabledApps);
 		} catch (error) {
 			// Any exception → safe fallback (never crash)

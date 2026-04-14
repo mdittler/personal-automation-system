@@ -298,11 +298,11 @@ describe('Router context-aware promotion (Task 5a)', () => {
 		await router.routeMessage(createTextCtx('show me that recipe'));
 
 		// Verifier suggested notes (a different appId from the low-confidence result food)
-		// → falls through to fallback (chatbot)
+		// → verifier is the stronger signal, dispatch to verifier-confirmed app
 		expect(verifier.verify).toHaveBeenCalledOnce();
 		expect(foodModule.handleMessage).not.toHaveBeenCalled();
-		expect(notesModule.handleMessage).not.toHaveBeenCalled();
-		expect(fallback.handleUnrecognized).toHaveBeenCalledOnce();
+		expect(notesModule.handleMessage).toHaveBeenCalledOnce();
+		expect(fallback.handleUnrecognized).not.toHaveBeenCalled();
 	});
 
 	it('TC3: low-confidence match + matching context + verifier throws → chatbot fallback (no crash)', async () => {

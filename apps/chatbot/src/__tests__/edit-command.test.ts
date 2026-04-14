@@ -365,6 +365,36 @@ describe('/edit command', () => {
 			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
 		});
 
+		it('stale call finally block does NOT delete a newer proposal from the map (Bug 1 fix)', async () => {
+			// Scenario: user runs /edit A, then /edit B before confirming A.
+			// When A's sendOptions resolves (Confirm), B's proposal is already in the map.
+			// The supersession guard in A fires (A's proposalId !== B's proposalId).
+			// A's finally block must NOT delete B's proposal — it belongs to a different active call.
+
+			const proposalA = makeProposal({ proposalId: 'id-A', description: 'edit A' });
+			const proposalB = makeProposal({ proposalId: 'id-B', description: 'edit B' });
+
+			const editService = makeEditService({
+				proposeEdit: vi.fn().mockResolvedValue(proposalA),
+			});
+			const services = makeServicesWithEdit(editService);
+
+			// When sendOptions resolves with Confirm, simulate call B having already
+			// overwritten the map with a newer proposal before this Confirm arrives.
+			vi.mocked(services.telegram.sendOptions).mockImplementation(async () => {
+				chatbot.pendingEdits.set('test-user', proposalB);
+				return 'Confirm';
+			});
+
+			await chatbot.init(services);
+
+			const ctx = makeCtx('/edit edit A');
+			await chatbot.handleCommand('/edit', ['edit A'], ctx);
+
+			// Proposal B must still be in the map (not deleted by A's finally block)
+			expect(chatbot.pendingEdits.get('test-user')).toBe(proposalB);
+		});
+
 		it('removes the pending edit from the map after a successful Confirm', async () => {
 			const proposal = makeProposal();
 			const editService = makeEditService({

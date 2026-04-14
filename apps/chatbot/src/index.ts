@@ -346,8 +346,11 @@ async function handleEditCommand(args: string[], ctx: MessageContext): Promise<v
 		return;
 	}
 
-	// Store the pending proposal
+	// Store the pending proposal and capture the unique ID that identifies this specific proposal.
+	// We use proposalId (not beforeHash) because two proposals to the same unchanged file
+	// share the same beforeHash, which would allow confirming one preview to apply another's edit.
 	pendingEdits.set(ctx.userId, result);
+	const proposalId = result.proposalId;
 
 	// Build diff preview message (plain text — sendOptions does not render Markdown)
 	const diffText = result.diff ? result.diff : '(no diff available)';
@@ -358,10 +361,18 @@ async function handleEditCommand(args: string[], ctx: MessageContext): Promise<v
 		const choice = await services.telegram.sendOptions(ctx.userId, previewMessage, ['Confirm', 'Cancel']);
 
 		if (choice === 'Confirm') {
-			// Re-fetch the stored proposal (it may have been replaced by a newer /edit call)
+			// Re-fetch the stored proposal and verify it is the same one shown in this preview.
+			// If the user ran /edit again before confirming, the slot was overwritten — reject.
 			const proposal = pendingEdits.get(ctx.userId);
 			if (!proposal) {
 				await services.telegram.send(ctx.userId, 'No pending edit found.');
+				return;
+			}
+			if (proposal.proposalId !== proposalId) {
+				await services.telegram.send(
+					ctx.userId,
+					'This edit was superseded by a newer /edit request. Please retry.',
+				);
 				return;
 			}
 			pendingEdits.delete(ctx.userId);
@@ -380,7 +391,13 @@ async function handleEditCommand(args: string[], ctx: MessageContext): Promise<v
 	} catch {
 		// sendOptions timed out or threw — map is cleaned up in finally
 	} finally {
-		pendingEdits.delete(ctx.userId); // idempotent: no-op if already deleted
+		// Only delete if the current map entry still belongs to THIS call.
+		// If a newer /edit call has overwritten the slot, leave it alone — deleting
+		// it would destroy the active proposal that the user hasn't confirmed yet.
+		const current = pendingEdits.get(ctx.userId);
+		if (current?.proposalId === proposalId) {
+			pendingEdits.delete(ctx.userId);
+		}
 	}
 }
 
