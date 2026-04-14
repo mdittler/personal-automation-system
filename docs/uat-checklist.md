@@ -434,6 +434,22 @@ Requires `API_TOKEN` set in `.env` and n8n running on port 5678. Tests the highe
 
 ---
 
+## 22. File Index Service (Phase D2a)
+
+Verifies FileIndexService startup indexing, live refresh, and scope security. All items are verified via unit/integration tests — no Telegram interaction required for D2a (D2b will add NL query UAT).
+
+| # | Action | Expected Result | Pass? |
+|---|--------|-----------------|-------|
+| 22.1 | Run `pnpm test core/src/services/file-index/` | All file-index tests pass (46+ tests covering rebuild, handleDataChanged, getEntries, getRelated, security) | |
+| 22.2 | Run `pnpm test core/src/services/data-store/__tests__/paths.test.ts` | All paths tests pass (23+ tests including scope normalization, null-byte rejection, traversal prevention) | |
+| 22.3 | Run `pnpm test apps/food/src/__tests__/recipe-store.test.ts` | Recipe store D2a enrichment tests pass (`entity_keys` includes title + first 5 ingredients, `type: recipe`, `app: food` in frontmatter) | |
+| 22.4 | Start `pnpm dev`, check startup logs | FileIndexService logs "FileIndexService rebuilt N entries" at startup | |
+| 22.5 | With system running, write a file via `POST /api/data` | Check logs: FileIndexService logs handling `data:changed` event within ~100ms | |
+| 22.6 | Verify scope security: attempt a `handleDataChanged` payload with `path: ../../../etc/passwd` (via test) | Test `security > handleDataChanged rejects path traversal in payload.path` passes (size unchanged) | |
+| 22.7 | Verify empty-scopes fix: apps with no declared scopes index zero files | Test `configuration edge cases > empty appScopes map means zero files indexed` passes | |
+
+---
+
 ## Results Summary
 
 | Section | Items | Passed | Failed | Skipped |
@@ -458,7 +474,8 @@ Requires `API_TOKEN` set in `.env` and n8n running on port 5678. Tests the highe
 | 19. External Data API | 12 | 10 | 0 | 1 | 19.11 skipped (space deleted before test) |
 | 20. Obsidian Frontmatter | 16 | 12 | 0 | 4 | 20.13-20.16 skipped (Obsidian not tested) |
 | 21. n8n Execution APIs | 13 | 13 | 0 | 0 |
-| **Total** | **156** | **113** | **0** | **19** |
+| 22. File Index Service | 7 | | | D2a infra — run `pnpm test` to verify |
+| **Total** | **163** | **113** | **0** | **19** |
 
 ## Issues Found
 
