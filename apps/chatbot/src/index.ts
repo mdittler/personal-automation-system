@@ -949,7 +949,7 @@ export function formatInteractionContextSummary(
 	return entries
 		.map((e) => {
 			const relTime = formatRelativeTime(new Date(e.timestamp), now);
-			return `${e.action} (${e.appId}, ${relTime})`;
+			return `${sanitizeInput(e.action, 100)} (${sanitizeInput(e.appId, 50)}, ${relTime})`;
 		})
 		.join(', ');
 }
@@ -1013,7 +1013,7 @@ export async function classifyPASMessage(
 	// Append recent context when available — helps resolve follow-up queries
 	const contextHint =
 		recentContext && recentContext.trim()
-			? ` Recent user actions: ${recentContext}.`
+			? ` Recent user actions: ${sanitizeInput(recentContext, 500)}.`
 			: '';
 
 	const systemPrompt =
