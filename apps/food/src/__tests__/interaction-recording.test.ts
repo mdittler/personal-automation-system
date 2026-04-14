@@ -315,6 +315,168 @@ describe('interaction recording — meal_plan_finalized', () => {
 	});
 });
 
+// ─── Recipe saved via photo (handleRecipePhoto) ───────────────────
+
+describe('interaction recording — recipe_saved via photo', () => {
+	const testPhoto = Buffer.from('fake-jpeg-data');
+
+	const validRecipeJson = JSON.stringify({
+		title: 'Chocolate Cake',
+		source: 'cookbook',
+		ingredients: [{ name: 'flour', quantity: 200, unit: 'g' }],
+		instructions: ['Mix', 'Bake'],
+		servings: 8,
+		tags: [],
+		allergens: [],
+	});
+
+	function createRecipePhotoServices(interactionContext?: MockInteractionContext) {
+		const sharedStore = createMockScopedStore({
+			'household.yaml': makeHouseholdYaml(),
+		});
+		const services = {
+			llm: {
+				complete: vi.fn().mockResolvedValue(validRecipeJson),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+			telegram: {
+				send: vi.fn().mockResolvedValue(undefined),
+				sendPhoto: vi.fn().mockResolvedValue(undefined),
+				sendOptions: vi.fn().mockResolvedValue(undefined),
+				sendWithButtons: vi.fn().mockResolvedValue(undefined),
+				editMessage: vi.fn().mockResolvedValue(undefined),
+			},
+			data: {
+				forShared: vi.fn().mockReturnValue(sharedStore),
+				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
+			},
+			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
+			interactionContext,
+		} as unknown as CoreServices;
+		return { services, sharedStore };
+	}
+
+	function createPhotoCtx(caption?: string): PhotoContext {
+		return {
+			userId: 'user1',
+			photo: testPhoto,
+			caption,
+			mimeType: 'image/jpeg',
+			timestamp: new Date(),
+			chatId: 123,
+			messageId: 456,
+		};
+	}
+
+	it('records recipe_saved after a successful recipe photo write', async () => {
+		const interactionContext = makeInteractionContext();
+		const { services } = createRecipePhotoServices(interactionContext);
+		const ctx = createPhotoCtx('save this recipe');
+
+		await handlePhoto(services, ctx);
+
+		expect(interactionContext.record).toHaveBeenCalledOnce();
+		const call = vi.mocked(interactionContext.record).mock.calls[0];
+		expect(call[0]).toBe('user1');
+		expect(call[1]).toMatchObject({
+			appId: 'food',
+			action: 'recipe_saved',
+			entityType: 'recipe',
+			scope: 'shared',
+		});
+		// entityId and filePaths should be populated with the saved recipe ID
+		expect(call[1].entityId).toBeTruthy();
+		expect(call[1].filePaths?.[0]).toMatch(/^recipes\/.+\.yaml$/);
+	});
+
+	it('does not throw when interactionContext is undefined', async () => {
+		const { services } = createRecipePhotoServices(undefined);
+		const ctx = createPhotoCtx('save this recipe');
+
+		await expect(handlePhoto(services, ctx)).resolves.not.toThrow();
+	});
+});
+
+// ─── Grocery updated via photo (handleGroceryPhoto) ──────────────
+
+describe('interaction recording — grocery_updated via photo', () => {
+	const testPhoto = Buffer.from('fake-jpeg-data');
+
+	const validGroceryJson = JSON.stringify({
+		items: [
+			{ name: 'apples', quantity: 6, unit: null },
+			{ name: 'bread', quantity: 1, unit: 'loaf' },
+		],
+		isRecipe: false,
+	});
+
+	function createGroceryPhotoServices(interactionContext?: MockInteractionContext) {
+		const sharedStore = createMockScopedStore({
+			'household.yaml': makeHouseholdYaml(),
+		});
+		const services = {
+			llm: {
+				complete: vi.fn().mockResolvedValue(validGroceryJson),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			},
+			telegram: {
+				send: vi.fn().mockResolvedValue(undefined),
+				sendPhoto: vi.fn().mockResolvedValue(undefined),
+				sendOptions: vi.fn().mockResolvedValue(undefined),
+				sendWithButtons: vi.fn().mockResolvedValue(undefined),
+				editMessage: vi.fn().mockResolvedValue(undefined),
+			},
+			data: {
+				forShared: vi.fn().mockReturnValue(sharedStore),
+				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
+			},
+			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
+			interactionContext,
+		} as unknown as CoreServices;
+		return { services, sharedStore };
+	}
+
+	function createPhotoCtx(caption?: string): PhotoContext {
+		return {
+			userId: 'user1',
+			photo: testPhoto,
+			caption,
+			mimeType: 'image/jpeg',
+			timestamp: new Date(),
+			chatId: 123,
+			messageId: 456,
+		};
+	}
+
+	it('records grocery_updated after a successful grocery photo write', async () => {
+		const interactionContext = makeInteractionContext();
+		const { services } = createGroceryPhotoServices(interactionContext);
+		const ctx = createPhotoCtx('add to grocery list');
+
+		await handlePhoto(services, ctx);
+
+		expect(interactionContext.record).toHaveBeenCalledOnce();
+		const call = vi.mocked(interactionContext.record).mock.calls[0];
+		expect(call[0]).toBe('user1');
+		expect(call[1]).toMatchObject({
+			appId: 'food',
+			action: 'grocery_updated',
+			entityType: 'grocery-list',
+			filePaths: ['grocery/active.yaml'],
+			scope: 'shared',
+		});
+	});
+
+	it('does not throw when interactionContext is undefined', async () => {
+		const { services } = createGroceryPhotoServices(undefined);
+		const ctx = createPhotoCtx('add to grocery list');
+
+		await expect(handlePhoto(services, ctx)).resolves.not.toThrow();
+	});
+});
+
 // ─── Price updated (handlePriceUpdateIntent) ──────────────────────
 
 describe('interaction recording — price_updated', () => {

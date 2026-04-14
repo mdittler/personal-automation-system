@@ -156,6 +156,16 @@ async function handleRecipePhoto(
 	recipe.sourcePhoto = photoPath;
 	await updateRecipe(store, recipe);
 
+	// Record the interaction after successful write
+	services.interactionContext?.record(ctx.userId, {
+		appId: 'food',
+		action: 'recipe_saved',
+		entityType: 'recipe',
+		entityId: recipe.id,
+		filePaths: [`recipes/${recipe.id}.yaml`],
+		scope: 'shared',
+	});
+
 	await services.telegram.send(
 		ctx.userId,
 		`📷 Recipe saved from photo!\n\n*${escapeMarkdown(recipe.title)}*\n` +
@@ -305,6 +315,15 @@ async function handleGroceryPhoto(
 		await services.telegram.send(ctx.userId, '⚠️ I recognised the items but couldn\'t save the grocery list. Please try again.');
 		return;
 	}
+
+	// Record the interaction after successful write
+	services.interactionContext?.record(ctx.userId, {
+		appId: 'food',
+		action: 'grocery_updated',
+		entityType: 'grocery-list',
+		filePaths: ['grocery/active.yaml'],
+		scope: 'shared',
+	});
 
 	const itemNames = result.items.map((i) => {
 		const qty = i.quantity != null ? ` (${i.quantity}${i.unit ? ' ' + escapeMarkdown(i.unit) : ''})` : '';
