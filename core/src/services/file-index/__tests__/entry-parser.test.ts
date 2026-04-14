@@ -149,6 +149,65 @@ Content`;
   });
 });
 
+describe('parseFileContent — edge cases', () => {
+  it('handles empty file content', () => {
+    const result = parseFileContent('');
+    expect(result.title).toBeNull();
+    expect(result.type).toBeNull();
+    expect(result.tags).toEqual([]);
+    expect(result.wikiLinks).toEqual([]);
+  });
+
+  it('handles file with only frontmatter and no body', () => {
+    const content = '---\ntitle: Test\ntype: recipe\n---';
+    const result = parseFileContent(content);
+    expect(result.title).toBe('Test');
+    expect(result.type).toBe('recipe');
+    expect(result.summary).toBeNull();
+  });
+
+  it('handles unclosed frontmatter block — parser returns empty meta', () => {
+    // parseFrontmatter() returns { meta: {}, content: raw } when no closing --- is found
+    // so title and type will be null (empty meta), not parsed from the frontmatter block
+    const content = '---\ntitle: Test\ntype: recipe\nSome body text';
+    const result = parseFileContent(content);
+    expect(result.title).toBeNull();
+    expect(result.type).toBeNull();
+  });
+
+  it('handles entity_keys with special YAML characters', () => {
+    const content = `---
+title: "Grandma's Recipe: The Best"
+type: recipe
+entity_keys:
+  - "grandma's recipe: the best"
+  - "bell peppers (red)"
+---
+Body.`;
+    const result = parseFileContent(content);
+    expect(result.entityKeys).toContain("grandma's recipe: the best");
+    expect(result.entityKeys).toContain("bell peppers (red)");
+  });
+
+  it('rejects invalid month in date field (month 00)', () => {
+    const content = `---\ndate: 9999-00-01\n---\nBody.`;
+    const result = parseFileContent(content);
+    expect(result.dates.earliest).toBeNull();
+  });
+
+  it('rejects invalid month in date field (month 13)', () => {
+    const content = `---\ndate: 2026-13-01\n---\nBody.`;
+    const result = parseFileContent(content);
+    expect(result.dates.earliest).toBeNull();
+  });
+
+  it('rejects invalid day in date field (day 00)', () => {
+    const content = `---\ndate: 2026-04-00\n---\nBody.`;
+    const result = parseFileContent(content);
+    expect(result.dates.earliest).toBeNull();
+  });
+});
+
 describe('isArchived', () => {
   it('detects archived filename', () => {
     expect(isArchived('recipe.2026-04-13_14-30-22.yaml')).toBe(true);

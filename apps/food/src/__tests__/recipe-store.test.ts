@@ -547,6 +547,33 @@ describe('saveRecipe — D2a frontmatter enrichment', () => {
 	});
 });
 
+describe('saveRecipe — entity_keys ingredient cap', () => {
+	it('entity_keys limited to title plus first 5 ingredients (6 total max)', async () => {
+		const store = createMockScopedStore();
+		const manyIngredients: ParsedRecipe = {
+			...sampleParsed,
+			title: 'Big Recipe',
+			ingredients: [
+				{ name: 'Ingredient One', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Two', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Three', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Four', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Five', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Six', quantity: 1, unit: 'cup' },
+				{ name: 'Ingredient Seven', quantity: 1, unit: 'cup' },
+			],
+		};
+		await saveRecipe(store as any, manyIngredients, 'user1');
+		const written = store.write.mock.calls[0][1] as string;
+		// entity_keys should contain title + first 5 ingredients only (6 total)
+		expect(written).toContain('big recipe');
+		expect(written).toContain('ingredient one');
+		expect(written).toContain('ingredient five');
+		expect(written).not.toContain('ingredient six');
+		expect(written).not.toContain('ingredient seven');
+	});
+});
+
 describe('updateRecipe — D2a frontmatter enrichment', () => {
 	it('writes type: recipe in frontmatter after update', async () => {
 		const store = createMockScopedStore();

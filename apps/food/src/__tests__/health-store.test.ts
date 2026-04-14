@@ -151,6 +151,13 @@ describe('saveMonthlyHealth', () => {
 		expect(written).toContain('type: health-metrics');
 	});
 
+	it('includes app: food in frontmatter', async () => {
+		const log = makeLog('2026-04', 'alice');
+		await saveMonthlyHealth(store as unknown as ScopedDataStore, log);
+		const written = vi.mocked(store.write).mock.calls[0]![1] as string;
+		expect(written).toContain('app: food');
+	});
+
 	it('round-trips day entries through save and load', async () => {
 		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-05', { metrics: { sleepHours: 8, weightKg: 72 } })]);
 

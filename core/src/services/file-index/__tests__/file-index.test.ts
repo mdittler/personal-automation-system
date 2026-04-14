@@ -316,4 +316,155 @@ Content with [[recipes/tacos]].`;
       expect(service.size).toBe(2);
     });
   });
+
+  describe('error handling', () => {
+    it('handleDataChanged skips null payload gracefully', async () => {
+      await service.handleDataChanged(null as any);
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged skips empty object payload gracefully', async () => {
+      await service.handleDataChanged({} as any);
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged skips payload with invalid operation', async () => {
+      // Write a file that would otherwise be indexed
+      await writeDataFile(dataDir, 'users/shared/food/recipes/tacos.yaml', RECIPE_CONTENT);
+      await service.handleDataChanged({
+        operation: 'delete' as any,
+        appId: 'food',
+        userId: null,
+        path: 'recipes/tacos.yaml',
+      });
+      expect(service.size).toBe(0);
+    });
+  });
+
+  describe('security', () => {
+    it('handleDataChanged rejects path traversal in payload.path', async () => {
+      // First index a valid file so size=1
+      await writeDataFile(dataDir, 'users/shared/food/recipes/tacos.yaml', RECIPE_CONTENT);
+      await service.rebuild();
+
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food',
+        userId: null,
+        path: '../../../etc/passwd',
+      });
+      expect(service.size).toBe(1); // only the original
+    });
+
+    it('handleDataChanged rejects userId with path separators', async () => {
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food',
+        userId: '../admin',
+        path: 'recipes/evil.yaml',
+      });
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged rejects spaceId with path traversal', async () => {
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food',
+        userId: 'matt',
+        path: 'recipes/evil.yaml',
+        spaceId: '../../etc',
+      });
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged rejects appId with path separators', async () => {
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food/../evil',
+        userId: null,
+        path: 'recipes/evil.yaml',
+      });
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged rejects Windows drive-like path', async () => {
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food',
+        userId: null,
+        path: 'C:/Windows/system32',
+      });
+      expect(service.size).toBe(0);
+    });
+
+    it('handleDataChanged rejects empty path', async () => {
+      await service.handleDataChanged({
+        operation: 'write',
+        appId: 'food',
+        userId: null,
+        path: '',
+      });
+      expect(service.size).toBe(0);
+    });
+
+    it('reindexByPath rejects path traversal', async () => {
+      await service.reindexByPath('../../etc/passwd');
+      expect(service.size).toBe(0);
+    });
+
+    it('reindexByPath rejects absolute path', async () => {
+      await service.reindexByPath('/etc/passwd');
+      expect(service.size).toBe(0);
+    });
+
+    it('reindexByPath rejects empty string', async () => {
+      await service.reindexByPath('');
+      expect(service.size).toBe(0);
+    });
+  });
+
+  describe('concurrency', () => {
+    it('concurrent handleDataChanged calls on same file resolve without corruption', async () => {
+      await writeDataFile(dataDir, 'users/shared/food/prices/costco.md', PRICE_CONTENT);
+
+      const payload: DataChangedPayload = {
+        operation: 'write',
+        appId: 'food',
+        userId: null,
+        path: 'prices/costco.md',
+      };
+
+      await Promise.all([
+        service.handleDataChanged(payload),
+        service.handleDataChanged(payload),
+      ]);
+
+      expect(service.getEntries({ appId: 'food' })).toHaveLength(1);
+    });
+  });
+
+  describe('configuration edge cases', () => {
+    it('empty appScopes map means zero files indexed', async () => {
+      const emptyService = new FileIndexService(dataDir, new Map());
+      await writeDataFile(dataDir, 'users/shared/food/recipes/tacos.yaml', RECIPE_CONTENT);
+      await emptyService.rebuild();
+      expect(emptyService.size).toBe(0);
+    });
+
+    it('registered app with empty scopes indexes zero files', async () => {
+      const emptyScopes = new Map([
+        ['food', { user: [] as ManifestDataScope[], shared: [] as ManifestDataScope[] }],
+      ]);
+      const emptyService = new FileIndexService(dataDir, emptyScopes);
+      await writeDataFile(dataDir, 'users/shared/food/recipes/tacos.yaml', RECIPE_CONTENT);
+      await emptyService.rebuild();
+      expect(emptyService.size).toBe(0);
+    });
+
+    it('non-existent data directory results in zero entries', async () => {
+      const badService = new FileIndexService('/nonexistent/path/does/not/exist', appScopes);
+      await badService.rebuild();
+      expect(badService.size).toBe(0);
+    });
+  });
 });

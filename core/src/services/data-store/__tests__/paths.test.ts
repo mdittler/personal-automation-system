@@ -126,6 +126,33 @@ describe('findMatchingScope', () => {
 		];
 		expect(findMatchingScope('.', scopes)).toBeUndefined();
 	});
+
+	it('rejects path with null byte', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		expect(findMatchingScope('grocery/\0evil.md', scopes)).toBeUndefined();
+	});
+
+	it('treats URL-encoded path separators as literal characters (not decoded)', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		// %2e%2e is treated as a literal directory name because findMatchingScope
+		// does not URL-decode paths. This is safe as long as no decoding occurs
+		// upstream before this call. If a decodeURIComponent step is ever added,
+		// this test would need to be revisited.
+		const result = findMatchingScope('grocery/%2e%2e/secret.md', scopes);
+		expect(result).toEqual(scopes[0]);
+	});
+
+	it('handles extremely long path without crashing', () => {
+		const scopes: ManifestDataScope[] = [
+			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
+		];
+		const longPath = 'grocery/' + 'a'.repeat(1000) + '.md';
+		expect(findMatchingScope(longPath, scopes)).toEqual(scopes[0]);
+	});
 });
 
 describe('ScopeViolationError', () => {
