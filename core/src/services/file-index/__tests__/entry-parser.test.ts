@@ -208,6 +208,175 @@ Body.`;
   });
 });
 
+describe('parseFileContent — realistic user content', () => {
+  it('parses recipe with unicode and apostrophes', () => {
+    const content = `---
+title: "Abuela's Arroz con Pollo"
+type: recipe
+app: food
+entity_keys:
+  - "abuela's arroz con pollo"
+  - chicken
+  - rice
+  - saffron
+tags:
+  - pas/recipe
+  - pas/food
+date: 2026-03-15
+---
+A classic recipe. See [[pantry]] for spices and [[recipes/sofrito]] for the base.`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe("Abuela's Arroz con Pollo");
+    expect(result.type).toBe('recipe');
+    expect(result.entityKeys).toContain("abuela's arroz con pollo");
+    expect(result.wikiLinks).toContain('pantry');
+    expect(result.wikiLinks).toContain('recipes/sofrito');
+    expect(result.dates.earliest).toBe('2026-03-15');
+  });
+
+  it('parses price list with hyphenated store name', () => {
+    const content = `---
+title: "H-E-B Prices"
+type: price-list
+app: food
+entity_keys:
+  - h-e-b
+  - heb
+tags:
+  - pas/prices
+  - pas/food
+date: 2026-04-01
+---
+## Produce
+- Avocados: $1.29 each`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe('H-E-B Prices');
+    expect(result.type).toBe('price-list');
+    expect(result.entityKeys).toContain('h-e-b');
+    expect(result.tags).toContain('pas/prices');
+  });
+
+  it('parses meal plan with wiki-links to recipes', () => {
+    const content = `---
+title: Meal Plan 2026-W15
+type: meal-plan
+app: food
+entity_keys:
+  - 2026-W15
+date: 2026-04-07
+tags:
+  - pas/meal-plan
+  - pas/food
+---
+## Monday
+- Dinner: [[recipes/chicken-tacos]]
+## Tuesday
+- Dinner: [[recipes/pasta-primavera]]`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe('Meal Plan 2026-W15');
+    expect(result.wikiLinks).toContain('recipes/chicken-tacos');
+    expect(result.wikiLinks).toContain('recipes/pasta-primavera');
+    expect(result.entityKeys).toContain('2026-W15');
+  });
+
+  it('parses daily note with cross-app wiki-links', () => {
+    const content = `---
+title: Daily Note 2026-04-13
+type: daily-note
+app: chatbot
+date: 2026-04-13
+tags:
+  - pas/daily-note
+---
+Made [[recipes/chicken-tacos]] for dinner tonight.
+Need to restock [[pantry]] with tortillas.
+Checked [[grocery/active]] list.`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe('Daily Note 2026-04-13');
+    expect(result.type).toBe('daily-note');
+    expect(result.wikiLinks).toContain('recipes/chicken-tacos');
+    expect(result.wikiLinks).toContain('pantry');
+    expect(result.wikiLinks).toContain('grocery/active');
+    expect(result.dates.earliest).toBe('2026-04-13');
+  });
+
+  it('parses nutrition log with month date', () => {
+    const content = `---
+title: Nutrition 2026-03
+type: nutrition-log
+app: food
+date: 2026-03-01
+tags:
+  - pas/nutrition
+  - pas/food
+---
+month: 2026-03`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe('Nutrition 2026-03');
+    expect(result.type).toBe('nutrition-log');
+    expect(result.dates.earliest).toBe('2026-03-01');
+    expect(result.tags).toContain('pas/nutrition');
+  });
+
+  it('parses receipt from OCR with entity_keys', () => {
+    const content = `---
+title: "TRADER JOE'S #123 — 2026-04-01"
+type: receipt
+app: food
+entity_keys:
+  - "trader joe's"
+  - trader-joes
+date: 2026-04-01
+tags:
+  - pas/receipt
+  - pas/food
+---
+Receipt scanned via photo.`;
+    const result = parseFileContent(content);
+    expect(result.title).toContain("TRADER JOE'S");
+    expect(result.type).toBe('receipt');
+    expect(result.entityKeys).toContain("trader joe's");
+    expect(result.dates.earliest).toBe('2026-04-01');
+  });
+});
+
+describe('parseFileContent — D2a enrichment compatibility', () => {
+  it('parses all D2a fields correctly when present together', () => {
+    const content = `---
+title: Test Recipe
+type: recipe
+app: food
+entity_keys:
+  - test recipe
+  - chicken
+  - rice
+tags:
+  - pas/recipe
+  - pas/food
+date: 2026-04-13
+related:
+  - prices/costco.md
+aliases:
+  - My Test Recipe
+---
+# Test Recipe
+
+A test recipe body with [[pantry]] link.
+`;
+    const result = parseFileContent(content);
+    expect(result.title).toBe('Test Recipe');
+    expect(result.type).toBe('recipe');
+    expect(result.tags).toEqual(['pas/recipe', 'pas/food']);
+    expect(result.entityKeys).toEqual(['test recipe', 'chicken', 'rice']);
+    expect(result.aliases).toEqual(['My Test Recipe']);
+    expect(result.dates.earliest).toBe('2026-04-13');
+    expect(result.wikiLinks).toEqual(['pantry']);
+    expect(result.relationships).toEqual([{ target: 'prices/costco.md', type: 'related' }]);
+    // Summary should be the first non-heading body line
+    expect(result.summary).toContain('test recipe body');
+  });
+});
+
 describe('isArchived', () => {
   it('detects archived filename', () => {
     expect(isArchived('recipe.2026-04-13_14-30-22.yaml')).toBe(true);

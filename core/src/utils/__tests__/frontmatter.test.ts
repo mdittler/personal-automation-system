@@ -372,6 +372,25 @@ describe('extractWikiLinks', () => {
 	});
 });
 
+describe('parseFrontmatter — D2a enrichment roundtrip', () => {
+	it('roundtrips D2a enrichment fields (type, app, entity_keys)', () => {
+		const meta = {
+			title: 'Chicken Tacos',
+			type: 'recipe',
+			app: 'food',
+			entity_keys: ['chicken tacos', 'chicken', 'tortillas'],
+			tags: ['pas/recipe', 'pas/food'],
+		};
+		const generated = generateFrontmatter(meta);
+		const parsed = parseFrontmatter(generated + '\nBody content');
+		expect(parsed.meta.title).toBe('Chicken Tacos');
+		expect(parsed.meta.type).toBe('recipe');
+		expect(parsed.meta.app).toBe('food');
+		expect(parsed.meta.entity_keys).toEqual(['chicken tacos', 'chicken', 'tortillas']);
+		expect(parsed.meta.tags).toEqual(['pas/recipe', 'pas/food']);
+	});
+});
+
 describe('buildAppTags', () => {
 	it('builds basic tags with app ID and type', () => {
 		const tags = buildAppTags('food-tracker', 'recipe');

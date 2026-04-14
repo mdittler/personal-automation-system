@@ -443,6 +443,204 @@ Content with [[recipes/tacos]].`;
     });
   });
 
+  describe('realistic household data', () => {
+    let householdService: FileIndexService;
+
+    // Representative subset of production scopes — covers the file types used in HOUSEHOLD_FILES.
+    // The full food manifest has ~15 shared scopes; only those needed for this fixture are listed.
+    // If you add files at a path not covered here (e.g., receipts/, photos/), add the scope too.
+    const productionScopes = new Map([
+      ['food', {
+        user: [
+          { path: 'nutrition/', access: 'read-write' as const, description: 'Nutrition logs' },
+          { path: 'health/', access: 'read-write' as const, description: 'Health metrics' },
+          { path: 'preferences.yaml', access: 'read-write' as const, description: 'Food preferences' },
+        ],
+        shared: [
+          { path: 'recipes/', access: 'read-write' as const, description: 'Recipes' },
+          { path: 'meal-plans/', access: 'read-write' as const, description: 'Meal plans' },
+          { path: 'grocery/', access: 'read-write' as const, description: 'Grocery lists' },
+          { path: 'pantry.yaml', access: 'read-write' as const, description: 'Pantry inventory' },
+          { path: 'prices/', access: 'read-write' as const, description: 'Price tracking' },
+          { path: 'cultural-calendar.yaml', access: 'read-write' as const, description: 'Cultural calendar' },
+        ],
+      }],
+      ['chatbot', {
+        user: [
+          { path: 'history.json', access: 'read-write' as const, description: 'Chat history' },
+          { path: 'daily-notes/', access: 'read-write' as const, description: 'Daily notes' },
+        ],
+        shared: [],
+      }],
+    ]);
+
+    const HOUSEHOLD_FILES: Record<string, string> = {
+      'users/shared/food/recipes/chicken-tacos.yaml': `---
+title: Chicken Tacos
+type: recipe
+entity_keys:
+  - chicken tacos
+  - chicken
+  - tortillas
+  - cilantro
+  - lime
+tags:
+  - pas/recipe
+  - pas/food
+date: 2026-03-10
+app: food
+---
+# Chicken Tacos
+A classic recipe. See [[pantry]] for spices.`,
+
+      'users/shared/food/recipes/pasta-primavera.yaml': `---
+title: Pasta Primavera
+type: recipe
+entity_keys:
+  - pasta primavera
+  - penne
+  - zucchini
+tags:
+  - pas/recipe
+date: 2026-02-15
+app: food
+---
+Use fresh seasonal vegetables.`,
+
+      'users/shared/food/prices/costco.md': `---
+title: Costco Prices
+type: price-list
+entity_keys:
+  - costco
+  - costco-wholesale
+tags:
+  - pas/prices
+app: food
+---
+## Produce
+- Avocados $5.99/bag`,
+
+      'users/shared/food/prices/trader-joes.md': `---
+title: "Trader Joe's Prices"
+type: price-list
+entity_keys:
+  - "trader joe's"
+  - trader-joes
+date: 2026-04-01
+app: food
+---
+## Snacks
+- Everything Bagels $3.49`,
+
+      'users/shared/food/meal-plans/2026-W15.yaml': `---
+title: Meal Plan 2026-W15
+type: meal-plan
+entity_keys:
+  - 2026-W15
+date: 2026-04-07
+app: food
+---
+## Monday
+- Dinner: [[recipes/chicken-tacos]]`,
+
+      'users/matt/food/nutrition/2026-03.yaml': `---
+title: Nutrition 2026-03
+type: nutrition-log
+date: 2026-03-15
+app: food
+---
+month: 2026-03`,
+
+      'users/matt/food/health/2026-03.yaml': `---
+title: Health 2026-03
+type: health-metrics
+date: 2026-03-31
+app: food
+---
+month: 2026-03`,
+
+      'users/matt/chatbot/daily-notes/2026-04-13.md': `---
+title: Daily Note 2026-04-13
+type: daily-note
+date: 2026-04-13
+tags:
+  - pas/daily-note
+app: chatbot
+---
+Made [[recipes/chicken-tacos]] for dinner tonight.
+Need to restock [[pantry]] with tortillas.`,
+    };
+
+    beforeEach(async () => {
+      householdService = new FileIndexService(dataDir, productionScopes);
+      for (const [path, content] of Object.entries(HOUSEHOLD_FILES)) {
+        await writeDataFile(dataDir, path, content);
+      }
+      await householdService.rebuild();
+    });
+
+    it('indexes all household files', () => {
+      expect(householdService.size).toBe(Object.keys(HOUSEHOLD_FILES).length);
+    });
+
+    it('text search "chicken" finds recipe', () => {
+      const results = householdService.getEntries({ text: 'chicken' });
+      expect(results.some(e => e.type === 'recipe' && e.title === 'Chicken Tacos')).toBe(true);
+    });
+
+    it('text search "costco" finds the price list', () => {
+      // Only costco.md has 'costco' in its title or entity_keys; trader-joes.md does not
+      const results = householdService.getEntries({ text: 'costco' });
+      expect(results).toHaveLength(1);
+      expect(results[0]?.type).toBe('price-list');
+    });
+
+    it('text search "2026-W15" finds the meal plan', () => {
+      const results = householdService.getEntries({ text: '2026-W15' });
+      expect(results).toHaveLength(1);
+      expect(results[0]?.type).toBe('meal-plan');
+    });
+
+    it('filters all food recipes by type', () => {
+      const recipes = householdService.getEntries({ appId: 'food', type: 'recipe' });
+      expect(recipes).toHaveLength(2);
+    });
+
+    it('date range query for March 2026 returns relevant files', () => {
+      const march = householdService.getEntries({ dateFrom: '2026-03-01', dateTo: '2026-03-31' });
+      expect(march.some(e => e.type === 'nutrition-log')).toBe(true);
+      expect(march.some(e => e.type === 'health-metrics')).toBe(true);
+      expect(march.some(e => e.type === 'recipe' && e.title === 'Chicken Tacos')).toBe(true);
+    });
+
+    it('getRelated returns wiki-links from daily note to recipes and pantry', () => {
+      const dailyNoteKey = 'users/matt/chatbot/daily-notes/2026-04-13.md';
+      const related = householdService.getRelated(dailyNoteKey);
+      expect(related.some(r => r.target === 'recipes/chicken-tacos')).toBe(true);
+      expect(related.some(r => r.target === 'pantry')).toBe(true);
+      expect(related.every(r => r.type === 'wiki-link')).toBe(true);
+    });
+
+    it('shared scope food files have null owner', () => {
+      const shared = householdService.getEntries({ scope: 'shared', appId: 'food' });
+      expect(shared.length).toBeGreaterThanOrEqual(4); // recipes, prices, meal-plan
+      expect(shared.every(e => e.owner === null)).toBe(true);
+    });
+
+    it('user scope food files have correct owner', () => {
+      const userFiles = householdService.getEntries({ scope: 'user', owner: 'matt', appId: 'food' });
+      expect(userFiles.length).toBeGreaterThanOrEqual(2); // nutrition + health
+      expect(userFiles.every(e => e.owner === 'matt')).toBe(true);
+    });
+
+    it('chatbot files are separate from food files', () => {
+      const chatbotFiles = householdService.getEntries({ appId: 'chatbot' });
+      const foodFiles = householdService.getEntries({ appId: 'food' });
+      expect(chatbotFiles).toHaveLength(1);
+      expect(foodFiles).toHaveLength(Object.keys(HOUSEHOLD_FILES).length - 1);
+    });
+  });
+
   describe('configuration edge cases', () => {
     it('empty appScopes map means zero files indexed', async () => {
       const emptyService = new FileIndexService(dataDir, new Map());
