@@ -231,7 +231,7 @@ describe('/edit command', () => {
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
-				expect.stringContaining('applied'),
+				expect.stringContaining('Applied'),
 			);
 		});
 
@@ -344,6 +344,56 @@ describe('/edit command', () => {
 				'fix orange price to $4.99',
 				'test-user',
 			);
+		});
+	});
+
+	describe('pendingEdits map cleanup', () => {
+		it('removes the pending edit from the map when sendOptions throws (timeout/exception)', async () => {
+			const proposal = makeProposal();
+			const editService = makeEditService({
+				proposeEdit: vi.fn().mockResolvedValue(proposal),
+			});
+			const services = makeServicesWithEdit(editService);
+			// Simulate sendOptions throwing (e.g. 5-minute TTL expired)
+			vi.mocked(services.telegram.sendOptions).mockRejectedValue(new Error('Timeout'));
+			await chatbot.init(services);
+
+			const ctx = makeCtx('/edit fix orange price to $4.99');
+			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+
+			// The map must be empty — the finally block must have cleaned it up
+			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
+		});
+
+		it('removes the pending edit from the map after a successful Confirm', async () => {
+			const proposal = makeProposal();
+			const editService = makeEditService({
+				proposeEdit: vi.fn().mockResolvedValue(proposal),
+				confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
+			});
+			const services = makeServicesWithEdit(editService);
+			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
+			await chatbot.init(services);
+
+			const ctx = makeCtx('/edit fix orange price to $4.99');
+			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+
+			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
+		});
+
+		it('removes the pending edit from the map after Cancel', async () => {
+			const proposal = makeProposal();
+			const editService = makeEditService({
+				proposeEdit: vi.fn().mockResolvedValue(proposal),
+			});
+			const services = makeServicesWithEdit(editService);
+			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
+			await chatbot.init(services);
+
+			const ctx = makeCtx('/edit fix orange price to $4.99');
+			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+
+			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
 		});
 	});
 });

@@ -33,7 +33,9 @@ const history = new ConversationHistory({ maxTurns: 20 });
 
 /**
  * In-memory pending edit proposals (userId → proposal).
- * TTL is enforced by the proposal's expiresAt field — checked in confirmEdit.
+ * One pending edit per user. A new /edit call replaces any in-progress proposal;
+ * the Confirm/Cancel flow re-fetches at confirm time to pick up whichever proposal is current.
+ * TTL is enforced by the proposal's expiresAt field — checked in EditService.confirmEdit().
  */
 export const pendingEdits = new Map<string, EditProposal>();
 
@@ -347,36 +349,38 @@ async function handleEditCommand(args: string[], ctx: MessageContext): Promise<v
 	// Store the pending proposal
 	pendingEdits.set(ctx.userId, result);
 
-	// Build diff preview message
-	const diffText = result.diff ? `\`\`\`\n${result.diff}\n\`\`\`` : '_(no diff available)_';
-	const previewMessage =
-		`*Edit preview for* \`${escapeMarkdown(result.filePath)}\`\n\n` +
-		`${diffText}\n\n` +
-		`Apply this change?`;
+	// Build diff preview message (plain text — sendOptions does not render Markdown)
+	const diffText = result.diff ? result.diff : '(no diff available)';
+	const previewMessage = `Edit preview for ${result.filePath}\n\n${diffText}\n\nApply this change?`;
 
 	// Present Confirm / Cancel to the user (blocks until the user responds)
-	const choice = await services.telegram.sendOptions(ctx.userId, previewMessage, ['Confirm', 'Cancel']);
+	try {
+		const choice = await services.telegram.sendOptions(ctx.userId, previewMessage, ['Confirm', 'Cancel']);
 
-	if (choice === 'Confirm') {
-		// Re-fetch the stored proposal (it may have been replaced by a newer /edit call)
-		const proposal = pendingEdits.get(ctx.userId);
-		pendingEdits.delete(ctx.userId);
+		if (choice === 'Confirm') {
+			// Re-fetch the stored proposal (it may have been replaced by a newer /edit call)
+			const proposal = pendingEdits.get(ctx.userId);
+			if (!proposal) {
+				await services.telegram.send(ctx.userId, 'No pending edit found.');
+				return;
+			}
+			pendingEdits.delete(ctx.userId);
 
-		if (!proposal) {
-			await services.telegram.send(ctx.userId, 'Edit proposal expired or was replaced.');
-			return;
-		}
-
-		const confirmResult = await editService.confirmEdit(proposal);
-		if (confirmResult.ok) {
-			await services.telegram.send(ctx.userId, `Edit applied to \`${escapeMarkdown(proposal.filePath)}\`.`);
+			const confirmResult = await editService.confirmEdit(proposal);
+			if (confirmResult.ok) {
+				await services.telegram.send(ctx.userId, `✓ Applied to \`${escapeMarkdown(proposal.filePath)}\``);
+			} else {
+				await services.telegram.send(ctx.userId, `Edit failed: ${confirmResult.reason}`);
+			}
 		} else {
-			await services.telegram.send(ctx.userId, `Edit failed: ${confirmResult.reason}`);
+			// Cancel or any other response
+			pendingEdits.delete(ctx.userId);
+			await services.telegram.send(ctx.userId, 'Edit cancelled.');
 		}
-	} else {
-		// Cancel or any other response
-		pendingEdits.delete(ctx.userId);
-		await services.telegram.send(ctx.userId, 'Edit cancelled.');
+	} catch {
+		// sendOptions timed out or threw — map is cleaned up in finally
+	} finally {
+		pendingEdits.delete(ctx.userId); // idempotent: no-op if already deleted
 	}
 }
 
