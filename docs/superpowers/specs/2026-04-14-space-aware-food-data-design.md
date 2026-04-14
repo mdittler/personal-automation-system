@@ -6,20 +6,20 @@ When a user sends a receipt photo, the bot captures data correctly to `data/user
 
 1. **DataQueryService scope isolation**: `getAuthorizedEntries()` in `core/src/services/data-query/index.ts:117` intentionally hides `users/shared/` files when the user belongs to a space. User belongs to `family` space → all shared food data is invisible to NL queries.
 2. **Missing routing intents**: Food manifest has no receipt/price query intents, so these messages can't classify to the food app.
-3. **Poor discoverability**: Receipt `entity_keys` only contain the store name, not line item names. Price file `entity_keys` lack individual item names.
+3. **Poor discoverability**: Receipt `entity_keys` only contain the store name, not line item names or caption labels.
 4. **No receipt review at capture**: Bot only shows item count and total, not actual line items.
 
 ## Design
 
 ### Principle: Explicit context, no implicit inference
 
-Space resolution happens at the router level (interactive context injection). The food app never looks up active space on its own. Scheduled jobs remain on `forShared('shared')`. DataQueryService scope isolation is preserved unchanged.
+Space resolution happens at the router level (interactive context injection). The food app never looks up active space on its own. Scheduled jobs remain on `forShared('shared')` and will not see space-scoped food data until per-space scheduled jobs are explicitly designed. DataQueryService scope isolation is preserved unchanged.
 
-### 1. PhotoContext gets space fields
+### 1. PhotoContext and CallbackContext get space fields
 
 **File:** `core/src/types/telegram.ts`
 
-Add optional `spaceId` and `spaceName` to `PhotoContext`, matching `MessageContext`:
+Add optional `spaceId` and `spaceName` to both `PhotoContext` and `CallbackContext`, matching `MessageContext`:
 
 ```typescript
 export interface PhotoContext {
@@ -33,15 +33,27 @@ export interface PhotoContext {
   spaceId?: string;
   spaceName?: string;
 }
+
+export interface CallbackContext {
+  userId: string;
+  chatId: number;
+  messageId: number;
+  spaceId?: string;
+  spaceName?: string;
+}
 ```
 
-### 2. Router enriches photo context
+### 2. Router and bootstrap inject space into photo and callback contexts
 
 **File:** `core/src/services/router/index.ts`
 
 Add `enrichPhotoWithActiveSpace()` that does the same space lookup as `enrichWithActiveSpace()` but operates on `PhotoContext`. Call it in `routePhoto()` before classification and dispatch, so the photo context carries `spaceId` throughout.
 
-The existing `enrichWithActiveSpace` is typed for `MessageContext`. Rather than making it generic (which would require a shared base type or generics), add a parallel method for photos — the logic is 4 lines and duplication is preferable to type gymnastics.
+The existing `enrichWithActiveSpace` is typed for `MessageContext`. Rather than making it generic, add a parallel method for photos — the logic is 4 lines and duplication is preferable to type gymnastics.
+
+**File:** `core/src/bootstrap.ts` (line ~849)
+
+The callback dispatch constructs `callbackCtx` at bootstrap.ts:849. Add space injection here — look up the user's active space via `spaceService.getActiveSpace(userId)` and include `spaceId`/`spaceName` in the context object, same pattern as the router uses for messages.
 
 ### 3. Food app: `resolveFoodStore()` helper
 
@@ -62,7 +74,7 @@ export async function resolveFoodStore(
     userId: string,
     spaceId?: string,
 ): Promise<FoodStoreResult | null> {
-    // Always check household via shared store (household.yaml lives there)
+    // Always check household via shared store (household.yaml lives there during migration)
     const sharedStore = services.data.forShared('shared');
     const household = await loadHousehold(sharedStore);
     if (!household) return null;
@@ -84,13 +96,15 @@ export async function resolveFoodStore(
 - Interactive handlers migrate from `requireHousehold(services, ctx.userId)` → `resolveFoodStore(services, ctx.userId, ctx.spaceId)`.
 - Return field is `store` (not `sharedStore`). All callers rename `hh.sharedStore` → `fh.store`.
 
+**Note on `household.yaml` authority:** `resolveFoodStore()` reads `household.yaml` from `users/shared/food/` even when returning a space-scoped store. This is a migration bridge. Long-term, space membership should come from `SpaceService` / the space-scoped store, not a single global household file. The migration script (Section 9) copies `household.yaml` into the space directory as a first step toward this.
+
 ### 4. Migrate interactive callers to `resolveFoodStore`
 
 **Scope of change:** All `requireHousehold` calls in interactive handlers (message, command, callback, photo) switch to `resolveFoodStore`. This is ~45 call sites across:
 
-- `apps/food/src/index.ts` — handleMessage, handleCommand, handleCallbackQuery, and all their sub-functions that receive `MessageContext`
+- `apps/food/src/index.ts` — handleMessage, handleCommand, handleCallbackQuery, and all their sub-functions that receive `MessageContext` or `CallbackContext`
 - `apps/food/src/handlers/photo.ts` — handlePhoto and sub-handlers
-- `apps/food/src/handlers/cook-mode.ts` — handleCookCommand, handleCookMessage, handleCookScheduledJob
+- `apps/food/src/handlers/cook-mode.ts` — handleCookCommand, handleCookMessage
 
 **Pattern:**
 ```typescript
@@ -108,7 +122,8 @@ const list = await loadGroceryList(fh.store);
 **Exceptions that stay on `requireHousehold`:**
 - `handleScheduledJob` in `index.ts` — already uses `services.data.forShared('shared')` directly, not `requireHousehold`. No change needed.
 - `cook-mode.ts:285` — `handleCookScheduledJob` is called from `handleScheduledJob` and receives only `userId` (no `MessageContext`). Stays on `requireHousehold`.
-- `cook-mode.ts:93,194` — `handleCookCommand` and `handleCookMessage` receive `MessageContext` (which has `spaceId`) and SHOULD migrate to `resolveFoodStore`.
+
+**Callback-specific note:** `handleCallbackQuery` in `index.ts` receives `CallbackContext` which will now carry `spaceId` (injected by bootstrap). All callback sub-handlers that call `requireHousehold` should migrate to `resolveFoodStore(services, ctx.userId, ctx.spaceId)`.
 
 ### 5. Interaction recording paths
 
@@ -134,13 +149,27 @@ Apply to all interaction recording sites in:
 
 **File:** `apps/food/src/handlers/photo.ts`, `handleReceiptPhoto()`
 
-Enrich `entity_keys` with normalized line item names (capped at 20 to bound metadata):
+Enrich `entity_keys` with normalized line item names AND caption-derived labels (capped at 20 items to bound metadata):
 
 ```typescript
 const itemKeys = parsed.lineItems
     .slice(0, 20)
     .map(item => item.name.toLowerCase());
-const entityKeys = [parsed.store.toLowerCase(), ...new Set(itemKeys)];
+
+// Include caption label (e.g., "receipt 2") so queries like "break down receipt 2" match
+const captionKeys: string[] = [];
+if (ctx.caption) {
+    const label = ctx.caption.trim().toLowerCase();
+    if (label && label !== parsed.store.toLowerCase()) {
+        captionKeys.push(label);
+    }
+}
+
+const entityKeys = [
+    parsed.store.toLowerCase(),
+    ...captionKeys,
+    ...new Set(itemKeys),
+];
 
 const fm = generateFrontmatter({
     title: `Receipt: ${parsed.store}`,
@@ -172,21 +201,20 @@ const fm = generateFrontmatter({
 
 **File:** `apps/food/src/handlers/photo.ts`, `handleReceiptPhoto()`
 
-Include a concise line-item summary and receipt ID in the Telegram response:
+Include a concise line-item summary and receipt ID in the Telegram response. Use the existing `escapeMarkdown()` utility (legacy Telegram Markdown mode), not MarkdownV2 escaping:
 
 ```typescript
-// Build line item summary (truncated for readability)
 const maxItems = 10;
 const itemLines = parsed.lineItems.slice(0, maxItems).map(item =>
     `  ${escapeMarkdown(item.name)}: $${item.totalPrice.toFixed(2)}`
 ).join('\n');
 const moreItems = parsed.lineItems.length > maxItems
-    ? `\n  _\\.\\.\\. and ${parsed.lineItems.length - maxItems} more_`
+    ? `\n  _... and ${parsed.lineItems.length - maxItems} more_`
     : '';
 
 await services.telegram.send(
     ctx.userId,
-    `🧾 Receipt captured\\! \\(${escapeMarkdown(id)}\\)\n\n` +
+    `🧾 Receipt captured! (${escapeMarkdown(id)})\n\n` +
     `*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n` +
     `${itemLines}${moreItems}\n\n` +
     `• ${parsed.lineItems.length} items — Total: $${parsed.total.toFixed(2)}\n` +
@@ -195,7 +223,7 @@ await services.telegram.send(
 );
 ```
 
-The receipt ID in the response allows the user to reference it in follow-up queries (e.g., "receipt 2026-04-14-abc123"). The `/edit` command (D2c) already supports editing files found via DataQueryService, so follow-up corrections work if the receipt is discoverable (which it now will be with enriched entity_keys).
+The receipt ID in the response allows the user to reference it in follow-up queries. The `/edit` command (D2c) already supports editing files found via DataQueryService, so follow-up corrections work if the receipt is discoverable (which it now will be with enriched entity_keys + caption labels).
 
 ### 9. Legacy data migration script
 
@@ -208,13 +236,13 @@ Usage: npx tsx scripts/migrate-shared-to-space.ts <spaceId>
 ```
 
 Behavior:
-- Recursively copies all files from `data/users/shared/food/` to `data/spaces/<spaceId>/food/`
+- Recursively copies ALL files and directories from `data/users/shared/food/` to `data/spaces/<spaceId>/food/`, preserving directory structure
 - Skips files that already exist at the destination (no overwrites)
 - Reports: files copied, files skipped, errors
 - Does NOT delete originals
 - Validates spaceId exists in `data/system/spaces.yaml` before proceeding
 
-Directories to copy: `receipts/`, `prices/`, `recipes/`, `photos/`, `pantry/`, `grocery-list.md`, `meal-plan/`, `freezer.yaml`, `leftovers.yaml`, `household.yaml`, `children/`, `guests.yaml`, `seasonal/`, `cultural-calendar.yaml`, `waste-log.yaml`, `cost-history/`.
+Derives paths from the actual filesystem contents rather than a hardcoded list. Actual current structure includes: `household.yaml`, `ingredient-cache.yaml`, `pantry.yaml`, `photos/`, `prices/`, `receipts/` (and potentially more as the food app evolves).
 
 ### 10. Food manifest intents
 
@@ -230,7 +258,7 @@ Add after line 36 ("user wants to see food spending"):
 ### What does NOT change
 
 - **DataQueryService** — scope isolation preserved. No shared-file visibility fallback.
-- **Scheduled jobs** — continue using `services.data.forShared('shared')` directly. Per-space scheduled jobs are future work.
+- **Scheduled jobs** — continue using `services.data.forShared('shared')` directly. They will NOT see space-scoped food data. Per-space scheduled job support is explicitly deferred as future work.
 - **InteractionContextService** — remains in-memory with 10-min TTL. Not persisted across restarts.
 - **`requireHousehold()`** — kept as-is for backward compatibility (scheduled jobs, setup commands).
 
@@ -238,11 +266,12 @@ Add after line 36 ("user wants to see food spending"):
 
 | File | Change |
 |------|--------|
-| `core/src/types/telegram.ts` | Add `spaceId?`, `spaceName?` to `PhotoContext` |
+| `core/src/types/telegram.ts` | Add `spaceId?`, `spaceName?` to `PhotoContext` and `CallbackContext` |
 | `core/src/services/router/index.ts` | Add `enrichPhotoWithActiveSpace()`, call in `routePhoto()` |
+| `core/src/bootstrap.ts` | Inject `spaceId`/`spaceName` into callback context construction |
 | `apps/food/src/utils/household-guard.ts` | Add `resolveFoodStore()` + `FoodStoreResult` type |
 | `apps/food/src/index.ts` | Migrate ~40 `requireHousehold` → `resolveFoodStore`, rename `hh.sharedStore` → `fh.store` |
-| `apps/food/src/handlers/photo.ts` | Space-aware store, enriched entity_keys, line-item response |
+| `apps/food/src/handlers/photo.ts` | Space-aware store, enriched entity_keys + caption labels, line-item response |
 | `apps/food/src/handlers/cook-mode.ts` | Migrate interactive `requireHousehold` calls |
 | `apps/food/src/services/price-store.ts` | Enriched entity_keys with item names |
 | `apps/food/manifest.yaml` | Add receipt/price query intents |
@@ -252,12 +281,13 @@ Add after line 36 ("user wants to see food spending"):
 
 | Test file | What to test |
 |-----------|-------------|
-| `core/src/services/router/__tests__/` | Photo context carries `spaceId` after routing |
+| `core/src/services/router/__tests__/` | Photo context carries `spaceId` after routing; add router-spaces test for photo |
+| `core/src/bootstrap.ts` tests | Callback context carries `spaceId` from active space |
 | `apps/food/src/__tests__/household-guard.test.ts` | `resolveFoodStore` returns space-scoped store when spaceId present, shared store when absent |
-| `apps/food/src/__tests__/photo-handler.test.ts` (or similar) | Receipt photo with `spaceId: 'family'` writes to `spaces/family/food/receipts/...` |
-| `apps/food/src/__tests__/interaction-recording.test.ts` (or similar) | Interaction filePaths are space-scoped when spaceId present |
+| `apps/food/src/__tests__/` (photo-handler or similar) | Receipt photo with `spaceId: 'family'` writes to `spaces/family/food/receipts/...` |
+| `apps/food/src/__tests__/` (interaction recording) | Interaction filePaths are space-scoped when spaceId present |
 | `core/src/services/data-query/__tests__/data-query.test.ts` | Space member can query space-scoped receipt/price files; keep existing test that hides shared for space members |
-| `apps/food/src/__tests__/` | entity_keys on receipt and price files include item names |
+| `apps/food/src/__tests__/` (entity_keys) | entity_keys on receipt files include item names + caption label; price files include item names |
 
 ## Verification
 
