@@ -28,6 +28,7 @@ requirements:
     - model-journal
     - system-info
     - data-query
+    - interaction-context
   data:
     user_scopes:
       - path: "history.json"

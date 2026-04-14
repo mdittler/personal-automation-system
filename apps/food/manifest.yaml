@@ -171,6 +171,7 @@ requirements:
     - event-bus
     - audio
     - context-store
+    - interaction-context
   data:
     shared_scopes:
       - path: "recipes/"

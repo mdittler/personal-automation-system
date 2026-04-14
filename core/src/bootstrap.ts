@@ -69,6 +69,7 @@ import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { FileIndexService } from './services/file-index/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
+import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
@@ -376,6 +377,10 @@ export async function main(): Promise<void> {
 	// during message handling, not during init().
 	let dataQueryServiceImpl: DataQueryServiceImpl | undefined;
 
+	// D2c: InteractionContextService — in-memory per-user interaction tracking.
+	// Created once and shared across all apps that declare 'interaction-context'.
+	const interactionContextService = new InteractionContextServiceImpl();
+
 	// Service factory: creates scoped CoreServices per app
 	const serviceFactory: ServiceFactory = (manifest, _appDir) => {
 		const declaredServices = new Set(manifest.requirements?.services ?? []);
@@ -471,6 +476,9 @@ export async function main(): Promise<void> {
 							return dataQueryServiceImpl.query(q, uid);
 						},
 					}
+				: undefined,
+			interactionContext: declaredServices.has('interaction-context')
+				? interactionContextService
 				: undefined,
 			secrets,
 			config: appConfig,
