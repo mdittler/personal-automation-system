@@ -87,4 +87,55 @@ export class IntentClassifier {
 			return null;
 		}
 	}
+
+	/**
+	 * Classify text against the intent table WITHOUT applying the confidence threshold gate.
+	 *
+	 * Returns the raw LLM classification result (null only on error or empty intentTable).
+	 * Used for context-aware promotion: when the normal classify() returns null (below
+	 * threshold), the router may call this to get the low-confidence result for comparison
+	 * against recent interaction context.
+	 *
+	 * NOTE: This method never direct-routes. The caller is responsible for gating the
+	 * result through a RouteVerifier before acting on it.
+	 */
+	async classifyWithLowConfidence(
+		text: string,
+		intentTable: IntentTableEntry[],
+	): Promise<IntentClassificationResult | null> {
+		if (intentTable.length === 0) {
+			this.logger.debug('No intents registered — skipping low-confidence classification');
+			return null;
+		}
+
+		const categories = intentTable.map((entry) => entry.category);
+
+		try {
+			const result = await this.llm.classify(text, categories);
+
+			// Map the matched category back to its app ID
+			const entry = intentTable.find((e) => e.category === result.category);
+			if (!entry) {
+				this.logger.debug(
+					{ category: result.category },
+					'Low-confidence classification: category not found in intent table',
+				);
+				return null;
+			}
+
+			this.logger.debug(
+				{ text, appId: entry.appId, intent: result.category, confidence: result.confidence },
+				'Low-confidence intent classified (threshold not applied)',
+			);
+
+			return {
+				appId: entry.appId,
+				intent: result.category,
+				confidence: result.confidence,
+			};
+		} catch (error) {
+			this.logger.error({ error, text }, 'Low-confidence intent classification failed');
+			return null;
+		}
+	}
 }

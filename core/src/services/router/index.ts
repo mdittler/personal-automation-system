@@ -17,6 +17,7 @@ import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
 import type { InviteService } from '../invite/index.js';
+import type { InteractionContextService } from '../interaction-context/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
@@ -56,6 +57,8 @@ export interface RouterOptions {
 	inviteService?: InviteService;
 	/** User mutation service for registering users via invite codes. */
 	userMutationService?: UserMutationService;
+	/** Interaction context service for context-aware low-confidence promotion. */
+	interactionContext?: InteractionContextService;
 }
 
 export class Router {
@@ -76,6 +79,7 @@ export class Router {
 	private readonly verificationUpperBound: number;
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
+	private readonly interactionContext?: InteractionContextService;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -97,6 +101,7 @@ export class Router {
 		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
+		this.interactionContext = options.interactionContext;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -222,6 +227,12 @@ export class Router {
 				await this.dispatchMessage(app, enrichedCtx);
 				return;
 			}
+		} else if (this.interactionContext && this.routeVerifier) {
+			// 3b. Context-aware promotion: classify() returned null (below threshold).
+			// Check recent interaction context — if recent activity matches a low-confidence
+			// result, promote to the verifier. Safety invariant: NEVER direct-route here.
+			await this.tryContextPromotion(enrichedCtx, user.enabledApps);
+			return;
 		}
 
 		// 4. Fallback → chatbot or daily notes
@@ -811,6 +822,109 @@ export class Router {
 
 		// Explicit list — exclude overridden-off entries
 		return enabledApps.filter((id) => overrides[id] !== false);
+	}
+
+	/**
+	 * Context-aware promotion: try to elevate a below-threshold classification to the
+	 * verifier when recent interaction context matches the low-confidence result.
+	 *
+	 * Safety invariant: low-confidence results NEVER direct-route. They can only proceed
+	 * through the verifier. If the verifier is absent, context is empty, or the appIds
+	 * don't match, we fall through to chatbot.
+	 *
+	 * Called only when classify() returned null AND both interactionContext AND routeVerifier
+	 * are configured.
+	 */
+	private async tryContextPromotion(ctx: MessageContext, enabledApps: string[]): Promise<void> {
+		// Guard: both services must be present (caller ensures this, but be explicit)
+		if (!this.interactionContext || !this.routeVerifier) {
+			await this.sendToFallback(ctx, enabledApps);
+			return;
+		}
+
+		try {
+			// Get recent interaction context for this user
+			const recentEntries = this.interactionContext.getRecent(ctx.userId);
+			if (recentEntries.length === 0) {
+				await this.sendToFallback(ctx, enabledApps);
+				return;
+			}
+
+			// Get low-confidence result (no threshold gate)
+			const lowMatch = await this.intentClassifier.classifyWithLowConfidence(
+				ctx.text,
+				this.intentTable,
+			);
+			if (!lowMatch) {
+				await this.sendToFallback(ctx, enabledApps);
+				return;
+			}
+
+			// Check if any recent context entry matches the low-confidence appId
+			const contextMatch = recentEntries.some((e) => e.appId === lowMatch.appId);
+			if (!contextMatch) {
+				await this.sendToFallback(ctx, enabledApps);
+				return;
+			}
+
+			// Build a human-readable recent interactions string for the verifier prompt
+			const recentInteractions = recentEntries
+				.map((e) => `app=${e.appId} action=${e.action}${e.entityType ? ` entity=${e.entityType}` : ''}`)
+				.join('; ');
+
+			// Resolve effective app list
+			const resolvedApps = await this.resolveEnabledApps(ctx.userId, enabledApps);
+
+			// Enter verifier flow with the low-confidence result
+			const result = await this.routeVerifier.verify(
+				ctx,
+				lowMatch,
+				undefined,
+				resolvedApps,
+				recentInteractions,
+			);
+
+			if (result.action === 'held') {
+				// Message is held waiting for user button press — just return
+				return;
+			}
+
+			if (result.action === 'route' && result.appId === lowMatch.appId) {
+				// Verifier confirmed the low-confidence appId — check access and dispatch
+				if (!(await this.isAppEnabled(ctx.userId, result.appId, enabledApps))) {
+					await this.trySend(ctx.userId, `You don't have access to the ${result.appId} app.`);
+					return;
+				}
+				const app = this.registry.getApp(result.appId);
+				if (app) {
+					await this.dispatchMessage(app, ctx);
+					return;
+				}
+			}
+
+			// Verifier suggested a different app or returned an unexpected result → fall through
+			await this.sendToFallback(ctx, enabledApps);
+		} catch (error) {
+			// Any exception → safe fallback (never crash)
+			this.logger.warn({ error }, 'Context-aware promotion failed — falling back to chatbot');
+			await this.sendToFallback(ctx, enabledApps);
+		}
+	}
+
+	/**
+	 * Send message to the configured fallback handler (chatbot or notes).
+	 * Extracted to avoid code duplication between routeMessage and tryContextPromotion.
+	 */
+	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
+		if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
+			if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
+				await this.fallback.handleUnrecognized(ctx, this.telegram);
+				return;
+			}
+			await this.dispatchMessage(this.chatbotApp, ctx);
+		} else {
+			await this.fallback.handleUnrecognized(ctx, this.telegram);
+		}
 	}
 
 	/** Try to send a message, logging errors but not throwing. */

@@ -672,6 +672,7 @@ export async function main(): Promise<void> {
 		verificationUpperBound: verificationConfig?.upperBound,
 		inviteService,
 		userMutationService,
+		interactionContext: interactionContextService,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
