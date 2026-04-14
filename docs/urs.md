@@ -1935,10 +1935,23 @@ All data store operations must reject path traversal attempts (`../`, absolute p
 - `scoped-store.test.ts` > path traversal protection > rejects archive with .. traversal
 - `scoped-store.test.ts` > path traversal protection > rejects backslash traversal (..\\..)
 - `context-store.test.ts` > get > should reject path traversal attempts
+- `paths.test.ts` > findMatchingScope > rejects traversal out of directory scope via ..
+- `paths.test.ts` > findMatchingScope > rejects traversal with backslashes
+- `paths.test.ts` > findMatchingScope > resolves . segments and still matches
+- `paths.test.ts` > findMatchingScope > resolves nested .. that stays within scope
+- `paths.test.ts` > findMatchingScope > rejects double traversal escaping scope entirely
+- `paths.test.ts` > findMatchingScope > rejects traversal from different scope
+- `paths.test.ts` > findMatchingScope > exact file scope with normalized path still matches
+- `paths.test.ts` > findMatchingScope > rejects absolute path input
+- `paths.test.ts` > findMatchingScope > rejects bare . input
+- `paths.test.ts` > findMatchingScope > rejects path with null byte
+- `paths.test.ts` > findMatchingScope > treats URL-encoded path separators as literal characters (not decoded)
+- `paths.test.ts` > findMatchingScope > handles extremely long path without crashing
 
 **See also:** REQ-DATA-001, REQ-CTX-001
 
-**Fixes:** None
+**Fixes:**
+- **D2a (2026-04-13):** Virtual POSIX normalization in findMatchingScope() — prevents declared-scope bypass via .. segments. Null-byte rejection added to normalizePosix(). CL: D2a-scope-fix.
 
 ### REQ-SEC-002: Webhook secret validation
 
@@ -4639,6 +4652,9 @@ Generated markdown files must include Obsidian-compatible YAML frontmatter. The 
   - `frontmatter.test.ts` > generateFrontmatter — security > quotes values that could be YAML injection
   - `frontmatter.test.ts` > generateFrontmatter — security > quotes tag values with special characters
 
+**Fixes:**
+- **D2a (2026-04-13):** Widened FrontmatterMeta.type from 6-literal union to string for app-defined types. CL: D2a-type-widen.
+
 ### REQ-FMATTER-004: Cross-app linking utilities
 
 **Phase:** 27A | **Status:** Implemented
@@ -4738,6 +4754,143 @@ The migration script must add frontmatter to existing markdown files in `data/`,
 
 ---
 
+## File Index Service
+
+### REQ-FILEINDEX-001: FileIndexService startup indexing and live refresh
+
+**Phase:** D2a | **Status:** Implemented
+
+FileIndexService scans `users/` and `spaces/` directories at startup, indexes `.md`/`.yaml`/`.yml` files within registered app manifest scopes, excludes archived files, and maintains a live index via `data:changed` event subscription. Apps with empty scope lists have zero files indexed. Invalid event payloads and path traversal attempts are rejected. Payload `appId`, `userId`, `spaceId` are validated against the `SAFE_SEGMENT` pattern.
+
+**Standard tests:**
+- `file-index.test.ts` > rebuild > indexes user-scoped files within declared scopes
+- `file-index.test.ts` > rebuild > indexes shared-scoped files
+- `file-index.test.ts` > rebuild > indexes space-scoped files using shared scopes
+- `file-index.test.ts` > handleDataChanged > re-indexes file on write event
+- `file-index.test.ts` > handleDataChanged > removes entry on archive event
+- `file-index.test.ts` > handleDataChanged > indexes space-scoped file from write event
+- `file-index.test.ts` > handleDataChanged > reindexByPath updates an existing entry
+- `file-index.test.ts` > rebuild consistency with archive > excludes archived files after rebuild
+- `file-index.test.ts` > size property > returns total indexed count
+
+**Edge case tests:**
+- `file-index.test.ts` > rebuild > excludes archived files
+- `file-index.test.ts` > rebuild > excludes files from unregistered apps
+- `file-index.test.ts` > rebuild > excludes files outside declared manifest scopes
+- `file-index.test.ts` > error handling > handleDataChanged skips null payload gracefully
+- `file-index.test.ts` > error handling > handleDataChanged skips empty object payload gracefully
+- `file-index.test.ts` > error handling > handleDataChanged skips payload with invalid operation
+- Security
+  - `file-index.test.ts` > security > handleDataChanged rejects path traversal in payload.path
+  - `file-index.test.ts` > security > handleDataChanged rejects userId with path separators
+  - `file-index.test.ts` > security > handleDataChanged rejects spaceId with path traversal
+  - `file-index.test.ts` > security > handleDataChanged rejects appId with path separators
+  - `file-index.test.ts` > security > handleDataChanged rejects Windows drive-like path
+  - `file-index.test.ts` > security > handleDataChanged rejects empty path
+  - `file-index.test.ts` > security > reindexByPath rejects path traversal
+  - `file-index.test.ts` > security > reindexByPath rejects absolute path
+  - `file-index.test.ts` > security > reindexByPath rejects empty string
+- Concurrency
+  - `file-index.test.ts` > concurrency > concurrent handleDataChanged calls on same file resolve without corruption
+- Configuration
+  - `file-index.test.ts` > configuration edge cases > empty appScopes map means zero files indexed
+  - `file-index.test.ts` > configuration edge cases > registered app with empty scopes indexes zero files
+  - `file-index.test.ts` > configuration edge cases > non-existent data directory results in zero entries
+
+### REQ-FILEINDEX-002: FileIndexService query and filtering
+
+**Phase:** D2a | **Status:** Implemented
+
+`getEntries()` supports filtering by scope, appId, owner, type, tags, dateFrom, dateTo, and text (case-insensitive search on title + entityKeys + aliases). Date filtering uses range-overlap semantics where a file is included if its date range overlaps the query window. No filter returns all entries.
+
+**Standard tests:**
+- `file-index.test.ts` > getEntries filter > filters by type
+- `file-index.test.ts` > getEntries filter > filters by owner
+- `file-index.test.ts` > getEntries filter > filters by text search on title
+- `file-index.test.ts` > getEntries filter > filters by text search on entityKeys
+- `file-index.test.ts` > getEntries filter > no filter returns all entries
+
+**Edge case tests:**
+- `file-index.test.ts` > getEntries filter > date range filtering > dateFrom includes file when dateFrom is before latest date
+- `file-index.test.ts` > getEntries filter > date range filtering > dateFrom excludes file when dateFrom is after latest date
+- `file-index.test.ts` > getEntries filter > date range filtering > dateTo includes file when dateTo is after earliest date
+- `file-index.test.ts` > getEntries filter > date range filtering > dateTo excludes file when dateTo is before earliest date
+
+### REQ-FILEINDEX-003: FileIndexService graph edges
+
+**Phase:** D2a | **Status:** Implemented
+
+`getRelated()` returns frontmatter `related`/`source` relationships plus wiki-link edges extracted from file body content. Entity-key matching is deferred to D2b.
+
+**Standard tests:**
+- `file-index.test.ts` > getRelated > returns frontmatter relationships and wiki-link edges
+
+### REQ-FILEINDEX-004: Entry parsing and metadata extraction
+
+**Phase:** D2a | **Status:** Implemented
+
+`parsePathMeta()` derives appId, scope, and owner from data-root-relative paths for user, shared, and space path structures. `parseFileContent()` extracts title, type, tags, aliases, entity_keys, dates, relationships, wiki-links, and summary from YAML frontmatter and markdown body. `isArchived()` detects archive filenames by timestamp suffix pattern. Date validation rejects values with invalid month (00 or 13+) or invalid day (00) values.
+
+**Standard tests:**
+- `entry-parser.test.ts` > parsePathMeta > parses user-scoped path
+- `entry-parser.test.ts` > parsePathMeta > parses shared-scoped path
+- `entry-parser.test.ts` > parsePathMeta > parses space-scoped path
+- `entry-parser.test.ts` > parseFileContent > extracts frontmatter fields
+- `entry-parser.test.ts` > parseFileContent > extracts wiki-links from body
+- `entry-parser.test.ts` > parseFileContent > extracts title from first heading when no frontmatter title
+- `entry-parser.test.ts` > parseFileContent > extracts summary from first non-heading paragraph
+- `entry-parser.test.ts` > parseFileContent > extracts path-like source as relationship
+- `entry-parser.test.ts` > parseFileContent > extracts dates from frontmatter
+
+**Edge case tests:**
+- `entry-parser.test.ts` > parsePathMeta > returns unknown appId for unrecognized path structure
+- `entry-parser.test.ts` > parseFileContent > ignores non-path source values (labels)
+- `entry-parser.test.ts` > parseFileContent > handles file with no frontmatter
+- `entry-parser.test.ts` > parseFileContent > handles empty file content
+- `entry-parser.test.ts` > parseFileContent > handles file with only frontmatter and no body
+- `entry-parser.test.ts` > parseFileContent > handles unclosed frontmatter block — parser returns empty meta
+- `entry-parser.test.ts` > parseFileContent > handles entity_keys with special YAML characters
+- `entry-parser.test.ts` > parseFileContent > rejects invalid month in date field (month 00)
+- `entry-parser.test.ts` > parseFileContent > rejects invalid month in date field (month 13)
+- `entry-parser.test.ts` > parseFileContent > rejects invalid day in date field (day 00)
+- `entry-parser.test.ts` > isArchived > detects archived filename
+- `entry-parser.test.ts` > isArchived > rejects normal filename
+- `entry-parser.test.ts` > isArchived > rejects date-named files
+
+### REQ-FMATTER-005: Food app frontmatter enrichment
+
+**Phase:** D2a | **Status:** Implemented
+
+All food app write sites include `type` and `app: food` in generated frontmatter. Recipe, receipt, price-list, meal-plan, grocery-list, and grocery-history stores additionally include `entity_keys` for index searchability. Both create and update writes are enriched. Recipe `entity_keys` are limited to the title plus first 5 ingredient names (6 total maximum) for reasonable index size.
+
+**Standard tests:**
+- `recipe-store.test.ts` > saveRecipe — D2a frontmatter enrichment > writes type: recipe in frontmatter
+- `recipe-store.test.ts` > saveRecipe — D2a frontmatter enrichment > writes entity_keys containing lowercased title in frontmatter
+- `recipe-store.test.ts` > saveRecipe — D2a frontmatter enrichment > writes entity_keys containing lowercased ingredient names in frontmatter
+- `recipe-store.test.ts` > updateRecipe — D2a frontmatter enrichment > writes type: recipe in frontmatter after update
+- `recipe-store.test.ts` > updateRecipe — D2a frontmatter enrichment > writes entity_keys with lowercased title after update
+- `recipe-store.test.ts` > updateRecipe — D2a frontmatter enrichment > writes entity_keys with lowercased ingredient names after update
+- `health-store.test.ts` > saveMonthlyHealth > includes type: health-metrics in frontmatter
+- `health-store.test.ts` > saveMonthlyHealth > includes app: food in frontmatter
+- `cultural-calendar.test.ts` > ensureCalendar > includes type: cultural-calendar in frontmatter when writing
+- `cultural-calendar.test.ts` > ensureCalendar > writes frontmatter with app: food and pas/ tags
+- `price-store.test.ts` > formatPriceFile frontmatter enrichment (D2a) > includes type: price-list in frontmatter
+- `price-store.test.ts` > formatPriceFile frontmatter enrichment (D2a) > includes entity_keys with lowercased store name
+- `price-store.test.ts` > formatPriceFile frontmatter enrichment (D2a) > includes entity_keys with slug
+- `grocery-store.test.ts` > saveGroceryList frontmatter enrichment (D2a) > includes type: grocery-list in frontmatter
+- `grocery-store.test.ts` > archivePurchased frontmatter enrichment (D2a) > includes type: grocery-history in archive frontmatter
+- `meal-plan-store.test.ts` > savePlan > includes type: meal-plan in frontmatter
+- `meal-plan-store.test.ts` > savePlan > includes entity_keys with the week identifier in frontmatter
+- `meal-plan-store.test.ts` > archivePlan > includes type: meal-plan in frontmatter
+- `meal-plan-store.test.ts` > archivePlan > includes entity_keys with the week identifier in archivePlan frontmatter
+- `macro-tracker.test.ts` > saveMonthlyLog frontmatter enrichment (D2a) > includes type: nutrition-log in frontmatter
+- `pantry-store.test.ts` > savePantry > includes type: pantry in frontmatter
+
+**Edge case tests:**
+- `recipe-store.test.ts` > saveRecipe — entity_keys ingredient cap > entity_keys limited to title plus first 5 ingredients (6 total max)
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -4818,7 +4971,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-UTIL-002 | file.test.ts | 4 | 2 | Implemented |
 | REQ-UTIL-003 | yaml.test.ts | 5 | 3 | Implemented |
 | REQ-UTIL-004 | frequency-picker.test.ts | 29 | 27 | Implemented |
-| REQ-SEC-001 | scoped-store.test.ts, context-store.test.ts | 0 | 8 | Implemented |
+| REQ-SEC-001 | scoped-store.test.ts, context-store.test.ts, paths.test.ts | 0 | 20 | Implemented |
 | REQ-SEC-002 | webhook.test.ts | 1 | 2 | Implemented |
 | REQ-SEC-003 | classify.test.ts, extract-structured.test.ts | 0 | 2 | Implemented |
 | REQ-SEC-004 | router.test.ts | 0 | 1 | Implemented |
@@ -4939,5 +5092,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-VAULT-003 | vault.test.ts | 0 | 4 | Implemented |
 | REQ-VAULT-004 | vault.test.ts | 3 | 1 | Implemented |
 
+| REQ-FILEINDEX-001 | file-index.test.ts | 9 | 19 | Implemented |
+| REQ-FILEINDEX-002 | file-index.test.ts | 5 | 4 | Implemented |
+| REQ-FILEINDEX-003 | file-index.test.ts | 1 | 0 | Implemented |
+| REQ-FILEINDEX-004 | entry-parser.test.ts | 9 | 13 | Implemented |
+| REQ-FMATTER-005 | recipe-store.test.ts, health-store.test.ts, cultural-calendar.test.ts, price-store.test.ts, grocery-store.test.ts, meal-plan-store.test.ts, macro-tracker.test.ts, pantry-store.test.ts | 21 | 1 | Implemented |
+
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **126 test files** | **943** | **1171** | **2211 tests** |
+| **Totals** | **142 test files** | **988** | **1220** | **2208 tests** |
