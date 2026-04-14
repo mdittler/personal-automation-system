@@ -183,7 +183,8 @@ export class EditServiceImpl implements EditService {
       };
     }
 
-    const file = queryResult.files[0];
+    // We checked length === 1 above, so files[0] is guaranteed to exist
+    const file = queryResult.files[0]!;
 
     // Step 2: Write-access check via app manifest
     const app = this.appRegistry.getApp(file.appId);

@@ -77,9 +77,9 @@ function computeLCS(before: string[], after: string[]): Array<[number, number]> 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       if (before[i - 1] === after[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
+        dp[i]![j] = (dp[i - 1]![j - 1] ?? 0) + 1;
       } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        dp[i]![j] = Math.max(dp[i - 1]![j] ?? 0, dp[i]![j - 1] ?? 0);
       }
     }
   }
@@ -94,7 +94,7 @@ function computeLCS(before: string[], after: string[]): Array<[number, number]> 
       matches.unshift([i - 1, j - 1]);
       i--;
       j--;
-    } else if (dp[i - 1][j] > dp[i][j - 1]) {
+    } else if ((dp[i - 1]![j] ?? 0) > (dp[i]![j - 1] ?? 0)) {
       i--;
     } else {
       j--;
@@ -150,7 +150,7 @@ function buildHunks(beforeLines: string[], afterLines: string[], matches: Array<
   let i = 0;
 
   while (i < ops.length) {
-    if (ops[i].type === 'context') {
+    if (ops[i]!.type === 'context') {
       i++;
       continue;
     }
@@ -161,17 +161,17 @@ function buildHunks(beforeLines: string[], afterLines: string[], matches: Array<
 
     // Consume all change ops, merging nearby change regions (gap ≤ 4 context lines)
     while (changeEnd < ops.length) {
-      if (ops[changeEnd].type !== 'context') {
+      if (ops[changeEnd]!.type !== 'context') {
         changeEnd++;
       } else {
         // Look ahead through up to 4 context lines to see if another change follows
         let peek = changeEnd;
         let contextCount = 0;
-        while (peek < ops.length && ops[peek].type === 'context' && contextCount < 4) {
+        while (peek < ops.length && ops[peek]!.type === 'context' && contextCount < 4) {
           peek++;
           contextCount++;
         }
-        if (peek < ops.length && ops[peek].type !== 'context') {
+        if (peek < ops.length && ops[peek]!.type !== 'context') {
           // Another change is nearby — extend changeEnd to consume the gap
           changeEnd = peek;
         } else {
@@ -213,10 +213,10 @@ function buildHunks(beforeLines: string[], afterLines: string[], matches: Array<
         type: op.type,
         text:
           op.type === 'remove'
-            ? beforeLines[op.beforeIdx!]
+            ? (beforeLines[op.beforeIdx!] ?? '')
             : op.type === 'add'
-              ? afterLines[op.afterIdx!]
-              : beforeLines[op.beforeIdx!],
+              ? (afterLines[op.afterIdx!] ?? '')
+              : (beforeLines[op.beforeIdx!] ?? ''),
       })),
     };
 

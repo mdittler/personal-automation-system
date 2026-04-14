@@ -11,7 +11,7 @@
 
 import type { DataQueryResult } from '../types/data-query.js';
 import type { LLMService } from '../types/llm.js';
-import type { Logger } from 'pino';
+import type { AppLogger } from '../types/app-module.js';
 import { sanitizeInput } from '../services/llm/prompt-templates.js';
 
 const MAX_QUESTION_LENGTH = 500;
@@ -28,7 +28,7 @@ export async function formatDataAnswer(
 	question: string,
 	dataResult: DataQueryResult,
 	llm: LLMService,
-	logger: Logger,
+	logger: AppLogger,
 ): Promise<string | null> {
 	if (dataResult.empty) {
 		return null;
