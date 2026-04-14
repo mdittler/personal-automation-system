@@ -18,8 +18,9 @@ Status legend: `open`, `fixed`, `verified`.
 | 8. Config, Manifest & Installation | F36–F40 | CR8 | **All Fixed** |
 | 9. Test Quality & Coverage Gaps | (14 test gaps) | CR9 | **All Covered** |
 | 10. Cross-Module AI Errors | F41, F42 | CR8 | **All Fixed** |
+| D2a. File Index Foundation Review | D2a-R1 through D2a-R9 | D2a-review | **All Fixed** |
 
-**Totals:** 42 findings fixed · 14 test coverage gaps addressed (5 new tests, 9 already covered) · All remediation phases complete (R1–R7, F9, CR6, CR8, R1-post, CR9) · Last updated 2026-04-13.
+**Totals:** 42 findings fixed · 14 test coverage gaps addressed (5 new tests, 9 already covered) · All remediation phases complete (R1–R7, F9, CR6, CR8, R1-post, CR9) · 9 D2a findings fixed · Last updated 2026-04-13.
 
 ---
 
@@ -1377,3 +1378,108 @@ Missing coverage — addressed in CR9 (2026-04-13):
 - ~~No report or alert edit-page render test proves server data embedded in inline JavaScript is escaped for script context.~~ **New tests** — `reports.test.ts` "safeJsonForScript escapes `</script>` breakout in report edit-page PAS_APPS inline JSON (Gap 12+13)": custom registry with malicious app name, asserts literal payload absent and `\u003c` present. `alerts.test.ts` "safeJsonForScript escapes `</script>` breakout in alert edit-page PAS_EXISTING_ACTIONS inline JSON (Gap 12+13)": malicious action message config, same assertions.
 - ~~No client-side select-builder test proves app/user/report names inserted through `innerHTML` remain inert text.~~ **Covered as part of Gap 12+13 tests** — server-side `safeJsonForScript` prevents `</script>` breakout; client-side innerHTML injection is a separate browser-runtime concern beyond server-side test scope.
 - ~~No alert executor test proves `write_data.path` expands the GUI-documented `{date}` token.~~ **New test** — `alert-executor-enhanced.test.ts` "expands `{date}` token in path to today's date (Gap 14)": path `alert-log/{date}.md`, asserts file written at resolved date path, not literal `{date}`.
+
+---
+
+## Phase D2a: File Index Foundation Review
+
+Reviewed 2026-04-13. All findings fixed in the `fix(D2a-review)` commit.
+
+### Finding D2a-R1: Empty-scopes bypass in FileIndexService.indexFile()
+
+- Status: fixed
+- Severity: medium
+- Classification: logic / security boundary
+- Location: `core/src/services/file-index/index.ts`
+
+`indexFile()` had `if (scopeList.length > 0 && !findMatchingScope(...)) return;`. Apps with `{ user: [], shared: [] }` (empty scopes) bypassed scope checking entirely, causing all files to be indexed for that app. An app with no declared data scopes should have zero files indexed.
+
+Fix: Removed `scopeList.length > 0 &&` — `findMatchingScope()` already returns `undefined` for empty arrays.
+
+### Finding D2a-R2: No payload validation in handleDataChanged()
+
+- Status: fixed
+- Severity: medium
+- Classification: security / input validation
+- Location: `core/src/services/file-index/index.ts`
+
+`handleDataChanged()` trusted all fields from `DataChangedPayload` without validation. Since the EventBus is available to declared-event apps, a malicious or buggy app could emit `data:changed` with crafted `appId`, `userId`, or `spaceId` containing path separators or traversal segments, causing arbitrary filesystem paths to be constructed and indexed.
+
+Fix: Added `isValidPayload()` private method validating: operation enum (`write`/`append`/`archive`), `SAFE_SEGMENT` pattern on `appId`/`userId`/`spaceId`, and `posix.normalize()` traversal check on `path`. Same validation added to `reindexByPath()`.
+
+### Finding D2a-R3: reindexByPath() accepted arbitrary paths
+
+- Status: fixed
+- Severity: medium
+- Classification: security / path traversal
+- Location: `core/src/services/file-index/index.ts`
+
+`reindexByPath()` joined its argument directly against `dataDir` with no validation, allowing path traversal. This is a public method that D2b will call.
+
+Fix: Apply `posix.normalize()` + `startsWith('..')` / absolute / Windows-drive rejection before joining.
+
+### Finding D2a-R4: normalizePosix() did not reject null bytes
+
+- Status: fixed
+- Severity: low
+- Classification: security / input validation
+- Location: `core/src/services/data-store/paths.ts`
+
+Null bytes in paths can interfere with string comparisons and bypass string-prefix scope checks on some platforms.
+
+Fix: Added `if (p.includes('\0')) return '..'` at the top of `normalizePosix()`, forcing the caller's `startsWith('..')` check to reject it.
+
+### Finding D2a-R5: FileIndexEntry fields are untrusted data
+
+- Status: documented
+- Severity: low (note)
+- Classification: security / prompt injection — D2b concern
+- Location: `core/src/services/file-index/types.ts`
+
+Fields `title`, `summary`, `entityKeys`, `wikiLinks`, and `aliases` in `FileIndexEntry` originate from user-controlled file content (including LLM/OCR output). D2b's DataQueryService will include these values in LLM prompts, creating a prompt injection risk if not sanitized.
+
+Fix: Added JSDoc warning to `FileIndexEntry`: "UNTRUSTED DATA — consumers (especially D2b DataQueryService) MUST sanitize/frame these values before including them in LLM prompts." Actual sanitization is a D2b implementation requirement.
+
+### Finding D2a-R6: Missing app:'food' in health-store and cultural-calendar frontmatter
+
+- Status: fixed
+- Severity: low
+- Classification: logic / data consistency
+- Location: `apps/food/src/services/health-store.ts`, `apps/food/src/services/cultural-calendar.ts`
+
+Both files were missing `app: 'food'` in their generated frontmatter. This breaks FileIndexService filtering by `appId`. Cultural-calendar also used raw tag strings instead of `buildAppTags()`, producing inconsistent tags that lacked the `pas/` prefix.
+
+Fix: Added `app: 'food'` to both. Fixed cultural-calendar to use `buildAppTags('food', 'cultural-calendar')`.
+
+### Finding D2a-R7: Recipe entity_keys not capped
+
+- Status: fixed
+- Severity: low
+- Classification: logic / index quality
+- Location: `apps/food/src/services/recipe-store.ts`
+
+`entity_keys` included all recipe ingredients (potentially 20+). At that scale, entity_keys lose their discriminative value for text search.
+
+Fix: Capped to title + first 5 ingredients (6 total) in both `saveRecipe` and `updateRecipe`.
+
+### Finding D2a-R8: toDateString() accepted invalid dates
+
+- Status: fixed
+- Severity: low
+- Classification: logic / data validation
+- Location: `core/src/services/file-index/entry-parser.ts`
+
+The regex `/^\d{4}-\d{2}/` accepted month `00`, month `13`, and day `00` — all invalid calendar dates. These could silently corrupt date-range query results.
+
+Fix: Tightened to `/(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/`.
+
+### Finding D2a-R9: isValidPayload() did not reject empty or dot paths
+
+- Status: fixed
+- Severity: low
+- Classification: logic / robustness
+- Location: `core/src/services/file-index/index.ts`
+
+`payload.path = ""` and `payload.path = "."` both survived `posix.normalize()` without triggering the traversal check. These would cause `readFile()` to attempt reading a directory (EISDIR), triggering noisy `onSkip` warnings.
+
+Fix: Added `!payload.path || payload.path === '.'` guard in `isValidPayload()` and same guard in `reindexByPath()`.
