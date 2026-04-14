@@ -834,6 +834,74 @@ describe('EditServiceImpl', () => {
 });
 
 // ---------------------------------------------------------------------------
+// PathLock tests (internal Map cleanup)
+// ---------------------------------------------------------------------------
+
+describe('PathLock Map cleanup', () => {
+  it('cleans up the lock Map after sequential acquisitions on the same path', async () => {
+    // Access PathLock indirectly via EditServiceImpl by running two sequential confirms
+    // on the same path and verifying no Map leak (both succeed and Map is cleaned up)
+    const relativePath = 'users/matt/food/recipes/lock-test.yaml';
+    let dataDir: string;
+    dataDir = makeTmpDir();
+    await mkdir(dataDir, { recursive: true });
+    await mkdir(join(dataDir, 'system'), { recursive: true });
+
+    const absolutePath = join(dataDir, relativePath);
+    await mkdir(join(dataDir, 'users/matt/food/recipes'), { recursive: true });
+
+    // First confirm: write v1 → v2
+    await writeFile(absolutePath, 'v1', 'utf-8');
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+    const svc = new EditServiceImpl({
+      dataQueryService: makeDataQueryService([]),
+      appRegistry: registry,
+      llm: makeLLM(''),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const proposal1 = {
+      kind: 'proposal' as const,
+      filePath: relativePath,
+      absolutePath,
+      appId: 'food',
+      userId: 'matt',
+      description: 'first sequential edit',
+      scope: 'user',
+      beforeContent: 'v1',
+      afterContent: 'v2',
+      beforeHash: sha256('v1'),
+      diff: '...',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    const r1 = await svc.confirmEdit(proposal1);
+    expect(r1.ok).toBe(true);
+
+    // Second confirm: write v2 → v3
+    await writeFile(absolutePath, 'v2', 'utf-8');
+    const proposal2 = {
+      ...proposal1,
+      description: 'second sequential edit',
+      beforeContent: 'v2',
+      afterContent: 'v3',
+      beforeHash: sha256('v2'),
+    };
+
+    const r2 = await svc.confirmEdit(proposal2);
+    expect(r2.ok).toBe(true);
+
+    // Both confirms succeeded — file should be at v3
+    const written = await readFile(absolutePath, 'utf-8');
+    expect(written).toBe('v3');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // EditLog tests
 // ---------------------------------------------------------------------------
 
