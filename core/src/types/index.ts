@@ -14,6 +14,9 @@ export type { DataQueryResult, DataQueryFile, DataQueryService, DataQueryOptions
 // Interaction context (D2c)
 export type { InteractionEntry, InteractionContextService } from '../services/interaction-context/index.js';
 
+// Edit service (D2c)
+export type { EditProposal, EditError, ProposeEditResult, EditService } from '../services/edit/index.js';
+
 // Manifest
 export type {
 	AppManifest,

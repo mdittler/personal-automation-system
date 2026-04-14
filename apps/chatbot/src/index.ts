@@ -20,14 +20,22 @@ import type { AppModule, CoreServices, MessageContext } from '@pas/core/types';
 import type { SystemInfoService } from '@pas/core/types';
 import type { DataQueryResult, DataQueryOptions } from '@pas/core/types';
 import type { InteractionEntry } from '@pas/core/types';
+import type { EditProposal } from '@pas/core/types';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { slugifyModelId } from '@pas/core/utils/slugify';
 import { formatRelativeTime } from '@pas/core/utils/cron-describe';
+import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
 import { ConversationHistory, type ConversationTurn } from './conversation-history.js';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });
+
+/**
+ * In-memory pending edit proposals (userId → proposal).
+ * TTL is enforced by the proposal's expiresAt field — checked in confirmEdit.
+ */
+export const pendingEdits = new Map<string, EditProposal>();
 
 /** Max context entries to include in system prompt. */
 const MAX_CONTEXT_ENTRIES = 3;
@@ -302,11 +310,86 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	}
 };
 
+/**
+ * Handle the /edit command — propose an LLM-assisted file edit, show a diff
+ * preview, and wait for the user to Confirm or Cancel.
+ */
+async function handleEditCommand(args: string[], ctx: MessageContext): Promise<void> {
+	const editService = services.editService;
+	if (!editService) {
+		await services.telegram.send(ctx.userId, 'Edit service is not available.');
+		return;
+	}
+
+	const description = args.join(' ').trim();
+	if (!description) {
+		await services.telegram.send(
+			ctx.userId,
+			'Usage: /edit <description of change>\nExample: /edit fix orange price at Costco to $4.99',
+		);
+		return;
+	}
+
+	// Propose an edit
+	const result = await editService.proposeEdit(description, ctx.userId);
+
+	if (result.kind === 'error') {
+		const messages: Record<string, string> = {
+			no_match: 'No matching files found for that description.',
+			ambiguous: 'Multiple files match — try being more specific.',
+			access_denied: 'That file cannot be edited.',
+			generation_failed: result.message,
+		};
+		await services.telegram.send(ctx.userId, messages[result.action] ?? result.message);
+		return;
+	}
+
+	// Store the pending proposal
+	pendingEdits.set(ctx.userId, result);
+
+	// Build diff preview message
+	const diffText = result.diff ? `\`\`\`\n${result.diff}\n\`\`\`` : '_(no diff available)_';
+	const previewMessage =
+		`*Edit preview for* \`${escapeMarkdown(result.filePath)}\`\n\n` +
+		`${diffText}\n\n` +
+		`Apply this change?`;
+
+	// Present Confirm / Cancel to the user (blocks until the user responds)
+	const choice = await services.telegram.sendOptions(ctx.userId, previewMessage, ['Confirm', 'Cancel']);
+
+	if (choice === 'Confirm') {
+		// Re-fetch the stored proposal (it may have been replaced by a newer /edit call)
+		const proposal = pendingEdits.get(ctx.userId);
+		pendingEdits.delete(ctx.userId);
+
+		if (!proposal) {
+			await services.telegram.send(ctx.userId, 'Edit proposal expired or was replaced.');
+			return;
+		}
+
+		const confirmResult = await editService.confirmEdit(proposal);
+		if (confirmResult.ok) {
+			await services.telegram.send(ctx.userId, `Edit applied to \`${escapeMarkdown(proposal.filePath)}\`.`);
+		} else {
+			await services.telegram.send(ctx.userId, `Edit failed: ${confirmResult.reason}`);
+		}
+	} else {
+		// Cancel or any other response
+		pendingEdits.delete(ctx.userId);
+		await services.telegram.send(ctx.userId, 'Edit cancelled.');
+	}
+}
+
 export const handleCommand: AppModule['handleCommand'] = async (
 	command: string,
 	args: string[],
 	ctx: MessageContext,
 ) => {
+	if (command === '/edit') {
+		await handleEditCommand(args, ctx);
+		return;
+	}
+
 	if (command !== '/ask') return;
 
 	const question = args.join(' ').trim();
