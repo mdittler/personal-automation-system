@@ -17,6 +17,7 @@ import type {
 } from '@pas/core/types';
 import type { ScopedDataStore } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
+import { formatDataAnswer } from '@pas/core/utils/data-answer-formatter';
 import { stringify } from 'yaml';
 import {
 	handleBudgetCommand as handleBudgetCmd,
@@ -642,6 +643,29 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (looksLikeRecipe(text)) {
 		await handleSaveRecipe(text, ctx);
 		return;
+	}
+
+	// D2c: Gated data query fallback — try DataQueryService before sending help message
+	if (services.dataQuery) {
+		const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+		const hasRecentFoodContext = recentEntries.some((e) => e.appId === 'food');
+		const isDataQuestion = /\b(show|what|how much|how many|list|tell me about)\b/i.test(ctx.text);
+
+		if (hasRecentFoodContext || isDataQuestion) {
+			const recentFilePaths = recentEntries.flatMap((e) => e.filePaths ?? []);
+			const result = await services.dataQuery.query(
+				ctx.text,
+				ctx.userId,
+				recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+			);
+			if (!result.empty) {
+				const answer = await formatDataAnswer(ctx.text, result, services.llm, services.logger);
+				if (answer) {
+					await services.telegram.send(ctx.userId, answer);
+					return;
+				}
+			}
+		}
 	}
 
 	await services.telegram.send(

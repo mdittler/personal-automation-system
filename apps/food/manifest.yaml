@@ -172,6 +172,7 @@ requirements:
     - audio
     - context-store
     - interaction-context
+    - data-query
   data:
     shared_scopes:
       - path: "recipes/"
