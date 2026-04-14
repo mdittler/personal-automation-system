@@ -42,7 +42,7 @@
 | 27A | Obsidian cross-app linking | **Complete** | ~5 | Conventions, utilities, Dataview fields, chatbot data awareness |
 | 27A-Vaults | VaultService | **Planned** | ~4 | Per-user Obsidian vaults with symlinks for personal, shared, and space data |
 | 28 | Route Verification | **Complete** | ~10 | Grey-zone LLM verification, inline buttons, verification log |
-| 27B | FileIndexService | **Planned** | ~6 | In-memory cross-app file metadata index with tag/backlink search |
+| 27B | FileIndexService | **Superseded by D2a** | ~6 | Superseded by Phase D2a FileIndexService (scope-aware, event-driven, richer metadata) |
 | 27C | CrossAppDataService | **Planned** | ~8 | Read-only cross-app file access + wiki-link resolution |
 | R1 | Security: Access Control | **Complete** | ~8 | Route-verifier app access check (F1), atomic invite redemption (F2) |
 | R2 | Security: Chatbot LLM Trust | **Complete** | ~6 | Model-switch admin+intent gating (F4), history anti-instruction framing (F5), system data admin gating (F6) |
@@ -57,6 +57,7 @@
 | R1-post | R1 Post-Review Hardening | **Complete** | ~6 | H1 (resolveCallback access check), H2 (claimAndRedeem idempotency + rollback), L1-L6, M1-M3 |
 | CR9 | Test Coverage Gaps (Review Phases 9+10) | **Complete** | ~5 | 14 test gaps from review Phases 9-10: 5 new tests (Gaps 4, 6, 8, 12+13, 14) + 9 already covered |
 | D1 | Chatbot Context & Conversation Quality | **Complete** | ~8 | LLM classifier replaces keyword list, user context injection, message splitting, 2048 token cap |
+| D2a | File Index Foundation | **Complete** | ~14 | FileIndexService in-memory index, scope normalization fix, food app frontmatter enrichment |
 
 ### Dependency Graph
 
@@ -2130,6 +2131,70 @@ User testing revealed the chatbot felt disconnected — it didn't know who it wa
 - Auto-detect now uses a fast-tier LLM call per non-PAS message (adds one LLM call when `auto_detect_pas` is true and message is general). Cost is minimal (maxTokens: 5).
 - `isPasRelevant()` is deprecated. Its tests remain for backward compat. Remove in a future cleanup once no callers remain.
 - `dataQueryCandidate` field on `PASClassification` is the D2 hook — currently always `undefined`.
+
+---
+
+## Phase D2a: File Index Foundation
+
+**Date:** 2026-04-13  **Status:** Complete  **Part of:** Deployment Readiness Roadmap (D2)
+
+### Motivation
+
+NL data access (D2b) requires knowing what files exist, who owns them, and what metadata they carry — without scanning the filesystem on every query. D2a builds the in-memory index that D2b will query.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| FileIndexService | New `core/src/services/file-index/index.ts` — in-memory index rebuilt at startup from all registered app manifest scopes. Subscribes to `data:changed` EventBus events to stay current. Exposes `query({ appId?, scope?, tag?, dateAfter?, dateBefore?, limit? })` and `getByPath()`. |
+| EntryParser | New `core/src/services/file-index/entry-parser.ts` — extracts metadata from file paths (appId, scope, owner type + id) and YAML frontmatter (title, type, tags, entity_keys, wiki-links, dates, relationships, aliases, summary). |
+| Scope normalization | Fixed `findMatchingScope()` in `core/src/services/data-store/paths.ts` — virtual POSIX normalization (`posix.normalize`) prevents Windows path separator bypass. Null-byte rejection added. |
+| Food frontmatter enrichment | All food app write sites now include `type`, `app: 'food'`, and where applicable `entity_keys` in YAML frontmatter: recipe-store, meal-plan-store, grocery-store, pantry-store, price-store, receipt handlers, health-store, cultural-calendar. |
+| Bootstrap wiring | `FileIndexService` instantiated and started in `core/src/bootstrap.ts`; injected into `CoreServices` as `fileIndex`. |
+
+### Post-Review Fixes (D2a-review)
+
+| Finding | Fix |
+|---------|-----|
+| Empty-scopes bug | Apps with no declared manifest scopes now index zero files instead of potentially indexing everything |
+| Payload validation | `data:changed` handler validates `operation` enum, applies `SAFE_SEGMENT` to `appId`/`userId`/`spaceId`, and `posix.normalize` to path before indexing |
+| `reindexByPath()` safety | Same SAFE_SEGMENT + normalize guards applied to the manual reindex path |
+| Untrusted data annotation | `FileIndexEntry` fields (title, tags, summary, entity_keys) documented as user-controlled; callers must sanitize before including in LLM prompts |
+| Recipe entity_keys cap | Capped at title + first 5 ingredients to avoid unbounded index entries |
+
+### Files Touched
+
+- **New:** `core/src/services/file-index/index.ts` — FileIndexService
+- **New:** `core/src/services/file-index/entry-parser.ts` — metadata extractor
+- **New:** `core/src/services/file-index/types.ts` — FileIndexEntry, FileIndexQuery types
+- **Modified:** `core/src/services/data-store/paths.ts` — scope normalization fix in `findMatchingScope()`
+- **Modified:** `core/src/bootstrap.ts` — FileIndexService wiring
+- **Modified:** `core/src/types/app-module.ts` — `fileIndex` field on CoreServices
+- **Modified:** `apps/food/src/services/recipe-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/meal-plan-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/grocery-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/pantry-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/price-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/health-store.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/services/cultural-calendar.ts` — frontmatter enrichment
+- **Modified:** `apps/food/src/handlers/receipt-handler.ts` — frontmatter enrichment
+- **New:** `core/src/services/file-index/__tests__/file-index.test.ts` — FileIndexService tests
+- **New:** `core/src/services/file-index/__tests__/entry-parser.test.ts` — EntryParser tests
+- **Modified:** `core/src/services/data-store/__tests__/paths.test.ts` — scope normalization regression tests
+- **Modified:** `docs/urs.md` — REQ-DATAIDX-001–005 added; traceability matrix updated
+- **Modified:** `docs/implementation-phases.md` — this entry
+- **Modified:** `CLAUDE.md` — D2a status updated to Complete
+
+### Verification
+
+- `pnpm test` — 6023 tests across 241 test files, all green
+- `pnpm lint` — clean
+
+### Consequences
+
+- `FileIndexEntry` fields are user-controlled data (from file content). D2b must sanitize before passing to LLM prompts.
+- `dataQueryCandidate` on `PASClassification` (from D1) is the hook for D2b wiring — currently unused.
+- Phase 27B (original FileIndexService plan) is fully superseded by this implementation.
 
 ---
 
