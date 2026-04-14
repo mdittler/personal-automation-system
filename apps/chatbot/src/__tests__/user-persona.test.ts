@@ -71,8 +71,8 @@ describe('classifier prompt content', () => {
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		// Prompt must describe the food/grocery/health domain
 		expect(systemPrompt).toContain('food');
-		// Must give binary answer instruction
-		expect(systemPrompt).toContain('YES or NO');
+		// Must give answer instruction (now YES_DATA/YES/NO)
+		expect(systemPrompt).toContain('YES');
 	});
 
 	it('classifier prompt describes scheduling so it can classify reminder questions', async () => {
@@ -439,21 +439,26 @@ describe('/ask command with natural language questions', () => {
 
 		await chatbot.handleCommand?.('/ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
 
-		// /ask always uses app-aware — only ONE LLM call (no classifier)
-		expect(services.llm.complete).toHaveBeenCalledTimes(1);
-		const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
+		// /ask now runs classifier first (fast tier), then main response (standard tier)
+		expect(services.llm.complete).toHaveBeenCalledTimes(2);
+		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
+		const prompt = standardCall?.[1]?.systemPrompt ?? '';
 		expect(prompt).toContain('PAS (Personal Automation System) assistant');
 		// And household context is included
 		expect(prompt).toContain('My Household');
 	});
 
 	it('/ask about costs gives a helpful answer with correct prompt context', async () => {
-		vi.mocked(services.llm.complete).mockResolvedValueOnce("You've spent $1.20 this month.");
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('YES') // classifier — PAS spending question but not a data file query
+			.mockResolvedValueOnce("You've spent $1.20 this month."); // main LLM
 		const ctx = createTestMessageContext({ text: '/ask how much have I spent this month?' });
 
 		await chatbot.handleCommand?.('/ask', ['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
 
-		const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
+		// /ask now runs classifier (fast tier) then main response (standard tier)
+		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
+		const prompt = standardCall?.[1]?.systemPrompt ?? '';
 		expect(prompt).toContain('PAS (Personal Automation System) assistant');
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),

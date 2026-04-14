@@ -27,6 +27,7 @@ requirements:
     - app-knowledge
     - model-journal
     - system-info
+    - data-query
   data:
     user_scopes:
       - path: "history.json"

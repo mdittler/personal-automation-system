@@ -175,7 +175,8 @@
 							"app-metadata",
 							"app-knowledge",
 							"model-journal",
-							"system-info"
+							"system-info",
+							"data-query"
 						]
 					},
 					"description": "Infrastructure services this app uses."

@@ -68,6 +68,7 @@ import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { FileIndexService } from './services/file-index/index.js';
+import { DataQueryServiceImpl } from './services/data-query/index.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
@@ -368,6 +369,13 @@ export async function main(): Promise<void> {
 	const defaultMonthlyCostCap = safeguards?.defaultMonthlyCostCap ?? 10.0;
 	const globalMonthlyCostCap = safeguards?.globalMonthlyCostCap ?? 50.0;
 
+	// D2b: Lazy facade for DataQueryService.
+	// serviceFactory runs during registry.loadAll() — before FileIndexService is instantiated.
+	// Apps that declare 'data-query' get a facade that delegates to the real service once
+	// it is initialized (after loadAll completes). Safe because apps only call services
+	// during message handling, not during init().
+	let dataQueryServiceImpl: DataQueryServiceImpl | undefined;
+
 	// Service factory: creates scoped CoreServices per app
 	const serviceFactory: ServiceFactory = (manifest, _appDir) => {
 		const declaredServices = new Set(manifest.requirements?.services ?? []);
@@ -453,6 +461,17 @@ export async function main(): Promise<void> {
 			appKnowledge: declaredServices.has('app-knowledge') ? appKnowledge : undefined,
 			modelJournal: declaredServices.has('model-journal') ? modelJournal : undefined,
 			systemInfo: declaredServices.has('system-info') ? systemInfoService : undefined,
+			dataQuery: declaredServices.has('data-query')
+				? {
+						query: (q: string, uid: string) => {
+							if (!dataQueryServiceImpl) {
+								logger.warn('DataQueryService called before initialization — returning empty result');
+								return Promise.resolve({ files: [], empty: true });
+							}
+							return dataQueryServiceImpl.query(q, uid);
+						},
+					}
+				: undefined,
 			secrets,
 			config: appConfig,
 			timezone: config.timezone,
@@ -574,6 +593,18 @@ export async function main(): Promise<void> {
 		});
 	};
 	eventBus.on('data:changed', onDataChanged);
+
+	// D2b: Initialize DataQueryService now that FileIndexService is ready.
+	// Apps declared 'data-query' already have the lazy facade; assigning the impl here
+	// makes the facade functional before any message handling begins.
+	dataQueryServiceImpl = new DataQueryServiceImpl({
+		fileIndex,
+		spaceService,
+		llm: systemLlm,
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'data-query' }),
+	});
+	logger.info('DataQueryService: initialized');
 
 	// 9d. Vault service — per-user Obsidian vault directories with symlinks
 	const vaultService = new VaultService({

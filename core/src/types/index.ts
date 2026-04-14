@@ -8,6 +8,9 @@
 // Core contract
 export type { AppModule, CoreServices, AppLogger } from './app-module.js';
 
+// Data query (D2b)
+export type { DataQueryResult, DataQueryFile, DataQueryService } from './data-query.js';
+
 // Manifest
 export type {
 	AppManifest,

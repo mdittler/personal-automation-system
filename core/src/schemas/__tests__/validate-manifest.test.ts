@@ -466,6 +466,7 @@ describe('validateManifest', () => {
 						'audio',
 						'event-bus',
 						'context-store',
+						'data-query',
 					],
 				},
 			});

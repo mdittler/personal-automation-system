@@ -10,6 +10,7 @@ import { vi } from 'vitest';
 import type { AppKnowledgeBaseService } from '../types/app-knowledge.js';
 import type { AppMetadataService } from '../types/app-metadata.js';
 import type { AppLogger, CoreServices } from '../types/app-module.js';
+import type { DataQueryService } from '../types/data-query.js';
 import type { AudioService } from '../types/audio.js';
 import type { ConditionEvaluatorService } from '../types/condition.js';
 import type { AppConfigService } from '../types/config.js';
@@ -55,7 +56,9 @@ function createMockLogger(): AppLogger {
 
 /** Deep partial type for overriding specific service methods. */
 type MockOverrides = {
-	[K in keyof CoreServices]?: Partial<Record<string, unknown>>;
+	[K in keyof CoreServices]?: K extends 'dataQuery'
+		? Partial<DataQueryService>
+		: Partial<Record<string, unknown>>;
 };
 
 /**
@@ -214,6 +217,9 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 			has: vi.fn().mockReturnValue(false),
 			...overrides?.secrets,
 		},
+		dataQuery: overrides?.dataQuery
+			? ({ query: vi.fn().mockResolvedValue({ files: [], empty: true }), ...overrides.dataQuery } as DataQueryService)
+			: undefined,
 		timezone: 'UTC',
 		logger,
 	};

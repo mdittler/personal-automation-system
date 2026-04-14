@@ -450,6 +450,28 @@ Verifies FileIndexService startup indexing, live refresh, and scope security. Al
 
 ---
 
+## 23. DataQueryService & Natural Language Data Queries (Phase D2b)
+
+Verifies that natural language data queries route correctly to DataQueryService and return relevant results. Covers the chatbot YES_DATA path, /ask classifier, and category suppression.
+
+| # | Action | Expected Result | Result |
+|---|--------|----------------|--------|
+| 23.1 | Run `pnpm test core/src/services/data-query/__tests__/data-query.test.ts` | All DataQueryService unit tests pass (file selection, path hardening, malformed JSON, regex edge cases) | |
+| 23.2 | Run `pnpm test apps/chatbot/src/__tests__/data-query-wiring.test.ts` | All chatbot wiring tests pass (YES_DATA routing, /ask classifier, category suppression, security) | |
+| 23.3 | Run `pnpm test` | Full suite passes (6103+ tests, 243 files) | |
+| 23.4 | Send Telegram message: "what are my Costco prices?" | Chatbot calls DataQueryService, includes relevant price data in response | |
+| 23.5 | Send Telegram message: "what's in my pantry?" | Chatbot calls DataQueryService, returns pantry contents | |
+| 23.6 | Send Telegram message: "what did I eat last week?" | Chatbot calls DataQueryService, returns nutrition log data | |
+| 23.7 | Send Telegram message: "compare orange prices between stores" | Chatbot calls DataQueryService, returns multi-store price comparison | |
+| 23.8 | Send `/ask what are my Costco prices?` | /ask path uses LLM classifier → DataQueryService called → prices in response | |
+| 23.9 | Send `/ask what apps do I have installed?` | /ask path uses LLM classifier → NO data query → no DataQueryService call | |
+| 23.10 | Ask "what are my Costco prices?" | System prompt does NOT contain "Active model tiers" or "Monthly costs" sections | |
+| 23.11 | Ask "what LLM models are available?" | System prompt DOES contain model tier information (AI keyword not suppressed) | |
+| 23.12 | Create a markdown file with triple-backtick content, index it, ask about it | Response does not contain raw triple backticks (sanitized by sanitizeInput) | |
+| 23.13 | Ask a data question when DataQueryService is disabled (no `data-query` in manifest) | Chatbot responds normally without crashing | |
+
+---
+
 ## Results Summary
 
 | Section | Items | Passed | Failed | Skipped |
@@ -475,7 +497,8 @@ Verifies FileIndexService startup indexing, live refresh, and scope security. Al
 | 20. Obsidian Frontmatter | 16 | 12 | 0 | 4 | 20.13-20.16 skipped (Obsidian not tested) |
 | 21. n8n Execution APIs | 13 | 13 | 0 | 0 |
 | 22. File Index Service | 7 | | | D2a infra — run `pnpm test` to verify |
-| **Total** | **163** | **113** | **0** | **19** |
+| 23. DataQueryService & NL Queries | 13 | | | D2b — NL data access |
+| **Total** | **176** | **113** | **0** | **19** |
 
 ## Issues Found
 

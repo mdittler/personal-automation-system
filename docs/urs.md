@@ -2699,6 +2699,18 @@ The chatbot's LLM calls use `maxTokens: 2048` (raised from 1024 in Phase 16). Ap
 **Standard tests:**
 - `chatbot.test.ts` > handleMessage > calls LLM with standard tier (covers maxTokens via objectContaining check)
 
+### REQ-CHATBOT-016: DataQueryService integration for YES_DATA messages
+
+**Category:** Data Access  **Phase:** D2b  **Status:** Implemented
+
+When `classifyPASMessage()` returns `YES_DATA`, the chatbot calls `DataQueryService.query()` with the user's message and userId. The returned files are formatted via `formatDataQueryContext()` and injected into the system prompt via `sanitizeInput()`. The LLM response incorporates the data context when answering. DataQueryService is only called when the service is available and `auto_detect_pas` is enabled.
+
+### REQ-CHATBOT-017: /ask uses LLM classifier for data detection
+
+**Category:** Data Access  **Phase:** D2b  **Status:** Implemented
+
+The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMessage`) to detect data queries, replacing the previous keyword-matching gate. When the classifier returns `YES_DATA`, `/ask` calls DataQueryService and injects the data context. This ensures consistent data detection behavior across both the main message handler and the `/ask` command.
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -4825,6 +4837,30 @@ FileIndexService scans `users/` and `spaces/` directories at startup, indexes `.
 **Standard tests:**
 - `file-index.test.ts` > getRelated > returns frontmatter relationships and wiki-link edges
 
+### REQ-DATAQUERY-001: Scope-filtered file retrieval with content
+
+**Category:** Data Access  **Phase:** D2b  **Status:** Implemented
+
+`DataQueryService.query(question, userId)` queries `FileIndexService` for candidate files scoped to the requesting user (personal files and files in spaces the user belongs to). It calls a fast-tier LLM to select relevant file IDs from the candidates, validates the returned IDs against the pre-authorized candidate set (preventing LLM-injected IDs), reads file content, and returns a `DataQueryResult` with the selected files and their content.
+
+### REQ-DATAQUERY-002: LLM file selection validated against pre-authorized candidate set
+
+**Category:** Security  **Phase:** D2b  **Status:** Implemented
+
+File IDs returned by the LLM file selection call are validated against the set of candidate IDs that were provided to the LLM. IDs not in the pre-authorized set are silently discarded. The fallback regex for prose responses uses `(?<![-.\d])\b\d+\b(?!\.\d)` to reject negative and float-adjacent numbers. This prevents the LLM from selecting files outside the user's authorized scope.
+
+### REQ-DATAQUERY-003: Multi-household scope isolation
+
+**Category:** Security  **Phase:** D2b  **Status:** Implemented
+
+DataQueryService delegates scope filtering to FileIndexService, which applies the same scope rules as DataStore: personal files (`data/users/<userId>/`) are only accessible to that user; space files (`data/spaces/<spaceId>/`) are only accessible to members of that space. Shared files (`data/users/shared/`) are hidden when the user belongs to a space (space takes precedence).
+
+### REQ-DATAQUERY-004: Path hardening via realpath containment
+
+**Category:** Security  **Phase:** D2b  **Status:** Implemented
+
+Before reading file content, `DataQueryService` resolves the full file path via `realpath()`, which follows all symlinks in the entire path chain including parent directories. The resolved path is verified to start with `realpath(dataDir)`. Files that escape the data directory (via symlinks, junctions, or path traversal) are silently skipped with a warning log. This supersedes the previous `resolve()+lstat()` approach which only checked the final path segment.
+
 ### REQ-FILEINDEX-004: Entry parsing and metadata extraction
 
 **Phase:** D2a | **Status:** Implemented
@@ -5097,6 +5133,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-FILEINDEX-003 | file-index.test.ts | 1 | 0 | Implemented |
 | REQ-FILEINDEX-004 | entry-parser.test.ts | 9 | 13 | Implemented |
 | REQ-FMATTER-005 | recipe-store.test.ts, health-store.test.ts, cultural-calendar.test.ts, price-store.test.ts, grocery-store.test.ts, meal-plan-store.test.ts, macro-tracker.test.ts, pantry-store.test.ts | 21 | 1 | Implemented |
+| REQ-DATAQUERY-001 | data-query.test.ts, data-query-wiring.test.ts | 12 | 8 | Implemented |
+| REQ-DATAQUERY-002 | data-query.test.ts | 6 | 4 | Implemented |
+| REQ-DATAQUERY-003 | data-query.test.ts | 3 | 2 | Implemented |
+| REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
+| REQ-CHATBOT-016 | data-query-wiring.test.ts | 8 | 6 | Implemented |
+| REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **142 test files** | **988** | **1220** | **2208 tests** |
+| **Totals** | **143 test files** | **1023** | **1245** | **2268 tests** |

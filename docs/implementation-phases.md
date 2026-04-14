@@ -2198,6 +2198,70 @@ NL data access (D2b) requires knowing what files exist, who owns them, and what 
 
 ---
 
+## Phase D2b: DataQueryService + Chatbot Wiring
+
+**Date:** 2026-04-13  **Status:** Complete  **Part of:** Deployment Readiness Roadmap (D2)
+
+### Motivation
+
+With the FileIndexService providing a metadata index of all user data files (D2a), D2b adds the natural language query layer: a DataQueryService that uses LLM file selection + content retrieval, and chatbot wiring that routes YES_DATA-classified questions to that service.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| DataQueryService | New `core/src/services/data-query/index.ts` — accepts a NL question + userId, queries FileIndexService for candidate files, calls fast-tier LLM to select relevant IDs (validated against pre-authorized set), reads file content with realpath path containment, returns results. |
+| DataQuery types | New `core/src/types/data-query.ts` — `DataQueryResult`, `DataQueryFile` types. |
+| Chatbot wiring | `apps/chatbot/src/index.ts` — `handleMessage()` calls DataQueryService when classifier returns `YES_DATA`; `dataContext` injected into system prompt via `formatDataQueryContext()` with `sanitizeInput()`. |
+| /ask classifier | `/ask` command now uses `classifyPASMessage()` (LLM classifier) instead of keyword matching, consistent with the `handleMessage` path. |
+| Category suppression | When `dataContext` is present and question doesn't mention AI keywords, `llm` and `costs` categories are suppressed from `gatherSystemData()` to avoid injecting irrelevant model pricing alongside grocery data. |
+| Bootstrap wiring | DataQueryService instantiated in `core/src/bootstrap.ts` with lazy facade — safe to call during init, gracefully returns empty result if service not yet initialized. |
+| Manifest schema | `core/src/schemas/app-manifest.schema.json` — `data-query` added to valid `requirements` service names. |
+
+### End-of-Phase Review Fixes
+
+| ID | Severity | Finding | Fix |
+|----|----------|---------|-----|
+| S1 | Medium | Unsanitized `dataContext` in system prompt (backtick fence escape) | `sanitizeInput(dataContext, MAX_DATA_CONTEXT_CHARS)` with 12 000-char cap |
+| S2 | Medium | Fallback regex `\b\d+\b` extracted numbers from negative/float prose | Tightened to `(?<![-.\d])\b\d+\b(?!\.\d)` — rejects `-1`, `0.5` |
+| S3 | Medium | `resolve()+lstat()` missed symlink parent directories | Replaced with `realpath()` containment — resolves entire path chain including parent dirs |
+| S4 | Low | LLM/costs system data injected for grocery price queries | Suppress `llm`/`costs` categories when `dataContext` present and no AI keywords in question |
+| S5 | Low | Lazy facade `dataQueryServiceImpl!` crashes if called during `init()` | Graceful null check — returns `{ files: [], empty: true }` |
+| L1 | Low | Stale "future update" comment in `gatherUserDataOverview()` | Updated to reflect active NL query support |
+| L2 | Low | Stale "reserved for D2" in `PASClassification` JSDoc | Updated to describe active `YES_DATA` behavior |
+
+### Files Touched
+
+- **New:** `core/src/services/data-query/index.ts` — DataQueryService
+- **New:** `core/src/types/data-query.ts` — DataQueryResult, DataQueryFile types
+- **New:** `core/src/services/data-query/__tests__/data-query.test.ts` — DataQueryService unit tests
+- **New:** `apps/chatbot/src/__tests__/data-query-wiring.test.ts` — chatbot wiring integration tests
+- **Modified:** `core/src/bootstrap.ts` — DataQueryService lazy facade + graceful bootstrap guard
+- **Modified:** `core/src/types/app-module.ts` — `dataQuery` field on CoreServices
+- **Modified:** `core/src/schemas/app-manifest.schema.json` — `data-query` added to valid service names
+- **Modified:** `apps/chatbot/src/index.ts` — YES_DATA routing, dataContext injection, category suppression, /ask classifier
+- **Modified:** `apps/chatbot/src/__tests__/chatbot.test.ts` — updated for classifier call ordering
+- **Modified:** `apps/chatbot/src/__tests__/user-persona.test.ts` — updated for classifier call count
+- **Modified:** `core/src/services/data-query/__tests__/data-query.test.ts` — regex, symlink, malformed JSON tests strengthened
+- **Modified:** `core/src/schemas/__tests__/validate-manifest.test.ts` — data-query added to valid services test
+- **Modified:** `docs/urs.md` — REQ-DATAQUERY-001–004, REQ-CHATBOT-016–017 added; traceability matrix updated
+- **Modified:** `docs/uat-checklist.md` — Section 23 added
+- **Modified:** `docs/implementation-phases.md` — this entry
+- **Modified:** `CLAUDE.md` — D2b status updated to Complete
+
+### Verification
+
+- `pnpm test` — 6103 tests across 243 test files, all green
+- `pnpm build` — clean
+
+### Consequences
+
+- DataQueryService is now the canonical NL data access layer. Apps wishing to expose data to NL queries must write YAML frontmatter (type, app, entity_keys) — food app does this as of D2a.
+- `dataQueryCandidate` on `PASClassification` is now fully wired and active.
+- D2c (Data Modification via `/edit`) is the next phase.
+
+---
+
 ## Deferred Phases (Future)
 
 These are documented but not scheduled. Implementation depends on ecosystem growth.
