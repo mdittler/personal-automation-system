@@ -11,6 +11,7 @@ import type { AppKnowledgeBaseService } from '../types/app-knowledge.js';
 import type { AppMetadataService } from '../types/app-metadata.js';
 import type { AppLogger, CoreServices } from '../types/app-module.js';
 import type { DataQueryService } from '../types/data-query.js';
+import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { AudioService } from '../types/audio.js';
 import type { ConditionEvaluatorService } from '../types/condition.js';
 import type { AppConfigService } from '../types/config.js';
@@ -58,6 +59,8 @@ function createMockLogger(): AppLogger {
 type MockOverrides = {
 	[K in keyof CoreServices]?: K extends 'dataQuery'
 		? Partial<DataQueryService>
+		: K extends 'interactionContext'
+		? Partial<InteractionContextService>
 		: Partial<Record<string, unknown>>;
 };
 
@@ -219,6 +222,9 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		},
 		dataQuery: overrides?.dataQuery
 			? ({ query: vi.fn().mockResolvedValue({ files: [], empty: true }), ...overrides.dataQuery } as DataQueryService)
+			: undefined,
+		interactionContext: overrides?.interactionContext
+			? ({ record: vi.fn(), getRecent: vi.fn().mockReturnValue([]), ...overrides.interactionContext } as InteractionContextService)
 			: undefined,
 		timezone: 'UTC',
 		logger,

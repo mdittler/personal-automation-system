@@ -18,7 +18,8 @@
 import type { AppInfo } from '@pas/core/types';
 import type { AppModule, CoreServices, MessageContext } from '@pas/core/types';
 import type { SystemInfoService } from '@pas/core/types';
-import type { DataQueryResult } from '@pas/core/types';
+import type { DataQueryResult, DataQueryOptions } from '@pas/core/types';
+import type { InteractionEntry } from '@pas/core/types';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { slugifyModelId } from '@pas/core/utils/slugify';
@@ -218,13 +219,20 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	const userCtx = await buildUserContext(ctx, services);
 
 	if (autoDetect) {
-		const classification = await classifyPASMessage(ctx.text, services);
+		// D2c: get recent interaction context for classifier + dataQuery context hints
+		const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+		const recentContextSummary = formatInteractionContextSummary(recentEntries);
+		const recentFilePaths = extractRecentFilePaths(recentEntries);
+
+		const classification = await classifyPASMessage(ctx.text, services, recentContextSummary || undefined);
 		if (classification.pasRelated) {
 			// D2b: call DataQueryService when message is a data query candidate
 			let dataContext = '';
 			if (classification.dataQueryCandidate && services.dataQuery) {
 				try {
-					const result = await services.dataQuery.query(ctx.text, ctx.userId);
+					const result = recentFilePaths.length > 0
+						? await services.dataQuery.query(ctx.text, ctx.userId, { recentFilePaths })
+						: await services.dataQuery.query(ctx.text, ctx.userId);
 					if (!result.empty) {
 						dataContext = formatDataQueryContext(result);
 					}
@@ -338,14 +346,21 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	// Build app-aware prompt (always app-aware for /ask, no classification needed)
 	const userCtx = await buildUserContext(ctx, services);
 
-	// D2b: call DataQueryService for /ask when classifier detects a data query
+	// D2b/D2c: call DataQueryService for /ask when classifier detects a data query.
 	// Uses LLM classifier (same as handleMessage) for consistent, broad coverage across
 	// all natural phrasings — not a narrow keyword gate.
+	// D2c: get recent interaction context for classifier + dataQuery context hints.
+	const askRecentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+	const askRecentContextSummary = formatInteractionContextSummary(askRecentEntries);
+	const askRecentFilePaths = extractRecentFilePaths(askRecentEntries);
+
 	let askDataContext = '';
-	const askClassification = await classifyPASMessage(question, services);
+	const askClassification = await classifyPASMessage(question, services, askRecentContextSummary || undefined);
 	if (askClassification.dataQueryCandidate && services.dataQuery) {
 		try {
-			const result = await services.dataQuery.query(question, ctx.userId);
+			const result = askRecentFilePaths.length > 0
+				? await services.dataQuery.query(question, ctx.userId, { recentFilePaths: askRecentFilePaths })
+				: await services.dataQuery.query(question, ctx.userId);
 			if (!result.empty) {
 				askDataContext = formatDataQueryContext(result);
 			}
@@ -919,6 +934,41 @@ async function gatherUserDataOverview(userId: string): Promise<string> {
 }
 
 /**
+ * Format recent interaction entries as a concise summary string for classifier injection.
+ *
+ * Example output: "receipt_captured (food, 2m ago), recipe_saved (food, 7m ago)"
+ *
+ * @param entries  Recent interaction entries (newest-first from getRecent()).
+ * @param now      Reference time for relative timestamps (injectable for testing).
+ */
+export function formatInteractionContextSummary(
+	entries: InteractionEntry[],
+	now: Date = new Date(),
+): string {
+	if (entries.length === 0) return '';
+	return entries
+		.map((e) => {
+			const relTime = formatRelativeTime(new Date(e.timestamp), now);
+			return `${e.action} (${e.appId}, ${relTime})`;
+		})
+		.join(', ');
+}
+
+/**
+ * Extract and deduplicate all filePaths from a list of interaction entries.
+ * Returns a flat, unique array of data-root-relative file paths.
+ */
+export function extractRecentFilePaths(entries: InteractionEntry[]): string[] {
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		for (const path of entry.filePaths ?? []) {
+			seen.add(path);
+		}
+	}
+	return [...seen];
+}
+
+/**
  * Classification result from LLM-based PAS relevance check.
  */
 export interface PASClassification {
@@ -935,10 +985,17 @@ export interface PASClassification {
  * on LLM error so users with auto_detect_pas on still get helpful responses.
  *
  * Only call when auto_detect_pas is enabled — /ask is always app-aware.
+ *
+ * @param text           The user's message text.
+ * @param svc            CoreServices (for LLM + appMetadata access).
+ * @param recentContext  Optional summary of recent user interactions (from InteractionContextService).
+ *                       When provided and non-empty, appended to the classifier system prompt so
+ *                       the LLM can resolve follow-up references (e.g. "what did that cost?").
  */
 export async function classifyPASMessage(
 	text: string,
 	svc: CoreServices,
+	recentContext?: string,
 ): Promise<PASClassification> {
 	if (!text.trim()) return { pasRelated: false };
 
@@ -953,11 +1010,18 @@ export async function classifyPASMessage(
 		: '';
 	const appHint = appNames ? ` Installed apps: ${appNames}.` : '';
 
+	// Append recent context when available — helps resolve follow-up queries
+	const contextHint =
+		recentContext && recentContext.trim()
+			? ` Recent user actions: ${recentContext}.`
+			: '';
+
 	const systemPrompt =
 		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
 		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
 		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.${appHint}` +
-		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).`;
+		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).` +
+		contextHint;
 
 	try {
 		const response = await svc.llm.complete(sanitizeInput(text), {
