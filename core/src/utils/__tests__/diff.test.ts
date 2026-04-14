@@ -27,10 +27,45 @@ describe('generateDiff', () => {
 
     expect(result).toContain('--- a/test.md');
     expect(result).toContain('+++ b/test.md');
+
+    // All three changed lines must appear
     expect(result).toContain('-b');
     expect(result).toContain('+B');
     expect(result).toContain('-e');
     expect(result).toContain('+E');
+    expect(result).toContain('-h');
+    expect(result).toContain('+H');
+
+    // Trailing context after the last change must be present
+    // After h→H, lines i and j should appear as context
+    expect(result).toContain(' i');
+    expect(result).toContain(' j');
+
+    // There must be at least one @@ hunk header and no more than three
+    const hunkHeaders = result.match(/@@ -\d+,\d+ \+\d+,\d+ @@/g) ?? [];
+    expect(hunkHeaders.length).toBeGreaterThanOrEqual(1);
+    expect(hunkHeaders.length).toBeLessThanOrEqual(3);
+  });
+
+  it('includes trailing context after last change in a merged hunk', () => {
+    // Changes at b→B and d→D are 2 context lines apart; they should merge.
+    // After the merge, trailing context lines e and f must be present.
+    const before = 'a\nb\nc\nd\ne\nf\n';
+    const after = 'a\nB\nc\nD\ne\nf\n';
+    const result = generateDiff(before, after, 'test.md');
+
+    expect(result).toContain('-b');
+    expect(result).toContain('+B');
+    expect(result).toContain('-d');
+    expect(result).toContain('+D');
+
+    // Trailing context lines after the last change must be present
+    expect(result).toContain(' e');
+    expect(result).toContain(' f');
+
+    // Should be a single merged hunk
+    const hunkHeaders = result.match(/@@ -\d+,\d+ \+\d+,\d+ @@/g) ?? [];
+    expect(hunkHeaders.length).toBe(1);
   });
 
   it('generates diff for lines added', () => {

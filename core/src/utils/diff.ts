@@ -157,11 +157,27 @@ function buildHunks(beforeLines: string[], afterLines: string[], matches: Array<
 
     // Found a change - collect with 2-line context before and after
     const contextBefore = Math.max(0, i - 2);
-    let changeEnd = i;
+    let changeEnd = i + 1;
 
-    // Collect all consecutive changes
-    while (changeEnd < ops.length && ops[changeEnd].type !== 'context') {
-      changeEnd++;
+    // Consume all change ops, merging nearby change regions (gap ≤ 4 context lines)
+    while (changeEnd < ops.length) {
+      if (ops[changeEnd].type !== 'context') {
+        changeEnd++;
+      } else {
+        // Look ahead through up to 4 context lines to see if another change follows
+        let peek = changeEnd;
+        let contextCount = 0;
+        while (peek < ops.length && ops[peek].type === 'context' && contextCount < 4) {
+          peek++;
+          contextCount++;
+        }
+        if (peek < ops.length && ops[peek].type !== 'context') {
+          // Another change is nearby — extend changeEnd to consume the gap
+          changeEnd = peek;
+        } else {
+          break;
+        }
+      }
     }
 
     // Collect 2 lines of context after
