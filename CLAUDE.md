@@ -89,6 +89,10 @@ A local-first home automation platform where users interact through a single Tel
 | `core/src/services/router/pending-verification-store.ts` | In-memory pending message store |
 | `core/src/services/router/verification-logger.ts` | Verification event log writer |
 | `core/src/services/data-store/scoped-store.ts` | Per-user/per-app data access |
+| `core/src/services/data-store/paths.ts` | Scope normalization (POSIX traversal rejection, null-byte guard) |
+| `core/src/services/file-index/index.ts` | FileIndexService — in-memory file metadata index, EventBus refresh |
+| `core/src/services/file-index/entry-parser.ts` | Path metadata + content extraction (title, type, entityKeys, wikiLinks) |
+| `core/src/services/file-index/types.ts` | FileIndexEntry (untrusted-data fields; sanitize before LLM prompts in D2b) |
 | `core/src/services/llm/index.ts` | LLM service (multi-provider routing) |
 | `core/src/services/llm/llm-guard.ts` | Per-app rate limit + cost cap |
 | `core/src/services/context/request-context.ts` | Unified AsyncLocalStorage userId propagation (LLM cost attribution + per-user config reads) |

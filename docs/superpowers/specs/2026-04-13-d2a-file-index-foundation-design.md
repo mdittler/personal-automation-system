@@ -1,7 +1,7 @@
 # Phase D2a: File Index Foundation
 
 **Date:** 2026-04-13
-**Status:** Draft
+**Status:** Implemented — see `core/src/services/file-index/` for implementation. Post-review fixes committed 2026-04-13.
 **Parent spec:** `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md` (Phase D2)
 
 ## Context
