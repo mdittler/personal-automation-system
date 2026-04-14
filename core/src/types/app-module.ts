@@ -16,6 +16,7 @@ import type { ConditionEvaluatorService } from './condition.js';
 import type { AppConfigService } from './config.js';
 import type { ContextStoreService } from './context-store.js';
 import type { DataQueryService } from './data-query.js';
+import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { DataStoreService } from './data-store.js';
 import type { EventBusService } from './events.js';
 import type { LLMService } from './llm.js';
@@ -121,6 +122,8 @@ export interface CoreServices {
 	systemInfo: SystemInfoService;
 	/** NL data query over indexed files (D2b). Only injected when app declares "data-query". */
 	dataQuery?: DataQueryService;
+	/** Per-user in-memory interaction context (D2c). Only injected when app declares "interaction-context". */
+	interactionContext?: InteractionContextService;
 	/** Infrastructure-mediated access to declared external API secrets. */
 	secrets: SecretsService;
 	/** IANA timezone string from system config (e.g. 'America/New_York'). */
