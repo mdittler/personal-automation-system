@@ -87,6 +87,6 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		const cutoff = Date.now() - TTL_MS;
 
 		// Filter expired entries and return newest-first
-		return buffer.filter((e) => e.timestamp > cutoff).reverse();
+		return buffer.filter((e) => e.timestamp > cutoff).toReversed();
 	}
 }
