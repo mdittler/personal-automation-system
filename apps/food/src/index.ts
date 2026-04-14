@@ -1766,6 +1766,15 @@ async function handleSaveRecipe(text: string, ctx: MessageContext): Promise<void
 
 		services.logger.info('Recipe saved: %s (id=%s) by %s', recipe.title, recipe.id, ctx.userId);
 
+		services.interactionContext?.record(ctx.userId, {
+			appId: 'food',
+			action: 'recipe_saved',
+			entityType: 'recipe',
+			entityId: recipe.id,
+			filePaths: [`recipes/${recipe.id}.yaml`],
+			scope: 'shared',
+		});
+
 		await services.telegram.send(
 			ctx.userId,
 			`Recipe saved as draft!\n\n${formatRecipe(recipe, true)}\n\nCook it and I'll ask for your rating to confirm it.`,
@@ -2137,6 +2146,14 @@ async function handleGroceryAdd(text: string, ctx: MessageContext): Promise<void
 	list = addItems(list, deduped);
 	await saveGroceryList(hh.sharedStore, list);
 
+	services.interactionContext?.record(ctx.userId, {
+		appId: 'food',
+		action: 'grocery_updated',
+		entityType: 'grocery-list',
+		filePaths: ['grocery/active.yaml'],
+		scope: 'shared',
+	});
+
 	await services.telegram.send(
 		ctx.userId,
 		`Added ${deduped.length} item(s): ${deduped.map((i) => i.name).join(', ')}`,
@@ -2428,6 +2445,15 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 		const startDate = nextMonday(todayDate(services.timezone));
 		const plan = await generatePlan(services, recipes, pantry, startDate, services.timezone);
 		await savePlan(hh.sharedStore, plan);
+
+		services.interactionContext?.record(ctx.userId, {
+			appId: 'food',
+			action: 'meal_plan_finalized',
+			entityType: 'meal-plan',
+			entityId: plan.id,
+			filePaths: ['meal-plans/current.yaml'],
+			scope: 'shared',
+		});
 
 		// H4: Multi-member households enter voting flow
 		if (hh.household.members.length > 1) {
@@ -2995,6 +3021,14 @@ async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promi
 
 	priceData = addOrUpdatePrice(priceData, entry);
 	await saveStorePrices(hh.sharedStore, priceData);
+
+	services.interactionContext?.record(ctx.userId, {
+		appId: 'food',
+		action: 'price_updated',
+		entityType: 'price-list',
+		filePaths: [`prices/${slug}.md`],
+		scope: 'shared',
+	});
 
 	await services.telegram.send(
 		ctx.userId,

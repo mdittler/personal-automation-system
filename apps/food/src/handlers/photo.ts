@@ -202,6 +202,16 @@ async function handleReceiptPhoto(
 	});
 	await store.write(`receipts/${id}.yaml`, fm + stringify(receipt));
 
+	// Record the interaction after successful write
+	services.interactionContext?.record(ctx.userId, {
+		appId: 'food',
+		action: 'receipt_captured',
+		entityType: 'receipt',
+		entityId: id,
+		filePaths: [`receipts/${id}.yaml`],
+		scope: 'shared',
+	});
+
 	// H10: Auto-update price store from receipt
 	let priceUpdateMsg = '';
 	try {
