@@ -172,6 +172,20 @@ describe('Space GUI Routes', () => {
 			expect(res.body).toContain('Alice'); // member name resolved
 		});
 
+		it('includes CSRF token and data-confirm-delete in delete form', async () => {
+			const space = makeSpace();
+			app = await buildApp({
+				listSpaces: vi.fn().mockReturnValue([space]),
+			});
+
+			const res = await authenticatedGet('/gui/spaces');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('name="_csrf"');
+			expect(res.body).toContain('data-confirm-delete=');
+			expect(res.body).not.toMatch(/onclick="return confirm/);
+		});
+
 		it('shows empty state when no spaces', async () => {
 			app = await buildApp({
 				listSpaces: vi.fn().mockReturnValue([]),
@@ -187,13 +201,14 @@ describe('Space GUI Routes', () => {
 	// --- New form ---
 
 	describe('GET /gui/spaces/new', () => {
-		it('returns create form', async () => {
+		it('returns create form with CSRF token', async () => {
 			app = await buildApp();
 
 			const res = await authenticatedGet('/gui/spaces/new');
 
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('Create Space');
+			expect(res.body).toContain('name="_csrf"');
 			// Should list registered users as member checkboxes
 			expect(res.body).toContain('Alice');
 			expect(res.body).toContain('Bob');

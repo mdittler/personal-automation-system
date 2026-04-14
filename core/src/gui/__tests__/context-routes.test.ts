@@ -284,5 +284,13 @@ describe('Context GUI Routes', () => {
 			const res = await authenticatedGet(app, '/gui/context/123/edit?key=');
 			expect(res.body).toContain('name="_csrf"');
 		});
+
+		it('delete button uses data-confirm-delete instead of inline onclick', async () => {
+			await contextStore.save('123', 'my-entry', 'some content');
+			const res = await authenticatedGet(app, '/gui/context/123');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('data-confirm-delete="Delete my-entry?"');
+			expect(res.body).not.toMatch(/onclick="return confirm/);
+		});
 	});
 });

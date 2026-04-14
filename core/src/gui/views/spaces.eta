@@ -33,8 +33,9 @@
           <td>
             <a href="/gui/spaces/<%= space.id %>/edit" style="margin-right:0.5rem">Edit</a>
             <form method="post" action="/gui/spaces/<%= space.id %>/delete" style="display:inline;margin:0">
+              <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
               <button type="submit" class="outline secondary toggle-btn"
-                      onclick="return confirm('Delete space &quot;<%= space.name %>&quot;? Data on disk will be preserved.')">
+                      data-confirm-delete="Delete space &quot;<%= space.name %>&quot;? Data on disk will be preserved.">
                 Delete
               </button>
             </form>

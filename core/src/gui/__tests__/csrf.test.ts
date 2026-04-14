@@ -248,6 +248,73 @@ describe('CSRF Protection', () => {
 		expect(csrfCookie).toBeUndefined();
 	});
 
+	describe('Secure cookie flag', () => {
+		const originalNodeEnv = process.env['NODE_ENV'];
+		const originalSecureCookies = process.env['GUI_SECURE_COOKIES'];
+
+		afterEach(() => {
+			if (originalNodeEnv === undefined) {
+				delete process.env['NODE_ENV'];
+			} else {
+				process.env['NODE_ENV'] = originalNodeEnv;
+			}
+			if (originalSecureCookies === undefined) {
+				delete process.env['GUI_SECURE_COOKIES'];
+			} else {
+				process.env['GUI_SECURE_COOKIES'] = originalSecureCookies;
+			}
+		});
+
+		/** Find the Set-Cookie header string for a specific cookie name. */
+		function findCookieHeader(
+			res: { headers: Record<string, string | string[] | undefined> },
+			cookieName: string,
+		): string | undefined {
+			const raw = res.headers['set-cookie'];
+			const headers = Array.isArray(raw) ? raw : raw ? [raw] : [];
+			return headers.find((h) => h.startsWith(`${cookieName}=`));
+		}
+
+		it('sets Secure flag on pas_csrf cookie when NODE_ENV=production', async () => {
+			process.env['NODE_ENV'] = 'production';
+			const res = await app.inject({ method: 'GET', url: '/gui/page' });
+			expect(res.statusCode).toBe(200);
+			const csrfHeader = findCookieHeader(res, 'pas_csrf');
+			expect(csrfHeader).toBeDefined();
+			expect(csrfHeader).toMatch(/(^|;\s*)Secure(;|$)/i);
+		});
+
+		it('sets Secure flag on pas_csrf cookie when GUI_SECURE_COOKIES=true', async () => {
+			process.env['GUI_SECURE_COOKIES'] = 'true';
+			const res = await app.inject({ method: 'GET', url: '/gui/page' });
+			expect(res.statusCode).toBe(200);
+			const csrfHeader = findCookieHeader(res, 'pas_csrf');
+			expect(csrfHeader).toBeDefined();
+			expect(csrfHeader).toMatch(/(^|;\s*)Secure(;|$)/i);
+		});
+
+		it('reissues existing CSRF cookie with Secure flag in production', async () => {
+			// First GET without production — creates cookie without Secure
+			delete process.env['NODE_ENV'];
+			delete process.env['GUI_SECURE_COOKIES'];
+			const res1 = await app.inject({ method: 'GET', url: '/gui/page' });
+			const csrfCookie = extractCsrfCookie(res1);
+			expect(csrfCookie).toBeDefined();
+
+			// Second GET with production — should reissue with Secure
+			process.env['NODE_ENV'] = 'production';
+			const res2 = await app.inject({
+				method: 'GET',
+				url: '/gui/page',
+				cookies: { pas_csrf: csrfCookie ?? '' },
+			});
+			expect(res2.statusCode).toBe(200);
+			const csrfHeader = findCookieHeader(res2, 'pas_csrf');
+			expect(csrfHeader).toBeDefined();
+			expect(csrfHeader).toMatch(/(^|;\s*)Secure(;|$)/i);
+		});
+	});
+
 	it('header token takes priority over body field', async () => {
 		const getRes = await app.inject({ method: 'GET', url: '/gui/page' });
 		const csrfCookie = extractCsrfCookie(getRes);

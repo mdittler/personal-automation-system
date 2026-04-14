@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
-| **Status** | Phases 0–28 complete (except 27A-Vaults, 27B, 27C planned) |
-| **Last Updated** | 2026-04-13 |
+| **Status** | Phases 0–28, D1–D3 complete (except 27A-Vaults, 27B, 27C planned) |
+| **Last Updated** | 2026-04-14 |
 
 ---
 
@@ -58,6 +58,9 @@
 | CR9 | Test Coverage Gaps (Review Phases 9+10) | **Complete** | ~5 | 14 test gaps from review Phases 9-10: 5 new tests (Gaps 4, 6, 8, 12+13, 14) + 9 already covered |
 | D1 | Chatbot Context & Conversation Quality | **Complete** | ~8 | LLM classifier replaces keyword list, user context injection, message splitting, 2048 token cap |
 | D2a | File Index Foundation | **Complete** | ~14 | FileIndexService in-memory index, scope normalization fix, food app frontmatter enrichment |
+| D2b | NL Data Query Service | **Complete** | ~10 | DataQueryService + chatbot wiring, YES_DATA classifier, realpath hardening, /ask LLM classifier |
+| D2c | Interaction Context & /edit | **Complete** | ~18 | InteractionContextService, context-aware routing, food interaction recording, EditService, /edit command |
+| D3 | Security Hardening | **Complete** | ~12 | Secure cookie (auth+CSRF), inline JS→data-attributes, target validation, CSRF in spaces forms, Docker dep gap, cookie reissue upgrade |
 
 ### Dependency Graph
 

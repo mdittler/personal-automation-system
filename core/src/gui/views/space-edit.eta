@@ -13,6 +13,7 @@
 <% } %>
 
 <form method="post" action="/gui/spaces">
+  <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
   <input type="hidden" name="isNew" value="<%= it.isNew ? 'true' : 'false' %>" />
   <% if (!it.isNew && it.space) { %>
     <input type="hidden" name="createdBy" value="<%= it.space.createdBy %>" />

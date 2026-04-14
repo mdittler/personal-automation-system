@@ -75,14 +75,19 @@ export async function registerCsrfProtection(server: FastifyInstance): Promise<v
 
 		if (!token) {
 			token = generateCsrfToken();
-			reply.setCookie(CSRF_COOKIE, token, {
-				path: '/gui',
-				httpOnly: false, // Must be readable by htmx via meta tag
-				sameSite: 'strict',
-				maxAge: CSRF_COOKIE_MAX_AGE,
-				signed: true,
-			});
 		}
+
+		// Always reissue cookie with current secure policy (upgrades pre-hardening cookies)
+		const isSecure =
+			process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+		reply.setCookie(CSRF_COOKIE, token, {
+			path: '/gui',
+			httpOnly: false, // Must be readable by htmx via meta tag
+			sameSite: 'strict',
+			maxAge: CSRF_COOKIE_MAX_AGE,
+			signed: true,
+			secure: isSecure,
+		});
 
 		// Make token available to templates via request decoration
 		(request as unknown as Record<string, unknown>).csrfToken = token;

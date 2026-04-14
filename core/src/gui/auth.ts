@@ -58,12 +58,16 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			return reply.viewAsync('login', { title: 'Login — PAS', error: 'Invalid token' });
 		}
 
+		const isSecure =
+			process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+
 		reply.setCookie(COOKIE_NAME, cookieValue, {
 			path: '/gui',
 			httpOnly: true,
 			sameSite: 'strict',
 			maxAge: COOKIE_MAX_AGE,
 			signed: true,
+			secure: isSecure,
 		});
 
 		return reply.redirect('/gui/');
@@ -71,8 +75,10 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 	// Logout handler
 	server.post('/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
-		reply.clearCookie(COOKIE_NAME, { path: '/gui' });
-		reply.clearCookie('pas_csrf', { path: '/gui' });
+		const isSecure =
+			process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+		reply.clearCookie(COOKIE_NAME, { path: '/gui', secure: isSecure });
+		reply.clearCookie('pas_csrf', { path: '/gui', secure: isSecure });
 		return reply.redirect('/gui/login');
 	});
 
@@ -93,8 +99,22 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		// Verify signed cookie
 		const unsigned = request.unsignCookie(cookie);
 		if (!unsigned.valid || unsigned.value !== cookieValue) {
-			reply.clearCookie(COOKIE_NAME, { path: '/gui' });
+			const isSecure =
+				process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+			reply.clearCookie(COOKIE_NAME, { path: '/gui', secure: isSecure });
 			return reply.redirect('/gui/login');
 		}
+
+		// Reissue cookie with current secure policy (upgrades pre-hardening cookies)
+		const isSecure =
+			process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+		reply.setCookie(COOKIE_NAME, cookieValue, {
+			path: '/gui',
+			httpOnly: true,
+			sameSite: 'strict',
+			maxAge: COOKIE_MAX_AGE,
+			signed: true,
+			secure: isSecure,
+		});
 	});
 }

@@ -77,7 +77,7 @@ export function registerContextRoutes(
 				if (csrfToken)
 					html += `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />`;
 				html += `<input type="hidden" name="key" value="${safeKey}" />`;
-				html += `<button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem" onclick="return confirm('Delete ${safeKey}?')">Delete</button>`;
+				html += `<button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem" data-confirm-delete="Delete ${safeKey}?">Delete</button>`;
 				html += '</form>';
 				html += '</td>';
 				html += '</tr>';

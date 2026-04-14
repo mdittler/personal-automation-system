@@ -320,6 +320,10 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			return reply.status(400).type('text/html').send('<small>Missing parameters.</small>');
 		}
 
+		if (!/^[A-Za-z0-9_-]+$/.test(target)) {
+			return reply.status(400).type('text/html').send('<small>Invalid target parameter.</small>');
+		}
+
 		if (!userId || !appId) {
 			return reply.type('text/html').send('<small><em>Select an app and user first.</em></small>');
 		}
@@ -335,6 +339,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		}
 
 		const safeTarget = escapeHtml(target);
+		const urlTarget = encodeURIComponent(target);
 		const escapedScope = escapeHtml(scope);
 		const escapedUserId = escapeHtml(userId);
 		const escapedAppId = escapeHtml(appId);
@@ -346,7 +351,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		if (subpath) {
 			const parentPath = subpath.includes('/') ? subpath.slice(0, subpath.lastIndexOf('/')) : '';
 			const parentParam = parentPath ? `&subpath=${encodeURIComponent(parentPath)}` : '';
-			html += `<div><a href="#" style="text-decoration:none" hx-get="/gui/data/files?scope=${escapedScope}&userId=${escapedUserId}&appId=${escapedAppId}${parentParam}&target=${safeTarget}" hx-target="closest .file-browser-list" hx-swap="outerHTML">\u2190 Back</a></div>`;
+			html += `<div><a href="#" style="text-decoration:none" hx-get="/gui/data/files?scope=${escapedScope}&userId=${escapedUserId}&appId=${escapedAppId}${parentParam}&target=${urlTarget}" hx-target="closest .file-browser-list" hx-swap="outerHTML">\u2190 Back</a></div>`;
 		}
 
 		for (const entry of entries) {
@@ -355,15 +360,15 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			const escapedFullPath = escapeHtml(fullPath);
 
 			if (entry.isDirectory) {
-				html += `<div style="display:flex;align-items:center;gap:0.5rem"><a href="#" style="text-decoration:none;flex:1" hx-get="/gui/data/files?scope=${escapedScope}&userId=${escapedUserId}&appId=${escapedAppId}&subpath=${encodeURIComponent(fullPath)}&target=${safeTarget}" hx-target="closest .file-browser-list" hx-swap="outerHTML">\uD83D\uDCC1 ${escapedName}/</a><a href="#" style="text-decoration:none;font-size:0.75rem;padding:0.1rem 0.4rem;border:1px solid var(--pas-border);border-radius:4px" onclick="document.querySelector('input[name=&quot;${safeTarget}&quot;]').value='${escapedFullPath}/';this.closest('.file-browser-list').remove();return false;">Select</a></div>`;
+				html += `<div style="display:flex;align-items:center;gap:0.5rem"><a href="#" style="text-decoration:none;flex:1" hx-get="/gui/data/files?scope=${escapedScope}&userId=${escapedUserId}&appId=${escapedAppId}&subpath=${encodeURIComponent(fullPath)}&target=${urlTarget}" hx-target="closest .file-browser-list" hx-swap="outerHTML">\uD83D\uDCC1 ${escapedName}/</a><a href="#" style="text-decoration:none;font-size:0.75rem;padding:0.1rem 0.4rem;border:1px solid var(--pas-border);border-radius:4px" data-pick-path="${escapedFullPath}/" data-pick-target="${safeTarget}">Select</a></div>`;
 			} else {
-				html += `<div><a href="#" style="text-decoration:none" onclick="document.querySelector('input[name=&quot;${safeTarget}&quot;]').value='${escapedFullPath}';this.closest('.file-browser-list').remove();return false;">\uD83D\uDCC4 ${escapedName}</a> <small>${formatSize(entry.size)}</small></div>`;
+				html += `<div><a href="#" style="text-decoration:none" data-pick-path="${escapedFullPath}" data-pick-target="${safeTarget}">\uD83D\uDCC4 ${escapedName}</a> <small>${formatSize(entry.size)}</small></div>`;
 			}
 		}
 
 		// Close button
 		html +=
-			'<div style="margin-top:0.25rem;border-top:1px solid var(--pas-border);padding-top:0.25rem;"><a href="#" style="text-decoration:none;font-size:0.8rem" onclick="this.closest(\'.file-browser-list\').remove();return false;">Close</a></div>';
+			'<div style="margin-top:0.25rem;border-top:1px solid var(--pas-border);padding-top:0.25rem;"><a href="#" style="text-decoration:none;font-size:0.8rem" data-close-browser>Close</a></div>';
 		html += '</div>';
 
 		return reply.type('text/html').send(html);

@@ -499,7 +499,7 @@ describe('GET /gui/data/files (file browser for data sources)', () => {
 		expect(res.body).toContain('daily-notes');
 	});
 
-	it('returns clickable files with path fill onclick', async () => {
+	it('returns clickable files with data-pick-path attributes (no inline onclick)', async () => {
 		const res = await server.inject({
 			method: 'GET',
 			url: '/gui/data/files?scope=user&userId=123&appId=notes&subpath=daily-notes&target=ds_path_0',
@@ -510,6 +510,59 @@ describe('GET /gui/data/files (file browser for data sources)', () => {
 		expect(res.body).toContain('2026-03-12.md');
 		expect(res.body).toContain('ds_path_0');
 		expect(res.body).toContain('daily-notes/2026-03-12.md');
+		// Data attributes used instead of inline onclick
+		expect(res.body).toContain('data-pick-path');
+		expect(res.body).toContain('data-pick-target');
+		expect(res.body).not.toContain('onclick=');
+	});
+
+	it('rejects invalid target parameter (XSS via target)', async () => {
+		const res = await server.inject({
+			method: 'GET',
+			url: '/gui/data/files?scope=user&userId=123&appId=notes&target=ds_path_0%22%3E%3Cscript%3E',
+			headers: { cookie: authCookie },
+		});
+		expect(res.statusCode).toBe(400);
+		expect(res.body).toContain('Invalid target parameter');
+	});
+
+	it('escapes filenames with apostrophes in data-pick-path', async () => {
+		await writeFile(
+			join(dataDir, 'users', '123', 'notes', 'daily-notes', "it's-a-file.md"),
+			'content',
+		);
+		const res = await server.inject({
+			method: 'GET',
+			url: '/gui/data/files?scope=user&userId=123&appId=notes&subpath=daily-notes&target=ds_path_0',
+			headers: { cookie: authCookie },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('data-pick-path="daily-notes/it&#39;s-a-file.md"');
+	});
+
+	it('escapes filenames with ampersands in data-pick-path', async () => {
+		await writeFile(
+			join(dataDir, 'users', '123', 'notes', 'daily-notes', 'tom&jerry.md'),
+			'content',
+		);
+		const res = await server.inject({
+			method: 'GET',
+			url: '/gui/data/files?scope=user&userId=123&appId=notes&subpath=daily-notes&target=ds_path_0',
+			headers: { cookie: authCookie },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('data-pick-path="daily-notes/tom&amp;jerry.md"');
+	});
+
+	it('uses data-close-browser instead of onclick for close button', async () => {
+		const res = await server.inject({
+			method: 'GET',
+			url: '/gui/data/files?scope=user&userId=123&appId=notes&target=ds_path_0',
+			headers: { cookie: authCookie },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('data-close-browser');
+		expect(res.body).not.toContain('onclick=');
 	});
 
 	it('shows back link for subdirectories', async () => {

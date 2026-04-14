@@ -15,7 +15,11 @@ WORKDIR /app
 # Copy package manifests first for better layer caching
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY core/package.json core/
+# Keep in sync with apps/*/package.json
 COPY apps/echo/package.json apps/echo/
+COPY apps/chatbot/package.json apps/chatbot/
+COPY apps/food/package.json apps/food/
+COPY apps/notes/package.json apps/notes/
 
 # Install all dependencies (including devDependencies for build)
 RUN pnpm install --frozen-lockfile

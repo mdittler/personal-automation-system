@@ -168,6 +168,36 @@
       if (sidebarCollapsed === 'true' && sidebar) {
         sidebar.classList.add('collapsed');
       }
+
+      // Delegated handlers for data-pick-path (file picker) and data-confirm-delete
+      document.addEventListener('click', function(e) {
+        if (!e.target || !(e.target instanceof Element)) return;
+        // File picker: set input value and remove browser
+        var pick = e.target.closest('[data-pick-path]');
+        if (pick) {
+          e.preventDefault();
+          var input = document.getElementsByName(pick.getAttribute('data-pick-target') || '')[0];
+          if (input) input.value = pick.getAttribute('data-pick-path') || '';
+          var browser = pick.closest('.file-browser-list');
+          if (browser) browser.remove();
+          return;
+        }
+        // File picker: close browser
+        var close = e.target.closest('[data-close-browser]');
+        if (close) {
+          e.preventDefault();
+          var browser2 = close.closest('.file-browser-list');
+          if (browser2) browser2.remove();
+          return;
+        }
+        // Confirm-delete: show confirmation before allowing submit/click
+        var del = e.target.closest('[data-confirm-delete]');
+        if (del) {
+          if (!confirm(del.getAttribute('data-confirm-delete') || '')) {
+            e.preventDefault();
+          }
+        }
+      });
     })();
   </script>
 </body>
