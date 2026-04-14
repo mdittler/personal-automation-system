@@ -174,7 +174,9 @@ export class DataQueryServiceImpl {
 		scored.sort((a, b) => b.score - a.score);
 		const filtered = scored.slice(0, remainingSlots).map((s) => s.entry);
 
-		// Priority candidates go first so their indices are predictable
+		// Priority candidates go first (in the pre-filter path) so their indices are predictable;
+		// in the <= MAX_CANDIDATES path, candidates are returned as-is and priority files may
+		// not be at index 0, but the [recent interaction] label in Stage C still biases the LLM
 		return [...priorityCandidates, ...filtered];
 	}
 
