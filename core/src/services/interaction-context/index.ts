@@ -18,8 +18,8 @@
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type pino from 'pino';
-import { atomicWrite } from '../../utils/file.js';
 import { withFileLock } from '../../utils/file-mutex.js';
+import { atomicWrite } from '../../utils/file.js';
 
 /** A single recorded interaction event. */
 export interface InteractionEntry {
@@ -108,27 +108,65 @@ const TTL_MS = 10 * 60 * 1000;
 /** Valid scope values for InteractionEntry. */
 const VALID_SCOPES = new Set(['user', 'shared', 'space']);
 
-/** Type guard that validates an InteractionEntry from untrusted data. */
-function isValidEntry(value: unknown): value is InteractionEntry {
+/** Maximum character lengths for string fields to prevent memory exhaustion. */
+const MAX_APP_ID_LEN = 128;
+const MAX_ACTION_LEN = 128;
+const MAX_ENTITY_TYPE_LEN = 256;
+const MAX_ENTITY_ID_LEN = 256;
+const MAX_FILE_PATH_LEN = 512;
+const MAX_FILE_PATHS_COUNT = 20;
+const MAX_METADATA_VALUE_LEN = 512;
+const MAX_METADATA_KEYS = 20;
+
+/**
+ * Type guard that validates an InteractionEntry from untrusted data.
+ * @param value - The value to validate.
+ * @param now - Current time in milliseconds (used for future-timestamp guard).
+ */
+function isValidEntry(value: unknown, now: number): value is InteractionEntry {
 	if (typeof value !== 'object' || value === null) return false;
 	const obj = value as Record<string, unknown>;
 
-	if (typeof obj['appId'] !== 'string') return false;
-	if (typeof obj['action'] !== 'string') return false;
-	if (typeof obj['timestamp'] !== 'number') return false;
-	if (!isFinite(obj['timestamp']) || obj['timestamp'] <= 0) return false;
+	if (typeof obj.appId !== 'string') return false;
+	if (typeof obj.action !== 'string') return false;
+	if (typeof obj.timestamp !== 'number') return false;
+	if (!Number.isFinite(obj.timestamp) || obj.timestamp <= 0) return false;
+	// Reject timestamps more than 1 hour in the future (possible tampering)
+	if (obj.timestamp > now + 3_600_000) return false;
 
-	if (obj['scope'] !== undefined && (typeof obj['scope'] !== 'string' || !VALID_SCOPES.has(obj['scope']))) return false;
-	if (obj['filePaths'] !== undefined && !Array.isArray(obj['filePaths'])) return false;
-	if (obj['filePaths'] !== undefined) {
-		for (const fp of obj['filePaths'] as unknown[]) {
+	// Length bounds on required string fields
+	if (obj.appId.length > MAX_APP_ID_LEN) return false;
+	if (obj.action.length > MAX_ACTION_LEN) return false;
+
+	if (obj.scope !== undefined && (typeof obj.scope !== 'string' || !VALID_SCOPES.has(obj.scope)))
+		return false;
+
+	// Optional string fields — type + length check
+	if (obj.entityType !== undefined) {
+		if (typeof obj.entityType !== 'string') return false;
+		if (obj.entityType.length > MAX_ENTITY_TYPE_LEN) return false;
+	}
+	if (obj.entityId !== undefined) {
+		if (typeof obj.entityId !== 'string') return false;
+		if (obj.entityId.length > MAX_ENTITY_ID_LEN) return false;
+	}
+	if (obj.spaceId !== undefined && typeof obj.spaceId !== 'string') return false;
+
+	if (obj.filePaths !== undefined) {
+		if (!Array.isArray(obj.filePaths)) return false;
+		if (obj.filePaths.length > MAX_FILE_PATHS_COUNT) return false;
+		for (const fp of obj.filePaths as unknown[]) {
 			if (typeof fp !== 'string') return false;
+			if (fp.length > MAX_FILE_PATH_LEN) return false;
 		}
 	}
-	if (obj['metadata'] !== undefined) {
-		if (typeof obj['metadata'] !== 'object' || obj['metadata'] === null) return false;
-		for (const v of Object.values(obj['metadata'] as Record<string, unknown>)) {
+	if (obj.metadata !== undefined) {
+		if (typeof obj.metadata !== 'object' || obj.metadata === null) return false;
+		const metaEntries = Object.entries(obj.metadata as Record<string, unknown>);
+		if (metaEntries.length > MAX_METADATA_KEYS) return false;
+		for (const [, v] of metaEntries) {
 			if (typeof v !== 'string') return false;
+			if (v.length > MAX_METADATA_VALUE_LEN) return false;
 		}
 	}
 
@@ -165,9 +203,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		this.flushDelayMs = options.flushDelayMs ?? 500;
 		this.writer = options.writer ?? atomicWrite;
 		this.clock = options.clock ?? (() => Date.now());
-		this.persistPath = this.dataDir
-			? join(this.dataDir, 'system', 'interaction-context.json')
-			: '';
+		this.persistPath = this.dataDir ? join(this.dataDir, 'system', 'interaction-context.json') : '';
 	}
 
 	// ─── Public API ───────────────────────────────────────────────────────────
@@ -242,16 +278,17 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 			return;
 		}
 
-		const obj = data as Record<string, unknown>;
-		if (obj['version'] !== 1) {
+		const obj = data as PersistedData;
+		// Validate version before accessing typed fields
+		if ((data as Record<string, unknown>).version !== 1) {
 			this.logger?.warn(
-				{ path: this.persistPath, version: obj['version'] },
+				{ path: this.persistPath, version: (data as Record<string, unknown>).version },
 				'interaction-context: unknown version; starting empty',
 			);
 			return;
 		}
 
-		const users = obj['users'];
+		const users = obj.users;
 		if (typeof users !== 'object' || users === null || Array.isArray(users)) {
 			this.logger?.warn(
 				{ path: this.persistPath },
@@ -261,6 +298,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		}
 
 		const usersMap = users as Record<string, unknown>;
+		const now = this.clock();
 
 		for (const [userId, rawEntries] of Object.entries(usersMap)) {
 			if (!Array.isArray(rawEntries)) continue;
@@ -268,7 +306,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 			const valid: InteractionEntry[] = [];
 			let dropped = 0;
 			for (const e of rawEntries) {
-				if (isValidEntry(e)) {
+				if (isValidEntry(e, now)) {
 					valid.push(e);
 				} else {
 					dropped++;
@@ -284,11 +322,10 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 
 			if (valid.length === 0) continue;
 
-			// Enforce buffer cap (keep newest 5 by highest timestamp)
-			const capped =
-				valid.length > BUFFER_SIZE
-					? valid.slice().sort((a, b) => a.timestamp - b.timestamp).slice(-BUFFER_SIZE)
-					: valid;
+			// Always sort ascending by timestamp to enforce internal oldest-first invariant,
+			// then cap to BUFFER_SIZE (keep newest entries).
+			const sorted = valid.slice().sort((a, b) => a.timestamp - b.timestamp);
+			const capped = sorted.slice(-BUFFER_SIZE);
 
 			this.store.set(userId, capped);
 		}
@@ -308,7 +345,14 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 			clearTimeout(this.flushTimer);
 			this.flushTimer = null;
 		}
-		this.enqueueFlush();
+		// Enqueue a flush if needed, then await the write queue.
+		// After the first await, check whether new records arrived during the
+		// in-flight write (revision > flushedRevision) and drain them too.
+		if (this.flushedRevision < this.revision) {
+			this.enqueueFlush();
+		}
+		await this.writeQueue;
+		// Drain any follow-up flush that _doFlush auto-enqueued.
 		await this.writeQueue;
 	}
 
@@ -318,10 +362,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		try {
 			await this.flush();
 		} catch (err) {
-			this.logger?.warn(
-				{ err, path: this.persistPath },
-				'interaction-context: stop flush failed',
-			);
+			this.logger?.warn({ err, path: this.persistPath }, 'interaction-context: stop flush failed');
 		}
 	}
 
@@ -378,10 +419,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 	}
 
 	private _logFlushError(err: unknown): void {
-		this.logger?.error(
-			{ err, path: this.persistPath },
-			'interaction-context: flush failed',
-		);
+		this.logger?.error({ err, path: this.persistPath }, 'interaction-context: flush failed');
 	}
 
 	/** Prune expired entries in-place across all users. */
