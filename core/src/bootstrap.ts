@@ -866,8 +866,9 @@ export async function main(): Promise<void> {
 						entry.verifierSuggestedIntent,
 					);
 
-					// Dispatch to chosen app (wrap in LLM context for cost tracking)
-					await requestContext.run({ userId }, async () => {
+					// Dispatch to chosen app (I-6: include householdId in context, matching dispatchMessage)
+					const rvHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
+					await requestContext.run({ userId, householdId: rvHouseholdId }, async () => {
 						if (chosenAppId === 'chatbot' && chatbotApp) {
 							await chatbotApp.module.handleMessage({
 								...(entry.ctx as import('./types/telegram.js').MessageContext),
@@ -916,7 +917,8 @@ export async function main(): Promise<void> {
 							messageId: ctx.callbackQuery.message?.message_id ?? 0,
 						};
 						const handler = appEntry.module.handleCallbackQuery;
-						await requestContext.run({ userId }, () => handler(customData, callbackCtx));
+						const appCbHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
+						await requestContext.run({ userId, householdId: appCbHouseholdId }, () => handler(customData, callbackCtx));
 					}
 					return;
 				}

@@ -100,8 +100,9 @@ describe('dispatch-site requestContext wraps', () => {
 			// requestContext.run. We assert the wrap appears in the 'rv:'
 			// branch by searching for the characteristic handoff between
 			// resolveCallback and requestContext.run.
+			// I-6: the rv: callback block now includes householdId in the context object
 			const rvBranch = source.match(
-				/resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*\{\s*userId\s*\}/,
+				/resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*\{\s*userId/,
 			);
 			expect(rvBranch).not.toBeNull();
 		});
@@ -110,10 +111,11 @@ describe('dispatch-site requestContext wraps', () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
 			// The 'app:' callback branch ends with
-			//   await requestContext.run({ userId }, () => handler(customData, callbackCtx));
-			// We assert that exact handoff shape exists.
+			//   await requestContext.run({ userId, householdId: ... }, () => handler(customData, callbackCtx));
+			// I-6: householdId is now also set in the context object.
+			// We assert that requestContext.run is called with userId and that handler() is invoked.
 			const appCallbackWrap = source.match(
-				/requestContext\.run\s*\(\s*\{\s*userId\s*\}\s*,\s*\(\s*\)\s*=>\s*handler\s*\(/,
+				/requestContext\.run\s*\(\s*\{[\s\S]{0,120}userId[\s\S]{0,200}\(\s*\)\s*=>\s*handler\s*\(/,
 			);
 			expect(appCallbackWrap).not.toBeNull();
 		});

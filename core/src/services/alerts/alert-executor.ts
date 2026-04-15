@@ -28,6 +28,7 @@ import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { HouseholdService } from '../household/index.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
+import { extractHouseholdIdFromPath } from '../data-store/paths.js';
 import type { Router } from '../router/index.js';
 
 /** Maximum length for template-expanded data to prevent memory issues. */
@@ -411,14 +412,11 @@ async function executeWriteData(
 	// householdId is absent (system call or pre-migration instance).
 	const contextHouseholdId = getCurrentHouseholdId();
 	if (contextHouseholdId) {
-		const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(fullPath);
-		if (householdMatch) {
-			const pathHouseholdId = householdMatch[1];
-			if (pathHouseholdId !== contextHouseholdId) {
-				throw new Error(
-					`Household boundary violation in write_data action: path household "${pathHouseholdId}" does not match context household "${contextHouseholdId}"`,
-				);
-			}
+		const pathHouseholdId = extractHouseholdIdFromPath(fullPath);
+		if (pathHouseholdId !== null && pathHouseholdId !== contextHouseholdId) {
+			throw new Error(
+				`Household boundary violation in write_data action: path household "${pathHouseholdId}" does not match context household "${contextHouseholdId}"`,
+			);
 		}
 	}
 

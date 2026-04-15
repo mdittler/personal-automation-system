@@ -117,6 +117,7 @@ describe('UserGuard', () => {
 					expiresAt: new Date(Date.now() + 3600000).toISOString(),
 					usedBy: null,
 					usedAt: null,
+					householdId: 'default',
 				} as never,
 			});
 			const userMutationService = createMockUserMutationService();
@@ -228,6 +229,7 @@ describe('UserGuard', () => {
 					expiresAt: new Date(Date.now() + 3600000).toISOString(),
 					usedBy: null,
 					usedAt: null,
+					householdId: 'default',
 				} as never,
 			});
 			const userMutationService = createMockUserMutationService();
@@ -257,6 +259,7 @@ describe('UserGuard', () => {
 					expiresAt: new Date(Date.now() + 3600000).toISOString(),
 					usedBy: null,
 					usedAt: null,
+					householdId: 'default',
 				} as never,
 			});
 			const userMutationService = createMockUserMutationService();
@@ -287,6 +290,7 @@ describe('UserGuard', () => {
 					expiresAt: new Date(Date.now() + 3600000).toISOString(),
 					usedBy: null,
 					usedAt: null,
+					householdId: 'default',
 				} as never,
 			});
 			const userMutationService = createMockUserMutationService();
@@ -343,6 +347,7 @@ describe('UserGuard', () => {
 					expiresAt: new Date(Date.now() + 3600000).toISOString(),
 					usedBy: null,
 					usedAt: null,
+					householdId: 'default',
 				} as never,
 			});
 			const userMutationService = createMockUserMutationService();

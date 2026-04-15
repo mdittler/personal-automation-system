@@ -139,7 +139,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 	});
 
 	const validInvite = {
-		invite: { name: 'Sarah' },
+		invite: { name: 'Sarah', householdId: 'default' },
 	};
 
 	const expiredInvite = {

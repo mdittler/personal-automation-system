@@ -169,6 +169,88 @@ describe('DataStoreServiceImpl.forSystem()', () => {
 });
 
 /**
+ * I-9: Import audit — SYSTEM_BYPASS_TOKEN must not leak via barrel files.
+ *
+ * The token module is private by design. Only a controlled set of internal
+ * modules may import it directly; no @core/* barrel or public index should
+ * re-export it.  This test reads the barrel files and asserts the token is
+ * not among their exports.
+ */
+describe('SYSTEM_BYPASS_TOKEN import audit', () => {
+	const { readFileSync, readdirSync } = require('node:fs');
+	const { join: pathJoin, resolve: pathResolve } = require('node:path');
+
+	// Locate the project root relative to this test file
+	const projectRoot = pathResolve(__dirname, '../../../../..');
+
+	/** Approved direct importers of system-bypass-token.ts (relative to core/src/) */
+	const APPROVED_IMPORTERS = new Set([
+		'services/data-store/scoped-store.ts',
+		'services/data-store/index.ts',
+		'api/routes/data.ts',
+	]);
+
+	/** Barrel / index files that must NOT re-export the token */
+	const BARREL_FILES = [
+		'core/src/index.ts',
+		'core/src/types/index.ts',
+	];
+
+	it('no barrel file re-exports system-bypass-token', () => {
+		for (const barrelRelPath of BARREL_FILES) {
+			const fullPath = pathJoin(projectRoot, barrelRelPath);
+			let content: string;
+			try {
+				content = readFileSync(fullPath, 'utf8');
+			} catch {
+				// Barrel doesn't exist — nothing to check
+				continue;
+			}
+			expect(
+				content,
+				`Barrel "${barrelRelPath}" must not re-export SYSTEM_BYPASS_TOKEN`,
+			).not.toContain('system-bypass-token');
+		}
+	});
+
+	it('only approved modules import system-bypass-token', () => {
+		const coreSrc = pathJoin(projectRoot, 'core/src');
+
+		function walk(dir: string): string[] {
+			const result: string[] = [];
+			for (const entry of readdirSync(dir, { withFileTypes: true })) {
+				const full = pathJoin(dir, entry.name);
+				if (entry.isDirectory()) {
+					result.push(...walk(full));
+				} else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.js'))) {
+					result.push(full);
+				}
+			}
+			return result;
+		}
+
+		const allFiles = walk(coreSrc);
+		const violations: string[] = [];
+
+		for (const file of allFiles) {
+			// Relative path from core/src/ — normalise to forward slashes for set lookup
+			const rel = file.slice(coreSrc.length + 1).replace(/\\/g, '/');
+
+			// Skip the token definition file itself and test files
+			if (rel === 'services/data-store/system-bypass-token.ts') continue;
+			if (rel.includes('__tests__') || rel.includes('.test.')) continue;
+
+			const content = readFileSync(file, 'utf8');
+			if (content.includes('system-bypass-token') && !APPROVED_IMPORTERS.has(rel)) {
+				violations.push(rel);
+			}
+		}
+
+		expect(violations).toEqual([]);
+	});
+});
+
+/**
  * Compile-time check: `forSystem` must NOT be on the public DataStoreService interface.
  *
  * This test verifies that `forSystem` is not part of the `DataStoreService` type that apps

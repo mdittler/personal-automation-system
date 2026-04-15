@@ -27,7 +27,7 @@ import { dirname, join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { syncUsersToConfig } from '../config/config-writer.js';
 import { loadSystemConfig } from '../config/index.js';
-import { createMigrationBackup } from './migration-backup.js';
+import { type BackupResult, createMigrationBackup } from './migration-backup.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -63,9 +63,9 @@ export interface MigrationDeps {
 	};
 	/**
 	 * Injectable for tests — replaces the real createMigrationBackup call.
-	 * Signature matches createMigrationBackup (dataDir, parentDir) → Promise<void>.
+	 * Signature matches createMigrationBackup (dataDir, parentDir) → Promise<BackupResult>.
 	 */
-	_createBackup?: (dataDir: string, parentDir: string) => Promise<void>;
+	_createBackup?: (dataDir: string, parentDir: string) => Promise<BackupResult>;
 	/**
 	 * Injectable for tests — replaces fs.rename for individual dir moves.
 	 * Signature matches fs.rename (src, dest) → Promise<void>.

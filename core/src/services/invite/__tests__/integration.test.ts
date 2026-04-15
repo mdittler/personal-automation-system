@@ -101,7 +101,7 @@ describe('Invite lifecycle integration', () => {
 
 	it('admin creates invite → new user redeems → user is active → config persisted (legacy two-step)', async () => {
 		// 1. Admin creates an invite for Sarah
-		const code = await inviteService.createInvite('Sarah', '111');
+		const code = await inviteService.createInvite('Sarah', '111', { householdId: 'default' });
 		expect(code).toHaveLength(8);
 
 		// 2. Validate the code — should succeed
@@ -138,7 +138,7 @@ describe('Invite lifecycle integration', () => {
 
 	it('admin creates invite → new user claims atomically → user is active → config persisted', async () => {
 		// 1. Admin creates an invite for Alex
-		const code = await inviteService.createInvite('Alex', '111');
+		const code = await inviteService.createInvite('Alex', '111', { householdId: 'default' });
 		expect(code).toHaveLength(8);
 
 		// 2. Atomically claim and redeem
@@ -274,7 +274,7 @@ describe('redeemInviteAndRegister with new fields', () => {
 	});
 
 	it('sets isAdmin: true when invite role is admin', async () => {
-		const code = await inviteService.createInvite('Admin User', '111', { role: 'admin' });
+		const code = await inviteService.createInvite('Admin User', '111', { householdId: 'default', role: 'admin' });
 
 		await redeemInviteAndRegister(
 			{
@@ -294,6 +294,7 @@ describe('redeemInviteAndRegister with new fields', () => {
 
 	it('calls spaceService.addMember for each initialSpace after registration', async () => {
 		const code = await inviteService.createInvite('Space User', '111', {
+			householdId: 'default',
 			initialSpaces: ['space-1'],
 		});
 
@@ -318,6 +319,7 @@ describe('redeemInviteAndRegister with new fields', () => {
 
 	it('skips auto-join when spaceService is absent', async () => {
 		const code = await inviteService.createInvite('No Space', '111', {
+			householdId: 'default',
 			initialSpaces: ['space-1'],
 		});
 
@@ -338,6 +340,7 @@ describe('redeemInviteAndRegister with new fields', () => {
 
 	it('swallows spaceService.addMember errors and still returns success', async () => {
 		const code = await inviteService.createInvite('Error Space', '111', {
+			householdId: 'default',
 			initialSpaces: ['space-1'],
 		});
 

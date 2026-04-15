@@ -132,6 +132,21 @@ export function findMatchingScope(
 }
 
 /**
+ * Extract the household ID from an absolute filesystem path that passes through
+ * a `households/<hh>/` segment.  Returns `null` when no such segment is found.
+ *
+ * Used by section-collector and alert-executor to enforce household boundary
+ * checks on resolved file paths.  Centralised here to avoid duplicating the
+ * cross-platform regex in multiple consumers.
+ *
+ * @param absolutePath - The fully-resolved absolute path to inspect.
+ */
+export function extractHouseholdIdFromPath(absolutePath: string): string | null {
+	const match = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(absolutePath);
+	return match?.[1] ?? null;
+}
+
+/**
  * Check for scope paths that incorrectly use the {appId}/ prefix.
  * Returns human-readable warning strings for each offending path.
  */

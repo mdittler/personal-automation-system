@@ -27,13 +27,13 @@ describe('InviteService', () => {
 	describe('createInvite', () => {
 		it('returns an 8-character hex code', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			expect(code).toMatch(/^[0-9a-f]{8}$/);
 		});
 
 		it('stores the invite in the YAML file', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const content = await readFile(join(tempDir, 'system', 'invites.yaml'), 'utf-8');
 			expect(content).toContain(code);
@@ -43,7 +43,7 @@ describe('InviteService', () => {
 
 		it('sets usedBy and usedAt to null', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const store = await svc.listInvites();
 			const invite = store[code];
@@ -55,7 +55,7 @@ describe('InviteService', () => {
 		it('sets expiresAt 24 hours from now', async () => {
 			const before = Date.now();
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			const after = Date.now();
 
 			const store = await svc.listInvites();
@@ -71,7 +71,7 @@ describe('InviteService', () => {
 
 		it('stores createdAt as ISO string', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Bob', 'admin');
+			const code = await svc.createInvite('Bob', 'admin', { householdId: 'default' });
 
 			const store = await svc.listInvites();
 			const invite = store[code];
@@ -81,9 +81,9 @@ describe('InviteService', () => {
 		it('generates unique codes for multiple invites', async () => {
 			const svc = makeService();
 			const codes = await Promise.all([
-				svc.createInvite('Alice', 'admin'),
-				svc.createInvite('Bob', 'admin'),
-				svc.createInvite('Charlie', 'admin'),
+				svc.createInvite('Alice', 'admin', { householdId: 'default' }),
+				svc.createInvite('Bob', 'admin', { householdId: 'default' }),
+				svc.createInvite('Charlie', 'admin', { householdId: 'default' }),
 			]);
 
 			const unique = new Set(codes);
@@ -92,8 +92,8 @@ describe('InviteService', () => {
 
 		it('persists multiple invites without overwriting', async () => {
 			const svc = makeService();
-			const code1 = await svc.createInvite('Alice', 'admin');
-			const code2 = await svc.createInvite('Bob', 'admin');
+			const code1 = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
+			const code2 = await svc.createInvite('Bob', 'admin', { householdId: 'default' });
 
 			const store = await svc.listInvites();
 			expect(store[code1]).toBeDefined();
@@ -106,7 +106,7 @@ describe('InviteService', () => {
 	describe('validateCode', () => {
 		it('returns invite for a valid, unused, non-expired code', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const result = await svc.validateCode(code);
 			expect('invite' in result).toBe(true);
@@ -127,7 +127,7 @@ describe('InviteService', () => {
 
 		it('returns error for an already-used code', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			const result = await svc.validateCode(code);
@@ -139,7 +139,7 @@ describe('InviteService', () => {
 
 		it('returns error for an expired code', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// Manually expire the code by modifying the store
 			const store = await svc.listInvites();
@@ -160,7 +160,7 @@ describe('InviteService', () => {
 
 		it('validates after reload (reads from disk)', async () => {
 			const svc1 = makeService();
-			const code = await svc1.createInvite('Alice', 'admin');
+			const code = await svc1.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// Create a fresh service instance — it should read from disk
 			const svc2 = makeService();
@@ -174,7 +174,7 @@ describe('InviteService', () => {
 	describe('redeemCode', () => {
 		it('marks code as used', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			const store = await svc.listInvites();
@@ -185,7 +185,7 @@ describe('InviteService', () => {
 
 		it('sets usedAt as ISO string', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			const store = await svc.listInvites();
@@ -194,7 +194,7 @@ describe('InviteService', () => {
 
 		it('persists redemption to disk', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			const content = await readFile(join(tempDir, 'system', 'invites.yaml'), 'utf-8');
@@ -203,7 +203,7 @@ describe('InviteService', () => {
 
 		it('reloads from disk for fresh service instance', async () => {
 			const svc1 = makeService();
-			const code = await svc1.createInvite('Alice', 'admin');
+			const code = await svc1.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc1.redeemCode(code, 'user123');
 
 			const svc2 = makeService();
@@ -213,7 +213,7 @@ describe('InviteService', () => {
 
 		it('rejects already-used codes', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			await expect(svc.redeemCode(code, 'user456')).rejects.toThrow('already used');
@@ -221,7 +221,7 @@ describe('InviteService', () => {
 
 		it('rejects expired codes', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// Force expiry
 			const store = await svc.listInvites();
@@ -244,8 +244,8 @@ describe('InviteService', () => {
 
 		it('returns all invites', async () => {
 			const svc = makeService();
-			const code1 = await svc.createInvite('Alice', 'admin');
-			const code2 = await svc.createInvite('Bob', 'admin');
+			const code1 = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
+			const code2 = await svc.createInvite('Bob', 'admin', { householdId: 'default' });
 
 			const store = await svc.listInvites();
 			expect(Object.keys(store)).toHaveLength(2);
@@ -255,7 +255,7 @@ describe('InviteService', () => {
 
 		it('reads from disk each time (no stale cache)', async () => {
 			const svc1 = makeService();
-			const code = await svc1.createInvite('Alice', 'admin');
+			const code = await svc1.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const svc2 = makeService();
 			const store = await svc2.listInvites();
@@ -268,7 +268,7 @@ describe('InviteService', () => {
 	describe('cleanup', () => {
 		it('removes expired+used codes older than 7 days', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			// Manually set usedAt to 8 days ago and expiresAt to 8 days ago
@@ -290,7 +290,7 @@ describe('InviteService', () => {
 
 		it('keeps used codes that are less than 7 days old', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, 'user123');
 
 			// usedAt is now (fresh), should not be cleaned up
@@ -302,7 +302,7 @@ describe('InviteService', () => {
 
 		it('keeps expired-but-unused codes (not yet 7 days old)', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// Expire the code (no usedBy), but it's still recent
 			const store = await svc.listInvites();
@@ -327,8 +327,8 @@ describe('InviteService', () => {
 
 		it('removes only old expired+used codes, keeps active ones', async () => {
 			const svc = makeService();
-			const oldCode = await svc.createInvite('Old User', 'admin');
-			const activeCode = await svc.createInvite('Active User', 'admin');
+			const oldCode = await svc.createInvite('Old User', 'admin', { householdId: 'default' });
+			const activeCode = await svc.createInvite('Active User', 'admin', { householdId: 'default' });
 
 			// Mark oldCode as used and expired 8 days ago
 			const store = await svc.listInvites();
@@ -363,7 +363,7 @@ describe('InviteService', () => {
 
 		it('stores role: admin when provided', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin', { role: 'admin' });
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default', role: 'admin' });
 
 			const store = await svc.listInvites();
 			expect(store[code]?.role).toBe('admin');
@@ -372,6 +372,7 @@ describe('InviteService', () => {
 		it('stores initialSpaces when provided', async () => {
 			const svc = makeService();
 			const code = await svc.createInvite('Alice', 'admin', {
+				householdId: 'default',
 				initialSpaces: ['space-1', 'space-2'],
 			});
 
@@ -382,13 +383,14 @@ describe('InviteService', () => {
 		it('throws on initialSpaces containing a SAFE_SEGMENT-violating entry', async () => {
 			const svc = makeService();
 			await expect(
-				svc.createInvite('Alice', 'admin', { initialSpaces: ['../evil'] }),
+				svc.createInvite('Alice', 'admin', { householdId: 'default', initialSpaces: ['../evil'] }),
 			).rejects.toThrow(/Invalid space ID/);
 		});
 
 		it('stores enabledApps when provided', async () => {
 			const svc = makeService();
 			const code = await svc.createInvite('Alice', 'admin', {
+				householdId: 'default',
 				enabledApps: ['food', 'chatbot'],
 			});
 
@@ -404,7 +406,7 @@ describe('InviteService', () => {
 			const svc = makeService();
 			const codes = new Set<string>();
 			for (let i = 0; i < 20; i++) {
-				const code = await svc.createInvite(`User${i}`, 'admin');
+				const code = await svc.createInvite(`User${i}`, 'admin', { householdId: 'default' });
 				codes.add(code);
 			}
 			expect(codes.size).toBe(20);
@@ -424,7 +426,7 @@ describe('InviteService', () => {
 
 		it('handles concurrent redemption safely (second call sees used code)', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.redeemCode(code, '222');
 			const result = await svc.validateCode(code);
 			expect(result).toEqual({ error: 'This invite code has already been used.' });
@@ -436,7 +438,7 @@ describe('InviteService', () => {
 	describe('claimAndRedeem', () => {
 		it('atomically validates and redeems a code', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const result = await svc.claimAndRedeem(code, '111');
 			expect('invite' in result).toBe(true);
@@ -454,7 +456,7 @@ describe('InviteService', () => {
 
 		it('rejects expired codes', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// Force expiry by modifying the store directly
 			const store = await svc.listInvites();
@@ -470,7 +472,7 @@ describe('InviteService', () => {
 
 		it('rejects already-used codes', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 			await svc.claimAndRedeem(code, '111');
 
 			const result = await svc.claimAndRedeem(code, '222');
@@ -479,7 +481,7 @@ describe('InviteService', () => {
 
 		it('same user retrying after registration failure gets success (idempotent)', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			// First claim succeeds
 			const first = await svc.claimAndRedeem(code, '111');
@@ -496,7 +498,7 @@ describe('InviteService', () => {
 
 		it('allows exactly one winner in concurrent redemptions', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin');
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default' });
 
 			const results = await Promise.all([
 				svc.claimAndRedeem(code, '111'),

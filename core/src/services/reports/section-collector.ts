@@ -21,6 +21,7 @@ import { DEFAULT_LOOKBACK_HOURS } from '../../types/report.js';
 import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { collectChanges } from '../daily-diff/collector.js';
 import type { ChangeLog } from '../data-store/change-log.js';
+import { extractHouseholdIdFromPath } from '../data-store/paths.js';
 
 export interface CollectorDeps {
 	changeLog: ChangeLog;
@@ -152,9 +153,8 @@ async function collectAppDataSection(
 	// it belongs to the report owner's household. Fail-open when householdId is absent
 	// (system call or pre-migration instance).
 	if (deps.householdId) {
-		const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(fullPath);
-		if (householdMatch) {
-			const pathHouseholdId = householdMatch[1];
+		const pathHouseholdId = extractHouseholdIdFromPath(fullPath);
+		if (pathHouseholdId !== null) {
 			if (pathHouseholdId !== deps.householdId) {
 				deps.logger.warn(
 					{ pathHouseholdId, reportHouseholdId: deps.householdId, resolved: fullPath },

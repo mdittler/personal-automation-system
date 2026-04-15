@@ -45,13 +45,28 @@ export async function redeemInviteAndRegister(
 
 	const invite = result.invite;
 
+	// I-4: Reject invites with empty householdId — the redeemer must land in a known household.
+	// An invite created before D5a (or with householdId omitted) will have householdId: ''.
+	if (!invite.householdId) {
+		logger.error({ code, userId }, 'redeemInviteAndRegister: invite has empty householdId — refusing registration');
+		try {
+			await telegram.send(
+				userId,
+				'This invite code is invalid (no household assigned). Ask the admin to generate a new one.',
+			);
+		} catch {
+			// Telegram send failure is non-fatal
+		}
+		return { success: false, error: 'Invite missing household assignment.' };
+	}
+
 	const newUser = {
 		id: userId,
 		name: invite.name,
 		isAdmin: invite.role === 'admin',
 		enabledApps: invite.enabledApps ?? (['*'] as string[]),
 		sharedScopes: [] as string[],
-		...(invite.householdId ? { householdId: invite.householdId } : {}),
+		householdId: invite.householdId,
 	};
 
 	try {

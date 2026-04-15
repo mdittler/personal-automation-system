@@ -118,7 +118,13 @@ export class DataQueryServiceImpl {
 		return allEntries.filter((entry) => {
 			switch (entry.scope) {
 				case 'user':
-					return entry.owner === userId;
+					// I-7: also enforce household containment so user-scope entries from other
+					// households (same userId, different household) are never returned.
+					if (entry.owner !== userId) return false;
+					if (userHouseholdId !== undefined && entry.householdId !== null) {
+						return entry.householdId === userHouseholdId;
+					}
+					return true;
 				case 'shared':
 					// Shared data is household-wide and always visible regardless of space membership.
 					// When householdId is available in context, restrict to this household's shared data.

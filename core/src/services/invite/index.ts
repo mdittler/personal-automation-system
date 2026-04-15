@@ -80,8 +80,16 @@ export class InviteService {
 			}
 		}
 
-		// TODO(Task J): When HouseholdService is injectable, verify that createdBy
-		// is in household.adminUserIds before allowing invite creation.
+		// I-3: householdId is required on every invite created post-D5a.
+		// Admin check (createdBy must be in household.adminUserIds) is enforced at the
+		// router/command level before createInvite is called, so it is not re-enforced here.
+		const householdId = opts?.householdId ?? '';
+		if (!householdId) {
+			throw new Error('householdId is required when creating an invite code. Pass opts.householdId.');
+		}
+		if (!SAFE_SEGMENT.test(householdId)) {
+			throw new Error(`Invalid householdId: ${JSON.stringify(householdId)}. Must match SAFE_SEGMENT pattern.`);
+		}
 
 		const code = randomBytes(4).toString('hex');
 		const now = new Date();
@@ -95,14 +103,14 @@ export class InviteService {
 			expiresAt: expiresAt.toISOString(),
 			usedBy: null,
 			usedAt: null,
-			householdId: opts?.householdId ?? '',
+			householdId,
 			role: opts?.role ?? 'member',
 			initialSpaces,
 			...(opts?.enabledApps !== undefined ? { enabledApps: opts.enabledApps } : {}),
 		};
 
 		await this.writeStore(store);
-		this.logger.info({ code, name, createdBy, householdId: opts?.householdId }, 'Invite code created');
+		this.logger.info({ code, name, createdBy, householdId }, 'Invite code created');
 		return code;
 	}
 

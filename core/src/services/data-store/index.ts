@@ -98,10 +98,24 @@ export class DataStoreServiceImpl implements DataStoreService {
 	}
 
 	forUser(userId: string): UserDataStore {
-		// Actor-vs-target check: reject when BOTH actor and target are known and mismatched
 		const actorId = getCurrentUserId();
-		if (actorId !== undefined && actorId !== userId) {
-			throw new UserBoundaryError(actorId, userId);
+
+		if (this._householdService) {
+			// I-1: Fail-closed post-migration: actor must always be in context.
+			// The bypass token skips scope enforcement (ScopedStore) but NOT the actor
+			// check — even system-bypassed stores must run in a user request context
+			// so that the calling code is explicit about which user it is acting as.
+			if (actorId === undefined) {
+				throw new UserBoundaryError('(no actor in context)', userId);
+			}
+			if (actorId !== userId) {
+				throw new UserBoundaryError(actorId, userId);
+			}
+		} else {
+			// Legacy (no householdService): only check when actor is known.
+			if (actorId !== undefined && actorId !== userId) {
+				throw new UserBoundaryError(actorId, userId);
+			}
 		}
 
 		// Resolve household-aware path
@@ -130,6 +144,18 @@ export class DataStoreServiceImpl implements DataStoreService {
 	forShared(scope: string): SharedDataStore {
 		// Resolve household-aware path from current request context
 		const currentUserId = getCurrentUserId();
+
+		// I-2: Fail-closed when householdService is wired (post-migration) and no
+		// user in context. Without a userId we cannot determine the caller's household,
+		// so we cannot route to the correct household-scoped shared directory.
+		// System code must use SYSTEM_BYPASS_TOKEN to skip this check.
+		if (this._householdService && !currentUserId && this._bypassToken !== SYSTEM_BYPASS_TOKEN) {
+			throw new Error(
+				`forShared("${scope}"): householdService is wired but no userId in request context — ` +
+				'cannot determine caller household. Ensure forShared is called from within a requestContext.',
+			);
+		}
+
 		const householdId =
 			this._householdService && currentUserId
 				? this._householdService.getHouseholdForUser(currentUserId)

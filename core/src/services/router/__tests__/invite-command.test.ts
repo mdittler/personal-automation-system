@@ -77,7 +77,7 @@ function createMockInviteService(overrides: Partial<InviteService> = {}): Invite
 			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null },
 		}),
 		claimAndRedeem: vi.fn().mockResolvedValue({
-			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null },
+			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null, householdId: 'default' },
 		}),
 		redeemCode: vi.fn().mockResolvedValue(undefined),
 		listInvites: vi.fn().mockResolvedValue({}),
