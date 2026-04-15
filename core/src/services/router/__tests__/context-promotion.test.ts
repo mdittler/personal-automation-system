@@ -12,11 +12,12 @@
 
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { InteractionContextService, InteractionEntry } from '../../interaction-context/index.js';
 import type { FallbackHandler } from '../fallback.js';
@@ -115,6 +116,13 @@ function createMockFallback(): FallbackHandler {
 
 function createMockVerifier(result: VerifyAction): RouteVerifier {
 	return { verify: vi.fn().mockResolvedValue(result) } as unknown as RouteVerifier;
+}
+
+/** Assert that a dispatch mock received a context whose route matches the expected partial shape. */
+function expectDispatchedRoute(mockFn: Mock, expected: Partial<RouteInfo>): void {
+	expect(mockFn).toHaveBeenCalledWith(
+		expect.objectContaining({ route: expect.objectContaining(expected) }),
+	);
 }
 
 function createThrowingVerifier(): RouteVerifier {
@@ -523,16 +531,12 @@ describe('Router context-aware promotion (Task 5a)', () => {
 
 		await router.routeMessage(createTextCtx('show me that recipe'));
 
-		expect(foodModule.handleMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				route: expect.objectContaining({
-					appId: 'food',
-					intent: 'log meal',
-					confidence: 0.25,
-					source: 'context-promotion',
-					verifierStatus: 'agreed',
-				}),
-			}),
-		);
+		expectDispatchedRoute(vi.mocked(foodModule.handleMessage), {
+			appId: 'food',
+			intent: 'log meal',
+			confidence: 0.25,
+			source: 'context-promotion',
+			verifierStatus: 'agreed',
+		});
 	});
 });

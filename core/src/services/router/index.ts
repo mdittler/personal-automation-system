@@ -12,7 +12,7 @@
 import type { Logger } from 'pino';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
-import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../types/telegram.js';
+import type { MessageContext, PhotoContext, RouteInfo, RouteSource, RouteVerifierStatus, TelegramService } from '../../types/telegram.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
@@ -27,10 +27,84 @@ import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
-import type { RouteVerifier } from './route-verifier.js';
+import type { RouteVerifier, VerifyAction } from './route-verifier.js';
 
 /** Default confidence threshold for intent classification. */
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
+
+// ---------------------------------------------------------------------------
+// Route info factory helpers
+// ---------------------------------------------------------------------------
+// Centralising construction prevents copy-paste drift across the 7+ dispatch
+// branches. Each factory encodes exactly one routing shape.
+
+/** RouteInfo for a successfully matched /command. */
+function routeForCommand(appId: string, commandName: string): RouteInfo {
+	return { appId, intent: commandName, confidence: 1.0, source: 'command', verifierStatus: 'not-run' };
+}
+
+/** RouteInfo for the chatbot/notes fallback branch. */
+function routeForFallback(): RouteInfo {
+	return { appId: 'chatbot', intent: 'chatbot', confidence: 0, source: 'fallback', verifierStatus: 'not-run' };
+}
+
+/**
+ * RouteInfo built from a classifier match (intent or photo-intent), with the
+ * verifierStatus supplied by the caller (skipped / not-run / agreed / degraded).
+ */
+function routeFromClassifier(
+	appId: string,
+	intent: string,
+	confidence: number,
+	source: RouteSource,
+	verifierStatus: RouteVerifierStatus,
+): RouteInfo {
+	return { appId, intent, confidence, source, verifierStatus };
+}
+
+/** RouteInfo derived from a `VerifyAction.route` result (carries intent, confidence, verifierStatus). */
+function routeFromVerifyAction(
+	result: Extract<VerifyAction, { action: 'route' }>,
+	source: RouteSource,
+): RouteInfo {
+	return {
+		appId: result.appId,
+		intent: result.intent,
+		confidence: result.confidence,
+		source,
+		verifierStatus: result.verifierStatus,
+	};
+}
+
+/**
+ * RouteInfo for the user-override (rv: callback) re-dispatch path.
+ *
+ * Exported so bootstrap.ts can import it for use in the `rv:` callback handler,
+ * and so the same logic can be unit-tested without a full bootstrap integration.
+ *
+ * Intent selection:
+ *  - If the user chose the app the classifier originally suggested, carry through
+ *    the classifier's intent (most specific).
+ *  - If they chose the verifier's suggestion, use verifierSuggestedIntent when
+ *    available. Fall back to the chosen appId as a coarser-but-honest label.
+ */
+export function buildUserOverrideRouteInfo(
+	classifierResult: { appId: string; intent: string },
+	chosenAppId: string,
+	verifierSuggestedIntent?: string,
+): RouteInfo {
+	const intent =
+		chosenAppId === classifierResult.appId
+			? classifierResult.intent
+			: (verifierSuggestedIntent ?? chosenAppId);
+	return {
+		appId: chosenAppId,
+		intent,
+		confidence: 1.0,
+		source: 'user-override',
+		verifierStatus: 'user-override',
+	};
+}
 
 export interface RouterOptions {
 	registry: AppRegistry;
@@ -217,16 +291,7 @@ export class Router {
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp) {
-					await this.dispatchMessage(
-						verifiedApp,
-						this.withRoute(enrichedCtx, {
-							appId: result.appId,
-							intent: result.intent,
-							confidence: result.confidence,
-							source: 'intent',
-							verifierStatus: result.verifierStatus,
-						}),
-					);
+					await this.dispatchMessage(verifiedApp, enrichedCtx, routeFromVerifyAction(result, 'intent'));
 					return;
 				}
 			}
@@ -235,13 +300,14 @@ export class Router {
 			if (app) {
 				await this.dispatchMessage(
 					app,
-					this.withRoute(enrichedCtx, {
-						appId: match.appId,
-						intent: match.intent,
-						confidence: match.confidence,
-						source: 'intent',
-						verifierStatus: this.routeVerifier ? 'skipped' : 'not-run',
-					}),
+					enrichedCtx,
+					routeFromClassifier(
+						match.appId,
+						match.intent,
+						match.confidence,
+						'intent',
+						this.routeVerifier ? 'skipped' : 'not-run',
+					),
 				);
 				return;
 			}
@@ -259,16 +325,7 @@ export class Router {
 				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
 				return;
 			}
-			await this.dispatchMessage(
-				this.chatbotApp,
-				this.withRoute(enrichedCtx, {
-					appId: 'chatbot',
-					intent: 'chatbot',
-					confidence: 0,
-					source: 'fallback',
-					verifierStatus: 'not-run',
-				}),
-			);
+			await this.dispatchMessage(this.chatbotApp, enrichedCtx, routeForFallback());
 		} else {
 			await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
 		}
@@ -333,16 +390,7 @@ export class Router {
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp?.module.handlePhoto) {
-					await this.dispatchPhoto(
-						verifiedApp,
-						this.withRoute(ctx, {
-							appId: result.appId,
-							intent: result.intent,
-							confidence: result.confidence,
-							source: 'photo-intent',
-							verifierStatus: result.verifierStatus,
-						}),
-					);
+					await this.dispatchPhoto(verifiedApp, ctx, routeFromVerifyAction(result, 'photo-intent'));
 					return;
 				}
 			}
@@ -351,13 +399,14 @@ export class Router {
 			if (app?.module.handlePhoto) {
 				await this.dispatchPhoto(
 					app,
-					this.withRoute(ctx, {
-						appId: match.appId,
-						intent: match.photoType,
-						confidence: match.confidence,
-						source: 'photo-intent',
-						verifierStatus: this.routeVerifier ? 'skipped' : 'not-run',
-					}),
+					ctx,
+					routeFromClassifier(
+						match.appId,
+						match.photoType,
+						match.confidence,
+						'photo-intent',
+						this.routeVerifier ? 'skipped' : 'not-run',
+					),
 				);
 				return;
 			}
@@ -411,17 +460,11 @@ export class Router {
 		}
 
 		const commandName = result.command.name.replace(/^\//, '');
-		const commandRoute: RouteInfo = {
-			appId: result.appId,
-			intent: commandName,
-			confidence: 1.0,
-			source: 'command',
-			verifierStatus: 'not-run',
-		};
+		const commandRoute = routeForCommand(result.appId, commandName);
 
 		if (app.module.handleCommand) {
 			try {
-				await app.module.handleCommand(commandName, result.parsedArgs, this.withRoute(ctx, commandRoute));
+				await app.module.handleCommand(commandName, result.parsedArgs, { ...ctx, route: commandRoute });
 			} catch (error) {
 				this.logger.error(
 					{ appId: result.appId, command: result.command.name, error },
@@ -431,34 +474,34 @@ export class Router {
 			}
 		} else {
 			// App has no handleCommand — fall through to handleMessage
-			await this.dispatchMessage(app, this.withRoute(ctx, commandRoute));
+			await this.dispatchMessage(app, ctx, commandRoute);
 		}
 	}
 
 	/**
-	 * Return a shallow clone of ctx with route metadata attached.
-	 * Using a clone instead of mutation preserves the original enrichedCtx across branches.
+	 * Dispatch a message to an app's handleMessage, with error isolation.
+	 *
+	 * `route` is a required parameter — omitting it is a compile error, which prevents
+	 * accidentally dispatching without route metadata attached to the handler context.
+	 * The helper spreads route onto ctx internally so callers never forget the spread.
 	 */
-	private withRoute(ctx: MessageContext, route: RouteInfo): MessageContext;
-	private withRoute(ctx: PhotoContext, route: RouteInfo): PhotoContext;
-	private withRoute(ctx: MessageContext | PhotoContext, route: RouteInfo): MessageContext | PhotoContext {
-		return { ...ctx, route };
-	}
-
-	/** Dispatch a message to an app's handleMessage, with error isolation. */
-	private async dispatchMessage(app: RegisteredApp, ctx: MessageContext): Promise<void> {
+	private async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
 		try {
-			await app.module.handleMessage(ctx);
+			await app.module.handleMessage({ ...ctx, route });
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App message handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong. Please try again later.');
 		}
 	}
 
-	/** Dispatch a photo to an app's handlePhoto, with error isolation. */
-	private async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext): Promise<void> {
+	/**
+	 * Dispatch a photo to an app's handlePhoto, with error isolation.
+	 *
+	 * `route` is a required parameter for the same reason as dispatchMessage.
+	 */
+	private async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
 		try {
-			await app.module.handlePhoto?.(ctx);
+			await app.module.handlePhoto?.({ ...ctx, route });
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App photo handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong processing your photo.');
@@ -977,16 +1020,7 @@ export class Router {
 				}
 				const app = this.registry.getApp(result.appId);
 				if (app) {
-					await this.dispatchMessage(
-						app,
-						this.withRoute(ctx, {
-							appId: result.appId,
-							intent: result.intent,
-							confidence: result.confidence,
-							source: 'context-promotion',
-							verifierStatus: result.verifierStatus,
-						}),
-					);
+					await this.dispatchMessage(app, ctx, routeFromVerifyAction(result, 'context-promotion'));
 					return;
 				}
 			}
@@ -1010,16 +1044,7 @@ export class Router {
 				await this.fallback.handleUnrecognized(ctx, this.telegram);
 				return;
 			}
-			await this.dispatchMessage(
-				this.chatbotApp,
-				this.withRoute(ctx, {
-					appId: 'chatbot',
-					intent: 'chatbot',
-					confidence: 0,
-					source: 'fallback',
-					verifierStatus: 'not-run',
-				}),
-			);
+			await this.dispatchMessage(this.chatbotApp, ctx, routeForFallback());
 		} else {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 		}

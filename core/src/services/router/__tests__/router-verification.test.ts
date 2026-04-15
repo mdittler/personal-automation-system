@@ -7,11 +7,12 @@
 
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, PhotoContext, TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { AppToggleStore } from '../../app-toggle/index.js';
 import type { FallbackHandler } from '../fallback.js';
@@ -86,6 +87,13 @@ function createMockFallback(): FallbackHandler {
 
 function createMockVerifier(result: VerifyAction): RouteVerifier {
 	return { verify: vi.fn().mockResolvedValue(result) } as unknown as RouteVerifier;
+}
+
+/** Assert that a dispatch mock received a context whose route matches the expected partial shape. */
+function expectDispatchedRoute(mockFn: Mock, expected: Partial<RouteInfo>): void {
+	expect(mockFn).toHaveBeenCalledWith(
+		expect.objectContaining({ route: expect.objectContaining(expected) }),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -650,17 +658,13 @@ describe('Router — grey-zone verification', () => {
 
 			await router.routeMessage(createTextCtx('something ambiguous'));
 
-			expect(echoModule.handleMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: expect.objectContaining({
-						appId: 'echo',
-						intent: 'echo',
-						confidence: 0.55,
-						source: 'intent',
-						verifierStatus: 'agreed',
-					}),
-				}),
-			);
+			expectDispatchedRoute(vi.mocked(echoModule.handleMessage), {
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.55,
+				source: 'intent',
+				verifierStatus: 'agreed',
+			});
 		});
 
 		it('verifier-degraded dispatch attaches verifierStatus:degraded on ctx.route', async () => {
@@ -680,14 +684,10 @@ describe('Router — grey-zone verification', () => {
 
 			await router.routeMessage(createTextCtx('something ambiguous'));
 
-			expect(echoModule.handleMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: expect.objectContaining({
-						source: 'intent',
-						verifierStatus: 'degraded',
-					}),
-				}),
-			);
+			expectDispatchedRoute(vi.mocked(echoModule.handleMessage), {
+				source: 'intent',
+				verifierStatus: 'degraded',
+			});
 		});
 
 		it('high-confidence dispatch with verifier wired attaches verifierStatus:skipped on ctx.route', async () => {
@@ -703,15 +703,11 @@ describe('Router — grey-zone verification', () => {
 			await router.routeMessage(createTextCtx('echo this clearly'));
 
 			expect(verifier.verify).not.toHaveBeenCalled();
-			expect(echoModule.handleMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: expect.objectContaining({
-						appId: 'echo',
-						source: 'intent',
-						verifierStatus: 'skipped',
-					}),
-				}),
-			);
+			expectDispatchedRoute(vi.mocked(echoModule.handleMessage), {
+				appId: 'echo',
+				source: 'intent',
+				verifierStatus: 'skipped',
+			});
 		});
 	});
 });

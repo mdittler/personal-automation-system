@@ -1,13 +1,25 @@
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, PhotoContext, TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
+
+/**
+ * Assert that a dispatch mock was called with a context whose `route` field
+ * matches the expected partial shape.  Use this in every branch test so that
+ * missing route assertions are visually obvious on review.
+ */
+function expectDispatchedRoute(mockFn: Mock, expected: Partial<RouteInfo>): void {
+	expect(mockFn).toHaveBeenCalledWith(
+		expect.objectContaining({ route: expect.objectContaining(expected) }),
+	);
+}
 
 function createMockLogger(): Logger {
 	return {
@@ -561,17 +573,13 @@ describe('Router', () => {
 
 			await router.routeMessage(createTextCtx('I need milk'));
 
-			expect(groceryModule.handleMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: expect.objectContaining({
-						appId: 'grocery',
-						intent: 'add grocery',
-						confidence: 0.9,
-						source: 'intent',
-						verifierStatus: 'not-run',
-					}),
-				}),
-			);
+			expectDispatchedRoute(vi.mocked(groceryModule.handleMessage), {
+				appId: 'grocery',
+				intent: 'add grocery',
+				confidence: 0.9,
+				source: 'intent',
+				verifierStatus: 'not-run',
+			});
 		});
 
 		it('chatbot fallback attaches source:fallback, verifierStatus:not-run, intent:chatbot', async () => {
@@ -596,17 +604,13 @@ describe('Router', () => {
 
 			await router.routeMessage(createTextCtx('hello'));
 
-			expect(chatbotModule.handleMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: {
-						appId: 'chatbot',
-						intent: 'chatbot',
-						confidence: 0,
-						source: 'fallback',
-						verifierStatus: 'not-run',
-					},
-				}),
-			);
+			expectDispatchedRoute(vi.mocked(chatbotModule.handleMessage), {
+				appId: 'chatbot',
+				intent: 'chatbot',
+				confidence: 0,
+				source: 'fallback',
+				verifierStatus: 'not-run',
+			});
 		});
 
 		it('photo single-app shortcut attaches source:photo-intent, verifierStatus:skipped, confidence:1.0', async () => {
@@ -615,14 +619,70 @@ describe('Router', () => {
 
 			await router.routePhoto(createPhotoCtx('receipt from Costco'));
 
-			expect(groceryModule.handlePhoto).toHaveBeenCalledWith(
-				expect.objectContaining({
-					route: expect.objectContaining({
-						appId: 'grocery',
-						source: 'photo-intent',
-						confidence: 1.0,
-					}),
-				}),
+			expectDispatchedRoute(vi.mocked(groceryModule.handlePhoto), {
+				appId: 'grocery',
+				source: 'photo-intent',
+				confidence: 1.0,
+			});
+		});
+
+		it('photo fallback branch does not dispatch to any handler — sends "could not determine" message instead', async () => {
+			// When multiple photo apps exist but the classifier returns no confident match,
+			// the router sends a fallback message — no handler receives a ctx.
+			// Photo fallback is intentionally handler-less (unlike text fallback which routes
+			// to chatbot). This test pins that explicit decision.
+			//
+			// Note: the single-photo-app shortcut bypasses the classifier at confidence 1.0,
+			// so we need two photo apps to exercise the classifier path where match can be null.
+			const localTelegram = createMockTelegram();
+			const photoApp1Module = createMockModule();
+			const photoApp2Module = createMockModule();
+
+			const photoManifest1: AppManifest = {
+				app: { id: 'photo1', name: 'Photo1', version: '1.0.0', description: 'Photo app 1', author: 'Test' },
+				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['receipt'] } },
+			};
+			const photoManifest2: AppManifest = {
+				app: { id: 'photo2', name: 'Photo2', version: '1.0.0', description: 'Photo app 2', author: 'Test' },
+				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['landscape'] } },
+			};
+
+			const apps = [
+				{ manifest: photoManifest1, module: photoApp1Module, appDir: '/apps/photo1' },
+				{ manifest: photoManifest2, module: photoApp2Module, appDir: '/apps/photo2' },
+			];
+			const cache = new ManifestCache();
+			cache.add(photoManifest1, '/apps/photo1');
+			cache.add(photoManifest2, '/apps/photo2');
+			const registry = {
+				getApp: (id: string) => apps.find((a) => a.manifest.app.id === id) as RegisteredApp | undefined,
+				getManifestCache: () => cache,
+				getAll: () => apps,
+				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+			} as unknown as AppRegistry;
+
+			// Low confidence → classifier returns null → photo fallback message
+			const lowConfLlm = createMockLLM({ category: 'receipt', confidence: 0.05 });
+
+			const router = new Router({
+				registry,
+				llm: lowConfLlm,
+				telegram: localTelegram,
+				fallback: createMockFallback(),
+				config: createMockConfig(users),
+				logger: createMockLogger(),
+			});
+			router.buildRoutingTables();
+
+			await router.routePhoto(createPhotoCtx('some photo'));
+
+			// No handler dispatched
+			expect(photoApp1Module.handlePhoto).not.toHaveBeenCalled();
+			expect(photoApp2Module.handlePhoto).not.toHaveBeenCalled();
+			// Fallback message sent to user
+			expect(localTelegram.send).toHaveBeenCalledWith(
+				'user1',
+				expect.stringContaining("couldn't determine"),
 			);
 		});
 

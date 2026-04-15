@@ -48,7 +48,7 @@ import { ModelJournalServiceImpl } from './services/model-journal/index.js';
 import { N8nDispatcherImpl } from './services/n8n/index.js';
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
-import { Router } from './services/router/index.js';
+import { buildUserOverrideRouteInfo, Router } from './services/router/index.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
 import { VerificationLogger } from './services/router/verification-logger.js';
@@ -806,22 +806,12 @@ export async function main(): Promise<void> {
 					const { entry } = resolved;
 					const appEntry = registry.getApp(chosenAppId);
 
-					// Build user-override route metadata.
-					// If the user picked the app the classifier originally suggested, carry
-					// through the classifier's intent. If they picked the verifier's suggestion,
-					// use verifierSuggestedIntent when available. Fall back to the chosen appId
-					// as a coarser-but-honest label rather than leaving intent unknown.
-					const overrideIntent =
-						chosenAppId === entry.classifierResult.appId
-							? entry.classifierResult.intent
-							: (entry.verifierSuggestedIntent ?? chosenAppId);
-					const overrideRoute: import('./types/telegram.js').RouteInfo = {
-						appId: chosenAppId,
-						intent: overrideIntent,
-						confidence: 1.0,
-						source: 'user-override',
-						verifierStatus: 'user-override',
-					};
+					// Build user-override route metadata (pure helper — testable independently).
+					const overrideRoute = buildUserOverrideRouteInfo(
+						entry.classifierResult,
+						chosenAppId,
+						entry.verifierSuggestedIntent,
+					);
 
 					// Dispatch to chosen app (wrap in LLM context for cost tracking)
 					await requestContext.run({ userId }, async () => {

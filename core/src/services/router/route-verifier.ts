@@ -91,6 +91,39 @@ function parseVerifierResponse(raw: string): VerifierResponse | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// VerifyAction factory helpers
+// ---------------------------------------------------------------------------
+
+/** Classifier result fields needed to build a route action. */
+type ClassifierResultFields = { appId: string; intent: string; confidence: number };
+
+/** Route action where the verifier confirmed the classifier's pick (or degraded gracefully). */
+function agreedRoute(classifierResult: ClassifierResultFields): Extract<VerifyAction, { action: 'route' }> {
+	return {
+		action: 'route',
+		appId: classifierResult.appId,
+		intent: classifierResult.intent,
+		confidence: classifierResult.confidence,
+		verifierStatus: 'agreed',
+	};
+}
+
+/**
+ * Route action for degraded-gracefully paths: verifier LLM failed, returned
+ * unparseable output, hallucinated an appId, or failed to send inline buttons.
+ * Non-strict mode falls back to the classifier's pick.
+ */
+function degradedRoute(classifierResult: ClassifierResultFields): Extract<VerifyAction, { action: 'route' }> {
+	return {
+		action: 'route',
+		appId: classifierResult.appId,
+		intent: classifierResult.intent,
+		confidence: classifierResult.confidence,
+		verifierStatus: 'degraded',
+	};
+}
+
+// ---------------------------------------------------------------------------
 // RouteVerifier
 // ---------------------------------------------------------------------------
 
@@ -166,13 +199,7 @@ export class RouteVerifier {
 				accessibleApps.length === 1
 					? accessibleApps[0]!.manifest.app.id
 					: classifierResult.appId;
-			return {
-				action: 'route',
-				appId: fallbackId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'agreed',
-			};
+			return { ...agreedRoute(classifierResult), appId: fallbackId };
 		}
 
 		const candidateApps = accessibleApps.map((app) => ({
@@ -211,24 +238,12 @@ export class RouteVerifier {
 			// caller (context-promotion) can safely defer to chatbot instead of dispatching
 			// a sub-threshold message based on a degraded verifier decision.
 			if (strict) return { action: 'fallback' };
-			return {
-				action: 'route',
-				appId: classifierResult.appId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'degraded',
-			};
+			return degradedRoute(classifierResult);
 		}
 
 		if (verifierResponse === undefined) {
 			if (strict) return { action: 'fallback' };
-			return {
-				action: 'route',
-				appId: classifierResult.appId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'degraded',
-			};
+			return degradedRoute(classifierResult);
 		}
 
 		if (verifierResponse.agrees) {
@@ -242,13 +257,7 @@ export class RouteVerifier {
 				outcome: 'auto',
 				routedTo: classifierResult.appId,
 			});
-			return {
-				action: 'route',
-				appId: classifierResult.appId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'agreed',
-			};
+			return agreedRoute(classifierResult);
 		}
 
 		// Verifier disagrees — validate suggested appId exists in registry
@@ -261,13 +270,7 @@ export class RouteVerifier {
 				{ suggestedAppId: rawSuggestedId },
 				'RouteVerifier: LLM suggested non-existent app — falling back to classifier',
 			);
-			return {
-				action: 'route',
-				appId: classifierResult.appId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'degraded',
-			};
+			return degradedRoute(classifierResult);
 		}
 
 		const suggestedAppId = rawSuggestedId;
@@ -311,13 +314,7 @@ export class RouteVerifier {
 		} catch (err) {
 			this.logger.error({ err }, 'RouteVerifier: failed to send inline buttons');
 			this.pendingStore.resolve(pendingId);
-			return {
-				action: 'route',
-				appId: classifierResult.appId,
-				intent: classifierResult.intent,
-				confidence: classifierResult.confidence,
-				verifierStatus: 'degraded',
-			};
+			return degradedRoute(classifierResult);
 		}
 
 		// Track the real sent IDs for use in resolveCallback

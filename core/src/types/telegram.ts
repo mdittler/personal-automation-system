@@ -59,7 +59,15 @@ export interface RouteInfo {
 	confidence: number;
 	/** How the router determined the destination. */
 	source: RouteSource;
-	/** Whether the route verifier ran and what it concluded. */
+	/**
+	 * Whether the route verifier ran and what it concluded.
+	 *
+	 * Trust note: `verifierStatus: 'degraded'` means the classifier's pick was allowed
+	 * through after the verifier LLM failed, returned unparseable output, hallucinated an
+	 * appId, or failed to deliver inline buttons. It does NOT mean the route was verified.
+	 * Consumers (e.g. item #2 Food classifier) should treat 'degraded' the same as
+	 * 'skipped' — the classifier's confidence value is the only signal available.
+	 */
 	verifierStatus: RouteVerifierStatus;
 }
 
