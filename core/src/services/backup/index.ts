@@ -30,10 +30,7 @@ export class BackupService {
 			 * Override for execFileAsync — used in tests to inject a fake tar implementation
 			 * without fighting the promisify-captures-reference-at-import-time issue.
 			 */
-			_execFileAsync?: (
-				cmd: string,
-				args: string[],
-			) => Promise<{ stdout: string; stderr: string }>;
+			_execFileAsync?: (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 		},
 	) {}
 

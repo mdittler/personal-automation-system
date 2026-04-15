@@ -41,9 +41,7 @@ export function registerHealthRoute(app: FastifyInstance, checker?: HealthChecke
 
 		const { checks } = await checker.checkAll();
 
-		const essentialFailed = checks.some(
-			(c) => c.status === 'fail' && ESSENTIAL_CHECKS.has(c.name),
-		);
+		const essentialFailed = checks.some((c) => c.status === 'fail' && ESSENTIAL_CHECKS.has(c.name));
 
 		const status = essentialFailed ? 'degraded' : 'ok';
 		const httpStatus = essentialFailed ? 503 : 200;

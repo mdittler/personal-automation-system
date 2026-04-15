@@ -22,8 +22,9 @@ export function withMultiFileLock<T>(keys: string[], fn: () => Promise<T>): Prom
 	const sorted = [...new Set(keys)].sort();
 	const acquire = (i: number): Promise<T> => {
 		if (i >= sorted.length) return fn();
-		// sorted[i] is always defined here — guarded by i < sorted.length
-		return lock.run(sorted[i]!, () => acquire(i + 1));
+		// sorted[i] is always defined here — guarded by i < sorted.length above
+		const key = sorted[i] as string;
+		return lock.run(key, () => acquire(i + 1));
 	};
 	return acquire(0);
 }

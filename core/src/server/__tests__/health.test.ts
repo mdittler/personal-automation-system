@@ -1,16 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
-import type { CheckResult } from '../health-checks.js';
-import { HealthChecker } from '../health-checks.js';
+import type { CheckResult, HealthChecker } from '../health-checks.js';
 import { registerHealthRoute } from '../health.js';
-
-// Minimal pino-compatible logger mock
-const mockLogger = {
-	info: vi.fn(),
-	warn: vi.fn(),
-	error: vi.fn(),
-	debug: vi.fn(),
-} as unknown as import('pino').Logger;
 
 function makeChecker(checksOverride?: CheckResult[]): HealthChecker {
 	const defaultChecks: CheckResult[] = checksOverride ?? [

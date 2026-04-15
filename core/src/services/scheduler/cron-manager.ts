@@ -116,7 +116,11 @@ export class CronManager {
 						}
 					} catch (err) {
 						this.logger.error(
-							{ appId: job.appId, jobId: job.id, error: err instanceof Error ? err.message : String(err) },
+							{
+								appId: job.appId,
+								jobId: job.id,
+								error: err instanceof Error ? err.message : String(err),
+							},
 							'Notifier threw during job lifecycle callback — ignoring',
 						);
 					}

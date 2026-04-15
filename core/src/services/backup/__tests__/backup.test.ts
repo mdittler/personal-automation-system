@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -192,9 +192,7 @@ describe('BackupService — cross-platform', () => {
 			const result = await service.createBackup();
 
 			expect(result).toBe('');
-			expect(logger.warn).toHaveBeenCalledWith(
-				expect.stringMatching(/not supported on Windows/i),
-			);
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/not supported on Windows/i));
 		} finally {
 			platformSpy.mockRestore();
 		}
@@ -317,9 +315,7 @@ describe.skipIf(process.platform === 'win32')('BackupService — tar', () => {
 		await expect(service.createBackup()).rejects.toThrow(/tar/i);
 
 		// The partial file must have been cleaned up
-		const remaining = (await readdir(backupPath)).filter((f) =>
-			f.startsWith('pas-backup-'),
-		);
+		const remaining = (await readdir(backupPath)).filter((f) => f.startsWith('pas-backup-'));
 		expect(remaining).toHaveLength(0);
 	});
 
@@ -394,11 +390,7 @@ describe('loadSystemConfig — backup defaults', () => {
 			const envPath = pjoin(dir, '.env');
 			const yamlPath = pjoin(dir, 'pas.yaml');
 
-			await wf(
-				envPath,
-				'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g',
-				'utf-8',
-			);
+			await wf(envPath, 'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g', 'utf-8');
 			await wf(yamlPath, stringify({ defaults: {} }), 'utf-8');
 
 			const config = await loadSystemConfig({ envPath, configPath: yamlPath });
@@ -424,11 +416,7 @@ describe('loadSystemConfig — backup defaults', () => {
 			const envPath = pjoin(dir, '.env');
 			const yamlPath = pjoin(dir, 'pas.yaml');
 
-			await wf(
-				envPath,
-				'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g',
-				'utf-8',
-			);
+			await wf(envPath, 'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g', 'utf-8');
 			await wf(yamlPath, stringify({ backup: { enabled: true } }), 'utf-8');
 
 			const config = await loadSystemConfig({ envPath, configPath: yamlPath });
@@ -454,16 +442,8 @@ describe('loadSystemConfig — backup defaults', () => {
 			const envPath = pjoin(dir, '.env');
 			const yamlPath = pjoin(dir, 'pas.yaml');
 
-			await wf(
-				envPath,
-				'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g',
-				'utf-8',
-			);
-			await wf(
-				yamlPath,
-				stringify({ backup: { enabled: true, retention_count: 0 } }),
-				'utf-8',
-			);
+			await wf(envPath, 'TELEGRAM_BOT_TOKEN=t\nANTHROPIC_API_KEY=k\nGUI_AUTH_TOKEN=g', 'utf-8');
+			await wf(yamlPath, stringify({ backup: { enabled: true, retention_count: 0 } }), 'utf-8');
 
 			await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
 				/Invalid pas\.yaml|retention_count|Number must be greater than/i,

@@ -11,8 +11,8 @@ import type { Logger } from 'pino';
 import type { AppManifest } from '../../types/manifest.js';
 import type { ScheduledJob, SchedulerService } from '../../types/scheduler.js';
 import { CronManager } from './cron-manager.js';
-import { OneOffManager } from './oneoff-manager.js';
 import type { SchedulerJobNotifier } from './notifier.js';
+import { OneOffManager } from './oneoff-manager.js';
 import type { TaskHandler } from './task-runner.js';
 
 export interface SchedulerServiceOptions {

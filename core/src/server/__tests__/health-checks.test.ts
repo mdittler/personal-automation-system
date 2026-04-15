@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HealthChecker } from '../health-checks.js';
-import type { CheckResult } from '../health-checks.js';
 
 // Minimal pino-compatible logger mock
 const mockLogger = {

@@ -11,11 +11,13 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-	let handle: ReturnType<typeof setTimeout>;
+	let handle: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<never>((_, reject) => {
 		handle = setTimeout(() => reject(new Error(message)), ms);
 	});
-	return Promise.race([promise, timeout]).finally(() => clearTimeout(handle!));
+	return Promise.race([promise, timeout]).finally(() => {
+		if (handle !== undefined) clearTimeout(handle);
+	});
 }
 
 interface TelegramClient {
@@ -60,7 +62,11 @@ export class HealthChecker {
 	async checkTelegram(): Promise<CheckResult> {
 		const start = Date.now();
 		try {
-			await withTimeout(this.deps.telegram.getMe(), TELEGRAM_TIMEOUT_MS, 'Telegram getMe timed out');
+			await withTimeout(
+				this.deps.telegram.getMe(),
+				TELEGRAM_TIMEOUT_MS,
+				'Telegram getMe timed out',
+			);
 			return { name: 'telegram', status: 'ok', latencyMs: Date.now() - start };
 		} catch (err) {
 			return {
@@ -96,7 +102,7 @@ export class HealthChecker {
 		}
 
 		// Try listModels on the first available provider
-		const first = providers[0]!;
+		const first = providers[0] as ProviderClient;
 		const start = Date.now();
 		try {
 			await withTimeout(first.listModels(), 5_000, 'listModels timed out');
@@ -142,7 +148,11 @@ export class HealthChecker {
 			if (result.status === 'fulfilled') return result.value;
 			// Should not happen since our methods never throw, but be defensive
 			const names = ['telegram', 'scheduler', 'llm', 'filesystem'];
-			return { name: names[i] ?? `check_${i}`, status: 'fail' as const, detail: String(result.reason) };
+			return {
+				name: names[i] ?? `check_${i}`,
+				status: 'fail' as const,
+				detail: String(result.reason),
+			};
 		});
 
 		const allOk = checks.every((c) => c.status === 'ok');

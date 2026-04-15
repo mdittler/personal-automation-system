@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // We test the module-level singleton functions via re-import isolation isn't
 // possible in ESM without a factory. Instead we test observable behavior:

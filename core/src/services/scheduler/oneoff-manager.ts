@@ -39,7 +39,8 @@ export class OneOffManager {
 	 * returns the function to execute. Set by the bootstrap.
 	 * Throws if the app is not found or has no handleScheduledJob.
 	 */
-	private handlerResolver: ((appId: string, handler: string, jobId: string) => TaskHandler) | null = null;
+	private handlerResolver: ((appId: string, handler: string, jobId: string) => TaskHandler) | null =
+		null;
 
 	constructor(dataDir: string, logger: Logger) {
 		this.yamlPath = join(dataDir, 'system', 'scheduled-jobs.yaml');
@@ -56,7 +57,9 @@ export class OneOffManager {
 	 * once without per-user context. If per-user one-off tasks are needed
 	 * in future, the `OneOffTask` schema must be extended with `user_scope`.
 	 */
-	setHandlerResolver(resolver: (appId: string, handler: string, jobId: string) => TaskHandler): void {
+	setHandlerResolver(
+		resolver: (appId: string, handler: string, jobId: string) => TaskHandler,
+	): void {
 		this.handlerResolver = resolver;
 	}
 
@@ -69,7 +72,10 @@ export class OneOffManager {
 	 */
 	private enqueue(fn: () => Promise<void>): Promise<void> {
 		const p = this.writeQueue.then(fn, fn);
-		this.writeQueue = p.then(() => {}, () => {});
+		this.writeQueue = p.then(
+			() => {},
+			() => {},
+		);
 		return p;
 	}
 
@@ -246,7 +252,11 @@ export class OneOffManager {
 				}
 			} catch (err) {
 				this.logger.error(
-					{ appId: task.appId, jobId: task.jobId, error: err instanceof Error ? err.message : String(err) },
+					{
+						appId: task.appId,
+						jobId: task.jobId,
+						error: err instanceof Error ? err.message : String(err),
+					},
 					'Notifier threw during job lifecycle callback — ignoring',
 				);
 			}
