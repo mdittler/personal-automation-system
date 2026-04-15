@@ -152,7 +152,7 @@ export function resolveHouseholdMeta(relativePath: string): HouseholdMeta {
     return { householdId: hh, spaceKind: null, collaborationId: null };
   }
 
-  if (parts[0] === 'collaborations' && parts.length >= 2) {
+  if (parts[0] === 'collaborations' && parts.length >= 3) {
     const sId = parts[1]!;
     return { householdId: null, spaceKind: 'collaboration', collaborationId: sId };
   }

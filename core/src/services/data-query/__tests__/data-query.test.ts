@@ -11,9 +11,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DataQueryServiceImpl } from '../index.js';
 import { FileIndexService } from '../../file-index/index.js';
+import type { FileIndexEntry } from '../../file-index/types.js';
 import type { ManifestDataScope } from '../../../types/manifest.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { LLMService } from '../../../types/llm.js';
+import { requestContext } from '../../context/request-context.js';
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -982,5 +984,137 @@ describe('DataQueryService — path hardening', () => {
 		});
 
 		await expect(svc.query('anything', 'matt')).resolves.toEqual({ files: [], empty: true });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Household filter tests (D5a boundary enforcement)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal FileIndexService stub: returns a fixed entry list without any
+ * filesystem interaction. Used to test getAuthorizedEntries() household
+ * filtering in isolation without needing real files on disk.
+ */
+function makeStubFileIndex(entries: FileIndexEntry[]): FileIndexService {
+	return {
+		getEntries: () => entries,
+		getRelated: () => [],
+		get size() { return entries.length; },
+	} as unknown as FileIndexService;
+}
+
+function makeSharedEntry(overrides: Partial<FileIndexEntry> = {}): FileIndexEntry {
+	return {
+		path: 'users/shared/food/prices/costco.md',
+		appId: 'food',
+		scope: 'shared',
+		owner: null,
+		householdId: null,
+		spaceKind: null,
+		collaborationId: null,
+		type: 'price-list',
+		title: 'Costco Prices',
+		tags: ['pas/prices'],
+		aliases: [],
+		entityKeys: ['costco'],
+		dates: { earliest: null, latest: null },
+		relationships: [],
+		wikiLinks: [],
+		size: 100,
+		modifiedAt: new Date(),
+		summary: null,
+		...overrides,
+	};
+}
+
+describe('DataQueryService — household filter (D5a)', () => {
+	let dataDir: string;
+	let logger: AppLogger;
+
+	beforeEach(async () => {
+		dataDir = makeTempDir();
+		await mkdir(dataDir, { recursive: true });
+		logger = makeMockLogger();
+	});
+
+	afterEach(async () => {
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	it('should exclude shared files from a different household when householdId is in context', async () => {
+		// Use distinct titles so we can verify which entry appears in the LLM prompt
+		const entryAlpha = makeSharedEntry({
+			householdId: 'hh-alpha',
+			path: 'users/shared/food/prices/alpha.md',
+			title: 'Alpha Household Prices',
+		});
+		const entryBeta = makeSharedEntry({
+			householdId: 'hh-beta',
+			path: 'users/shared/food/prices/beta.md',
+			title: 'Beta Household Prices',
+		});
+
+		const fileIndex = makeStubFileIndex([entryAlpha, entryBeta]);
+		const llm = makeMockLlm('[]');
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([]),
+			llm,
+			dataDir,
+			logger,
+		});
+
+		// Run inside a requestContext with householdId: 'hh-alpha'
+		await requestContext.run({ userId: 'u1', householdId: 'hh-alpha' }, async () => {
+			await svc.query('show me prices', 'u1');
+		});
+
+		// LLM should have been called with only the hh-alpha entry (1 candidate)
+		const completeSpy = vi.mocked(llm.complete);
+		expect(completeSpy).toHaveBeenCalledOnce();
+		const systemPrompt = completeSpy.mock.calls[0]![1]?.systemPrompt ?? '';
+		// hh-alpha entry title must appear; hh-beta entry title must not
+		expect(systemPrompt).toContain('Alpha Household Prices');
+		expect(systemPrompt).not.toContain('Beta Household Prices');
+	});
+
+	it('should include all shared files when no householdId is in context (fail-open)', async () => {
+		// Use distinct titles so we can verify both entries appear in the LLM prompt
+		const entryAlpha = makeSharedEntry({
+			householdId: 'hh-alpha',
+			path: 'users/shared/food/prices/alpha.md',
+			title: 'Alpha Household Prices',
+		});
+		const entryBeta = makeSharedEntry({
+			householdId: 'hh-beta',
+			path: 'users/shared/food/prices/beta.md',
+			title: 'Beta Household Prices',
+		});
+
+		const fileIndex = makeStubFileIndex([entryAlpha, entryBeta]);
+		const llm = makeMockLlm('[]');
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([]),
+			llm,
+			dataDir,
+			logger,
+		});
+
+		// Run inside a requestContext WITHOUT householdId (fail-open: all shared files visible)
+		await requestContext.run({ userId: 'u1' }, async () => {
+			await svc.query('show me prices', 'u1');
+		});
+
+		// LLM should have been called with both entries (2 candidates)
+		const completeSpy = vi.mocked(llm.complete);
+		expect(completeSpy).toHaveBeenCalledOnce();
+		const systemPrompt = completeSpy.mock.calls[0]![1]?.systemPrompt ?? '';
+		// Both entry titles must appear in the prompt
+		expect(systemPrompt).toContain('Alpha Household Prices');
+		expect(systemPrompt).toContain('Beta Household Prices');
 	});
 });

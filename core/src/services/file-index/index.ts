@@ -31,7 +31,7 @@ export class FileIndexService {
   async rebuild(): Promise<void> {
     this.entries.clear();
 
-    for (const topDir of ['users', 'spaces']) {
+    for (const topDir of ['users', 'spaces', 'households', 'collaborations']) {
       const fullDir = join(this.dataDir, topDir);
       await this.scanDirectory(fullDir, topDir);
     }
@@ -181,6 +181,22 @@ export class FileIndexService {
 
   /** Reconstruct data-root-relative path from DataChangedPayload fields. */
   private payloadToRelativePath(payload: DataChangedPayload): string {
+    // New household-scoped layout: households/<hh>/...
+    if (payload.householdId) {
+      const hh = payload.householdId;
+      if (payload.spaceId) {
+        return `households/${hh}/spaces/${payload.spaceId}/${payload.appId}/${payload.path}`;
+      }
+      if (payload.userId) {
+        return `households/${hh}/users/${payload.userId}/${payload.appId}/${payload.path}`;
+      }
+      return `households/${hh}/shared/${payload.appId}/${payload.path}`;
+    }
+
+    // Legacy layout (no householdId): collaborations or pre-migration paths
+    if (payload.collaborationId) {
+      return `collaborations/${payload.collaborationId}/${payload.appId}/${payload.path}`;
+    }
     if (payload.spaceId) {
       return `spaces/${payload.spaceId}/${payload.appId}/${payload.path}`;
     }
