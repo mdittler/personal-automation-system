@@ -15,6 +15,7 @@ import type { AppToggleStore } from '../../app-toggle/index.js';
 import { UserManager } from '../../user-manager/index.js';
 import { UserMutationService } from '../../user-manager/user-mutation-service.js';
 import { InviteService } from '../index.js';
+import { redeemInviteAndRegister } from '../redeem-and-register.js';
 
 // Mock only the logger
 const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
@@ -210,5 +211,155 @@ describe('Invite lifecycle integration', () => {
 		const configContent = await readFile(configPath, 'utf-8');
 		expect(configContent).toContain('food');
 		expect(configContent).toContain('notes');
+	});
+});
+
+describe('redeemInviteAndRegister with new fields', () => {
+	let tmpDir: string;
+	let configPath: string;
+	let inviteService: InviteService;
+	let userManager: UserManager;
+	let mutationService: UserMutationService;
+
+	const mockTelegram = {
+		send: vi.fn().mockResolvedValue(undefined),
+	} as never;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(join(tmpdir(), 'pas-redeem-register-'));
+		configPath = join(tmpDir, 'pas.yaml');
+		await writeFile(configPath, INITIAL_PAS_YAML, 'utf-8');
+
+		inviteService = new InviteService({ dataDir: tmpDir, logger: mockLogger });
+		userManager = new UserManager({
+			config: makeConfig(tmpDir),
+			appToggle: createMockAppToggle(),
+			logger: mockLogger,
+		});
+		mutationService = new UserMutationService({
+			userManager,
+			configPath,
+			logger: mockLogger,
+		});
+
+		vi.clearAllMocks();
+	});
+
+	afterEach(async () => {
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	it('propagates householdId from invite to registered user', async () => {
+		const code = await inviteService.createInvite('Sarah', '111', {
+			householdId: 'household-abc',
+		});
+
+		const result = await redeemInviteAndRegister(
+			{
+				inviteService,
+				userMutationService: mutationService,
+				telegram: mockTelegram,
+				logger: mockLogger,
+			},
+			code,
+			'222',
+		);
+
+		expect(result).toEqual({ success: true, name: 'Sarah' });
+
+		// User registered in memory with the correct householdId
+		const users = userManager.getAllUsers();
+		const sarah = users.find((u) => u.id === '222');
+		expect(sarah?.householdId).toBe('household-abc');
+	});
+
+	it('sets isAdmin: true when invite role is admin', async () => {
+		const code = await inviteService.createInvite('Admin User', '111', { role: 'admin' });
+
+		await redeemInviteAndRegister(
+			{
+				inviteService,
+				userMutationService: mutationService,
+				telegram: mockTelegram,
+				logger: mockLogger,
+			},
+			code,
+			'333',
+		);
+
+		const users = userManager.getAllUsers();
+		const newAdmin = users.find((u) => u.id === '333');
+		expect(newAdmin?.isAdmin).toBe(true);
+	});
+
+	it('calls spaceService.addMember for each initialSpace after registration', async () => {
+		const code = await inviteService.createInvite('Space User', '111', {
+			initialSpaces: ['space-1'],
+		});
+
+		const mockSpaceService = {
+			addMember: vi.fn().mockResolvedValue([]),
+		} as never;
+
+		await redeemInviteAndRegister(
+			{
+				inviteService,
+				userMutationService: mutationService,
+				telegram: mockTelegram,
+				logger: mockLogger,
+				spaceService: mockSpaceService,
+			},
+			code,
+			'444',
+		);
+
+		expect(mockSpaceService.addMember).toHaveBeenCalledWith('space-1', '444');
+	});
+
+	it('skips auto-join when spaceService is absent', async () => {
+		const code = await inviteService.createInvite('No Space', '111', {
+			initialSpaces: ['space-1'],
+		});
+
+		// No spaceService — should not throw
+		const result = await redeemInviteAndRegister(
+			{
+				inviteService,
+				userMutationService: mutationService,
+				telegram: mockTelegram,
+				logger: mockLogger,
+			},
+			code,
+			'555',
+		);
+
+		expect(result).toEqual({ success: true, name: 'No Space' });
+	});
+
+	it('swallows spaceService.addMember errors and still returns success', async () => {
+		const code = await inviteService.createInvite('Error Space', '111', {
+			initialSpaces: ['space-1'],
+		});
+
+		const mockSpaceService = {
+			addMember: vi.fn().mockRejectedValue(new Error('Space service down')),
+		} as never;
+
+		// Should not throw despite spaceService failure
+		const result = await redeemInviteAndRegister(
+			{
+				inviteService,
+				userMutationService: mutationService,
+				telegram: mockTelegram,
+				logger: mockLogger,
+				spaceService: mockSpaceService,
+			},
+			code,
+			'666',
+		);
+
+		expect(result).toEqual({ success: true, name: 'Error Space' });
+		// User was registered despite auto-join failure
+		expect(userManager.isRegistered('666')).toBe(true);
 	});
 });

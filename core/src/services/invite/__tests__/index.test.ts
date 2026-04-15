@@ -350,6 +350,53 @@ describe('InviteService', () => {
 		});
 	});
 
+	// --- opts fields (householdId, role, initialSpaces, enabledApps) ---
+
+	describe('createInvite opts fields', () => {
+		it('stores householdId when provided', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin', { householdId: 'household-abc' });
+
+			const store = await svc.listInvites();
+			expect(store[code]?.householdId).toBe('household-abc');
+		});
+
+		it('stores role: admin when provided', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin', { role: 'admin' });
+
+			const store = await svc.listInvites();
+			expect(store[code]?.role).toBe('admin');
+		});
+
+		it('stores initialSpaces when provided', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin', {
+				initialSpaces: ['space-1', 'space-2'],
+			});
+
+			const store = await svc.listInvites();
+			expect(store[code]?.initialSpaces).toEqual(['space-1', 'space-2']);
+		});
+
+		it('throws on initialSpaces containing a SAFE_SEGMENT-violating entry', async () => {
+			const svc = makeService();
+			await expect(
+				svc.createInvite('Alice', 'admin', { initialSpaces: ['../evil'] }),
+			).rejects.toThrow(/Invalid space ID/);
+		});
+
+		it('stores enabledApps when provided', async () => {
+			const svc = makeService();
+			const code = await svc.createInvite('Alice', 'admin', {
+				enabledApps: ['food', 'chatbot'],
+			});
+
+			const store = await svc.listInvites();
+			expect(store[code]?.enabledApps).toEqual(['food', 'chatbot']);
+		});
+	});
+
 	// --- security ---
 
 	describe('security', () => {

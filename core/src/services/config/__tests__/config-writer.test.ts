@@ -160,4 +160,48 @@ defaults:
 		expect(users).toHaveLength(1);
 		expect(users[0].is_admin).toBe(true);
 	});
+
+	it('serializes householdId as household_id when present', async () => {
+		const configPath = join(tempDir, 'pas.yaml');
+		await writeFile(configPath, 'users: []\n', 'utf-8');
+
+		const userWithHousehold: RegisteredUser = {
+			id: '333',
+			name: 'Charlie',
+			isAdmin: false,
+			enabledApps: ['food'],
+			sharedScopes: [],
+			householdId: 'household-abc',
+		};
+
+		await syncUsersToConfig(configPath, [userWithHousehold]);
+
+		const content = await readFile(configPath, 'utf-8');
+		const parsed = parse(content) as Record<string, unknown>;
+		const users = parsed.users as Array<Record<string, unknown>>;
+
+		expect(users[0].household_id).toBe('household-abc');
+	});
+
+	it('omits household_id from serialized YAML when householdId is undefined', async () => {
+		const configPath = join(tempDir, 'pas.yaml');
+		await writeFile(configPath, 'users: []\n', 'utf-8');
+
+		const userWithoutHousehold: RegisteredUser = {
+			id: '444',
+			name: 'Dana',
+			isAdmin: false,
+			enabledApps: ['chatbot'],
+			sharedScopes: [],
+			// householdId intentionally absent
+		};
+
+		await syncUsersToConfig(configPath, [userWithoutHousehold]);
+
+		const content = await readFile(configPath, 'utf-8');
+		const parsed = parse(content) as Record<string, unknown>;
+		const users = parsed.users as Array<Record<string, unknown>>;
+
+		expect(users[0]).not.toHaveProperty('household_id');
+	});
 });
