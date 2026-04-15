@@ -722,6 +722,56 @@ describe('DataQueryService — scope enforcement', () => {
 		expect(result.empty).toBe(true);
 		expect(vi.mocked(llm.complete)).not.toHaveBeenCalled();
 	});
+
+	it('shared files are visible to a user who belongs to multiple spaces', async () => {
+		// Regression guard: the old code used userSpaces.length to gate shared access.
+		// With multiple spaces, a user would still have been denied shared data.
+		await writeDataFile(dataDir, 'users/shared/food/prices/costco.md', PRICE_FILE);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['prices/']));
+		await fileIndex.rebuild();
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([
+				{ id: 'household-a', members: ['matt', 'nina'] },
+				{ id: 'household-b', members: ['matt'] },
+			]),
+			llm: makeMockLlm('[0]'),
+			dataDir,
+			logger,
+		});
+
+		const result = await svc.query('show me prices', 'matt');
+
+		expect(result.empty).toBe(false);
+		expect(result.files[0].content).toContain('Orange');
+	});
+
+	it('scope filter does not call listSpaces or getSpacesForUser — those methods are not part of the authorization contract', async () => {
+		// Regression guard: the old buggy implementation called getSpacesForUser() and
+		// listSpaces() to compute includeShared. The fix must NOT call these methods,
+		// because shared access is unconditional. If they are re-introduced, this test fails.
+		await writeDataFile(dataDir, 'users/shared/food/prices/costco.md', PRICE_FILE);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['prices/']));
+		await fileIndex.rebuild();
+
+		const spaceService = makeSpaceService([{ id: 'household-a', members: ['matt'] }]);
+		const listSpacesSpy = vi.spyOn(spaceService, 'listSpaces');
+		const getSpacesForUserSpy = vi.spyOn(spaceService, 'getSpacesForUser');
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService,
+			llm: makeMockLlm('[0]'),
+			dataDir,
+			logger,
+		});
+
+		await svc.query('show me prices', 'matt');
+
+		expect(listSpacesSpy).not.toHaveBeenCalled();
+		expect(getSpacesForUserSpy).not.toHaveBeenCalled();
+	});
 });
 
 describe('DataQueryService — LLM output untrusted (ID validation)', () => {
