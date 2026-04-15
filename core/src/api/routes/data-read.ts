@@ -9,8 +9,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { PathTraversalError, resolveScopedPath } from '../../services/data-store/paths.js';
-import type { HouseholdService } from '../../services/household/index.js';
+import { PathTraversalError, resolveScopedPath, resolveScopedDataDir } from '../../services/data-store/paths.js';
+import { HouseholdBoundaryError, type HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
@@ -38,6 +38,14 @@ export interface DataReadRouteOptions {
 /**
  * Resolve the base directory for a read request, accounting for household routing.
  * Private to this module — do not expose on any public interface.
+ *
+ * Defense-in-depth: when a space of kind='household' is requested, this asserts that
+ * the requesting userId belongs to the same household as the space (in addition to the
+ * isMember check performed by the caller) — matching the invariant in DataStoreServiceImpl.forSpace().
+ *
+ * householdId semantics for the underlying resolveScopedDataDir call:
+ *   - opts.householdService present → resolve and pass (string or null → fail-closed)
+ *   - opts.householdService absent → pass undefined → legacy fallback
  */
 function resolveApiReadBaseDir(opts: {
 	dataDir: string;
@@ -47,29 +55,36 @@ function resolveApiReadBaseDir(opts: {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	spaceService: SpaceService;
 }): string {
-	if (opts.spaceId) {
+	// Defense-in-depth: for household spaces, verify the requesting user's household
+	// matches the space's householdId, even if isMember already passed.
+	if (opts.spaceId && opts.householdService) {
 		const spaceDef = opts.spaceService.getSpace(opts.spaceId) ?? null;
 		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
-			return join(
-				opts.dataDir,
-				'households',
-				spaceDef.householdId,
-				'spaces',
-				opts.spaceId,
-				opts.appId,
-			);
+			const userHh = opts.householdService.getHouseholdForUser(opts.userId);
+			if (userHh !== spaceDef.householdId) {
+				throw new HouseholdBoundaryError(
+					userHh,
+					spaceDef.householdId,
+					`GET /api/data: user "${opts.userId}" (household "${userHh ?? 'none'}") attempted to access space "${opts.spaceId}" in household "${spaceDef.householdId}"`,
+				);
+			}
 		}
-		if (spaceDef?.kind === 'collaboration') {
-			return join(opts.dataDir, 'collaborations', opts.spaceId, opts.appId);
-		}
-		// Legacy / unknown kind — transitional fallback
-		return join(opts.dataDir, 'spaces', opts.spaceId, opts.appId);
 	}
-	const hhId = opts.householdService?.getHouseholdForUser(opts.userId) ?? null;
-	if (hhId) {
-		return join(opts.dataDir, 'households', hhId, 'users', opts.userId, opts.appId);
-	}
-	return join(opts.dataDir, 'users', opts.userId, opts.appId);
+
+	// Resolve household ID: undefined when service not wired (legacy fallback allowed),
+	// string or null when wired (null → fail-closed throw in resolveScopedDataDir).
+	const householdId = opts.householdService
+		? opts.householdService.getHouseholdForUser(opts.userId)
+		: undefined;
+
+	return resolveScopedDataDir({
+		dataDir: opts.dataDir,
+		appId: opts.appId,
+		userId: opts.userId,
+		spaceId: opts.spaceId,
+		householdId,
+		spaceService: opts.spaceService,
+	});
 }
 
 interface DataReadQuery {

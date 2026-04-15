@@ -5,9 +5,11 @@
  * and rejects any path that would escape the expected scope.
  */
 
-import { posix, relative, resolve, sep } from 'node:path';
+import { join, posix, relative, resolve, sep } from 'node:path';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { HouseholdBoundaryError } from '../household/index.js';
+
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Resolve a relative path within a base directory.
@@ -144,6 +146,86 @@ export function findMatchingScope(
 export function extractHouseholdIdFromPath(absolutePath: string): string | null {
 	const match = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(absolutePath);
 	return match?.[1] ?? null;
+}
+
+/**
+ * Resolve a household-aware base directory for app data access.
+ *
+ * This is a **path resolver only** — it builds an absolute path but does NOT
+ * enforce authorization (membership checks, actor-vs-target, etc.).  Callers
+ * must perform their own authorization before invoking this helper.
+ *
+ * ### householdId semantics
+ * - `string`    → use household-scoped path `households/<hh>/users/<u>/<app>`
+ * - `null`      → HouseholdService is wired but returned no household for this
+ *                 user — throw `HouseholdBoundaryError` (fail-closed)
+ * - `undefined` → HouseholdService is not wired; fall back to legacy layout
+ *                 (`users/<u>/<app>`) — transitional bootstrap mode only
+ *
+ * ### Space routing
+ * - `kind='household'` → `households/<hh>/spaces/<s>/<app>`
+ * - `kind='collaboration'` → `collaborations/<s>/<app>`
+ * - unknown / absent kind → legacy `spaces/<s>/<app>` (transitional fallback)
+ *
+ * @throws `HouseholdBoundaryError` when `householdId` is `null` (wired, no household)
+ * @throws `PathTraversalError` when any segment fails the SAFE_SEGMENT check or contains null bytes
+ */
+export function resolveScopedDataDir(opts: {
+	dataDir: string;
+	appId: string;
+	userId?: string;
+	spaceId?: string;
+	/**
+	 * Resolved household ID:
+	 *   string → household path; null → fail-closed throw; undefined → legacy fallback
+	 */
+	householdId?: string | null;
+	spaceService?: { getSpace(id: string): { kind: string; householdId?: string } | null };
+}): string {
+	// Segment validation — reject null bytes and unsafe characters
+	if (!SAFE_SEGMENT.test(opts.appId)) {
+		throw new PathTraversalError(opts.appId, opts.dataDir);
+	}
+	if (opts.userId !== undefined && !SAFE_SEGMENT.test(opts.userId)) {
+		throw new PathTraversalError(opts.userId, opts.dataDir);
+	}
+	if (opts.spaceId !== undefined && !SAFE_SEGMENT.test(opts.spaceId)) {
+		throw new PathTraversalError(opts.spaceId, opts.dataDir);
+	}
+
+	if (opts.spaceId) {
+		const spaceDef = opts.spaceService?.getSpace(opts.spaceId) ?? null;
+		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
+			return resolve(
+				join(opts.dataDir, 'households', spaceDef.householdId, 'spaces', opts.spaceId, opts.appId),
+			);
+		}
+		if (spaceDef?.kind === 'collaboration') {
+			return resolve(join(opts.dataDir, 'collaborations', opts.spaceId, opts.appId));
+		}
+		// Legacy / unknown kind — transitional fallback (both wired and unwired)
+		return resolve(join(opts.dataDir, 'spaces', opts.spaceId, opts.appId));
+	}
+
+	// User path
+	if (opts.householdId === null) {
+		throw new HouseholdBoundaryError(
+			null,
+			null,
+			`resolveScopedDataDir: HouseholdService is wired but no household found for user "${opts.userId ?? '(unknown)'}". Refusing legacy fallback.`,
+		);
+	}
+	if (!opts.userId) {
+		throw new PathTraversalError('(missing userId)', opts.dataDir);
+	}
+	if (opts.householdId !== undefined) {
+		// Explicit household ID provided — use household-scoped path
+		return resolve(
+			join(opts.dataDir, 'households', opts.householdId, 'users', opts.userId, opts.appId),
+		);
+	}
+	// Service not wired — transitional legacy layout
+	return resolve(join(opts.dataDir, 'users', opts.userId, opts.appId));
 }
 
 /**

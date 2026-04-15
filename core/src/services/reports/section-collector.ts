@@ -22,7 +22,7 @@ import type { SpaceDefinition } from '../../types/spaces.js';
 import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { collectChanges } from '../daily-diff/collector.js';
 import type { ChangeLog } from '../data-store/change-log.js';
-import { extractHouseholdIdFromPath } from '../data-store/paths.js';
+import { extractHouseholdIdFromPath, resolveScopedDataDir } from '../data-store/paths.js';
 
 export interface CollectorDeps {
 	changeLog: ChangeLog;
@@ -165,32 +165,17 @@ async function collectAppDataSection(
 	// Resolve date tokens in path
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone);
 
-	// Build the full path: space-aware or per-user (household-aware post-migration).
-	// For space_id, consult SpaceService.getSpace() for kind-based routing:
-	//   kind='household' → data/households/<hh>/spaces/<s>/<app>
-	//   kind='collaboration' → data/collaborations/<s>/<app>
-	//   unknown/legacy → data/spaces/<s>/<app>   (transitional fallback)
+	// Build the full path using the shared household-aware resolver.
+	// deps.householdId: string → household path; undefined → legacy (service not wired).
 	// biome-ignore lint/style/noNonNullAssertion: validated by report-validator (user_id required when no space_id)
-	let baseDir: string;
-	if (config.space_id) {
-		const spaceDef = deps.spaceService?.getSpace(config.space_id) ?? null;
-		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
-			baseDir = resolve(
-				join(deps.dataDir, 'households', spaceDef.householdId, 'spaces', config.space_id, config.app_id),
-			);
-		} else if (spaceDef?.kind === 'collaboration') {
-			baseDir = resolve(join(deps.dataDir, 'collaborations', config.space_id, config.app_id));
-		} else {
-			// Legacy / unknown kind — transitional fallback
-			baseDir = resolve(join(deps.dataDir, 'spaces', config.space_id, config.app_id));
-		}
-	} else if (deps.householdId) {
-		baseDir = resolve(
-			join(deps.dataDir, 'households', deps.householdId, 'users', config.user_id!, config.app_id),
-		);
-	} else {
-		baseDir = resolve(join(deps.dataDir, 'users', config.user_id!, config.app_id));
-	}
+	const baseDir = resolveScopedDataDir({
+		dataDir: deps.dataDir,
+		appId: config.app_id,
+		userId: config.user_id ?? undefined,
+		spaceId: config.space_id ?? undefined,
+		householdId: deps.householdId,
+		spaceService: deps.spaceService,
+	});
 	const fullPath = resolve(join(baseDir, resolvedPath));
 
 	// Path traversal check: ensure resolved path is within the base dir

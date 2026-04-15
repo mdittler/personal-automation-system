@@ -13,12 +13,27 @@ import {
 	ARCHIVE_FILENAME_PATTERN,
 	MODEL_SLUG_PATTERN,
 } from '../../services/model-journal/index.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import type { SystemConfig } from '../../types/config.js';
 
 export interface DataOptions {
 	config: SystemConfig;
 	dataDir: string;
 	logger: Logger;
+	/**
+	 * Optional — when present, routes user/shared browsing to the household
+	 * layout and enforces householdId consistency on browse requests.
+	 */
+	householdService?: {
+		getHouseholdForUser(userId: string): string | null;
+		listHouseholds(): Array<{ id: string; name: string }>;
+	};
+	/**
+	 * Optional — when present, resolves space data directories by kind:
+	 * household spaces → `data/households/<hh>/spaces/<s>/`, collaborations →
+	 * `data/collaborations/<s>/`.
+	 */
+	spaceService?: { getSpace(id: string): SpaceDefinition | null };
 }
 
 /** Pattern for valid userId and appId segments. */
@@ -89,15 +104,21 @@ function escapeHtml(str: string): string {
  * Validate and resolve a browsing path. Returns null if path is invalid.
  *
  * Supported scopes:
- *   - 'user'       → data/users/<userId>/[<appId>/]          (legacy layout)
- *   - 'shared'     → data/users/shared/[<appId>/]            (legacy layout)
+ *   - 'user'       → `data/households/<hh>/users/<userId>/[<appId>/]` when householdId provided,
+ *                    else `data/users/<userId>/[<appId>/]` (legacy)
+ *   - 'shared'     → `data/households/<hh>/shared/[<appId>/]` when householdId provided,
+ *                    else `data/users/shared/[<appId>/]` (legacy)
  *   - 'system'     → data/system/
- *   - 'space'      → data/spaces/<spaceId>/[<appId>/]
- *   - 'household'  → data/households/<householdId>/[<appId>/] (new multi-hh layout)
+ *   - 'space'      → resolved by kind via spaceService when provided:
+ *                    household kind → `data/households/<hh>/spaces/<s>/`
+ *                    collaboration kind → `data/collaborations/<s>/`
+ *                    unknown/absent → `data/spaces/<s>/` (legacy)
+ *   - 'household'  → `data/households/<householdId>/[<appId>/]` (admin top-level browser;
+ *                    userId parameter carries the householdId)
  *
- * The 'household' scope uses the userId parameter to carry the householdId.
- * This route is system-owner-only (single GUI auth token), so no per-household
- * auth enforcement is applied here — that is a D5b concern.
+ * `householdId` enables the new layout for user/shared/space scopes. The
+ * caller is responsible for validating household constraints before calling
+ * this function — it is a path resolver only.
  */
 function resolveBrowsePath(
 	dataDir: string,
@@ -105,22 +126,55 @@ function resolveBrowsePath(
 	userId?: string,
 	appId?: string,
 	subpath?: string,
+	householdId?: string,
+	spaceService?: { getSpace(id: string): SpaceDefinition | null },
 ): string | null {
 	// Validate segments
 	if (userId && !SAFE_SEGMENT.test(userId)) return null;
 	if (appId && !SAFE_SEGMENT.test(appId)) return null;
+	if (householdId && !SAFE_SEGMENT.test(householdId)) return null;
 
 	// Build base path
 	let targetPath: string;
 	if (scope === 'user' && userId) {
-		targetPath = appId ? join(dataDir, 'users', userId, appId) : join(dataDir, 'users', userId);
+		if (householdId) {
+			targetPath = appId
+				? join(dataDir, 'households', householdId, 'users', userId, appId)
+				: join(dataDir, 'households', householdId, 'users', userId);
+		} else {
+			targetPath = appId
+				? join(dataDir, 'users', userId, appId)
+				: join(dataDir, 'users', userId);
+		}
 	} else if (scope === 'shared') {
-		targetPath = appId ? join(dataDir, 'users', 'shared', appId) : join(dataDir, 'users', 'shared');
+		if (householdId) {
+			targetPath = appId
+				? join(dataDir, 'households', householdId, 'shared', appId)
+				: join(dataDir, 'households', householdId, 'shared');
+		} else {
+			targetPath = appId
+				? join(dataDir, 'users', 'shared', appId)
+				: join(dataDir, 'users', 'shared');
+		}
 	} else if (scope === 'system') {
 		targetPath = join(dataDir, 'system');
 	} else if (scope === 'space' && userId) {
 		// For spaces, userId parameter carries the spaceId
-		targetPath = appId ? join(dataDir, 'spaces', userId, appId) : join(dataDir, 'spaces', userId);
+		const spaceDef = spaceService?.getSpace(userId) ?? null;
+		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
+			targetPath = appId
+				? join(dataDir, 'households', spaceDef.householdId, 'spaces', userId, appId)
+				: join(dataDir, 'households', spaceDef.householdId, 'spaces', userId);
+		} else if (spaceDef?.kind === 'collaboration') {
+			targetPath = appId
+				? join(dataDir, 'collaborations', userId, appId)
+				: join(dataDir, 'collaborations', userId);
+		} else {
+			// Legacy layout
+			targetPath = appId
+				? join(dataDir, 'spaces', userId, appId)
+				: join(dataDir, 'spaces', userId);
+		}
 	} else if (scope === 'household' && userId) {
 		// For households, userId parameter carries the householdId
 		targetPath = appId
@@ -149,11 +203,14 @@ function resolveBrowsePath(
 }
 
 export function registerDataRoutes(server: FastifyInstance, options: DataOptions): void {
-	const { config, dataDir } = options;
+	const { config, dataDir, householdService, spaceService } = options;
 
 	// Full page — overview of all data directories
 	server.get('/data', async (_request: FastifyRequest, reply: FastifyReply) => {
-		// Build user sections (legacy layout: data/users/<userId>/)
+		// Build user sections. When householdService is wired, read from
+		// households/<hh>/users/<u> for each known household. Otherwise fall back
+		// to the legacy data/users/<u> layout so the browser is functional before
+		// and after migration.
 		const userSections: Array<{
 			id: string;
 			name: string;
@@ -161,7 +218,15 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		}> = [];
 
 		for (const user of config.users) {
-			const userDir = join(dataDir, 'users', user.id);
+			let userDir: string;
+			if (householdService) {
+				const hh = householdService.getHouseholdForUser(user.id);
+				userDir = hh
+					? join(dataDir, 'households', hh, 'users', user.id)
+					: join(dataDir, 'users', user.id);
+			} else {
+				userDir = join(dataDir, 'users', user.id);
+			}
 			const apps = await listDirectory(userDir);
 			userSections.push({
 				id: user.id,
@@ -170,9 +235,25 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			});
 		}
 
-		// Shared data
-		const sharedDir = join(dataDir, 'users', 'shared');
-		const sharedApps = await listDirectory(sharedDir);
+		// Shared data — prefer household layout when service is wired.
+		// We show one shared block per household (using the first household found),
+		// falling back to the legacy path when no households exist.
+		let sharedApps: FileEntry[] = [];
+		let sharedHouseholdId: string | undefined;
+		if (householdService) {
+			const households = householdService.listHouseholds();
+			if (households.length > 0) {
+				// Show shared data for the first household as the primary display.
+				// A future D5b phase will add per-household auth and per-household tabs.
+				sharedHouseholdId = households[0]!.id;
+				sharedApps = await listDirectory(
+					join(dataDir, 'households', sharedHouseholdId, 'shared'),
+				);
+			}
+		}
+		if (!householdService || sharedApps.length === 0) {
+			sharedApps = await listDirectory(join(dataDir, 'users', 'shared'));
+		}
 
 		// System data
 		const systemDir = join(dataDir, 'system');
@@ -206,6 +287,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			activePage: 'data',
 			userSections,
 			sharedApps: sharedApps.filter((e) => e.isDirectory).map((e) => e.name),
+			sharedHouseholdId,
 			systemEntries: systemEntries.map((e) => ({ name: e.name, isDirectory: e.isDirectory })),
 			spaceSections,
 			householdSections,
@@ -221,15 +303,46 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			userId?: string;
 			appId?: string;
 			subpath?: string;
+			householdId?: string;
 		};
 
-		const { scope, userId, appId, subpath } = query;
+		const { scope, userId, appId, subpath, householdId } = query;
 
 		if (!scope) {
 			return reply.status(400).type('text/html').send('Missing scope parameter.');
 		}
 
-		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath);
+		// Household-aware validation and path resolution.
+		// When householdService is wired:
+		//   - scope=user: auto-derive householdId from userId if not provided; if
+		//     provided, verify it matches (403 on mismatch).
+		//   - scope=shared: householdId is required (400 if absent).
+		let resolvedHouseholdId = householdId;
+		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId) {
+				return reply
+					.status(400)
+					.type('text/html')
+					.send('Missing householdId for shared scope.');
+			}
+			if (scope === 'user' && userId) {
+				const actualHh = householdService.getHouseholdForUser(userId);
+				if (resolvedHouseholdId) {
+					if (actualHh !== resolvedHouseholdId) {
+						return reply
+							.status(403)
+							.type('text/html')
+							.send('User does not belong to the specified household.');
+					}
+				} else if (actualHh) {
+					// Auto-derive: route to the household layout without requiring the
+					// caller to know the householdId.
+					resolvedHouseholdId = actualHh;
+				}
+			}
+		}
+
+		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath, resolvedHouseholdId, spaceService);
 		if (targetPath === null) {
 			return reply.status(400).type('text/html').send('Invalid path.');
 		}
@@ -264,7 +377,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		}
 
 		// Build browse URL params for sub-directories
-		const baseParams = `scope=${escapeHtml(scope)}${userId ? `&userId=${escapeHtml(userId)}` : ''}${appId ? `&appId=${escapeHtml(appId)}` : ''}`;
+		const baseParams = `scope=${escapeHtml(scope)}${userId ? `&userId=${escapeHtml(userId)}` : ''}${appId ? `&appId=${escapeHtml(appId)}` : ''}${householdId ? `&householdId=${escapeHtml(householdId)}` : ''}`;
 
 		const rows = entries
 			.map((e) => {
@@ -296,15 +409,40 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			userId?: string;
 			appId?: string;
 			subpath?: string;
+			householdId?: string;
 		};
 
-		const { scope, userId, appId, subpath } = query;
+		const { scope, userId, appId, subpath, householdId } = query;
 
 		if (!scope || !subpath) {
 			return reply.status(400).type('text/html').send('Missing parameters.');
 		}
 
-		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath);
+		// Household-aware validation (mirrors /data/browse)
+		let resolvedHouseholdId = householdId;
+		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId) {
+				return reply
+					.status(400)
+					.type('text/html')
+					.send('Missing householdId for shared scope.');
+			}
+			if (scope === 'user' && userId) {
+				const actualHh = householdService.getHouseholdForUser(userId);
+				if (resolvedHouseholdId) {
+					if (actualHh !== resolvedHouseholdId) {
+						return reply
+							.status(403)
+							.type('text/html')
+							.send('User does not belong to the specified household.');
+					}
+				} else if (actualHh) {
+					resolvedHouseholdId = actualHh;
+				}
+			}
+		}
+
+		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath, resolvedHouseholdId, spaceService);
 		if (targetPath === null) {
 			return reply.status(400).type('text/html').send('Invalid path.');
 		}
@@ -342,9 +480,10 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			appId?: string;
 			subpath?: string;
 			target?: string;
+			householdId?: string;
 		};
 
-		const { scope, userId, appId, subpath, target } = query;
+		const { scope, userId, appId, subpath, target, householdId } = query;
 
 		if (!scope || !target) {
 			return reply.status(400).type('text/html').send('<small>Missing parameters.</small>');
@@ -358,7 +497,31 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			return reply.type('text/html').send('<small><em>Select an app and user first.</em></small>');
 		}
 
-		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath);
+		// Household-aware validation (mirrors /data/browse)
+		let resolvedHouseholdId = householdId;
+		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId) {
+				return reply
+					.status(400)
+					.type('text/html')
+					.send('<small>Missing householdId for shared scope.</small>');
+			}
+			if (scope === 'user') {
+				const actualHh = householdService.getHouseholdForUser(userId);
+				if (resolvedHouseholdId) {
+					if (actualHh !== resolvedHouseholdId) {
+						return reply
+							.status(403)
+							.type('text/html')
+							.send('<small>User does not belong to the specified household.</small>');
+					}
+				} else if (actualHh) {
+					resolvedHouseholdId = actualHh;
+				}
+			}
+		}
+
+		const targetPath = resolveBrowsePath(dataDir, scope, userId, appId, subpath, resolvedHouseholdId, spaceService);
 		if (targetPath === null) {
 			return reply.status(400).type('text/html').send('<small>Invalid path.</small>');
 		}

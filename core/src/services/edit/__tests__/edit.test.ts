@@ -1305,3 +1305,108 @@ describe('EditLog', () => {
     expect(content).toContain('"outcome":"confirmed"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// confirmEdit household boundary
+// ---------------------------------------------------------------------------
+
+describe('confirmEdit: household boundary enforcement', () => {
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = makeTmpDir();
+    await mkdir(dataDir, { recursive: true });
+    await mkdir(join(dataDir, 'system'), { recursive: true });
+  });
+
+  it('confirmEdit: path household differs from context household → throws HouseholdBoundaryError with correct householdIdB', async () => {
+    const hhBetaDataDir = join(dataDir, 'households', 'hh-beta');
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    const absolutePath = join(hhBetaDataDir, relativePath);
+    await mkdir(join(hhBetaDataDir, 'users/matt/food/recipes'), { recursive: true });
+    await writeFile(absolutePath, 'original content', 'utf-8');
+    const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+    const svc = new EditServiceImpl({
+      dataQueryService: makeDataQueryService([]),
+      appRegistry: makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' }),
+      llm: makeLLM(''),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir: hhBetaDataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const proposal = {
+      kind: 'proposal' as const,
+      filePath: relativePath,
+      absolutePath,
+      appId: 'food',
+      userId: 'matt',
+      description: 'edit something',
+      scope: 'user',
+      beforeContent: 'original content',
+      afterContent: 'new content',
+      beforeHash: sha256('original content'),
+      diff: '...',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    // Context householdId is hh-alpha; path contains hh-beta → boundary violation
+    let thrown: unknown;
+    try {
+      await requestContext.run({ userId: 'matt', householdId: 'hh-alpha' }, () =>
+        svc.confirmEdit(proposal),
+      );
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(HouseholdBoundaryError);
+    const err = thrown as HouseholdBoundaryError;
+    expect(err.householdIdA).toBe('hh-alpha');
+    expect(err.householdIdB).toBe('hh-beta');
+  });
+
+  it('confirmEdit: path household matches context household → succeeds', async () => {
+    const hhAlphaDataDir = join(dataDir, 'households', 'hh-alpha');
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    const absolutePath = join(hhAlphaDataDir, relativePath);
+    await mkdir(join(hhAlphaDataDir, 'users/matt/food/recipes'), { recursive: true });
+    const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+    await writeFile(absolutePath, 'original content', 'utf-8');
+
+    const svc = new EditServiceImpl({
+      dataQueryService: makeDataQueryService([]),
+      appRegistry: makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' }),
+      llm: makeLLM(''),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir: hhAlphaDataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    const proposal = {
+      kind: 'proposal' as const,
+      filePath: relativePath,
+      absolutePath,
+      appId: 'food',
+      userId: 'matt',
+      description: 'edit something',
+      scope: 'user',
+      beforeContent: 'original content',
+      afterContent: 'new content',
+      beforeHash: sha256('original content'),
+      diff: '...',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    const result = await requestContext.run({ userId: 'matt', householdId: 'hh-alpha' }, () =>
+      svc.confirmEdit(proposal),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+});
