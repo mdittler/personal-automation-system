@@ -93,9 +93,9 @@ export async function main(): Promise<void> {
 
 	const transitionalConfig = await loadSystemConfig({ mode: 'transitional' });
 	const configPath = resolve('config', 'pas.yaml');
-	const migrationRan = !!transitionalConfig.migrationNeeded;
+	const needsMigration = !!transitionalConfig.migrationNeeded;
 
-	if (migrationRan) {
+	if (needsMigration) {
 		// Phase 2: Run migration (fail-fast on error).
 		// Logger not yet constructed — use console so migration progress is visible.
 		// biome-ignore lint/suspicious/noConsole: logger not available during migration
@@ -665,7 +665,7 @@ export async function main(): Promise<void> {
 
 	// If migration ran, paths changed (data/users/ → data/households/default/users/).
 	// Rebuild to pick up new locations — the initial rebuild above read pre-migration paths.
-	if (migrationRan) {
+	if (needsMigration) {
 		await fileIndex.rebuild();
 		logger.info({ count: fileIndex.size }, 'FileIndexService: post-migration index rebuilt');
 	} else {

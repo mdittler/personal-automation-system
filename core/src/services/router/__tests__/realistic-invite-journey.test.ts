@@ -496,7 +496,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 		it('"/invite Sarah" — simple first name', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Sarah', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1', expect.objectContaining({ householdId: 'default' }));
 			expect(telegram.send).toHaveBeenCalledWith(
 				'admin1',
 				expect.stringContaining('d3f7a8c2'),
@@ -506,25 +506,25 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 		it('"/invite Mom" — family nickname', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Mom', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Mom', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('Mom', 'admin1', expect.objectContaining({ householdId: 'default' }));
 		});
 
 		it('"/invite Sarah Johnson" — full name with space', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Sarah Johnson', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah Johnson', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah Johnson', 'admin1', expect.objectContaining({ householdId: 'default' }));
 		});
 
 		it('"/invite my wife" — descriptive name', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite my wife', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('my wife', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('my wife', 'admin1', expect.objectContaining({ householdId: 'default' }));
 		});
 
 		it('"/invite Grandma 👵" — name with emoji', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Grandma 👵', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Grandma 👵', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('Grandma 👵', 'admin1', expect.objectContaining({ householdId: 'default' }));
 		});
 	});
 

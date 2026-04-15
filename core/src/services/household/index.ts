@@ -302,6 +302,19 @@ export class HouseholdService {
 	}
 
 	/**
+	 * Remove a user from the in-memory userId→householdId map and member registry.
+	 * Does NOT modify households.yaml — the actual user removal from pas.yaml is
+	 * handled by UserMutationService. Call this after a user is removed.
+	 */
+	removeUser(userId: string): void {
+		this.userHouseholdMap.delete(userId);
+		const idx = this.memberRegistry.findIndex((u) => u.id === userId);
+		if (idx >= 0) {
+			this.memberRegistry.splice(idx, 1);
+		}
+	}
+
+	/**
 	 * Sync a user into the userId→householdId map.
 	 * Call this when a user is registered, updated, or their householdId changes.
 	 * Also adds the user to the member registry for getMembers().

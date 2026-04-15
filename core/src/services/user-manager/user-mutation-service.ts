@@ -15,15 +15,15 @@ export interface UserMutationServiceOptions {
 	userManager: UserManager;
 	configPath: string;
 	logger: Logger;
-	/** Optional — when present, syncUser is called after each successful registration to keep the in-memory map current. */
-	householdService?: Pick<HouseholdService, 'syncUser'>;
+	/** Optional — when present, syncUser is called after each successful registration and removeUser after removal to keep the in-memory map current. */
+	householdService?: Pick<HouseholdService, 'syncUser' | 'removeUser'>;
 }
 
 export class UserMutationService {
 	private readonly userManager: UserManager;
 	private readonly configPath: string;
 	private readonly logger: Logger;
-	private readonly householdService?: Pick<HouseholdService, 'syncUser'>;
+	private readonly householdService?: Pick<HouseholdService, 'syncUser' | 'removeUser'>;
 
 	constructor(options: UserMutationServiceOptions) {
 		this.userManager = options.userManager;
@@ -94,6 +94,7 @@ export class UserMutationService {
 
 		this.userManager.removeUser(telegramId);
 		await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		this.householdService?.removeUser(telegramId);
 		this.logger.info({ userId: telegramId }, 'User removed and config synced');
 		return {};
 	}

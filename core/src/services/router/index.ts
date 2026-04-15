@@ -882,7 +882,8 @@ export class Router {
 			return;
 		}
 
-		const code = await this.inviteService.createInvite(name, ctx.userId);
+		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? 'default';
+		const code = await this.inviteService.createInvite(name, ctx.userId, { householdId, role: 'member', initialSpaces: [] });
 		await this.trySend(
 			ctx.userId,
 			`Invite code for *${escapeMarkdown(name)}*: \`${code}\`\n\nShare this code. They should send \`/start ${code}\` to the bot. Expires in 24 hours.`,

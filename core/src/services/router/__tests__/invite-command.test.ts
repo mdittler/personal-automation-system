@@ -173,7 +173,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/invite Sarah', 'admin1'));
 
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1');
+			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1', expect.objectContaining({ householdId: 'default' }));
 			expect(telegram.send).toHaveBeenCalledWith(
 				'admin1',
 				expect.stringContaining('abc12345'),
@@ -336,6 +336,7 @@ describe('Router — /invite command', () => {
 			expect(inviteService.createInvite).toHaveBeenCalledWith(
 				'<script>alert(1)</script>',
 				'admin1',
+				expect.objectContaining({ householdId: 'default' }),
 			);
 		});
 
