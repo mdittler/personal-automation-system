@@ -82,6 +82,12 @@ interface PasYamlConfig {
 			upper_bound?: number;
 		};
 	};
+	backup?: {
+		enabled?: boolean;
+		path?: string;
+		schedule?: string;
+		retention_count?: number;
+	};
 }
 
 /**
@@ -198,6 +204,12 @@ export async function loadSystemConfig(options?: {
 			},
 		},
 		users,
+		backup: {
+			enabled: yamlConfig?.backup?.enabled ?? false,
+			path: yamlConfig?.backup?.path ?? resolve(env.DATA_DIR, '..', 'backups'),
+			schedule: yamlConfig?.backup?.schedule ?? '0 3 * * *',
+			retentionCount: yamlConfig?.backup?.retention_count ?? 7,
+		},
 	};
 
 	return config;

@@ -84,6 +84,13 @@ defaults:
 #     url: http://localhost:5678/webhook/pas-data
 #     events: ["data:changed"]
 
+# Scheduled backups — tar.gz of data/ and config/ directories (Unix/macOS only)
+# backup:
+#   enabled: false           # Set to true to enable daily backups
+#   path: /path/to/backups   # Where to store backup files (default: <dataDir>/../backups)
+#   schedule: "0 3 * * *"   # Cron schedule (default: 3am daily)
+#   retention_count: 7       # Number of backups to keep (default: 7)
+
 # Food app — optional integrations
 # food:
 #   # Optional: USDA FoodData Central API key for quick-meal macro cross-check.

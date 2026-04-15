@@ -106,6 +106,15 @@ export const PasYamlConfigSchema = z
 			})
 			.passthrough()
 			.optional(),
+		backup: z
+			.object({
+				enabled: z.boolean().optional(),
+				path: z.string().optional(),
+				schedule: z.string().optional(),
+				retention_count: z.number().int().positive().optional(),
+			})
+			.passthrough()
+			.optional(),
 	})
 	.passthrough();
 

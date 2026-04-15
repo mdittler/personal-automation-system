@@ -997,10 +997,36 @@ export async function main(): Promise<void> {
 		},
 	);
 
-	// 14b. Load and register report cron jobs
+	// 14b. Register system backup cron job (if enabled)
+	if (config.backup.enabled) {
+		const { BackupService } = await import('./services/backup/index.js');
+		const backupService = new BackupService({
+			dataDir: config.dataDir,
+			configDir: resolve('config'),
+			backupPath: config.backup.path,
+			retentionCount: config.backup.retentionCount,
+			logger: createChildLogger(logger, { service: 'backup' }),
+		});
+		scheduler.cron.register(
+			{
+				id: 'system-backup',
+				appId: 'system',
+				cron: config.backup.schedule,
+				handler: 'system-backup',
+				description: 'Backup data and config directories',
+				userScope: 'system',
+			},
+			() => async () => {
+				const path = await backupService.createBackup();
+				if (path) logger.info({ path }, 'System backup saved');
+			},
+		);
+	}
+
+	// 14d. Load and register report cron jobs
 	await reportService.init();
 
-	// 14c. Load and register alert cron jobs
+	// 14e. Load and register alert cron jobs
 	await alertService.init();
 
 	// 15. Start scheduler

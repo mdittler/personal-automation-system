@@ -143,6 +143,18 @@ export interface SystemConfig {
 
 	/** Registered users. */
 	users: RegisteredUser[];
+
+	/** Scheduled backup configuration. */
+	backup: {
+		/** Whether scheduled backup is enabled. Default: false. */
+		enabled: boolean;
+		/** Absolute path for backup output directory. Default: <dataDir>/../backups */
+		path: string;
+		/** Cron schedule for backup job. Default: '0 3 * * *' (3am daily) */
+		schedule: string;
+		/** Number of backups to keep. Default: 7 */
+		retentionCount: number;
+	};
 }
 
 /** Route verification configuration. */
