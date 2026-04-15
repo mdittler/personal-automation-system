@@ -13,6 +13,7 @@ import type { AlertService } from '../services/alerts/index.js';
 import type { AppRegistry } from '../services/app-registry/index.js';
 import type { AppToggleStore } from '../services/app-toggle/index.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
+import type { HouseholdService } from '../services/household/index.js';
 import type { LLMServiceImpl } from '../services/llm/index.js';
 import type { ModelCatalog } from '../services/llm/model-catalog.js';
 import type { ModelSelector } from '../services/llm/model-selector.js';
@@ -57,6 +58,8 @@ export interface GuiOptions {
 	dataDir: string;
 	logger: Logger;
 	loginRateLimiter?: RateLimiter;
+	/** Optional — when present, householdId can be derived for simulated message dispatch. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 /**

@@ -16,6 +16,8 @@ import type { MessageContext, PhotoContext, RouteInfo, RouteSource, RouteVerifie
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import { requestContext } from '../../services/context/request-context.js';
+import type { HouseholdService } from '../household/index.js';
 import type { InviteService } from '../invite/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import type { SpaceService } from '../spaces/index.js';
@@ -133,6 +135,8 @@ export interface RouterOptions {
 	userMutationService?: UserMutationService;
 	/** Interaction context service for context-aware low-confidence promotion. */
 	interactionContext?: InteractionContextService;
+	/** Optional — when present, householdId is derived and injected into request context for each dispatch. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 export class Router {
@@ -154,6 +158,7 @@ export class Router {
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
+	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -176,6 +181,7 @@ export class Router {
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
 		this.interactionContext = options.interactionContext;
+		this.householdService = options.householdService;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -484,10 +490,17 @@ export class Router {
 	 * `route` is a required parameter — omitting it is a compile error, which prevents
 	 * accidentally dispatching without route metadata attached to the handler context.
 	 * The helper spreads route onto ctx internally so callers never forget the spread.
+	 *
+	 * Re-establishes the request context with householdId so that household boundary
+	 * enforcement downstream can read the correct householdId even when the outer
+	 * bootstrap context was established before householdService was available.
 	 */
 	private async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
+		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
-			await app.module.handleMessage({ ...ctx, route });
+			await requestContext.run({ userId: ctx.userId, householdId }, () =>
+				app.module.handleMessage({ ...ctx, route }),
+			);
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App message handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong. Please try again later.');
@@ -498,10 +511,15 @@ export class Router {
 	 * Dispatch a photo to an app's handlePhoto, with error isolation.
 	 *
 	 * `route` is a required parameter for the same reason as dispatchMessage.
+	 *
+	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
 	 */
 	private async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
+		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
-			await app.module.handlePhoto?.({ ...ctx, route });
+			await requestContext.run({ userId: ctx.userId, householdId }, () =>
+				app.module.handlePhoto?.({ ...ctx, route }),
+			);
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App photo handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong processing your photo.');
