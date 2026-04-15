@@ -109,7 +109,7 @@ function isValidEntry(value: unknown): value is InteractionEntry {
 	if (typeof obj['timestamp'] !== 'number') return false;
 	if (!isFinite(obj['timestamp']) || obj['timestamp'] <= 0) return false;
 
-	if (obj['scope'] !== undefined && !VALID_SCOPES.has(obj['scope'] as string)) return false;
+	if (obj['scope'] !== undefined && (typeof obj['scope'] !== 'string' || !VALID_SCOPES.has(obj['scope']))) return false;
 	if (obj['filePaths'] !== undefined && !Array.isArray(obj['filePaths'])) return false;
 	if (obj['filePaths'] !== undefined) {
 		for (const fp of obj['filePaths'] as unknown[]) {
@@ -148,6 +148,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 	private flushTimer: NodeJS.Timeout | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
 	private stopping = false;
+	private dirEnsured = false;
 
 	constructor(options: InteractionContextOptions = {}) {
 		this.dataDir = options.dataDir;
@@ -352,8 +353,11 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		}
 		const json = JSON.stringify({ version: 1, users: usersObj }, null, 2);
 
-		// Ensure system dir exists, then write atomically under file lock
-		await mkdir(join(this.persistPath, '..'), { recursive: true });
+		// Ensure system dir exists (once per process lifetime), then write atomically under file lock
+		if (!this.dirEnsured) {
+			await mkdir(join(this.persistPath, '..'), { recursive: true });
+			this.dirEnsured = true;
+		}
 		await withFileLock(this.persistPath, () => this.writer(this.persistPath, json));
 
 		this.flushedRevision = revisionAtSnapshot;
