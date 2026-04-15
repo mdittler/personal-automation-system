@@ -30,8 +30,19 @@ export class UserMutationService {
 	/**
 	 * Register a new user (e.g. from invite redemption).
 	 * Adds the user to the in-memory manager and syncs to config.
+	 *
+	 * For new registrations, `user.householdId` should always be provided.
+	 * A warning is logged if it is absent (legacy/migration path only).
 	 */
 	async registerUser(user: RegisteredUser): Promise<void> {
+		if (!user.householdId) {
+			this.logger.warn(
+				{ userId: user.id },
+				'registerUser: householdId is missing — new users should always have a householdId. ' +
+					'This is allowed only during migration.',
+			);
+		}
+
 		this.userManager.addUser(user);
 		try {
 			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
@@ -41,7 +52,7 @@ export class UserMutationService {
 			this.logger.error({ userId: user.id, err }, 'Config sync failed — registration rolled back');
 			throw err;
 		}
-		this.logger.info({ userId: user.id }, 'User registered and config synced');
+		this.logger.info({ userId: user.id, householdId: user.householdId ?? 'MISSING' }, 'User registered and config synced');
 	}
 
 	/**

@@ -90,16 +90,30 @@ interface PasYamlConfig {
 	};
 }
 
+/** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
+/** Error thrown when strict-mode config validation finds missing required fields. */
+export class ConfigValidationError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ConfigValidationError';
+	}
+}
+
 /**
  * Load and validate system configuration.
  *
  * @param options.envPath - Path to .env file. Defaults to project root .env.
  * @param options.configPath - Path to pas.yaml. Defaults to config/pas.yaml.
+ * @param options.mode - 'transitional' accepts users/spaces without householdId (sets
+ *   migrationNeeded=true). 'strict' (default) requires householdId on every user.
  * @returns Validated SystemConfig
  */
 export async function loadSystemConfig(options?: {
 	envPath?: string;
 	configPath?: string;
+	mode?: 'transitional' | 'strict';
 }): Promise<SystemConfig> {
 	// Load .env file
 	loadDotenv({ path: options?.envPath });
@@ -147,14 +161,43 @@ export async function loadSystemConfig(options?: {
 		yamlConfig = parsePasYamlConfig(strictResult.data) as PasYamlConfig;
 	}
 
+	// Determine mode — default to strict so new installs always enforce household requirement
+	const mode = options?.mode ?? 'strict';
+
 	// Parse registered users from YAML
-	const users: RegisteredUser[] = (yamlConfig?.users ?? []).map((u) => ({
-		id: u.id,
-		name: u.name,
-		isAdmin: u.is_admin ?? false,
-		enabledApps: u.enabled_apps ?? [],
-		sharedScopes: u.shared_scopes ?? [],
-	}));
+	const rawUsers: RegisteredUser[] = (yamlConfig?.users ?? []).map((u) => {
+		const ru = u as Record<string, unknown>;
+		const householdId =
+			typeof ru['household_id'] === 'string' && ru['household_id']
+				? ru['household_id']
+				: undefined;
+		return {
+			id: u.id,
+			name: u.name,
+			isAdmin: u.is_admin ?? false,
+			enabledApps: u.enabled_apps ?? [],
+			sharedScopes: u.shared_scopes ?? [],
+			...(householdId !== undefined ? { householdId } : {}),
+		};
+	});
+
+	// Mode-specific validation
+	const usersWithoutHousehold = rawUsers.filter((u) => !u.householdId);
+	let migrationNeeded: boolean | undefined;
+
+	if (usersWithoutHousehold.length > 0) {
+		if (mode === 'strict') {
+			const ids = usersWithoutHousehold.map((u) => u.id).join(', ');
+			throw new ConfigValidationError(
+				`Strict mode: the following users are missing householdId: ${ids}. ` +
+					`Run the household migration or load with mode='transitional'.`,
+			);
+		}
+		// transitional mode — flag that migration is needed
+		migrationNeeded = true;
+	}
+
+	const users: RegisteredUser[] = rawUsers;
 
 	// Build multi-provider LLM config (use process.env directly for provider key lookups)
 	const llmConfig = buildLLMConfig(process.env as Record<string, string>, yamlConfig?.llm);
@@ -211,6 +254,10 @@ export async function loadSystemConfig(options?: {
 			retentionCount: yamlConfig?.backup?.retention_count ?? 7,
 		},
 	};
+
+	if (migrationNeeded) {
+		config.migrationNeeded = true;
+	}
 
 	return config;
 }

@@ -46,6 +46,7 @@ export async function syncUsersToConfig(
 		is_admin: u.isAdmin,
 		enabled_apps: u.enabledApps,
 		shared_scopes: u.sharedScopes,
+		...(u.householdId !== undefined ? { household_id: u.householdId } : {}),
 	}));
 
 	// Serialize and write atomically (atomicWrite creates parent dirs as needed).

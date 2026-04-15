@@ -61,6 +61,7 @@ describe('loadSystemConfig', () => {
 		const config = await loadSystemConfig({
 			envPath,
 			configPath: yamlPath,
+			mode: 'transitional',
 		});
 
 		expect(config.telegram.botToken).toBe('test-bot-token-123');
@@ -129,6 +130,7 @@ describe('loadSystemConfig', () => {
 		const config = await loadSystemConfig({
 			envPath,
 			configPath: yamlPath,
+			mode: 'transitional',
 		});
 
 		expect(config.users).toHaveLength(2);
@@ -651,5 +653,117 @@ describe('loadSystemConfig', () => {
 		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
 			/tiers.standard.*without.*tiers.fast|either specify both/i,
 		);
+	});
+
+	// --- Household transition mode tests ---
+
+	it('transitional mode: users missing householdId load successfully and set migrationNeeded=true', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				users: [
+					{ id: '111', name: 'Alice', is_admin: true },
+					{ id: '222', name: 'Bob', is_admin: false },
+				],
+			}),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: yamlPath,
+			mode: 'transitional',
+		});
+
+		expect(config.users).toHaveLength(2);
+		expect(config.users[0]?.householdId).toBeUndefined();
+		expect(config.migrationNeeded).toBe(true);
+	});
+
+	it('strict mode: users missing householdId throw ConfigValidationError', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				users: [
+					{ id: '111', name: 'Alice', is_admin: true },
+					{ id: '222', name: 'Bob', is_admin: false },
+				],
+			}),
+			'utf-8',
+		);
+
+		await expect(
+			loadSystemConfig({ envPath, configPath: yamlPath, mode: 'strict' }),
+		).rejects.toThrow(/missing householdId/i);
+	});
+
+	it('strict mode: all users with householdId loads successfully without migrationNeeded', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				users: [
+					{ id: '111', name: 'Alice', is_admin: true, household_id: 'household-abc' },
+					{ id: '222', name: 'Bob', is_admin: false, household_id: 'household-abc' },
+				],
+			}),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: yamlPath,
+			mode: 'strict',
+		});
+
+		expect(config.users).toHaveLength(2);
+		expect(config.users[0]?.householdId).toBe('household-abc');
+		expect(config.users[1]?.householdId).toBe('household-abc');
+		expect(config.migrationNeeded).toBeUndefined();
+	});
+
+	it('default mode (no mode option) with users missing householdId throws (strict by default)', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				users: [{ id: '111', name: 'Alice', is_admin: true }],
+			}),
+			'utf-8',
+		);
+
+		// No mode option → should default to strict → should throw
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			/missing householdId/i,
+		);
+	});
+
+	it('strict mode: empty users list loads without migrationNeeded', async () => {
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, requiredEnvVars);
+
+		// No users in config → no migration needed
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+			mode: 'strict',
+		});
+
+		expect(config.users).toHaveLength(0);
+		expect(config.migrationNeeded).toBeUndefined();
 	});
 });

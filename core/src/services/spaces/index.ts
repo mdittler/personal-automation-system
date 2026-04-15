@@ -20,6 +20,9 @@ import {
 	MAX_SPACE_NAME_LENGTH,
 	SPACE_ID_PATTERN,
 } from '../../types/spaces.js';
+
+/** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 import { ensureDir } from '../../utils/file.js';
 import { readYamlFile, readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import type { UserManager } from '../user-manager/index.js';
@@ -405,6 +408,31 @@ export class SpaceService {
 			}
 		}
 
+		// kind + householdId invariant
+		if (def.kind === 'household') {
+			if (!def.householdId) {
+				errors.push({
+					field: 'householdId',
+					message: "householdId is required for spaces of kind 'household'",
+				});
+			} else if (!SAFE_SEGMENT.test(def.householdId)) {
+				errors.push({
+					field: 'householdId',
+					message: 'householdId must be a valid SAFE_SEGMENT string (letters, digits, hyphens, underscores)',
+				});
+			}
+		} else if (def.kind === 'collaboration') {
+			if (def.householdId) {
+				errors.push({
+					field: 'householdId',
+					message: "householdId must not be set for spaces of kind 'collaboration'",
+				});
+			}
+		}
+
+		// TODO(Task J): When HouseholdService is injectable, validate that all members
+		// belong to the same household (for kind='household' spaces).
+
 		return errors;
 	}
 
@@ -431,19 +459,31 @@ class SpaceLimitError extends Error {
  * Validate a raw space entry from YAML: must be an object with required string fields.
  * Excludes malformed entries from the operational space map.
  *
- * Note: `kind` field validation is intentionally deferred to Task C (config loader transition).
- * Legacy spaces.yaml entries without `kind` will be migrated to kind='household' by the migration runner.
- * Until then, `kind` may be undefined on loaded legacy entries — Task C adds strict validation.
+ * Accepts entries where `kind` is missing (legacy) — these are allowed through so that
+ * the migration runner can backfill the kind field. A missing kind is treated as valid
+ * at load time; the migration runner will set kind='household' on all legacy entries.
+ *
+ * Entries that have `kind` set must use a recognised value ('household' or 'collaboration').
  */
 function isValidSpaceEntry(key: string, value: unknown): boolean {
 	if (typeof value !== 'object' || value === null) return false;
 	const v = value as Record<string, unknown>;
-	return (
-		typeof v['id'] === 'string' &&
-		v['id'] === key &&
-		typeof v['name'] === 'string' &&
-		v['name'].length > 0 &&
-		Array.isArray(v['members']) &&
-		typeof v['createdBy'] === 'string'
-	);
+
+	if (
+		typeof v['id'] !== 'string' ||
+		v['id'] !== key ||
+		typeof v['name'] !== 'string' ||
+		v['name'].length === 0 ||
+		!Array.isArray(v['members']) ||
+		typeof v['createdBy'] !== 'string'
+	) {
+		return false;
+	}
+
+	// If kind is present, it must be a known value
+	if (v['kind'] !== undefined && v['kind'] !== 'household' && v['kind'] !== 'collaboration') {
+		return false;
+	}
+
+	return true;
 }

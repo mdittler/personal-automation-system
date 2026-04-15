@@ -14,6 +14,9 @@ import type { Logger } from 'pino';
 import { AsyncLock } from '../../utils/async-lock.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
 
+/** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
 export interface InviteCode {
 	name: string;
 	createdBy: string;
@@ -21,6 +24,14 @@ export interface InviteCode {
 	expiresAt: string;
 	usedBy: string | null;
 	usedAt: string | null;
+	/** Household the redeemer will be registered into. */
+	householdId: string;
+	/** Role assigned to the new user on registration. */
+	role: 'admin' | 'member' | 'child';
+	/** Space IDs the new user will be auto-joined into after registration. */
+	initialSpaces: string[];
+	/** Optional override for enabled apps; defaults to household defaults if absent. */
+	enabledApps?: string[];
 }
 
 /** Shape of invites.yaml: { code: InviteCode } */
@@ -43,9 +54,35 @@ export class InviteService {
 
 	/**
 	 * Create a new invite code.
-	 * Returns the 8-character hex code.
+	 *
+	 * @param name - Display name for the invited user.
+	 * @param createdBy - User ID of the admin creating the invite.
+	 * @param opts - Household registration options.
+	 * @returns The 8-character hex code.
 	 */
-	async createInvite(name: string, createdBy: string): Promise<string> {
+	async createInvite(
+		name: string,
+		createdBy: string,
+		opts?: {
+			householdId?: string;
+			role?: 'admin' | 'member' | 'child';
+			initialSpaces?: string[];
+			enabledApps?: string[];
+		},
+	): Promise<string> {
+		// Validate initialSpaces — each must be a valid SAFE_SEGMENT
+		const initialSpaces = opts?.initialSpaces ?? [];
+		for (const spaceId of initialSpaces) {
+			if (!SAFE_SEGMENT.test(spaceId)) {
+				throw new Error(
+					`Invalid space ID in initialSpaces: ${JSON.stringify(spaceId)}. Must match SAFE_SEGMENT pattern.`,
+				);
+			}
+		}
+
+		// TODO(Task J): When HouseholdService is injectable, verify that createdBy
+		// is in household.adminUserIds before allowing invite creation.
+
 		const code = randomBytes(4).toString('hex');
 		const now = new Date();
 		const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -58,10 +95,14 @@ export class InviteService {
 			expiresAt: expiresAt.toISOString(),
 			usedBy: null,
 			usedAt: null,
+			householdId: opts?.householdId ?? '',
+			role: opts?.role ?? 'member',
+			initialSpaces,
+			...(opts?.enabledApps !== undefined ? { enabledApps: opts.enabledApps } : {}),
 		};
 
 		await this.writeStore(store);
-		this.logger.info({ code, name, createdBy }, 'Invite code created');
+		this.logger.info({ code, name, createdBy, householdId: opts?.householdId }, 'Invite code created');
 		return code;
 	}
 

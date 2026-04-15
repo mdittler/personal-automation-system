@@ -52,6 +52,7 @@ function makeSpace(overrides: Partial<SpaceDefinition> = {}): SpaceDefinition {
 		createdBy: '111',
 		createdAt: new Date().toISOString(),
 		kind: 'household',
+		householdId: 'household-test',
 		...overrides,
 	};
 }
@@ -879,6 +880,104 @@ describe('SpaceService', () => {
 
 			expect(svc.listSpaces()).toHaveLength(0);
 			expect(warnMessages.some((m) => m.includes('spaces.yaml'))).toBe(true);
+		});
+
+		it('accepts legacy space entries without kind field (migration-ready)', async () => {
+			const { writeFile, mkdir } = await import('node:fs/promises');
+			await mkdir(join(tempDir, 'system'), { recursive: true });
+			// Legacy entry: no 'kind' field (pre-D5a)
+			await writeFile(
+				join(tempDir, 'system', 'spaces.yaml'),
+				[
+					'family:',
+					'  id: family',
+					'  name: Family Space',
+					'  members: [111]',
+					'  createdBy: "111"',
+				].join('\n'),
+			);
+
+			const svc = makeService();
+			await svc.init();
+			// Legacy space should be loaded (kind absent = allowed for migration)
+			expect(svc.getSpace('family')).not.toBeNull();
+		});
+
+		it('excludes space entry with unknown kind value', async () => {
+			const { writeFile, mkdir } = await import('node:fs/promises');
+			await mkdir(join(tempDir, 'system'), { recursive: true });
+			await writeFile(
+				join(tempDir, 'system', 'spaces.yaml'),
+				[
+					'family:',
+					'  id: family',
+					'  name: Family Space',
+					'  members: [111]',
+					'  createdBy: "111"',
+					'  kind: unknown-kind',
+				].join('\n'),
+			);
+
+			const svc = makeService();
+			await svc.init();
+			expect(svc.getSpace('family')).toBeNull();
+		});
+	});
+
+	// --- kind/householdId invariant ---
+
+	describe('kind and householdId validation', () => {
+		it("saveSpace requires householdId for kind='household'", async () => {
+			const svc = makeService();
+			await svc.init();
+
+			const errors = await svc.saveSpace(
+				makeSpace({ kind: 'household', householdId: undefined }),
+			);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
+		});
+
+		it("saveSpace rejects invalid householdId (path traversal chars) for kind='household'", async () => {
+			const svc = makeService();
+			await svc.init();
+
+			const errors = await svc.saveSpace(
+				makeSpace({ kind: 'household', householdId: '../evil' }),
+			);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
+		});
+
+		it("saveSpace rejects householdId on kind='collaboration'", async () => {
+			const svc = makeService();
+			await svc.init();
+
+			const errors = await svc.saveSpace(
+				makeSpace({ kind: 'collaboration', householdId: 'some-household' }),
+			);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
+		});
+
+		it("saveSpace accepts valid collaboration space (no householdId)", async () => {
+			const svc = makeService();
+			await svc.init();
+
+			const errors = await svc.saveSpace(
+				makeSpace({ kind: 'collaboration', householdId: undefined }),
+			);
+			expect(errors).toEqual([]);
+		});
+
+		it("saveSpace accepts valid household space with valid householdId", async () => {
+			const svc = makeService();
+			await svc.init();
+
+			const errors = await svc.saveSpace(
+				makeSpace({ kind: 'household', householdId: 'household-123' }),
+			);
+			expect(errors).toEqual([]);
 		});
 	});
 });
