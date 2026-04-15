@@ -6,6 +6,7 @@
  */
 
 import type { InlineButton, ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { GroceryItem, GroceryList } from '../types.js';
@@ -15,6 +16,11 @@ import { DEPARTMENT_EMOJI } from './item-parser.js';
 
 const ACTIVE_PATH = 'grocery/active.yaml';
 const HISTORY_DIR = 'grocery/history';
+
+/** Acquire the grocery list lock for a read-modify-write sequence. */
+export function withGroceryLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(ACTIVE_PATH, fn);
+}
 
 /** Department display order. */
 const DEPT_ORDER = [
@@ -112,7 +118,7 @@ export function clearPurchased(list: GroceryList): {
 	return { updated: list, purchased };
 }
 
-/** Archive purchased items to history. */
+/** Archive purchased items to history. Merges with existing same-day history. */
 export async function archivePurchased(
 	store: ScopedDataStore,
 	items: GroceryItem[],
@@ -121,6 +127,22 @@ export async function archivePurchased(
 	if (!items.length) return;
 	const date = todayDate(timezone);
 	const path = `${HISTORY_DIR}/${date}.yaml`;
+
+	// Merge with existing history for the same day (prevents overwrite on second clear)
+	let merged = items;
+	const existing = await store.read(path);
+	if (existing) {
+		try {
+			const content = stripFrontmatter(existing);
+			const data = parse(content) as { items?: GroceryItem[] };
+			if (data?.items && Array.isArray(data.items)) {
+				merged = [...data.items, ...items];
+			}
+		} catch {
+			// Corrupt history — overwrite with new items only
+		}
+	}
+
 	const fm = generateFrontmatter({
 		title: `Grocery History — ${date}`,
 		date: isoNow(),
@@ -128,7 +150,7 @@ export async function archivePurchased(
 		type: 'grocery-history',
 		app: 'food',
 	});
-	await store.write(path, fm + stringify({ date, items }));
+	await store.write(path, fm + stringify({ date, items: merged }));
 }
 
 /** Format the grocery list as a department-grouped message. */

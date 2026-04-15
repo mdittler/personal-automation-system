@@ -132,6 +132,7 @@ import {
 	loadFreezer,
 	parseFreezerInput,
 	saveFreezer,
+	withFreezerLock,
 } from './services/freezer-store.js';
 import { deduplicateAndAssignDepartments } from './services/grocery-dedup.js';
 import { generateGroceryFromRecipes } from './services/grocery-generator.js';
@@ -145,6 +146,7 @@ import {
 	loadGroceryList,
 	saveGroceryList,
 	togglePurchased,
+	withGroceryLock,
 } from './services/grocery-store.js';
 import { formatGuestList, loadGuests, removeGuest } from './services/guest-profiles.js';
 import {
@@ -161,6 +163,7 @@ import {
 	loadLeftovers,
 	parseLeftoverInput,
 	saveLeftovers,
+	withLeftoverLock,
 } from './services/leftover-store.js';
 import { autoLogFromCookedMeal } from './services/macro-tracker.js';
 import {
@@ -184,6 +187,7 @@ import {
 	parsePantryItems,
 	removePantryItem,
 	savePantry,
+	withPantryLock,
 } from './services/pantry-store.js';
 import { generatePediatricianReport } from './services/pediatrician-report.js';
 import { loadPhoto } from './services/photo-store.js';
@@ -822,10 +826,14 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		if (data.startsWith('toggle:')) {
 			const index = Number.parseInt(data.slice(7), 10);
 			if (Number.isNaN(index) || index < 0) return;
-			let list = await loadGroceryList(hh.sharedStore);
-			if (!list || index >= list.items.length) return;
-			list = togglePurchased(list, index);
-			await saveGroceryList(hh.sharedStore, list);
+			const list = await withGroceryLock(async () => {
+				let l = await loadGroceryList(hh.sharedStore);
+				if (!l || index >= l.items.length) return null;
+				l = togglePurchased(l, index);
+				await saveGroceryList(hh.sharedStore, l);
+				return l;
+			});
+			if (!list) return;
 			await services.telegram.editMessage(
 				ctx.chatId,
 				ctx.messageId,
@@ -855,11 +863,16 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		}
 
 		if (data === 'clear') {
-			const list = await loadGroceryList(hh.sharedStore);
-			if (!list) return;
-			const { updated, purchased } = clearPurchased(list);
-			await archivePurchased(hh.sharedStore, purchased, services.timezone);
-			await saveGroceryList(hh.sharedStore, updated);
+			const result = await withGroceryLock(async () => {
+				const list = await loadGroceryList(hh.sharedStore);
+				if (!list) return null;
+				const { updated, purchased } = clearPurchased(list);
+				await archivePurchased(hh.sharedStore, purchased, services.timezone);
+				await saveGroceryList(hh.sharedStore, updated);
+				return { updated, purchased };
+			});
+			if (!result) return;
+			const { updated, purchased } = result;
 			// H4: Schedule shopping follow-up if items remain
 			if (updated.items.length > 0) {
 				scheduleShoppingFollowup(services, ctx.userId, updated.items.length);
@@ -900,9 +913,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				const normalized = await normalizePantryItems(services, rawPantryItems);
 				// H6: Estimate expiry for perishable items
 				const pantryItems = await enrichWithExpiry(services, normalized);
-				const existing = await loadPantry(hh.sharedStore);
-				const updated = addPantryItems(existing, pantryItems);
-				await savePantry(hh.sharedStore, updated);
+				await withPantryLock(async () => {
+					const existing = await loadPantry(hh.sharedStore);
+					const updated = addPantryItems(existing, pantryItems);
+					await savePantry(hh.sharedStore, updated);
+				});
 				await services.telegram.editMessage(
 					ctx.chatId,
 					ctx.messageId,
@@ -940,20 +955,26 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		}
 
 		if (data === 'pantry-prompt') {
-			const list = await loadGroceryList(hh.sharedStore);
-			if (!list) return;
-			const purchasedCount = list.items.filter((i) => i.purchased).length;
-			if (purchasedCount === 0) {
+			const result = await withGroceryLock(async () => {
+				const list = await loadGroceryList(hh.sharedStore);
+				if (!list) return null;
+				const purchasedCount = list.items.filter((i) => i.purchased).length;
+				if (purchasedCount === 0) return 'no-purchased' as const;
+				// Show confirmation — reuse the clear+pantry flow
+				const { updated, purchased } = clearPurchased(list);
+				await archivePurchased(hh.sharedStore, purchased, services.timezone);
+				await saveGroceryList(hh.sharedStore, updated);
+				return { updated, purchased };
+			});
+			if (!result) return;
+			if (result === 'no-purchased') {
 				await services.telegram.send(
 					ctx.userId,
 					'No purchased items to move. Tap items to check them off first.',
 				);
 				return;
 			}
-			// Show confirmation — reuse the clear+pantry flow
-			const { updated, purchased } = clearPurchased(list);
-			await archivePurchased(hh.sharedStore, purchased, services.timezone);
-			await saveGroceryList(hh.sharedStore, updated);
+			const { purchased } = result;
 			setPendingPantryItems(ctx.userId, purchased);
 			await services.telegram.editMessage(
 				ctx.chatId,
@@ -1461,9 +1482,11 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 				frozenDate: today,
 				source: recipeName,
 			};
-			const existingFreezer = await loadFreezer(hh.sharedStore);
-			const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
-			await saveFreezer(hh.sharedStore, updatedFreezer);
+			await withFreezerLock(async () => {
+				const existingFreezer = await loadFreezer(hh.sharedStore);
+				const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
+				await saveFreezer(hh.sharedStore, updatedFreezer);
+			});
 			await services.telegram.editMessage(
 				ctx.chatId,
 				ctx.messageId,
@@ -1745,10 +1768,12 @@ async function handleAddGroceryCommand(args: string[], ctx: MessageContext): Pro
 		return;
 	}
 
-	let list = await loadGroceryList(hh.sharedStore);
-	if (!list) list = createEmptyList();
-	list = addItems(list, items);
-	await saveGroceryList(hh.sharedStore, list);
+	await withGroceryLock(async () => {
+		let list = await loadGroceryList(hh.sharedStore);
+		if (!list) list = createEmptyList();
+		list = addItems(list, items);
+		await saveGroceryList(hh.sharedStore, list);
+	});
 
 	await services.telegram.send(
 		ctx.userId,
@@ -2163,13 +2188,15 @@ async function handleGroceryAdd(text: string, ctx: MessageContext): Promise<void
 		return;
 	}
 
-	// Run LLM dedup if multiple items
+	// Run LLM dedup if multiple items (outside lock — slow LLM work)
 	const deduped = items.length > 1 ? await deduplicateAndAssignDepartments(services, items) : items;
 
-	let list = await loadGroceryList(hh.sharedStore);
-	if (!list) list = createEmptyList();
-	list = addItems(list, deduped);
-	await saveGroceryList(hh.sharedStore, list);
+	await withGroceryLock(async () => {
+		let list = await loadGroceryList(hh.sharedStore);
+		if (!list) list = createEmptyList();
+		list = addItems(list, deduped);
+		await saveGroceryList(hh.sharedStore, list);
+	});
 
 	services.interactionContext?.record(ctx.userId, {
 		appId: 'food',
@@ -2364,10 +2391,13 @@ async function handlePantryAdd(text: string, ctx: MessageContext): Promise<void>
 	}
 
 	// H11.z: normalize ingredient names (canonical form) before dedup + save.
+	// LLM normalization outside lock — only RMW inside.
 	const newItems = await normalizePantryItems(services, parsed);
-	const existing = await loadPantry(hh.sharedStore);
-	const updated = addPantryItems(existing, newItems);
-	await savePantry(hh.sharedStore, updated);
+	await withPantryLock(async () => {
+		const existing = await loadPantry(hh.sharedStore);
+		const updated = addPantryItems(existing, newItems);
+		await savePantry(hh.sharedStore, updated);
+	});
 
 	await services.telegram.send(
 		ctx.userId,
@@ -2401,15 +2431,19 @@ async function handlePantryRemove(text: string, ctx: MessageContext): Promise<vo
 		return;
 	}
 
-	const existing = await loadPantry(hh.sharedStore);
-	const updated = removePantryItem(existing, itemName);
+	const removed = await withPantryLock(async () => {
+		const existing = await loadPantry(hh.sharedStore);
+		const updated = removePantryItem(existing, itemName);
+		if (updated.length === existing.length) return false;
+		await savePantry(hh.sharedStore, updated);
+		return true;
+	});
 
-	if (updated.length === existing.length) {
+	if (!removed) {
 		await services.telegram.send(ctx.userId, `"${escapeMarkdown(itemName)}" wasn't in the pantry.`);
 		return;
 	}
 
-	await savePantry(hh.sharedStore, updated);
 	await services.telegram.send(ctx.userId, `Removed "${escapeMarkdown(itemName)}" from pantry.`);
 	services.logger.info('Removed pantry item "%s" for %s', itemName, ctx.userId);
 }
@@ -3285,12 +3319,15 @@ async function handleLeftoverAddIntent(text: string, ctx: MessageContext): Promi
 	}
 
 	const parsed = parseLeftoverInput(itemText, undefined, services.timezone);
+	// LLM expiry estimation outside lock
 	const expiryEstimate = await estimateLeftoverExpiry(parsed.storedDate, parsed.name);
 
 	const leftover: Leftover = { ...parsed, expiryEstimate };
-	const existing = await loadLeftovers(hh.sharedStore);
-	const updated = addLeftover(existing, leftover);
-	await saveLeftovers(hh.sharedStore, updated);
+	await withLeftoverLock(async () => {
+		const existing = await loadLeftovers(hh.sharedStore);
+		const updated = addLeftover(existing, leftover);
+		await saveLeftovers(hh.sharedStore, updated);
+	});
 
 	await services.telegram.send(
 		ctx.userId,
@@ -3307,12 +3344,15 @@ async function handlePendingLeftoverAdd(text: string, ctx: MessageContext): Prom
 	if (!hh) return;
 
 	const parsed = parseLeftoverInput(text, pending.fromRecipe, services.timezone);
+	// LLM expiry estimation outside lock
 	const expiryEstimate = await estimateLeftoverExpiry(parsed.storedDate, parsed.name);
 
 	const leftover: Leftover = { ...parsed, expiryEstimate };
-	const existing = await loadLeftovers(hh.sharedStore);
-	const updated = addLeftover(existing, leftover);
-	await saveLeftovers(hh.sharedStore, updated);
+	await withLeftoverLock(async () => {
+		const existing = await loadLeftovers(hh.sharedStore);
+		const updated = addLeftover(existing, leftover);
+		await saveLeftovers(hh.sharedStore, updated);
+	});
 
 	await services.telegram.send(
 		ctx.userId,
@@ -3370,9 +3410,11 @@ async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promis
 	}
 
 	const item = parseFreezerInput(itemText, 'manual', services.timezone);
-	const existing = await loadFreezer(hh.sharedStore);
-	const updated = addFreezerItem(existing, item);
-	await saveFreezer(hh.sharedStore, updated);
+	await withFreezerLock(async () => {
+		const existing = await loadFreezer(hh.sharedStore);
+		const updated = addFreezerItem(existing, item);
+		await saveFreezer(hh.sharedStore, updated);
+	});
 
 	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
 	services.logger.info('Added freezer item "%s" for %s', item.name, ctx.userId);
@@ -3385,9 +3427,11 @@ async function handlePendingFreezerAdd(text: string, ctx: MessageContext): Promi
 	if (!hh) return;
 
 	const item = parseFreezerInput(text, 'manual', services.timezone);
-	const existing = await loadFreezer(hh.sharedStore);
-	const updated = addFreezerItem(existing, item);
-	await saveFreezer(hh.sharedStore, updated);
+	await withFreezerLock(async () => {
+		const existing = await loadFreezer(hh.sharedStore);
+		const updated = addFreezerItem(existing, item);
+		await saveFreezer(hh.sharedStore, updated);
+	});
 
 	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
 }
@@ -3429,15 +3473,17 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 		source: 'pantry',
 		date: todayDate(services.timezone),
 	};
-	await appendWaste(hh.sharedStore, entry);
+	await appendWaste(hh.sharedStore, entry); // self-locking
 
 	// Try to remove from pantry if it exists
-	const pantry = await loadPantry(hh.sharedStore);
-	const pantryIdx = pantry.findIndex((p) => p.name.toLowerCase() === itemText.toLowerCase());
-	if (pantryIdx >= 0) {
-		const updated = [...pantry.slice(0, pantryIdx), ...pantry.slice(pantryIdx + 1)];
-		await savePantry(hh.sharedStore, updated);
-	}
+	await withPantryLock(async () => {
+		const pantry = await loadPantry(hh.sharedStore);
+		const pantryIdx = pantry.findIndex((p) => p.name.toLowerCase() === itemText.toLowerCase());
+		if (pantryIdx >= 0) {
+			const updated = [...pantry.slice(0, pantryIdx), ...pantry.slice(pantryIdx + 1)];
+			await savePantry(hh.sharedStore, updated);
+		}
+	});
 
 	await services.telegram.send(ctx.userId, `🗑 Logged waste: ${escapeMarkdown(itemText)}. Sorry about that!`);
 	services.logger.info('Logged food waste "%s" for %s', itemText, ctx.userId);

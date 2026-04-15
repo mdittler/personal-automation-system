@@ -5,6 +5,7 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { GroceryItem, PantryItem } from '../types.js';
@@ -16,6 +17,11 @@ import { normalizeIngredientName } from './ingredient-normalizer.js';
 import { DEPARTMENT_EMOJI, assignDepartment } from './item-parser.js';
 
 const PANTRY_PATH = 'pantry.yaml';
+
+/** Acquire the pantry lock for a read-modify-write sequence. */
+export function withPantryLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(PANTRY_PATH, fn);
+}
 
 /** Department display order for pantry. */
 const DEPT_ORDER = [

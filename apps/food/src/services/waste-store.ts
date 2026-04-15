@@ -5,12 +5,18 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { WasteLogEntry } from '../types.js';
 import { isoNow } from '../utils/date.js';
 
 const WASTE_LOG_PATH = 'waste-log.yaml';
+
+/** Acquire the waste log lock for a read-modify-write sequence. */
+export function withWasteLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(WASTE_LOG_PATH, fn);
+}
 
 const REASON_EMOJI: Record<WasteLogEntry['reason'], string> = {
 	expired: '⏰',
@@ -45,11 +51,13 @@ async function saveWasteLog(store: ScopedDataStore, entries: WasteLogEntry[]): P
 	await store.write(WASTE_LOG_PATH, fm + stringify({ entries }));
 }
 
-/** Append a waste entry to the log. */
+/** Append a waste entry to the log. Self-locking — callers need no external lock. */
 export async function appendWaste(store: ScopedDataStore, entry: WasteLogEntry): Promise<void> {
-	const entries = await loadWasteLog(store);
-	entries.push(entry);
-	await saveWasteLog(store, entries);
+	await withWasteLock(async () => {
+		const entries = await loadWasteLog(store);
+		entries.push(entry);
+		await saveWasteLog(store, entries);
+	});
 }
 
 /** Format a waste summary for the given period. */

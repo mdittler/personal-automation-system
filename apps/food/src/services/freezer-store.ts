@@ -5,12 +5,18 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { FreezerItem } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
 
 const FREEZER_PATH = 'freezer.yaml';
+
+/** Acquire the freezer lock for a read-modify-write sequence. */
+export function withFreezerLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(FREEZER_PATH, fn);
+}
 
 /** Regex to extract quantity+unit prefix from freezer item text. */
 const FREEZER_QTY_REGEX =

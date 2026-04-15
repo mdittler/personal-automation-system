@@ -3,11 +3,17 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { Household } from '../types.js';
 
 const HOUSEHOLD_PATH = 'household.yaml';
+
+/** Acquire the household lock for a read-modify-write sequence. */
+export function withHouseholdLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(HOUSEHOLD_PATH, fn);
+}
 
 /** Valid join code format: 6 uppercase alphanumeric chars. */
 export const JOIN_CODE_PATTERN = /^[A-Z0-9]{6}$/;

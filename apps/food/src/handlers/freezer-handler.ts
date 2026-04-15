@@ -11,6 +11,7 @@ import {
 	loadFreezer,
 	removeFreezerItem,
 	saveFreezer,
+	withFreezerLock,
 } from '../services/freezer-store.js';
 import { appendWaste } from '../services/waste-store.js';
 import { todayDate } from '../utils/date.js';
@@ -44,21 +45,29 @@ export async function handleFreezerCallback(
 		return;
 	}
 
-	const items = await loadFreezer(store);
-	const item = items[index];
-	if (!item) return;
+	const item = await withFreezerLock(async () => {
+		const items = await loadFreezer(store);
+		const found = items[index];
+		if (!found) return null;
 
-	// Guard: verify name matches (prevents wrong-item after list mutation)
-	if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+		// Guard: verify name matches (prevents wrong-item after list mutation)
+		if (decodedName && found.name.toLowerCase() !== decodedName.toLowerCase()) {
+			return 'mismatch' as const;
+		}
+
+		const updated = removeFreezerItem(items, index);
+		await saveFreezer(store, updated);
+		return found;
+	});
+
+	if (!item) return;
+	if (item === 'mismatch') {
 		await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
 		return;
 	}
 
-	const updated = removeFreezerItem(items, index);
-	await saveFreezer(store, updated);
-
 	if (verb === 'toss') {
-		await appendWaste(store, {
+		await appendWaste(store, { // self-locking
 			name: item.name,
 			quantity: item.quantity,
 			reason: 'discarded',

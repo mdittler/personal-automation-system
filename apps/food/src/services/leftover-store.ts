@@ -5,12 +5,18 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { Leftover } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
 
 const LEFTOVERS_PATH = 'leftovers.yaml';
+
+/** Acquire the leftovers lock for a read-modify-write sequence. */
+export function withLeftoverLock<T>(fn: () => Promise<T>): Promise<T> {
+	return withFileLock(LEFTOVERS_PATH, fn);
+}
 
 /** Load leftovers, or empty array if none exists. */
 export async function loadLeftovers(store: ScopedDataStore): Promise<Leftover[]> {

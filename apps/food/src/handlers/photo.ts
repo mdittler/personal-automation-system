@@ -18,8 +18,9 @@ import {
 	loadPantry,
 	normalizePantryItems,
 	savePantry,
+	withPantryLock,
 } from '../services/pantry-store.js';
-import { addItems, loadGroceryList, saveGroceryList, createEmptyList } from '../services/grocery-store.js';
+import { addItems, loadGroceryList, saveGroceryList, createEmptyList, withGroceryLock } from '../services/grocery-store.js';
 import { isoNow } from '../utils/date.js';
 import type { Receipt } from '../types.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
@@ -263,10 +264,13 @@ async function handlePantryPhoto(
 	}
 
 	// H11.z: normalize canonical names before dedup + save.
+	// LLM normalization outside lock.
 	const normalized = await normalizePantryItems(services, items);
-	const pantry = await loadPantry(store);
-	const updated = addPantryItems(pantry, normalized);
-	await savePantry(store, updated);
+	await withPantryLock(async () => {
+		const pantry = await loadPantry(store);
+		const updated = addPantryItems(pantry, normalized);
+		await savePantry(store, updated);
+	});
 
 	const itemNames = items.map((i) => `• ${escapeMarkdown(i.name)} (${escapeMarkdown(i.quantity)})`).join('\n');
 	await services.telegram.send(
@@ -292,11 +296,6 @@ async function handleGroceryPhoto(
 	}
 
 	// Add items to grocery list
-	let list = await loadGroceryList(store);
-	if (!list) {
-		list = createEmptyList();
-	}
-
 	const groceryItems = result.items.map((item) => ({
 		name: item.name,
 		quantity: item.quantity,
@@ -307,9 +306,15 @@ async function handleGroceryPhoto(
 		addedBy: ctx.userId,
 	}));
 
-	list = addItems(list, groceryItems);
 	try {
-		await saveGroceryList(store, list);
+		await withGroceryLock(async () => {
+			let list = await loadGroceryList(store);
+			if (!list) {
+				list = createEmptyList();
+			}
+			list = addItems(list, groceryItems);
+			await saveGroceryList(store, list);
+		});
 	} catch (err) {
 		services.logger.error('Failed to save grocery list from photo: %s', err);
 		await services.telegram.send(ctx.userId, '⚠️ I recognised the items but couldn\'t save the grocery list. Please try again.');

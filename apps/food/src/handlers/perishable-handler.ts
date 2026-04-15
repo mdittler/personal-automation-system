@@ -7,8 +7,9 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { withMultiFileLock } from '@pas/core/utils/file-mutex';
 import { loadFreezer, addFreezerItem, saveFreezer } from '../services/freezer-store.js';
-import { loadPantry, savePantry } from '../services/pantry-store.js';
+import { loadPantry, savePantry, withPantryLock } from '../services/pantry-store.js';
 import { appendWaste } from '../services/waste-store.js';
 import type { FreezerItem, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
@@ -67,63 +68,76 @@ export async function handlePerishableCallback(
 	}
 
 	if (verb === 'freeze') {
-		const pantry = await loadPantry(store);
-		const item = pantry[idx];
-		if (!item) return;
+		const result = await withMultiFileLock(['pantry.yaml', 'freezer.yaml'], async () => {
+			const pantry = await loadPantry(store);
+			const item = pantry[idx];
+			if (!item) return null;
 
-		// Guard: verify name matches (prevents wrong-item after list mutation)
-		if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+			// Guard: verify name matches (prevents wrong-item after list mutation)
+			if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+				return 'mismatch' as const;
+			}
+
+			// Remove from pantry
+			const updatedPantry = pantry.filter((_, i) => i !== idx);
+			await savePantry(store, updatedPantry);
+
+			// Add to freezer
+			const today = todayDate(services.timezone);
+			const freezerItem: FreezerItem = {
+				name: item.name,
+				quantity: item.quantity,
+				frozenDate: today,
+				source: 'pantry',
+			};
+			const existingFreezer = await loadFreezer(store);
+			const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
+			await saveFreezer(store, updatedFreezer);
+			return item.name;
+		});
+		if (!result) return;
+		if (result === 'mismatch') {
 			await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
 			return;
 		}
-
-		// Remove from pantry
-		const updatedPantry = pantry.filter((_, i) => i !== idx);
-		await savePantry(store, updatedPantry);
-
-		// Add to freezer
-		const today = todayDate(services.timezone);
-		const freezerItem: FreezerItem = {
-			name: item.name,
-			quantity: item.quantity,
-			frozenDate: today,
-			source: 'pantry',
-		};
-		const existingFreezer = await loadFreezer(store);
-		const updatedFreezer = addFreezerItem(existingFreezer, freezerItem);
-		await saveFreezer(store, updatedFreezer);
-
-		await services.telegram.editMessage(chatId, messageId, `🧊 Moved to freezer: ${item.name}`);
+		await services.telegram.editMessage(chatId, messageId, `🧊 Moved to freezer: ${result}`);
 		return;
 	}
 
 	if (verb === 'toss') {
-		const pantry = await loadPantry(store);
-		const item = pantry[idx];
-		if (!item) return;
+		const result = await withPantryLock(async () => {
+			const pantry = await loadPantry(store);
+			const item = pantry[idx];
+			if (!item) return null;
 
-		// Guard: verify name matches
-		if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+			// Guard: verify name matches
+			if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
+				return 'mismatch' as const;
+			}
+
+			// Remove from pantry
+			const updatedPantry = pantry.filter((_, i) => i !== idx);
+			await savePantry(store, updatedPantry);
+			return item;
+		});
+		if (!result) return;
+		if (result === 'mismatch') {
 			await services.telegram.editMessage(chatId, messageId, 'This item was already handled.');
 			return;
 		}
 
-		// Remove from pantry
-		const updatedPantry = pantry.filter((_, i) => i !== idx);
-		await savePantry(store, updatedPantry);
-
-		// Log waste
+		// Log waste (appendWaste is self-locking)
 		const today = todayDate(services.timezone);
 		const wasteEntry: WasteLogEntry = {
-			name: item.name,
-			quantity: item.quantity,
+			name: result.name,
+			quantity: result.quantity,
 			reason: 'expired',
 			source: 'pantry',
 			date: today,
 		};
 		await appendWaste(store, wasteEntry);
 
-		await services.telegram.editMessage(chatId, messageId, `🗑 Tossed: ${item.name}`);
+		await services.telegram.editMessage(chatId, messageId, `🗑 Tossed: ${result.name}`);
 		return;
 	}
 }

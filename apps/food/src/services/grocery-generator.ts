@@ -8,7 +8,7 @@
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { GroceryItem, GroceryList, Recipe } from '../types.js';
 import { deduplicateAndAssignDepartments } from './grocery-dedup.js';
-import { addItems, createEmptyList, loadGroceryList, saveGroceryList } from './grocery-store.js';
+import { addItems, createEmptyList, loadGroceryList, saveGroceryList, withGroceryLock } from './grocery-store.js';
 import { assignDepartment } from './item-parser.js';
 import { loadPantry, pantryContains } from './pantry-store.js';
 import { emitGroceryListReady } from '../events/emitters.js';
@@ -95,13 +95,14 @@ export async function generateGroceryFromRecipes(
 	// 6. LLM dedup + department assignment
 	const deduped = await deduplicateAndAssignDepartments(services, afterPantry);
 
-	// 7. Add to existing list or create new
-	let list = await loadGroceryList(sharedStore);
-	if (!list) list = createEmptyList();
-	list = addItems(list, deduped);
-
-	// 8. Save
-	await saveGroceryList(sharedStore, list);
+	// 7. Add to existing list or create new + 8. Save (under lock)
+	const list = await withGroceryLock(async () => {
+		let l = await loadGroceryList(sharedStore);
+		if (!l) l = createEmptyList();
+		l = addItems(l, deduped);
+		await saveGroceryList(sharedStore, l);
+		return l;
+	});
 
 	// Emit event after successful save
 	const household = await loadHousehold(sharedStore);

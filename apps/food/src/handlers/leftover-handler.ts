@@ -7,15 +7,17 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { withMultiFileLock } from '@pas/core/utils/file-mutex';
 import { loadFreezer, addFreezerItem, saveFreezer } from '../services/freezer-store.js';
 import {
 	loadLeftovers,
 	saveLeftovers,
 	updateLeftoverStatus,
 	getActiveLeftovers,
+	withLeftoverLock,
 } from '../services/leftover-store.js';
 import { appendWaste } from '../services/waste-store.js';
-import type { FreezerItem, WasteLogEntry } from '../types.js';
+import type { FreezerItem, Leftover, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
 
@@ -54,77 +56,100 @@ export async function handleLeftoverCallback(
 
 	if (!verb || isNaN(idx)) return;
 
-	const items = await loadLeftovers(store);
-	const item = items[idx];
-	if (!item) return;
-
-	// Guard: verify name matches (prevents wrong-item after list mutation)
-	if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) {
-		await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
-		return;
-	}
-
-	// Guard: prevent double-action on non-active items
-	if (item.status !== 'active' && verb !== 'keep') {
-		await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
-		return;
-	}
-
 	const today = todayDate(services.timezone);
 
 	switch (verb) {
 		case 'use': {
-			const updated = updateLeftoverStatus(items, idx, 'used');
-			await saveLeftovers(store, updated);
-			await services.telegram.editMessage(chatId, messageId, `✅ Used: ${item.name}`);
+			const result = await withLeftoverLock(async () => {
+				const items = await loadLeftovers(store);
+				const item = items[idx];
+				if (!item) return null;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (item.status !== 'active') return 'mismatch' as const;
+				const updated = updateLeftoverStatus(items, idx, 'used');
+				await saveLeftovers(store, updated);
+				return item.name;
+			});
+			if (!result) return;
+			if (result === 'mismatch') {
+				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				return;
+			}
+			await services.telegram.editMessage(chatId, messageId, `✅ Used: ${result}`);
 			break;
 		}
 
 		case 'freeze': {
-			// Update leftover status
-			const updated = updateLeftoverStatus(items, idx, 'frozen');
-			await saveLeftovers(store, updated);
-
-			// Add to freezer
-			const freezerItem: FreezerItem = {
-				name: item.name,
-				quantity: item.quantity,
-				frozenDate: today,
-				source: item.fromRecipe ?? 'leftover',
-			};
-			const freezer = await loadFreezer(store);
-			const updatedFreezer = addFreezerItem(freezer, freezerItem);
-			await saveFreezer(store, updatedFreezer);
-
-			await services.telegram.editMessage(chatId, messageId, `🧊 Frozen: ${item.name}`);
+			// Multi-store: leftovers + freezer
+			const result = await withMultiFileLock(['leftovers.yaml', 'freezer.yaml'], async () => {
+				const items = await loadLeftovers(store);
+				const item = items[idx];
+				if (!item) return null;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (item.status !== 'active') return 'mismatch' as const;
+				// Update leftover status
+				const updated = updateLeftoverStatus(items, idx, 'frozen');
+				await saveLeftovers(store, updated);
+				// Add to freezer
+				const freezerItem: FreezerItem = {
+					name: item.name,
+					quantity: item.quantity,
+					frozenDate: today,
+					source: item.fromRecipe ?? 'leftover',
+				};
+				const freezer = await loadFreezer(store);
+				const updatedFreezer = addFreezerItem(freezer, freezerItem);
+				await saveFreezer(store, updatedFreezer);
+				return item.name;
+			});
+			if (!result) return;
+			if (result === 'mismatch') {
+				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				return;
+			}
+			await services.telegram.editMessage(chatId, messageId, `🧊 Frozen: ${result}`);
 			break;
 		}
 
 		case 'toss': {
-			// Update leftover status
-			const updated = updateLeftoverStatus(items, idx, 'wasted');
-			await saveLeftovers(store, updated);
-
-			// Append waste log
+			const result = await withLeftoverLock(async () => {
+				const items = await loadLeftovers(store);
+				const item = items[idx];
+				if (!item) return null;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (item.status !== 'active') return 'mismatch' as const;
+				// Update leftover status
+				const updated = updateLeftoverStatus(items, idx, 'wasted');
+				await saveLeftovers(store, updated);
+				return item;
+			});
+			if (!result) return;
+			if (result === 'mismatch') {
+				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				return;
+			}
+			// Append waste log (self-locking)
 			const entry: WasteLogEntry = {
-				name: item.name,
-				quantity: item.quantity,
+				name: result.name,
+				quantity: result.quantity,
 				reason: 'discarded',
 				source: 'leftover',
 				date: today,
 			};
 			await appendWaste(store, entry);
-
-			await services.telegram.editMessage(chatId, messageId, `🗑 Tossed: ${item.name}`);
+			await services.telegram.editMessage(chatId, messageId, `🗑 Tossed: ${result.name}`);
 			break;
 		}
 
 		case 'keep': {
-			// No data change — just acknowledge
+			// No data change — just acknowledge. Read name for display.
+			const items = await loadLeftovers(store);
+			const item = items[idx];
+			const name = item?.name ?? 'item';
 			await services.telegram.editMessage(
 				chatId,
 				messageId,
-				`✅ Got it — keeping ${item.name}`,
+				`✅ Got it — keeping ${name}`,
 			);
 			break;
 		}
@@ -158,58 +183,66 @@ export async function handleLeftoverCheckJob(
 	const todayMs = new Date(today).getTime();
 	const tomorrowMs = todayMs + 24 * 60 * 60 * 1000;
 
-	const items = await loadLeftovers(sharedStore);
-	const active = getActiveLeftovers(items);
-	if (!active.length) return;
+	type IndexedLeftover = { item: Leftover; originalIdx: number };
 
-	// Categorise each active leftover by expiry relative to today
-	type IndexedLeftover = { item: (typeof active)[0]; originalIdx: number };
-	const expired: IndexedLeftover[] = [];
-	const expiringToday: IndexedLeftover[] = [];
-	const expiringTomorrow: IndexedLeftover[] = [];
+	const categorized = await withLeftoverLock(async () => {
+		const items = await loadLeftovers(sharedStore);
+		const active = getActiveLeftovers(items);
+		if (!active.length) return null;
 
-	// Build a map from active item back to original index in `items`
-	const originalIndices = new Map<(typeof active)[0], number>();
-	for (let i = 0; i < items.length; i++) {
-		const item = items[i];
-		if (item && item.status === 'active') {
-			originalIndices.set(item, i);
+		// Categorise each active leftover by expiry relative to today
+		const expired: IndexedLeftover[] = [];
+		const expiringToday: IndexedLeftover[] = [];
+		const expiringTomorrow: IndexedLeftover[] = [];
+
+		// Build a map from active item back to original index in `items`
+		const originalIndices = new Map<Leftover, number>();
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i];
+			if (item && item.status === 'active') {
+				originalIndices.set(item, i);
+			}
 		}
-	}
 
-	for (const item of active) {
-		const expiryMs = new Date(item.expiryEstimate).getTime();
-		const origIdx = originalIndices.get(item) ?? -1;
-		const entry = { item, originalIdx: origIdx };
+		for (const item of active) {
+			const expiryMs = new Date(item.expiryEstimate).getTime();
+			const origIdx = originalIndices.get(item) ?? -1;
+			const entry = { item, originalIdx: origIdx };
 
-		if (expiryMs < todayMs) {
-			expired.push(entry);
-		} else if (expiryMs === todayMs) {
-			expiringToday.push(entry);
-		} else if (expiryMs === tomorrowMs) {
-			expiringTomorrow.push(entry);
+			if (expiryMs < todayMs) {
+				expired.push(entry);
+			} else if (expiryMs === todayMs) {
+				expiringToday.push(entry);
+			} else if (expiryMs === tomorrowMs) {
+				expiringTomorrow.push(entry);
+			}
 		}
-	}
 
-	// Nothing to report
-	if (!expired.length && !expiringToday.length && !expiringTomorrow.length) return;
+		// Nothing to report
+		if (!expired.length && !expiringToday.length && !expiringTomorrow.length) return null;
 
-	// Auto-waste expired items
-	let updatedItems = [...items];
-	for (const { item, originalIdx } of expired) {
-		updatedItems = updateLeftoverStatus(updatedItems, originalIdx, 'wasted');
-		const entry: WasteLogEntry = {
-			name: item.name,
-			quantity: item.quantity,
-			reason: 'expired',
-			source: 'leftover',
-			date: today,
-		};
-		await appendWaste(sharedStore, entry);
-	}
-	if (expired.length) {
-		await saveLeftovers(sharedStore, updatedItems);
-	}
+		// Auto-waste expired items
+		let updatedItems = [...items];
+		for (const { item, originalIdx } of expired) {
+			updatedItems = updateLeftoverStatus(updatedItems, originalIdx, 'wasted');
+			const entry: WasteLogEntry = {
+				name: item.name,
+				quantity: item.quantity,
+				reason: 'expired',
+				source: 'leftover',
+				date: today,
+			};
+			await appendWaste(sharedStore, entry); // self-locking on waste-log.yaml
+		}
+		if (expired.length) {
+			await saveLeftovers(sharedStore, updatedItems);
+		}
+
+		return { expired, expiringToday, expiringTomorrow };
+	});
+
+	if (!categorized) return;
+	const { expired, expiringToday, expiringTomorrow } = categorized;
 
 	// Build alert message
 	const lines: string[] = ['🍱 *Leftover Check*\n'];
