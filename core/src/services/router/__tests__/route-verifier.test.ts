@@ -270,6 +270,48 @@ describe('RouteVerifier', () => {
 		expect(row[1].callbackData).toMatch(/:notes$/);
 	});
 
+	it('stores verifierSuggestedIntent in pending entry when verifier disagrees', async () => {
+		const llm = createMockLLM(
+			'{"agrees": false, "suggestedAppId": "notes", "suggestedIntent": "save a note"}',
+		);
+		const verifier = buildVerifier(llm);
+
+		await verifier.verify(createTextCtx(), classifierResult);
+
+		const addArg = mockArg<Parameters<PendingVerificationStore['add']>[0]>(pendingStore.add, 0);
+		expect(addArg.verifierSuggestedIntent).toBe('save a note');
+		expect(addArg.verifierSuggestedAppId).toBe('notes');
+	});
+
+	it('degrades gracefully when sendWithButtons fails after verifier disagrees', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "notes"}');
+		const failingTelegram: TelegramService = {
+			...createMockTelegram(),
+			sendWithButtons: vi.fn().mockRejectedValue(new Error('Telegram network error')),
+		};
+		const verifier = new RouteVerifier({
+			llm,
+			telegram: failingTelegram,
+			registry,
+			pendingStore,
+			verificationLogger,
+			logger,
+		});
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		// Should degrade to classifier's pick, not throw
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
+		// Pending entry should have been cleaned up
+		expect(pendingStore.resolve).toHaveBeenCalledOnce();
+	});
+
 	it('uses standard tier for the verification LLM call', async () => {
 		const llm = createMockLLM('{"agrees": true}');
 		const verifier = buildVerifier(llm);

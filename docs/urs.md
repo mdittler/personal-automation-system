@@ -1129,6 +1129,7 @@ When intent classification confidence falls in the grey zone (>= 0.4 and < upper
 - `route-verifier.test.ts` > degrades gracefully when LLM call fails
 - `route-verifier.test.ts` > degrades gracefully when LLM returns unparseable response
 - `route-verifier.test.ts` > degrades gracefully when LLM response is valid JSON but missing agrees field
+- `route-verifier.test.ts` > degrades gracefully when sendWithButtons fails after verifier disagrees
 - `route-verifier.test.ts` > falls back to classifier pick when verifier suggests non-existent appId
 - `route-verifier.test.ts` > allows chatbot as a suggested appId even when not in registry
 - `route-verifier.test.ts` > skips verification when only 1 app is installed
@@ -1137,6 +1138,7 @@ When intent classification confidence falls in the grey zone (>= 0.4 and < upper
 - `route-verifier.test.ts` > does not show chatbot as a button option when verifier suggests chatbot
 - `route-verifier.test.ts` > logs pending outcome when message is held
 - `route-verifier.test.ts` > resolveCallback returns undefined for unknown pending ID
+- `route-verifier.test.ts` > stores verifierSuggestedIntent in pending entry when verifier disagrees
 - `router-verification.test.ts` > backward compatible — no verifier means no verification
 - `router-verification.test.ts` > photo grey-zone triggers verifier
 - `pending-verification-store.test.ts` > callback data fits Telegram 64-byte limit
@@ -1158,6 +1160,42 @@ When intent classification confidence falls in the grey zone (>= 0.4 and < upper
 - `route-verifier.test.ts` > photo saving > saves photo to photoDir when verifier agrees
 - `route-verifier.test.ts` > photo saving > does not save photo when photoDir is not configured
 - `route-verifier.test.ts` > photo saving > includes saved photo path in the pending entry
+
+**Fixes:** None
+
+---
+
+### REQ-ROUTE-007: Route metadata on handler contexts
+
+**Phase:** D (LLM item #1) | **Status:** Implemented
+
+Every app handler invocation must receive a `route?: RouteInfo` field on its `MessageContext` or `PhotoContext`. `RouteInfo` carries `{ appId, intent, confidence, source, verifierStatus }` so downstream handlers can inspect how routing was decided without re-running classification logic.
+
+`RouteSource` values: `command | intent | photo-intent | context-promotion | user-override | fallback`.
+`RouteVerifierStatus` values: `not-run | skipped | agreed | degraded | user-override`.
+
+`route` is optional so existing test fixtures that build contexts directly remain valid. The core router populates it at every owned dispatch branch. The bootstrap `rv:` callback handler populates it for user-override re-dispatch. `CallbackContext` is excluded (different dispatch taxonomy, out of scope).
+
+**Standard tests:**
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > command branch attaches source:command, verifierStatus:not-run, confidence:1.0
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > classifier match attaches source:intent, intent/confidence from classifier, verifierStatus:not-run when no verifier configured
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > chatbot fallback attaches source:fallback, verifierStatus:not-run, intent:chatbot
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > photo single-app shortcut attaches source:photo-intent and confidence:1.0
+- `router-verification.test.ts` > route metadata — verifier path > verifier-agreed dispatch attaches verifierStatus:agreed on ctx.route
+- `router-verification.test.ts` > route metadata — verifier path > verifier-degraded dispatch attaches verifierStatus:degraded on ctx.route
+- `router-verification.test.ts` > route metadata — verifier path > high-confidence dispatch with verifier wired attaches verifierStatus:skipped on ctx.route
+- `context-promotion.test.ts` > TC-route: context-promotion dispatch attaches source:context-promotion on ctx.route
+
+**Edge case tests:**
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > photo fallback branch does not dispatch to any handler — sends "could not determine" message instead
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > photo single-app shortcut attaches source:photo-intent, verifierStatus:not-run when no verifier configured
+- `router.test.ts` > route metadata — ctx.route attached at each dispatch branch > ctx.route field is absent from contexts built without router dispatch
+
+**buildUserOverrideRouteInfo unit tests:**
+- `router.test.ts` > buildUserOverrideRouteInfo > uses classifierResult.intent when user chose the classifier app
+- `router.test.ts` > buildUserOverrideRouteInfo > uses verifierSuggestedIntent when user chose the verifier app and intent is available
+- `router.test.ts` > buildUserOverrideRouteInfo > falls back to chosenAppId as intent when user chose verifier app but no suggestedIntent was stored
+- `router.test.ts` > buildUserOverrideRouteInfo > always produces confidence 1.0 and source user-override regardless of inputs
 
 **Fixes:** None
 
@@ -5033,7 +5071,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
 | REQ-SERVER-003 | server.test.ts | 2 | 2 | Implemented |
 | REQ-ROUTE-005 | router.test.ts, chatbot.test.ts | 7 | 14 | Implemented |
-| REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 24 | Implemented |
+| REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 26 | Implemented |
+| REQ-ROUTE-007 | router.test.ts, router-verification.test.ts, context-promotion.test.ts | 12 | 3 | Implemented |
 | REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
 | REQ-CHATBOT-002 | chatbot.test.ts | 4 | 6 | Implemented |
 | REQ-CHATBOT-003 | chatbot.test.ts | 1 | 1 | Implemented |
@@ -5141,4 +5180,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **143 test files** | **1023** | **1245** | **2268 tests** |
+| **Totals** | **144 test files** | **1035** | **1250** | **2285 tests** |

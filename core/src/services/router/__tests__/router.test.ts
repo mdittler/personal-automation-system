@@ -8,7 +8,7 @@ import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { FallbackHandler } from '../fallback.js';
-import { Router } from '../index.js';
+import { buildUserOverrideRouteInfo, Router } from '../index.js';
 
 /**
  * Assert that a dispatch mock was called with a context whose `route` field
@@ -613,8 +613,9 @@ describe('Router', () => {
 			});
 		});
 
-		it('photo single-app shortcut attaches source:photo-intent, verifierStatus:skipped, confidence:1.0', async () => {
-			// Single photo app → shortcut path with confidence 1.0 (≥ verificationUpperBound → skipped)
+		it('photo single-app shortcut attaches source:photo-intent and confidence:1.0', async () => {
+			// Single photo app → shortcut path with confidence 1.0.
+			// verifierStatus is covered separately (not-run without verifier, skipped with verifier wired).
 			const router = buildRouter(users, [{ manifest: groceryManifest, module: groceryModule }]);
 
 			await router.routePhoto(createPhotoCtx('receipt from Costco'));
@@ -691,5 +692,74 @@ describe('Router', () => {
 			const ctx = createTextCtx('hello');
 			expect(ctx.route).toBeUndefined();
 		});
+
+		it('photo single-app shortcut attaches source:photo-intent, verifierStatus:not-run when no verifier configured', async () => {
+			// Fixes: prior test name claimed "verifierStatus:skipped" but buildRouter wires no verifier.
+			// Without a verifier, the code path produces 'not-run'. 'skipped' requires a wired verifier.
+			const router = buildRouter(users, [{ manifest: groceryManifest, module: groceryModule }]);
+
+			await router.routePhoto(createPhotoCtx('receipt from Costco'));
+
+			expectDispatchedRoute(vi.mocked(groceryModule.handlePhoto), {
+				appId: 'grocery',
+				source: 'photo-intent',
+				confidence: 1.0,
+				verifierStatus: 'not-run',
+			});
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// buildUserOverrideRouteInfo — pure helper unit tests
+// ---------------------------------------------------------------------------
+
+describe('buildUserOverrideRouteInfo', () => {
+	const classifierResult = { appId: 'food', intent: 'add grocery' };
+
+	it('uses classifierResult.intent when user chose the classifier app', () => {
+		const route = buildUserOverrideRouteInfo(classifierResult, 'food');
+
+		expect(route).toEqual({
+			appId: 'food',
+			intent: 'add grocery',
+			confidence: 1.0,
+			source: 'user-override',
+			verifierStatus: 'user-override',
+		});
+	});
+
+	it('uses verifierSuggestedIntent when user chose the verifier app and intent is available', () => {
+		const route = buildUserOverrideRouteInfo(classifierResult, 'notes', 'save a note');
+
+		expect(route).toEqual({
+			appId: 'notes',
+			intent: 'save a note',
+			confidence: 1.0,
+			source: 'user-override',
+			verifierStatus: 'user-override',
+		});
+	});
+
+	it('falls back to chosenAppId as intent when user chose verifier app but no suggestedIntent was stored', () => {
+		// This happens when the verifier LLM did not include a suggestedIntent in its response
+		const route = buildUserOverrideRouteInfo(classifierResult, 'notes', undefined);
+
+		expect(route).toEqual({
+			appId: 'notes',
+			intent: 'notes', // falls back to appId string as coarse label
+			confidence: 1.0,
+			source: 'user-override',
+			verifierStatus: 'user-override',
+		});
+	});
+
+	it('always produces confidence 1.0 and source user-override regardless of inputs', () => {
+		const r1 = buildUserOverrideRouteInfo({ appId: 'a', intent: 'x' }, 'a');
+		const r2 = buildUserOverrideRouteInfo({ appId: 'a', intent: 'x' }, 'b', 'y');
+		expect(r1.confidence).toBe(1.0);
+		expect(r1.source).toBe('user-override');
+		expect(r2.confidence).toBe(1.0);
+		expect(r2.source).toBe('user-override');
 	});
 });
