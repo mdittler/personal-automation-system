@@ -34,6 +34,8 @@ capabilities:
       - "user wants to log leftovers"
       - "user wants to plan for hosting guests"
       - "user wants to see food spending"
+      - "user wants to see receipt details or look up items from a receipt"
+      - "user asks about prices at a specific store"
       - "user wants to see nutrition information"
       - "user wants to know what they can make with what they have"
       - "user wants to adapt a recipe for a child"

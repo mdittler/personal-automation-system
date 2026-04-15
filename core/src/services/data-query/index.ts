@@ -112,16 +112,14 @@ export class DataQueryServiceImpl {
 
 	private getAuthorizedEntries(userId: string): FileIndexEntry[] {
 		const allEntries = this.fileIndex.getEntries();
-		const userSpaces = this.spaceService.getSpacesForUser(userId);
-		const allSpaces = this.spaceService.listSpaces();
-		const includeShared = userSpaces.length === 0 || allSpaces.length === 0;
 
 		return allEntries.filter((entry) => {
 			switch (entry.scope) {
 				case 'user':
 					return entry.owner === userId;
 				case 'shared':
-					return includeShared;
+					// Shared data is household-wide and always visible regardless of space membership
+					return true;
 				case 'space':
 					// owner is spaceId for space-scoped entries
 					return entry.owner != null && this.spaceService.isMember(entry.owner, userId);

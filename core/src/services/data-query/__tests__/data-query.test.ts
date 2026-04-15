@@ -622,25 +622,45 @@ describe('DataQueryService — scope enforcement', () => {
 		expect(vi.mocked(llm.complete)).not.toHaveBeenCalled();
 	});
 
-	it('shared files are hidden when user belongs to a space (multi-household rule)', async () => {
+	it('shared files are visible even when user belongs to a space', async () => {
 		await writeDataFile(dataDir, 'users/shared/food/prices/costco.md', PRICE_FILE);
 		const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['prices/']));
 		await fileIndex.rebuild();
 
-		const llm = makeMockLlm('[0]');
 		const svc = new DataQueryServiceImpl({
 			fileIndex,
 			spaceService: makeSpaceService([{ id: 'household-a', members: ['matt'] }]),
-			llm,
+			llm: makeMockLlm('[0]'),
 			dataDir,
 			logger,
 		});
 
-		// Matt is in household-a space, so shared should be hidden
+		// Matt is in household-a space, but shared data is household-wide and always visible
 		const result = await svc.query('show me prices', 'matt');
 
-		expect(result.empty).toBe(true);
-		expect(vi.mocked(llm.complete)).not.toHaveBeenCalled();
+		expect(result.empty).toBe(false);
+		expect(result.files[0].content).toContain('Orange');
+	});
+
+	it('shared files are visible alongside space-scoped files for space members', async () => {
+		await writeDataFile(dataDir, 'users/shared/food/prices/costco.md', PRICE_FILE);
+		await writeDataFile(dataDir, 'spaces/household-a/food/prices/local.md', PRICE_FILE);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['prices/']));
+		await fileIndex.rebuild();
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([{ id: 'household-a', members: ['matt'] }]),
+			llm: makeMockLlm('[0,1]'),
+			dataDir,
+			logger,
+		});
+
+		const result = await svc.query('show me prices', 'matt');
+
+		// Both shared and space-scoped files are accessible
+		expect(result.empty).toBe(false);
+		expect(result.files.length).toBe(2);
 	});
 
 	it('shared files are visible in single-household mode (no spaces exist)', async () => {
