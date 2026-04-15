@@ -28,6 +28,7 @@ Readiness probe. Returns 200 when the system is fully operational, 503 when any 
 ```json
 {
   "status": "ok",
+  "uptime": 3842.7,
   "checks": [
     { "name": "telegram", "status": "ok" },
     { "name": "filesystem", "status": "ok" }
@@ -39,6 +40,7 @@ Readiness probe. Returns 200 when the system is fully operational, 503 when any 
 ```json
 {
   "status": "degraded",
+  "uptime": 3842.7,
   "checks": [
     { "name": "telegram", "status": "fail", "detail": "timeout" },
     { "name": "filesystem", "status": "ok" }

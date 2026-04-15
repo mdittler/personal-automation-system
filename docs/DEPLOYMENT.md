@@ -36,10 +36,9 @@ Copy `.env.example` to `.env` and fill in the values before starting the server.
 
 The main configuration file is `config/pas.yaml`. It controls:
 
-- **Users** — list of registered users with Telegram IDs and roles
+- **Users** — list of registered users with Telegram IDs and admin flags
 - **LLM providers** — model assignments for `fast`, `standard`, and `reasoning` tiers
 - **Backup** — enable scheduled backups, set the backup path and retention count
-- **Apps** — per-app enabled/disabled flags and configuration
 
 Minimal `config/pas.yaml` to get started:
 
@@ -47,18 +46,17 @@ Minimal `config/pas.yaml` to get started:
 users:
   - id: "your_telegram_user_id"
     name: "Your Name"
-    role: admin
+    is_admin: true
+    enabled_apps: ["*"]   # ["*"] = all apps
 
 llm:
-  fast:
-    provider: anthropic
-    model: claude-haiku-3-5
-  standard:
-    provider: anthropic
-    model: claude-sonnet-4-5
-  reasoning:
-    provider: anthropic
-    model: claude-opus-4-5
+  tiers:
+    fast:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+    standard:
+      provider: anthropic
+      model: claude-sonnet-4-20250514
 
 backup:
   enabled: true
