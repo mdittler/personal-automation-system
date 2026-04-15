@@ -215,11 +215,7 @@ export async function main(): Promise<void> {
 		timezone: config.timezone,
 	});
 
-	// 5. Context Store, Audio, Daily Diff
-	const contextStore = new ContextStoreServiceImpl({
-		dataDir: config.dataDir,
-		logger: createChildLogger(logger, { service: 'context-store' }),
-	});
+	// 5. Audio, Daily Diff (context store moved to after householdService — see below)
 
 	const audio = new AudioServiceImpl({
 		logger: createChildLogger(logger, { service: 'audio' }),
@@ -245,12 +241,7 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'telegram' }),
 	});
 
-	// 7. Fallback handler
-	const fallback = new FallbackHandler({
-		dataDir: config.dataDir,
-		timezone: config.timezone,
-		logger: createChildLogger(logger, { service: 'fallback' }),
-	});
+	// 7. Fallback handler and Context Store constructed below, after householdService (step 8b-hh)
 
 	// 8. App Toggle Store (per-user app enable/disable overrides)
 	const appToggle = new AppToggleStore({
@@ -273,6 +264,21 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'household' }),
 	});
 	await householdService.init();
+
+	// 5b. Context Store — household-aware; wired after householdService so routing is correct
+	const contextStore = new ContextStoreServiceImpl({
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'context-store' }),
+		householdService,
+	});
+
+	// 7b. Fallback handler — household-aware; wired after householdService
+	const fallback = new FallbackHandler({
+		dataDir: config.dataDir,
+		timezone: config.timezone,
+		logger: createChildLogger(logger, { service: 'fallback' }),
+		householdService,
+	});
 
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
@@ -344,6 +350,7 @@ export async function main(): Promise<void> {
 		n8nDispatcher,
 		audioService: audio,
 		householdService,
+		spaceService,
 	});
 
 	// 8e. Rate limiters
@@ -713,6 +720,7 @@ export async function main(): Promise<void> {
 		dataDir: config.dataDir,
 		spaceService,
 		userManager,
+		householdService,
 		logger: createChildLogger(logger, { service: 'vault' }),
 	});
 	spaceService.setVaultService(vaultService);

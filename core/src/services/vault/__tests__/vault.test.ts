@@ -29,9 +29,11 @@ function makeUserManager(users: Array<{ id: string; name: string }> = []): UserM
 }
 
 function makeSpaceService(spacesForUser: Record<string, SpaceDefinition[]> = {}): SpaceService {
+	const allSpaces = Object.values(spacesForUser).flat();
 	return {
 		getSpacesForUser: vi.fn((userId: string) => spacesForUser[userId] ?? []),
-		listSpaces: vi.fn(() => Object.values(spacesForUser).flat()),
+		listSpaces: vi.fn(() => allSpaces),
+		getSpace: vi.fn((id: string) => allSpaces.find((s) => s.id === id) ?? null),
 	} as unknown as SpaceService;
 }
 

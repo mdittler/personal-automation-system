@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { ContextStoreServiceImpl } from '../../services/context-store/index.js';
+import { requestContext } from '../../services/context/request-context.js';
 import type { SystemConfig } from '../../types/config.js';
 
 export interface ContextRoutesOptions {
@@ -52,7 +53,7 @@ export function registerContextRoutes(
 			return reply.status(400).type('text/html').send('Invalid user ID');
 		}
 
-		const entries = await contextStore.listForUser(userId);
+		const entries = await requestContext.run({ userId }, () => contextStore.listForUser(userId));
 		const csrfToken = (request as unknown as Record<string, unknown>).csrfToken as string;
 		const safeUserId = escapeHtml(userId);
 
@@ -107,7 +108,7 @@ export function registerContextRoutes(
 
 			let content = '';
 			if (isEdit) {
-				const existing = await contextStore.getForUser(key, userId);
+				const existing = await requestContext.run({ userId }, () => contextStore.getForUser(key, userId));
 				content = existing ?? '';
 			}
 
@@ -155,7 +156,7 @@ export function registerContextRoutes(
 		}
 
 		try {
-			await contextStore.save(userId, key, content);
+			await requestContext.run({ userId }, () => contextStore.save(userId, key, content));
 			logger.info({ userId, key }, 'Context entry saved via GUI');
 		} catch (err) {
 			logger.error({ userId, key, error: err }, 'Failed to save context entry');
@@ -183,7 +184,7 @@ export function registerContextRoutes(
 		}
 
 		try {
-			await contextStore.remove(userId, key);
+			await requestContext.run({ userId }, () => contextStore.remove(userId, key));
 			logger.info({ userId, key }, 'Context entry deleted via GUI');
 		} catch (err) {
 			logger.error({ userId, key, error: err }, 'Failed to delete context entry');

@@ -17,6 +17,14 @@ export interface FallbackOptions {
 	logger: Logger;
 	/** IANA timezone for formatting timestamps (e.g. 'America/New_York'). */
 	timezone: string;
+	/**
+	 * Optional — when present, routes daily notes to the household layout
+	 * (`data/households/<hh>/users/<userId>/daily-notes`). When wired and the
+	 * user has no household, falls back to legacy path with a warn log so
+	 * messages are never silently discarded (URS-RT-005).
+	 * When absent, legacy `data/users/<userId>/daily-notes` is used.
+	 */
+	householdService?: { getHouseholdForUser(userId: string): string | null };
 }
 
 export class FallbackHandler {
@@ -24,6 +32,7 @@ export class FallbackHandler {
 	private readonly logger: Logger;
 	private readonly timezone: string;
 	private readonly timeFormatter: Intl.DateTimeFormat;
+	private readonly householdService?: { getHouseholdForUser(userId: string): string | null };
 
 	constructor(options: FallbackOptions) {
 		this.dataDir = options.dataDir;
@@ -35,6 +44,29 @@ export class FallbackHandler {
 			hour12: false,
 			timeZone: this.timezone,
 		});
+		this.householdService = options.householdService;
+	}
+
+	/**
+	 * Resolve the daily-notes directory for a user, household-aware when wired.
+	 *
+	 * - householdService wired + user has household → `households/<hh>/users/<u>/daily-notes`
+	 * - householdService wired + user has no household → logs warn, falls back to legacy
+	 *   (fail-soft so messages are never silently discarded, per URS-RT-005)
+	 * - householdService absent → legacy `users/<u>/daily-notes`
+	 */
+	private notesDir(userId: string): string {
+		if (this.householdService) {
+			const hh = this.householdService.getHouseholdForUser(userId);
+			if (hh !== null) {
+				return join(this.dataDir, 'households', hh, 'users', userId, 'daily-notes');
+			}
+			this.logger.warn(
+				{ userId },
+				'FallbackHandler: user has no household — writing daily note to legacy path',
+			);
+		}
+		return join(this.dataDir, 'users', userId, 'daily-notes');
 	}
 
 	/**
@@ -44,7 +76,7 @@ export class FallbackHandler {
 	async handleUnrecognized(ctx: MessageContext, telegram: TelegramService): Promise<void> {
 		const dateStr = toDateString(ctx.timestamp);
 		const time = this.timeFormatter.format(ctx.timestamp); // HH:MM in configured timezone
-		const notesDir = join(this.dataDir, 'users', ctx.userId, 'daily-notes');
+		const notesDir = this.notesDir(ctx.userId);
 		const notesPath = join(notesDir, `${dateStr}.md`);
 
 		try {
