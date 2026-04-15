@@ -7,11 +7,17 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter } from '@pas/core/utils/frontmatter';
 import type { PriceEntry, Receipt, StorePriceData } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 
 const PRICES_DIR = 'prices';
+
+/** Acquire the price file lock for a given store slug. */
+export function withPriceLock<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+	return withFileLock(`${PRICES_DIR}/${slug}.md`, fn);
+}
 
 /** Convert a store display name to a file-safe slug. */
 export function getStoreSlug(storeName: string): string {

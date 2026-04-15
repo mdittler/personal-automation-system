@@ -16,7 +16,7 @@ import {
 	getActiveLeftovers,
 	withLeftoverLock,
 } from '../services/leftover-store.js';
-import { appendWaste } from '../services/waste-store.js';
+import { appendWaste, appendWasteUnsafe } from '../services/waste-store.js';
 import type { FreezerItem, Leftover, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
@@ -185,7 +185,9 @@ export async function handleLeftoverCheckJob(
 
 	type IndexedLeftover = { item: Leftover; originalIdx: number };
 
-	const categorized = await withLeftoverLock(async () => {
+	// Acquire leftovers.yaml and waste-log.yaml together in sorted order to prevent
+	// nested lock acquisition (leftovers < waste-log alphabetically).
+	const categorized = await withMultiFileLock(['leftovers.yaml', 'waste-log.yaml'], async () => {
 		const items = await loadLeftovers(sharedStore);
 		const active = getActiveLeftovers(items);
 		if (!active.length) return null;
@@ -221,7 +223,7 @@ export async function handleLeftoverCheckJob(
 		// Nothing to report
 		if (!expired.length && !expiringToday.length && !expiringTomorrow.length) return null;
 
-		// Auto-waste expired items
+		// Auto-waste expired items — use appendWasteUnsafe since waste-log.yaml is already held
 		let updatedItems = [...items];
 		for (const { item, originalIdx } of expired) {
 			updatedItems = updateLeftoverStatus(updatedItems, originalIdx, 'wasted');
@@ -232,7 +234,7 @@ export async function handleLeftoverCheckJob(
 				source: 'leftover',
 				date: today,
 			};
-			await appendWaste(sharedStore, entry); // self-locking on waste-log.yaml
+			await appendWasteUnsafe(sharedStore, entry);
 		}
 		if (expired.length) {
 			await saveLeftovers(sharedStore, updatedItems);

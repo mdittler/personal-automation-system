@@ -124,6 +124,7 @@ export async function archivePurchased(
 	items: GroceryItem[],
 	timezone: string,
 ): Promise<void> {
+	// Must be called from within withGroceryLock to prevent concurrent same-day races.
 	if (!items.length) return;
 	const date = todayDate(timezone);
 	const path = `${HISTORY_DIR}/${date}.yaml`;

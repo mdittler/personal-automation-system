@@ -60,6 +60,17 @@ export async function appendWaste(store: ScopedDataStore, entry: WasteLogEntry):
 	});
 }
 
+/**
+ * Append a waste entry without acquiring the waste lock.
+ * Must only be called from within a withMultiFileLock that already holds
+ * the 'waste-log.yaml' key (e.g. withMultiFileLock(['leftovers.yaml', 'waste-log.yaml'], ...)).
+ */
+export async function appendWasteUnsafe(store: ScopedDataStore, entry: WasteLogEntry): Promise<void> {
+	const entries = await loadWasteLog(store);
+	entries.push(entry);
+	await saveWasteLog(store, entries);
+}
+
 /** Format a waste summary for the given period. */
 export function formatWasteSummary(entries: WasteLogEntry[], _periodDays: number): string {
 	if (!entries.length) return 'No food waste logged.';

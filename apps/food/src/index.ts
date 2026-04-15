@@ -198,6 +198,7 @@ import {
 	loadStorePrices,
 	parsePriceUpdateText,
 	saveStorePrices,
+	withPriceLock,
 } from './services/price-store.js';
 import { applyRecipeEdit, parseRecipeText } from './services/recipe-parser.js';
 import {
@@ -3065,21 +3066,23 @@ async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promi
 	}
 
 	const slug = getStoreSlug(parsed.store);
-	let priceData = await loadStorePrices(hh.sharedStore, slug);
-	if (!priceData.store || priceData.store === slug) {
-		priceData = { ...priceData, store: parsed.store, slug };
-	}
+	await withPriceLock(slug, async () => {
+		let priceData = await loadStorePrices(hh.sharedStore, slug);
+		if (!priceData.store || priceData.store === slug) {
+			priceData = { ...priceData, store: parsed.store, slug };
+		}
 
-	const entry = {
-		name: parsed.item,
-		price: parsed.price,
-		unit: parsed.unit,
-		department: parsed.department,
-		updatedAt: todayDate(services.timezone),
-	};
+		const entry = {
+			name: parsed.item,
+			price: parsed.price,
+			unit: parsed.unit,
+			department: parsed.department,
+			updatedAt: todayDate(services.timezone),
+		};
 
-	priceData = addOrUpdatePrice(priceData, entry);
-	await saveStorePrices(hh.sharedStore, priceData);
+		priceData = addOrUpdatePrice(priceData, entry);
+		await saveStorePrices(hh.sharedStore, priceData);
+	});
 
 	services.interactionContext?.record(ctx.userId, {
 		appId: 'food',
@@ -3473,7 +3476,10 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 		source: 'pantry',
 		date: todayDate(services.timezone),
 	};
-	await appendWaste(hh.sharedStore, entry); // self-locking
+	// Sequential writes: waste log first, then pantry removal.
+	// These are intentionally separate — waste is logged even if pantry removal fails.
+	// No deadlock risk: waste lock is released before pantry lock is acquired.
+	await appendWaste(hh.sharedStore, entry);
 
 	// Try to remove from pantry if it exists
 	await withPantryLock(async () => {
