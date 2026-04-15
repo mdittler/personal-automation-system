@@ -21,7 +21,7 @@ import type {
 import type { EventBusService } from '../../types/events.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
-import { getCurrentUserId } from '../context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { HouseholdService } from '../household/index.js';
 import { UserBoundaryError } from '../household/index.js';
 import type { SpaceService } from '../spaces/index.js';
@@ -142,24 +142,38 @@ export class DataStoreServiceImpl implements DataStoreService {
 	}
 
 	forShared(scope: string): SharedDataStore {
-		// Resolve household-aware path from current request context
-		const currentUserId = getCurrentUserId();
+		// Resolve household-aware path from current request context.
+		//
+		// Resolution order (post-migration, when householdService is wired):
+		//   1. getCurrentHouseholdId() — preferred: supports per-household shared-job
+		//      dispatch which sets householdId in context but no userId.
+		//   2. Derive from getCurrentUserId() via getHouseholdForUser().
+		//   3. Neither present → throw unconditionally, even with SYSTEM_BYPASS_TOKEN.
+		//      The bypass token skips ScopedStore manifest-scope enforcement, not
+		//      household routing. System code needing cross-household scratch space
+		//      must use forSystem() instead.
+		// Legacy (no householdService) → unchanged: routes to data/users/shared/<app>.
 
-		// I-2: Fail-closed when householdService is wired (post-migration) and no
-		// user in context. Without a userId we cannot determine the caller's household,
-		// so we cannot route to the correct household-scoped shared directory.
-		// System code must use SYSTEM_BYPASS_TOKEN to skip this check.
-		if (this._householdService && !currentUserId && this._bypassToken !== SYSTEM_BYPASS_TOKEN) {
-			throw new Error(
-				`forShared("${scope}"): householdService is wired but no userId in request context — ` +
-				'cannot determine caller household. Ensure forShared is called from within a requestContext.',
-			);
+		let householdId: string | null = null;
+
+		if (this._householdService) {
+			const contextHouseholdId = getCurrentHouseholdId();
+			const currentUserId = getCurrentUserId();
+
+			if (contextHouseholdId) {
+				// A3: prefer householdId from context (per-household shared-job path)
+				householdId = contextHouseholdId;
+			} else if (currentUserId) {
+				// Derive from userId (user-initiated request path)
+				householdId = this._householdService.getHouseholdForUser(currentUserId);
+			} else {
+				// R9: Neither source available — throw even with bypass token.
+				throw new Error(
+					`forShared("${scope}") cannot resolve a household: request context has neither ` +
+					'householdId nor userId. Use forSystem() for cross-household system writes.',
+				);
+			}
 		}
-
-		const householdId =
-			this._householdService && currentUserId
-				? this._householdService.getHouseholdForUser(currentUserId)
-				: null;
 
 		const baseDir = householdId
 			? join(this.dataDir, 'households', householdId, 'shared', this.appId)
@@ -183,10 +197,21 @@ export class DataStoreServiceImpl implements DataStoreService {
 	}
 
 	forSpace(spaceId: string, userId: string): ScopedDataStore {
-		// Actor-vs-target check
+		// Actor-vs-target check — mirrors forUser() fail-closed pattern.
 		const actorId = getCurrentUserId();
-		if (actorId !== undefined && actorId !== userId) {
-			throw new UserBoundaryError(actorId, userId);
+		if (this._householdService) {
+			// R3: Fail-closed post-migration: actor must always be in context.
+			if (actorId === undefined) {
+				throw new UserBoundaryError('(no actor in context)', userId);
+			}
+			if (actorId !== userId) {
+				throw new UserBoundaryError(actorId, userId);
+			}
+		} else {
+			// Legacy (no householdService): only check when actor is known.
+			if (actorId !== undefined && actorId !== userId) {
+				throw new UserBoundaryError(actorId, userId);
+			}
 		}
 
 		// Validate space ID format

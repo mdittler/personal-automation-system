@@ -14,7 +14,12 @@ export interface DataChangedPayload {
 	appId: string;
 	/** User ID the data belongs to (null for shared scope). */
 	userId: string | null;
-	/** data-root-relative (e.g. 'households/default/users/u1/food/grocery.md'). */
+	/**
+	 * Scope-relative path within the app's scoped store
+	 * (e.g. `grocery.md` under a food `forUser` store).
+	 * Use the `householdId` / `spaceKind` / `collaborationId` fields on the
+	 * payload for the authorization boundary — do not parse this path.
+	 */
 	path: string;
 	/** Space ID, if the data belongs to a shared space. */
 	spaceId?: string;

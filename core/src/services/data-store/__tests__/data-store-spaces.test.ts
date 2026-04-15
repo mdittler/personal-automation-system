@@ -2,6 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { requestContext } from '../../context/request-context.js';
+import type { HouseholdService } from '../../household/index.js';
+import { UserBoundaryError } from '../../household/index.js';
 import type { SpaceService } from '../../spaces/index.js';
 import { ChangeLog } from '../change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../index.js';
@@ -458,5 +461,97 @@ describe('forSpace() scope enforcement', () => {
 		});
 		const spaceStore = service.forSpace('family', 'user-1');
 		await expect(spaceStore.write('allowed/note.md', 'x')).resolves.toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// R3: forSpace() actor boundary enforcement (post-migration fail-closed)
+// ---------------------------------------------------------------------------
+
+describe('forSpace() actor boundary — post-migration fail-closed (R3)', () => {
+	const mockHouseholdService = {
+		getHouseholdForUser: vi.fn().mockReturnValue('hh-1'),
+		assertUserCanAccessHousehold: vi.fn(),
+	} as unknown as HouseholdService;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(mockHouseholdService.getHouseholdForUser).mockReturnValue('hh-1');
+	});
+
+	it('throws UserBoundaryError when no actor is in context and HouseholdService is wired', () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [],
+			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
+			spaceService: mockSpaceService,
+			householdService: mockHouseholdService,
+		});
+
+		// No requestContext.run → getCurrentUserId() returns undefined
+		// With HouseholdService wired, forSpace must fail closed
+		expect(() => service.forSpace('team', 'user-1')).toThrow(UserBoundaryError);
+		expect(() => service.forSpace('team', 'user-1')).toThrow('(no actor in context)');
+	});
+
+	it('passes when actor matches target in request context', () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [],
+			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
+			spaceService: mockSpaceService,
+			householdService: mockHouseholdService,
+		});
+
+		requestContext.run({ userId: 'user-1', householdId: 'hh-1' }, () => {
+			expect(() => service.forSpace('team', 'user-1')).not.toThrow();
+		});
+	});
+
+	it('throws UserBoundaryError when actor mismatches target even with HouseholdService', () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [],
+			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
+			spaceService: mockSpaceService,
+			householdService: mockHouseholdService,
+		});
+
+		requestContext.run({ userId: 'alice', householdId: 'hh-1' }, () => {
+			expect(() => service.forSpace('team', 'bob')).toThrow(UserBoundaryError);
+		});
+	});
+
+	it('legacy mode (no HouseholdService) allows no-actor call — regression guard', () => {
+		vi.mocked(mockSpaceService.isMember).mockReturnValue(true);
+
+		const service = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'notes',
+			userScopes: [],
+			sharedScopes: [],
+			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
+			spaceService: mockSpaceService,
+			// no householdService → transitional / legacy mode
+		});
+
+		// No requestContext set → in legacy mode this must NOT throw
+		expect(() => service.forSpace('team', 'user-1')).not.toThrow();
 	});
 });
