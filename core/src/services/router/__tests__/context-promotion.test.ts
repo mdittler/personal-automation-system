@@ -275,7 +275,7 @@ describe('Router context-aware promotion (Task 5a)', () => {
 		expect(notesModule.handleMessage).not.toHaveBeenCalled();
 	});
 
-	it('TC2: low-confidence match + matching context + verifier disagrees → chatbot fallback', async () => {
+	it('TC2: low-confidence match + matching context + verifier confirms different app → chatbot fallback', async () => {
 		const llm = createMockLLMWithLowConfidence(
 			{ category: 'log meal', confidence: 0.1 },
 			{ category: 'log meal', confidence: 0.25 },
@@ -297,12 +297,13 @@ describe('Router context-aware promotion (Task 5a)', () => {
 
 		await router.routeMessage(createTextCtx('show me that recipe'));
 
-		// Verifier suggested notes (a different appId from the low-confidence result food)
-		// → verifier is the stronger signal, dispatch to verifier-confirmed app
+		// Context-promotion asked "is this food?" — verifier said notes (different app).
+		// In strict context-promotion, we only route if the verifier confirms the same appId.
+		// A verifier redirect to a different app is not trustworthy at sub-threshold confidence → chatbot.
 		expect(verifier.verify).toHaveBeenCalledOnce();
 		expect(foodModule.handleMessage).not.toHaveBeenCalled();
-		expect(notesModule.handleMessage).toHaveBeenCalledOnce();
-		expect(fallback.handleUnrecognized).not.toHaveBeenCalled();
+		expect(notesModule.handleMessage).not.toHaveBeenCalled();
+		expect(fallback.handleUnrecognized).toHaveBeenCalledOnce();
 	});
 
 	it('TC3: low-confidence match + matching context + verifier throws → chatbot fallback (no crash)', async () => {

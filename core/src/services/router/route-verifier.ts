@@ -27,7 +27,7 @@ import type { VerificationLogger } from './verification-logger.js';
 // Public types
 // ---------------------------------------------------------------------------
 
-export type VerifyAction = { action: 'route'; appId: string } | { action: 'held' };
+export type VerifyAction = { action: 'route'; appId: string } | { action: 'held' } | { action: 'fallback' };
 
 export interface RouteVerifierOptions {
 	llm: LLMService;
@@ -112,6 +112,9 @@ export class RouteVerifier {
 	 *
 	 * @param recentInteractions - Optional context string from InteractionContextService.
 	 *   Injected into the verification prompt to help the LLM make a better decision.
+	 * @param strict - If true, LLM failure or unparseable output returns `{ action: 'fallback' }`
+	 *   instead of `{ action: 'route' }`. Used by context-promotion to prevent degraded
+	 *   verifier decisions from silently dispatching sub-threshold messages.
 	 */
 	async verify(
 		ctx: MessageContext | PhotoContext,
@@ -119,6 +122,7 @@ export class RouteVerifier {
 		photoPath?: string,
 		enabledApps?: string[],
 		recentInteractions?: string,
+		strict?: boolean,
 	): Promise<VerifyAction> {
 		const isPhoto = 'photo' in ctx;
 		const messageText = isPhoto
@@ -185,10 +189,15 @@ export class RouteVerifier {
 			}
 		} catch (err) {
 			this.logger.warn({ err }, 'RouteVerifier: LLM call failed — degrading gracefully');
+			// In strict mode, LLM failure must not produce a route — return fallback so the
+			// caller (context-promotion) can safely defer to chatbot instead of dispatching
+			// a sub-threshold message based on a degraded verifier decision.
+			if (strict) return { action: 'fallback' };
 			return { action: 'route', appId: classifierResult.appId };
 		}
 
 		if (verifierResponse === undefined) {
+			if (strict) return { action: 'fallback' };
 			return { action: 'route', appId: classifierResult.appId };
 		}
 

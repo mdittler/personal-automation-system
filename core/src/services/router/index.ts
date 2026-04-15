@@ -882,13 +882,16 @@ export class Router {
 			// Resolve effective app list
 			const resolvedApps = await this.resolveEnabledApps(ctx.userId, enabledApps);
 
-			// Enter verifier flow with the low-confidence result
+			// Enter verifier flow with the low-confidence result.
+			// strict=true: LLM failure inside the verifier returns { action: 'fallback' }
+			// instead of { action: 'route' }, preventing silent dispatch of sub-threshold messages.
 			const result = await this.routeVerifier.verify(
 				ctx,
 				lowMatch,
 				undefined,
 				resolvedApps,
 				recentInteractions,
+				true, // strict mode — degraded verifier must not produce a route
 			);
 
 			if (result.action === 'held') {
@@ -896,11 +899,14 @@ export class Router {
 				return;
 			}
 
-			if (result.action === 'route') {
-				// Verifier confirmed routing to an app — honor it regardless of whether
-				// it matches the low-confidence classifier's pick. The verifier is the
-				// stronger signal; dispatching a verifier-confirmed app is safe (same as
-				// the normal grey-zone path). Safety invariant: we still check access.
+			if (result.action === 'fallback') {
+				// Verifier degraded (LLM failure / unparseable) in strict mode → chatbot
+				await this.sendToFallback(ctx, enabledApps);
+				return;
+			}
+
+			if (result.action === 'route' && result.appId === lowMatch.appId) {
+				// Verifier confirmed the low-confidence appId — check access and dispatch
 				if (!(await this.isAppEnabled(ctx.userId, result.appId, enabledApps))) {
 					await this.trySend(ctx.userId, `You don't have access to the ${result.appId} app.`);
 					return;
@@ -912,7 +918,7 @@ export class Router {
 				}
 			}
 
-			// Verifier returned an unexpected result or app not found → fall through
+			// Verifier suggested a different app or returned an unexpected result → fall through
 			await this.sendToFallback(ctx, enabledApps);
 		} catch (error) {
 			// Any exception → safe fallback (never crash)
