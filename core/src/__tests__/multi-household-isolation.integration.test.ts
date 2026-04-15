@@ -539,6 +539,13 @@ describe('API change-log filter', () => {
 
 describe('Section-collector household path guard', () => {
 	it('15: app-data section pointing to households/hh-beta/ is rejected when householdId=hh-alpha', async () => {
+		// NOTE: This test exercises the guard by setting dataDir to betaDataDir so the
+		// resolved path physically contains /households/hh-beta/ in the string.
+		// In production the guard fires when report config resolves to a different
+		// household's data tree. The guard itself is also tested directly in
+		// section-collector.test.ts (4 unit tests). The full-coverage test for the
+		// production call path requires Task J-wired bootstrap, which is post-D5a.
+
 		// Create a file that is physically in hh-beta's directory
 		const betaPath = join(dataDir, 'households', 'hh-beta', 'shared', 'food');
 		await mkdir(betaPath, { recursive: true });
