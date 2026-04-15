@@ -126,6 +126,18 @@ describe('CronManager', () => {
 		manager.stop();
 	});
 
+	it('isRunning() returns false before start, true after start, false after stop', async () => {
+		const manager = new CronManager(logger, 'America/New_York', testDataDir);
+
+		expect(manager.isRunning()).toBe(false);
+
+		manager.start();
+		expect(manager.isRunning()).toBe(true);
+
+		await manager.stop();
+		expect(manager.isRunning()).toBe(false);
+	});
+
 	it('passes timezone option to node-cron createTask', () => {
 		const createTaskSpy = vi.spyOn(cron, 'createTask');
 		const manager = new CronManager(logger, 'Europe/London', testDataDir);

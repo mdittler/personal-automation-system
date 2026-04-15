@@ -312,6 +312,16 @@ describe('OneOffManager', () => {
 		expect(Date.now() - start).toBeLessThan(200);
 	});
 
+	it('isRunning() returns false before start, true after start, false after stop', async () => {
+		expect(manager.isRunning()).toBe(false);
+
+		manager.start();
+		expect(manager.isRunning()).toBe(true);
+
+		await manager.stop();
+		expect(manager.isRunning()).toBe(false);
+	});
+
 	// --- notifier exception resilience ---
 
 	it('continues processing remaining tasks if notifier.onFailure throws', async () => {

@@ -94,12 +94,12 @@ describe('HealthChecker.checkLLM', () => {
 		expect(result.detail).toBe('llm_reachable');
 	});
 
-	it('returns ok with llm_configured when listModels fails (provider is configured)', async () => {
+	it('returns fail with llm_configured when listModels fails (provider is configured but unreachable)', async () => {
 		const checker = makeChecker({
 			listModels: () => Promise.reject(new Error('network error')),
 		});
 		const result = await checker.checkLLM();
-		expect(result.status).toBe('ok');
+		expect(result.status).toBe('fail');
 		expect(result.detail).toBe('llm_configured');
 	});
 
@@ -126,6 +126,25 @@ describe('HealthChecker.checkLLM', () => {
 
 		// Should only have called the underlying listModels once
 		expect(listModels).toHaveBeenCalledTimes(1);
+	});
+
+	it('calls listModels again after the 60s cache TTL expires', async () => {
+		vi.useFakeTimers();
+		try {
+			const listModels = vi.fn().mockResolvedValue([]);
+			const checker = makeChecker({ listModels });
+
+			await checker.checkLLM();
+			expect(listModels).toHaveBeenCalledTimes(1);
+
+			// Advance past the 60s TTL
+			vi.advanceTimersByTime(61_000);
+
+			await checker.checkLLM();
+			expect(listModels).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

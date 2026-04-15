@@ -10,6 +10,14 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+	let handle: ReturnType<typeof setTimeout>;
+	const timeout = new Promise<never>((_, reject) => {
+		handle = setTimeout(() => reject(new Error(message)), ms);
+	});
+	return Promise.race([promise, timeout]).finally(() => clearTimeout(handle!));
+}
+
 interface TelegramClient {
 	getMe(): Promise<unknown>;
 }
@@ -24,7 +32,6 @@ interface ProviderClient {
 
 interface ProviderRegistryHandle {
 	getAll(): ProviderClient[];
-	getAllModels?(): Promise<unknown[]>;
 }
 
 interface HealthCheckDeps {
@@ -53,12 +60,7 @@ export class HealthChecker {
 	async checkTelegram(): Promise<CheckResult> {
 		const start = Date.now();
 		try {
-			await Promise.race([
-				this.deps.telegram.getMe(),
-				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error('Telegram getMe timed out')), TELEGRAM_TIMEOUT_MS),
-				),
-			]);
+			await withTimeout(this.deps.telegram.getMe(), TELEGRAM_TIMEOUT_MS, 'Telegram getMe timed out');
 			return { name: 'telegram', status: 'ok', latencyMs: Date.now() - start };
 		} catch (err) {
 			return {
@@ -97,18 +99,13 @@ export class HealthChecker {
 		const first = providers[0]!;
 		const start = Date.now();
 		try {
-			await Promise.race([
-				first.listModels(),
-				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error('listModels timed out')), 5_000),
-				),
-			]);
+			await withTimeout(first.listModels(), 5_000, 'listModels timed out');
 			return { name: 'llm', status: 'ok', latencyMs: Date.now() - start, detail: 'llm_reachable' };
 		} catch {
-			// listModels failed but we have providers configured — degraded but configured
+			// listModels failed — provider is configured but not reachable
 			return {
 				name: 'llm',
-				status: 'ok',
+				status: 'fail',
 				latencyMs: Date.now() - start,
 				detail: 'llm_configured',
 			};
