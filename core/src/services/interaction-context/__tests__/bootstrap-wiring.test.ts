@@ -67,9 +67,20 @@ describe('InteractionContextService bootstrap wiring', () => {
 			expect(source).toContain("interaction-context/index.js'");
 		});
 
-		it('bootstrap.ts instantiates InteractionContextServiceImpl', async () => {
+		it('bootstrap.ts instantiates InteractionContextServiceImpl with dataDir and logger', async () => {
 			const source = stripComments(await readBootstrap());
-			expect(source).toMatch(/new\s+InteractionContextServiceImpl\s*\(\s*\)/);
+			expect(source).toMatch(/new\s+InteractionContextServiceImpl\s*\(\s*\{/);
+			expect(source).toMatch(/\bdataDir\s*:/);
+		});
+
+		it('bootstrap.ts calls loadFromDisk() at startup', async () => {
+			const source = stripComments(await readBootstrap());
+			expect(source).toContain('interactionContextService.loadFromDisk');
+		});
+
+		it('bootstrap.ts calls stop() on interactionContextService in shutdown', async () => {
+			const source = stripComments(await readBootstrap());
+			expect(source).toContain('interactionContextService.stop');
 		});
 
 		it('bootstrap.ts conditionally injects interactionContext via declaredServices.has', async () => {

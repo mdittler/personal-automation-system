@@ -385,9 +385,13 @@ export async function main(): Promise<void> {
 	// FileIndexService, both of which are initialized after registry.loadAll() completes.
 	let editServiceImpl: EditServiceImpl | undefined;
 
-	// D2c: InteractionContextService — in-memory per-user interaction tracking.
+	// D2c: InteractionContextService — per-user interaction tracking with disk persistence.
 	// Created once and shared across all apps that declare 'interaction-context'.
-	const interactionContextService = new InteractionContextServiceImpl();
+	const interactionContextService = new InteractionContextServiceImpl({
+		dataDir: config.dataDir,
+		logger: logger.child({ service: 'interaction-context' }),
+	});
+	await interactionContextService.loadFromDisk();
 
 	// Service factory: creates scoped CoreServices per app
 	const serviceFactory: ServiceFactory = (manifest, _appDir) => {
@@ -1073,6 +1077,8 @@ export async function main(): Promise<void> {
 			...(webhookService ? [() => webhookService.dispose()] : []),
 			// Unsubscribe FileIndexService from data:changed events
 			() => eventBus.off('data:changed', onDataChanged),
+			// Flush interaction context to disk and drain write queue
+			() => interactionContextService.stop(),
 		],
 	});
 	shutdownManager.register();
