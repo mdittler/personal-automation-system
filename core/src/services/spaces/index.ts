@@ -430,6 +430,10 @@ class SpaceLimitError extends Error {
 /**
  * Validate a raw space entry from YAML: must be an object with required string fields.
  * Excludes malformed entries from the operational space map.
+ *
+ * Note: `kind` field validation is intentionally deferred to Task C (config loader transition).
+ * Legacy spaces.yaml entries without `kind` will be migrated to kind='household' by the migration runner.
+ * Until then, `kind` may be undefined on loaded legacy entries — Task C adds strict validation.
  */
 function isValidSpaceEntry(key: string, value: unknown): boolean {
 	if (typeof value !== 'object' || value === null) return false;
