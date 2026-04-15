@@ -6,6 +6,8 @@
  * and per delivery user.
  */
 
+import { appendFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { Logger } from 'pino';
 import type {
 	AlertAction,
@@ -19,6 +21,7 @@ import type {
 import type { AudioService } from '../../types/audio.js';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
+import { atomicWrite, ensureDir } from '../../utils/file.js';
 import { getCurrentHouseholdId, requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
@@ -388,10 +391,6 @@ async function executeWriteData(
 		throw new Error('dataDir not available for write_data action');
 	}
 
-	const { join, resolve, sep } = await import('node:path');
-	const { appendFile } = await import('node:fs/promises');
-	const { atomicWrite, ensureDir } = await import('../../utils/file.js');
-
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone || 'UTC');
 	const content = resolveTemplate(config.content, vars);
 
@@ -419,7 +418,6 @@ async function executeWriteData(
 		}
 	}
 
-	const { dirname } = await import('node:path');
 	await ensureDir(dirname(fullPath));
 
 	if (config.mode === 'write') {
