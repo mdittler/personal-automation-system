@@ -174,6 +174,27 @@ describe('GET /health/ready', () => {
 		await app.close();
 	});
 
+	it('returns 200 with status ok when only the scheduler check fails (non-essential)', async () => {
+		const app = Fastify({ logger: false });
+		const schedulerFailChecks: CheckResult[] = [
+			{ name: 'telegram', status: 'ok' },
+			{ name: 'scheduler', status: 'fail', detail: 'not running' },
+			{ name: 'llm', status: 'ok' },
+			{ name: 'filesystem', status: 'ok' },
+		];
+		const checker = makeChecker(schedulerFailChecks);
+		registerHealthRoute(app, checker);
+
+		const response = await app.inject({ method: 'GET', url: '/health/ready' });
+
+		expect(response.statusCode).toBe(200);
+		const body = response.json<{ status: string; checks: CheckResult[] }>();
+		expect(body.status).toBe('ok');
+		expect(body.checks.find((c) => c.name === 'scheduler')?.status).toBe('fail');
+
+		await app.close();
+	});
+
 	it('returns 200 without checks when no checker is provided', async () => {
 		const app = Fastify({ logger: false });
 		registerHealthRoute(app); // no checker
