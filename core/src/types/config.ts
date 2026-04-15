@@ -155,6 +155,12 @@ export interface SystemConfig {
 		/** Number of backups to keep. Default: 7 */
 		retentionCount: number;
 	};
+
+	/**
+	 * True when one or more users without householdId are detected at load time.
+	 * Set by the transitional config loader; cleared after household migration completes.
+	 */
+	migrationNeeded?: boolean;
 }
 
 /** Route verification configuration. */

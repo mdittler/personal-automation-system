@@ -107,6 +107,7 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 			members,
 			createdBy: body.createdBy ?? '',
 			createdAt: body.createdAt ?? new Date().toISOString(),
+			kind: 'household' as const,
 		};
 
 		// For updates, preserve original creator/createdAt

@@ -39,6 +39,8 @@ export interface DataStoreService {
 	/**
 	 * Get a store scoped to a specific user's data.
 	 * Resolves to: data/users/<userId>/<appId>/
+	 * @param userId - Must equal the current request context userId unless using SYSTEM_BYPASS_TOKEN.
+	 *                 Mismatches throw UserBoundaryError.
 	 */
 	forUser(userId: string): UserDataStore;
 

@@ -17,4 +17,9 @@ export interface RegisteredUser {
 	enabledApps: string[];
 	/** Shared scope IDs this user can access. */
 	sharedScopes: string[];
+	/**
+	 * Household this user belongs to.
+	 * Required in strict mode. Will be present after household migration.
+	 */
+	householdId?: string;
 }

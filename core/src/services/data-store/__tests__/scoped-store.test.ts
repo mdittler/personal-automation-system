@@ -182,34 +182,43 @@ describe('ScopedStore', () => {
 
 		it('emits data:changed on write', async () => {
 			await storeWithEvents.write('file.md', 'content');
-			expect(mockEventBus.emit).toHaveBeenCalledWith('data:changed', {
-				operation: 'write',
-				appId: 'test-app',
-				userId: 'user-123',
-				path: 'file.md',
-			});
+			expect(mockEventBus.emit).toHaveBeenCalledWith(
+				'data:changed',
+				expect.objectContaining({
+					operation: 'write',
+					appId: 'test-app',
+					userId: 'user-123',
+					path: 'file.md',
+				}),
+			);
 		});
 
 		it('emits data:changed on append', async () => {
 			await storeWithEvents.append('log.md', 'entry\n');
-			expect(mockEventBus.emit).toHaveBeenCalledWith('data:changed', {
-				operation: 'append',
-				appId: 'test-app',
-				userId: 'user-123',
-				path: 'log.md',
-			});
+			expect(mockEventBus.emit).toHaveBeenCalledWith(
+				'data:changed',
+				expect.objectContaining({
+					operation: 'append',
+					appId: 'test-app',
+					userId: 'user-123',
+					path: 'log.md',
+				}),
+			);
 		});
 
 		it('emits data:changed on archive', async () => {
 			await storeWithEvents.write('data.md', 'content');
 			(mockEventBus.emit as ReturnType<typeof vi.fn>).mockClear();
 			await storeWithEvents.archive('data.md');
-			expect(mockEventBus.emit).toHaveBeenCalledWith('data:changed', {
-				operation: 'archive',
-				appId: 'test-app',
-				userId: 'user-123',
-				path: 'data.md',
-			});
+			expect(mockEventBus.emit).toHaveBeenCalledWith(
+				'data:changed',
+				expect.objectContaining({
+					operation: 'archive',
+					appId: 'test-app',
+					userId: 'user-123',
+					path: 'data.md',
+				}),
+			);
 		});
 
 		it('does NOT emit on read', async () => {
@@ -269,12 +278,15 @@ describe('ScopedStore', () => {
 				eventBus: mockEventBus,
 			});
 			await sharedStore.write('shared-file.md', 'shared data');
-			expect(mockEventBus.emit).toHaveBeenCalledWith('data:changed', {
-				operation: 'write',
-				appId: 'test-app',
-				userId: null,
-				path: 'shared-file.md',
-			});
+			expect(mockEventBus.emit).toHaveBeenCalledWith(
+				'data:changed',
+				expect.objectContaining({
+					operation: 'write',
+					appId: 'test-app',
+					userId: null,
+					path: 'shared-file.md',
+				}),
+			);
 		});
 
 		it('write succeeds even if eventBus.emit throws', async () => {

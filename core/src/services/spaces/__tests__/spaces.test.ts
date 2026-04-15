@@ -51,6 +51,7 @@ function makeSpace(overrides: Partial<SpaceDefinition> = {}): SpaceDefinition {
 		members: ['111', '222'],
 		createdBy: '111',
 		createdAt: new Date().toISOString(),
+		kind: 'household',
 		...overrides,
 	};
 }

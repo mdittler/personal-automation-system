@@ -82,6 +82,12 @@ export class ScopedStore implements ScopedDataStore {
 				appId: this.appId,
 				userId: this.userId,
 				path,
+				// householdId, spaceKind, collaborationId, sharedSelector will be
+				// populated by Task F/G once HouseholdService is wired into ScopedStore.
+				householdId: null,
+				spaceKind: null,
+				collaborationId: null,
+				sharedSelector: null,
 			};
 			if (this.spaceId) {
 				payload.spaceId = this.spaceId;

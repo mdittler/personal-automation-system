@@ -6,6 +6,13 @@
  * specific people rather than all registered users.
  */
 
+/**
+ * Discriminates between household-scoped spaces and cross-household collaboration spaces.
+ * - 'household': tied to a single household; householdId is required.
+ * - 'collaboration': cross-household or standalone; householdId is absent.
+ */
+export type SpaceKind = 'household' | 'collaboration';
+
 /** A named shared data space with defined membership. */
 export interface SpaceDefinition {
 	/** Unique space identifier (lowercase, alphanumeric + hyphens). */
@@ -20,6 +27,13 @@ export interface SpaceDefinition {
 	createdBy: string;
 	/** ISO 8601 timestamp of creation. */
 	createdAt: string;
+	/** Whether this space is household-scoped or a cross-household collaboration. */
+	kind: SpaceKind;
+	/**
+	 * Household this space belongs to.
+	 * REQUIRED iff kind === 'household'; absent iff kind === 'collaboration'.
+	 */
+	householdId?: string;
 }
 
 /** Valid space ID pattern: starts with lowercase letter, then lowercase alphanumeric + hyphens. */

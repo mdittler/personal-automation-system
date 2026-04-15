@@ -685,6 +685,7 @@ export class Router {
 			members: [ctx.userId],
 			createdBy: ctx.userId,
 			createdAt: new Date().toISOString(),
+			kind: 'household',
 		});
 
 		if (errors.length > 0) {

@@ -146,6 +146,10 @@ describe('FileIndexService', () => {
         appId: 'food',
         userId: null,
         path: 'prices/costco.md',
+        householdId: null,
+        spaceKind: null,
+        collaborationId: null,
+        sharedSelector: null,
       };
       await service.handleDataChanged(payload);
 
@@ -164,6 +168,10 @@ describe('FileIndexService', () => {
         appId: 'food',
         userId: 'matt',
         path: 'recipes/tacos.yaml',
+        householdId: null,
+        spaceKind: null,
+        collaborationId: null,
+        sharedSelector: null,
       };
       await service.handleDataChanged(payload);
 
@@ -179,6 +187,10 @@ describe('FileIndexService', () => {
         userId: 'matt',
         path: 'recipes/new.yaml',
         spaceId: 'family',
+        householdId: null,
+        spaceKind: null,
+        collaborationId: null,
+        sharedSelector: null,
       };
       await service.handleDataChanged(payload);
 
@@ -432,6 +444,10 @@ Content with [[recipes/tacos]].`;
         appId: 'food',
         userId: null,
         path: 'prices/costco.md',
+        householdId: null,
+        spaceKind: null,
+        collaborationId: null,
+        sharedSelector: null,
       };
 
       await Promise.all([

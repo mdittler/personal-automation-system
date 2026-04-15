@@ -318,12 +318,12 @@ describe('EditService integration', () => {
 
     await editService.confirmEdit(proposal);
 
-    expect(eventBus.emit).toHaveBeenCalledWith('data:changed', {
+    expect(eventBus.emit).toHaveBeenCalledWith('data:changed', expect.objectContaining({
       operation: 'write',
       path: 'receipts/notes.md', // app-relative (strips users/user1/food/)
       appId: 'food',
       userId: 'user1',
-    });
+    }));
   });
 
   // -------------------------------------------------------------------------
