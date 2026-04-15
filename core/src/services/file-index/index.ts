@@ -3,7 +3,7 @@ import { join, basename, posix } from 'node:path';
 import type { DataChangedPayload } from '../../types/data-events.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { findMatchingScope } from '../data-store/paths.js';
-import { parsePathMeta, parseFileContent, isArchived } from './entry-parser.js';
+import { parsePathMeta, parseFileContent, isArchived, resolveHouseholdMeta } from './entry-parser.js';
 import type { FileIndexEntry, FileIndexFilter } from './types.js';
 
 export { type FileIndexEntry, type FileIndexFilter } from './types.js';
@@ -95,11 +95,16 @@ export class FileIndexService {
         if (!dates.latest || filenameDate > dates.latest) dates.latest = filenameDate;
       }
 
+      const hhMeta = resolveHouseholdMeta(relativePath);
+
       const entry: FileIndexEntry = {
         path: relativePath,
         appId: pathMeta.appId,
         scope: pathMeta.scope,
         owner: pathMeta.owner,
+        householdId: hhMeta.householdId,
+        spaceKind: hhMeta.spaceKind,
+        collaborationId: hhMeta.collaborationId,
         type: parsed.type,
         title: parsed.title,
         tags: parsed.tags,

@@ -1,5 +1,6 @@
 import { parseFrontmatter, extractWikiLinks } from '../../utils/frontmatter.js';
 import { ARCHIVE_PATTERN } from './types.js';
+import type { SpaceKind } from '../../types/spaces.js';
 
 interface PathMeta {
   appId: string;
@@ -115,4 +116,47 @@ export function parseFileContent(content: string): ParsedContent {
 /** Check if a filename matches the archive naming pattern. */
 export function isArchived(filename: string): boolean {
   return ARCHIVE_PATTERN.test(filename);
+}
+
+export interface HouseholdMeta {
+  householdId: string | null;
+  spaceKind: SpaceKind | null;
+  collaborationId: string | null;
+}
+
+/**
+ * Resolve household-boundary metadata from a data-root-relative path.
+ *
+ * Supported patterns:
+ *   households/<hh>/users/<uid>/<app>/...   → householdId: <hh>, spaceKind: null, collaborationId: null
+ *   households/<hh>/shared/<app>/...        → householdId: <hh>, spaceKind: null, collaborationId: null
+ *   households/<hh>/spaces/<sId>/<app>/...  → householdId: <hh>, spaceKind: 'household', collaborationId: null
+ *   collaborations/<sId>/<app>/...          → householdId: null, spaceKind: 'collaboration', collaborationId: <sId>
+ *   system/...                              → householdId: null, spaceKind: null, collaborationId: null
+ *   users/<uid>/<app>/... (legacy)          → householdId: null, spaceKind: null, collaborationId: null
+ *   spaces/<sId>/<app>/... (legacy)         → householdId: null, spaceKind: null, collaborationId: null
+ */
+export function resolveHouseholdMeta(relativePath: string): HouseholdMeta {
+  const NULL_META: HouseholdMeta = { householdId: null, spaceKind: null, collaborationId: null };
+  const parts = relativePath.split('/');
+
+  if (parts[0] === 'households' && parts.length >= 3) {
+    const hh = parts[1]!;
+    const segment2 = parts[2]!;
+
+    if (segment2 === 'spaces' && parts.length >= 4) {
+      // households/<hh>/spaces/<sId>/...
+      return { householdId: hh, spaceKind: 'household', collaborationId: null };
+    }
+    // households/<hh>/users/<uid>/... or households/<hh>/shared/...
+    return { householdId: hh, spaceKind: null, collaborationId: null };
+  }
+
+  if (parts[0] === 'collaborations' && parts.length >= 2) {
+    const sId = parts[1]!;
+    return { householdId: null, spaceKind: 'collaboration', collaborationId: sId };
+  }
+
+  // system/, legacy users/, legacy spaces/, or anything else → no household
+  return NULL_META;
 }

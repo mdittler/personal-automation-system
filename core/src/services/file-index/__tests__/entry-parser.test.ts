@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePathMeta, parseFileContent, isArchived } from '../entry-parser.js';
+import { parsePathMeta, parseFileContent, isArchived, resolveHouseholdMeta } from '../entry-parser.js';
 
 describe('parsePathMeta', () => {
   it('parses user-scoped path', () => {
@@ -374,6 +374,53 @@ A test recipe body with [[pantry]] link.
     expect(result.relationships).toEqual([{ target: 'prices/costco.md', type: 'related' }]);
     // Summary should be the first non-heading body line
     expect(result.summary).toContain('test recipe body');
+  });
+});
+
+describe('resolveHouseholdMeta', () => {
+  it('household user path → householdId set, spaceKind null, collaborationId null', () => {
+    const meta = resolveHouseholdMeta('households/hh-alpha/users/matt/food/recipes/tacos.yaml');
+    expect(meta).toEqual({ householdId: 'hh-alpha', spaceKind: null, collaborationId: null });
+  });
+
+  it('household shared path → householdId set, spaceKind null, collaborationId null', () => {
+    const meta = resolveHouseholdMeta('households/hh-alpha/shared/food/prices/costco.md');
+    expect(meta).toEqual({ householdId: 'hh-alpha', spaceKind: null, collaborationId: null });
+  });
+
+  it('household space path → householdId set, spaceKind household, collaborationId null', () => {
+    const meta = resolveHouseholdMeta('households/hh-alpha/spaces/family-space/food/recipes/pasta.yaml');
+    expect(meta).toEqual({ householdId: 'hh-alpha', spaceKind: 'household', collaborationId: null });
+  });
+
+  it('collaboration path → householdId null, spaceKind collaboration, collaborationId set', () => {
+    const meta = resolveHouseholdMeta('collaborations/collab-123/food/recipes/shared.yaml');
+    expect(meta).toEqual({ householdId: null, spaceKind: 'collaboration', collaborationId: 'collab-123' });
+  });
+
+  it('system path → all null', () => {
+    const meta = resolveHouseholdMeta('system/households.yaml');
+    expect(meta).toEqual({ householdId: null, spaceKind: null, collaborationId: null });
+  });
+
+  it('legacy users path → all null (fail-open for pre-migration)', () => {
+    const meta = resolveHouseholdMeta('users/matt/food/recipes/tacos.yaml');
+    expect(meta).toEqual({ householdId: null, spaceKind: null, collaborationId: null });
+  });
+
+  it('legacy shared path → all null (fail-open for pre-migration)', () => {
+    const meta = resolveHouseholdMeta('users/shared/food/prices/costco.md');
+    expect(meta).toEqual({ householdId: null, spaceKind: null, collaborationId: null });
+  });
+
+  it('legacy spaces path → all null (fail-open for pre-migration)', () => {
+    const meta = resolveHouseholdMeta('spaces/family/food/recipes/pasta.yaml');
+    expect(meta).toEqual({ householdId: null, spaceKind: null, collaborationId: null });
+  });
+
+  it('unrecognized path → all null (fail-open)', () => {
+    const meta = resolveHouseholdMeta('random/unknown/structure.md');
+    expect(meta).toEqual({ householdId: null, spaceKind: null, collaborationId: null });
   });
 });
 

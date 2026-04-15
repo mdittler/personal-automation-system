@@ -20,6 +20,8 @@ import { dirname, join } from 'node:path';
 import type pino from 'pino';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { atomicWrite } from '../../utils/file.js';
+import { getCurrentUserId } from '../context/request-context.js';
+import { UserBoundaryError } from '../household/index.js';
 
 /** A single recorded interaction event. */
 export interface InteractionEntry {
@@ -229,6 +231,13 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 	}
 
 	getRecent(userId: string): InteractionEntry[] {
+		// Actor check: when running in a request context, only the current user
+		// may read their own interaction buffer (system calls have no userId in context).
+		const actorId = getCurrentUserId();
+		if (actorId !== undefined && actorId !== userId) {
+			throw new UserBoundaryError(actorId, userId);
+		}
+
 		const buffer = this.store.get(userId);
 		if (!buffer || buffer.length === 0) {
 			return [];

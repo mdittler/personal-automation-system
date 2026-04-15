@@ -25,6 +25,7 @@ import type { AppLogger } from '../../types/app-module.js';
 import type { DataQueryResult, DataQueryOptions } from '../../types/data-query.js';
 import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
 
 /** Maximum entries to send to the LLM for file selection. */
 const MAX_CANDIDATES = 100;
@@ -112,17 +113,28 @@ export class DataQueryServiceImpl {
 
 	private getAuthorizedEntries(userId: string): FileIndexEntry[] {
 		const allEntries = this.fileIndex.getEntries();
+		const userHouseholdId = getCurrentHouseholdId();
 
 		return allEntries.filter((entry) => {
 			switch (entry.scope) {
 				case 'user':
 					return entry.owner === userId;
 				case 'shared':
-					// Shared data is household-wide and always visible regardless of space membership
+					// Shared data is household-wide and always visible regardless of space membership.
+					// When householdId is available in context, restrict to this household's shared data.
+					// Fall back to showing all shared files when context is absent (pre-migration / system).
+					if (userHouseholdId !== undefined) {
+						return entry.householdId === userHouseholdId;
+					}
 					return true;
 				case 'space':
 					// owner is spaceId for space-scoped entries
-					return entry.owner != null && this.spaceService.isMember(entry.owner, userId);
+					if (entry.owner == null || !this.spaceService.isMember(entry.owner, userId)) return false;
+					// When householdId is available, restrict to same-household spaces
+					if (userHouseholdId !== undefined) {
+						return entry.householdId === userHouseholdId;
+					}
+					return true;
 				default:
 					return false;
 			}

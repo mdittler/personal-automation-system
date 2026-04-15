@@ -1,3 +1,5 @@
+import type { SpaceKind } from '../../types/spaces.js';
+
 /**
  * A single indexed data file's metadata.
  *
@@ -14,6 +16,12 @@ export interface FileIndexEntry {
   scope: 'user' | 'shared' | 'space';
   /** userId for user-scoped, spaceId for space-scoped, null for shared */
   owner: string | null;
+  /** Household this file belongs to; null for system/ and collaboration/ scopes. */
+  householdId: string | null;
+  /** Space kind discriminant; 'household' for household spaces, 'collaboration' for cross-household, null otherwise. */
+  spaceKind: SpaceKind | null;
+  /** Collaboration space ID when spaceKind === 'collaboration'; null otherwise. */
+  collaborationId: string | null;
   /** From frontmatter type field */
   type: string | null;
   /** From frontmatter title or first heading */

@@ -12,6 +12,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { InteractionContextServiceImpl } from '../index.js';
+import { requestContext } from '../../context/request-context.js';
+import { UserBoundaryError } from '../../household/index.js';
 
 describe('InteractionContextService integration', () => {
   let service: InteractionContextServiceImpl;
@@ -53,5 +55,39 @@ describe('InteractionContextService integration', () => {
 
     const entries = service.getRecent('user1');
     expect(entries).toHaveLength(0);
+  });
+});
+
+describe('InteractionContextService — actor check (H5)', () => {
+  let service: InteractionContextServiceImpl;
+
+  beforeEach(() => {
+    service = new InteractionContextServiceImpl();
+    service.record('me', { appId: 'food', action: 'view-recipe' });
+    service.record('other-user', { appId: 'notes', action: 'create-note' });
+  });
+
+  it('getRecent(me) from within runWithContext({ userId: me }) succeeds', async () => {
+    let entries: ReturnType<typeof service.getRecent> | undefined;
+    await requestContext.run({ userId: 'me' }, async () => {
+      entries = service.getRecent('me');
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries![0]!.action).toBe('view-recipe');
+  });
+
+  it('getRecent(other-user) from within runWithContext({ userId: me }) throws UserBoundaryError', async () => {
+    await expect(
+      requestContext.run({ userId: 'me' }, async () => {
+        service.getRecent('other-user');
+      }),
+    ).rejects.toThrow(UserBoundaryError);
+  });
+
+  it('getRecent(any) with no context (actorId undefined) succeeds (system use case)', () => {
+    // No requestContext.run wrapper — actorId is undefined
+    const entries = service.getRecent('other-user');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.action).toBe('create-note');
   });
 });
