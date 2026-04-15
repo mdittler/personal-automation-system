@@ -1070,13 +1070,12 @@ describe('EditServiceImpl', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PathLock tests (internal Map cleanup)
+// withFileLock integration — sequential confirms
 // ---------------------------------------------------------------------------
 
-describe('PathLock Map cleanup', () => {
+describe('withFileLock integration — sequential confirms', () => {
   it('cleans up the lock Map after sequential acquisitions on the same path', async () => {
-    // Access PathLock indirectly via EditServiceImpl by running two sequential confirms
-    // on the same path and verifying no Map leak (both succeed and Map is cleaned up)
+    // confirms on the same path are serialized via the shared FileMutex
     const relativePath = 'users/matt/food/recipes/lock-test.yaml';
     let dataDir: string;
     dataDir = makeTmpDir();

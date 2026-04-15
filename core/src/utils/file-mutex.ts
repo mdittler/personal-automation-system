@@ -16,6 +16,7 @@ export function withFileLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 /**
  * Acquire multiple file locks in canonical sorted order (prevents deadlocks).
  * Use when a single operation touches multiple stores.
+ * If keys is empty, fn() runs immediately with no lock held.
  */
 export function withMultiFileLock<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
 	const sorted = [...new Set(keys)].sort();
