@@ -17,6 +17,8 @@ import type { LLMService } from '../../../types/llm.js';
 import type { EventBusService } from '../../../types/events.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import { EditLog, EditServiceImpl } from '../index.js';
+import { requestContext } from '../../context/request-context.js';
+import { HouseholdBoundaryError } from '../../household/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1066,6 +1068,108 @@ describe('EditServiceImpl', () => {
     // The decoy file must NOT be changed
     const decoyContent = await readFile(join(dataDir, decoyRelPath), 'utf-8');
     expect(decoyContent).toBe(beforeContent);
+  });
+
+  // -------------------------------------------------------------------------
+  // Household boundary tests
+  // -------------------------------------------------------------------------
+
+  it('proposeEdit: householdId in context, dataDir is under a different household → throws HouseholdBoundaryError', async () => {
+    // dataDir is under households/hh-beta/ — the absolute path will contain /households/hh-beta/
+    // but the context says hh-alpha → boundary violation
+    const hhBetaDataDir = join(dataDir, 'households', 'hh-beta');
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    await mkdir(join(hhBetaDataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = 'original content';
+    await writeFile(join(hhBetaDataDir, relativePath), beforeContent, 'utf-8');
+
+    const afterContent = 'updated content';
+    const dq = makeDataQueryService([
+      { path: relativePath, appId: 'food', content: '(truncated)' },
+    ]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm: makeLLM(afterContent),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir: hhBetaDataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    // Run with context householdId 'hh-alpha' — absolute path contains hh-beta → violation
+    await expect(
+      requestContext.run({ userId: 'matt', householdId: 'hh-alpha' }, () =>
+        svc.proposeEdit('change something', 'matt'),
+      ),
+    ).rejects.toThrow(HouseholdBoundaryError);
+  });
+
+  it('proposeEdit: householdId in context matches path household → succeeds', async () => {
+    // dataDir is under households/hh-alpha/ — absolute path contains /households/hh-alpha/
+    const hhAlphaDataDir = join(dataDir, 'households', 'hh-alpha');
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    await mkdir(join(hhAlphaDataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = 'original content';
+    await writeFile(join(hhAlphaDataDir, relativePath), beforeContent, 'utf-8');
+
+    const afterContent = 'updated content';
+    const dq = makeDataQueryService([
+      { path: relativePath, appId: 'food', content: '(truncated)' },
+    ]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm: makeLLM(afterContent),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir: hhAlphaDataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    // householdId matches hh-alpha in the absolute path → should succeed
+    const result = await requestContext.run({ userId: 'matt', householdId: 'hh-alpha' }, () =>
+      svc.proposeEdit('change something', 'matt'),
+    );
+
+    expect(result.kind).toBe('proposal');
+  });
+
+  it('proposeEdit: no householdId in context → fail-open, any path succeeds', async () => {
+    // dataDir is under households/hh-beta/ but no householdId in context → should be allowed
+    const hhBetaDataDir = join(dataDir, 'households', 'hh-beta');
+    const relativePath = 'users/matt/food/recipes/tacos.yaml';
+    await mkdir(join(hhBetaDataDir, 'users/matt/food/recipes'), { recursive: true });
+    const beforeContent = 'original content';
+    await writeFile(join(hhBetaDataDir, relativePath), beforeContent, 'utf-8');
+
+    const afterContent = 'updated content';
+    const dq = makeDataQueryService([
+      { path: relativePath, appId: 'food', content: '(truncated)' },
+    ]);
+    const registry = makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' });
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: registry,
+      llm: makeLLM(afterContent),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir: hhBetaDataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+    });
+
+    // No requestContext.run → no householdId in context → fail-open
+    const result = await svc.proposeEdit('change something', 'matt');
+
+    expect(result.kind).toBe('proposal');
   });
 });
 

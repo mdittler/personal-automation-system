@@ -19,7 +19,7 @@ import type {
 import type { AudioService } from '../../types/audio.js';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
-import { requestContext } from '../context/request-context.js';
+import { getCurrentHouseholdId, requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { HouseholdService } from '../household/index.js';
@@ -406,7 +406,6 @@ async function executeWriteData(
 	// Household boundary check: if the resolved path falls under households/<hh>/,
 	// verify it matches the current request context's householdId. Fail-open when
 	// householdId is absent (system call or pre-migration instance).
-	const { getCurrentHouseholdId } = await import('../context/request-context.js');
 	const contextHouseholdId = getCurrentHouseholdId();
 	if (contextHouseholdId) {
 		const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(fullPath);

@@ -27,6 +27,8 @@ import { generateDiff } from '../../utils/diff.js';
 import { findMatchingScope } from '../data-store/paths.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import { withFileLock } from '../../utils/file-mutex.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
+import { HouseholdBoundaryError } from '../household/index.js';
 import { EditLog } from './edit-log.js';
 
 export { EditLog } from './edit-log.js';
@@ -231,6 +233,24 @@ export class EditServiceImpl implements EditService {
       };
     }
 
+    // Household boundary check: if the request context carries a householdId, verify
+    // the resolved path is within that household's subtree. Fail-open when no householdId
+    // is present (system call or pre-migration instance).
+    const contextHouseholdId = getCurrentHouseholdId();
+    if (contextHouseholdId) {
+      const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(absolutePath);
+      if (householdMatch) {
+        const pathHouseholdId = householdMatch[1];
+        if (pathHouseholdId !== contextHouseholdId) {
+          throw new HouseholdBoundaryError(
+            contextHouseholdId,
+            pathHouseholdId,
+            `EditService: path household "${pathHouseholdId}" does not match context household "${contextHouseholdId}"`,
+          );
+        }
+      }
+    }
+
     // Step 4: Re-read the full raw file
     let beforeContent: string;
     try {
@@ -433,6 +453,22 @@ export class EditServiceImpl implements EditService {
     }
     if (!realAbsPath.startsWith(realDataDir + sep) && realAbsPath !== realDataDir) {
       return { ok: false, reason: 'Path is outside data directory.' };
+    }
+
+    // Household boundary check (same policy as proposeEdit — fail-open when absent).
+    const confirmContextHouseholdId = getCurrentHouseholdId();
+    if (confirmContextHouseholdId) {
+      const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(realAbsPath);
+      if (householdMatch) {
+        const pathHouseholdId = householdMatch[1];
+        if (pathHouseholdId !== confirmContextHouseholdId) {
+          throw new HouseholdBoundaryError(
+            confirmContextHouseholdId,
+            pathHouseholdId,
+            `EditService confirmEdit: path household "${pathHouseholdId}" does not match context household "${confirmContextHouseholdId}"`,
+          );
+        }
+      }
     }
 
     // Steps 4-5: Per-path lock, re-read + hash compare, atomic write

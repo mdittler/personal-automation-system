@@ -421,7 +421,7 @@ describe('collectSection — app-data household boundary (I1)', () => {
 		);
 
 		// The resolved path contains households/hh1/ and householdId matches → allowed
-		expect(result.content).not.toContain('Access denied');
+		expect(result.content).toContain('hh1 content');
 	});
 
 	it('denies access when path household does not match report owner householdId', async () => {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AlertAction } from '../../../types/alert.js';
-import { getCurrentUserId } from '../../context/request-context.js';
+import { getCurrentUserId, requestContext } from '../../context/request-context.js';
 import {
 	type ExecutionContext,
 	type ExecutorDeps,
@@ -475,6 +475,81 @@ describe('executeActions — write_data', () => {
 		const filePath = join(tempDir, 'users', 'user1', 'notes', 'output.md');
 		const content = await readFile(filePath, 'utf-8');
 		expect(content).toBe('Data: evaluated content');
+	});
+
+	it('write_data with no context householdId succeeds (fail-open)', async () => {
+		const deps = makeDeps({ dataDir: tempDir });
+		const actions: AlertAction[] = [
+			{
+				type: 'write_data',
+				config: {
+					app_id: 'notes',
+					user_id: 'user1',
+					path: 'data.md',
+					content: 'hello',
+					mode: 'write',
+				},
+			},
+		];
+
+		// No requestContext.run → no householdId → should succeed
+		const result = await executeActions(actions, ['user1'], deps, makeContext());
+
+		expect(result.successCount).toBe(1);
+		expect(result.failureCount).toBe(0);
+	});
+
+	it('write_data with matching context householdId succeeds', async () => {
+		// Put the dataDir under a households/hh-alpha path to trigger the regex
+		const hhDataDir = join(tempDir, 'households', 'hh-alpha');
+		const deps = makeDeps({ dataDir: hhDataDir });
+		const actions: AlertAction[] = [
+			{
+				type: 'write_data',
+				config: {
+					app_id: 'notes',
+					user_id: 'user1',
+					path: 'data.md',
+					content: 'hello',
+					mode: 'write',
+				},
+			},
+		];
+
+		// householdId matches the hh-alpha path segment
+		const result = await requestContext.run({ userId: 'user1', householdId: 'hh-alpha' }, () =>
+			executeActions(actions, ['user1'], deps, makeContext()),
+		);
+
+		expect(result.successCount).toBe(1);
+		expect(result.failureCount).toBe(0);
+	});
+
+	it('write_data with mismatched context householdId is caught by executeActions', async () => {
+		// dataDir resolves under households/hh-beta but context says hh-alpha
+		const hhDataDir = join(tempDir, 'households', 'hh-beta');
+		const deps = makeDeps({ dataDir: hhDataDir });
+		const actions: AlertAction[] = [
+			{
+				type: 'write_data',
+				config: {
+					app_id: 'notes',
+					user_id: 'user1',
+					path: 'data.md',
+					content: 'hello',
+					mode: 'write',
+				},
+			},
+		];
+
+		// householdId hh-alpha does not match path containing hh-beta
+		const result = await requestContext.run({ userId: 'user1', householdId: 'hh-alpha' }, () =>
+			executeActions(actions, ['user1'], deps, makeContext()),
+		);
+
+		// executeActions catches the thrown error and increments failureCount
+		expect(result.failureCount).toBe(1);
+		expect(result.successCount).toBe(0);
 	});
 
 	it('expands {date} token in path to today\'s date (Gap 14)', async () => {
