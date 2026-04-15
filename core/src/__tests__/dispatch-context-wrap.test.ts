@@ -165,8 +165,9 @@ describe('dispatch-site requestContext wraps', () => {
 	describe('api/routes/messages.ts', () => {
 		it('wraps router.routeMessage in requestContext.run', async () => {
 			const source = stripComments(await readSource('api/routes/messages.ts'));
+			// Pattern allows extra fields (e.g. householdId) alongside userId in the context object
 			const wrapped = source.match(
-				/requestContext\.run\s*\(\s*\{\s*userId\s*\}\s*,\s*\(\s*\)\s*=>\s*router\.routeMessage\s*\(/,
+				/requestContext\.run\s*\(\s*\{[^}]*userId[^}]*\}\s*,\s*\(\s*\)\s*=>\s*router\.routeMessage\s*\(/,
 			);
 			expect(wrapped).not.toBeNull();
 		});
@@ -175,8 +176,9 @@ describe('dispatch-site requestContext wraps', () => {
 	describe('services/alerts/alert-executor.ts', () => {
 		it('wraps deps.router.routeMessage in requestContext.run with the action user_id', async () => {
 			const source = stripComments(await readSource('services/alerts/alert-executor.ts'));
+			// Pattern allows extra fields (e.g. householdId) alongside userId in the context object
 			const wrapped = source.match(
-				/requestContext\.run\s*\(\s*\{\s*userId:\s*config\.user_id\s*\}\s*,\s*\(\s*\)\s*=>\s*deps\.router[!\.]*routeMessage\s*\(/,
+				/requestContext\.run\s*\(\s*\{[^}]*userId:\s*config\.user_id[^}]*\}\s*,\s*\(\s*\)\s*=>\s*deps\.router[!\.]*routeMessage\s*\(/,
 			);
 			expect(wrapped).not.toBeNull();
 		});

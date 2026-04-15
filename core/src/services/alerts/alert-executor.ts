@@ -22,6 +22,7 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
+import type { HouseholdService } from '../household/index.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
 import type { Router } from '../router/index.js';
@@ -41,6 +42,8 @@ export interface ExecutorDeps {
 	audioService?: AudioService;
 	router?: Router;
 	timezone?: string;
+	/** Optional — when present, householdId is derived and injected into dispatch_message context. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 export interface ExecutionContext {
@@ -443,8 +446,9 @@ async function executeDispatchMessage(
 		messageId: 0,
 	};
 
-	// Wrap in LLM context for per-user cost attribution (same as API messages route)
-	await requestContext.run({ userId: config.user_id }, () => deps.router!.routeMessage(ctx));
+	// Wrap in request context for per-user cost attribution + household boundary
+	const householdId = deps.householdService?.getHouseholdForUser(config.user_id) ?? undefined;
+	await requestContext.run({ userId: config.user_id, householdId }, () => deps.router!.routeMessage(ctx));
 
 	deps.logger.info(
 		{ userId: config.user_id, textLength: text.length },

@@ -17,6 +17,7 @@
 
 import type { Logger } from 'pino';
 import { requestContext } from '../context/request-context.js';
+import type { HouseholdService } from '../household/index.js';
 import type { TaskHandler } from './task-runner.js';
 
 /**
@@ -40,6 +41,8 @@ export interface BuildScheduledJobHandlerOptions {
 	appModule: ScheduledJobAppModule;
 	userProvider: ScheduledJobUserProvider;
 	logger: Logger;
+	/** Optional — when present, householdId is derived and injected into context. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 /**
@@ -52,7 +55,7 @@ export interface BuildScheduledJobHandlerOptions {
  *   with no userId. Errors propagate to the task runner as before.
  */
 export function buildScheduledJobHandler(opts: BuildScheduledJobHandlerOptions): TaskHandler {
-	const { appId, jobId, userScope, appModule, userProvider, logger } = opts;
+	const { appId, jobId, userScope, appModule, userProvider, logger, householdService } = opts;
 
 	return async () => {
 		if (!appModule.handleScheduledJob) return;
@@ -70,7 +73,8 @@ export function buildScheduledJobHandler(opts: BuildScheduledJobHandlerOptions):
 
 		for (const user of users) {
 			try {
-				await requestContext.run({ userId: user.id }, () =>
+				const householdId = householdService?.getHouseholdForUser(user.id) ?? undefined;
+				await requestContext.run({ userId: user.id, householdId }, () =>
 					appModule.handleScheduledJob!(jobId, user.id),
 				);
 			} catch (err) {

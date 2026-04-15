@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { requestContext } from '../../services/context/request-context.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { Router } from '../../services/router/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { MessageContext } from '../../types/telegram.js';
@@ -20,6 +21,8 @@ export interface MessagesRouteOptions {
 	router: Router;
 	userManager: UserManager;
 	logger: Logger;
+	/** Optional — when present, householdId is derived and injected into context. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 interface MessagesRequestBody {
@@ -31,7 +34,7 @@ export function registerMessagesRoute(
 	server: FastifyInstance,
 	options: MessagesRouteOptions,
 ): void {
-	const { router, userManager, logger } = options;
+	const { router, userManager, logger, householdService } = options;
 
 	server.post('/messages', async (request, reply) => {
 		const body = request.body as MessagesRequestBody | undefined;
@@ -76,8 +79,9 @@ export function registerMessagesRoute(
 				messageId: 0,
 			};
 
-			// Wrap in LLM context for per-user cost attribution
-			await requestContext.run({ userId }, () => router.routeMessage(ctx));
+			// Wrap in request context for per-user cost attribution + household boundary
+			const householdId = householdService?.getHouseholdForUser(userId) ?? undefined;
+			await requestContext.run({ userId, householdId }, () => router.routeMessage(ctx));
 
 			logger.info({ userId, textLength: text.length }, 'API message dispatched');
 

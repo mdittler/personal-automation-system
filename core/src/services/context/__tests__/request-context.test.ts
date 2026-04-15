@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCurrentUserId, requestContext } from '../request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId, requestContext } from '../request-context.js';
 
 describe('requestContext', () => {
 	it('returns undefined outside any run() scope', () => {
@@ -86,5 +86,64 @@ describe('requestContext', () => {
 			const seen = requestContext.run({ userId: uid }, () => getCurrentUserId());
 			expect(seen).toBe(uid);
 		}
+	});
+});
+
+describe('getCurrentHouseholdId', () => {
+	it('returns undefined outside any run() scope', () => {
+		expect(getCurrentHouseholdId()).toBeUndefined();
+	});
+
+	it('returns undefined when store is present but householdId is omitted', () => {
+		const seen = requestContext.run({ userId: 'alice' }, () => getCurrentHouseholdId());
+		expect(seen).toBeUndefined();
+	});
+
+	it('returns undefined when store is present but householdId is explicitly undefined', () => {
+		const seen = requestContext.run({ userId: 'alice', householdId: undefined }, () =>
+			getCurrentHouseholdId(),
+		);
+		expect(seen).toBeUndefined();
+	});
+
+	it('exposes householdId set by run()', () => {
+		const seen = requestContext.run(
+			{ userId: 'alice', householdId: 'hh-smith' },
+			() => getCurrentHouseholdId(),
+		);
+		expect(seen).toBe('hh-smith');
+	});
+
+	it('householdId and userId are independent — both readable in same scope', () => {
+		const [uid, hhid] = requestContext.run(
+			{ userId: 'bob', householdId: 'hh-jones' },
+			() => [getCurrentUserId(), getCurrentHouseholdId()] as const,
+		);
+		expect(uid).toBe('bob');
+		expect(hhid).toBe('hh-jones');
+	});
+
+	it('inner run() overrides householdId', () => {
+		const seen = requestContext.run({ userId: 'outer', householdId: 'hh-outer' }, () =>
+			requestContext.run({ userId: 'inner', householdId: 'hh-inner' }, () =>
+				getCurrentHouseholdId(),
+			),
+		);
+		expect(seen).toBe('hh-inner');
+	});
+
+	it('does not leak householdId across sibling run() calls', async () => {
+		const results: Array<string | undefined> = [];
+		await Promise.all([
+			requestContext.run({ userId: 'u1', householdId: 'hh-a' }, async () => {
+				await Promise.resolve();
+				results.push(getCurrentHouseholdId());
+			}),
+			requestContext.run({ userId: 'u2', householdId: 'hh-b' }, async () => {
+				await Promise.resolve();
+				results.push(getCurrentHouseholdId());
+			}),
+		]);
+		expect(results.sort()).toEqual(['hh-a', 'hh-b']);
 	});
 });
