@@ -4,11 +4,13 @@
 
 **Goal:** Make food app data writes space-scoped when the user is in an active space, so NL queries via DataQueryService can discover receipt, price, and all other food data.
 
-**Architecture:** Router injects active space into PhotoContext and CallbackContext (matching existing MessageContext pattern). New `resolveFoodStore()` helper in the food app resolves the correct ScopedDataStore based on explicit spaceId. All interactive food handlers migrate from `requireHousehold()` to `resolveFoodStore()`. Scheduled jobs remain on shared store. Legacy data migrated via script.
+**Architecture:** Router injects active space into PhotoContext and CallbackContext (matching existing MessageContext pattern). New `resolveFoodStore()` helper in the food app resolves the correct ScopedDataStore based on explicit spaceId. All interactive food handlers migrate from `requireHousehold()` to `resolveFoodStore()`. Scheduled jobs remain on shared store — they will NOT see space-scoped data until per-space scheduled jobs are explicitly designed. Legacy data migrated via script.
 
 **Tech Stack:** TypeScript 5.x, ESM, Vitest, pnpm workspaces
 
 **Spec:** `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md`
+
+**Callback space semantics:** Space is resolved at tap-time (the user's active space when they tap the button), not creation-time (when the button was generated). This is accepted behavior — encoding originating scope into every callback data string would require changing all callback formats across the food app, which is out of scope. A code comment in bootstrap.ts documents this decision.
 
 ---
 
@@ -54,7 +56,13 @@ export interface CallbackContext {
 	userId: string;
 	chatId: number;
 	messageId: number; // the message the button was on
-	/** Active space ID (set by bootstrap when user is in space mode). */
+	/**
+	 * Active space ID at tap-time (set by bootstrap from user's current active space).
+	 * Note: this is the space active when the button is tapped, NOT when the button
+	 * was generated. If the user switches spaces between generation and tap, the
+	 * handler sees the new space. This is accepted behavior — encoding originating
+	 * scope into callback data strings is a larger change deferred for later.
+	 */
 	spaceId?: string;
 	/** Active space display name. */
 	spaceName?: string;
@@ -78,12 +86,12 @@ git commit -m "feat: add spaceId/spaceName to PhotoContext and CallbackContext"
 ### Task 2: Router injects active space into photo context
 
 **Files:**
-- Modify: `core/src/services/router/index.ts:253-323` (routePhoto) and `core/src/services/router/index.ts:466-476` (enrichWithActiveSpace area)
+- Modify: `core/src/services/router/index.ts:253-323` (routePhoto) and near line 476 (enrichWithActiveSpace area)
 - Test: `core/src/services/router/__tests__/router-spaces.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Add to the `'active space injection'` describe block in `core/src/services/router/__tests__/router-spaces.test.ts`:
+Add to the `'active space injection'` describe block in `core/src/services/router/__tests__/router-spaces.test.ts`. First add `PhotoContext` to the import from `../../../types/telegram.js`. Then:
 
 ```typescript
 it('injects spaceId and spaceName into photo context', async () => {
@@ -112,7 +120,7 @@ it('injects spaceId and spaceName into photo context', async () => {
 		apps: [{ manifest: photoManifest, module: photoModule }],
 	});
 
-	const photoCtx = {
+	const photoCtx: PhotoContext = {
 		userId: 'user1',
 		photo: Buffer.from('test'),
 		mimeType: 'image/jpeg',
@@ -154,7 +162,7 @@ it('does not inject space into photo context when no active space', async () => 
 		apps: [{ manifest: photoManifest, module: photoModule }],
 	});
 
-	const photoCtx = {
+	const photoCtx: PhotoContext = {
 		userId: 'user1',
 		photo: Buffer.from('test'),
 		mimeType: 'image/jpeg',
@@ -201,18 +209,11 @@ private enrichPhotoWithActiveSpace(ctx: PhotoContext): PhotoContext {
 }
 ```
 
-Add the `PhotoContext` import if not already present at top of file.
+Add `PhotoContext` to the import from types if not already present.
 
 - [ ] **Step 4: Call enrichPhotoWithActiveSpace in routePhoto**
 
-In the `routePhoto` method (line 253), add the enrichment call after the user authorization check (after line 260, before the "Check if any apps accept photos" comment):
-
-```typescript
-// Enrich with active space (same as text messages)
-ctx = this.enrichPhotoWithActiveSpace(ctx);
-```
-
-Change the method parameter from `ctx: PhotoContext` to `let ctx` (or use a new variable) since we're reassigning it. The cleanest approach: change line 253 to accept `rawCtx` and assign:
+In `routePhoto` (line 253), change the parameter to `rawCtx` and enrich after user auth:
 
 ```typescript
 async routePhoto(rawCtx: PhotoContext): Promise<void> {
@@ -224,11 +225,11 @@ async routePhoto(rawCtx: PhotoContext): Promise<void> {
 		return;
 	}
 
-	// 2. Enrich with active space
+	// 2. Enrich with active space (same as text messages)
 	const ctx = this.enrichPhotoWithActiveSpace(rawCtx);
 ```
 
-Then the rest of the method uses `ctx` as before.
+Then the rest of the method uses `ctx` as before (no other changes needed).
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -248,45 +249,48 @@ git commit -m "feat: inject active space into photo context in router"
 
 **Files:**
 - Modify: `core/src/bootstrap.ts:848-856`
-- Test: `core/src/__tests__/dispatch-context-wrap.test.ts` (existing test for callback dispatch)
+- Test: `core/src/__tests__/dispatch-context-wrap.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+The existing test file uses structural regex-on-source scans (no behavioral mocks). We add a structural test matching the existing pattern.
 
-In `core/src/__tests__/dispatch-context-wrap.test.ts`, add a test that verifies `spaceId` is injected into callback context. First, read the file to understand its existing test setup patterns (imports, mocks, etc.), then add:
+- [ ] **Step 1: Write the structural test**
+
+In `core/src/__tests__/dispatch-context-wrap.test.ts`, add:
 
 ```typescript
-it('injects spaceId from active space into callback context', async () => {
-	// This test should verify that when spaceService.getActiveSpace returns 'family',
-	// the callbackCtx passed to the app's handleCallbackQuery includes spaceId: 'family'
-	// and spaceName: 'Family'.
-	// Use the existing test setup patterns from this file.
-	// The key assertion is on the ctx argument of handleCallbackQuery.
+it('the callback context includes spaceId from active space lookup', async () => {
+	const source = stripComments(await readSource('bootstrap.ts'));
+
+	// Verify that the callback branch constructs callbackCtx with spaceId.
+	// The code should look like: callbackCtx = { userId, chatId: ..., messageId: ..., spaceId, spaceName }
+	const hasSpaceIdInCtx = source.match(/callbackCtx\s*=\s*\{[^}]*spaceId/);
+	expect(hasSpaceIdInCtx).not.toBeNull();
 });
 ```
-
-Note: Read the full test file first to understand the bootstrap test harness. The test needs to simulate a callback query with a spaceService that returns an active space, and verify the `callbackCtx` passed to the app handler includes `spaceId` and `spaceName`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm exec vitest run core/src/__tests__/dispatch-context-wrap.test.ts`
-Expected: FAIL — spaceId not present in callback context.
+Expected: FAIL — `callbackCtx` doesn't include spaceId yet.
 
-- [ ] **Step 3: Inject space into callback context**
+- [ ] **Step 3: Inject space into callback context in bootstrap.ts**
 
-In `core/src/bootstrap.ts`, at line 849 (the callback context construction), add space lookup. The bootstrap file should have access to `spaceService` from the composition root. Add:
+In `core/src/bootstrap.ts`, at line ~848, replace the callback context construction. First verify `spaceService` is in scope (it should be — it's created in the composition root above this code). Then:
 
 ```typescript
 if (appEntry.module.handleCallbackQuery) {
-	// Inject active space into callback context
-	let spaceId: string | undefined;
-	let spaceName: string | undefined;
+	// Resolve active space at tap-time. Note: this is the user's current
+	// active space when the button is tapped, not when the button was
+	// generated. See CallbackContext type docs for rationale.
+	let cbSpaceId: string | undefined;
+	let cbSpaceName: string | undefined;
 	if (spaceService) {
-		const activeSpaceId = spaceService.getActiveSpace(userId);
-		if (activeSpaceId) {
-			const space = spaceService.getSpace(activeSpaceId);
+		const activeId = spaceService.getActiveSpace(userId);
+		if (activeId) {
+			const space = spaceService.getSpace(activeId);
 			if (space) {
-				spaceId = activeSpaceId;
-				spaceName = space.name;
+				cbSpaceId = activeId;
+				cbSpaceName = space.name;
 			}
 		}
 	}
@@ -295,17 +299,15 @@ if (appEntry.module.handleCallbackQuery) {
 		userId,
 		chatId: ctx.callbackQuery.message?.chat.id ?? 0,
 		messageId: ctx.callbackQuery.message?.message_id ?? 0,
-		spaceId,
-		spaceName,
+		spaceId: cbSpaceId,
+		spaceName: cbSpaceName,
 	};
 	const handler = appEntry.module.handleCallbackQuery;
 	await requestContext.run({ userId }, () => handler(customData, callbackCtx));
 }
 ```
 
-Note: Verify that `spaceService` is in scope at this point in bootstrap.ts. It should be — it's created in the composition root. If the variable name differs, adjust accordingly.
-
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `pnpm exec vitest run core/src/__tests__/dispatch-context-wrap.test.ts`
 Expected: PASS
@@ -327,11 +329,9 @@ git commit -m "feat: inject active space into callback context in bootstrap"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `apps/food/src/__tests__/household-guard.test.ts`, in a new `describe('resolveFoodStore')` block:
+Add to `apps/food/src/__tests__/household-guard.test.ts`. Import `resolveFoodStore` and `FoodStoreResult` from the household-guard module. Add a new `describe('resolveFoodStore')` block:
 
 ```typescript
-import { resolveFoodStore, type FoodStoreResult } from '../utils/household-guard.js';
-
 describe('resolveFoodStore', () => {
 	let services: CoreServices;
 	let sharedStore: ReturnType<typeof createMockScopedStore>;
@@ -379,14 +379,25 @@ describe('resolveFoodStore', () => {
 	it('always reads household from shared store even when spaceId provided', async () => {
 		await resolveFoodStore(services, 'user1', 'family');
 
+		// Household membership is checked via shared store (migration bridge)
 		expect(services.data.forShared).toHaveBeenCalledWith('shared');
-		// Household is read from shared store, not space store
 		expect(sharedStore.read).toHaveBeenCalledWith('household.yaml');
+	});
+
+	it('propagates SpaceMembershipError when forSpace rejects', async () => {
+		vi.mocked(services.data.forSpace).mockImplementation(() => {
+			throw new Error('User stranger is not a member of space "family"');
+		});
+
+		// User passes household check but forSpace throws
+		await expect(resolveFoodStore(services, 'user1', 'family')).rejects.toThrow(
+			'not a member of space',
+		);
 	});
 });
 ```
 
-Note: Adjust imports and mock patterns to match the existing test file's conventions. The file already imports `createMockCoreServices` and has `createMockScopedStore` and `sampleHousehold` fixtures. Also import `stringify` from `'yaml'` if not already imported.
+Ensure `stringify` is imported from `'yaml'` and `sampleHousehold` is the existing fixture (members: `['user1']`). Adjust member IDs to match existing fixture.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -411,7 +422,14 @@ export interface FoodStoreResult {
  *
  * When spaceId is provided (from router-injected context), returns a space-scoped store.
  * When absent, returns the shared store.
- * Always checks household membership via the shared store (migration bridge).
+ *
+ * **Migration note:** Household membership is always checked via `users/shared/food/household.yaml`,
+ * even when returning a space-scoped store. This is a migration bridge — long-term, household
+ * membership should come from SpaceService rather than a global file.
+ *
+ * If the spaceId is invalid or the user is not a space member, `forSpace()` will throw
+ * `SpaceMembershipError`. Callers should let this propagate (the router already validated
+ * space membership when injecting spaceId, so this is a defense-in-depth guard).
  */
 export async function resolveFoodStore(
 	services: CoreServices,
@@ -452,16 +470,16 @@ git commit -m "feat: add resolveFoodStore helper for space-aware food data"
 ### Task 5: Migrate photo handlers to resolveFoodStore
 
 **Files:**
-- Modify: `apps/food/src/handlers/photo.ts:78-127` (handlePhoto) and all sub-handlers
+- Modify: `apps/food/src/handlers/photo.ts`
 - Test: `apps/food/src/__tests__/photo-handler.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write failing test — receipt photo with spaceId writes to space store**
 
-Add to `apps/food/src/__tests__/photo-handler.test.ts`:
+Add to `apps/food/src/__tests__/photo-handler.test.ts`. First add `forSpace: vi.fn()` to the `data` mock in `createMockServices` if not present:
 
 ```typescript
 describe('space-aware store resolution', () => {
-	it('uses space-scoped store when photo context has spaceId', async () => {
+	it('receipt photo with spaceId writes to space-scoped store', async () => {
 		const spaceStore = createMockStore({
 			'household.yaml': makeHouseholdYaml(['user-1']),
 		});
@@ -475,43 +493,98 @@ describe('space-aware store resolution', () => {
 				total: 6.49,
 			}),
 		);
-		vi.mocked(services.data.forSpace).mockReturnValue(spaceStore as any);
+		(services.data as any).forSpace = vi.fn().mockReturnValue(spaceStore);
 
 		const ctx = createPhotoCtx('receipt');
 		(ctx as any).spaceId = 'family';
 
 		await handlePhoto(services, ctx);
 
-		// Writes should go to space store, not shared store
-		expect(spaceStore.write).toHaveBeenCalled();
-		const writeCall = spaceStore.write.mock.calls.find(
+		// Receipt should be written to space store
+		const spaceWriteCall = spaceStore.write.mock.calls.find(
 			(c: any) => typeof c[0] === 'string' && c[0].startsWith('receipts/')
 		);
-		expect(writeCall).toBeDefined();
+		expect(spaceWriteCall).toBeDefined();
+
+		// Shared store should NOT have receipt writes (only household.yaml read)
+		const sharedReceiptWrite = sharedStore.write.mock.calls.find(
+			(c: any) => typeof c[0] === 'string' && c[0].startsWith('receipts/')
+		);
+		expect(sharedReceiptWrite).toBeUndefined();
+	});
+
+	it('receipt photo without spaceId writes to shared store', async () => {
+		const { services, sharedStore } = createMockServices(
+			JSON.stringify({
+				store: 'Costco',
+				date: '2026-04-14',
+				lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 5.99, totalPrice: 5.99 }],
+				subtotal: 5.99,
+				total: 6.49,
+			}),
+		);
+
+		const ctx = createPhotoCtx('receipt');
+		// No spaceId set
+
+		await handlePhoto(services, ctx);
+
+		const sharedWriteCall = sharedStore.write.mock.calls.find(
+			(c: any) => typeof c[0] === 'string' && c[0].startsWith('receipts/')
+		);
+		expect(sharedWriteCall).toBeDefined();
+	});
+
+	it('interaction record path is space-scoped when spaceId present', async () => {
+		const spaceStore = createMockStore({
+			'household.yaml': makeHouseholdYaml(['user-1']),
+		});
+		const { services } = createMockServices(
+			JSON.stringify({
+				store: 'Costco',
+				date: '2026-04-14',
+				lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 5.99, totalPrice: 5.99 }],
+				subtotal: 5.99,
+				total: 6.49,
+			}),
+		);
+		(services.data as any).forSpace = vi.fn().mockReturnValue(spaceStore);
+		services.interactionContext = { record: vi.fn(), getRecent: vi.fn().mockReturnValue([]) } as any;
+
+		const ctx = createPhotoCtx('receipt');
+		(ctx as any).spaceId = 'family';
+
+		await handlePhoto(services, ctx);
+
+		const recordCall = vi.mocked(services.interactionContext!.record).mock.calls[0];
+		expect(recordCall).toBeDefined();
+		expect(recordCall![1].filePaths[0]).toMatch(/^spaces\/family\/food\/receipts\//);
+		expect(recordCall![1].scope).toBe('space');
 	});
 });
 ```
 
-Note: The `createMockServices` helper already mocks `services.data.forShared`. Add `forSpace: vi.fn()` to the `data` mock if not present. Adjust based on the actual mock structure.
-
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
-Expected: FAIL — photo handler still uses shared store.
+Expected: FAIL
 
 - [ ] **Step 3: Update handlePhoto to use resolveFoodStore**
 
-In `apps/food/src/handlers/photo.ts`, change the `handlePhoto` function (line 78):
+In `apps/food/src/handlers/photo.ts`:
 
+Replace `requireHousehold` import with `resolveFoodStore`:
 ```typescript
-import { resolveFoodStore } from '../utils/household-guard.js';
+import { resolveFoodStore, type FoodStoreResult } from '../utils/household-guard.js';
+```
 
+Update `handlePhoto` (line 78):
+```typescript
 export async function handlePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 ): Promise<void> {
 	try {
-		// F15: require household membership before any LLM call or store write
 		const fh = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
 		if (!fh) {
 			await services.telegram.send(
@@ -528,7 +601,7 @@ export async function handlePhoto(
 
 		switch (photoType) {
 			case 'recipe':
-				await handleRecipePhoto(services, ctx, store);
+				await handleRecipePhoto(services, ctx, store, fh);
 				break;
 			case 'receipt':
 				await handleReceiptPhoto(services, ctx, store, fh);
@@ -537,7 +610,7 @@ export async function handlePhoto(
 				await handlePantryPhoto(services, ctx, store);
 				break;
 			case 'grocery':
-				await handleGroceryPhoto(services, ctx, store);
+				await handleGroceryPhoto(services, ctx, store, fh);
 				break;
 		}
 	} catch (error) {
@@ -546,11 +619,9 @@ export async function handlePhoto(
 }
 ```
 
-Note: Pass `fh` (the full FoodStoreResult) to `handleReceiptPhoto` so it can use `fh.scope` and `fh.spaceId` for interaction recording. Other sub-handlers only need the `store`.
+- [ ] **Step 4: Update handleReceiptPhoto to accept FoodStoreResult**
 
-- [ ] **Step 4: Update handleReceiptPhoto signature**
-
-Change `handleReceiptPhoto` to accept `FoodStoreResult` for interaction recording:
+Change signature and update interaction recording:
 
 ```typescript
 async function handleReceiptPhoto(
@@ -561,8 +632,7 @@ async function handleReceiptPhoto(
 ): Promise<void> {
 ```
 
-Update the interaction recording (line 216):
-
+Update interaction recording:
 ```typescript
 services.interactionContext?.record(ctx.userId, {
 	appId: 'food',
@@ -576,49 +646,16 @@ services.interactionContext?.record(ctx.userId, {
 });
 ```
 
-Also update the other photo sub-handlers' interaction recordings similarly (recipe_saved at line 160, grocery_updated at line 320). Those handlers also need the `fh` parameter OR just need the scope/spaceId. The simplest approach: pass `fh` to all sub-handlers that have interaction recording.
+- [ ] **Step 5: Update handleRecipePhoto and handleGroceryPhoto interaction recordings**
 
-- [ ] **Step 5: Update remaining photo interaction recordings**
+Same pattern for both — accept `fh: FoodStoreResult` parameter and update interaction recording paths. For handlers that don't record interactions (like `handlePantryPhoto`), only the store parameter is needed.
 
-For `handleRecipePhoto` (line ~145-170), update to accept and use `fh`:
-
-```typescript
-async function handleRecipePhoto(
-	services: CoreServices,
-	ctx: PhotoContext,
-	store: ScopedDataStore,
-	fh: FoodStoreResult,
-): Promise<void> {
-```
-
-Update interaction recording:
-```typescript
-services.interactionContext?.record(ctx.userId, {
-	appId: 'food',
-	action: 'recipe_saved',
-	entityType: 'recipe',
-	entityId: recipe.id,
-	filePaths: [fh.scope === 'space'
-		? `spaces/${fh.spaceId}/food/recipes/${recipe.id}.yaml`
-		: `users/shared/food/recipes/${recipe.id}.yaml`],
-	scope: fh.scope,
-});
-```
-
-Do the same for `handleGroceryPhoto` (line ~300-330).
-
-Update the switch statement in `handlePhoto` to pass `fh` to all sub-handlers that record interactions.
-
-- [ ] **Step 6: Remove old requireHousehold import if no longer used**
-
-Remove `requireHousehold` from the import statement in photo.ts if it's no longer referenced. Keep `loadHousehold` if still used elsewhere.
-
-- [ ] **Step 7: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/food/src/handlers/photo.ts apps/food/src/__tests__/photo-handler.test.ts
@@ -627,29 +664,17 @@ git commit -m "feat: migrate photo handlers to space-aware resolveFoodStore"
 
 ---
 
-### Task 6: Migrate food app index.ts interactive handlers to resolveFoodStore
-
-This is the largest mechanical change — ~40 call sites in `apps/food/src/index.ts`.
+### Task 6a: Migrate receipt/price handlers in index.ts
 
 **Files:**
-- Modify: `apps/food/src/index.ts`
+- Modify: `apps/food/src/index.ts` (receipt, price, and budget-related handlers only)
 
-- [ ] **Step 1: Add resolveFoodStore import**
+- [ ] **Step 1: Add imports and helper**
 
-In `apps/food/src/index.ts`, update the import from household-guard:
-
-```typescript
-import { loadHousehold, requireHousehold, resolveFoodStore } from './utils/household-guard.js';
-```
-
-Keep `requireHousehold` imported — some edge cases or flows that don't have a context may still need it.
-
-- [ ] **Step 2: Create a helper for interaction path resolution**
-
-Add a utility near the top of the file to reduce repetition:
+In `apps/food/src/index.ts`, add:
 
 ```typescript
-import type { FoodStoreResult } from './utils/household-guard.js';
+import { loadHousehold, requireHousehold, resolveFoodStore, type FoodStoreResult } from './utils/household-guard.js';
 
 /** Build the data-dir-relative file path for interaction recording. */
 function interactionPath(fh: FoodStoreResult, appRelativePath: string): string {
@@ -659,101 +684,23 @@ function interactionPath(fh: FoodStoreResult, appRelativePath: string): string {
 }
 ```
 
-- [ ] **Step 3: Migrate handleMessage requireHousehold calls**
+- [ ] **Step 2: Migrate handlePriceUpdateIntent (line ~3014)**
 
-In `handleMessage` (line 269+), find each `requireHousehold(services, ctx.userId)` call and replace with `resolveFoodStore(services, ctx.userId, ctx.spaceId)`. Change the variable name from `hh` to `fh` and replace all `hh.sharedStore` with `fh.store` in each scope.
-
-**Pattern for each call site:**
-
-Before:
-```typescript
-const hh = await requireHousehold(services, ctx.userId);
-if (!hh) {
-    await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
-    return;
-}
-// ... uses hh.sharedStore
-```
-
-After:
-```typescript
-const fh = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
-if (!fh) {
-    await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
-    return;
-}
-// ... uses fh.store
-```
-
-Apply to ALL `requireHousehold` calls inside `handleMessage` and its nested/called functions that receive `MessageContext`:
-- Line 333 (guest add flow)
-- Line 431 (child food flows)
-- Line 510 (nutrition log NL)
-- Line 530 (adherence)
-- Line 547, 568, 582 (various NL handlers)
-- And all other instances through the end of handleMessage
-
-For functions that are called from handleMessage and receive `ctx: MessageContext`, propagate `ctx.spaceId`.
-
-- [ ] **Step 4: Migrate handleCommand requireHousehold calls**
-
-Same pattern for the `/command` handler — `handleCommand` receives `MessageContext`. Replace all `requireHousehold` → `resolveFoodStore` calls within it (lines ~740-790 and their sub-functions).
-
-- [ ] **Step 5: Migrate handleCallbackQuery requireHousehold calls**
-
-`handleCallbackQuery` receives `CallbackContext` (which now has `spaceId`). Replace the `requireHousehold` call at line 818:
-
-Before:
-```typescript
-const hh = await requireHousehold(services, ctx.userId);
-if (!hh) return;
-```
-
-After:
-```typescript
-const fh = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
-if (!fh) return;
-```
-
-Replace all `hh.sharedStore` with `fh.store` in the callback handler scope.
-
-- [ ] **Step 6: Migrate handlePriceUpdateIntent**
-
-In `handlePriceUpdateIntent` (line 3014):
+Replace `requireHousehold` → `resolveFoodStore`, `hh.sharedStore` → `fh.store`, update interaction path:
 
 ```typescript
 async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promise<void> {
 	const fh = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
 	if (!fh) {
-		await services.telegram.send(
-			ctx.userId,
-			'Set up a household first with /household create <name>',
-		);
+		await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
 		return;
 	}
 
-	const parsed = await parsePriceUpdateText(services, text);
-	if (!parsed) {
-		await services.telegram.send(
-			ctx.userId,
-			'I couldn\'t understand that price update. Try: "eggs are $3.50 at costco"',
-		);
-		return;
-	}
+	// ... parsing unchanged ...
 
 	const slug = getStoreSlug(parsed.store);
 	let priceData = await loadStorePrices(fh.store, slug);
-	if (!priceData.store || priceData.store === slug) {
-		priceData = { ...priceData, store: parsed.store, slug };
-	}
-
-	const entry = {
-		name: parsed.item,
-		price: parsed.price,
-		unit: parsed.unit,
-		department: parsed.department,
-		updatedAt: todayDate(services.timezone),
-	};
+	// ... rest unchanged except hh.sharedStore → fh.store ...
 
 	priceData = addOrUpdatePrice(priceData, entry);
 	await saveStorePrices(fh.store, priceData);
@@ -766,38 +713,127 @@ async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promi
 		scope: fh.scope,
 	});
 
-	await services.telegram.send(
-		ctx.userId,
-		`✅ Updated ${parsed.item} → $${parsed.price.toFixed(2)} at ${parsed.store}`,
-	);
+	// ... telegram send unchanged ...
 }
 ```
 
-- [ ] **Step 7: Update all remaining interaction recording calls in index.ts**
+- [ ] **Step 3: Migrate budget/spending handlers**
 
-Update each `interactionContext.record()` call to use `interactionPath()`:
+Find handlers related to `/budget`, food spending views, and price lookups. Replace `requireHousehold` → `resolveFoodStore` and `hh.sharedStore` → `fh.store` in each.
 
-- recipe_saved (line ~1794): `filePaths: [interactionPath(fh, `recipes/${recipe.id}.yaml`)]`
-- grocery_updated (line ~2174): `filePaths: [interactionPath(fh, 'grocery/active.yaml')]`
-- meal_plan_finalized (line ~2474): `filePaths: [interactionPath(fh, 'meal-plans/current.yaml')]`
-- price_updated (line ~3050): already handled in step 6
+- [ ] **Step 4: Build to verify compilation**
 
-For each, also change `scope: 'shared'` to `scope: fh.scope`.
+Run: `pnpm build`
+Expected: SUCCESS
 
-- [ ] **Step 8: Verify the `fh` variable is in scope for each interaction recording**
-
-Each interaction recording must have the `fh` (FoodStoreResult) variable in scope. If a recording is inside a nested function that doesn't currently receive `fh`, thread it through as a parameter.
-
-- [ ] **Step 9: Run tests**
+- [ ] **Step 5: Run food tests**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/`
-Expected: PASS (or fix any failing tests — mock setups may need `forSpace` added to the data mock)
+Expected: PASS (fix any mock issues — add `forSpace: vi.fn()` to data mocks where needed)
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add apps/food/src/index.ts
-git commit -m "feat: migrate food app interactive handlers to resolveFoodStore"
+git commit -m "feat: migrate receipt/price/budget handlers to resolveFoodStore"
+```
+
+---
+
+### Task 6b: Migrate grocery/pantry handlers in index.ts
+
+**Files:**
+- Modify: `apps/food/src/index.ts` (grocery list, pantry, leftovers, freezer handlers)
+
+- [ ] **Step 1: Migrate grocery handlers**
+
+Find all `requireHousehold` calls in grocery-related code paths (`loadGroceryList`, `saveGroceryList`, `archivePurchased`, `addgrocery`, grocery generation, etc.). Replace `requireHousehold` → `resolveFoodStore` and `hh.sharedStore` → `fh.store`. Update grocery interaction recordings to use `interactionPath(fh, 'grocery/active.yaml')`.
+
+- [ ] **Step 2: Migrate pantry, leftovers, freezer handlers**
+
+Same pattern for pantry (`loadPantry`, `savePantry`), leftovers (`loadLeftovers`, `saveLeftovers`), freezer (`loadFreezer`, `saveFreezer`), and waste log (`appendWaste`) handlers.
+
+- [ ] **Step 3: Build to verify compilation**
+
+Run: `pnpm build`
+Expected: SUCCESS
+
+- [ ] **Step 4: Run food tests**
+
+Run: `pnpm exec vitest run apps/food/src/__tests__/`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/food/src/index.ts
+git commit -m "feat: migrate grocery/pantry/leftovers/freezer handlers to resolveFoodStore"
+```
+
+---
+
+### Task 6c: Migrate recipe/meal-plan handlers in index.ts
+
+**Files:**
+- Modify: `apps/food/src/index.ts` (recipe, meal plan, voting, batch prep handlers)
+
+- [ ] **Step 1: Migrate recipe handlers**
+
+Replace `requireHousehold` → `resolveFoodStore` and `hh.sharedStore` → `fh.store` in recipe save, search, load, update handlers. Update the recipe_saved interaction recording to use `interactionPath(fh, ...)`.
+
+- [ ] **Step 2: Migrate meal plan handlers**
+
+Same for meal plan generation, finalization, voting. Update meal_plan_finalized interaction recording.
+
+- [ ] **Step 3: Build to verify compilation**
+
+Run: `pnpm build`
+Expected: SUCCESS
+
+- [ ] **Step 4: Run food tests**
+
+Run: `pnpm exec vitest run apps/food/src/__tests__/`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/food/src/index.ts
+git commit -m "feat: migrate recipe/meal-plan handlers to resolveFoodStore"
+```
+
+---
+
+### Task 6d: Migrate callback, nutrition, hosting, and remaining handlers in index.ts
+
+**Files:**
+- Modify: `apps/food/src/index.ts` (handleCallbackQuery, child food, nutrition NL, hosting, cultural calendar, health correlation, what-can-I-make, dinner intent, etc.)
+
+- [ ] **Step 1: Migrate handleCallbackQuery**
+
+The `requireHousehold` call at line ~818 becomes `resolveFoodStore(services, ctx.userId, ctx.spaceId)`. Replace all `hh.sharedStore` → `fh.store` within the callback handler scope.
+
+Note: Household-independent callbacks (nutrition targets, adherence) that don't call `requireHousehold` are unchanged.
+
+- [ ] **Step 2: Migrate remaining handleMessage sub-handlers**
+
+Replace in: child food flows (line ~333, ~431), nutrition NL (line ~510), adherence (line ~530), hosting (line ~568), health correlation (line ~582), what-can-I-make, dinner intent, and any other `requireHousehold` calls not covered in 6a-6c.
+
+- [ ] **Step 3: Build to verify compilation**
+
+Run: `pnpm build`
+Expected: SUCCESS
+
+- [ ] **Step 4: Run full food test suite**
+
+Run: `pnpm exec vitest run apps/food/src/__tests__/`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/food/src/index.ts
+git commit -m "feat: migrate callback/nutrition/hosting/remaining handlers to resolveFoodStore"
 ```
 
 ---
@@ -807,21 +843,34 @@ git commit -m "feat: migrate food app interactive handlers to resolveFoodStore"
 **Files:**
 - Modify: `apps/food/src/handlers/cook-mode.ts`
 
-- [ ] **Step 1: Migrate handleCookCommand and handleCookMessage**
+Resolved signatures:
+- `handleCookCommand(services, args, ctx: MessageContext)` at line 88 → migrate to `resolveFoodStore(services, ctx.userId, ctx.spaceId)`
+- `handleServingsReply(services, text, ctx: MessageContext)` at line 175 → migrate
+- `handleCookCallback(services, action, userId, chatId, messageId)` at line 275 → **stays on `requireHousehold`** — receives bare `userId`, no context object, no spaceId
+- `handleCookTextAction(services, text, ctx: MessageContext)` at line 463 → migrate if it calls `requireHousehold`
+- `handleCookIntent(services, text, ctx: MessageContext)` at line 553 → migrate if it calls `requireHousehold`
 
-In `apps/food/src/handlers/cook-mode.ts`:
+- [ ] **Step 1: Migrate handleCookCommand and handleServingsReply**
 
-- `handleCookCommand` (line 88) receives `ctx: MessageContext` — replace `requireHousehold` with `resolveFoodStore(services, ctx.userId, ctx.spaceId)`, rename `hh.sharedStore` → `fh.store`.
-- `handleCookMessage` (line 194) receives `ctx: MessageContext` — same migration.
-- `handleCookCallback` (line 275) — check its signature. If it receives `CallbackContext` or `userId`, migrate accordingly.
-- Any function that receives only `userId` (no spaceId) stays on `requireHousehold`.
+Replace `requireHousehold(services, ctx.userId)` → `resolveFoodStore(services, ctx.userId, ctx.spaceId)`, rename `hh.sharedStore` → `fh.store`.
 
-- [ ] **Step 2: Run tests**
+- [ ] **Step 2: Keep handleCookCallback on requireHousehold**
 
-Run: `pnpm exec vitest run apps/food/src/__tests__/`
+`handleCookCallback` receives only `userId: string` — no spaceId available. It stays on `requireHousehold`. This is the same limitation as scheduled jobs: callbacks dispatched through this path use shared store. Add a comment:
+
+```typescript
+// handleCookCallback receives bare userId (no context object), so it cannot
+// resolve space. Stays on requireHousehold/shared store. To make this space-aware,
+// the callback dispatch would need to pass CallbackContext instead of individual fields.
+const hh = await requireHousehold(services, userId);
+```
+
+- [ ] **Step 3: Build and test**
+
+Run: `pnpm build && pnpm exec vitest run apps/food/src/__tests__/`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add apps/food/src/handlers/cook-mode.ts
@@ -833,9 +882,9 @@ git commit -m "feat: migrate cook-mode interactive handlers to resolveFoodStore"
 ### Task 8: Enrich receipt and price frontmatter with entity_keys
 
 **Files:**
-- Modify: `apps/food/src/handlers/photo.ts:205-212` (receipt frontmatter)
-- Modify: `apps/food/src/services/price-store.ts:28-38` (price frontmatter)
-- Test: `apps/food/src/__tests__/photo-handler.test.ts`, `apps/food/src/__tests__/price-store.test.ts` (or create if needed)
+- Modify: `apps/food/src/handlers/photo.ts:205-212`
+- Modify: `apps/food/src/services/price-store.ts:28-38`
+- Test: `apps/food/src/__tests__/photo-handler.test.ts`
 
 - [ ] **Step 1: Write failing test for receipt entity_keys**
 
@@ -859,7 +908,6 @@ it('includes item names and caption label in receipt entity_keys', async () => {
 
 	await handlePhoto(services, ctx);
 
-	// Find the receipt write
 	const writeCall = sharedStore.write.mock.calls.find(
 		(c: any) => typeof c[0] === 'string' && c[0].startsWith('receipts/')
 	);
@@ -877,14 +925,13 @@ it('includes item names and caption label in receipt entity_keys', async () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
-Expected: FAIL — entity_keys only contain store name.
+Expected: FAIL
 
 - [ ] **Step 3: Implement receipt entity_keys enrichment**
 
-In `apps/food/src/handlers/photo.ts`, in `handleReceiptPhoto`, replace the frontmatter generation:
+In `handleReceiptPhoto` in `photo.ts`, replace the frontmatter generation:
 
 ```typescript
-// Enriched entity_keys: store + caption label + item names (capped at 20)
 const itemKeys = parsed.lineItems
 	.slice(0, 20)
 	.map((item: { name: string }) => item.name.toLowerCase());
@@ -911,61 +958,32 @@ const fm = generateFrontmatter({
 });
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Implement price entity_keys enrichment**
 
-Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Write failing test for price entity_keys**
-
-Find or create a test for `formatPriceFile` in `apps/food/src/__tests__/`. Add:
+In `apps/food/src/services/price-store.ts`, in `formatPriceFile` (line 28), replace entity_keys:
 
 ```typescript
-it('includes item names in price file entity_keys', () => {
-	const data: StorePriceData = {
-		store: 'Costco',
-		slug: 'costco',
-		lastUpdated: '2026-04-14',
-		items: [
-			{ name: 'Eggs', price: 12.99, department: 'Dairy', updatedAt: '2026-04-14' },
-			{ name: 'Milk', price: 4.99, department: 'Dairy', updatedAt: '2026-04-14' },
-		],
-	};
+const itemKeys = data.items.slice(0, 30).map((i) => i.name.toLowerCase());
+const entityKeys = [data.store.toLowerCase(), data.slug, ...new Set(itemKeys)];
 
-	const content = formatPriceFile(data);
-
-	expect(content).toContain('eggs');
-	expect(content).toContain('milk');
+const fm = generateFrontmatter({
+	store: data.store,
+	slug: data.slug,
+	last_updated: data.lastUpdated,
+	item_count: data.items.length,
+	tags: buildAppTags('food', 'prices'),
+	type: 'price-list',
+	entity_keys: entityKeys,
+	app: 'food',
 });
 ```
 
-- [ ] **Step 6: Implement price entity_keys enrichment**
-
-In `apps/food/src/services/price-store.ts`, in `formatPriceFile` (line 28):
-
-```typescript
-export function formatPriceFile(data: StorePriceData): string {
-	const itemKeys = data.items.slice(0, 30).map((i) => i.name.toLowerCase());
-	const entityKeys = [data.store.toLowerCase(), data.slug, ...new Set(itemKeys)];
-
-	const fm = generateFrontmatter({
-		store: data.store,
-		slug: data.slug,
-		last_updated: data.lastUpdated,
-		item_count: data.items.length,
-		tags: buildAppTags('food', 'prices'),
-		type: 'price-list',
-		entity_keys: entityKeys,
-		app: 'food',
-	});
-```
-
-- [ ] **Step 7: Run tests to verify both pass**
+- [ ] **Step 5: Run tests**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add apps/food/src/handlers/photo.ts apps/food/src/services/price-store.ts apps/food/src/__tests__/
@@ -978,8 +996,9 @@ git commit -m "feat: enrich receipt and price entity_keys with item names and ca
 
 **Files:**
 - Modify: `apps/food/src/handlers/photo.ts:239-247`
+- Test: `apps/food/src/__tests__/photo-handler.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write failing tests**
 
 Add to `apps/food/src/__tests__/photo-handler.test.ts`:
 
@@ -1004,8 +1023,6 @@ it('includes line items in receipt capture response', async () => {
 	const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
 	expect(sendCall).toBeDefined();
 	const message = sendCall![1] as string;
-
-	// Should include item lines, not just count
 	expect(message).toContain('Eggs 5DZ');
 	expect(message).toContain('$12.99');
 	expect(message).toContain('Diapers');
@@ -1021,32 +1038,23 @@ it('includes receipt ID in capture response', async () => {
 		total: 5.99,
 	});
 	const { services } = createMockServices(receiptResponse);
-	const ctx = createPhotoCtx('receipt');
 
-	await handlePhoto(services, ctx);
+	await handlePhoto(services, createPhotoCtx('receipt'));
 
-	const sendCall = vi.mocked(services.telegram.send).mock.calls[0];
-	const message = sendCall![1] as string;
-
-	// Should include receipt ID (date-based)
+	const message = vi.mocked(services.telegram.send).mock.calls[0]![1] as string;
 	expect(message).toContain('2026-04-14-');
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Implement line-item response**
 
-Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
-Expected: FAIL — current message only shows item count.
-
-- [ ] **Step 3: Implement line-item response**
-
-In `apps/food/src/handlers/photo.ts`, replace the Telegram send in `handleReceiptPhoto` (line 239-247):
+In `handleReceiptPhoto`, replace the Telegram send (uses existing `escapeMarkdown` utility, legacy Telegram Markdown mode):
 
 ```typescript
-// Build line item summary (truncated for readability)
 const maxDisplayItems = 10;
-const itemLines = parsed.lineItems.slice(0, maxDisplayItems).map((item: { name: string; totalPrice: number }) =>
-	`  ${escapeMarkdown(item.name)}: $${item.totalPrice.toFixed(2)}`
+const itemLines = parsed.lineItems.slice(0, maxDisplayItems).map(
+	(item: { name: string; totalPrice: number }) =>
+		`  ${escapeMarkdown(item.name)}: $${item.totalPrice.toFixed(2)}`
 ).join('\n');
 const moreItems = parsed.lineItems.length > maxDisplayItems
 	? `\n  _... and ${parsed.lineItems.length - maxDisplayItems} more_`
@@ -1063,12 +1071,12 @@ await services.telegram.send(
 );
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 3: Run tests**
 
 Run: `pnpm exec vitest run apps/food/src/__tests__/photo-handler.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add apps/food/src/handlers/photo.ts apps/food/src/__tests__/photo-handler.test.ts
@@ -1077,21 +1085,21 @@ git commit -m "feat: include line items and receipt ID in capture response"
 
 ---
 
-### Task 10: Food manifest intents for receipt/price queries
+### Task 10: Food manifest intents
 
 **Files:**
 - Modify: `apps/food/manifest.yaml`
 
 - [ ] **Step 1: Add intents**
 
-In `apps/food/manifest.yaml`, add after line 36 (`"user wants to see food spending"`):
+After line 36 (`"user wants to see food spending"`):
 
 ```yaml
       - "user wants to see receipt details or look up items from a receipt"
       - "user asks about prices at a specific store"
 ```
 
-- [ ] **Step 2: Verify manifest validates**
+- [ ] **Step 2: Build**
 
 Run: `pnpm build`
 Expected: SUCCESS
@@ -1112,32 +1120,36 @@ git commit -m "feat: add receipt and price query intents to food manifest"
 
 - [ ] **Step 1: Write the migration script**
 
-Create `scripts/migrate-shared-to-space.ts`:
+Create `scripts/migrate-shared-to-space.ts` (run from repo root):
 
 ```typescript
 #!/usr/bin/env npx tsx
 /**
  * Migrate legacy shared food data to a space-scoped directory.
  *
- * Usage: npx tsx scripts/migrate-shared-to-space.ts <spaceId>
+ * Usage: npx tsx scripts/migrate-shared-to-space.ts <spaceId> [--dry-run]
  *
  * Non-destructive: copies files, skips existing, does not delete originals.
+ * Run from the repository root (where data/ lives).
  */
 
 import { readFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { parse } from 'yaml';
 
-const spaceId = process.argv[2];
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const spaceId = args.find((a) => !a.startsWith('--'));
+
 if (!spaceId) {
-	console.error('Usage: npx tsx scripts/migrate-shared-to-space.ts <spaceId>');
+	console.error('Usage: npx tsx scripts/migrate-shared-to-space.ts <spaceId> [--dry-run]');
 	process.exit(1);
 }
 
 // Validate spaceId exists
 const spacesPath = join('data', 'system', 'spaces.yaml');
 if (!existsSync(spacesPath)) {
-	console.error(`No spaces.yaml found at ${spacesPath}`);
+	console.error(`No spaces.yaml found at ${spacesPath}. Run from repo root.`);
 	process.exit(1);
 }
 
@@ -1173,6 +1185,9 @@ function copyRecursive(src: string, dest: string): void {
 			if (existsSync(destPath)) {
 				console.log(`  SKIP ${relative('.', destPath)} (already exists)`);
 				skipped++;
+			} else if (dryRun) {
+				console.log(`  WOULD COPY ${relative('.', srcPath)} → ${relative('.', destPath)}`);
+				copied++;
 			} else {
 				try {
 					mkdirSync(dirname(destPath), { recursive: true });
@@ -1188,9 +1203,9 @@ function copyRecursive(src: string, dest: string): void {
 	}
 }
 
-console.log(`Migrating ${srcDir} → ${destDir}\n`);
+console.log(`${dryRun ? '[DRY RUN] ' : ''}Migrating ${srcDir} → ${destDir}\n`);
 copyRecursive(srcDir, destDir);
-console.log(`\nDone: ${copied} copied, ${skipped} skipped, ${errors} errors`);
+console.log(`\nDone: ${copied} ${dryRun ? 'would be copied' : 'copied'}, ${skipped} skipped, ${errors} errors`);
 if (errors > 0) process.exit(1);
 ```
 
@@ -1198,38 +1213,34 @@ if (errors > 0) process.exit(1);
 
 ```bash
 git add scripts/migrate-shared-to-space.ts
-git commit -m "feat: add legacy shared-to-space data migration script"
+git commit -m "feat: add legacy shared-to-space data migration script with --dry-run"
 ```
 
 ---
 
-### Task 12: Add space-scoped data query test
+### Task 12: End-to-end data query tests for space-scoped data
 
 **Files:**
 - Modify: `core/src/services/data-query/__tests__/data-query.test.ts`
 
-- [ ] **Step 1: Write the test**
+These tests verify the full chain: space-scoped food writes are indexed, queryable, and the existing shared-hidden test still holds.
+
+- [ ] **Step 1: Write tests**
 
 Add after the existing scope tests (around line 700):
 
 ```typescript
-it('space member can query space-scoped receipt and price files', async () => {
-	// Write receipt and price files to space directory
+it('space member can query space-scoped receipt files', async () => {
 	await writeDataFile(
 		dataDir,
 		'spaces/family/food/receipts/2026-04-14-abc.yaml',
 		'---\ntitle: "Receipt: Costco"\ntype: receipt\nentity_keys:\n  - costco\n  - receipt 2\n  - eggs\n  - diapers\napp: food\n---\nstore: Costco\nlineItems:\n  - name: Eggs\n    totalPrice: 12.99\n  - name: Diapers\n    totalPrice: 29.99\n',
 	);
-	await writeDataFile(
-		dataDir,
-		'spaces/family/food/prices/costco.md',
-		'---\nstore: Costco\nslug: costco\ntype: price-list\nentity_keys:\n  - costco\n  - eggs\n  - diapers\napp: food\n---\n## Dairy\n- Eggs: $12.99\n## Baby\n- Diapers: $29.99\n',
-	);
 
-	const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['receipts/', 'prices/']));
+	const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['receipts/']));
 	await fileIndex.rebuild();
 
-	const llm = makeMockLlm('[0, 1]');
+	const llm = makeMockLlm('[0]');
 	const svc = new DataQueryServiceImpl({
 		fileIndex,
 		spaceService: makeSpaceService([{ id: 'family', members: ['matt'] }]),
@@ -1239,26 +1250,73 @@ it('space member can query space-scoped receipt and price files', async () => {
 	});
 
 	const result = await svc.query('how much were diapers at costco', 'matt');
-
 	expect(result.empty).toBe(false);
-	expect(result.files.length).toBeGreaterThanOrEqual(1);
+	expect(result.files[0].content).toContain('Diapers');
+});
+
+it('space member can query space-scoped price files', async () => {
+	await writeDataFile(
+		dataDir,
+		'spaces/family/food/prices/costco.md',
+		'---\nstore: Costco\nslug: costco\ntype: price-list\nentity_keys:\n  - costco\n  - eggs\n  - diapers\napp: food\n---\n## Dairy\n- Eggs: $12.99\n## Baby\n- Diapers: $29.99\n',
+	);
+
+	const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['prices/']));
+	await fileIndex.rebuild();
+
+	const llm = makeMockLlm('[0]');
+	const svc = new DataQueryServiceImpl({
+		fileIndex,
+		spaceService: makeSpaceService([{ id: 'family', members: ['matt'] }]),
+		llm,
+		dataDir,
+		logger,
+	});
+
+	const result = await svc.query('show me costco prices', 'matt');
+	expect(result.empty).toBe(false);
+	expect(result.files[0].content).toContain('Eggs');
+});
+
+it('non-member cannot query another space\'s food data', async () => {
+	await writeDataFile(
+		dataDir,
+		'spaces/family/food/receipts/2026-04-14-abc.yaml',
+		'---\ntitle: "Receipt: Costco"\ntype: receipt\nentity_keys:\n  - costco\napp: food\n---\nstore: Costco\n',
+	);
+
+	const fileIndex = new FileIndexService(dataDir, makeAppScopes([], ['receipts/']));
+	await fileIndex.rebuild();
+
+	const llm = makeMockLlm('[0]');
+	const svc = new DataQueryServiceImpl({
+		fileIndex,
+		spaceService: makeSpaceService([{ id: 'family', members: ['matt'] }]),
+		llm,
+		dataDir,
+		logger,
+	});
+
+	// nina is not in the family space
+	const result = await svc.query('show me costco receipt', 'nina');
+	expect(result.empty).toBe(true);
 });
 ```
 
-- [ ] **Step 2: Run tests**
+- [ ] **Step 2: Verify existing shared-hidden test still passes**
+
+The test at line 625 (`'shared files are hidden when user belongs to a space'`) must still pass — shared data stays hidden for space members.
+
+- [ ] **Step 3: Run tests**
 
 Run: `pnpm exec vitest run core/src/services/data-query/__tests__/data-query.test.ts`
-Expected: PASS — space-scoped files are accessible to space members (existing behavior).
-
-- [ ] **Step 3: Verify existing shared-hidden test still passes**
-
-The existing test `'shared files are hidden when user belongs to a space'` at line 625 should still pass — shared data remains hidden for space members.
+Expected: ALL PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add core/src/services/data-query/__tests__/data-query.test.ts
-git commit -m "test: verify space-scoped receipt/price data is queryable by members"
+git commit -m "test: end-to-end tests for space-scoped receipt/price data queries"
 ```
 
 ---
@@ -1272,17 +1330,17 @@ Expected: 6272+ tests passing, 0 failures.
 
 - [ ] **Step 2: Fix any failures**
 
-If tests fail, they're most likely:
+Common fixes needed:
 - Mock setups missing `forSpace` on data service mocks — add `forSpace: vi.fn().mockReturnValue(createMockStore())`.
-- Tests that assert `hh.sharedStore` on the return value of `requireHousehold` — these still work since `requireHousehold` is unchanged.
-- Tests that mock `requireHousehold` calls — update to expect `resolveFoodStore` import.
+- Tests that call food handlers without `spaceId` in context — these should still work (spaceId is optional, defaults to shared store).
+- Tests that mock `requireHousehold` directly may need adjustment if the handler now calls `resolveFoodStore` instead.
 
 - [ ] **Step 3: Run build**
 
 Run: `pnpm build`
 Expected: SUCCESS
 
-- [ ] **Step 4: Commit any test fixes**
+- [ ] **Step 4: Commit any fixes**
 
 ```bash
 git add -A
@@ -1296,10 +1354,10 @@ git commit -m "fix: update test mocks for space-aware food store resolution"
 - [ ] **Step 1: Update implementation status**
 
 Add to the Implementation Status section in `CLAUDE.md`:
-
-- Record that this phase is complete
+- Record this phase as complete with date
 - Update test counts
-- Note the migration script usage: `npx tsx scripts/migrate-shared-to-space.ts <spaceId>`
+- Note migration script: `npx tsx scripts/migrate-shared-to-space.ts <spaceId> [--dry-run]`
+- Note that scheduled jobs remain on shared store (explicit limitation)
 
 - [ ] **Step 2: Commit**
 
