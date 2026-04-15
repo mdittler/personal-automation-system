@@ -129,11 +129,13 @@ async function collectAppDataSection(
 	// Resolve date tokens in path
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone);
 
-	// Build the full path: space-aware or per-user
+	// Build the full path: space-aware or per-user (household-aware post-migration)
+	// biome-ignore lint/style/noNonNullAssertion: validated by report-validator (user_id required when no space_id)
 	const baseDir = config.space_id
 		? resolve(join(deps.dataDir, 'spaces', config.space_id, config.app_id))
-		: // biome-ignore lint/style/noNonNullAssertion: validated by report-validator (user_id required when no space_id)
-			resolve(join(deps.dataDir, 'users', config.user_id!, config.app_id));
+		: deps.householdId
+			? resolve(join(deps.dataDir, 'households', deps.householdId, 'users', config.user_id!, config.app_id))
+			: resolve(join(deps.dataDir, 'users', config.user_id!, config.app_id));
 	const fullPath = resolve(join(baseDir, resolvedPath));
 
 	// Path traversal check: ensure resolved path is within the base dir

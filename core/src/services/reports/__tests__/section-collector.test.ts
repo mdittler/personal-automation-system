@@ -382,12 +382,14 @@ describe('collectSection — error handling', () => {
 });
 
 describe('collectSection — app-data household boundary (I1)', () => {
-	it('allows access when path does not contain households/ segment', async () => {
+	it('uses legacy path when no householdId in deps (fail-open for pre-migration instances)', async () => {
+		// Without householdId, section-collector uses the legacy data/users/<uid>/<appId>/ layout.
 		const userDir = join(tempDir, 'users', '123', 'notes');
 		await mkdir(userDir, { recursive: true });
 		await writeFile(join(userDir, 'file.md'), 'content');
 
-		const deps = makeDeps({ householdId: 'hh1' });
+		// No householdId → legacy path used
+		const deps = makeDeps({});
 		const result = await collectSection(
 			{
 				type: 'app-data',
@@ -401,16 +403,14 @@ describe('collectSection — app-data household boundary (I1)', () => {
 		expect(result.content).toBe('content');
 	});
 
-	it('allows access when path household matches report owner householdId', async () => {
+	it('allows access when householdId is set and file is at the household-rooted path', async () => {
+		// With householdId, section-collector routes to data/households/<hh>/users/<uid>/<appId>/.
 		const hhDir = join(tempDir, 'households', 'hh1', 'users', '123', 'notes');
 		await mkdir(hhDir, { recursive: true });
 		await writeFile(join(hhDir, 'file.md'), 'hh1 content');
 
-		// Build deps with a dataDir that places the section under households/hh1/
-		const deps = makeDeps({
-			dataDir: join(tempDir, 'households', 'hh1'),
-			householdId: 'hh1',
-		});
+		// dataDir is tempDir; householdId drives the path to households/hh1/users/123/notes/
+		const deps = makeDeps({ householdId: 'hh1' });
 		const result = await collectSection(
 			{
 				type: 'app-data',
@@ -420,17 +420,20 @@ describe('collectSection — app-data household boundary (I1)', () => {
 			deps,
 		);
 
-		// The resolved path contains households/hh1/ and householdId matches → allowed
 		expect(result.content).toContain('hh1 content');
 	});
 
-	it('denies access when path household does not match report owner householdId', async () => {
-		// Set up a path that will resolve to contain households/hh2/
-		const hhDir = join(tempDir, 'households', 'hh2', 'users', '123', 'notes');
-		await mkdir(hhDir, { recursive: true });
-		await writeFile(join(hhDir, 'file.md'), 'hh2 content');
+	it('household guard denies access when space-scoped path resolves to wrong household', async () => {
+		// The household guard (regex check on fullPath) fires when the resolved path
+		// contains /households/<hh>/ but <hh> != deps.householdId.
+		// This can happen via the space_id code path when dataDir itself is inside
+		// a different household's directory tree (e.g., post-migration instances
+		// where dataDir = data/households/hh2).
+		const spaceDir = join(tempDir, 'households', 'hh2', 'spaces', 'space-hh2', 'notes');
+		await mkdir(spaceDir, { recursive: true });
+		await writeFile(join(spaceDir, 'file.md'), 'hh2 content');
 
-		// dataDir resolves to households/hh2/ but the report owner says hh1
+		// dataDir is inside households/hh2; householdId says hh1 → guard fires
 		const deps = makeDeps({
 			dataDir: join(tempDir, 'households', 'hh2'),
 			householdId: 'hh1',
@@ -439,7 +442,7 @@ describe('collectSection — app-data household boundary (I1)', () => {
 			{
 				type: 'app-data',
 				label: 'Notes',
-				config: { app_id: 'notes', user_id: '123', path: 'file.md' },
+				config: { app_id: 'notes', space_id: 'space-hh2', path: 'file.md' },
 			},
 			deps,
 		);

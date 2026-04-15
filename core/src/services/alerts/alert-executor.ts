@@ -394,7 +394,11 @@ async function executeWriteData(
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone || 'UTC');
 	const content = resolveTemplate(config.content, vars);
 
-	const baseDir = resolve(join(deps.dataDir, 'users', config.user_id, config.app_id));
+	// Use household-aware path layout when householdService is available
+	const householdId = deps.householdService?.getHouseholdForUser(config.user_id) ?? null;
+	const baseDir = householdId
+		? resolve(join(deps.dataDir, 'households', householdId, 'users', config.user_id, config.app_id))
+		: resolve(join(deps.dataDir, 'users', config.user_id, config.app_id));
 	const fullPath = resolve(join(baseDir, resolvedPath));
 
 	// Path traversal protection

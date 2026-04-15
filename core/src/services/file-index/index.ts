@@ -73,11 +73,13 @@ export class FileIndexService {
       const scopes = this.appScopes.get(pathMeta.appId)!;
       // Space-scoped paths use shared scopes (matches DataStoreServiceImpl.forSpace behavior)
       const scopeList = pathMeta.scope === 'user' ? scopes.user : scopes.shared;
-      // Derive app-relative path: strip the first 3 segments
-      // e.g. "users/matt/food/recipes/tacos.yaml" → "recipes/tacos.yaml"
-      //      "users/shared/food/prices/costco.md" → "prices/costco.md"
-      //      "spaces/family/food/recipes/pasta.yaml" → "recipes/pasta.yaml"
-      const appRelativePath = relativePath.split('/').slice(3).join('/');
+      // Derive app-relative path by stripping the prefix segments that precede the app data.
+      // The offset varies by layout:
+      //   users/matt/food/recipes/tacos.yaml         → offset 3 → recipes/tacos.yaml
+      //   households/hh/users/matt/food/recipes.yaml → offset 5 → recipes.yaml
+      //   households/hh/shared/food/prices.md        → offset 4 → prices.md
+      //   collaborations/sId/food/data.md            → offset 3 → data.md
+      const appRelativePath = relativePath.split('/').slice(pathMeta.appRelativeOffset).join('/');
       if (!findMatchingScope(appRelativePath, scopeList)) return;
 
       const [content, fileStat] = await Promise.all([

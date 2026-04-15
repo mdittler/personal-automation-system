@@ -13,7 +13,7 @@ export interface FileIndexEntry {
   path: string;
   /** Derived from path convention */
   appId: string;
-  scope: 'user' | 'shared' | 'space';
+  scope: 'user' | 'shared' | 'space' | 'collaboration';
   /** userId for user-scoped, spaceId for space-scoped, null for shared */
   owner: string | null;
   /** Household this file belongs to; null for system/ and collaboration/ scopes. */
@@ -42,7 +42,7 @@ export interface FileIndexEntry {
 }
 
 export interface FileIndexFilter {
-  scope?: 'user' | 'shared' | 'space';
+  scope?: 'user' | 'shared' | 'space' | 'collaboration';
   appId?: string;
   owner?: string;
   type?: string;

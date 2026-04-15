@@ -4,37 +4,74 @@ import type { SpaceKind } from '../../types/spaces.js';
 
 interface PathMeta {
   appId: string;
-  scope: 'user' | 'shared' | 'space';
+  scope: 'user' | 'shared' | 'space' | 'collaboration';
   owner: string | null;
+  /**
+   * Number of path segments to skip to obtain the app-relative path.
+   * Used by FileIndexService.indexFile() for scope matching.
+   *
+   * Examples:
+   *   users/matt/food/recipes/tacos.yaml         → offset 3 → recipes/tacos.yaml
+   *   households/hh/users/matt/food/recipes.yaml → offset 5 → recipes.yaml
+   *   households/hh/shared/food/prices.md        → offset 4 → prices.md
+   *   collaborations/sId/food/data.md            → offset 3 → data.md
+   */
+  appRelativeOffset: number;
 }
 
 /**
- * Derive appId, scope, and owner from a data-root-relative path.
+ * Derive appId, scope, owner, and app-relative offset from a data-root-relative path.
  *
- * Expected patterns:
- *   users/<userId>/<appId>/...   → user scope
- *   users/shared/<appId>/...     → shared scope
- *   spaces/<spaceId>/<appId>/... → space scope
+ * Supported patterns:
+ *   users/<userId>/<appId>/...                     → user scope  (offset 3)
+ *   users/shared/<appId>/...                       → shared scope (offset 3)
+ *   spaces/<spaceId>/<appId>/...                   → space scope  (offset 3)
+ *   households/<hh>/users/<uid>/<appId>/...        → user scope  (offset 5)
+ *   households/<hh>/shared/<appId>/...             → shared scope (offset 4)
+ *   households/<hh>/spaces/<sId>/<appId>/...       → space scope  (offset 5)
+ *   collaborations/<sId>/<appId>/...               → collaboration scope (offset 3)
  */
 export function parsePathMeta(relativePath: string): PathMeta {
   const parts = relativePath.split('/');
 
   if (parts[0] === 'users') {
     if (parts[1] === 'shared' && parts.length >= 3) {
-      return { appId: parts[2] ?? 'unknown', scope: 'shared', owner: null };
+      return { appId: parts[2] ?? 'unknown', scope: 'shared', owner: null, appRelativeOffset: 3 };
     }
     if (parts.length >= 3) {
-      return { appId: parts[2] ?? 'unknown', scope: 'user', owner: parts[1] ?? null };
+      return { appId: parts[2] ?? 'unknown', scope: 'user', owner: parts[1] ?? null, appRelativeOffset: 3 };
     }
   }
 
   if (parts[0] === 'spaces' && parts.length >= 3) {
-    return { appId: parts[2] ?? 'unknown', scope: 'space', owner: parts[1] ?? null };
+    return { appId: parts[2] ?? 'unknown', scope: 'space', owner: parts[1] ?? null, appRelativeOffset: 3 };
+  }
+
+  if (parts[0] === 'households' && parts.length >= 3) {
+    const segment2 = parts[2] ?? '';
+
+    if (segment2 === 'users' && parts.length >= 5) {
+      // households/<hh>/users/<uid>/<appId>/...
+      return { appId: parts[4] ?? 'unknown', scope: 'user', owner: parts[3] ?? null, appRelativeOffset: 5 };
+    }
+    if (segment2 === 'shared' && parts.length >= 4) {
+      // households/<hh>/shared/<appId>/...
+      return { appId: parts[3] ?? 'unknown', scope: 'shared', owner: null, appRelativeOffset: 4 };
+    }
+    if (segment2 === 'spaces' && parts.length >= 5) {
+      // households/<hh>/spaces/<sId>/<appId>/...
+      return { appId: parts[4] ?? 'unknown', scope: 'space', owner: parts[3] ?? null, appRelativeOffset: 5 };
+    }
+  }
+
+  if (parts[0] === 'collaborations' && parts.length >= 3) {
+    // collaborations/<sId>/<appId>/...
+    return { appId: parts[2] ?? 'unknown', scope: 'collaboration', owner: parts[1] ?? null, appRelativeOffset: 3 };
   }
 
   // Unrecognized path structure — FileIndexService will skip this entry since
   // 'unknown' will not match any registered appId in the scope map.
-  return { appId: 'unknown', scope: 'shared', owner: null };
+  return { appId: 'unknown', scope: 'shared', owner: null, appRelativeOffset: 3 };
 }
 
 interface ParsedContent {

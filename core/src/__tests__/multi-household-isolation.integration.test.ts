@@ -18,7 +18,7 @@
  *   Section-collector household path guard (15)
  */
 
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -30,7 +30,9 @@ import { InteractionContextServiceImpl } from '../services/interaction-context/i
 import { requestContext } from '../services/context/request-context.js';
 import { InviteService } from '../services/invite/index.js';
 import { EventBusServiceImpl } from '../services/event-bus/index.js';
+import { FileIndexService } from '../services/file-index/index.js';
 import type { DataChangedPayload } from '../types/data-events.js';
+import type { ManifestDataScope } from '../types/manifest.js';
 import type { SpaceDefinition } from '../types/spaces.js';
 import type { RegisteredUser } from '../types/users.js';
 import { collectSection } from '../services/reports/section-collector.js';
@@ -228,69 +230,43 @@ describe('FileIndex / DataQuery isolation', () => {
 		expect(alphaMeta.collaborationId).toBeNull();
 	});
 
-	it('5: DataQueryService getAuthorizedEntries logic excludes hh-beta shared entries from hh-alpha context', () => {
-		// Simulate the getAuthorizedEntries filtering logic from DataQueryServiceImpl.
-		// We construct mock FileIndexEntry objects to verify the filter predicate.
-		// This is the exact logic in DataQueryServiceImpl.getAuthorizedEntries.
-		const mockEntries = [
-			{
-				path: 'households/hh-alpha/shared/food/grocery.md',
-				appId: 'food',
-				scope: 'shared' as const,
-				owner: null,
-				householdId: 'hh-alpha',
-				spaceKind: null,
-				collaborationId: null,
-				type: 'grocery-list',
-				title: 'Alpha Grocery',
-				tags: [],
-				aliases: [],
-				entityKeys: [],
-				dates: { earliest: null, latest: null },
-				relationships: [],
-				wikiLinks: [],
-				size: 100,
-				modifiedAt: new Date(),
-				summary: null,
-			},
-			{
-				path: 'households/hh-beta/shared/food/grocery.md',
-				appId: 'food',
-				scope: 'shared' as const,
-				owner: null,
-				householdId: 'hh-beta',
-				spaceKind: null,
-				collaborationId: null,
-				type: 'grocery-list',
-				title: 'Beta Grocery',
-				tags: [],
-				aliases: [],
-				entityKeys: [],
-				dates: { earliest: null, latest: null },
-				relationships: [],
-				wikiLinks: [],
-				size: 100,
-				modifiedAt: new Date(),
-				summary: null,
-			},
-		];
+	it('5: FileIndexService correctly tags entries with householdId from path — hh-beta entries distinguishable from hh-alpha', async () => {
+		// Write real files to the test data dir under each household's layout.
+		// After rebuild(), each FileIndexEntry should carry the correct householdId.
+		// This proves the parsePathMeta + resolveHouseholdMeta pipeline works end-to-end.
+		//
+		// Files are placed inside a 'shared/' subdirectory so the scope prefix 'shared/'
+		// matches their app-relative path (e.g., 'shared/grocery.md').
+		const alphaSharedDir = join(dataDir, 'households', 'hh-alpha', 'shared', 'food', 'shared');
+		const betaSharedDir = join(dataDir, 'households', 'hh-beta', 'shared', 'food', 'shared');
+		await mkdir(alphaSharedDir, { recursive: true });
+		await mkdir(betaSharedDir, { recursive: true });
+		await writeFile(join(alphaSharedDir, 'grocery.md'), '---\ntitle: Alpha Grocery\ntype: grocery-list\n---\n');
+		await writeFile(join(betaSharedDir, 'grocery.md'), '---\ntitle: Beta Grocery\ntype: grocery-list\n---\n');
 
-		// Simulate being in hh-alpha context — same logic as DataQueryServiceImpl.getAuthorizedEntries
-		const userHouseholdId = 'hh-alpha';
+		// Use directory-prefix scopes (how real manifests are written, e.g. 'recipes/')
+		const appScopes = new Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>([
+			['food', {
+				user: [{ path: 'shared/', access: 'write' as const }],
+				shared: [{ path: 'shared/', access: 'write' as const }],
+			}],
+		]);
 
-		const authorized = mockEntries.filter((entry) => {
-			if (entry.scope === 'shared') {
-				// When householdId is available in context, restrict to this household's shared data.
-				return entry.householdId === userHouseholdId;
-			}
-			return false;
-		});
+		const fileIndex = new FileIndexService(dataDir, appScopes);
+		await fileIndex.rebuild();
 
-		const hasBeta = authorized.some((e) => e.householdId === 'hh-beta');
-		const hasAlpha = authorized.some((e) => e.householdId === 'hh-alpha');
+		// Verify householdId is correctly set on indexed entries
+		const allShared = fileIndex.getEntries({ scope: 'shared', appId: 'food' });
+		const alphaEntries = allShared.filter((e) => e.householdId === 'hh-alpha');
+		const betaEntries = allShared.filter((e) => e.householdId === 'hh-beta');
 
-		expect(hasBeta).toBe(false);
-		expect(hasAlpha).toBe(true);
+		expect(alphaEntries.length).toBeGreaterThanOrEqual(1);
+		expect(betaEntries.length).toBeGreaterThanOrEqual(1);
+
+		// Verify that filtering to hh-alpha context excludes hh-beta
+		const authorized = allShared.filter((e) => !e.householdId || e.householdId === 'hh-alpha');
+		expect(authorized.some((e) => e.householdId === 'hh-beta')).toBe(false);
+		expect(authorized.some((e) => e.householdId === 'hh-alpha')).toBe(true);
 	});
 });
 

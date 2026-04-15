@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { parsePathMeta, parseFileContent, isArchived, resolveHouseholdMeta } from '../entry-parser.js';
 
 describe('parsePathMeta', () => {
+  // Legacy layout (pre-migration)
   it('parses user-scoped path', () => {
     const meta = parsePathMeta('users/matt/food/recipes/tacos.yaml');
     expect(meta).toEqual({
       appId: 'food',
       scope: 'user',
       owner: 'matt',
+      appRelativeOffset: 3,
     });
   });
 
@@ -17,6 +19,7 @@ describe('parsePathMeta', () => {
       appId: 'food',
       scope: 'shared',
       owner: null,
+      appRelativeOffset: 3,
     });
   });
 
@@ -26,12 +29,55 @@ describe('parsePathMeta', () => {
       appId: 'food',
       scope: 'space',
       owner: 'family',
+      appRelativeOffset: 3,
     });
   });
 
   it('returns unknown appId for unrecognized path structure', () => {
     const meta = parsePathMeta('random/file.md');
     expect(meta.appId).toBe('unknown');
+    expect(meta.appRelativeOffset).toBe(3);
+  });
+
+  // Household layout (post-migration)
+  it('parses household user-scoped path', () => {
+    const meta = parsePathMeta('households/hh-alpha/users/matt/food/recipes/tacos.yaml');
+    expect(meta).toEqual({
+      appId: 'food',
+      scope: 'user',
+      owner: 'matt',
+      appRelativeOffset: 5,
+    });
+  });
+
+  it('parses household shared-scoped path', () => {
+    const meta = parsePathMeta('households/hh-alpha/shared/food/prices/costco.md');
+    expect(meta).toEqual({
+      appId: 'food',
+      scope: 'shared',
+      owner: null,
+      appRelativeOffset: 4,
+    });
+  });
+
+  it('parses household space-scoped path', () => {
+    const meta = parsePathMeta('households/hh-alpha/spaces/family/food/recipes/pasta.yaml');
+    expect(meta).toEqual({
+      appId: 'food',
+      scope: 'space',
+      owner: 'family',
+      appRelativeOffset: 5,
+    });
+  });
+
+  it('parses collaboration-scoped path', () => {
+    const meta = parsePathMeta('collaborations/cross-collab/food/shopping.md');
+    expect(meta).toEqual({
+      appId: 'food',
+      scope: 'collaboration',
+      owner: 'cross-collab',
+      appRelativeOffset: 3,
+    });
   });
 });
 
