@@ -11,6 +11,8 @@ import { join, resolve } from 'node:path';
 import { registerApiRoutes } from './api/index.js';
 import { registerGuiRoutes } from './gui/index.js';
 import { registerGlobalErrorHandlers } from './middleware/error-handler.js';
+import { HouseholdService } from './services/household/index.js';
+import { runHouseholdMigration } from './services/household/migration.js';
 import {
 	createApiRateLimiter,
 	createLoginRateLimiter,
@@ -80,8 +82,33 @@ import type { DataChangedPayload } from './types/data-events.js';
 import type { ManifestDataScope } from './types/manifest.js';
 
 export async function main(): Promise<void> {
-	// 1. Config + Logger
-	const config = await loadSystemConfig();
+	// 1. Config + Logger — three-phase boot for household migration
+	//
+	// Phase 1: Transitional load — accepts users without householdId.
+	//   Sets config.migrationNeeded = true if any user is missing householdId.
+	// Phase 2: Migration — if needed, moves data/ → data/households/default/ and
+	//   rewrites pas.yaml. On failure, startup is aborted (error propagates).
+	// Phase 3: Strict load — every user MUST have a householdId. This is the
+	//   config that feeds all subsequent services.
+
+	const transitionalConfig = await loadSystemConfig({ mode: 'transitional' });
+	const configPath = resolve('config', 'pas.yaml');
+	const migrationRan = !!transitionalConfig.migrationNeeded;
+
+	if (migrationRan) {
+		// Phase 2: Run migration (fail-fast on error).
+		// Logger not yet constructed — use console so migration progress is visible.
+		// biome-ignore lint/suspicious/noConsole: logger not available during migration
+		await runHouseholdMigration({
+			dataDir: resolve(transitionalConfig.dataDir),
+			configPath,
+			// biome-ignore lint/suspicious/noConsole: logger not available during migration
+			logger: console,
+		});
+	}
+
+	// Phase 3: Strict config — all users must have householdId after migration
+	const config = await loadSystemConfig({ mode: 'strict' });
 	const logger = await createLogger({
 		level: config.logLevel,
 		dataDir: config.dataDir,
@@ -238,7 +265,14 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
-	const configPath = resolve('config', 'pas.yaml');
+	// 8b-hh. Household Service — tenant boundary enforcement
+	// Initialized from the strict config (all users have householdId after migration).
+	const householdService = new HouseholdService({
+		dataDir: config.dataDir,
+		users: config.users,
+		logger: createChildLogger(logger, { service: 'household' }),
+	});
+	await householdService.init();
 
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
@@ -249,6 +283,7 @@ export async function main(): Promise<void> {
 	const userMutationService = new UserMutationService({
 		userManager,
 		configPath,
+		householdService,
 		logger: createChildLogger(logger, { service: 'user-mutation' }),
 	});
 
@@ -290,6 +325,7 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'reports' }),
 		eventBus,
 		n8nDispatcher,
+		householdService,
 	});
 
 	// 8d. Alert service (needs telegram + userManager + scheduler + reportService + eventBus + audio)
@@ -305,6 +341,7 @@ export async function main(): Promise<void> {
 		eventBus,
 		n8nDispatcher,
 		audioService: audio,
+		householdService,
 	});
 
 	// 8e. Rate limiters
@@ -407,6 +444,7 @@ export async function main(): Promise<void> {
 			changeLog,
 			spaceService,
 			eventBus,
+			householdService,
 		});
 
 		const appConfig = new AppConfigServiceImpl({
@@ -546,6 +584,7 @@ export async function main(): Promise<void> {
 							userScope: schedule.user_scope,
 							appModule,
 							userProvider: userManager,
+							householdService,
 							logger: createChildLogger(logger, {
 								service: 'scheduled-job',
 								appId,
@@ -584,6 +623,7 @@ export async function main(): Promise<void> {
 			userScope: 'system',
 			appModule: entry.module,
 			userProvider: userManager,
+			householdService,
 			logger: createChildLogger(logger, { service: 'scheduled-job', appId }),
 		});
 	});
@@ -622,7 +662,15 @@ export async function main(): Promise<void> {
 		logger.warn({ path, err }, 'FileIndexService: skipped file during indexing');
 	});
 	await fileIndex.rebuild();
-	logger.info({ count: fileIndex.size }, 'FileIndexService: initial index built');
+
+	// If migration ran, paths changed (data/users/ → data/households/default/users/).
+	// Rebuild to pick up new locations — the initial rebuild above read pre-migration paths.
+	if (migrationRan) {
+		await fileIndex.rebuild();
+		logger.info({ count: fileIndex.size }, 'FileIndexService: post-migration index rebuilt');
+	} else {
+		logger.info({ count: fileIndex.size }, 'FileIndexService: initial index built');
+	}
 
 	const onDataChanged = (payload: unknown) => {
 		fileIndex.handleDataChanged(payload as DataChangedPayload).catch((err) => {
@@ -716,6 +764,7 @@ export async function main(): Promise<void> {
 		inviteService,
 		userMutationService,
 		interactionContext: interactionContextService,
+		householdService,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
@@ -932,6 +981,7 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'gui' }),
 		loginRateLimiter,
 		userMutationService,
+		householdService,
 	});
 
 	// 13b. External Data API (optional — disabled when API_TOKEN is empty)
@@ -955,6 +1005,7 @@ export async function main(): Promise<void> {
 			alertService,
 			telegram: telegramService,
 			llm: apiLlm,
+			householdService,
 		});
 	} else {
 		logger.info('API routes disabled (API_TOKEN not set)');

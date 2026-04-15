@@ -28,6 +28,7 @@ import { readYamlFile, readYamlFileStrict, writeYamlFile } from '../../utils/yam
 import { canFire, parseCooldown } from '../condition-evaluator/cooldown-tracker.js';
 import { evaluateDeterministic, evaluateFuzzy } from '../condition-evaluator/evaluator.js';
 import type { EvaluatorDeps } from '../condition-evaluator/evaluator.js';
+import type { HouseholdService } from '../household/index.js';
 import type { N8nDispatcher } from '../n8n/index.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
@@ -52,6 +53,8 @@ export interface AlertServiceOptions {
 	n8nDispatcher?: N8nDispatcher;
 	audioService?: AudioService;
 	router?: Router;
+	/** Optional — when present, householdId is derived and injected into dispatch_message context. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 export class AlertService {
@@ -69,6 +72,7 @@ export class AlertService {
 	private readonly n8nDispatcher?: N8nDispatcher;
 	private readonly audioService?: AudioService;
 	private router?: Router;
+	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	private readonly eventSubscriptions = new Map<
 		string,
 		{ eventName: string; handler: EventHandler }
@@ -89,6 +93,7 @@ export class AlertService {
 		this.n8nDispatcher = options.n8nDispatcher;
 		this.audioService = options.audioService;
 		this.router = options.router;
+		this.householdService = options.householdService;
 	}
 
 	/**
@@ -328,6 +333,7 @@ export class AlertService {
 					audioService: this.audioService,
 					router: this.router,
 					timezone: this.timezone,
+					householdService: this.householdService,
 				},
 				{ data, alertName: alert.name },
 			);

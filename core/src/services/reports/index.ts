@@ -25,6 +25,7 @@ import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter } from '../../utils/frontmatter.js';
 import { readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import type { ChangeLog } from '../data-store/change-log.js';
+import type { HouseholdService } from '../household/index.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { N8nDispatcher } from '../n8n/index.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
@@ -47,6 +48,8 @@ export interface ReportServiceOptions {
 	logger: Logger;
 	eventBus?: EventBusService;
 	n8nDispatcher?: N8nDispatcher;
+	/** Optional — when present, householdId is resolved per-report-owner for section-collector boundary checks. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 export class ReportService {
@@ -63,6 +66,7 @@ export class ReportService {
 	private readonly logger: Logger;
 	private readonly eventBus?: EventBusService;
 	private readonly n8nDispatcher?: N8nDispatcher;
+	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 
 	constructor(options: ReportServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -78,6 +82,7 @@ export class ReportService {
 		this.logger = options.logger;
 		this.eventBus = options.eventBus;
 		this.n8nDispatcher = options.n8nDispatcher;
+		this.householdService = options.householdService;
 	}
 
 	/**
@@ -229,12 +234,18 @@ export class ReportService {
 		this.logger.info({ reportId, preview }, 'Running report');
 
 		// 1. Collect section data
+		// Resolve householdId from first delivery recipient (fail-open when absent)
+		const firstRecipient = report.delivery[0];
+		const reportHouseholdId = firstRecipient
+			? (this.householdService?.getHouseholdForUser(firstRecipient) ?? undefined)
+			: undefined;
 		const collectorDeps: CollectorDeps = {
 			changeLog: this.changeLog,
 			dataDir: this.dataDir,
 			contextStore: this.contextStore,
 			timezone: this.timezone,
 			logger: this.logger,
+			householdId: reportHouseholdId,
 		};
 
 		const sections: CollectedSection[] = [];

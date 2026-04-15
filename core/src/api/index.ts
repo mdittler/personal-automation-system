@@ -11,6 +11,7 @@ import type { Logger } from 'pino';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
 import type { AlertService } from '../services/alerts/index.js';
 import type { ChangeLog } from '../services/data-store/change-log.js';
+import type { HouseholdService } from '../services/household/index.js';
 import type { ReportService } from '../services/reports/index.js';
 import type { Router } from '../services/router/index.js';
 import type { CronManager } from '../services/scheduler/cron-manager.js';
@@ -47,6 +48,8 @@ export interface ApiOptions {
 	alertService: AlertService;
 	telegram: TelegramService;
 	llm: LLMService;
+	/** Optional — when present, householdId is derived for message dispatch context. */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 export async function registerApiRoutes(
@@ -69,6 +72,7 @@ export async function registerApiRoutes(
 		alertService,
 		telegram,
 		llm,
+		householdService,
 	} = options;
 
 	await server.register(
@@ -80,7 +84,7 @@ export async function registerApiRoutes(
 			// Phase 24-25 routes
 			registerDataRoute(api, { dataDir, changeLog, spaceService, userManager, eventBus, logger });
 			registerDataReadRoute(api, { dataDir, spaceService, userManager, logger });
-			registerMessagesRoute(api, { router, userManager, logger });
+			registerMessagesRoute(api, { router, userManager, logger, householdService });
 			registerSchedulesRoute(api, { cronManager, timezone, logger });
 
 			// Phase 26A routes

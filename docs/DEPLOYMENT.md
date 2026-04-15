@@ -283,3 +283,50 @@ Use a launchd plist to start PAS automatically on login.
    launchctl unload ~/Library/LaunchAgents/com.pas.server.plist
    launchctl load ~/Library/LaunchAgents/com.pas.server.plist
    ```
+
+---
+
+## Household Migration (D5a)
+
+Starting with D5a, PAS organises data under per-household directories. On the **first boot after upgrading**, the system automatically migrates existing data to the new layout.
+
+### What the migration does
+
+- Moves `data/users/<uid>/` → `data/households/default/users/<uid>/`
+- Moves `data/users/shared/` → `data/households/default/shared/`
+- Moves `data/spaces/<id>/` → `data/households/default/spaces/<id>/`
+- Creates `data/system/households.yaml` with a single `default` household
+- Rewrites `config/pas.yaml` to add `household_id: default` to every user entry
+- Writes a migration marker at `data/system/.household-migration-v1` so the migration never runs twice
+- Creates a full backup at `<parent-of-data-dir>/data-backup-pre-household-migration-<timestamp>/` before moving anything
+
+### Normal first-boot flow
+
+The migration runs automatically. Log output will show:
+
+```
+Starting household migration — creating backup first
+Backup created successfully
+Moving user and space directories into household scope
+...
+Household migration complete: users=N spaces=M marker=...
+```
+
+Once the marker file exists, subsequent restarts skip the migration entirely.
+
+### If startup fails with HouseholdMigrationError
+
+The marker is **not written** on failure, so the migration will retry on the next startup. To recover manually:
+
+1. Stop PAS.
+2. Locate the backup: `ls <parent-of-data-dir>/data-backup-pre-household-migration-*/` (the directory created just before the failure).
+3. Restore the backup to `data/`:
+   ```bash
+   rm -rf data
+   cp -r data-backup-pre-household-migration-<timestamp>/ data/
+   ```
+4. Fix the underlying cause (check disk space, file permissions, etc.) and restart.
+
+### GUI / API access in D5a
+
+The management GUI (`/`) and REST API (`/api/`) use a single bearer token (`GUI_AUTH_TOKEN` / `API_TOKEN`). Access is system-owner-only — there is no per-household authentication in D5a. Per-household GUI and API auth is planned for D5b.

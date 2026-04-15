@@ -8,23 +8,28 @@
 import type { Logger } from 'pino';
 import type { RegisteredUser } from '../../types/users.js';
 import { syncUsersToConfig } from '../config/config-writer.js';
+import type { HouseholdService } from '../household/index.js';
 import type { UserManager } from './index.js';
 
 export interface UserMutationServiceOptions {
 	userManager: UserManager;
 	configPath: string;
 	logger: Logger;
+	/** Optional — when present, syncUser is called after each successful registration to keep the in-memory map current. */
+	householdService?: Pick<HouseholdService, 'syncUser'>;
 }
 
 export class UserMutationService {
 	private readonly userManager: UserManager;
 	private readonly configPath: string;
 	private readonly logger: Logger;
+	private readonly householdService?: Pick<HouseholdService, 'syncUser'>;
 
 	constructor(options: UserMutationServiceOptions) {
 		this.userManager = options.userManager;
 		this.configPath = options.configPath;
 		this.logger = options.logger;
+		this.householdService = options.householdService;
 	}
 
 	/**
@@ -52,6 +57,8 @@ export class UserMutationService {
 			this.logger.error({ userId: user.id, err }, 'Config sync failed — registration rolled back');
 			throw err;
 		}
+		// Keep HouseholdService's in-memory userId→householdId map current
+		this.householdService?.syncUser(user);
 		this.logger.info({ userId: user.id, householdId: user.householdId ?? 'MISSING' }, 'User registered and config synced');
 	}
 
