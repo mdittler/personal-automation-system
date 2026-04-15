@@ -300,6 +300,7 @@ export async function main(): Promise<void> {
 		dataDir: config.dataDir,
 		userManager,
 		logger: createChildLogger(logger, { service: 'spaces' }),
+		householdService,
 	});
 	await spaceService.init();
 
@@ -326,6 +327,7 @@ export async function main(): Promise<void> {
 		eventBus,
 		n8nDispatcher,
 		householdService,
+		spaceService,
 	});
 
 	// 8d. Alert service (needs telegram + userManager + scheduler + reportService + eventBus + audio)

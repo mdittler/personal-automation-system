@@ -26,6 +26,7 @@ import { generateFrontmatter } from '../../utils/frontmatter.js';
 import { readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
 import type { ChangeLog } from '../data-store/change-log.js';
 import type { HouseholdService } from '../household/index.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { N8nDispatcher } from '../n8n/index.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
@@ -50,6 +51,8 @@ export interface ReportServiceOptions {
 	n8nDispatcher?: N8nDispatcher;
 	/** Optional — when present, householdId is resolved per-report-owner for section-collector boundary checks. */
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/** Optional — when present, space_id sections route to household-aware paths via getSpace() kind. */
+	spaceService?: { getSpace(id: string): SpaceDefinition | null };
 }
 
 export class ReportService {
@@ -67,6 +70,7 @@ export class ReportService {
 	private readonly eventBus?: EventBusService;
 	private readonly n8nDispatcher?: N8nDispatcher;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	private readonly spaceService?: { getSpace(id: string): SpaceDefinition | null };
 
 	constructor(options: ReportServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -83,6 +87,7 @@ export class ReportService {
 		this.eventBus = options.eventBus;
 		this.n8nDispatcher = options.n8nDispatcher;
 		this.householdService = options.householdService;
+		this.spaceService = options.spaceService;
 	}
 
 	/**
@@ -246,6 +251,7 @@ export class ReportService {
 			timezone: this.timezone,
 			logger: this.logger,
 			householdId: reportHouseholdId,
+			spaceService: this.spaceService,
 		};
 
 		const sections: CollectedSection[] = [];

@@ -10,6 +10,7 @@ import {
 	MAX_SPACE_ID_LENGTH,
 	MAX_SPACE_NAME_LENGTH,
 } from '../../../types/spaces.js';
+import type { HouseholdService } from '../../household/index.js';
 import type { UserManager } from '../../user-manager/index.js';
 import { SpaceService } from '../index.js';
 
@@ -40,6 +41,25 @@ function makeService(userManager?: UserManager): SpaceService {
 		dataDir: tempDir,
 		userManager: userManager ?? makeUserManager(),
 		logger,
+	});
+}
+
+function makeHouseholdService(
+	userHouseholds: Record<string, string | null>,
+): Pick<HouseholdService, 'getHouseholdForUser'> {
+	return {
+		getHouseholdForUser: (userId: string) => userHouseholds[userId] ?? null,
+	};
+}
+
+function makeServiceWithHousehold(
+	userHouseholds: Record<string, string | null>,
+): SpaceService {
+	return new SpaceService({
+		dataDir: tempDir,
+		userManager: makeUserManager(),
+		logger,
+		householdService: makeHouseholdService(userHouseholds),
 	});
 }
 
@@ -979,5 +999,87 @@ describe('SpaceService', () => {
 			);
 			expect(errors).toEqual([]);
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// B1 / R5: household space cross-household member enforcement
+// ---------------------------------------------------------------------------
+
+describe('SpaceService — household boundary enforcement (B1/R5)', () => {
+	it('saveSpace returns error when household member belongs to wrong household', async () => {
+		// '111' is in hh-alpha (matches space), '222' is in hh-beta (wrong)
+		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': 'hh-beta' });
+		await svc.init();
+
+		const errors = await svc.saveSpace(
+			makeSpace({
+				kind: 'household',
+				householdId: 'hh-alpha',
+				members: ['111', '222'],
+				createdBy: '111',
+			}),
+		);
+
+		expect(errors.length).toBeGreaterThan(0);
+		expect(errors.some((e) => e.field === 'members')).toBe(true);
+	});
+
+	it('addMember rejects cross-household member with error in array', async () => {
+		// Space is hh-alpha; '111' is creator (hh-alpha); '222' is cross-household (hh-beta)
+		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': 'hh-beta' });
+		await svc.init();
+
+		// Create space with only '111'
+		await svc.saveSpace(
+			makeSpace({
+				kind: 'household',
+				householdId: 'hh-alpha',
+				members: ['111'],
+				createdBy: '111',
+			}),
+		);
+
+		// Now try to add '222' who is in hh-beta
+		const errors = await svc.addMember('family', '222');
+
+		expect(errors.length).toBeGreaterThan(0);
+		expect(errors.some((e) => e.field === 'members' || e.field === 'userId')).toBe(true);
+	});
+
+	it('legacy mode (no HouseholdService) skips cross-household check on saveSpace', async () => {
+		// No householdService — transitional mode — members from any household allowed
+		const svc = makeService();
+		await svc.init();
+
+		const errors = await svc.saveSpace(
+			makeSpace({
+				kind: 'household',
+				householdId: 'hh-alpha',
+				members: ['111', '222'],
+				createdBy: '111',
+			}),
+		);
+
+		// No cross-household check when householdService is absent
+		expect(errors).toEqual([]);
+	});
+
+	it('collaboration space allows cross-household members — unchanged behavior', async () => {
+		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': 'hh-beta' });
+		await svc.init();
+
+		// Collaboration space has no householdId, so cross-household members are fine
+		const errors = await svc.saveSpace({
+			id: 'collab-1',
+			name: 'Collaboration One',
+			description: '',
+			members: ['111', '222'],
+			createdBy: '111',
+			createdAt: new Date().toISOString(),
+			kind: 'collaboration',
+		});
+
+		expect(errors).toEqual([]);
 	});
 });

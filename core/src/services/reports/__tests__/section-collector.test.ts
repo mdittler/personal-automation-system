@@ -508,3 +508,228 @@ describe('resolveDateTokens', () => {
 		expect(result).toMatch(/notes\/\d{4}-\d{2}-\d{2}\.md/);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// B3 / R6: app-data space_id section resolves path via SpaceService.getSpace()
+// ---------------------------------------------------------------------------
+
+describe('collectSection — app-data space_id path resolution (B3/R6)', () => {
+	function makeSpaceServiceStub(
+		spaces: Record<string, { kind: 'household' | 'collaboration'; householdId?: string }>,
+	) {
+		return {
+			getSpace: (id: string) => {
+				const s = spaces[id];
+				if (!s) return null;
+				return { id, name: id, description: '', members: [], createdBy: '', createdAt: '', ...s };
+			},
+		};
+	}
+
+	it('routes space_id of kind household to households/<hh>/spaces/<s>/<app>/ path', async () => {
+		const hhSpaceDir = join(tempDir, 'households', 'hh-alpha', 'spaces', 'family-space', 'food');
+		await mkdir(hhSpaceDir, { recursive: true });
+		await writeFile(join(hhSpaceDir, 'grocery.md'), 'Milk, Eggs');
+
+		const deps = makeDeps({
+			spaceService: makeSpaceServiceStub({
+				'family-space': { kind: 'household', householdId: 'hh-alpha' },
+			}),
+		});
+
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Grocery',
+				config: { app_id: 'food', space_id: 'family-space', path: 'grocery.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toBe('Milk, Eggs');
+	});
+
+	it('routes space_id of kind collaboration to collaborations/<s>/<app>/ path', async () => {
+		const collabDir = join(tempDir, 'collaborations', 'collab-1', 'food');
+		await mkdir(collabDir, { recursive: true });
+		await writeFile(join(collabDir, 'notes.md'), 'Project notes');
+
+		const deps = makeDeps({
+			spaceService: makeSpaceServiceStub({
+				'collab-1': { kind: 'collaboration' },
+			}),
+		});
+
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Collab',
+				config: { app_id: 'food', space_id: 'collab-1', path: 'notes.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toBe('Project notes');
+	});
+
+	it('falls back to legacy data/spaces path when spaceService returns null (unknown space)', async () => {
+		const legacyDir = join(tempDir, 'spaces', 'old-space', 'food');
+		await mkdir(legacyDir, { recursive: true });
+		await writeFile(join(legacyDir, 'data.md'), 'Legacy content');
+
+		const deps = makeDeps({
+			spaceService: makeSpaceServiceStub({}), // getSpace returns null
+		});
+
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Legacy',
+				config: { app_id: 'food', space_id: 'old-space', path: 'data.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toBe('Legacy content');
+	});
+
+	it('falls back to legacy data/spaces path when no spaceService is provided', async () => {
+		const legacyDir = join(tempDir, 'spaces', 'legacy-space', 'notes');
+		await mkdir(legacyDir, { recursive: true });
+		await writeFile(join(legacyDir, 'data.md'), 'Legacy notes');
+
+		// No spaceService in deps (legacy / transitional mode)
+		const deps = makeDeps({});
+
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Legacy',
+				config: { app_id: 'notes', space_id: 'legacy-space', path: 'data.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toBe('Legacy notes');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// B4 / R7: changes section filters entries by ChangeLogEntry.householdId
+// ---------------------------------------------------------------------------
+
+describe('collectSection — changes household filter (B4/R7)', () => {
+	it('excludes entries from a different household when deps.householdId is set', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'u-alpha',
+				operation: 'write',
+				path: 'grocery.md',
+				householdId: 'hh-alpha',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'u-beta',
+				operation: 'write',
+				path: 'recipe.md',
+				householdId: 'hh-beta',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		const deps = makeDeps({
+			changeLog: makeChangeLog(logPath),
+			householdId: 'hh-alpha',
+		});
+
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		// Only hh-alpha entry must appear
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toContain('u-alpha');
+		expect(result.content).not.toContain('u-beta');
+	});
+
+	it('excludes null-householdId entries in strict mode (deps.householdId set)', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'u-alpha',
+				operation: 'write',
+				path: 'grocery.md',
+				householdId: 'hh-alpha',
+			},
+			{
+				// No householdId — treated as system/pre-migration entry
+				timestamp: new Date().toISOString(),
+				appId: 'notes',
+				userId: 'u-sys',
+				operation: 'write',
+				path: 'system-note.md',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		const deps = makeDeps({
+			changeLog: makeChangeLog(logPath),
+			householdId: 'hh-alpha',
+		});
+
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		// hh-alpha entry included; null-householdId entry excluded in strict mode
+		expect(result.content).toContain('u-alpha');
+		expect(result.content).not.toContain('u-sys');
+	});
+
+	it('includes all entries when deps.householdId is absent (transitional mode)', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'u-alpha',
+				operation: 'write',
+				path: 'grocery.md',
+				householdId: 'hh-alpha',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'u-beta',
+				operation: 'write',
+				path: 'recipe.md',
+				householdId: 'hh-beta',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		// No householdId in deps → transitional mode, all entries visible
+		const deps = makeDeps({ changeLog: makeChangeLog(logPath) });
+
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toContain('u-alpha');
+		expect(result.content).toContain('u-beta');
+	});
+});

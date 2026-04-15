@@ -1080,7 +1080,7 @@ describe('DataQueryService — household filter (D5a)', () => {
 		expect(systemPrompt).not.toContain('Beta Household Prices');
 	});
 
-	it('should include all shared files when no householdId is in context (fail-open)', async () => {
+	it('should include all shared files when no householdId is in context (fail-open — transitional mode)', async () => {
 		// Use distinct titles so we can verify both entries appear in the LLM prompt
 		const entryAlpha = makeSharedEntry({
 			householdId: 'hh-alpha',
@@ -1116,5 +1116,116 @@ describe('DataQueryService — household filter (D5a)', () => {
 		// Both entry titles must appear in the prompt
 		expect(systemPrompt).toContain('Alpha Household Prices');
 		expect(systemPrompt).toContain('Beta Household Prices');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// B2 / R4: collaboration scope entries authorized via SpaceService.isMember
+// ---------------------------------------------------------------------------
+
+describe('DataQueryService — collaboration scope visibility (B2/R4)', () => {
+	let dataDir: string;
+	let logger: AppLogger;
+
+	beforeEach(async () => {
+		dataDir = makeTempDir();
+		await mkdir(dataDir, { recursive: true });
+		logger = makeMockLogger();
+	});
+
+	afterEach(async () => {
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	function makeCollabEntry(
+		collaborationId: string,
+		overrides: Partial<FileIndexEntry> = {},
+	): FileIndexEntry {
+		return {
+			path: `collaborations/${collaborationId}/food/shared.md`,
+			appId: 'food',
+			scope: 'collaboration',
+			owner: collaborationId,
+			householdId: null,
+			spaceKind: 'collaboration',
+			collaborationId,
+			type: 'grocery-list',
+			title: 'Shared Grocery List',
+			tags: [],
+			aliases: [],
+			entityKeys: ['groceries'],
+			dates: { earliest: null, latest: null },
+			relationships: [],
+			wikiLinks: [],
+			size: 100,
+			modifiedAt: new Date(),
+			summary: null,
+			...overrides,
+		};
+	}
+
+	it('collaboration-scope entries are visible to members', async () => {
+		const entry = makeCollabEntry('collab-1');
+		const fileIndex = makeStubFileIndex([entry]);
+		const llm = makeMockLlm('[]');
+
+		// alice and bob are members of collab-1
+		const spaceService = makeSpaceService([{ id: 'collab-1', members: ['alice', 'bob'] }]);
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService,
+			llm,
+			dataDir,
+			logger,
+		});
+
+		await svc.query('show me shared groceries', 'alice');
+
+		// LLM must be called — alice is authorized to see the collaboration entry
+		expect(vi.mocked(llm.complete)).toHaveBeenCalled();
+	});
+
+	it('collaboration-scope entries are hidden from non-members', async () => {
+		const entry = makeCollabEntry('collab-1');
+		const fileIndex = makeStubFileIndex([entry]);
+		const llm = makeMockLlm('[]');
+
+		// carol is NOT a member of collab-1
+		const spaceService = makeSpaceService([{ id: 'collab-1', members: ['alice', 'bob'] }]);
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService,
+			llm,
+			dataDir,
+			logger,
+		});
+
+		await svc.query('show me shared groceries', 'carol');
+
+		// LLM must NOT be called — carol has no authorized entries
+		expect(vi.mocked(llm.complete)).not.toHaveBeenCalled();
+	});
+
+	it('collaboration entry with null collaborationId is excluded even for members', async () => {
+		const entry = makeCollabEntry('collab-1', { collaborationId: null });
+		const fileIndex = makeStubFileIndex([entry]);
+		const llm = makeMockLlm('[]');
+
+		const spaceService = makeSpaceService([{ id: 'collab-1', members: ['alice'] }]);
+
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService,
+			llm,
+			dataDir,
+			logger,
+		});
+
+		await svc.query('show me shared groceries', 'alice');
+
+		// Missing collaborationId → entry excluded despite alice being a member
+		expect(vi.mocked(llm.complete)).not.toHaveBeenCalled();
 	});
 });

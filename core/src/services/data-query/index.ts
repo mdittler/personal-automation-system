@@ -141,6 +141,12 @@ export class DataQueryServiceImpl {
 						return entry.householdId === userHouseholdId;
 					}
 					return true;
+				case 'collaboration': {
+					// R4: Collaboration entries are cross-household; membership is via SpaceService.isMember().
+					const collabId = entry.collaborationId;
+					if (!collabId) return false;
+					return this.spaceService.isMember(collabId, userId);
+				}
 				default:
 					return false;
 			}

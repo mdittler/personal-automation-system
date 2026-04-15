@@ -18,6 +18,7 @@ import type {
 	ReportSection,
 } from '../../types/report.js';
 import { DEFAULT_LOOKBACK_HOURS } from '../../types/report.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { collectChanges } from '../daily-diff/collector.js';
 import type { ChangeLog } from '../data-store/change-log.js';
@@ -34,8 +35,17 @@ export interface CollectorDeps {
 	 * falls under a `households/<hh>/` subtree is checked to ensure `<hh>`
 	 * matches this value. Paths outside `households/` are passed through
 	 * unchanged (fail-open for non-migrated instances).
+	 * Also used to filter change-log entries: only entries whose `householdId`
+	 * matches this value are included (strict mode). Absent → all entries visible
+	 * (transitional mode).
 	 */
 	householdId?: string;
+	/**
+	 * Optional — when present, used to resolve `space_id` section config to the
+	 * correct household-aware path. When absent, falls back to legacy `data/spaces/`
+	 * layout (transitional mode).
+	 */
+	spaceService?: { getSpace(id: string): SpaceDefinition | null };
 }
 
 /**
@@ -101,11 +111,36 @@ async function collectChangesSection(
 		return { label, content: 'No changes in this period.', isEmpty: true };
 	}
 
+	// R7: When householdId is set (strict / post-migration mode), only include entries
+	// whose householdId matches the report owner's household. Entries with a null/absent
+	// householdId are also excluded in strict mode (they predate migration or come from
+	// system-level writes that should use forSystem(), not forShared()).
+	// Transitional mode (no householdId in deps): all entries pass through unchanged.
+	let filteredEntries = changes.entries;
+	if (deps.householdId) {
+		filteredEntries = changes.entries.filter((e) => e.householdId === deps.householdId);
+	}
+
+	if (filteredEntries.length === 0) {
+		return { label, content: 'No changes in this period.', isEmpty: true };
+	}
+
+	// Rebuild byApp from filtered entries
+	const byApp: Record<string, Record<string, typeof filteredEntries>> = {};
+	for (const entry of filteredEntries) {
+		if (!byApp[entry.appId]) byApp[entry.appId] = {};
+		// biome-ignore lint/style/noNonNullAssertion: guaranteed by check above
+		const appGroup = byApp[entry.appId]!;
+		if (!appGroup[entry.userId]) appGroup[entry.userId] = [];
+		// biome-ignore lint/style/noNonNullAssertion: guaranteed by check above
+		appGroup[entry.userId]!.push(entry);
+	}
+
 	// Apply app filter if specified
 	const appFilter = config.app_filter?.length ? new Set(config.app_filter) : null;
 
 	const lines: string[] = [];
-	for (const [appId, users] of Object.entries(changes.byApp)) {
+	for (const [appId, users] of Object.entries(byApp)) {
 		if (appFilter && !appFilter.has(appId)) continue;
 
 		lines.push(`**${appId}**`);
@@ -130,13 +165,32 @@ async function collectAppDataSection(
 	// Resolve date tokens in path
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone);
 
-	// Build the full path: space-aware or per-user (household-aware post-migration)
+	// Build the full path: space-aware or per-user (household-aware post-migration).
+	// For space_id, consult SpaceService.getSpace() for kind-based routing:
+	//   kind='household' → data/households/<hh>/spaces/<s>/<app>
+	//   kind='collaboration' → data/collaborations/<s>/<app>
+	//   unknown/legacy → data/spaces/<s>/<app>   (transitional fallback)
 	// biome-ignore lint/style/noNonNullAssertion: validated by report-validator (user_id required when no space_id)
-	const baseDir = config.space_id
-		? resolve(join(deps.dataDir, 'spaces', config.space_id, config.app_id))
-		: deps.householdId
-			? resolve(join(deps.dataDir, 'households', deps.householdId, 'users', config.user_id!, config.app_id))
-			: resolve(join(deps.dataDir, 'users', config.user_id!, config.app_id));
+	let baseDir: string;
+	if (config.space_id) {
+		const spaceDef = deps.spaceService?.getSpace(config.space_id) ?? null;
+		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
+			baseDir = resolve(
+				join(deps.dataDir, 'households', spaceDef.householdId, 'spaces', config.space_id, config.app_id),
+			);
+		} else if (spaceDef?.kind === 'collaboration') {
+			baseDir = resolve(join(deps.dataDir, 'collaborations', config.space_id, config.app_id));
+		} else {
+			// Legacy / unknown kind — transitional fallback
+			baseDir = resolve(join(deps.dataDir, 'spaces', config.space_id, config.app_id));
+		}
+	} else if (deps.householdId) {
+		baseDir = resolve(
+			join(deps.dataDir, 'households', deps.householdId, 'users', config.user_id!, config.app_id),
+		);
+	} else {
+		baseDir = resolve(join(deps.dataDir, 'users', config.user_id!, config.app_id));
+	}
 	const fullPath = resolve(join(baseDir, resolvedPath));
 
 	// Path traversal check: ensure resolved path is within the base dir

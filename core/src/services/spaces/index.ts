@@ -20,6 +20,7 @@ import {
 	MAX_SPACE_NAME_LENGTH,
 	SPACE_ID_PATTERN,
 } from '../../types/spaces.js';
+import type { HouseholdService } from '../household/index.js';
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
@@ -38,6 +39,12 @@ export interface SpaceServiceOptions {
 	dataDir: string;
 	userManager: UserManager;
 	logger: Logger;
+	/**
+	 * Optional — when present, validates that all members of a `kind: 'household'`
+	 * space belong to the same household as the space itself.
+	 * Absent in transitional mode (pre-migration): cross-household check is skipped.
+	 */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 /** Validation error for space operations. */
@@ -59,6 +66,9 @@ export class SpaceService {
 	/** Optional vault service for symlink management. */
 	private vaultService?: VaultService;
 
+	/** Optional — wired post-migration. When absent, cross-household check is skipped. */
+	private householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+
 	/** Promise chain for serializing write operations (prevents concurrent YAML corruption). */
 	private writeQueue: Promise<void> = Promise.resolve();
 
@@ -68,6 +78,15 @@ export class SpaceService {
 		this.activeSpacesPath = join(options.dataDir, 'system', 'active-spaces.yaml');
 		this.userManager = options.userManager;
 		this.logger = options.logger;
+		this.householdService = options.householdService;
+	}
+
+	/**
+	 * Inject the HouseholdService after construction (bootstrap wiring).
+	 * Mirrors the pattern used by DataStoreServiceImpl.
+	 */
+	setHouseholdService(svc: Pick<HouseholdService, 'getHouseholdForUser'>): void {
+		this.householdService = svc;
 	}
 
 	/** Load space definitions and active spaces from disk. */
@@ -234,6 +253,19 @@ export class SpaceService {
 
 		if (space.members.length >= MAX_MEMBERS_PER_SPACE) {
 			return [{ field: 'members', message: `Maximum ${MAX_MEMBERS_PER_SPACE} members allowed` }];
+		}
+
+		// R5: Reject cross-household members for household-kind spaces (post-migration only).
+		if (space.kind === 'household' && space.householdId && this.householdService) {
+			const memberHousehold = this.householdService.getHouseholdForUser(userId);
+			if (memberHousehold !== null && memberHousehold !== space.householdId) {
+				return [
+					{
+						field: 'members',
+						message: `User ${userId} belongs to household "${memberHousehold}", not "${space.householdId}"`,
+					},
+				];
+			}
 		}
 
 		return this.enqueue(async () => {
@@ -430,8 +462,20 @@ export class SpaceService {
 			}
 		}
 
-		// TODO(Task J): When HouseholdService is injectable, validate that all members
-		// belong to the same household (for kind='household' spaces).
+		// R5: When HouseholdService is wired (post-migration), validate that all members
+		// belong to the same household as the space itself (for kind='household' spaces).
+		// Absent → transitional mode, cross-household check skipped.
+		if (def.kind === 'household' && def.householdId && this.householdService) {
+			for (const memberId of def.members ?? []) {
+				const memberHousehold = this.householdService.getHouseholdForUser(memberId);
+				if (memberHousehold !== null && memberHousehold !== def.householdId) {
+					errors.push({
+						field: 'members',
+						message: `User ${memberId} belongs to household "${memberHousehold}", not "${def.householdId}"`,
+					});
+				}
+			}
+		}
 
 		return errors;
 	}
