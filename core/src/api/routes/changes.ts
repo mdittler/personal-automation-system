@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { collectChanges } from '../../services/daily-diff/collector.js';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
+import { getCurrentHouseholdId } from '../../services/context/request-context.js';
 import type { ChangeLogEntry } from '../../types/data-store.js';
 
 const DEFAULT_LIMIT = 500;
@@ -59,6 +60,17 @@ export function registerChangesRoute(server: FastifyInstance, options: ChangesRo
 
 			let entries: ChangeLogEntry[] = changes.entries;
 
+			// Household boundary filter: if the request context carries a householdId,
+			// only return entries whose householdId matches (or that have no householdId —
+			// system/collaboration changes are visible to all). Fail-open when no
+			// householdId in context (system caller or pre-migration instance).
+			const requestHouseholdId = getCurrentHouseholdId();
+			if (requestHouseholdId) {
+				entries = entries.filter(
+					(e) => !e.householdId || e.householdId === requestHouseholdId,
+				);
+			}
+
 			// Optional app filter
 			if (query.appFilter) {
 				entries = entries.filter((e) => e.appId === query.appFilter);
@@ -68,7 +80,12 @@ export function registerChangesRoute(server: FastifyInstance, options: ChangesRo
 			entries = entries.slice(0, limit);
 
 			logger.info(
-				{ since: since.toISOString(), appFilter: query.appFilter, count: entries.length },
+				{
+					since: since.toISOString(),
+					appFilter: query.appFilter,
+					requestHouseholdId,
+					count: entries.length,
+				},
 				'API changes listed',
 			);
 

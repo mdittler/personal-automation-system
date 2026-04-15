@@ -366,7 +366,18 @@ async function executeWebhook(
 
 /**
  * Write or append content to a data file.
- * Uses low-level file utilities to avoid needing ChangeLog/SpaceService dependencies.
+ *
+ * Uses low-level file utilities (`atomicWrite`/`appendFile`) rather than a
+ * DataStoreService because the executor is not bound to a specific app's
+ * DataStore instance — `write_data` actions can target any user+app pair.
+ * The same atomic-write primitives are used internally by ScopedStore, so
+ * durability guarantees are equivalent. Change-log recording is intentionally
+ * omitted here; alert-triggered writes are an infrastructure concern that does
+ * not need per-app audit attribution.
+ *
+ * Household boundary: if the request context carries a householdId and the
+ * resolved path is under a `households/<hh>/` subtree, we verify the path
+ * belongs to the same household. Fail-open when householdId is absent.
  */
 async function executeWriteData(
 	config: WriteDataActionConfig,
@@ -390,6 +401,23 @@ async function executeWriteData(
 	// Path traversal protection
 	if (!fullPath.startsWith(baseDir + sep) && fullPath !== baseDir) {
 		throw new Error('Path traversal detected in write_data action');
+	}
+
+	// Household boundary check: if the resolved path falls under households/<hh>/,
+	// verify it matches the current request context's householdId. Fail-open when
+	// householdId is absent (system call or pre-migration instance).
+	const { getCurrentHouseholdId } = await import('../context/request-context.js');
+	const contextHouseholdId = getCurrentHouseholdId();
+	if (contextHouseholdId) {
+		const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(fullPath);
+		if (householdMatch) {
+			const pathHouseholdId = householdMatch[1];
+			if (pathHouseholdId !== contextHouseholdId) {
+				throw new Error(
+					`Household boundary violation in write_data action: path household "${pathHouseholdId}" does not match context household "${contextHouseholdId}"`,
+				);
+			}
+		}
 	}
 
 	const { dirname } = await import('node:path');

@@ -87,6 +87,17 @@ function escapeHtml(str: string): string {
 
 /**
  * Validate and resolve a browsing path. Returns null if path is invalid.
+ *
+ * Supported scopes:
+ *   - 'user'       → data/users/<userId>/[<appId>/]          (legacy layout)
+ *   - 'shared'     → data/users/shared/[<appId>/]            (legacy layout)
+ *   - 'system'     → data/system/
+ *   - 'space'      → data/spaces/<spaceId>/[<appId>/]
+ *   - 'household'  → data/households/<householdId>/[<appId>/] (new multi-hh layout)
+ *
+ * The 'household' scope uses the userId parameter to carry the householdId.
+ * This route is system-owner-only (single GUI auth token), so no per-household
+ * auth enforcement is applied here — that is a D5b concern.
  */
 function resolveBrowsePath(
 	dataDir: string,
@@ -110,6 +121,11 @@ function resolveBrowsePath(
 	} else if (scope === 'space' && userId) {
 		// For spaces, userId parameter carries the spaceId
 		targetPath = appId ? join(dataDir, 'spaces', userId, appId) : join(dataDir, 'spaces', userId);
+	} else if (scope === 'household' && userId) {
+		// For households, userId parameter carries the householdId
+		targetPath = appId
+			? join(dataDir, 'households', userId, appId)
+			: join(dataDir, 'households', userId);
 	} else {
 		return null;
 	}
@@ -137,7 +153,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 
 	// Full page — overview of all data directories
 	server.get('/data', async (_request: FastifyRequest, reply: FastifyReply) => {
-		// Build user sections
+		// Build user sections (legacy layout: data/users/<userId>/)
 		const userSections: Array<{
 			id: string;
 			name: string;
@@ -169,6 +185,16 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			.filter((e) => e.isDirectory && SAFE_SEGMENT.test(e.name))
 			.map((e) => e.name);
 
+		// Household data (new multi-household layout: data/households/<hhId>/)
+		// Enumerated for display alongside the legacy users layout so the data
+		// browser stays functional after migration. No per-household auth is
+		// applied here — this route is system-owner-only (single GUI auth token).
+		const householdsDir = join(dataDir, 'households');
+		const householdEntries = await listDirectory(householdsDir);
+		const householdSections = householdEntries
+			.filter((e) => e.isDirectory && SAFE_SEGMENT.test(e.name))
+			.map((e) => e.name);
+
 		// Vault paths for Obsidian
 		const vaultPaths = config.users.map((user) => ({
 			name: user.name,
@@ -182,6 +208,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			sharedApps: sharedApps.filter((e) => e.isDirectory).map((e) => e.name),
 			systemEntries: systemEntries.map((e) => ({ name: e.name, isDirectory: e.isDirectory })),
 			spaceSections,
+			householdSections,
 			vaultPaths,
 			dataDir: resolve(dataDir),
 		});
@@ -222,6 +249,9 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			breadcrumbParts.push('System');
 		} else if (scope === 'space' && userId) {
 			breadcrumbParts.push(`Space: ${userId}`);
+			if (appId) breadcrumbParts.push(appId);
+		} else if (scope === 'household' && userId) {
+			breadcrumbParts.push(`Household: ${userId}`);
 			if (appId) breadcrumbParts.push(appId);
 		}
 		if (subpath) breadcrumbParts.push(subpath);

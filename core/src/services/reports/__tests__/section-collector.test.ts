@@ -381,6 +381,93 @@ describe('collectSection — error handling', () => {
 	});
 });
 
+describe('collectSection — app-data household boundary (I1)', () => {
+	it('allows access when path does not contain households/ segment', async () => {
+		const userDir = join(tempDir, 'users', '123', 'notes');
+		await mkdir(userDir, { recursive: true });
+		await writeFile(join(userDir, 'file.md'), 'content');
+
+		const deps = makeDeps({ householdId: 'hh1' });
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Notes',
+				config: { app_id: 'notes', user_id: '123', path: 'file.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toBe('content');
+	});
+
+	it('allows access when path household matches report owner householdId', async () => {
+		const hhDir = join(tempDir, 'households', 'hh1', 'users', '123', 'notes');
+		await mkdir(hhDir, { recursive: true });
+		await writeFile(join(hhDir, 'file.md'), 'hh1 content');
+
+		// Build deps with a dataDir that places the section under households/hh1/
+		const deps = makeDeps({
+			dataDir: join(tempDir, 'households', 'hh1'),
+			householdId: 'hh1',
+		});
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Notes',
+				config: { app_id: 'notes', user_id: '123', path: 'file.md' },
+			},
+			deps,
+		);
+
+		// The resolved path contains households/hh1/ and householdId matches → allowed
+		expect(result.content).not.toContain('Access denied');
+	});
+
+	it('denies access when path household does not match report owner householdId', async () => {
+		// Set up a path that will resolve to contain households/hh2/
+		const hhDir = join(tempDir, 'households', 'hh2', 'users', '123', 'notes');
+		await mkdir(hhDir, { recursive: true });
+		await writeFile(join(hhDir, 'file.md'), 'hh2 content');
+
+		// dataDir resolves to households/hh2/ but the report owner says hh1
+		const deps = makeDeps({
+			dataDir: join(tempDir, 'households', 'hh2'),
+			householdId: 'hh1',
+		});
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Notes',
+				config: { app_id: 'notes', user_id: '123', path: 'file.md' },
+			},
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(true);
+		expect(result.content).toContain('Access denied');
+	});
+
+	it('skips household check when householdId is absent (fail-open for system calls)', async () => {
+		const hhDir = join(tempDir, 'households', 'hh2', 'users', '123', 'notes');
+		await mkdir(hhDir, { recursive: true });
+		await writeFile(join(hhDir, 'file.md'), 'some content');
+
+		// No householdId in deps → fail-open, any household path is allowed
+		const deps = makeDeps({ dataDir: join(tempDir, 'households', 'hh2') });
+		const result = await collectSection(
+			{
+				type: 'app-data',
+				label: 'Notes',
+				config: { app_id: 'notes', user_id: '123', path: 'file.md' },
+			},
+			deps,
+		);
+
+		expect(result.content).not.toContain('Access denied');
+	});
+});
+
 describe('resolveDateTokens', () => {
 	it('resolves {date} token (alias for {today})', () => {
 		const result = resolveDateTokens('log/{date}.md', 'UTC');

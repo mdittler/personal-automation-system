@@ -8,6 +8,16 @@ import { ChangeLog } from '../../services/data-store/change-log.js';
 import { ensureDir } from '../../utils/file.js';
 import { registerApiRoutes } from '../index.js';
 
+// Mock the request-context module so we can control getCurrentHouseholdId in tests.
+// Fastify inject() does not propagate AsyncLocalStorage, so we use vi.mock instead.
+vi.mock('../../services/context/request-context.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../../services/context/request-context.js')>();
+	return {
+		...original,
+		getCurrentHouseholdId: vi.fn(() => undefined as string | undefined),
+	};
+});
+
 const API_TOKEN = 'test-api-secret';
 
 const logger = {
@@ -115,6 +125,7 @@ describe('API Changes Route', () => {
 			path: string;
 			appId: string;
 			userId: string;
+			householdId?: string;
 		}>,
 	) {
 		await ensureDir(join(dataDir, 'system'));
@@ -250,5 +261,79 @@ describe('API Changes Route', () => {
 	it('requires authentication', async () => {
 		const res = await app.inject({ method: 'GET', url: '/api/changes' });
 		expect(res.statusCode).toBe(401);
+	});
+
+	describe('household boundary filter (I3)', () => {
+		// Import the mocked getCurrentHouseholdId for control in tests
+		let mockGetCurrentHouseholdId: ReturnType<typeof vi.fn>;
+
+		beforeEach(async () => {
+			const mod = await import('../../services/context/request-context.js');
+			mockGetCurrentHouseholdId = mod.getCurrentHouseholdId as ReturnType<typeof vi.fn>;
+			mockGetCurrentHouseholdId.mockReturnValue(undefined);
+		});
+
+		afterEach(() => {
+			mockGetCurrentHouseholdId.mockReturnValue(undefined);
+		});
+
+		it('returns all entries when no householdId in request context (fail-open)', async () => {
+			const now = new Date().toISOString();
+			await writeChangeLogEntries([
+				{ timestamp: now, operation: 'write', path: 'a.md', appId: 'notes', userId: 'u1', householdId: 'hh1' },
+				{ timestamp: now, operation: 'write', path: 'b.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+			]);
+
+			// getCurrentHouseholdId() returns undefined → filter skipped → all rows returned
+			mockGetCurrentHouseholdId.mockReturnValue(undefined);
+			const res = await app.inject({ method: 'GET', url: '/api/changes', headers: authHeaders() });
+			const body = res.json();
+			expect(body.ok).toBe(true);
+			expect(body.count).toBe(2);
+		});
+
+		it('filters to matching household when householdId in request context', async () => {
+			const now = new Date().toISOString();
+			await writeChangeLogEntries([
+				{ timestamp: now, operation: 'write', path: 'hh1.md', appId: 'notes', userId: 'u1', householdId: 'hh1' },
+				{ timestamp: now, operation: 'write', path: 'hh2.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+			]);
+
+			mockGetCurrentHouseholdId.mockReturnValue('hh1');
+			const res = await app.inject({ method: 'GET', url: '/api/changes', headers: authHeaders() });
+			const body = res.json();
+			expect(body.ok).toBe(true);
+			expect(body.count).toBe(1);
+			expect(body.entries[0].path).toBe('hh1.md');
+		});
+
+		it('includes entries with no householdId (system/collaboration changes) regardless of context', async () => {
+			const now = new Date().toISOString();
+			await writeChangeLogEntries([
+				{ timestamp: now, operation: 'write', path: 'system.md', appId: 'notes', userId: 'system' },
+				{ timestamp: now, operation: 'write', path: 'hh2.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+			]);
+
+			mockGetCurrentHouseholdId.mockReturnValue('hh1');
+			const res = await app.inject({ method: 'GET', url: '/api/changes', headers: authHeaders() });
+			const body = res.json();
+			// system.md has no householdId → included; hh2.md belongs to hh2 → excluded
+			expect(body.count).toBe(1);
+			expect(body.entries[0].path).toBe('system.md');
+		});
+
+		it('shows all entries when no entries have householdId (pre-migration instance)', async () => {
+			const now = new Date().toISOString();
+			await writeChangeLogEntries([
+				{ timestamp: now, operation: 'write', path: 'a.md', appId: 'notes', userId: 'u1' },
+				{ timestamp: now, operation: 'write', path: 'b.md', appId: 'notes', userId: 'u2' },
+			]);
+
+			mockGetCurrentHouseholdId.mockReturnValue('hh1');
+			const res = await app.inject({ method: 'GET', url: '/api/changes', headers: authHeaders() });
+			const body = res.json();
+			// No householdId on any entry → all included (treated as system/legacy)
+			expect(body.count).toBe(2);
+		});
 	});
 });

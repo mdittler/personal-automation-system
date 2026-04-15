@@ -28,6 +28,13 @@ export interface CollectorDeps {
 	contextStore: ContextStoreService;
 	timezone: string;
 	logger: Logger;
+	/**
+	 * Household ID of the report owner. When set, any resolved file path that
+	 * falls under a `households/<hh>/` subtree is checked to ensure `<hh>`
+	 * matches this value. Paths outside `households/` are passed through
+	 * unchanged (fail-open for non-migrated instances).
+	 */
+	householdId?: string;
 }
 
 /**
@@ -137,6 +144,23 @@ async function collectAppDataSection(
 			'Path traversal attempt in app-data section',
 		);
 		return { label, content: 'Invalid path.', isEmpty: true };
+	}
+
+	// Household boundary check: if the resolved path is under households/<hh>/, verify
+	// it belongs to the report owner's household. Fail-open when householdId is absent
+	// (system call or pre-migration instance).
+	if (deps.householdId) {
+		const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(fullPath);
+		if (householdMatch) {
+			const pathHouseholdId = householdMatch[1];
+			if (pathHouseholdId !== deps.householdId) {
+				deps.logger.warn(
+					{ pathHouseholdId, reportHouseholdId: deps.householdId, resolved: fullPath },
+					'Household boundary violation in app-data section — skipping',
+				);
+				return { label, content: 'Access denied.', isEmpty: true };
+			}
+		}
 	}
 
 	try {
