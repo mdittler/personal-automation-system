@@ -223,7 +223,13 @@ describe('Router — grey-zone verification', () => {
 		it('calls verifier when confidence is in grey zone (0.4–0.7)', async () => {
 			// Confidence 0.55 — above threshold (0.4) but below upper bound (0.7)
 			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
-			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
 
 			const router = buildRouter(
 				[{ manifest: echoManifest, module: echoModule }],
@@ -240,7 +246,13 @@ describe('Router — grey-zone verification', () => {
 		it('skips verifier when confidence is above upper bound (0.85)', async () => {
 			// Confidence 0.85 — above upper bound (0.7), should skip verification
 			const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
-			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.85,
+				verifierStatus: 'agreed',
+			});
 
 			const router = buildRouter(
 				[{ manifest: echoManifest, module: echoModule }],
@@ -313,7 +325,13 @@ describe('Router — grey-zone verification', () => {
 			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
 			const groceryModule = createMockModule();
 			// Verifier disagrees with classifier and picks grocery
-			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'grocery',
+				intent: 'grocery',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
 
 			const cache = new ManifestCache();
 			cache.add(echoManifest, '/apps/echo');
@@ -385,7 +403,13 @@ describe('Router — grey-zone verification', () => {
 				getOverrides: vi.fn(async () => ({ grocery: false })),
 			} as unknown as AppToggleStore;
 
-			const verifier = createMockVerifier({ action: 'route', appId: 'echo' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
 			const cache = new ManifestCache();
 			cache.add(echoManifest, '/apps/echo');
 			cache.add(groceryManifest, '/apps/grocery');
@@ -443,7 +467,13 @@ describe('Router — grey-zone verification', () => {
 			// Grey-zone verification only applies when multiple apps compete for photos.
 			// With a single photo app, the classifier routes directly at confidence 1.0 (no LLM).
 			const greyZoneLlm = createMockLLM({ category: 'receipt', confidence: 0.55 });
-			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'grocery',
+				intent: 'receipt',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
 
 			const router = buildRouter(
 				[
@@ -462,7 +492,13 @@ describe('Router — grey-zone verification', () => {
 
 		it('skips verifier for photo when confidence is above upper bound (multiple photo apps)', async () => {
 			const highConfLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
-			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'grocery',
+				intent: 'receipt',
+				confidence: 0.9,
+				verifierStatus: 'agreed',
+			});
 
 			const router = buildRouter(
 				[
@@ -531,7 +567,13 @@ describe('Router — grey-zone verification', () => {
 			groceryModule = createMockModule();
 			photoModule2 = createMockModule();
 			// Verifier disagrees and picks grocery
-			const verifier = createMockVerifier({ action: 'route', appId: 'grocery' });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'grocery',
+				intent: 'landscape',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
 
 			const cache = new ManifestCache();
 			cache.add(groceryManifest, '/apps/grocery');
