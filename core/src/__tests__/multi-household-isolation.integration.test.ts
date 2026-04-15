@@ -18,7 +18,8 @@
  *   Section-collector household path guard (15)
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readlink, rm, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -37,6 +38,11 @@ import type { SpaceDefinition } from '../types/spaces.js';
 import type { RegisteredUser } from '../types/users.js';
 import { collectSection } from '../services/reports/section-collector.js';
 import type { ContextStoreService } from '../types/context-store.js';
+import { FallbackHandler } from '../services/router/fallback.js';
+import { VaultService } from '../services/vault/index.js';
+import { UserManager } from '../services/user-manager/index.js';
+import { AppToggleStore } from '../services/app-toggle/index.js';
+import type { SpaceService } from '../services/spaces/index.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -629,5 +635,82 @@ describe('Section-collector household path guard', () => {
 		);
 
 		expect(guardResult.content).toBe('Access denied.');
+	});
+});
+
+// ─── FallbackHandler daily-note routing (test 16) ────────────────────────────
+
+describe('FallbackHandler — household daily-note routing', () => {
+	it('16: daily note written to household path for household user', async () => {
+		const logger = makeLogger();
+		const handler = new FallbackHandler({
+			dataDir,
+			timezone: 'UTC',
+			logger,
+			householdService,
+		});
+
+		const fakeCtx = {
+			userId: 'alpha-parent-a',
+			chatId: 111,
+			text: 'Hello',
+			timestamp: new Date('2026-04-15T10:00:00Z'),
+		} as any;
+		const fakeTelegram = { send: vi.fn().mockResolvedValue(undefined) } as any;
+
+		await handler.handleUnrecognized(fakeCtx, fakeTelegram);
+
+		const expectedDir = join(dataDir, 'households', 'hh-alpha', 'users', 'alpha-parent-a', 'daily-notes');
+		const files = await readdir(expectedDir);
+		expect(files).toHaveLength(1);
+		expect(files[0]).toMatch(/^2026-04-15\.md$/);
+
+		// Confirm legacy path was NOT created
+		const legacyDir = join(dataDir, 'users', 'alpha-parent-a', 'daily-notes');
+		let legacyExists = false;
+		try {
+			await readdir(legacyDir);
+			legacyExists = true;
+		} catch { /* not created */ }
+		expect(legacyExists).toBe(false);
+	});
+});
+
+// ─── VaultService symlink routing (test 17) ──────────────────────────────────
+
+describe('VaultService — household symlink routing', () => {
+	it('17: vault symlink for household user targets household layout', async () => {
+		const logger = makeLogger();
+
+		// Create app data at the household path
+		const appDir = join(dataDir, 'households', 'hh-alpha', 'users', 'alpha-parent-a', 'food');
+		await mkdir(appDir, { recursive: true });
+		await writeFile(join(appDir, 'items.md'), 'pasta\n');
+
+		const userManager = new UserManager({
+			config: { users: USERS } as any,
+			appToggle: new AppToggleStore({ dataDir, logger }),
+			logger,
+		});
+
+		const vaultService = new VaultService({
+			dataDir,
+			spaceService: {
+				getSpacesForUser: () => [],
+				getSpace: () => null,
+				isMember: () => false,
+				listSpaces: () => [],
+				setVaultService: vi.fn(),
+			} as unknown as SpaceService,
+			userManager,
+			householdService,
+			logger,
+		});
+
+		await vaultService.rebuildVault('alpha-parent-a');
+
+		const linkPath = join(dataDir, 'vaults', 'alpha-parent-a', 'food');
+		const target = await readlink(linkPath);
+		expect(resolve(target)).toBe(resolve(appDir));
 	});
 });
