@@ -11,7 +11,7 @@ import type { TelegramService } from '../../../types/telegram.js';
 import { AppToggleStore } from '../../app-toggle/index.js';
 import { CronManager } from '../../scheduler/cron-manager.js';
 import { UserManager } from '../../user-manager/index.js';
-import { AlertService, type AlertServiceOptions } from '../index.js';
+import { AlertService, AlertScopeError, type AlertServiceOptions } from '../index.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -898,5 +898,191 @@ describe('AlertService', () => {
 			expect(errors).toEqual([]);
 			expect(eventBus.on).toHaveBeenCalledTimes(2);
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Household scope authorization
+// ---------------------------------------------------------------------------
+
+describe('AlertService — household scope authorization', () => {
+	// Use numeric IDs that match the default UserManager pattern
+	const USER_A = '111111111';
+	const USER_B = '222222222';
+	const USER_C = '333333333';
+
+	function makeHouseholdService(map: Record<string, string | null>) {
+		return { getHouseholdForUser: (uid: string) => map[uid] ?? null };
+	}
+
+	function makeSpaceService(spaces: Record<string, { kind: string; householdId?: string; members?: string[] }>) {
+		return {
+			getSpace: (id: string) => spaces[id] ?? null,
+			isMember: (spaceId: string, userId: string) => (spaces[spaceId]?.members ?? []).includes(userId),
+		};
+	}
+
+	function makeHhAlert(overrides: Partial<AlertDefinition> = {}): AlertDefinition {
+		return {
+			id: 'hh-alert',
+			name: 'Household Alert',
+			enabled: true,
+			schedule: '0 8 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'line count > 0',
+				data_sources: [{ app_id: 'food', user_id: USER_A, path: 'grocery.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'Check grocery list' } }],
+			delivery: [USER_A],
+			cooldown: '24 hours',
+			...overrides,
+		};
+	}
+
+	it('mixed-household recipients → evaluate returns error, no sendMessage', async () => {
+		const { service, telegram } = makeService({
+			userManager: makeUserManager([USER_A, USER_B]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a', [USER_B]: 'hh-b' }),
+		});
+		const alert = makeHhAlert({ delivery: [USER_A, USER_B] });
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(false);
+		expect(result.error).toMatch(/multiple households/i);
+		expect(telegram.send).not.toHaveBeenCalled();
+	});
+
+	it('null-household recipient → evaluate returns error, no sendMessage', async () => {
+		const { service, telegram } = makeService({
+			userManager: makeUserManager([USER_A]),
+			householdService: makeHouseholdService({ [USER_A]: null }),
+		});
+		const alert = makeHhAlert({ delivery: [USER_A] });
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(false);
+		expect(result.error).toMatch(/no household/i);
+		expect(telegram.send).not.toHaveBeenCalled();
+	});
+
+	it('data_source in foreign household → evaluate returns error, no partial read', async () => {
+		const { service, telegram } = makeService({
+			userManager: makeUserManager([USER_A, USER_B]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a', [USER_B]: 'hh-b' }),
+		});
+		const alert = makeHhAlert({
+			delivery: [USER_A],
+			condition: {
+				type: 'deterministic',
+				expression: 'line count > 0',
+				data_sources: [{ app_id: 'food', user_id: USER_B, path: 'grocery.md' }],
+			},
+		});
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(false);
+		expect(result.error).toMatch(/household/i);
+		expect(telegram.send).not.toHaveBeenCalled();
+	});
+
+	it('single household, all sources same household → reads from households/<hh>/users path', async () => {
+		// Create the data file under household path
+		const hhDir = join(tempDir, 'households', 'hh-a', 'users', USER_A, 'food');
+		await mkdir(hhDir, { recursive: true });
+		const dataFilePath = join(hhDir, 'grocery.md');
+		// Write 1 line so 'line count > 0' triggers
+		await writeFile(dataFilePath, 'item 1', 'utf-8');
+
+		const { service } = makeService({
+			userManager: makeUserManager([USER_A]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a' }),
+		});
+		const alert = makeHhAlert();
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		// condition should be met (1 line > 0)
+		expect(result.conditionMet).toBe(true);
+	});
+
+	it('write_data action targets foreign-household user → evaluate returns error', async () => {
+		const { service, telegram } = makeService({
+			userManager: makeUserManager([USER_A, USER_B]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a', [USER_B]: 'hh-b' }),
+		});
+		const alert = makeHhAlert({
+			delivery: [USER_A],
+			actions: [{
+				type: 'write_data',
+				config: { app_id: 'food', user_id: USER_B, path: 'note.md', content: 'hello' },
+			}],
+		});
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(false);
+		expect(result.error).toMatch(/household/i);
+		expect(telegram.send).not.toHaveBeenCalled();
+	});
+
+	it('space data_source in same household → allowed', async () => {
+		// Create the data file under household space path
+		const spaceDir = join(tempDir, 'households', 'hh-a', 'spaces', 'family-space', 'food');
+		await mkdir(spaceDir, { recursive: true });
+		await writeFile(join(spaceDir, 'grocery.md'), 'item 1', 'utf-8');
+
+		const { service } = makeService({
+			userManager: makeUserManager([USER_A]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a' }),
+			spaceService: makeSpaceService({
+				'family-space': { kind: 'household', householdId: 'hh-a', members: [USER_A] },
+			}),
+		});
+		const alert = makeHhAlert({
+			condition: {
+				type: 'deterministic',
+				expression: 'line count > 0',
+				data_sources: [{ app_id: 'food', space_id: 'family-space', path: 'grocery.md' }],
+			},
+		});
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(true);
+	});
+
+	it('space data_source in different household → evaluate returns error', async () => {
+		const { service, telegram } = makeService({
+			userManager: makeUserManager([USER_A, USER_C]),
+			householdService: makeHouseholdService({ [USER_A]: 'hh-a', [USER_C]: 'hh-b' }),
+			spaceService: makeSpaceService({
+				'other-space': { kind: 'household', householdId: 'hh-b', members: [USER_C] },
+			}),
+		});
+		const alert = makeHhAlert({
+			delivery: [USER_A],
+			condition: {
+				type: 'deterministic',
+				expression: 'line count > 0',
+				data_sources: [{ app_id: 'food', space_id: 'other-space', path: 'grocery.md' }],
+			},
+		});
+		const errs = await service.saveAlert(alert);
+		expect(errs).toHaveLength(0);
+
+		const result = await service.evaluate('hh-alert');
+		expect(result.conditionMet).toBe(false);
+		expect(result.error).toMatch(/household/i);
+		expect(telegram.send).not.toHaveBeenCalled();
 	});
 });

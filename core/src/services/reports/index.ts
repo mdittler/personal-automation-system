@@ -13,6 +13,7 @@ import type { ContextStoreService } from '../../types/context-store.js';
 import type { EventBusService } from '../../types/events.js';
 import type { LLMService } from '../../types/llm.js';
 import type {
+	AppDataSectionConfig,
 	CollectedSection,
 	ReportDefinition,
 	ReportRunResult,
@@ -123,7 +124,7 @@ export class ReportService {
 					this.logger.warn({ file, error: result.error }, 'Skipping report: YAML parse error');
 					continue;
 				}
-				const validated = safeValidateReport(result.data, this.userManager);
+				const validated = safeValidateReport(result.data, this.userManager, this.householdService);
 				if (validated === null) {
 					this.logger.warn({ file }, 'Skipping report: not a valid object');
 					continue;
@@ -153,7 +154,7 @@ export class ReportService {
 			this.logger.warn({ reportId: id, error: result.error }, 'Report YAML parse error');
 			return null;
 		}
-		const validated = safeValidateReport(result.data, this.userManager);
+		const validated = safeValidateReport(result.data, this.userManager, this.householdService);
 		if (validated === null) return null;
 		if (validated.errors.length > 0) {
 			this.logger.warn(
@@ -238,12 +239,81 @@ export class ReportService {
 
 		this.logger.info({ reportId, preview }, 'Running report');
 
-		// 1. Collect section data
-		// Resolve householdId from first delivery recipient (fail-open when absent)
-		const firstRecipient = report.delivery[0];
-		const reportHouseholdId = firstRecipient
-			? (this.householdService?.getHouseholdForUser(firstRecipient) ?? undefined)
-			: undefined;
+		// 1. Household preflight — when HouseholdService is wired:
+		//    a. Derive a single reportHouseholdId from ALL delivery recipients.
+		//    b. Refuse if any recipient has no household or recipients span > 1 household.
+		//    c. Pre-flight each app-data section against that household.
+		let reportHouseholdId: string | undefined;
+		if (this.householdService) {
+			const householdIds = new Set<string>();
+			for (const uid of report.delivery) {
+				const hh = this.householdService.getHouseholdForUser(uid);
+				if (hh === null) {
+					this.logger.error(
+						{ reportId, userId: uid },
+						'Refusing report: delivery recipient has no household assigned',
+					);
+					return null;
+				}
+				householdIds.add(hh);
+			}
+			if (householdIds.size > 1) {
+				this.logger.error(
+					{ reportId, households: Array.from(householdIds) },
+					'Refusing report: delivery recipients span multiple households',
+				);
+				return null;
+			}
+			reportHouseholdId = householdIds.size === 1 ? householdIds.values().next().value! : undefined;
+
+			// Pre-flight sections against reportHouseholdId
+			if (reportHouseholdId !== undefined) {
+				for (const section of report.sections) {
+					if (section.type !== 'app-data') continue;
+					const cfg = section.config as AppDataSectionConfig;
+
+					if (cfg.user_id) {
+						const sectionHh = this.householdService.getHouseholdForUser(cfg.user_id);
+						if (sectionHh !== reportHouseholdId) {
+							this.logger.error(
+								{ reportId, sectionLabel: section.label, sectionUserId: cfg.user_id, sectionHh, reportHouseholdId },
+								'Refusing report: app-data section user_id belongs to different household',
+							);
+							return null;
+						}
+					} else if (cfg.space_id && this.spaceService) {
+						const spaceDef = this.spaceService.getSpace(cfg.space_id);
+						if (spaceDef?.kind === 'household') {
+							if (spaceDef.householdId !== reportHouseholdId) {
+								this.logger.error(
+									{ reportId, sectionLabel: section.label, spaceId: cfg.space_id, spaceHh: spaceDef.householdId, reportHouseholdId },
+									'Refusing report: app-data section household space belongs to different household',
+								);
+								return null;
+							}
+						} else if (spaceDef?.kind === 'collaboration') {
+							const spaceMembers = new Set(spaceDef.members ?? []);
+							const nonMember = report.delivery.find((uid) => !spaceMembers.has(uid));
+							if (nonMember) {
+								this.logger.error(
+									{ reportId, sectionLabel: section.label, spaceId: cfg.space_id, nonMember },
+									'Refusing report: collaboration space has delivery recipient who is not a member',
+								);
+								return null;
+							}
+						} else if (!spaceDef) {
+							this.logger.error(
+								{ reportId, sectionLabel: section.label, spaceId: cfg.space_id },
+								'Refusing report: app-data section references unknown space',
+							);
+							return null;
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Collect section data
 		const collectorDeps: CollectorDeps = {
 			changeLog: this.changeLog,
 			dataDir: this.dataDir,
@@ -466,6 +536,7 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 function safeValidateReport(
 	data: unknown,
 	userManager: UserManager,
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>,
 ): { report: ReportDefinition; errors: ReportValidationError[] } | null {
 	if (typeof data !== 'object' || data === null) return null;
 	const obj = data as Record<string, unknown>;
@@ -477,6 +548,29 @@ function safeValidateReport(
 		errors = validateReport(report, userManager);
 	} catch {
 		errors = [{ field: 'unknown', message: 'Validator threw an exception on malformed data' }];
+	}
+
+	// Load-time cross-household warning: when HouseholdService is available,
+	// check if delivery recipients span multiple households. This surfaces a GUI
+	// badge so operators catch mis-authored reports before execution.
+	if (householdService && Array.isArray(report.delivery) && report.delivery.length > 0) {
+		const householdIds = new Set<string | null>();
+		for (const uid of report.delivery) {
+			householdIds.add(householdService.getHouseholdForUser(uid));
+		}
+		const hasNull = householdIds.has(null);
+		const nonNullIds = Array.from(householdIds).filter(Boolean) as string[];
+		if (hasNull || nonNullIds.length > 1) {
+			errors = [
+				...errors,
+				{
+					field: 'delivery',
+					message: hasNull
+						? 'One or more delivery recipients have no household assigned'
+						: 'Delivery recipients span multiple households — report will be refused at runtime',
+				},
+			];
+		}
 	}
 
 	report._validationErrors = errors.length > 0 ? errors : undefined;

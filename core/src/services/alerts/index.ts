@@ -13,9 +13,13 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import type { Logger } from 'pino';
 import type {
+	AlertAction,
+	AlertDataSource,
 	AlertDefinition,
 	AlertEvaluationResult,
 	AlertValidationError,
+	WriteDataActionConfig,
+	DispatchMessageActionConfig,
 } from '../../types/alert.js';
 import { ALERT_ID_PATTERN, MAX_ALERTS } from '../../types/alert.js';
 import type { EventBusService, EventHandler } from '../../types/events.js';
@@ -35,10 +39,24 @@ import { resolveDateTokens } from '../reports/section-collector.js';
 import type { Router } from '../router/index.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
 import type { UserManager } from '../user-manager/index.js';
+import { resolveScopedDataDir } from '../data-store/paths.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import { executeActions } from './alert-executor.js';
 import { validateAlert } from './alert-validator.js';
 
 const CRON_KEY_PREFIX = 'alerts';
+
+/**
+ * Thrown when an alert's household authorization check fails — e.g., delivery
+ * spans multiple households, a data_source belongs to a foreign household, or
+ * an action targets a user outside the alert's household.
+ */
+export class AlertScopeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'AlertScopeError';
+	}
+}
 
 export interface AlertServiceOptions {
 	dataDir: string;
@@ -53,8 +71,10 @@ export interface AlertServiceOptions {
 	n8nDispatcher?: N8nDispatcher;
 	audioService?: AudioService;
 	router?: Router;
-	/** Optional — when present, householdId is derived and injected into dispatch_message context. */
+	/** Optional — when present, household boundary checks are enforced for delivery, data_sources, and actions. */
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/** Optional — when present, space_id data_sources are resolved to household/collaboration paths. */
+	spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
 }
 
 export class AlertService {
@@ -73,6 +93,7 @@ export class AlertService {
 	private readonly audioService?: AudioService;
 	private router?: Router;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	private readonly spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
 	private readonly eventSubscriptions = new Map<
 		string,
 		{ eventName: string; handler: EventHandler }
@@ -94,6 +115,7 @@ export class AlertService {
 		this.audioService = options.audioService;
 		this.router = options.router;
 		this.householdService = options.householdService;
+		this.spaceService = options.spaceService;
 	}
 
 	/**
@@ -281,8 +303,25 @@ export class AlertService {
 		this.logger.info({ alertId, preview }, 'Evaluating alert');
 
 		try {
+			// 0. Household authorization — derive alertHouseholdId and authorize scope.
+			// Throws AlertScopeError when householdService is wired and constraints are violated.
+			let alertHouseholdId: string | null;
+			try {
+				alertHouseholdId = this.authorizeAlertScope(alert);
+			} catch (scopeErr) {
+				const msg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
+				this.logger.error({ alertId, error: msg }, 'Household scope authorization failed — refusing to evaluate');
+				return {
+					alertId,
+					conditionMet: false,
+					actionTriggered: false,
+					actionsExecuted: 0,
+					error: msg,
+				};
+			}
+
 			// 1. Read data sources
-			const data = await this.readDataSources(alert);
+			const data = await this.readDataSources(alert, alertHouseholdId);
 
 			// 2. Evaluate condition
 			const conditionMet = await this.checkCondition(alert, data);
@@ -382,17 +421,124 @@ export class AlertService {
 
 	// --- Private helpers ---
 
-	private async readDataSources(alert: AlertDefinition): Promise<string> {
+	/**
+	 * Derive the alert's household ID from its delivery recipients and authorize
+	 * all data_sources and actions against that household.
+	 *
+	 * Returns the household ID string when authorization succeeds, or null when
+	 * householdService is not wired (transitional / pre-migration mode).
+	 *
+	 * Throws when:
+	 * - HouseholdService is wired AND any delivery recipient has no household
+	 * - HouseholdService is wired AND delivery recipients span multiple households
+	 * - Any data_source or action targets a user/space in a different household
+	 */
+	private authorizeAlertScope(alert: AlertDefinition): string | null {
+		if (!this.householdService) return null; // Not wired — skip household enforcement
+
+		// Derive household from delivery recipients
+		if (alert.delivery.length === 0) {
+			this.logger.warn({ alertId: alert.id }, 'Alert has no delivery recipients — skipping household authorization');
+			return null;
+		}
+
+		const householdIds = new Set<string>();
+		for (const uid of alert.delivery) {
+			const hh = this.householdService.getHouseholdForUser(uid);
+			if (hh === null) {
+				throw new AlertScopeError(
+					`Alert "${alert.id}": delivery recipient "${uid}" has no household. Refusing to evaluate.`,
+				);
+			}
+			householdIds.add(hh);
+		}
+		if (householdIds.size > 1) {
+			throw new AlertScopeError(
+				`Alert "${alert.id}": delivery recipients span multiple households (${[...householdIds].join(', ')}). Refusing to evaluate.`,
+			);
+		}
+		const alertHouseholdId = [...householdIds][0]!;
+
+		// Authorize each data_source
+		for (const source of alert.condition.data_sources) {
+			this.authorizeDataSource(alert.id, source, alertHouseholdId, alert.delivery);
+		}
+
+		// Authorize each action that targets a user_id or space_id
+		for (const action of alert.actions) {
+			this.authorizeAction(alert.id, action, alertHouseholdId);
+		}
+
+		return alertHouseholdId;
+	}
+
+	private authorizeDataSource(alertId: string, source: AlertDataSource, alertHouseholdId: string, deliveryUsers: string[]): void {
+		if (source.space_id) {
+			const spaceDef = this.spaceService?.getSpace(source.space_id) ?? null;
+			if (!spaceDef) return; // Unknown space — let resolveScopedDataDir handle it
+			if (spaceDef.kind === 'household') {
+				if (spaceDef.householdId !== alertHouseholdId) {
+					throw new AlertScopeError(
+						`Alert "${alertId}": data_source space "${source.space_id}" belongs to household "${spaceDef.householdId ?? 'unknown'}", not "${alertHouseholdId}".`,
+					);
+				}
+			} else if (spaceDef.kind === 'collaboration') {
+				// Collaboration space: all alert delivery members must also be space members
+				for (const uid of deliveryUsers) {
+					if (!this.spaceService!.isMember(source.space_id, uid)) {
+						throw new AlertScopeError(
+							`Alert "${alertId}": data_source collaboration space "${source.space_id}" — delivery user "${uid}" is not a member.`,
+						);
+					}
+				}
+			}
+		} else if (source.user_id) {
+			const sourceHh = this.householdService!.getHouseholdForUser(source.user_id);
+			if (sourceHh !== alertHouseholdId) {
+				throw new AlertScopeError(
+					`Alert "${alertId}": data_source user "${source.user_id}" belongs to household "${sourceHh ?? 'none'}", not "${alertHouseholdId}".`,
+				);
+			}
+		}
+	}
+
+
+	private authorizeAction(alertId: string, action: AlertAction, alertHouseholdId: string): void {
+		if (action.type === 'write_data') {
+			const cfg = action.config as WriteDataActionConfig;
+			const targetHh = this.householdService!.getHouseholdForUser(cfg.user_id);
+			if (targetHh !== alertHouseholdId) {
+				throw new AlertScopeError(
+					`Alert "${alertId}": write_data action targets user "${cfg.user_id}" in household "${targetHh ?? 'none'}", not "${alertHouseholdId}".`,
+				);
+			}
+		} else if (action.type === 'dispatch_message') {
+			const cfg = action.config as DispatchMessageActionConfig;
+			const targetHh = this.householdService!.getHouseholdForUser(cfg.user_id);
+			if (targetHh !== alertHouseholdId) {
+				throw new AlertScopeError(
+					`Alert "${alertId}": dispatch_message action targets user "${cfg.user_id}" in household "${targetHh ?? 'none'}", not "${alertHouseholdId}".`,
+				);
+			}
+		}
+	}
+
+	private async readDataSources(alert: AlertDefinition, alertHouseholdId: string | null): Promise<string> {
 		const dataContents: string[] = [];
 
 		for (const source of alert.condition.data_sources) {
 			const resolvedPath = resolveDateTokens(source.path, this.timezone);
 
-			// Build path: space-aware or per-user
-			const baseDir = source.space_id
-				? resolve(join(this.dataDir, 'spaces', source.space_id, source.app_id))
-				: // biome-ignore lint/style/noNonNullAssertion: validated by alert-validator (user_id required when no space_id)
-					resolve(join(this.dataDir, 'users', source.user_id!, source.app_id));
+			// Build path using household-aware resolver.
+			// alertHouseholdId: string → household path; null → legacy (service not wired).
+			const baseDir = resolveScopedDataDir({
+				dataDir: this.dataDir,
+				appId: source.app_id,
+				userId: source.user_id ?? undefined,
+				spaceId: source.space_id ?? undefined,
+				householdId: alertHouseholdId ?? undefined,
+				spaceService: this.spaceService ?? undefined,
+			});
 			const fullPath = resolve(join(baseDir, resolvedPath));
 
 			// Path traversal check

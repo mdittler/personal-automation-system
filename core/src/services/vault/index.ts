@@ -23,6 +23,18 @@ export interface VaultServiceOptions {
 	spaceService: SpaceService;
 	userManager: UserManager;
 	logger: Logger;
+	/**
+	 * Optional — when present, routes personal and shared symlinks to the
+	 * household layout. When wired and the user has no household, personal and
+	 * shared symlinks are skipped with a warn log (fail-soft) rather than
+	 * pointing at legacy paths that may not exist post-migration.
+	 *
+	 * Space symlinks always consult spaceService.getSpace(spaceId).kind:
+	 * - kind=household  → `data/households/<hh>/spaces/<s>/<app>`
+	 * - kind=collaboration → `data/collaborations/<s>/<app>`
+	 * - unknown/no service → legacy `data/spaces/<s>/<app>`
+	 */
+	householdService?: { getHouseholdForUser(userId: string): string | null };
 }
 
 /** Symlink type: 'junction' on Windows, 'dir' on Unix. */
@@ -100,6 +112,7 @@ export class VaultService {
 	private readonly spaceService: SpaceService;
 	private readonly userManager: UserManager;
 	private readonly logger: Logger;
+	private readonly householdService?: { getHouseholdForUser(userId: string): string | null };
 
 	constructor(options: VaultServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -107,6 +120,7 @@ export class VaultService {
 		this.spaceService = options.spaceService;
 		this.userManager = options.userManager;
 		this.logger = options.logger;
+		this.householdService = options.householdService;
 	}
 
 	/**
@@ -126,9 +140,27 @@ export class VaultService {
 		const vaultDir = join(this.vaultsDir, userId);
 		await ensureDir(vaultDir);
 
+		// Resolve household for this user (wired + null → skip personal/shared with warn)
+		let householdId: string | null | undefined;
+		if (this.householdService) {
+			householdId = this.householdService.getHouseholdForUser(userId);
+		} else {
+			householdId = undefined; // not wired — legacy layout
+		}
+
 		// 1. Personal app directories
-		const userDir = join(this.dataDir, 'users', userId);
-		const personalApps = await listSubdirs(userDir);
+		let userDir: string;
+		if (householdId !== undefined && householdId !== null) {
+			userDir = join(this.dataDir, 'households', householdId, 'users', userId);
+		} else if (householdId === null) {
+			// Wired but no household — skip personal symlinks (fail-soft)
+			this.logger.warn({ userId }, 'VaultService: user has no household — skipping personal app symlinks');
+			userDir = '';
+		} else {
+			userDir = join(this.dataDir, 'users', userId);
+		}
+
+		const personalApps = userDir ? await listSubdirs(userDir) : [];
 		for (const appId of personalApps) {
 			const target = resolve(join(userDir, appId));
 			const linkPath = join(vaultDir, appId);
@@ -136,20 +168,32 @@ export class VaultService {
 		}
 
 		// 2. Shared directories
-		const sharedDir = join(this.dataDir, 'users', 'shared');
-		const sharedApps = await listSubdirs(sharedDir);
-		const sharedVaultDir = join(vaultDir, '_shared');
-		if (sharedApps.length > 0) {
-			await ensureDir(sharedVaultDir);
-			for (const appId of sharedApps) {
-				const target = resolve(join(sharedDir, appId));
-				const linkPath = join(sharedVaultDir, appId);
-				await createSymlink(target, linkPath, this.logger);
-			}
+		let sharedDir: string;
+		if (householdId !== undefined && householdId !== null) {
+			sharedDir = join(this.dataDir, 'households', householdId, 'shared');
+		} else if (householdId === null) {
+			// Wired but no household — skip shared symlinks (fail-soft)
+			sharedDir = '';
+		} else {
+			sharedDir = join(this.dataDir, 'users', 'shared');
 		}
-		// Remove stale shared symlinks (even if no shared apps remain)
-		if (await pathExists(sharedVaultDir)) {
-			await this.removeStaleSymlinks(sharedVaultDir, new Set(sharedApps));
+
+		let sharedApps: string[] = [];
+		const sharedVaultDir = join(vaultDir, '_shared');
+		if (sharedDir) {
+			sharedApps = await listSubdirs(sharedDir);
+			if (sharedApps.length > 0) {
+				await ensureDir(sharedVaultDir);
+				for (const appId of sharedApps) {
+					const target = resolve(join(sharedDir, appId));
+					const linkPath = join(sharedVaultDir, appId);
+					await createSymlink(target, linkPath, this.logger);
+				}
+			}
+			// Remove stale shared symlinks (even if no shared apps remain)
+			if (await pathExists(sharedVaultDir)) {
+				await this.removeStaleSymlinks(sharedVaultDir, new Set(sharedApps));
+			}
 		}
 
 		// 3. Space directories (only spaces user is a member of)
@@ -162,7 +206,16 @@ export class VaultService {
 		}
 
 		for (const space of memberSpaces) {
-			const spaceDataDir = join(this.dataDir, 'spaces', space.id);
+			// Resolve canonical data dir based on space kind
+			let spaceDataDir: string;
+			if (space.kind === 'household' && space.householdId) {
+				spaceDataDir = join(this.dataDir, 'households', space.householdId, 'spaces', space.id);
+			} else if (space.kind === 'collaboration') {
+				spaceDataDir = join(this.dataDir, 'collaborations', space.id);
+			} else {
+				spaceDataDir = join(this.dataDir, 'spaces', space.id);
+			}
+
 			const spaceApps = await listSubdirs(spaceDataDir);
 			const spaceVaultDir = join(spacesVaultDir, space.id);
 
@@ -229,7 +282,17 @@ export class VaultService {
 		const spacesVaultDir = join(vaultDir, '_spaces');
 		await ensureDir(spacesVaultDir);
 
-		const spaceDataDir = join(this.dataDir, 'spaces', spaceId);
+		// Resolve canonical data dir based on space kind
+		const spaceDef = this.spaceService.getSpace(spaceId);
+		let spaceDataDir: string;
+		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
+			spaceDataDir = join(this.dataDir, 'households', spaceDef.householdId, 'spaces', spaceId);
+		} else if (spaceDef?.kind === 'collaboration') {
+			spaceDataDir = join(this.dataDir, 'collaborations', spaceId);
+		} else {
+			spaceDataDir = join(this.dataDir, 'spaces', spaceId);
+		}
+
 		const spaceApps = await listSubdirs(spaceDataDir);
 		const spaceVaultDir = join(spacesVaultDir, spaceId);
 

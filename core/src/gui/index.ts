@@ -58,8 +58,11 @@ export interface GuiOptions {
 	dataDir: string;
 	logger: Logger;
 	loginRateLimiter?: RateLimiter;
-	/** Optional — when present, householdId can be derived for simulated message dispatch. */
-	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/**
+	 * Optional — when present, householdId can be derived for simulated message dispatch
+	 * and the data browser routes user/shared scopes through the household layout.
+	 */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'listHouseholds'>;
 }
 
 /**
@@ -102,7 +105,13 @@ export async function registerGuiRoutes(
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir, logger });
-			registerDataRoutes(gui, { config, dataDir, logger });
+			registerDataRoutes(gui, {
+				config,
+				dataDir,
+				logger,
+				householdService: options.householdService,
+				spaceService: spaceService ?? undefined,
+			});
 			registerConfigRoutes(gui, { registry, config, dataDir, logger });
 			if (contextStore) {
 				registerContextRoutes(gui, { contextStore, config, logger });
