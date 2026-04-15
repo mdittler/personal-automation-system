@@ -12,10 +12,20 @@ import type { DataChangedPayload } from '../../types/data-events.js';
 import type { ScopedDataStore } from '../../types/data-store.js';
 import type { EventBusService } from '../../types/events.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
+import type { SpaceKind } from '../../types/spaces.js';
 import { toArchiveTimestamp } from '../../utils/date.js';
 import { appendWithFrontmatter, atomicWrite, ensureDir } from '../../utils/file.js';
 import type { ChangeLog } from './change-log.js';
+import { SYSTEM_BYPASS_TOKEN } from './system-bypass-token.js';
 import { ScopeViolationError, findMatchingScope, resolveScopedPath } from './paths.js';
+
+/** Metadata propagated to DataChangedPayload events. */
+export interface ScopedStoreEventMeta {
+	householdId: string | null;
+	spaceKind: SpaceKind | null;
+	collaborationId: string | null;
+	sharedSelector: string | null;
+}
 
 export interface ScopedStoreOptions {
 	/** Absolute path to the base directory for this scope. */
@@ -30,8 +40,21 @@ export interface ScopedStoreOptions {
 	spaceId?: string;
 	/** Event bus for emitting data:changed events (optional). */
 	eventBus?: EventBusService;
-	/** Manifest-declared scopes. Undefined or empty = no enforcement (API trust). */
+	/**
+	 * Manifest-declared scopes.
+	 * - Undefined: scopes not yet declared — treated as DENY (no access without bypass).
+	 * - Non-empty: enforce declared scopes.
+	 * - Empty array: DENY unless _systemBypassToken is provided.
+	 */
 	scopes?: ManifestDataScope[];
+	/**
+	 * System bypass token. Only SYSTEM_BYPASS_TOKEN (the singleton Symbol) is accepted.
+	 * Any other symbol (including Symbol('pas.systemBypass')) is rejected.
+	 * When present and valid, scope enforcement is bypassed entirely.
+	 */
+	_systemBypassToken?: symbol;
+	/** Metadata for DataChangedPayload events (set by DataStoreServiceImpl factory methods). */
+	_eventMeta?: ScopedStoreEventMeta;
 }
 
 export class ScopedStore implements ScopedDataStore {
@@ -42,8 +65,15 @@ export class ScopedStore implements ScopedDataStore {
 	private readonly spaceId?: string;
 	private readonly eventBus?: EventBusService;
 	private readonly scopes?: ManifestDataScope[];
+	private readonly systemBypass: boolean;
+	private readonly eventMeta: ScopedStoreEventMeta;
 
 	constructor(options: ScopedStoreOptions) {
+		// Validate system bypass token — forged symbols are rejected
+		if (options._systemBypassToken !== undefined && options._systemBypassToken !== SYSTEM_BYPASS_TOKEN) {
+			throw new Error('Invalid system bypass token: forged symbol rejected');
+		}
+
 		this.baseDir = options.baseDir;
 		this.appId = options.appId;
 		this.userId = options.userId;
@@ -51,14 +81,32 @@ export class ScopedStore implements ScopedDataStore {
 		this.spaceId = options.spaceId;
 		this.eventBus = options.eventBus;
 		this.scopes = options.scopes;
+		this.systemBypass = options._systemBypassToken === SYSTEM_BYPASS_TOKEN;
+		this.eventMeta = options._eventMeta ?? {
+			householdId: null,
+			spaceKind: null,
+			collaborationId: null,
+			sharedSelector: null,
+		};
 	}
 
 	/**
 	 * Check that a path is within declared scopes and the operation is permitted.
-	 * Skips enforcement when scopes are undefined or empty (API trust bypass).
+	 * Throws ScopeViolationError when scopes are empty/undefined and no system bypass token.
 	 */
 	private checkScope(path: string, operation: 'read' | 'write'): void {
-		if (!this.scopes || this.scopes.length === 0) return;
+		// System bypass: skip enforcement and log
+		if (this.systemBypass) {
+			return;
+		}
+
+		if (!this.scopes || this.scopes.length === 0) {
+			throw new ScopeViolationError(
+				path,
+				operation,
+				this.appId,
+			);
+		}
 
 		const scope = findMatchingScope(path, this.scopes);
 		if (!scope) {
@@ -82,12 +130,10 @@ export class ScopedStore implements ScopedDataStore {
 				appId: this.appId,
 				userId: this.userId,
 				path,
-				// householdId, spaceKind, collaborationId, sharedSelector will be
-				// populated by Task F/G once HouseholdService is wired into ScopedStore.
-				householdId: null,
-				spaceKind: null,
-				collaborationId: null,
-				sharedSelector: null,
+				householdId: this.eventMeta.householdId,
+				spaceKind: this.eventMeta.spaceKind,
+				collaborationId: this.eventMeta.collaborationId,
+				sharedSelector: this.eventMeta.sharedSelector,
 			};
 			if (this.spaceId) {
 				payload.spaceId = this.spaceId;
@@ -109,7 +155,7 @@ export class ScopedStore implements ScopedDataStore {
 		if (!fileExists) return '';
 
 		const content = await readFile(fullPath, 'utf-8');
-		await this.changeLog.record('read', path, this.appId, this.userId, this.spaceId);
+		await this.changeLog.record('read', path, this.appId, this.userId, this.spaceId, this.eventMeta);
 		return content;
 	}
 
@@ -117,7 +163,7 @@ export class ScopedStore implements ScopedDataStore {
 		this.checkScope(path, 'write');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 		await atomicWrite(fullPath, content);
-		await this.changeLog.record('write', path, this.appId, this.userId, this.spaceId);
+		await this.changeLog.record('write', path, this.appId, this.userId, this.spaceId, this.eventMeta);
 		this.emitDataChanged('write', path);
 	}
 
@@ -135,7 +181,7 @@ export class ScopedStore implements ScopedDataStore {
 			await fsAppend(fullPath, content, 'utf-8');
 		}
 
-		await this.changeLog.record('append', path, this.appId, this.userId, this.spaceId);
+		await this.changeLog.record('append', path, this.appId, this.userId, this.spaceId, this.eventMeta);
 		this.emitDataChanged('append', path);
 	}
 
@@ -185,7 +231,7 @@ export class ScopedStore implements ScopedDataStore {
 		await ensureDir(join(archiveFullPath, '..'));
 		await rename(fullPath, archiveFullPath);
 
-		await this.changeLog.record('archive', path, this.appId, this.userId, this.spaceId);
+		await this.changeLog.record('archive', path, this.appId, this.userId, this.spaceId, this.eventMeta);
 		this.emitDataChanged('archive', path);
 	}
 }

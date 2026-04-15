@@ -7,6 +7,7 @@
 
 import { posix, relative, resolve, sep } from 'node:path';
 import type { ManifestDataScope } from '../../types/manifest.js';
+import { HouseholdBoundaryError } from '../household/index.js';
 
 /**
  * Resolve a relative path within a base directory.
@@ -26,6 +27,23 @@ export function resolveScopedPath(baseDir: string, relativePath: string): string
 	// If the relative path starts with '..' or is absolute, it escapes the scope
 	if (rel.startsWith('..') || rel.startsWith(sep) || rel.startsWith('/')) {
 		throw new PathTraversalError(relativePath, baseDir);
+	}
+
+	// Household boundary check: if the base dir is rooted under a household subtree,
+	// verify the resolved path has not escaped that subtree.
+	const householdMatch = /[/\\]households[/\\]([^/\\]+)[/\\]/.exec(resolvedBase);
+	if (householdMatch) {
+		const hhId = householdMatch[1] ?? null;
+		// Find the households/<hhId>/ prefix in the base path (trim trailing sep from matched group)
+		const hhRoot = resolvedBase.slice(0, resolvedBase.indexOf(householdMatch[0]) + householdMatch[0].length - 1);
+		const hhRel = relative(hhRoot, resolvedPath);
+		if (hhRel.startsWith('..') || hhRel.startsWith(sep) || hhRel.startsWith('/')) {
+			throw new HouseholdBoundaryError(
+				hhId,
+				null,
+				`Path "${relativePath}" escapes household subtree for household "${hhId ?? 'unknown'}"`,
+			);
+		}
 	}
 
 	return resolvedPath;

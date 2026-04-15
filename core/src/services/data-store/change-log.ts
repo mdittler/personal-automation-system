@@ -11,10 +11,18 @@
 import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChangeLogEntry } from '../../types/data-store.js';
+import type { SpaceKind } from '../../types/spaces.js';
 import { toISO } from '../../utils/date.js';
 import { ensureDir } from '../../utils/file.js';
 
 export type ChangeOperation = 'read' | 'write' | 'append' | 'archive';
+
+export interface ChangeLogMeta {
+	householdId?: string | null;
+	spaceKind?: SpaceKind | null;
+	collaborationId?: string | null;
+	sharedSelector?: string | null;
+}
 
 export class ChangeLog {
 	private readonly logPath: string;
@@ -33,6 +41,7 @@ export class ChangeLog {
 		appId: string,
 		userId: string | null,
 		spaceId?: string,
+		meta?: ChangeLogMeta,
 	): Promise<void> {
 		if (!this.initialized) {
 			await ensureDir(join(this.dataDir, 'system'));
@@ -49,6 +58,19 @@ export class ChangeLog {
 
 		if (spaceId) {
 			entry.spaceId = spaceId;
+		}
+
+		if (meta?.householdId != null) {
+			entry.householdId = meta.householdId;
+		}
+		if (meta?.spaceKind != null) {
+			entry.spaceKind = meta.spaceKind;
+		}
+		if (meta?.collaborationId != null) {
+			entry.collaborationId = meta.collaborationId;
+		}
+		if (meta?.sharedSelector != null) {
+			entry.sharedSelector = meta.sharedSelector;
 		}
 
 		const line = `${JSON.stringify(entry)}\n`;

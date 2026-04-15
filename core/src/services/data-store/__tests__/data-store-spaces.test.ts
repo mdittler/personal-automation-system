@@ -6,6 +6,7 @@ import type { SpaceService } from '../../spaces/index.js';
 import { ChangeLog } from '../change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../index.js';
 import { PathTraversalError, ScopeViolationError } from '../paths.js';
+import { SYSTEM_BYPASS_TOKEN } from '../system-bypass-token.js';
 
 let tempDir: string;
 let dataDir: string;
@@ -13,6 +14,7 @@ let changeLog: ChangeLog;
 
 const mockSpaceService = {
 	isMember: vi.fn(),
+	getSpace: vi.fn().mockReturnValue(null),
 } as unknown as SpaceService;
 
 beforeEach(async () => {
@@ -37,6 +39,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -57,6 +60,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -75,6 +79,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -94,6 +99,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -112,6 +118,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -132,6 +139,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -148,6 +156,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -169,6 +178,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				// no spaceService
 			});
 
@@ -184,6 +194,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -206,6 +217,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -221,6 +233,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -239,6 +252,7 @@ describe('DataStoreServiceImpl.forSpace()', () => {
 				userScopes: [],
 				sharedScopes: [],
 				changeLog,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 				spaceService: mockSpaceService,
 			});
 
@@ -294,6 +308,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 			userScopes: [],
 			sharedScopes: [],
 			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			spaceService: mockSpaceService,
 		});
 
@@ -320,6 +335,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 			userScopes: [],
 			sharedScopes: [],
 			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			spaceService: mockSpaceService,
 		});
 
@@ -345,6 +361,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 			userScopes: [],
 			sharedScopes: [],
 			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			spaceService: mockSpaceService,
 		});
 
@@ -373,6 +390,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 			userScopes: [],
 			sharedScopes: [],
 			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			spaceService: mockSpaceService,
 		});
 
@@ -397,6 +415,7 @@ describe('ScopedStore passes spaceId to change log', () => {
 			userScopes: [],
 			sharedScopes: [],
 			changeLog,
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 		});
 
 		const userStore = service.forUser('user-1');

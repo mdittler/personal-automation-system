@@ -8,6 +8,7 @@ import type { ManifestDataScope } from '../../../types/manifest.js';
 import { ChangeLog } from '../change-log.js';
 import { PathTraversalError, ScopeViolationError } from '../paths.js';
 import { ScopedStore } from '../scoped-store.js';
+import { SYSTEM_BYPASS_TOKEN } from '../system-bypass-token.js';
 
 let tempDir: string;
 let dataDir: string;
@@ -23,6 +24,7 @@ beforeEach(async () => {
 		appId: 'test-app',
 		userId: 'user-123',
 		changeLog,
+		_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 	});
 });
 
@@ -177,6 +179,7 @@ describe('ScopedStore', () => {
 				userId: 'user-123',
 				changeLog,
 				eventBus: mockEventBus,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 		});
 
@@ -257,6 +260,7 @@ describe('ScopedStore', () => {
 				changeLog,
 				spaceId: 'family',
 				eventBus: mockEventBus,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 			await spaceStore.write('shared.md', 'data');
 			const payload = (mockEventBus.emit as ReturnType<typeof vi.fn>).mock
@@ -276,6 +280,7 @@ describe('ScopedStore', () => {
 				userId: null,
 				changeLog,
 				eventBus: mockEventBus,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 			await sharedStore.write('shared-file.md', 'shared data');
 			expect(mockEventBus.emit).toHaveBeenCalledWith(
@@ -303,6 +308,7 @@ describe('ScopedStore', () => {
 				userId: 'user-123',
 				changeLog,
 				eventBus: throwingEventBus,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 			// Write should succeed despite emit throwing
 			await throwingStore.write('file.md', 'content');
@@ -451,15 +457,15 @@ describe('ScopedStore', () => {
 			await expect(scopedStore.exists('log.md')).rejects.toThrow(ScopeViolationError);
 		});
 
-		it('skips enforcement when scopes is undefined', async () => {
+		it('denies access when scopes is undefined and no system bypass', async () => {
 			const unscoped = new ScopedStore({
 				baseDir: join(tempDir, 'unscoped'),
 				appId: 'test-app',
 				userId: 'user-123',
 				changeLog,
 			});
-			await unscoped.write('anything.md', 'ok');
-			expect(await unscoped.read('anything.md')).toBe('ok');
+			await expect(unscoped.write('anything.md', 'ok')).rejects.toThrow(ScopeViolationError);
+			await expect(unscoped.read('anything.md')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('archive() throws ScopeViolationError on destination when scope is exact-file', async () => {
@@ -477,7 +483,7 @@ describe('ScopedStore', () => {
 			await expect(store2.archive('data.yaml')).rejects.toThrow(ScopeViolationError);
 		});
 
-		it('skips enforcement when scopes is empty array', async () => {
+		it('denies access when scopes is empty array and no system bypass (fail-closed)', async () => {
 			const emptyScopes = new ScopedStore({
 				baseDir: join(tempDir, 'empty-scopes'),
 				appId: 'test-app',
@@ -485,8 +491,8 @@ describe('ScopedStore', () => {
 				changeLog,
 				scopes: [],
 			});
-			await emptyScopes.write('anything.md', 'ok');
-			expect(await emptyScopes.read('anything.md')).toBe('ok');
+			await expect(emptyScopes.write('anything.md', 'ok')).rejects.toThrow(ScopeViolationError);
+			await expect(emptyScopes.read('anything.md')).rejects.toThrow(ScopeViolationError);
 		});
 	});
 

@@ -21,9 +21,13 @@ import type {
 import type { EventBusService } from '../../types/events.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
+import { getCurrentUserId } from '../context/request-context.js';
+import type { HouseholdService } from '../household/index.js';
+import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { ChangeLog } from './change-log.js';
 import { ScopedStore } from './scoped-store.js';
+import { SYSTEM_BYPASS_TOKEN } from './system-bypass-token.js';
 
 /** Error thrown when a user is not a member of a requested space. */
 export class SpaceMembershipError extends Error {
@@ -51,6 +55,13 @@ export interface DataStoreServiceOptions {
 	spaceService?: SpaceService;
 	/** Event bus for emitting data:changed events (optional). */
 	eventBus?: EventBusService;
+	/** Household service for tenant boundary enforcement (optional). */
+	householdService?: HouseholdService;
+	/**
+	 * Internal: pass SYSTEM_BYPASS_TOKEN to bypass scope enforcement on all returned stores.
+	 * For use by internal infrastructure tests only — NOT exposed on DataStoreService interface.
+	 */
+	_systemBypassToken?: symbol;
 }
 
 export class DataStoreServiceImpl implements DataStoreService {
@@ -61,6 +72,10 @@ export class DataStoreServiceImpl implements DataStoreService {
 	private readonly changeLog: ChangeLog;
 	private readonly spaceService?: SpaceService;
 	private readonly eventBus?: EventBusService;
+	/** Optional — wired in Task J. When absent, legacy path layout is used. */
+	private _householdService?: HouseholdService;
+	/** Internal test escape hatch: bypass scope enforcement on all returned stores. */
+	private readonly _bypassToken?: symbol;
 
 	constructor(options: DataStoreServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -70,10 +85,31 @@ export class DataStoreServiceImpl implements DataStoreService {
 		this.changeLog = options.changeLog;
 		this.spaceService = options.spaceService;
 		this.eventBus = options.eventBus;
+		this._householdService = options.householdService;
+		this._bypassToken = options._systemBypassToken;
+	}
+
+	/**
+	 * Inject the HouseholdService after construction.
+	 * Called by bootstrap wiring (Task J) once HouseholdService is available.
+	 */
+	setHouseholdService(svc: HouseholdService): void {
+		this._householdService = svc;
 	}
 
 	forUser(userId: string): UserDataStore {
-		const baseDir = join(this.dataDir, 'users', userId, this.appId);
+		// Actor-vs-target check: reject when BOTH actor and target are known and mismatched
+		const actorId = getCurrentUserId();
+		if (actorId !== undefined && actorId !== userId) {
+			throw new UserBoundaryError(actorId, userId);
+		}
+
+		// Resolve household-aware path
+		const householdId = this._householdService?.getHouseholdForUser(userId) ?? null;
+		const baseDir = householdId
+			? join(this.dataDir, 'households', householdId, 'users', userId, this.appId)
+			: join(this.dataDir, 'users', userId, this.appId);
+
 		return new ScopedStore({
 			baseDir,
 			appId: this.appId,
@@ -81,11 +117,26 @@ export class DataStoreServiceImpl implements DataStoreService {
 			changeLog: this.changeLog,
 			eventBus: this.eventBus,
 			scopes: this.userScopes,
+			_systemBypassToken: this._bypassToken,
+			_eventMeta: {
+				householdId,
+				spaceKind: null,
+				collaborationId: null,
+				sharedSelector: null,
+			},
 		});
 	}
 
-	forShared(_scope: string): SharedDataStore {
-		const baseDir = join(this.dataDir, 'users', 'shared', this.appId);
+	forShared(scope: string): SharedDataStore {
+		// Resolve household-aware path from current request context
+		const householdId = this._householdService
+			? (getCurrentUserId() ? this._householdService.getHouseholdForUser(getCurrentUserId()!) : null)
+			: null;
+
+		const baseDir = householdId
+			? join(this.dataDir, 'households', householdId, 'shared', this.appId)
+			: join(this.dataDir, 'users', 'shared', this.appId);
+
 		return new ScopedStore({
 			baseDir,
 			appId: this.appId,
@@ -93,10 +144,23 @@ export class DataStoreServiceImpl implements DataStoreService {
 			changeLog: this.changeLog,
 			eventBus: this.eventBus,
 			scopes: this.sharedScopes,
+			_systemBypassToken: this._bypassToken,
+			_eventMeta: {
+				householdId,
+				spaceKind: null,
+				collaborationId: null,
+				sharedSelector: scope,
+			},
 		});
 	}
 
 	forSpace(spaceId: string, userId: string): ScopedDataStore {
+		// Actor-vs-target check
+		const actorId = getCurrentUserId();
+		if (actorId !== undefined && actorId !== userId) {
+			throw new UserBoundaryError(actorId, userId);
+		}
+
 		// Validate space ID format
 		if (!SPACE_ID_PATTERN.test(spaceId)) {
 			throw new SpaceMembershipError(spaceId, userId);
@@ -107,7 +171,31 @@ export class DataStoreServiceImpl implements DataStoreService {
 			throw new SpaceMembershipError(spaceId, userId);
 		}
 
-		const baseDir = join(this.dataDir, 'spaces', spaceId, this.appId);
+		// Resolve space definition for kind-based routing
+		const spaceDef = this.spaceService?.getSpace(spaceId) ?? null;
+		const spaceKind = spaceDef?.kind ?? null;
+
+		let baseDir: string;
+		let collaborationId: string | null = null;
+		let householdId: string | null = null;
+
+		if (spaceKind === 'collaboration') {
+			// Collaboration space: cross-household, no household check
+			// Assert user is a member (already checked via isMember above)
+			baseDir = join(this.dataDir, 'collaborations', spaceId, this.appId);
+			collaborationId = spaceId;
+		} else if (spaceKind === 'household' && spaceDef?.householdId) {
+			// Household space: assert the space's household matches the user's household
+			householdId = spaceDef.householdId;
+			if (this._householdService) {
+				this._householdService.assertUserCanAccessHousehold(userId, householdId);
+			}
+			baseDir = join(this.dataDir, 'households', householdId, 'spaces', spaceId, this.appId);
+		} else {
+			// Legacy space (no kind field) or household space without householdId: use old path layout
+			baseDir = join(this.dataDir, 'spaces', spaceId, this.appId);
+		}
+
 		return new ScopedStore({
 			baseDir,
 			appId: this.appId,
@@ -116,9 +204,44 @@ export class DataStoreServiceImpl implements DataStoreService {
 			spaceId,
 			eventBus: this.eventBus,
 			scopes: this.sharedScopes,
+			_systemBypassToken: this._bypassToken,
+			_eventMeta: {
+				householdId,
+				spaceKind,
+				collaborationId,
+				sharedSelector: null,
+			},
+		});
+	}
+
+	/**
+	 * Get a store rooted at data/system/ with system bypass enabled.
+	 * Only accepts the genuine SYSTEM_BYPASS_TOKEN singleton symbol.
+	 * NOT on the DataStoreService public interface — apps cannot call this.
+	 */
+	forSystem(token: symbol): ScopedDataStore {
+		if (token !== SYSTEM_BYPASS_TOKEN) {
+			throw new Error('Invalid system bypass token');
+		}
+		const baseDir = join(this.dataDir, 'system');
+		return new ScopedStore({
+			baseDir,
+			appId: this.appId,
+			userId: null,
+			changeLog: this.changeLog,
+			eventBus: this.eventBus,
+			scopes: [],
+			_systemBypassToken: SYSTEM_BYPASS_TOKEN,
+			_eventMeta: {
+				householdId: null,
+				spaceKind: null,
+				collaborationId: null,
+				sharedSelector: null,
+			},
 		});
 	}
 }
 
 export { ChangeLog } from './change-log.js';
 export { PathTraversalError, ScopeViolationError } from './paths.js';
+export { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';

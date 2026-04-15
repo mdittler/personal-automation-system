@@ -10,6 +10,7 @@ import type { Logger } from 'pino';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../../services/data-store/index.js';
 import { PathTraversalError, ScopeViolationError } from '../../services/data-store/index.js';
+import { SYSTEM_BYPASS_TOKEN } from '../../services/data-store/system-bypass-token.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { EventBusService } from '../../types/events.js';
@@ -92,6 +93,7 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 		try {
 			// Create a DataStore scoped to the requested appId.
 			// API is trusted — no manifest scope enforcement needed.
+			// SYSTEM_BYPASS_TOKEN disables scope enforcement for this trusted caller.
 			const dataStore = new DataStoreServiceImpl({
 				dataDir,
 				appId,
@@ -100,6 +102,7 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 				changeLog,
 				spaceService,
 				eventBus,
+				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 
 			let store: ReturnType<typeof dataStore.forUser>;

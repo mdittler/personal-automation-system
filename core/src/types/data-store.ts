@@ -72,4 +72,12 @@ export interface ChangeLogEntry {
 	userId: string;
 	/** Space ID if the operation was within a shared space. */
 	spaceId?: string;
+	/** Household ID for this data; omitted for collaboration + system scopes. */
+	householdId?: string;
+	/** Space kind discriminant; omitted for non-space scopes. */
+	spaceKind?: string;
+	/** Collaboration space ID when scope === 'collaboration'; omitted otherwise. */
+	collaborationId?: string;
+	/** The scope argument passed to forShared(); omitted for non-shared scopes. */
+	sharedSelector?: string;
 }
