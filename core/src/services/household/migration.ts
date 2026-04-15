@@ -24,7 +24,7 @@
 import { mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { cp } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { loadSystemConfig } from '../config/index.js';
 import { syncUsersToConfig } from '../config/config-writer.js';
 import { createMigrationBackup, type MigrationBackupError } from './migration-backup.js';
@@ -42,14 +42,12 @@ export type MigrationErrorCode =
 
 export class HouseholdMigrationError extends Error {
 	override readonly name = 'HouseholdMigrationError';
-	override readonly cause?: unknown;
 	constructor(
 		public readonly code: MigrationErrorCode,
 		message: string,
 		cause?: unknown,
 	) {
-		super(message);
-		this.cause = cause;
+		super(message, { cause });
 	}
 }
 
@@ -349,8 +347,6 @@ export async function runHouseholdMigration(deps: MigrationDeps): Promise<void> 
 	try {
 		const spacesFileContent = await readFile(spacesYamlPath, 'utf-8').catch(() => null);
 		if (spacesFileContent !== null) {
-			// Parse YAML inline to avoid circular dep on yaml utils
-			const { parse } = await import('yaml');
 			const parsed = parse(spacesFileContent) as Record<string, unknown> | null;
 			if (parsed && typeof parsed === 'object') {
 				const updated: Record<string, unknown> = {};
