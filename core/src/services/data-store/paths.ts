@@ -35,7 +35,10 @@ export function resolveScopedPath(baseDir: string, relativePath: string): string
 	if (householdMatch) {
 		const hhId = householdMatch[1] ?? null;
 		// Find the households/<hhId>/ prefix in the base path (trim trailing sep from matched group)
-		const hhRoot = resolvedBase.slice(0, resolvedBase.indexOf(householdMatch[0]) + householdMatch[0].length - 1);
+		const hhRoot = resolvedBase.slice(
+			0,
+			resolvedBase.indexOf(householdMatch[0]) + householdMatch[0].length - 1,
+		);
 		const hhRel = relative(hhRoot, resolvedPath);
 		if (hhRel.startsWith('..') || hhRel.startsWith(sep) || hhRel.startsWith('/')) {
 			throw new HouseholdBoundaryError(
@@ -112,7 +115,7 @@ export function findMatchingScope(
 		// Re-append trailing / if the original scope had it (directory semantics)
 		const scopeDir =
 			scope.path.endsWith('/') && !normalizedScope.endsWith('/')
-				? normalizedScope + '/'
+				? `${normalizedScope}/`
 				: normalizedScope;
 
 		// Exact file match

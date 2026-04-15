@@ -82,8 +82,8 @@ export function parseFileContent(content: string): ParsedContent {
   // Dates
   const dateVals = [toDateString(meta.date), toDateString(meta.created)].filter(Boolean) as string[];
   const dates = {
-    earliest: dateVals.length ? [...dateVals].sort()[0]! : null,
-    latest: dateVals.length ? [...dateVals].sort().reverse()[0]! : null,
+    earliest: dateVals.length ? ([...dateVals].sort()[0] ?? null) : null,
+    latest: dateVals.length ? ([...dateVals].sort().reverse()[0] ?? null) : null,
   };
 
   // Relationships from related and source fields
@@ -141,8 +141,8 @@ export function resolveHouseholdMeta(relativePath: string): HouseholdMeta {
   const parts = relativePath.split('/');
 
   if (parts[0] === 'households' && parts.length >= 3) {
-    const hh = parts[1]!;
-    const segment2 = parts[2]!;
+    const hh = parts[1] ?? '';
+    const segment2 = parts[2] ?? '';
 
     if (segment2 === 'spaces' && parts.length >= 4) {
       // households/<hh>/spaces/<sId>/...
@@ -153,7 +153,7 @@ export function resolveHouseholdMeta(relativePath: string): HouseholdMeta {
   }
 
   if (parts[0] === 'collaborations' && parts.length >= 3) {
-    const sId = parts[1]!;
+    const sId = parts[1] ?? '';
     return { householdId: null, spaceKind: 'collaboration', collaborationId: sId };
   }
 

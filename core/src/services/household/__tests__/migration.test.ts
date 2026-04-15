@@ -125,9 +125,13 @@ describe('runHouseholdMigration — happy path (existing install)', () => {
 		await writeFile(join(systemDir, 'spaces.yaml'), spacesYaml, 'utf-8');
 
 		// pas.yaml with one admin user (no householdId)
-		await writeFile(configPath, makePasYaml({
-			users: [{ id: 'u1', name: 'Admin User', is_admin: true, enabled_apps: ['*'] }],
-		}), 'utf-8');
+		await writeFile(
+			configPath,
+			makePasYaml({
+				users: [{ id: 'u1', name: 'Admin User', is_admin: true, enabled_apps: ['*'] }],
+			}),
+			'utf-8',
+		);
 
 		await runHouseholdMigration({ dataDir, configPath });
 
@@ -144,7 +148,15 @@ describe('runHouseholdMigration — happy path (existing install)', () => {
 		expect(await readFile(pricesPath, 'utf-8')).toBe('# Prices');
 
 		// Space directory moved
-		const recipesPath = join(dataDir, 'households', 'default', 'spaces', 's1', 'food', 'recipes.md');
+		const recipesPath = join(
+			dataDir,
+			'households',
+			'default',
+			'spaces',
+			's1',
+			'food',
+			'recipes.md',
+		);
 		expect(await pathExists(recipesPath)).toBe(true);
 		expect(await readFile(recipesPath, 'utf-8')).toBe('# Recipes');
 
@@ -155,30 +167,30 @@ describe('runHouseholdMigration — happy path (existing install)', () => {
 		// households.yaml written
 		const householdsRaw = await readFile(join(systemDir, 'households.yaml'), 'utf-8');
 		const households = parse(householdsRaw) as Record<string, unknown>;
-		const defaultHh = households['default'] as Record<string, unknown>;
+		const defaultHh = households.default as Record<string, unknown>;
 		expect(defaultHh).toBeDefined();
-		expect(defaultHh['id']).toBe('default');
-		expect(defaultHh['name']).toBe('Default Household');
-		expect(Array.isArray(defaultHh['adminUserIds'])).toBe(true);
-		expect((defaultHh['adminUserIds'] as string[])).toContain('u1');
+		expect(defaultHh.id).toBe('default');
+		expect(defaultHh.name).toBe('Default Household');
+		expect(Array.isArray(defaultHh.adminUserIds)).toBe(true);
+		expect(defaultHh.adminUserIds as string[]).toContain('u1');
 
 		// spaces.yaml updated with kind and householdId
 		const spacesRaw = await readFile(join(systemDir, 'spaces.yaml'), 'utf-8');
 		const spaces = parse(spacesRaw) as Record<string, Record<string, unknown>>;
-		expect(spaces['s1']?.['kind']).toBe('household');
-		expect(spaces['s1']?.['householdId']).toBe('default');
+		expect(spaces.s1?.kind).toBe('household');
+		expect(spaces.s1?.householdId).toBe('default');
 
 		// pas.yaml updated with householdId
 		const pasRaw = await readFile(configPath, 'utf-8');
 		const pas = parse(pasRaw) as { users: Array<Record<string, unknown>> };
-		expect(pas.users[0]?.['household_id']).toBe('default');
+		expect(pas.users[0]?.household_id).toBe('default');
 
 		// Marker written with correct shape
 		expect(await pathExists(join(systemDir, '.household-migration-v1'))).toBe(true);
 		const markerRaw = await readFile(join(systemDir, '.household-migration-v1'), 'utf-8');
 		const marker = JSON.parse(markerRaw) as Record<string, unknown>;
-		expect(marker['version']).toBe(1);
-		expect(typeof marker['timestamp']).toBe('string');
+		expect(marker.version).toBe(1);
+		expect(typeof marker.timestamp).toBe('string');
 
 		// Backup created as a sibling of dataDir
 		const siblings = await readdir(tempRoot);
@@ -229,7 +241,7 @@ describe('runHouseholdMigration — fresh install', () => {
 		expect(await pathExists(join(systemDir, '.household-migration-v1'))).toBe(true);
 		const markerRaw = await readFile(join(systemDir, '.household-migration-v1'), 'utf-8');
 		const marker = JSON.parse(markerRaw) as Record<string, unknown>;
-		expect(marker['note']).toMatch(/fresh install/i);
+		expect(marker.note).toMatch(/fresh install/i);
 
 		// No backup created (no siblings matching backup prefix)
 		const siblings = await readdir(tempRoot);

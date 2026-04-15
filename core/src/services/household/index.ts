@@ -373,13 +373,13 @@ function isValidHouseholdEntry(key: string, value: unknown): boolean {
 	if (typeof value !== 'object' || value === null) return false;
 	const v = value as Record<string, unknown>;
 	return (
-		typeof v['id'] === 'string' &&
-		v['id'] === key &&
-		SAFE_SEGMENT.test(v['id']) &&
-		typeof v['name'] === 'string' &&
-		v['name'].length > 0 &&
-		typeof v['createdAt'] === 'string' &&
-		typeof v['createdBy'] === 'string' &&
-		Array.isArray(v['adminUserIds'])
+		typeof v.id === 'string' &&
+		v.id === key &&
+		SAFE_SEGMENT.test(v.id) &&
+		typeof v.name === 'string' &&
+		v.name.length > 0 &&
+		typeof v.createdAt === 'string' &&
+		typeof v.createdBy === 'string' &&
+		Array.isArray(v.adminUserIds)
 	);
 }

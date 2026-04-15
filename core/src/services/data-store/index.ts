@@ -23,7 +23,7 @@ import type { ManifestDataScope } from '../../types/manifest.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
 import { getCurrentUserId } from '../context/request-context.js';
 import type { HouseholdService } from '../household/index.js';
-import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
+import { UserBoundaryError } from '../household/index.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { ChangeLog } from './change-log.js';
 import { ScopedStore } from './scoped-store.js';
@@ -129,9 +129,11 @@ export class DataStoreServiceImpl implements DataStoreService {
 
 	forShared(scope: string): SharedDataStore {
 		// Resolve household-aware path from current request context
-		const householdId = this._householdService
-			? (getCurrentUserId() ? this._householdService.getHouseholdForUser(getCurrentUserId()!) : null)
-			: null;
+		const currentUserId = getCurrentUserId();
+		const householdId =
+			this._householdService && currentUserId
+				? this._householdService.getHouseholdForUser(currentUserId)
+				: null;
 
 		const baseDir = householdId
 			? join(this.dataDir, 'households', householdId, 'shared', this.appId)

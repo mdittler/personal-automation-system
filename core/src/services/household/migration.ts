@@ -25,9 +25,9 @@ import { mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from 'no
 import { cp } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parse, stringify } from 'yaml';
-import { loadSystemConfig } from '../config/index.js';
 import { syncUsersToConfig } from '../config/config-writer.js';
-import { createMigrationBackup, type MigrationBackupError } from './migration-backup.js';
+import { loadSystemConfig } from '../config/index.js';
+import { createMigrationBackup } from './migration-backup.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -96,7 +96,7 @@ async function ensureDir(dir: string): Promise<void> {
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
 	const dir = dirname(filePath);
 	await ensureDir(dir);
-	const tmp = filePath + '.tmp-' + Date.now().toString(36);
+	const tmp = `${filePath}.tmp-${Date.now().toString(36)}`;
 	await writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8');
 	await rename(tmp, filePath);
 }
@@ -108,7 +108,7 @@ async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
 async function atomicWriteYaml(filePath: string, data: unknown): Promise<void> {
 	const dir = dirname(filePath);
 	await ensureDir(dir);
-	const tmp = filePath + '.tmp-' + Date.now().toString(36);
+	const tmp = `${filePath}.tmp-${Date.now().toString(36)}`;
 	await writeFile(tmp, stringify(data), 'utf-8');
 	await rename(tmp, filePath);
 }
@@ -238,16 +238,15 @@ export async function runHouseholdMigration(deps: MigrationDeps): Promise<void> 
 		createdBy = admins[0]?.id ?? cfg.users[0]?.id ?? 'unknown';
 	} catch (err) {
 		// Non-fatal: we'll still migrate the data and write an empty household
-		log.warn(
-			'Could not load admin users from config — proceeding with empty adminUserIds',
-			err,
-		);
+		log.warn('Could not load admin users from config — proceeding with empty adminUserIds', err);
 	}
 
 	// ------------------------------------------------------------------
 	// Step 5: Create data/system/households.yaml
 	// ------------------------------------------------------------------
-	log.info(`Creating default household: createdBy=${createdBy} adminUserIds=${adminUserIds.join(',')}`);
+	log.info(
+		`Creating default household: createdBy=${createdBy} adminUserIds=${adminUserIds.join(',')}`,
+	);
 	await ensureDir(systemDir);
 
 	const householdsPath = join(systemDir, 'households.yaml');
@@ -287,11 +286,7 @@ export async function runHouseholdMigration(deps: MigrationDeps): Promise<void> 
 					log.info('Moved users/shared → households/default/shared');
 				} else {
 					// Move user dir: data/users/<uid>/ → data/households/default/users/<uid>/
-					await moveDir(
-						join(usersDir, entry.name),
-						join(defaultUsersDir, entry.name),
-						_rename,
-					);
+					await moveDir(join(usersDir, entry.name), join(defaultUsersDir, entry.name), _rename);
 					log.info(`Moved user directory: ${entry.name}`);
 					movedUsersCount++;
 				}
@@ -312,11 +307,7 @@ export async function runHouseholdMigration(deps: MigrationDeps): Promise<void> 
 			for (const entry of spaceEntries) {
 				if (!entry.isDirectory()) continue;
 				// Move: data/spaces/<sId>/ → data/households/default/spaces/<sId>/
-				await moveDir(
-					join(spacesDir, entry.name),
-					join(defaultSpacesDir, entry.name),
-					_rename,
-				);
+				await moveDir(join(spacesDir, entry.name), join(defaultSpacesDir, entry.name), _rename);
 				log.info(`Moved space directory: ${entry.name}`);
 				movedSpacesCount++;
 			}
