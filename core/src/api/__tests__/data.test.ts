@@ -362,3 +362,99 @@ describe('API Data Route', () => {
 		expect(res.json().ok).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// C2 / R2: POST /api/data — household-aware write (post-migration)
+// ---------------------------------------------------------------------------
+
+describe('API Data Route — household-aware write (C2/R2)', () => {
+	let app: ReturnType<typeof Fastify>;
+	let dataDir: string;
+	let changeLog: ChangeLog;
+
+	const householdService = {
+		getHouseholdForUser: (id: string) => (id === 'user1' ? 'hh-alpha' : null),
+	};
+
+	beforeEach(async () => {
+		dataDir = await mkdtemp(join(tmpdir(), 'pas-api-data-hh-'));
+		changeLog = new ChangeLog(dataDir);
+
+		app = Fastify({ logger: false });
+		await registerApiRoutes(app, {
+			apiToken: API_TOKEN,
+			rateLimiter: new RateLimiter({ maxAttempts: 100, windowMs: 60_000 }),
+			dataDir,
+			changeLog,
+			spaceService: createMockSpaceService({ family: ['user1'] }) as any,
+			userManager: createMockUserManager() as any,
+			router: createMockRouter() as any,
+			cronManager: {
+				getJobDetails: vi.fn(() => []),
+				register: vi.fn(),
+				start: vi.fn(),
+				stop: vi.fn(),
+				unregister: vi.fn(),
+				getRegisteredJobs: vi.fn(() => []),
+			} as any,
+			timezone: 'America/New_York',
+			eventBus: createMockEventBus(),
+			reportService: {
+				listReports: vi.fn(() => []),
+				getReport: vi.fn(),
+				run: vi.fn(),
+				saveReport: vi.fn(),
+				deleteReport: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			alertService: {
+				listAlerts: vi.fn(() => []),
+				getAlert: vi.fn(),
+				evaluate: vi.fn(),
+				saveAlert: vi.fn(),
+				deleteAlert: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as any,
+			llm: {
+				complete: vi.fn(() => 'mock response'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			} as any,
+			logger,
+			// Post-migration: householdService routes files to households/<hh>/
+			householdService: householdService as any,
+		});
+	});
+
+	afterEach(async () => {
+		await app.close();
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	function post(body: Record<string, unknown>) {
+		return app.inject({
+			method: 'POST',
+			url: '/api/data',
+			headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+			payload: body,
+		});
+	}
+
+	it('writes user file to households/<hh>/users/<u>/<app>/ path when householdService is wired', async () => {
+		const res = await post({
+			userId: 'user1',
+			appId: 'notes',
+			path: 'test.md',
+			content: 'Household content',
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.json().ok).toBe(true);
+
+		// File must be at the household-aware path, NOT the legacy path
+		const hhPath = join(dataDir, 'households', 'hh-alpha', 'users', 'user1', 'notes', 'test.md');
+		const content = await readFile(hhPath, 'utf-8');
+		expect(content).toBe('Household content');
+	});
+});

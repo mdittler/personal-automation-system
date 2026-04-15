@@ -48,8 +48,8 @@ export interface ApiOptions {
 	alertService: AlertService;
 	telegram: TelegramService;
 	llm: LLMService;
-	/** Optional — when present, householdId is derived for message dispatch context. */
-	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/** Optional — when present, enables household-aware data routing for /api/data routes and message dispatch context. */
+	householdService?: HouseholdService;
 }
 
 export async function registerApiRoutes(
@@ -82,8 +82,16 @@ export async function registerApiRoutes(
 			api.addHook('onRequest', authHook);
 
 			// Phase 24-25 routes
-			registerDataRoute(api, { dataDir, changeLog, spaceService, userManager, eventBus, logger });
-			registerDataReadRoute(api, { dataDir, spaceService, userManager, logger });
+			registerDataRoute(api, {
+				dataDir,
+				changeLog,
+				spaceService,
+				userManager,
+				eventBus,
+				logger,
+				householdService,
+			});
+			registerDataReadRoute(api, { dataDir, spaceService, userManager, logger, householdService });
 			registerMessagesRoute(api, { router, userManager, logger, householdService });
 			registerSchedulesRoute(api, { cronManager, timezone, logger });
 

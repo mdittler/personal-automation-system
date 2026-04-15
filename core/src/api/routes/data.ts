@@ -11,6 +11,8 @@ import type { ChangeLog } from '../../services/data-store/change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../../services/data-store/index.js';
 import { PathTraversalError, ScopeViolationError } from '../../services/data-store/index.js';
 import { SYSTEM_BYPASS_TOKEN } from '../../services/data-store/system-bypass-token.js';
+import { requestContext } from '../../services/context/request-context.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { EventBusService } from '../../types/events.js';
@@ -26,6 +28,15 @@ export interface DataRouteOptions {
 	userManager: UserManager;
 	eventBus?: EventBusService;
 	logger: Logger;
+	/**
+	 * Optional — when present, enables household-aware path routing.
+	 * Also satisfies DataStoreServiceImpl's fail-closed actor check by injecting a
+	 * synthetic requestContext for the target userId. This is NOT authentication —
+	 * the route is a privileged shared-admin API gated by a single bearer token.
+	 * The `userId` in the request body is a target parameter, not an authenticated actor.
+	 * Per-user API auth is deferred to D5b.
+	 */
+	householdService?: HouseholdService;
 }
 
 interface DataRequestBody {
@@ -38,7 +49,8 @@ interface DataRequestBody {
 }
 
 export function registerDataRoute(server: FastifyInstance, options: DataRouteOptions): void {
-	const { dataDir, changeLog, spaceService, userManager, eventBus, logger } = options;
+	const { dataDir, changeLog, spaceService, userManager, eventBus, logger, householdService } =
+		options;
 
 	server.post('/data', async (request, reply) => {
 		const body = request.body as DataRequestBody | undefined;
@@ -94,6 +106,14 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 			// Create a DataStore scoped to the requested appId.
 			// API is trusted — no manifest scope enforcement needed.
 			// SYSTEM_BYPASS_TOKEN disables scope enforcement for this trusted caller.
+			//
+			// When householdService is wired (post-migration), we inject a synthetic
+			// requestContext so DataStoreServiceImpl's fail-closed actor check is satisfied.
+			// NOTE: This is NOT authentication — this is a privileged shared-admin API
+			// gated by a single bearer token. The userId here is a target parameter.
+			// Per-user API auth is deferred to D5b.
+			const householdId = householdService?.getHouseholdForUser(userId) ?? undefined;
+
 			const dataStore = new DataStoreServiceImpl({
 				dataDir,
 				appId,
@@ -102,21 +122,24 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 				changeLog,
 				spaceService,
 				eventBus,
+				householdService,
 				_systemBypassToken: SYSTEM_BYPASS_TOKEN,
 			});
 
-			let store: ReturnType<typeof dataStore.forUser>;
-			if (spaceId) {
-				store = dataStore.forSpace(spaceId, userId);
-			} else {
-				store = dataStore.forUser(userId);
-			}
+			await requestContext.run({ userId, householdId }, async () => {
+				let store: ReturnType<typeof dataStore.forUser>;
+				if (spaceId) {
+					store = dataStore.forSpace(spaceId, userId);
+				} else {
+					store = dataStore.forUser(userId);
+				}
 
-			if (mode === 'append') {
-				await store.append(path, content);
-			} else {
-				await store.write(path, content);
-			}
+				if (mode === 'append') {
+					await store.append(path, content);
+				} else {
+					await store.write(path, content);
+				}
+			});
 
 			logger.info({ userId, appId, path, mode, spaceId }, 'API data write');
 

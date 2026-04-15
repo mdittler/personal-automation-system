@@ -319,3 +319,144 @@ describe('API Data Read Route', () => {
 		expect(res.json().error).toContain('size');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// C3 / R2: GET /api/data — household-aware read (post-migration)
+// ---------------------------------------------------------------------------
+
+describe('API Data Read Route — household-aware read (C3/R2)', () => {
+	let app: ReturnType<typeof Fastify>;
+	let dataDir: string;
+
+	const householdService = {
+		getHouseholdForUser: (id: string) => (id === 'user1' ? 'hh-alpha' : null),
+	};
+
+	function createSpaceServiceWithKinds() {
+		return {
+			isMember: vi.fn((spaceId: string, userId: string) =>
+				['family', 'collab-1'].includes(spaceId) && userId === 'user1',
+			),
+			getSpace: vi.fn((spaceId: string) => {
+				if (spaceId === 'family') {
+					return { id: 'family', kind: 'household', householdId: 'hh-alpha' };
+				}
+				if (spaceId === 'collab-1') {
+					return { id: 'collab-1', kind: 'collaboration' };
+				}
+				return null;
+			}),
+		};
+	}
+
+	beforeEach(async () => {
+		dataDir = await mkdtemp(join(tmpdir(), 'pas-api-read-hh-'));
+
+		app = Fastify({ logger: false });
+		await registerApiRoutes(app, {
+			apiToken: API_TOKEN,
+			rateLimiter: new RateLimiter({ maxAttempts: 100, windowMs: 60_000 }),
+			dataDir,
+			changeLog: { record: vi.fn(), getLogPath: vi.fn() } as any,
+			spaceService: createSpaceServiceWithKinds() as any,
+			userManager: createMockUserManager() as any,
+			router: createMockRouter() as any,
+			cronManager: createMockCronManager() as any,
+			timezone: 'America/New_York',
+			reportService: {
+				listReports: vi.fn(() => []),
+				getReport: vi.fn(),
+				run: vi.fn(),
+				saveReport: vi.fn(),
+				deleteReport: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			alertService: {
+				listAlerts: vi.fn(() => []),
+				getAlert: vi.fn(),
+				evaluate: vi.fn(),
+				saveAlert: vi.fn(),
+				deleteAlert: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as any,
+			llm: {
+				complete: vi.fn(() => 'mock response'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			} as any,
+			logger,
+			householdService: householdService as any,
+		});
+	});
+
+	afterEach(async () => {
+		await app.close();
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	function get(params: Record<string, string>) {
+		const searchParams = new URLSearchParams(params);
+		return app.inject({
+			method: 'GET',
+			url: `/api/data?${searchParams}`,
+			headers: { authorization: `Bearer ${API_TOKEN}` },
+		});
+	}
+
+	it('reads user file from households/<hh>/users/<u>/<app>/ path when householdService is wired', async () => {
+		const hhPath = join(dataDir, 'households', 'hh-alpha', 'users', 'user1', 'notes');
+		await mkdir(hhPath, { recursive: true });
+		await writeFile(join(hhPath, 'data.md'), 'Household data');
+
+		const res = await get({ userId: 'user1', appId: 'notes', path: 'data.md' });
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		expect(body.ok).toBe(true);
+		expect(body.type).toBe('file');
+		expect(body.content).toBe('Household data');
+	});
+
+	it('reads household-space file from households/<hh>/spaces/<s>/<app>/ path', async () => {
+		const spacePath = join(
+			dataDir,
+			'households',
+			'hh-alpha',
+			'spaces',
+			'family',
+			'notes',
+		);
+		await mkdir(spacePath, { recursive: true });
+		await writeFile(join(spacePath, 'shared.md'), 'Household space data');
+
+		const res = await get({
+			userId: 'user1',
+			appId: 'notes',
+			path: 'shared.md',
+			spaceId: 'family',
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		expect(body.ok).toBe(true);
+		expect(body.type).toBe('file');
+		expect(body.content).toBe('Household space data');
+	});
+
+	it('reads collaboration-space file from collaborations/<s>/<app>/ path', async () => {
+		const collabPath = join(dataDir, 'collaborations', 'collab-1', 'notes');
+		await mkdir(collabPath, { recursive: true });
+		await writeFile(join(collabPath, 'shared.md'), 'Collab data');
+
+		const res = await get({
+			userId: 'user1',
+			appId: 'notes',
+			path: 'shared.md',
+			spaceId: 'collab-1',
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		expect(body.ok).toBe(true);
+		expect(body.type).toBe('file');
+		expect(body.content).toBe('Collab data');
+	});
+});

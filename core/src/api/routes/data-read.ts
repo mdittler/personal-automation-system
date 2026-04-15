@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { PathTraversalError, resolveScopedPath } from '../../services/data-store/paths.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
@@ -25,6 +26,50 @@ export interface DataReadRouteOptions {
 	spaceService: SpaceService;
 	userManager: UserManager;
 	logger: Logger;
+	/**
+	 * Optional — when present, user reads route to households/<hh>/users/<u>/<app>/
+	 * and space reads route based on space kind (household or collaboration).
+	 * This is NOT authentication — the route is a privileged shared-admin API.
+	 * Per-user API auth is deferred to D5b.
+	 */
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+}
+
+/**
+ * Resolve the base directory for a read request, accounting for household routing.
+ * Private to this module — do not expose on any public interface.
+ */
+function resolveApiReadBaseDir(opts: {
+	dataDir: string;
+	appId: string;
+	userId: string;
+	spaceId?: string;
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	spaceService: SpaceService;
+}): string {
+	if (opts.spaceId) {
+		const spaceDef = opts.spaceService.getSpace(opts.spaceId) ?? null;
+		if (spaceDef?.kind === 'household' && spaceDef.householdId) {
+			return join(
+				opts.dataDir,
+				'households',
+				spaceDef.householdId,
+				'spaces',
+				opts.spaceId,
+				opts.appId,
+			);
+		}
+		if (spaceDef?.kind === 'collaboration') {
+			return join(opts.dataDir, 'collaborations', opts.spaceId, opts.appId);
+		}
+		// Legacy / unknown kind — transitional fallback
+		return join(opts.dataDir, 'spaces', opts.spaceId, opts.appId);
+	}
+	const hhId = opts.householdService?.getHouseholdForUser(opts.userId) ?? null;
+	if (hhId) {
+		return join(opts.dataDir, 'households', hhId, 'users', opts.userId, opts.appId);
+	}
+	return join(opts.dataDir, 'users', opts.userId, opts.appId);
 }
 
 interface DataReadQuery {
@@ -38,7 +83,7 @@ export function registerDataReadRoute(
 	server: FastifyInstance,
 	options: DataReadRouteOptions,
 ): void {
-	const { dataDir, spaceService, userManager, logger } = options;
+	const { dataDir, spaceService, userManager, logger, householdService } = options;
 
 	server.get('/data', async (request, reply) => {
 		const query = request.query as DataReadQuery;
@@ -79,19 +124,22 @@ export function registerDataReadRoute(
 		}
 
 		try {
-			// Resolve the base directory based on scope
-			let baseDir: string;
-			if (spaceId) {
-				// Validate space membership
-				if (!spaceService.isMember(spaceId, userId)) {
-					return reply
-						.status(403)
-						.send({ ok: false, error: 'Not a member of the requested space.' });
-				}
-				baseDir = join(dataDir, 'spaces', spaceId, appId);
-			} else {
-				baseDir = join(dataDir, 'users', userId, appId);
+			// Validate space membership before resolving path
+			if (spaceId && !spaceService.isMember(spaceId, userId)) {
+				return reply
+					.status(403)
+					.send({ ok: false, error: 'Not a member of the requested space.' });
 			}
+
+			// Resolve the base directory — household-aware when householdService is wired
+			const baseDir = resolveApiReadBaseDir({
+				dataDir,
+				appId,
+				userId,
+				spaceId,
+				householdService,
+				spaceService,
+			});
 
 			// Resolve and validate path (throws on traversal)
 			const fullPath = resolveScopedPath(baseDir, path);
