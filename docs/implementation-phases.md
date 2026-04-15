@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
-| **Status** | Phases 0–28, D1–D3 complete (except 27A-Vaults, 27B, 27C planned) |
+| **Status** | Phases 0–28, D1–D4 complete (except 27A-Vaults, 27B, 27C planned) |
 | **Last Updated** | 2026-04-14 |
 
 ---
@@ -61,6 +61,7 @@
 | D2b | NL Data Query Service | **Complete** | ~10 | DataQueryService + chatbot wiring, YES_DATA classifier, realpath hardening, /ask LLM classifier |
 | D2c | Interaction Context & /edit | **Complete** | ~18 | InteractionContextService, context-aware routing, food interaction recording, EditService, /edit command |
 | D3 | Security Hardening | **Complete** | ~12 | Secure cookie (auth+CSRF), inline JS→data-attributes, target validation, CSRF in spaces forms, Docker dep gap, cookie reissue upgrade |
+| D4 | Concurrency & Ops | **Complete** | ~40 | Central FileMutex (withFileLock/withMultiFileLock), 6 food store lock wrappers + 28 RMW call sites, EditService PathLock migrated to FileMutex, archivePurchased same-day merge, /health/live + /health/ready endpoints with 4 checks, BackupService (tar.gz, rolling retention), deployment docs |
 
 ### Dependency Graph
 
