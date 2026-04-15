@@ -16,7 +16,7 @@
  */
 
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type pino from 'pino';
 import { atomicWrite } from '../../utils/file.js';
 import { withFileLock } from '../../utils/file-mutex.js';
@@ -355,7 +355,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 
 		// Ensure system dir exists (once per process lifetime), then write atomically under file lock
 		if (!this.dirEnsured) {
-			await mkdir(join(this.persistPath, '..'), { recursive: true });
+			await mkdir(dirname(this.persistPath), { recursive: true });
 			this.dirEnsured = true;
 		}
 		await withFileLock(this.persistPath, () => this.writer(this.persistPath, json));
