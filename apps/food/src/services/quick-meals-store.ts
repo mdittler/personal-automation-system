@@ -3,7 +3,7 @@ import { parse, stringify } from 'yaml';
 import { z } from 'zod';
 import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import type { QuickMealTemplate } from '../types.js';
-import { AsyncLock } from '../utils/async-lock.js';
+import { AsyncLock } from '@pas/core/utils/async-lock';
 
 const QUICK_MEALS_FILE = 'quick-meals.yaml';
 const SAFE_SEGMENT = /^[a-z0-9][a-z0-9-]*$/;

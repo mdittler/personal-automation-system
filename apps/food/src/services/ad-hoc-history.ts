@@ -27,7 +27,7 @@ import {
 	stripFrontmatter,
 	buildAppTags,
 } from '@pas/core/utils/frontmatter';
-import { AsyncLock } from '../utils/async-lock.js';
+import { AsyncLock } from '@pas/core/utils/async-lock';
 import { STOP_WORDS } from '../utils/stopwords.js';
 
 const FILE = 'ad-hoc-history.yaml';

@@ -26,6 +26,7 @@ import { atomicWrite } from '../../utils/file.js';
 import { generateDiff } from '../../utils/diff.js';
 import { findMatchingScope } from '../data-store/paths.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
+import { withFileLock } from '../../utils/file-mutex.js';
 import { EditLog } from './edit-log.js';
 
 export { EditLog } from './edit-log.js';
@@ -100,37 +101,6 @@ export interface EditServiceOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Per-path lock implementation (simple Map<string, Promise> queue)
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal per-path async lock.
- * Serializes concurrent confirm operations on the same file path.
- */
-class PathLock {
-  private readonly locks = new Map<string, Promise<void>>();
-
-  async acquire<T>(path: string, fn: () => Promise<T>): Promise<T> {
-    const existing = this.locks.get(path) ?? Promise.resolve();
-    let resolveLock!: () => void;
-    const lockPromise = new Promise<void>((r) => { resolveLock = r; });
-    // Store the combined promise so we can compare against it in finally
-    const combined = existing.then(() => lockPromise);
-    this.locks.set(path, combined);
-    try {
-      await existing;
-      return await fn();
-    } finally {
-      resolveLock();
-      // Cleanup: if no waiters remain (combined is still the current entry), remove the entry
-      if (this.locks.get(path) === combined) {
-        this.locks.delete(path);
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
@@ -143,7 +113,6 @@ export class EditServiceImpl implements EditService {
   private readonly dataDir: string;
   private readonly logger: AppLogger;
   private readonly editLog: EditLog;
-  private readonly lock = new PathLock();
 
   /** Lazily cached realpath of dataDir. */
   private realDataDir: string | undefined;
@@ -467,7 +436,7 @@ export class EditServiceImpl implements EditService {
     }
 
     // Steps 4-5: Per-path lock, re-read + hash compare, atomic write
-    return this.lock.acquire(realAbsPath, async () => {
+    return withFileLock(realAbsPath, async () => {
       // Step 4: Re-read + hash compare
       let currentContent: string;
       try {

@@ -15,6 +15,14 @@
 			"import": "./dist/types/index.js",
 			"types": "./dist/types/index.d.ts"
 		},
+		"./utils/async-lock": {
+			"import": "./dist/utils/async-lock.js",
+			"types": "./dist/utils/async-lock.d.ts"
+		},
+		"./utils/file-mutex": {
+			"import": "./dist/utils/file-mutex.js",
+			"types": "./dist/utils/file-mutex.d.ts"
+		},
 		"./utils/llm-errors": {
 			"import": "./dist/utils/llm-errors.js",
 			"types": "./dist/utils/llm-errors.d.ts"
