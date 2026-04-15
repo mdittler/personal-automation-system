@@ -257,37 +257,66 @@ describe('InteractionContextService persistence', () => {
 	});
 
 	// ─── Test 10 ──────────────────────────────────────────────────────────────
-	it('records during in-flight flush are captured by a follow-up flush', async () => {
-		// Verify the follow-up flush mechanism: when a record() arrives while
-		// a flush is in-flight, the next _doFlush (triggered by revision >
-		// flushedRevision) captures it, so all data lands on disk.
-		//
-		// We test this end-to-end: record 'first', flush, record 'second' after
-		// the first flush completes (simulating a record that bumped revision
-		// after snapshot), then flush again and verify both entries survive reload.
+	it('records during in-flight flush are captured by automatic follow-up flush', async () => {
+		// Verify the automatic follow-up flush path:
+		// When record() is called WHILE a flush is in-flight (i.e. the writer is
+		// blocked), the post-flush check (revision > flushedRevision) auto-enqueues
+		// a follow-up flush WITHOUT any explicit flush() call, so both entries
+		// land on disk.
+
+		// 1. Create a deferred promise that blocks the first writer call
+		let resolveFirstWrite!: () => void;
+		const blockFirstWrite = new Promise<void>((r) => {
+			resolveFirstWrite = r;
+		});
+
+		let writeCount = 0;
+		// Writer: block on first call, use atomicWrite on subsequent calls
+		const writer = vi.fn().mockImplementation(async (path: string, content: string) => {
+			writeCount++;
+			if (writeCount === 1) {
+				await blockFirstWrite;
+			}
+			await atomicWrite(path, content);
+		});
 
 		const svc = new InteractionContextServiceImpl({
 			dataDir: tempDir,
-			writer: atomicWrite,
+			writer,
 			flushDelayMs: 0,
 		});
 
-		// Record 'first', flush to disk
+		// 2. record() → schedules a debounced flush (flushDelayMs=0, fires on next tick)
 		svc.record('user1', { appId: 'food', action: 'first' });
-		await svc.flush();
 
-		// Record 'second' — this bumps revision above flushedRevision
+		// 3. Yield to the event loop so the debounce timer fires and the first
+		//    _doFlush begins executing — it will block inside the writer
+		await new Promise<void>((r) => setTimeout(r, 10));
+
+		// 4. While first flush is still in-flight (blocked), call record() again.
+		//    This bumps revision above flushedRevision (which is still 0).
 		svc.record('user1', { appId: 'food', action: 'second' });
 
-		// A second flush captures the new entry
-		await svc.flush();
+		// 5. Unblock the first writer — first flush completes, detects
+		//    revision > flushedRevision, and auto-enqueues a follow-up flush
+		resolveFirstWrite();
 
-		// Reload and verify both entries persist
+		// 6. Wait for the write queue to fully drain (first flush + follow-up flush).
+		//    No explicit flush() call is needed — the follow-up is automatic.
+		await new Promise<void>((r) => setTimeout(r, 50));
+
+		// 7. Reload from disk — BOTH entries must be present
 		const b = new InteractionContextServiceImpl({ dataDir: tempDir });
 		await b.loadFromDisk();
 		const actions = b.getRecent('user1').map((e) => e.action);
 		expect(actions).toContain('first');
 		expect(actions).toContain('second');
+
+		// Writer was called at least twice: the first flush plus the automatic
+		// follow-up that fired because revision > flushedRevision after the first
+		// flush completed. (A third write from the debounce timer that record()
+		// schedules is also acceptable — what matters is the follow-up mechanism.)
+		expect(writer.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
 
 	// ─── Test 11 ──────────────────────────────────────────────────────────────

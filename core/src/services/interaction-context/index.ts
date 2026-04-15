@@ -205,7 +205,12 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 				// First run — start empty silently
 				return;
 			}
-			throw err;
+			// Any other I/O error (EACCES, EMFILE, etc.) — log and start empty
+			this.logger?.warn(
+				{ path: this.persistPath, err },
+				'interaction-context: failed to read persistence file; starting empty',
+			);
+			return;
 		}
 
 		let data: unknown;
@@ -246,7 +251,6 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 		}
 
 		const usersMap = users as Record<string, unknown>;
-		const now = this.clock();
 
 		for (const [userId, rawEntries] of Object.entries(usersMap)) {
 			if (!Array.isArray(rawEntries)) continue;
@@ -270,18 +274,21 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 
 			if (valid.length === 0) continue;
 
-			// Prune expired entries
-			const cutoff = now - TTL_MS;
-			const alive = valid.filter((e) => e.timestamp > cutoff);
-			if (alive.length === 0) continue;
-
 			// Enforce buffer cap (keep newest 5 by highest timestamp)
 			const capped =
-				alive.length > BUFFER_SIZE
-					? alive.slice().sort((a, b) => a.timestamp - b.timestamp).slice(-BUFFER_SIZE)
-					: alive;
+				valid.length > BUFFER_SIZE
+					? valid.slice().sort((a, b) => a.timestamp - b.timestamp).slice(-BUFFER_SIZE)
+					: valid;
 
 			this.store.set(userId, capped);
+		}
+
+		// Prune expired entries using the shared helper (avoids duplicating TTL logic)
+		this.pruneExpired(this.clock());
+
+		// Remove users left with empty buffers after pruning
+		for (const [userId, buffer] of this.store) {
+			if (buffer.length === 0) this.store.delete(userId);
 		}
 	}
 
@@ -358,7 +365,7 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 	}
 
 	private _logFlushError(err: unknown): void {
-		this.logger?.warn(
+		this.logger?.error(
 			{ err, path: this.persistPath },
 			'interaction-context: flush failed',
 		);
