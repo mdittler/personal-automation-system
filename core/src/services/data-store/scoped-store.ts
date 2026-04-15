@@ -8,6 +8,7 @@
 
 import { appendFile as fsAppend, readFile, readdir, rename, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Logger } from 'pino';
 import type { DataChangedPayload } from '../../types/data-events.js';
 import type { ScopedDataStore } from '../../types/data-store.js';
 import type { EventBusService } from '../../types/events.js';
@@ -55,6 +56,11 @@ export interface ScopedStoreOptions {
 	_systemBypassToken?: symbol;
 	/** Metadata for DataChangedPayload events (set by DataStoreServiceImpl factory methods). */
 	_eventMeta?: ScopedStoreEventMeta;
+	/**
+	 * Optional logger. When provided, system-bypass accesses emit a debug log
+	 * entry so that bypassed paths are auditable after-the-fact.
+	 */
+	logger?: Pick<Logger, 'debug'>;
 }
 
 export class ScopedStore implements ScopedDataStore {
@@ -67,6 +73,7 @@ export class ScopedStore implements ScopedDataStore {
 	private readonly scopes?: ManifestDataScope[];
 	private readonly systemBypass: boolean;
 	private readonly eventMeta: ScopedStoreEventMeta;
+	private readonly logger?: Pick<Logger, 'debug'>;
 
 	constructor(options: ScopedStoreOptions) {
 		// Validate system bypass token — forged symbols are rejected
@@ -82,6 +89,7 @@ export class ScopedStore implements ScopedDataStore {
 		this.eventBus = options.eventBus;
 		this.scopes = options.scopes;
 		this.systemBypass = options._systemBypassToken === SYSTEM_BYPASS_TOKEN;
+		this.logger = options.logger;
 		this.eventMeta = options._eventMeta ?? {
 			householdId: null,
 			spaceKind: null,
@@ -95,8 +103,9 @@ export class ScopedStore implements ScopedDataStore {
 	 * Throws ScopeViolationError when scopes are empty/undefined and no system bypass token.
 	 */
 	private checkScope(path: string, operation: 'read' | 'write'): void {
-		// System bypass: skip enforcement and log
+		// System bypass: skip enforcement and emit audit log
 		if (this.systemBypass) {
+			this.logger?.debug({ appId: this.appId, path, operation }, 'dataStore.systemBypass');
 			return;
 		}
 
