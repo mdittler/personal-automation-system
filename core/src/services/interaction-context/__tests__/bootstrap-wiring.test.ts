@@ -20,10 +20,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-	InteractionContextServiceImpl,
-	type InteractionContextService,
-} from '../index.js';
+import { type InteractionContextService, InteractionContextServiceImpl } from '../index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,9 +83,7 @@ describe('InteractionContextService bootstrap wiring', () => {
 		it('bootstrap.ts conditionally injects interactionContext via declaredServices.has', async () => {
 			const source = stripComments(await readBootstrap());
 			// Verify the guard exists with the correct service key
-			expect(source).toMatch(
-				/declaredServices\.has\s*\(\s*['"]interaction-context['"]\s*\)/,
-			);
+			expect(source).toMatch(/declaredServices\.has\s*\(\s*['"]interaction-context['"]\s*\)/);
 			// Verify the field name in the returned services object
 			expect(source).toMatch(/\binteractionContext\s*:/);
 		});
@@ -119,13 +114,14 @@ describe('InteractionContextService bootstrap wiring', () => {
 			const declared = new Set(['interaction-context']);
 
 			const injected = simulateInjection(declared, service);
-			expect(injected).not.toBeUndefined();
+			expect(injected).toBeDefined();
+			if (!injected) throw new Error('injected must be defined');
 
 			// Verify the injected service is operational
-			injected!.record('user1', { appId: 'food', action: 'view-recipe' });
-			const entries = injected!.getRecent('user1');
+			injected.record('user1', { appId: 'food', action: 'view-recipe' });
+			const entries = injected.getRecent('user1');
 			expect(entries).toHaveLength(1);
-			expect(entries[0]!.action).toBe('view-recipe');
+			expect(entries[0]?.action).toBe('view-recipe');
 		});
 
 		it('same singleton is injected regardless of which app requests it', () => {
@@ -142,11 +138,12 @@ describe('InteractionContextService bootstrap wiring', () => {
 
 			// Both point to the same instance — state written by food is visible to chatbot
 			expect(foodResult).toBe(chatbotResult);
+			if (!foodResult || !chatbotResult) throw new Error('results must be defined');
 
-			foodResult!.record('user1', { appId: 'food', action: 'capture-receipt' });
-			const chatbotEntries = chatbotResult!.getRecent('user1');
+			foodResult.record('user1', { appId: 'food', action: 'capture-receipt' });
+			const chatbotEntries = chatbotResult.getRecent('user1');
 			expect(chatbotEntries).toHaveLength(1);
-			expect(chatbotEntries[0]!.action).toBe('capture-receipt');
+			expect(chatbotEntries[0]?.action).toBe('capture-receipt');
 		});
 	});
 
