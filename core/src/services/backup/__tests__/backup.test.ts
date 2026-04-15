@@ -272,49 +272,55 @@ describe.skipIf(process.platform === 'win32')('BackupService — tar', () => {
 	});
 
 	it('createBackup throws if output size is zero', async () => {
-		// Mock execFileAsync to create an empty file instead of running tar
-		const backupModule = await import('../index.js');
-
-		// We need to mock at the module level — use a spy on the service's internal
-		// behavior by creating a service where we intercept stat after creating an empty file
-		const { mkdir: md } = await import('node:fs/promises');
+		// Inject a fake execFileAsync that writes an empty file instead of running tar.
+		// We cannot spy on the real execFile because promisify() captures the reference
+		// at module import time — the spy would not be seen by execFileAsync.
+		const { mkdir: md, writeFile: wf } = await import('node:fs/promises');
 		await md(backupPath, { recursive: true });
 
-		// Spy on the module by patching child_process.execFile
-		const cp = await import('node:child_process');
-		const execFileSpy = vi
-			.spyOn(cp, 'execFile')
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			.mockImplementation((...args: any[]) => {
-				// Find the callback (last arg) and call it to create an empty file
-				const cb = args[args.length - 1] as (
-					err: null,
-					stdout: string,
-					stderr: string,
-				) => void;
-				// We need the dest path — it's args[1][1] (second element of the args array)
-				const destPath = args[1][1] as string;
-				import('node:fs/promises')
-					.then(({ writeFile: wf }) => wf(destPath, '', 'utf-8'))
-					.then(() => cb(null, '', ''))
-					.catch((err) => cb(err, '', ''));
-				// Return a fake ChildProcess
-				return { on: vi.fn(), kill: vi.fn() } as unknown as ReturnType<typeof cp.execFile>;
-			});
+		const service = new BackupService({
+			dataDir,
+			configDir,
+			backupPath,
+			retentionCount: 7,
+			logger,
+			_execFileAsync: async (_cmd: string, args: string[]) => {
+				// args[1] is the dest path: tar -czf <dest> ...
+				const destPath = args[1] as string;
+				await wf(destPath, '', 'utf-8');
+				return { stdout: '', stderr: '' };
+			},
+		});
 
-		try {
-			const service = new backupModule.BackupService({
-				dataDir,
-				configDir,
-				backupPath,
-				retentionCount: 7,
-				logger,
-			});
+		await expect(service.createBackup()).rejects.toThrow(/empty/i);
+	});
 
-			await expect(service.createBackup()).rejects.toThrow(/empty/i);
-		} finally {
-			execFileSpy.mockRestore();
-		}
+	it('createBackup cleans up partial archive when tar fails', async () => {
+		// Inject a fake execFileAsync that writes a partial file then throws.
+		const { mkdir: md, writeFile: wf, readdir } = await import('node:fs/promises');
+		await md(backupPath, { recursive: true });
+
+		const service = new BackupService({
+			dataDir,
+			configDir,
+			backupPath,
+			retentionCount: 7,
+			logger,
+			_execFileAsync: async (_cmd: string, args: string[]) => {
+				const destPath = args[1] as string;
+				// Simulate tar writing some bytes then failing
+				await wf(destPath, 'partial', 'utf-8');
+				throw new Error('tar: write error');
+			},
+		});
+
+		await expect(service.createBackup()).rejects.toThrow(/tar/i);
+
+		// The partial file must have been cleaned up
+		const remaining = (await readdir(backupPath)).filter((f) =>
+			f.startsWith('pas-backup-'),
+		);
+		expect(remaining).toHaveLength(0);
 	});
 
 	it('createBackup creates backup dir if it does not exist', async () => {

@@ -26,6 +26,14 @@ export class BackupService {
 			/** Number of most-recent backups to keep. */
 			retentionCount: number;
 			logger: Logger;
+			/**
+			 * Override for execFileAsync — used in tests to inject a fake tar implementation
+			 * without fighting the promisify-captures-reference-at-import-time issue.
+			 */
+			_execFileAsync?: (
+				cmd: string,
+				args: string[],
+			) => Promise<{ stdout: string; stderr: string }>;
 		},
 	) {}
 
@@ -51,16 +59,24 @@ export class BackupService {
 
 		// 3. Create tarball: bundle data dir and config dir using absolute paths
 		//    tar -czf <dest> -C <parentOfData> <dataBasename> -C <parentOfConfig> <configBasename>
-		await execFileAsync('tar', [
-			'-czf',
-			dest,
-			'-C',
-			dirname(this.opts.dataDir),
-			basename(this.opts.dataDir),
-			'-C',
-			dirname(this.opts.configDir),
-			basename(this.opts.configDir),
-		]);
+		const execFn = this.opts._execFileAsync ?? execFileAsync;
+		try {
+			await execFn('tar', [
+				'-czf',
+				dest,
+				'-C',
+				dirname(this.opts.dataDir),
+				basename(this.opts.dataDir),
+				'-C',
+				dirname(this.opts.configDir),
+				basename(this.opts.configDir),
+			]);
+		} catch (err) {
+			// Clean up partial archive before re-throwing so it doesn't corrupt
+			// the retention window (pas-backup-*.tar.gz filter would otherwise include it).
+			await rm(dest, { force: true });
+			throw err;
+		}
 
 		// 4. Verify output exists with nonzero size
 		const stats = await stat(dest);
