@@ -4965,6 +4965,89 @@ All food app write sites include `type` and `app: food` in generated frontmatter
 
 ---
 
+### REQ-IC-001: Per-user interaction context circular buffer
+
+**Phase:** D2c | **Status:** Implemented
+
+Records the last 5 interactions per user with a 10-minute TTL. Each entry captures `appId`, `action`, optional `entityType`/`entityId`, canonical `filePaths`, `scope`, and arbitrary `metadata`. `record()` is synchronous and never throws. `getRecent()` returns entries newest-first, filtered by TTL. Strict userId isolation — no user can see another's entries.
+
+**Standard tests:**
+- `interaction-context.test.ts` > InteractionContextService > records entries and returns them newest-first
+- `interaction-context.test.ts` > InteractionContextService > returns all entries recorded within TTL
+- `interaction-context.test.ts` > InteractionContextService > stamps timestamp automatically on record()
+- `interaction-context.test.ts` > InteractionContextService > preserves optional fields on InteractionEntry
+- `integration.test.ts` > InteractionContextService integration > receipt → context flow: recorded entry is returned by getRecent with correct filePaths
+
+**Edge case tests:**
+- `interaction-context.test.ts` > InteractionContextService > caps buffer at 5 entries, evicting oldest on 6th add
+- `interaction-context.test.ts` > InteractionContextService > excludes entries older than 10 minutes
+- `interaction-context.test.ts` > InteractionContextService > isolates entries between users
+- `interaction-context.test.ts` > InteractionContextService > returns empty array for unknown user
+- `interaction-context.test.ts` > InteractionContextService > excludes only the expired entries when TTL is partially elapsed
+- `integration.test.ts` > InteractionContextService integration > 11-minute expiry: entries older than TTL are excluded
+
+---
+
+### REQ-IC-002: Bootstrap injection and singleton sharing
+
+**Phase:** D2c | **Status:** Implemented
+
+`InteractionContextService` is constructed once at bootstrap and conditionally injected into apps that declare `interaction-context` in their manifest. All apps receive the same singleton instance, enabling cross-app context sharing within the same process. Apps not declaring the service receive `undefined`.
+
+**Standard tests:**
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts imports InteractionContextServiceImpl
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts conditionally injects interactionContext via declaredServices.has
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > app declaring interaction-context receives a non-undefined service
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > app NOT declaring interaction-context receives undefined
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > injected service is functional — record() and getRecent() work
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > same singleton is injected regardless of which app requests it
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > manifest declarations > chatbot manifest declares interaction-context
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > manifest declarations > food manifest declares interaction-context
+
+---
+
+### REQ-IC-003: Disk persistence — write path
+
+**Phase:** D6 | **Status:** Implemented
+
+Interaction context is persisted to `data/system/interaction-context.json` via a debounced flush queue (500ms default). `record()` increments an internal revision counter and schedules a debounced flush. Revision tracking ensures records that arrive during an in-flight write trigger an automatic follow-up flush. `flush()` cancels the debounce and writes immediately; `stop()` drains all pending writes on graceful shutdown. All disk failures are logged at `error` level and retried on next `record()` or `stop()` — they never propagate to callers. Before serialization, expired entries are pruned and empty users are removed.
+
+**Standard tests:**
+- `persistence.test.ts` > InteractionContextService persistence > reload restores entries written by a prior instance
+- `persistence.test.ts` > InteractionContextService persistence > per-user isolation is preserved across reload
+- `persistence.test.ts` > InteractionContextService persistence > flush() cancels debounce and writes immediately without waiting for timer
+- `persistence.test.ts` > InteractionContextService persistence > stop() drains pending writes; records after stop() do not schedule new flushes
+- `persistence.test.ts` > InteractionContextService persistence > in-memory mode (no dataDir): record/getRecent work, lifecycle methods resolve
+
+**Edge case tests:**
+- `persistence.test.ts` > InteractionContextService persistence > debounced flush coalesces multiple rapid records into one write
+- `persistence.test.ts` > InteractionContextService persistence > records during in-flight flush are captured by follow-up flush
+- `persistence.test.ts` > InteractionContextService persistence > empty users are pruned from serialized JSON when all entries expire
+- `persistence.test.ts` > InteractionContextService persistence > background flush failure is logged and does not throw from record()
+
+---
+
+### REQ-IC-004: Disk persistence — load path
+
+**Phase:** D6 | **Status:** Implemented
+
+On startup, `loadFromDisk()` is awaited before Telegram handlers register. It reads `data/system/interaction-context.json`, validates each entry with `isValidEntry()` (checks all field types, length bounds, scope enum, future-timestamp guard), prunes TTL-expired entries, sorts remaining entries by timestamp, and enforces the 5-entry buffer cap. On ENOENT the service starts empty silently. On parse failure the corrupt file is preserved as a `.corrupt` sidecar and the service starts empty. On unknown schema version the service starts empty with a warning.
+
+**Standard tests:**
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts instantiates InteractionContextServiceImpl with dataDir and logger
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts calls loadFromDisk() at startup
+- `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts calls stop() on interactionContextService in shutdown
+
+**Edge case tests:**
+- `persistence.test.ts` > InteractionContextService persistence > expired entries are dropped on load
+- `persistence.test.ts` > InteractionContextService persistence > buffer cap of 5 is enforced on load (keep newest)
+- `persistence.test.ts` > InteractionContextService persistence > missing file starts empty without error
+- `persistence.test.ts` > InteractionContextService persistence > corrupt JSON creates .corrupt sidecar and starts empty
+- `persistence.test.ts` > InteractionContextService persistence > invalid entries are dropped during load, valid ones kept
+- `persistence.test.ts` > InteractionContextService persistence > unknown version starts empty with a warning
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -5178,6 +5261,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
 | REQ-CHATBOT-016 | data-query-wiring.test.ts | 8 | 6 | Implemented |
 | REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
+| REQ-IC-001 | interaction-context.test.ts, integration.test.ts | 5 | 6 | Implemented |
+| REQ-IC-002 | bootstrap-wiring.test.ts | 8 | 0 | Implemented |
+| REQ-IC-003 | persistence.test.ts | 5 | 4 | Implemented |
+| REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **144 test files** | **1035** | **1250** | **2285 tests** |
+| **Totals** | **148 test files** | **1056** | **1266** | **2322 tests** |
