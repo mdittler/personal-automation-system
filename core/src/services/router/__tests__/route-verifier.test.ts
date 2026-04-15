@@ -200,7 +200,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(ctx, classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'agreed',
+		});
 	});
 
 	it('does not send buttons when verifier agrees', async () => {
@@ -291,7 +297,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
 		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 	});
 
@@ -301,7 +313,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
 		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 	});
 
@@ -311,7 +329,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -325,7 +349,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(ctx, classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'agreed',
+		});
 		// The prompt passed to LLM should contain the caption text
 		const promptArg = mockArg<string>(llm.complete, 0);
 		expect(promptArg).toContain('recipe photo caption');
@@ -538,7 +568,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
 		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ suggestedAppId: 'hallucinated-app' }),
@@ -589,7 +625,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'agreed',
+		});
 		expect(llm.complete).not.toHaveBeenCalled();
 	});
 
@@ -613,7 +655,13 @@ describe('RouteVerifier', () => {
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
 
-		expect(result).toEqual({ action: 'route', appId: 'food' });
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'agreed',
+		});
 		expect(llm.complete).not.toHaveBeenCalled();
 	});
 
@@ -740,7 +788,14 @@ describe('RouteVerifier', () => {
 
 		// LLM should NOT be called (only 1 accessible app)
 		expect(llm.complete).not.toHaveBeenCalled();
-		expect(result).toEqual({ action: 'route', appId: 'notes' });
+		// verifierStatus 'agreed' because the single-app skip is treated as implicit agreement
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'notes',
+			intent: 'grocery',
+			confidence: 0.55,
+			verifierStatus: 'agreed',
+		});
 	});
 
 	// -------------------------------------------------------------------------

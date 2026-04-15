@@ -6,6 +6,8 @@ export interface PendingEntry {
 	isPhoto: boolean;
 	classifierResult: { appId: string; intent: string; confidence: number };
 	verifierSuggestedAppId: string;
+	/** Intent the verifier suggested for the alternative app. Present when the verifier disagreed. */
+	verifierSuggestedIntent?: string;
 	sentMessageId: number;
 	sentChatId: number;
 	photoPath?: string;

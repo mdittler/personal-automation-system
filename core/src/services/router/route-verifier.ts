@@ -27,7 +27,19 @@ import type { VerificationLogger } from './verification-logger.js';
 // Public types
 // ---------------------------------------------------------------------------
 
-export type VerifyAction = { action: 'route'; appId: string } | { action: 'held' } | { action: 'fallback' };
+export type VerifyAction =
+	| {
+			action: 'route';
+			appId: string;
+			intent: string;
+			confidence: number;
+			/** 'agreed' when the verifier confirmed the classifier's pick; 'degraded' when
+			 *  the verifier LLM failed, returned unparseable output, hallucinated an appId,
+			 *  or failed to send inline buttons — non-strict mode falls back to classifier. */
+			verifierStatus: 'agreed' | 'degraded';
+	  }
+	| { action: 'held' }
+	| { action: 'fallback' };
 
 export interface RouteVerifierOptions {
 	llm: LLMService;
@@ -154,7 +166,13 @@ export class RouteVerifier {
 				accessibleApps.length === 1
 					? accessibleApps[0]!.manifest.app.id
 					: classifierResult.appId;
-			return { action: 'route', appId: fallbackId };
+			return {
+				action: 'route',
+				appId: fallbackId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'agreed',
+			};
 		}
 
 		const candidateApps = accessibleApps.map((app) => ({
@@ -193,12 +211,24 @@ export class RouteVerifier {
 			// caller (context-promotion) can safely defer to chatbot instead of dispatching
 			// a sub-threshold message based on a degraded verifier decision.
 			if (strict) return { action: 'fallback' };
-			return { action: 'route', appId: classifierResult.appId };
+			return {
+				action: 'route',
+				appId: classifierResult.appId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'degraded',
+			};
 		}
 
 		if (verifierResponse === undefined) {
 			if (strict) return { action: 'fallback' };
-			return { action: 'route', appId: classifierResult.appId };
+			return {
+				action: 'route',
+				appId: classifierResult.appId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'degraded',
+			};
 		}
 
 		if (verifierResponse.agrees) {
@@ -212,7 +242,13 @@ export class RouteVerifier {
 				outcome: 'auto',
 				routedTo: classifierResult.appId,
 			});
-			return { action: 'route', appId: classifierResult.appId };
+			return {
+				action: 'route',
+				appId: classifierResult.appId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'agreed',
+			};
 		}
 
 		// Verifier disagrees — validate suggested appId exists in registry
@@ -225,7 +261,13 @@ export class RouteVerifier {
 				{ suggestedAppId: rawSuggestedId },
 				'RouteVerifier: LLM suggested non-existent app — falling back to classifier',
 			);
-			return { action: 'route', appId: classifierResult.appId };
+			return {
+				action: 'route',
+				appId: classifierResult.appId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'degraded',
+			};
 		}
 
 		const suggestedAppId = rawSuggestedId;
@@ -237,6 +279,7 @@ export class RouteVerifier {
 			isPhoto,
 			classifierResult,
 			verifierSuggestedAppId: suggestedAppId,
+			verifierSuggestedIntent: verifierResponse.suggestedIntent,
 			sentMessageId: 0,
 			sentChatId: 0,
 			photoPath: resolvedPhotoPath,
@@ -268,7 +311,13 @@ export class RouteVerifier {
 		} catch (err) {
 			this.logger.error({ err }, 'RouteVerifier: failed to send inline buttons');
 			this.pendingStore.resolve(pendingId);
-			return { action: 'route', appId: classifierResult.appId };
+			return {
+				action: 'route',
+				appId: classifierResult.appId,
+				intent: classifierResult.intent,
+				confidence: classifierResult.confidence,
+				verifierStatus: 'degraded',
+			};
 		}
 
 		// Track the real sent IDs for use in resolveCallback

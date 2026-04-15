@@ -496,4 +496,43 @@ describe('Router context-aware promotion (Task 5a)', () => {
 		expect(fallback.handleUnrecognized).not.toHaveBeenCalled();
 		expect(foodModule.handleMessage).not.toHaveBeenCalled();
 	});
+
+	it('TC-route: context-promotion dispatch attaches source:context-promotion on ctx.route', async () => {
+		const llm = createMockLLMWithLowConfidence(
+			{ category: 'log meal', confidence: 0.1 },
+			{ category: 'log meal', confidence: 0.25 },
+		);
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'food',
+			intent: 'log meal',
+			confidence: 0.25,
+			verifierStatus: 'agreed',
+		});
+		const interactionContext = createMockInteractionContext([makeRecentEntry('food')]);
+
+		const router = buildRouter(
+			[
+				{ manifest: foodManifest, module: foodModule },
+				{ manifest: notesManifest, module: notesModule },
+			],
+			llm,
+			{ verifier, interactionContext },
+		);
+		router.buildRoutingTables();
+
+		await router.routeMessage(createTextCtx('show me that recipe'));
+
+		expect(foodModule.handleMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				route: expect.objectContaining({
+					appId: 'food',
+					intent: 'log meal',
+					confidence: 0.25,
+					source: 'context-promotion',
+					verifierStatus: 'agreed',
+				}),
+			}),
+		);
+	});
 });

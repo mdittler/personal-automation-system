@@ -38,7 +38,7 @@ export type {
 } from './manifest.js';
 
 // Telegram
-export type { CallbackContext, InlineButton, MessageContext, PhotoContext, SentMessage, TelegramService } from './telegram.js';
+export type { CallbackContext, InlineButton, MessageContext, PhotoContext, RouteInfo, RouteSource, RouteVerifierStatus, SentMessage, TelegramService } from './telegram.js';
 
 // LLM
 export type {

@@ -368,7 +368,7 @@ describe('Realistic route verification scenarios', () => {
 					confidence: 0.6,
 				});
 
-				expect(result).toEqual({ action: 'route', appId: 'food' });
+				expect(result).toMatchObject({ action: 'route', appId: 'food' });
 				expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 			});
 		}
@@ -395,7 +395,7 @@ describe('Realistic route verification scenarios', () => {
 					confidence: 0.6,
 				});
 
-				expect(result).toEqual({ action: 'route', appId: 'notes' });
+				expect(result).toMatchObject({ action: 'route', appId: 'notes' });
 				expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 			});
 		}
@@ -463,7 +463,7 @@ describe('Realistic route verification scenarios', () => {
 				},
 			);
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 			expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 		});
 	});
@@ -550,7 +550,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.6,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('handles LLM returning verbose reasoning', async () => {
@@ -579,7 +579,7 @@ describe('Realistic route verification scenarios', () => {
 			});
 
 			// Can't parse — falls back to classifier's pick
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 			expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 		});
 
@@ -593,7 +593,7 @@ describe('Realistic route verification scenarios', () => {
 				{ appId: 'food', intent: 'user wants to add items to the grocery list', confidence: 0.6 },
 			);
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 	});
 
@@ -649,7 +649,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.45,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"dinner" → verifier agrees with food', async () => {
@@ -661,7 +661,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.48,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"note" → verifier agrees with notes', async () => {
@@ -673,7 +673,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.42,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'notes' });
+			expect(result).toMatchObject({ action: 'route', appId: 'notes' });
 		});
 
 		it('"hey" → verifier disagrees with food classification', async () => {
@@ -704,7 +704,7 @@ describe('Realistic route verification scenarios', () => {
 				{ appId: 'food', intent: 'user wants to log leftovers', confidence: 0.58 },
 			);
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"My mom is coming for dinner Saturday. She can\'t eat gluten. Can you help plan?" → food', async () => {
@@ -715,7 +715,7 @@ describe('Realistic route verification scenarios', () => {
 				{ appId: 'food', intent: 'user wants to plan for hosting guests', confidence: 0.52 },
 			);
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"I saw a great pasta recipe on Instagram. Save it for later: rigatoni with sausage and broccoli rabe" → verifier corrects notes→food', async () => {
@@ -749,7 +749,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.55,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"lol we have literally nothing in the fridge 😭" → verifier agrees with food', async () => {
@@ -764,7 +764,7 @@ describe('Realistic route verification scenarios', () => {
 				},
 			);
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('"ughhh what should I even cook tonight" → verifier agrees with food', async () => {
@@ -776,7 +776,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.5,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 	});
 
@@ -806,7 +806,7 @@ describe('Realistic route verification scenarios', () => {
 				confidence: 0.6,
 			});
 
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 		});
 
 		it('photo with no caption → verifier still gets empty text in prompt', async () => {
@@ -941,7 +941,7 @@ describe('Realistic route verification scenarios', () => {
 			});
 
 			// Should fall back to classifier's pick, NOT hold with an invalid app
-			expect(result).toEqual({ action: 'route', appId: 'food' });
+			expect(result).toMatchObject({ action: 'route', appId: 'food' });
 			expect(telegram.sendWithButtons).not.toHaveBeenCalled();
 		});
 	});

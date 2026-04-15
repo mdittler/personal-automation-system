@@ -806,21 +806,41 @@ export async function main(): Promise<void> {
 					const { entry } = resolved;
 					const appEntry = registry.getApp(chosenAppId);
 
+					// Build user-override route metadata.
+					// If the user picked the app the classifier originally suggested, carry
+					// through the classifier's intent. If they picked the verifier's suggestion,
+					// use verifierSuggestedIntent when available. Fall back to the chosen appId
+					// as a coarser-but-honest label rather than leaving intent unknown.
+					const overrideIntent =
+						chosenAppId === entry.classifierResult.appId
+							? entry.classifierResult.intent
+							: (entry.verifierSuggestedIntent ?? chosenAppId);
+					const overrideRoute: import('./types/telegram.js').RouteInfo = {
+						appId: chosenAppId,
+						intent: overrideIntent,
+						confidence: 1.0,
+						source: 'user-override',
+						verifierStatus: 'user-override',
+					};
+
 					// Dispatch to chosen app (wrap in LLM context for cost tracking)
 					await requestContext.run({ userId }, async () => {
 						if (chosenAppId === 'chatbot' && chatbotApp) {
-							await chatbotApp.module.handleMessage(
-								entry.ctx as import('./types/telegram.js').MessageContext,
-							);
+							await chatbotApp.module.handleMessage({
+								...(entry.ctx as import('./types/telegram.js').MessageContext),
+								route: overrideRoute,
+							});
 						} else if (appEntry) {
 							if (entry.isPhoto && appEntry.module.handlePhoto) {
-								await appEntry.module.handlePhoto(
-									entry.ctx as import('./types/telegram.js').PhotoContext,
-								);
+								await appEntry.module.handlePhoto({
+									...(entry.ctx as import('./types/telegram.js').PhotoContext),
+									route: overrideRoute,
+								});
 							} else {
-								await appEntry.module.handleMessage(
-									entry.ctx as import('./types/telegram.js').MessageContext,
-								);
+								await appEntry.module.handleMessage({
+									...(entry.ctx as import('./types/telegram.js').MessageContext),
+									route: overrideRoute,
+								});
 							}
 						}
 					});

@@ -578,4 +578,98 @@ describe('Router — grey-zone verification', () => {
 			);
 		});
 	});
+
+	// ---------------------------------------------------------------------------
+	// Route metadata plumbing — verifier branches
+	// ---------------------------------------------------------------------------
+
+	describe('route metadata — verifier path', () => {
+		let echoModule: AppModule;
+
+		beforeEach(() => {
+			echoModule = createMockModule();
+		});
+
+		it('verifier-agreed dispatch attaches verifierStatus:agreed on ctx.route', async () => {
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			// Return the full new VerifyAction shape
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.55,
+				verifierStatus: 'agreed',
+			});
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			expect(echoModule.handleMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: expect.objectContaining({
+						appId: 'echo',
+						intent: 'echo',
+						confidence: 0.55,
+						source: 'intent',
+						verifierStatus: 'agreed',
+					}),
+				}),
+			);
+		});
+
+		it('verifier-degraded dispatch attaches verifierStatus:degraded on ctx.route', async () => {
+			const greyZoneLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'echo',
+				intent: 'echo',
+				confidence: 0.55,
+				verifierStatus: 'degraded',
+			});
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				greyZoneLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('something ambiguous'));
+
+			expect(echoModule.handleMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: expect.objectContaining({
+						source: 'intent',
+						verifierStatus: 'degraded',
+					}),
+				}),
+			);
+		});
+
+		it('high-confidence dispatch with verifier wired attaches verifierStatus:skipped on ctx.route', async () => {
+			// confidence 0.9 > verificationUpperBound (0.7) — verifier is wired but bypassed
+			const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.9 });
+			const verifier = createMockVerifier({ action: 'held' }); // should never be called
+			const router = buildRouter(
+				[{ manifest: echoManifest, module: echoModule }],
+				highConfLlm,
+				verifier,
+			);
+
+			await router.routeMessage(createTextCtx('echo this clearly'));
+
+			expect(verifier.verify).not.toHaveBeenCalled();
+			expect(echoModule.handleMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: expect.objectContaining({
+						appId: 'echo',
+						source: 'intent',
+						verifierStatus: 'skipped',
+					}),
+				}),
+			);
+		});
+	});
 });

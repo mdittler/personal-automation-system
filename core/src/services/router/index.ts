@@ -12,7 +12,7 @@
 import type { Logger } from 'pino';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
-import type { MessageContext, PhotoContext, TelegramService } from '../../types/telegram.js';
+import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../types/telegram.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
@@ -217,14 +217,32 @@ export class Router {
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp) {
-					await this.dispatchMessage(verifiedApp, enrichedCtx);
+					await this.dispatchMessage(
+						verifiedApp,
+						this.withRoute(enrichedCtx, {
+							appId: result.appId,
+							intent: result.intent,
+							confidence: result.confidence,
+							source: 'intent',
+							verifierStatus: result.verifierStatus,
+						}),
+					);
 					return;
 				}
 			}
 
 			const app = this.registry.getApp(match.appId);
 			if (app) {
-				await this.dispatchMessage(app, enrichedCtx);
+				await this.dispatchMessage(
+					app,
+					this.withRoute(enrichedCtx, {
+						appId: match.appId,
+						intent: match.intent,
+						confidence: match.confidence,
+						source: 'intent',
+						verifierStatus: this.routeVerifier ? 'skipped' : 'not-run',
+					}),
+				);
 				return;
 			}
 		} else if (this.interactionContext && this.routeVerifier) {
@@ -241,7 +259,16 @@ export class Router {
 				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
 				return;
 			}
-			await this.dispatchMessage(this.chatbotApp, enrichedCtx);
+			await this.dispatchMessage(
+				this.chatbotApp,
+				this.withRoute(enrichedCtx, {
+					appId: 'chatbot',
+					intent: 'chatbot',
+					confidence: 0,
+					source: 'fallback',
+					verifierStatus: 'not-run',
+				}),
+			);
 		} else {
 			await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
 		}
@@ -306,14 +333,32 @@ export class Router {
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp?.module.handlePhoto) {
-					await this.dispatchPhoto(verifiedApp, ctx);
+					await this.dispatchPhoto(
+						verifiedApp,
+						this.withRoute(ctx, {
+							appId: result.appId,
+							intent: result.intent,
+							confidence: result.confidence,
+							source: 'photo-intent',
+							verifierStatus: result.verifierStatus,
+						}),
+					);
 					return;
 				}
 			}
 
 			const app = this.registry.getApp(match.appId);
 			if (app?.module.handlePhoto) {
-				await this.dispatchPhoto(app, ctx);
+				await this.dispatchPhoto(
+					app,
+					this.withRoute(ctx, {
+						appId: match.appId,
+						intent: match.photoType,
+						confidence: match.confidence,
+						source: 'photo-intent',
+						verifierStatus: this.routeVerifier ? 'skipped' : 'not-run',
+					}),
+				);
 				return;
 			}
 		}
@@ -365,9 +410,18 @@ export class Router {
 			return;
 		}
 
+		const commandName = result.command.name.replace(/^\//, '');
+		const commandRoute: RouteInfo = {
+			appId: result.appId,
+			intent: commandName,
+			confidence: 1.0,
+			source: 'command',
+			verifierStatus: 'not-run',
+		};
+
 		if (app.module.handleCommand) {
 			try {
-				await app.module.handleCommand(result.command.name.replace(/^\//, ''), result.parsedArgs, ctx);
+				await app.module.handleCommand(commandName, result.parsedArgs, this.withRoute(ctx, commandRoute));
 			} catch (error) {
 				this.logger.error(
 					{ appId: result.appId, command: result.command.name, error },
@@ -377,8 +431,18 @@ export class Router {
 			}
 		} else {
 			// App has no handleCommand — fall through to handleMessage
-			await this.dispatchMessage(app, ctx);
+			await this.dispatchMessage(app, this.withRoute(ctx, commandRoute));
 		}
+	}
+
+	/**
+	 * Return a shallow clone of ctx with route metadata attached.
+	 * Using a clone instead of mutation preserves the original enrichedCtx across branches.
+	 */
+	private withRoute(ctx: MessageContext, route: RouteInfo): MessageContext;
+	private withRoute(ctx: PhotoContext, route: RouteInfo): PhotoContext;
+	private withRoute(ctx: MessageContext | PhotoContext, route: RouteInfo): MessageContext | PhotoContext {
+		return { ...ctx, route };
 	}
 
 	/** Dispatch a message to an app's handleMessage, with error isolation. */
@@ -913,7 +977,16 @@ export class Router {
 				}
 				const app = this.registry.getApp(result.appId);
 				if (app) {
-					await this.dispatchMessage(app, ctx);
+					await this.dispatchMessage(
+						app,
+						this.withRoute(ctx, {
+							appId: result.appId,
+							intent: result.intent,
+							confidence: result.confidence,
+							source: 'context-promotion',
+							verifierStatus: result.verifierStatus,
+						}),
+					);
 					return;
 				}
 			}
@@ -937,7 +1010,16 @@ export class Router {
 				await this.fallback.handleUnrecognized(ctx, this.telegram);
 				return;
 			}
-			await this.dispatchMessage(this.chatbotApp, ctx);
+			await this.dispatchMessage(
+				this.chatbotApp,
+				this.withRoute(ctx, {
+					appId: 'chatbot',
+					intent: 'chatbot',
+					confidence: 0,
+					source: 'fallback',
+					verifierStatus: 'not-run',
+				}),
+			);
 		} else {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 		}

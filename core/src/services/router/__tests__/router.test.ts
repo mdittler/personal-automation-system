@@ -519,4 +519,117 @@ describe('Router', () => {
 			expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('No apps'));
 		});
 	});
+
+	// ---------------------------------------------------------------------------
+	// Route metadata plumbing (LLM plan item #1)
+	// ---------------------------------------------------------------------------
+
+	describe('route metadata — ctx.route attached at each dispatch branch', () => {
+		const users = [
+			{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+		];
+
+		it('command branch attaches source:command, verifierStatus:not-run, confidence:1.0', async () => {
+			const router = buildRouter(users, [{ manifest: echoManifest, module: echoModule }]);
+
+			await router.routeMessage(createTextCtx('/echo hello'));
+
+			expect(echoModule.handleCommand).toHaveBeenCalledWith(
+				'echo',
+				['hello'],
+				expect.objectContaining({
+					route: {
+						appId: 'echo',
+						intent: 'echo',
+						confidence: 1.0,
+						source: 'command',
+						verifierStatus: 'not-run',
+					},
+				}),
+			);
+		});
+
+		it('classifier match attaches source:intent, intent/confidence from classifier, verifierStatus:not-run when no verifier configured', async () => {
+			// No routeVerifier wired in buildRouter → verifierStatus is 'not-run'
+			// (verifierStatus is 'skipped' when routeVerifier IS configured but confidence ≥ upperBound)
+			const highConfLlm = createMockLLM({ category: 'add grocery', confidence: 0.9 });
+			const router = buildRouter(
+				users,
+				[{ manifest: groceryManifest, module: groceryModule }],
+				highConfLlm,
+			);
+
+			await router.routeMessage(createTextCtx('I need milk'));
+
+			expect(groceryModule.handleMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: expect.objectContaining({
+						appId: 'grocery',
+						intent: 'add grocery',
+						confidence: 0.9,
+						source: 'intent',
+						verifierStatus: 'not-run',
+					}),
+				}),
+			);
+		});
+
+		it('chatbot fallback attaches source:fallback, verifierStatus:not-run, intent:chatbot', async () => {
+			// LLM returns low confidence → no match → falls through to chatbot
+			const lowConfLlm = createMockLLM({ category: 'add grocery', confidence: 0.1 });
+			const chatbotModule = createMockModule();
+			const chatbotApp = {
+				manifest: {
+					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'AI', author: 'Test' },
+					capabilities: { messages: { intents: ['chat'] } },
+				},
+				module: chatbotModule,
+				appDir: '/apps/chatbot',
+			} as unknown as RegisteredApp;
+
+			const router = buildRouter(
+				users,
+				[{ manifest: groceryManifest, module: groceryModule }],
+				lowConfLlm,
+				{ chatbotApp, fallbackMode: 'chatbot' },
+			);
+
+			await router.routeMessage(createTextCtx('hello'));
+
+			expect(chatbotModule.handleMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: {
+						appId: 'chatbot',
+						intent: 'chatbot',
+						confidence: 0,
+						source: 'fallback',
+						verifierStatus: 'not-run',
+					},
+				}),
+			);
+		});
+
+		it('photo single-app shortcut attaches source:photo-intent, verifierStatus:skipped, confidence:1.0', async () => {
+			// Single photo app → shortcut path with confidence 1.0 (≥ verificationUpperBound → skipped)
+			const router = buildRouter(users, [{ manifest: groceryManifest, module: groceryModule }]);
+
+			await router.routePhoto(createPhotoCtx('receipt from Costco'));
+
+			expect(groceryModule.handlePhoto).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: expect.objectContaining({
+						appId: 'grocery',
+						source: 'photo-intent',
+						confidence: 1.0,
+					}),
+				}),
+			);
+		});
+
+		it('ctx.route field is absent from contexts built without router dispatch', () => {
+			// Regression guard: manually constructed contexts must not require route
+			const ctx = createTextCtx('hello');
+			expect(ctx.route).toBeUndefined();
+		});
+	});
 });
