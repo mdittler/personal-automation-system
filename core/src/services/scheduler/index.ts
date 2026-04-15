@@ -79,6 +79,13 @@ export class SchedulerServiceImpl implements SchedulerService {
 	}
 
 	/**
+	 * Returns true if both the cron manager and one-off manager are running.
+	 */
+	isRunning(): boolean {
+		return this.cron.isRunning() && this.oneOff.isRunning();
+	}
+
+	/**
 	 * Stop all cron jobs and the one-off task checker.
 	 * Awaits both sub-managers so in-flight jobs complete before returning.
 	 */

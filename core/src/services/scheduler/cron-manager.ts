@@ -28,6 +28,7 @@ export class CronManager {
 	private notifier: SchedulerJobNotifier | null = null;
 	private inFlightCount = 0;
 	private readonly drainResolvers: Array<() => void> = [];
+	private started = false;
 
 	constructor(logger: Logger, timezone: string, dataDir: string) {
 		this.logger = logger;
@@ -145,6 +146,14 @@ export class CronManager {
 			task.start();
 			this.logger.debug({ jobKey: key }, 'Cron job started');
 		}
+		this.started = true;
+	}
+
+	/**
+	 * Returns true if the cron manager has been started.
+	 */
+	isRunning(): boolean {
+		return this.started;
 	}
 
 	/**
@@ -152,6 +161,7 @@ export class CronManager {
 	 * Waits up to 30 seconds for in-flight jobs before returning.
 	 */
 	async stop(): Promise<void> {
+		this.started = false;
 		for (const [key, { task }] of this.jobs) {
 			task.stop();
 			this.logger.debug({ jobKey: key }, 'Cron job stopped');

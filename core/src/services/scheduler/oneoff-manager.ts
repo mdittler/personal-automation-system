@@ -30,6 +30,7 @@ export class OneOffManager {
 	private checkInterval: ReturnType<typeof setInterval> | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
 	private stopping = false;
+	private started = false;
 
 	private notifier: SchedulerJobNotifier | null = null;
 
@@ -98,7 +99,15 @@ export class OneOffManager {
 			void this.checkAndExecute();
 		}, 60_000);
 
+		this.started = true;
 		this.logger.info('One-off task checker started (60s interval)');
+	}
+
+	/**
+	 * Returns true if the one-off task checker has been started.
+	 */
+	isRunning(): boolean {
+		return this.started;
 	}
 
 	/**
@@ -108,6 +117,7 @@ export class OneOffManager {
 	 */
 	async stop(): Promise<void> {
 		this.stopping = true;
+		this.started = false;
 		if (this.checkInterval !== null) {
 			clearInterval(this.checkInterval);
 			this.checkInterval = null;

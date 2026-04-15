@@ -17,6 +17,7 @@ import {
 	createTelegramRateLimiter,
 } from './middleware/rate-limiter.js';
 import { ShutdownManager } from './middleware/shutdown.js';
+import { HealthChecker } from './server/health-checks.js';
 import { createServer, registerHealthRoute, registerWebhookRoute } from './server/index.js';
 import { AlertService } from './services/alerts/index.js';
 import { AppKnowledgeBase } from './services/app-knowledge/index.js';
@@ -884,7 +885,14 @@ export async function main(): Promise<void> {
 			.slice(0, 64);
 
 	const webhookCallback = createWebhookCallback(bot);
-	registerHealthRoute(server);
+	const healthChecker = new HealthChecker({
+		telegram: { getMe: () => bot.api.getMe() },
+		scheduler: { isRunning: () => scheduler.isRunning() },
+		providerRegistry,
+		dataDir: config.dataDir,
+		logger,
+	});
+	registerHealthRoute(server, healthChecker);
 	registerWebhookRoute(server, {
 		webhookCallback,
 		webhookSecret,
