@@ -23,9 +23,18 @@ import { withFileLock } from '../../utils/file-mutex.js';
 
 /** A single recorded interaction event. */
 export interface InteractionEntry {
-	/** The app that generated this interaction (e.g. 'food', 'notes'). */
+	/**
+	 * The app that generated this interaction (e.g. 'food', 'notes').
+	 * Must be a hardcoded app constant, not a user-supplied string — these fields
+	 * flow through sanitizers before LLM injection but the invariant should be
+	 * preserved at the source.
+	 */
 	appId: string;
-	/** What the user/app did (e.g. 'capture-receipt', 'view-recipe'). */
+	/**
+	 * What the user/app did (e.g. 'capture-receipt', 'view-recipe').
+	 * Must be a hardcoded app constant, not a user-supplied string — same
+	 * reasoning as appId.
+	 */
 	action: string;
 	/** Semantic type of the primary entity involved (e.g. 'receipt', 'recipe'). */
 	entityType?: string;

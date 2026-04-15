@@ -390,10 +390,9 @@ describe('InteractionContextService persistence', () => {
 		// so this call does NOT rethrow.
 		await svc.flush();
 
-		// Logger should have been notified about the failure
-		const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
+		// Logger must emit at error level (not just warn) for flush failures
 		const errorCalls = (logger.error as ReturnType<typeof vi.fn>).mock.calls;
-		expect(warnCalls.length + errorCalls.length).toBeGreaterThan(0);
+		expect(errorCalls.length).toBeGreaterThan(0);
 	});
 
 	// ─── Test 14 ──────────────────────────────────────────────────────────────
