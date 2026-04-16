@@ -23,10 +23,12 @@ import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
+import type { CredentialService } from '../services/credentials/index.js';
 import type { SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
+import { registerViewLocals } from './view-locals.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerAppsRoutes } from './routes/apps.js';
 import { registerConfigRoutes } from './routes/config.js';
@@ -62,7 +64,9 @@ export interface GuiOptions {
 	 * Optional — when present, householdId can be derived for simulated message dispatch
 	 * and the data browser routes user/shared scopes through the household layout.
 	 */
-	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'listHouseholds'>;
+	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'listHouseholds' | 'getHousehold'>;
+	/** D5b-3: Per-user credential store (password hashes + session versions). */
+	credentialService?: CredentialService;
 }
 
 /**
@@ -90,15 +94,29 @@ export async function registerGuiRoutes(
 		dataDir,
 		logger,
 		loginRateLimiter,
+		credentialService,
 	} = options;
 
 	await server.register(
 		async (gui) => {
-			// Auth middleware + login/logout routes
-			await registerAuth(gui, { authToken: config.gui.authToken, loginRateLimiter });
+			// Auth middleware + login/logout routes (D5b-3: per-user password login).
+			// credentialService/userManager/householdService are optional for backward compat
+			// with legacy tests; when present, per-user auth is active.
+			await registerAuth(gui, {
+				authToken: config.gui.authToken,
+				credentialService,
+				userManager: userManager ?? undefined,
+				householdService: options.householdService as Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> | undefined,
+				loginRateLimiter,
+			});
 
 			// CSRF protection (after auth, before content routes)
 			await registerCsrfProtection(gui);
+
+			// View-locals: inject currentUser into every template render (D5b-3)
+			if (userManager) {
+				await registerViewLocals(gui, { userManager });
+			}
 
 			// Content routes
 			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir, logger });

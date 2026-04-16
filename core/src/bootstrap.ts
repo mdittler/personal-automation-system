@@ -1004,6 +1004,7 @@ export async function main(): Promise<void> {
 		loginRateLimiter,
 		userMutationService,
 		householdService,
+		credentialService, // D5b-3: per-user password auth
 	});
 
 	// 13b. External Data API (optional — disabled when API_TOKEN is empty)

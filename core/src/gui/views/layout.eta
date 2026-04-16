@@ -33,6 +33,9 @@
       </a>
     </div>
     <div class="pas-topbar-right">
+      <% if (it.currentUser) { %>
+        <span style="font-size:0.85rem;color:var(--pico-muted-color);margin-right:0.5rem"><%= it.currentUser.name %></span>
+      <% } %>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" type="button">&#9790;</button>
       <form method="post" action="/gui/logout" style="margin:0">
         <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
