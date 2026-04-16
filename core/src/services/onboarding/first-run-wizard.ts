@@ -17,6 +17,7 @@
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { TelegramService } from '../../types/telegram.js';
+import { withFileLock } from '../../utils/file-mutex.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
 
 export interface FirstRunWizardDeps {
@@ -31,7 +32,6 @@ type WizardStep = 'awaiting_digest_preference';
 
 interface WizardState {
 	step: WizardStep;
-	name: string;
 	expiresAt: number;
 }
 
@@ -69,12 +69,14 @@ async function savePreference(
 	preference: 'yes' | 'no',
 ): Promise<void> {
 	const filePath = join(deps.dataDir, 'system', 'onboarding.yaml');
-	const existing = (await readYamlFile<OnboardingStore>(filePath)) ?? {};
-	existing[userId] = {
-		digestPreference: preference,
-		completedAt: new Date().toISOString(),
-	};
-	await writeYamlFile(filePath, existing);
+	await withFileLock(filePath, async () => {
+		const existing = (await readYamlFile<OnboardingStore>(filePath)) ?? {};
+		existing[userId] = {
+			digestPreference: preference,
+			completedAt: new Date().toISOString(),
+		};
+		await writeYamlFile(filePath, existing);
+	});
 }
 
 // ---- Wizard steps ----
@@ -108,7 +110,6 @@ export async function beginFirstRunWizard(
 ): Promise<void> {
 	pending.set(userId, {
 		step: 'awaiting_digest_preference',
-		name: displayName,
 		expiresAt: Date.now() + PENDING_TTL_MS,
 	});
 

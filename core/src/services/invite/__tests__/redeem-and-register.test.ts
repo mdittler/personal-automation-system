@@ -103,6 +103,23 @@ describe('redeemInviteAndRegister + first-run wizard', () => {
 		expect(hasPendingFirstRunWizard('user-3')).toBe(false);
 	});
 
+	it('without dataDir, falls back to plain welcome message (legacy callers)', async () => {
+		const deps = makeDeps({ dataDir: undefined });
+
+		const result = await redeemInviteAndRegister(deps, 'ABC123', 'user-legacy');
+
+		expect(result).toEqual({ success: true, name: 'Alice' });
+		// No wizard state set (no dataDir)
+		expect(hasPendingFirstRunWizard('user-legacy')).toBe(false);
+		// Plain welcome sent directly
+		expect(deps.telegram.send).toHaveBeenCalledWith(
+			'user-legacy',
+			expect.stringContaining('Welcome to PAS, Alice'),
+		);
+		// No digest question buttons shown
+		expect(deps.telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
 	it('registerUser failure does not trigger wizard', async () => {
 		const deps = makeDeps({
 			dataDir: tempDir,

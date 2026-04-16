@@ -240,8 +240,9 @@ export class Router {
 			return;
 		}
 
-		// D5b-9a: First-run wizard intercept — handle before any normal routing.
-		if (hasPendingFirstRunWizard(ctx.userId)) {
+		// D5b-9a: First-run wizard intercept — only for free text.
+		// Commands (/help, /start, etc.) pass through so the user isn't locked out.
+		if (!parsed && hasPendingFirstRunWizard(ctx.userId)) {
 			await handleFirstRunWizardReply(
 				{ telegram: this.telegram, dataDir: this.config.dataDir, logger: this.logger },
 				ctx.userId,

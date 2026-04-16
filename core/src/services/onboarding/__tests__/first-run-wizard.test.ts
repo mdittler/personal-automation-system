@@ -1,8 +1,8 @@
 /**
  * D5b-9a: First-run wizard tests.
  *
- * Tests the state machine, TTL, digest preference storage, and all 8 scenarios
- * from the D5b plan.
+ * Tests the state machine, TTL, digest preference storage, and coverage
+ * gaps identified in end-of-phase review.
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -44,6 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+	vi.useRealTimers(); // always restore — test 5 may have left fake timers
 	__resetFirstRunWizardForTests();
 	await rm(tempDir, { recursive: true, force: true });
 });
@@ -83,7 +84,7 @@ describe('D5b-9a: First-run wizard', () => {
 		expect(result).toBe(true);
 		expect(hasPendingFirstRunWizard('user-2')).toBe(false);
 
-		// Verify preference persisted
+		// Verify preference persisted to disk
 		const filePath = join(tempDir, 'system', 'onboarding.yaml');
 		const raw = await readFile(filePath, 'utf-8');
 		const data = parse(raw) as Record<string, { digestPreference: string }>;
@@ -117,46 +118,48 @@ describe('D5b-9a: First-run wizard', () => {
 		vi.clearAllMocks();
 		await handleFirstRunWizardReply(deps, 'user-4', 'yes please');
 
-		// State still active
+		// State still active — user is still in the wizard
 		expect(hasPendingFirstRunWizard('user-4')).toBe(true);
 		// Re-prompted with buttons
 		expect(deps.telegram.sendWithButtons).toHaveBeenCalledWith(
 			'user-4',
 			expect.any(String),
-			expect.any(Array),
+			expect.arrayContaining([
+				expect.arrayContaining([
+					expect.objectContaining({ callbackData: 'onboard:digest-yes' }),
+				]),
+			]),
 		);
+		// No YAML written — text reply does not advance or complete the wizard
+		await expect(readFile(join(tempDir, 'system', 'onboarding.yaml'), 'utf-8')).rejects.toThrow();
 	});
 
 	// ---- Test 5: TTL expiry — state cleared, next message routes normally ----
 	it('wizard TTL expiry clears state so hasPendingFirstRunWizard returns false', async () => {
 		const deps = makeDeps({ dataDir: tempDir });
-		// Manually inject an expired entry
 		await beginFirstRunWizard(deps, 'user-5', 'Eve');
 
-		// Force-expire by reaching into module — use negative offset via vi.setSystemTime
+		// Advance time past the 10-minute TTL (fake timers cleaned up in afterEach)
 		vi.useFakeTimers();
-		vi.setSystemTime(Date.now() + 11 * 60 * 1000); // 11 minutes later
+		vi.setSystemTime(Date.now() + 11 * 60 * 1000);
 
 		expect(hasPendingFirstRunWizard('user-5')).toBe(false);
-
-		vi.useRealTimers();
 	});
 
 	// ---- Test 6: two users in wizard simultaneously do not interfere ----
 	it('two simultaneous users do not interfere with each other', async () => {
-		const deps1 = makeDeps({ dataDir: tempDir });
-		const deps2 = makeDeps({ dataDir: tempDir });
+		const deps = makeDeps({ dataDir: tempDir });
 
-		await beginFirstRunWizard(deps1, 'user-a', 'Alice');
-		await beginFirstRunWizard(deps2, 'user-b', 'Bob');
+		await beginFirstRunWizard(deps, 'user-a', 'Alice');
+		await beginFirstRunWizard(deps, 'user-b', 'Bob');
 
 		expect(hasPendingFirstRunWizard('user-a')).toBe(true);
 		expect(hasPendingFirstRunWizard('user-b')).toBe(true);
 
 		// Complete user-a
-		await handleFirstRunWizardCallback(deps1, 'user-a', 'onboard:digest-yes');
+		await handleFirstRunWizardCallback(deps, 'user-a', 'onboard:digest-yes');
 
-		// user-b still pending
+		// user-b still pending; user-a gone
 		expect(hasPendingFirstRunWizard('user-a')).toBe(false);
 		expect(hasPendingFirstRunWizard('user-b')).toBe(true);
 	});
@@ -166,9 +169,6 @@ describe('D5b-9a: First-run wizard', () => {
 		const deps = makeDeps({ dataDir: tempDir });
 		await beginFirstRunWizard(deps, 'user-x', 'X');
 		await beginFirstRunWizard(deps, 'user-y', 'Y');
-
-		expect(hasPendingFirstRunWizard('user-x')).toBe(true);
-		expect(hasPendingFirstRunWizard('user-y')).toBe(true);
 
 		__resetFirstRunWizardForTests();
 
@@ -192,9 +192,69 @@ describe('D5b-9a: First-run wizard', () => {
 
 		expect(data['u1']?.digestPreference).toBe('yes');
 		expect(data['u2']?.digestPreference).toBe('no');
-
-		// Both should have completedAt ISO timestamps
 		expect(data['u1']?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 		expect(data['u2']?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+
+	// ---- Test 9 (gap): stale button press after TTL expires is silently consumed ----
+	it('button press after TTL expiry is consumed (returns true) without side effects', async () => {
+		const deps = makeDeps({ dataDir: tempDir });
+		await beginFirstRunWizard(deps, 'user-stale', 'Stale');
+
+		vi.useFakeTimers();
+		vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+
+		vi.clearAllMocks();
+		const result = await handleFirstRunWizardCallback(deps, 'user-stale', 'onboard:digest-yes');
+
+		// Callback consumed (true), no messages sent, no YAML written
+		expect(result).toBe(true);
+		expect(deps.telegram.send).not.toHaveBeenCalled();
+		await expect(readFile(join(tempDir, 'system', 'onboarding.yaml'), 'utf-8')).rejects.toThrow();
+	});
+
+	// ---- Test 10 (gap): handleFirstRunWizardReply when wizard is expired — no send ----
+	it('free-text reply after TTL expiry does nothing (no telegram send)', async () => {
+		const deps = makeDeps({ dataDir: tempDir });
+		await beginFirstRunWizard(deps, 'user-exp', 'Expired');
+
+		vi.useFakeTimers();
+		vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+
+		vi.clearAllMocks();
+		await handleFirstRunWizardReply(deps, 'user-exp', 'yes');
+
+		expect(deps.telegram.send).not.toHaveBeenCalled();
+		expect(deps.telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	// ---- Test 11 (gap): unknown onboard: prefix is silently consumed ----
+	it('unknown onboard: callback prefix is consumed (true) without side effects', async () => {
+		const deps = makeDeps({ dataDir: tempDir });
+		await beginFirstRunWizard(deps, 'user-unk', 'Unknown');
+
+		vi.clearAllMocks();
+		const result = await handleFirstRunWizardCallback(deps, 'user-unk', 'onboard:something-else');
+
+		expect(result).toBe(true);
+		// Wizard state still active (unrecognised callback doesn't advance or clear it)
+		expect(hasPendingFirstRunWizard('user-unk')).toBe(true);
+		expect(deps.telegram.send).not.toHaveBeenCalled();
+	});
+
+	// ---- Test 12 (gap): beginFirstRunWizard when Telegram send fails — state still set ----
+	it('beginFirstRunWizard state persists even if Telegram send fails', async () => {
+		const deps = makeDeps({ dataDir: tempDir });
+		(deps.telegram.send as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network error'));
+
+		await beginFirstRunWizard(deps, 'user-fail', 'FailUser');
+
+		// State was set before the send attempt — wizard is recoverable
+		expect(hasPendingFirstRunWizard('user-fail')).toBe(true);
+		// Error was logged
+		expect(deps.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: 'user-fail' }),
+			expect.stringContaining('failed to send welcome'),
+		);
 	});
 });
