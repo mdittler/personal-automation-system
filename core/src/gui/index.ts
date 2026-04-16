@@ -23,6 +23,7 @@ import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
+import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { CredentialService } from '../services/credentials/index.js';
 import type { SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
@@ -30,7 +31,9 @@ import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
 import { registerViewLocals } from './view-locals.js';
 import { registerAlertRoutes } from './routes/alerts.js';
+import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
+import { registerCredentialRoutes } from './routes/credentials.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerContextRoutes } from './routes/context.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
@@ -67,6 +70,8 @@ export interface GuiOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'listHouseholds' | 'getHousehold'>;
 	/** D5b-3: Per-user credential store (password hashes + session versions). */
 	credentialService?: CredentialService;
+	/** D5b-8: Per-user API key store (for self-service key management UI). */
+	apiKeyService?: ApiKeyService;
 }
 
 /**
@@ -95,6 +100,7 @@ export async function registerGuiRoutes(
 		logger,
 		loginRateLimiter,
 		credentialService,
+		apiKeyService,
 	} = options;
 
 	await server.register(
@@ -184,6 +190,21 @@ export async function registerGuiRoutes(
 					userMutationService,
 					registry,
 					spaceService,
+					logger,
+				});
+			}
+			// D5b-8: self-service credential management (any authenticated user)
+			if (credentialService && userManager) {
+				registerCredentialRoutes(gui, {
+					credentialService,
+					userManager,
+					logger,
+				});
+			}
+			// D5b-8: self-service API key management (any authenticated user)
+			if (apiKeyService) {
+				registerApiKeyRoutes(gui, {
+					apiKeyService,
 					logger,
 				});
 			}

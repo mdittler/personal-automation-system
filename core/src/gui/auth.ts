@@ -98,7 +98,7 @@ function buildActor(
 }
 
 /** Issue a new session cookie for a successfully authenticated user. */
-function issueSessionCookie(
+export function issueSessionCookie(
 	reply: FastifyReply,
 	userId: string,
 	sessionVersion: number,
