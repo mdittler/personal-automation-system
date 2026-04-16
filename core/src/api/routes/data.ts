@@ -7,6 +7,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
+import { requireScope } from '../guards/require-scope.js';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../../services/data-store/index.js';
 import { PathTraversalError, ScopeViolationError } from '../../services/data-store/index.js';
@@ -52,7 +54,7 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 	const { dataDir, changeLog, spaceService, userManager, eventBus, logger, householdService } =
 		options;
 
-	server.post('/data', async (request, reply) => {
+	server.post('/data', { preHandler: [requireScope('data:write')] }, async (request, reply) => {
 		const body = request.body as DataRequestBody | undefined;
 
 		// Validate required fields
@@ -100,6 +102,18 @@ export function registerDataRoute(server: FastifyInstance, options: DataRouteOpt
 		// Validate user is registered
 		if (!userManager.isRegistered(userId)) {
 			return reply.status(403).send({ ok: false, error: 'Unregistered user.' });
+		}
+
+		// D5b-7: resource-kind authorization
+		if (request.actor) {
+			const allowed = authorizeResourceAccess(
+				request.actor,
+				spaceId ? { kind: 'space', spaceId } : { kind: 'user', userId },
+				spaceService,
+			);
+			if (!allowed) {
+				return reply.status(403).send({ ok: false, error: 'Access denied.' });
+			}
 		}
 
 		try {

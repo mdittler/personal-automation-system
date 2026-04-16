@@ -8,6 +8,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { assertCallerIsTargetUser } from '../guards/authorize-target.js';
+import { requireScope } from '../guards/require-scope.js';
 import { requestContext } from '../../services/context/request-context.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { Router } from '../../services/router/index.js';
@@ -36,7 +38,7 @@ export function registerMessagesRoute(
 ): void {
 	const { router, userManager, logger, householdService } = options;
 
-	server.post('/messages', async (request, reply) => {
+	server.post('/messages', { preHandler: [requireScope('messages:send')] }, async (request, reply) => {
 		const body = request.body as MessagesRequestBody | undefined;
 
 		// Validate required fields
@@ -68,6 +70,11 @@ export function registerMessagesRoute(
 		// Validate user is registered
 		if (!userManager.isRegistered(userId)) {
 			return reply.status(403).send({ ok: false, error: 'Unregistered user.' });
+		}
+
+		// D5b-7: per-user key may only dispatch messages on behalf of its own userId
+		if (request.actor && !assertCallerIsTargetUser(request.actor, userId)) {
+			return reply.status(403).send({ ok: false, error: 'Access denied.' });
 		}
 
 		try {

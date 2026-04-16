@@ -7,6 +7,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { assertCallerIsTargetUser } from '../guards/authorize-target.js';
+import { requireScope } from '../guards/require-scope.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { TelegramService } from '../../types/telegram.js';
 
@@ -30,7 +32,7 @@ export function registerTelegramRoute(
 ): void {
 	const { telegram, userManager, logger } = options;
 
-	server.post('/telegram/send', async (request, reply) => {
+	server.post('/telegram/send', { preHandler: [requireScope('telegram:send')] }, async (request, reply) => {
 		const body = request.body as TelegramSendBody | undefined;
 
 		if (!body?.userId) {
@@ -63,6 +65,11 @@ export function registerTelegramRoute(
 		// Validate user is registered
 		if (!userManager.isRegistered(userId)) {
 			return reply.status(403).send({ ok: false, error: 'Unregistered user.' });
+		}
+
+		// D5b-7: per-user key may only send Telegram messages on behalf of its own userId
+		if (request.actor && !assertCallerIsTargetUser(request.actor, userId)) {
+			return reply.status(403).send({ ok: false, error: 'Access denied.' });
 		}
 
 		try {

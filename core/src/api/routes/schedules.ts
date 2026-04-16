@@ -7,6 +7,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { requireScope } from '../guards/require-scope.js';
 import type { CronManager } from '../../services/scheduler/cron-manager.js';
 import { describeCron, getNextRun } from '../../utils/cron-describe.js';
 
@@ -22,7 +23,14 @@ export function registerSchedulesRoute(
 ): void {
 	const { cronManager, timezone, logger } = options;
 
-	server.get('/schedules', async (_request, reply) => {
+	server.get('/schedules', { preHandler: [requireScope('schedules:read')] }, async (request, reply) => {
+		// D5b-7: schedules list is platform-admin / platform-system only in D5b
+		// (no ownership metadata on jobs, so non-admin has nothing to see)
+		const actor = request.actor;
+		if (actor && !actor.isPlatformAdmin && actor.authMethod !== 'legacy-api-token') {
+			return reply.status(403).send({ ok: false, error: 'Insufficient privileges to list schedules.' });
+		}
+
 		const jobDetails = cronManager.getJobDetails();
 
 		const jobs = jobDetails.map((detail) => {

@@ -10,10 +10,23 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { requireScope } from '../guards/require-scope.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import type { AuthenticatedActor } from '../../types/auth-actor.js';
 import { REPORT_ID_PATTERN } from '../../types/report.js';
 import type { TelegramService } from '../../types/telegram.js';
+
+/** Returns true when the actor can see the report (is in its delivery list). Admin/system bypass. */
+function isDeliveryVisible(actor: AuthenticatedActor, delivery: string[]): boolean {
+	if (actor.isPlatformAdmin || actor.authMethod === 'legacy-api-token') return true;
+	return delivery.includes(actor.userId);
+}
+
+/** Returns true when the actor is allowed to run/fire reports. */
+function canRunReports(actor: AuthenticatedActor): boolean {
+	return actor.isPlatformAdmin || actor.authMethod === 'legacy-api-token';
+}
 
 const MAX_CONTENT_LENGTH = 50_000;
 const USER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -32,10 +45,15 @@ export function registerReportsApiRoute(
 	const { reportService, telegram, userManager, logger } = options;
 
 	// GET /reports — list all report definitions
-	server.get('/reports', async (_request, reply) => {
+	server.get('/reports', { preHandler: [requireScope('reports:read')] }, async (request, reply) => {
 		try {
 			const reports = await reportService.listReports();
-			return reply.send({ ok: true, reports });
+			// D5b-7: filter by delivery-list visibility for non-admin actors
+			const actor = request.actor;
+			const visible = actor
+				? reports.filter((r) => isDeliveryVisible(actor, r.delivery))
+				: reports;
+			return reply.send({ ok: true, reports: visible });
 		} catch (err) {
 			logger.error({ err }, 'API report list failed');
 			return reply.status(500).send({ ok: false, error: 'Internal server error.' });
@@ -43,7 +61,7 @@ export function registerReportsApiRoute(
 	});
 
 	// GET /reports/:id — get a single report definition
-	server.get('/reports/:id', async (request, reply) => {
+	server.get('/reports/:id', { preHandler: [requireScope('reports:read')] }, async (request, reply) => {
 		const { id } = request.params as { id: string };
 
 		if (!REPORT_ID_PATTERN.test(id)) {
@@ -55,6 +73,11 @@ export function registerReportsApiRoute(
 			if (!report) {
 				return reply.status(404).send({ ok: false, error: 'Report not found.' });
 			}
+			// D5b-7: 403 when actor is not in the delivery list
+			const actor = request.actor;
+			if (actor && !isDeliveryVisible(actor, report.delivery)) {
+				return reply.status(403).send({ ok: false, error: 'Access denied.' });
+			}
 			return reply.send({ ok: true, report });
 		} catch (err) {
 			logger.error({ err, reportId: id }, 'API report get failed');
@@ -63,12 +86,18 @@ export function registerReportsApiRoute(
 	});
 
 	// POST /reports/:id/run — execute report (collect, format, save, deliver)
-	server.post('/reports/:id/run', async (request, reply) => {
+	server.post('/reports/:id/run', { preHandler: [requireScope('reports:run')] }, async (request, reply) => {
 		const { id } = request.params as { id: string };
 		const body = request.body as { preview?: boolean } | undefined;
 
 		if (!REPORT_ID_PATTERN.test(id)) {
 			return reply.status(400).send({ ok: false, error: 'Invalid report ID format.' });
+		}
+
+		// D5b-7: run is platform-admin / platform-system only in D5b
+		const actor = request.actor;
+		if (actor && !canRunReports(actor)) {
+			return reply.status(403).send({ ok: false, error: 'Insufficient privileges to run reports.' });
 		}
 
 		try {
@@ -84,7 +113,7 @@ export function registerReportsApiRoute(
 	});
 
 	// POST /reports/:id/deliver — send content to delivery users via Telegram
-	server.post('/reports/:id/deliver', async (request, reply) => {
+	server.post('/reports/:id/deliver', { preHandler: [requireScope('reports:run')] }, async (request, reply) => {
 		const { id } = request.params as { id: string };
 		const body = request.body as { content?: string; userIds?: string[] } | undefined;
 
@@ -101,6 +130,12 @@ export function registerReportsApiRoute(
 				ok: false,
 				error: `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters.`,
 			});
+		}
+
+		// D5b-7: deliver is platform-admin / platform-system only in D5b
+		const deliverActor = request.actor;
+		if (deliverActor && !canRunReports(deliverActor)) {
+			return reply.status(403).send({ ok: false, error: 'Insufficient privileges to deliver reports.' });
 		}
 
 		// Determine recipients: explicit userIds or report's delivery list

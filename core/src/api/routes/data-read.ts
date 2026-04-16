@@ -9,6 +9,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
+import { requireScope } from '../guards/require-scope.js';
 import { PathTraversalError, resolveScopedPath, resolveScopedDataDir } from '../../services/data-store/paths.js';
 import { HouseholdBoundaryError, type HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
@@ -100,7 +102,7 @@ export function registerDataReadRoute(
 ): void {
 	const { dataDir, spaceService, userManager, logger, householdService } = options;
 
-	server.get('/data', async (request, reply) => {
+	server.get('/data', { preHandler: [requireScope('data:read')] }, async (request, reply) => {
 		const query = request.query as DataReadQuery;
 
 		// Validate required fields
@@ -136,6 +138,18 @@ export function registerDataReadRoute(
 		// Validate user is registered
 		if (!userManager.isRegistered(userId)) {
 			return reply.status(403).send({ ok: false, error: 'Unregistered user.' });
+		}
+
+		// D5b-7: resource-kind authorization
+		if (request.actor) {
+			const allowed = authorizeResourceAccess(
+				request.actor,
+				spaceId ? { kind: 'space', spaceId } : { kind: 'user', userId },
+				spaceService,
+			);
+			if (!allowed) {
+				return reply.status(403).send({ ok: false, error: 'Access denied.' });
+			}
 		}
 
 		try {
