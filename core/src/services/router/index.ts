@@ -24,6 +24,7 @@ import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
 import { redeemInviteAndRegister } from '../invite/redeem-and-register.js';
+import { hasPendingFirstRunWizard, handleFirstRunWizardReply } from '../onboarding/first-run-wizard.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
@@ -236,6 +237,17 @@ export class Router {
 		if (!user) {
 			this.logger.warn({ userId: ctx.userId }, 'Message from unregistered user');
 			await this.trySend(ctx.userId, 'You are not authorized to use this bot.');
+			return;
+		}
+
+		// D5b-9a: First-run wizard intercept — only for free text.
+		// Commands (/help, /start, etc.) pass through so the user isn't locked out.
+		if (!parsed && hasPendingFirstRunWizard(ctx.userId)) {
+			await handleFirstRunWizardReply(
+				{ telegram: this.telegram, dataDir: this.config.dataDir, logger: this.logger },
+				ctx.userId,
+				ctx.text,
+			);
 			return;
 		}
 
@@ -900,6 +912,7 @@ export class Router {
 				userMutationService: this.userMutationService,
 				telegram: this.telegram,
 				logger: this.logger,
+				dataDir: this.config.dataDir,
 			},
 			code,
 			userId,

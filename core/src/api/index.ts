@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
 import type { AlertService } from '../services/alerts/index.js';
+import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { ChangeLog } from '../services/data-store/change-log.js';
 import type { HouseholdService } from '../services/household/index.js';
 import type { ReportService } from '../services/reports/index.js';
@@ -50,6 +51,8 @@ export interface ApiOptions {
 	llm: LLMService;
 	/** Optional — when present, enables household-aware data routing for /api/data routes and message dispatch context. */
 	householdService?: HouseholdService;
+	/** Optional — when present, per-user API keys are accepted in addition to the legacy API_TOKEN. */
+	apiKeyService?: ApiKeyService;
 }
 
 export async function registerApiRoutes(
@@ -73,12 +76,19 @@ export async function registerApiRoutes(
 		telegram,
 		llm,
 		householdService,
+		apiKeyService,
 	} = options;
 
 	await server.register(
 		async (api) => {
 			// Auth hook for all /api/* routes
-			const authHook = createApiAuthHook({ apiToken, rateLimiter });
+			const authHook = createApiAuthHook({
+				apiToken,
+				rateLimiter,
+				apiKeyService,
+				userManager,
+				householdService,
+			});
 			api.addHook('onRequest', authHook);
 
 			// Phase 24-25 routes

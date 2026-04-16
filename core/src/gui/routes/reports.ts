@@ -8,6 +8,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type {
@@ -56,8 +57,13 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	}
 
 	// --- List ---
-	server.get('/reports', async (_request: FastifyRequest, reply: FastifyReply) => {
-		const reports = await reportService.listReports();
+	server.get('/reports', async (request: FastifyRequest, reply: FastifyReply) => {
+		const actor = request.user;
+		const allReports = await reportService.listReports();
+		// D5b-5: non-admin sees only reports where they are in the delivery list.
+		const reports = actor
+			? allReports.filter((r) => isDeliveryVisible(r.delivery ?? [], actor))
+			: allReports;
 		const now = new Date();
 
 		return reply.viewAsync('reports', {
@@ -84,7 +90,11 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	});
 
 	// --- New form ---
-	server.get('/reports/new', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/reports/new', async (request: FastifyRequest, reply: FastifyReply) => {
+		// D5b-5: only platform-admin can create reports.
+		if (request.user && !request.user.isPlatformAdmin) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
 		return reply.viewAsync('report-edit', {
 			title: 'Create Report — PAS',
 			activePage: 'reports',
@@ -108,6 +118,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	server.get(
 		'/reports/:id/edit',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can edit reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+			}
 			const report = await reportService.getReport(request.params.id);
 			if (!report) {
 				return reply.code(404).send('Report not found');
@@ -128,6 +142,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	server.post(
 		'/reports',
 		async (request: FastifyRequest<{ Body: Record<string, string> }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can create reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const body = request.body as Record<string, string>;
 			const def = parseFormToReport(body);
 
@@ -157,6 +175,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			}>,
 			reply: FastifyReply,
 		) => {
+			// D5b-5: only platform-admin can update reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const body = request.body as Record<string, string>;
 			const def = parseFormToReport(body);
 			// Force the ID from the URL param (readonly field in form)
@@ -182,6 +204,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	server.post(
 		'/reports/:id/delete',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can delete reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			await reportService.deleteReport(request.params.id);
 			return reply.redirect('/gui/reports');
 		},
@@ -191,6 +217,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	server.post(
 		'/reports/:id/toggle',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can toggle reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const report = await reportService.getReport(request.params.id);
 			if (!report) {
 				return reply.code(404).send('Report not found');
@@ -219,6 +249,10 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 	server.post(
 		'/reports/:id/preview',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can run/preview reports.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).type('text/html').send('<article><p>Access denied.</p></article>');
+			}
 			const result = await reportService.run(request.params.id, {
 				preview: true,
 			});

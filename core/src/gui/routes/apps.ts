@@ -8,6 +8,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import type { AppToggleStore } from '../../services/app-toggle/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
@@ -33,6 +34,9 @@ function escapeHtml(str: string): string {
 
 export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions): void {
 	const { registry, config, appToggle, dataDir, logger } = options;
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// Cache AppConfigServiceImpl instances per appId
 	const configServiceCache = new Map<string, AppConfigServiceImpl>();

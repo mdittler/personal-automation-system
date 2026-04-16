@@ -30,6 +30,12 @@ export function registerChangesRoute(server: FastifyInstance, options: ChangesRo
 	const { changeLog, logger } = options;
 
 	server.get('/changes', async (request, reply) => {
+		// D5b-7: defensive fail-closed — the auth hook always sets request.actor, but
+		// guard here in case of misconfiguration so the route never fails open.
+		if (!request.actor) {
+			return reply.status(401).send({ ok: false, error: 'Unauthenticated.' });
+		}
+
 		const query = request.query as ChangesQuery;
 
 		// Parse 'since' — default to last 24 hours

@@ -33,7 +33,10 @@ export interface DataOptions {
 	 * household spaces → `data/households/<hh>/spaces/<s>/`, collaborations →
 	 * `data/collaborations/<s>/`.
 	 */
-	spaceService?: { getSpace(id: string): SpaceDefinition | null };
+	spaceService?: {
+		getSpace(id: string): SpaceDefinition | null;
+		isMember(spaceId: string, userId: string): boolean;
+	};
 }
 
 /** Pattern for valid userId and appId segments. */
@@ -310,6 +313,30 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 
 		if (!scope) {
 			return reply.status(400).type('text/html').send('Missing scope parameter.');
+		}
+
+		// D5b-5: actor-based resource-kind enforcement.
+		// When request.user is present and is not a platform admin, apply resource-kind rules.
+		const actor = request.user;
+		if (actor && !actor.isPlatformAdmin) {
+			if (scope === 'system' || scope === 'household') {
+				return reply.status(403).type('text/html').send('Access denied.');
+			}
+			if (scope === 'user' && userId && userId !== actor.userId) {
+				return reply.status(403).type('text/html').send('Access denied.');
+			}
+			if (scope === 'shared') {
+				const resolvedHh = householdId ?? null;
+				if (resolvedHh && resolvedHh !== actor.householdId) {
+					return reply.status(403).type('text/html').send('Access denied.');
+				}
+			}
+			if (scope === 'space' && userId) {
+				// For space scope, userId carries the spaceId
+				if (spaceService && !spaceService.isMember(userId, actor.userId)) {
+					return reply.status(403).type('text/html').send('Access denied.');
+				}
+			}
 		}
 
 		// Household-aware validation and path resolution.

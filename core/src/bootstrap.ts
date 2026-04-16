@@ -8,9 +8,11 @@
 
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import './types/fastify-augmentation.js'; // D5b-2: module augmentation — adds user/actor to FastifyRequest
 import { registerApiRoutes } from './api/index.js';
 import { registerGuiRoutes } from './gui/index.js';
 import { registerGlobalErrorHandlers } from './middleware/error-handler.js';
+import { CredentialService } from './services/credentials/index.js';
 import { HouseholdService } from './services/household/index.js';
 import { runHouseholdMigration } from './services/household/migration.js';
 import {
@@ -36,6 +38,7 @@ import { ChangeLog } from './services/data-store/change-log.js';
 import { DataStoreServiceImpl } from './services/data-store/index.js';
 import { EventBusServiceImpl } from './services/event-bus/index.js';
 import { InviteService } from './services/invite/index.js';
+import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { requestContext } from './services/context/request-context.js';
@@ -256,6 +259,14 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
+	// 8b-cred. Credential Service — per-user password hashes + session versions.
+	// No consumers until D5b-3 (GUI login). Instantiated here so it is available
+	// before any route registration.
+	const credentialService = new CredentialService({
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'credentials' }),
+	});
+
 	// 8b-hh. Household Service — tenant boundary enforcement
 	// Initialized from the strict config (all users have householdId after migration).
 	const householdService = new HouseholdService({
@@ -299,6 +310,7 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'user-guard' }),
 		inviteService,
 		userMutationService,
+		dataDir: config.dataDir,
 	});
 
 	// 8b2. Space service (shared data spaces with membership)
@@ -788,7 +800,12 @@ export async function main(): Promise<void> {
 			const messageCtx = adaptTextMessage(ctx);
 			if (!messageCtx) return;
 
+			// Record whether this user was registered before the guard runs.
+			// If UserGuard registers a new user via invite redemption (e.g. /start <code>),
+			// the wizard is already started — skip routing to avoid double-processing.
+			const wasRegisteredBefore = userManager.isRegistered(messageCtx.userId);
 			if (!(await userGuard.checkUser(messageCtx.userId, messageCtx.text))) return;
+			if (!wasRegisteredBefore && userManager.isRegistered(messageCtx.userId)) return;
 
 			if (!telegramRateLimiter.isAllowed(messageCtx.userId)) {
 				await telegramService.send(messageCtx.userId, 'Please slow down. Try again in a moment.');
@@ -901,6 +918,19 @@ export async function main(): Promise<void> {
 					return;
 				}
 
+				// First-run wizard callbacks (onboard:digest-yes / onboard:digest-no).
+				// Wrapped in requestContext.run so D5b-9b report/data writes can attribute correctly.
+				if (data.startsWith('onboard:')) {
+					await requestContext.run({ userId }, async () => {
+						await handleFirstRunWizardCallback(
+							{ telegram: telegramService, dataDir: config.dataDir, logger: callbackLogger },
+							userId,
+							data,
+						);
+					});
+					return;
+				}
+
 				// Route app-specific callback queries
 				if (data.startsWith('app:')) {
 					const parts = data.split(':');
@@ -994,6 +1024,7 @@ export async function main(): Promise<void> {
 		loginRateLimiter,
 		userMutationService,
 		householdService,
+		credentialService, // D5b-3: per-user password auth
 	});
 
 	// 13b. External Data API (optional — disabled when API_TOKEN is empty)

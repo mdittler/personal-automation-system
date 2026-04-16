@@ -51,3 +51,19 @@ export function getCurrentUserId(): string | undefined {
 export function getCurrentHouseholdId(): string | undefined {
 	return requestContext.getStore()?.householdId;
 }
+
+/**
+ * Enter a request context synchronously, binding the provided store to the
+ * current async execution context and all its descendants.
+ *
+ * Unlike `requestContext.run(store, fn)` (which creates a child scope),
+ * `enterRequestContext` mutates the current context store so that code
+ * running *after* this call in the same async continuation — but NOT inside
+ * a callback — sees the new values. This is appropriate for Fastify onRequest
+ * hooks that set the context once for the lifetime of a request handler.
+ *
+ * Used by the GUI auth guard (D5b-3) and the API auth hook (D5b-6).
+ */
+export function enterRequestContext(store: RequestContext): void {
+	requestContext.enterWith(store);
+}

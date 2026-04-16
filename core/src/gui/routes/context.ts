@@ -10,6 +10,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { ContextStoreServiceImpl } from '../../services/context-store/index.js';
 import { requestContext } from '../../services/context/request-context.js';
 import type { SystemConfig } from '../../types/config.js';
@@ -36,6 +37,9 @@ export function registerContextRoutes(
 	options: ContextRoutesOptions,
 ): void {
 	const { contextStore, config, logger } = options;
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// Main page
 	server.get('/context', async (_request: FastifyRequest, reply: FastifyReply) => {

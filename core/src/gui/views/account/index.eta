@@ -1,0 +1,59 @@
+<div class="page-header">
+  <h1>Account</h1>
+</div>
+
+<% if (it.success) { %>
+  <div class="notice success" role="alert" style="padding:0.75rem 1rem;margin-bottom:1rem;background:var(--pico-ins-color,#d1fae5);border-radius:var(--pico-border-radius,0.25rem);color:#065f46;">
+    <%= it.success %>
+  </div>
+<% } %>
+<% if (it.error) { %>
+  <div class="notice error" role="alert" style="padding:0.75rem 1rem;margin-bottom:1rem;background:var(--pico-del-color,#fee2e2);border-radius:var(--pico-border-radius,0.25rem);color:#991b1b;">
+    <%= it.error %>
+  </div>
+<% } %>
+
+<div style="max-width:480px">
+  <section>
+    <h2 style="font-size:1.1rem;margin-bottom:1rem">
+      <% if (it.hasPassword) { %>Change Password<% } else { %>Set Password<% } %>
+    </h2>
+    <p style="font-size:0.875rem;color:var(--pico-muted-color);margin-bottom:1rem">
+      <% if (it.hasPassword) { %>
+        Update your login password. Your current session will remain active; all other sessions will be invalidated.
+      <% } else { %>
+        Set a password to enable GUI login with your Telegram user ID.
+      <% } %>
+    </p>
+    <form method="post" action="/gui/account/password">
+      <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+      <% if (it.hasPassword) { %>
+        <label>
+          Current Password
+          <input type="password" name="currentPassword" autocomplete="current-password" required />
+        </label>
+      <% } %>
+      <label>
+        New Password
+        <input type="password" name="newPassword" autocomplete="new-password" minlength="8" required />
+      </label>
+      <label>
+        Confirm New Password
+        <input type="password" name="confirmPassword" autocomplete="new-password" minlength="8" required />
+      </label>
+      <button type="submit" class="primary">
+        <% if (it.hasPassword) { %>Update Password<% } else { %>Set Password<% } %>
+      </button>
+    </form>
+  </section>
+
+  <section style="margin-top:2rem">
+    <h2 style="font-size:1.1rem;margin-bottom:0.5rem">API Keys</h2>
+    <p style="font-size:0.875rem;color:var(--pico-muted-color);margin-bottom:1rem">
+      Create API keys to access PAS programmatically from external tools.
+    </p>
+    <a href="/gui/account/api-keys" role="button" class="secondary outline" style="display:inline-block">
+      Manage API Keys
+    </a>
+  </section>
+</div>

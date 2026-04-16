@@ -33,6 +33,9 @@
       </a>
     </div>
     <div class="pas-topbar-right">
+      <% if (it.currentUser) { %>
+        <span style="font-size:0.85rem;color:var(--pico-muted-color);margin-right:0.5rem"><%= it.currentUser.name %></span>
+      <% } %>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" type="button">&#9790;</button>
       <form method="post" action="/gui/logout" style="margin:0">
         <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
@@ -47,6 +50,7 @@
     <aside class="pas-sidebar" id="pas-sidebar">
       <nav>
         <ul>
+          <% if (it.isPlatformAdmin) { %>
           <li>
             <a href="/gui/apps" title="Apps" <% if (it.activePage === 'apps') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
@@ -60,6 +64,7 @@
             </a>
           </li>
           <li class="nav-section-divider"></li>
+          <% } %>
           <li>
             <a href="/gui/reports" title="Reports" <% if (it.activePage === 'reports') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -79,6 +84,7 @@
               <span class="nav-label">Spaces</span>
             </a>
           </li>
+          <% if (it.isPlatformAdmin) { %>
           <li>
             <a href="/gui/users" title="Users" <% if (it.activePage === 'users') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -91,12 +97,14 @@
               <span class="nav-label">Context</span>
             </a>
           </li>
+          <% } %>
           <li>
             <a href="/gui/data" title="Data" <% if (it.activePage === 'data') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               <span class="nav-label">Data</span>
             </a>
           </li>
+          <% if (it.isPlatformAdmin) { %>
           <li class="nav-section-divider"></li>
           <li>
             <a href="/gui/logs" title="Logs" <% if (it.activePage === 'logs') { %>aria-current="page"<% } %>>
@@ -108,6 +116,14 @@
             <a href="/gui/llm" title="LLM" <% if (it.activePage === 'llm') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
               <span class="nav-label">LLM</span>
+            </a>
+          </li>
+          <% } %>
+          <li class="nav-section-divider"></li>
+          <li>
+            <a href="/gui/account" title="Account" <% if (it.activePage === 'account') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+              <span class="nav-label">Account</span>
             </a>
           </li>
         </ul>

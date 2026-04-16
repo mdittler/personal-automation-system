@@ -9,6 +9,7 @@ import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 
 export interface LogsOptions {
 	dataDir: string;
@@ -117,6 +118,9 @@ async function readLogEntries(
 export function registerLogsRoutes(server: FastifyInstance, options: LogsOptions): void {
 	const { dataDir } = options;
 	const logFilePath = join(dataDir, 'system', 'logs', 'pas.log');
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// Full page
 	server.get('/logs', async (request: FastifyRequest, reply: FastifyReply) => {

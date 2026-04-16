@@ -8,6 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
+import { requireScope } from '../guards/require-scope.js';
 import type { LLMService } from '../../types/llm.js';
 import type { ModelTier } from '../../types/llm.js';
 
@@ -31,7 +32,7 @@ interface LlmRequestBody {
 export function registerLlmRoute(server: FastifyInstance, options: LlmRouteOptions): void {
 	const { llm, logger } = options;
 
-	server.post('/llm/complete', async (request, reply) => {
+	server.post('/llm/complete', { preHandler: [requireScope('llm:complete')] }, async (request, reply) => {
 		const body = request.body as LlmRequestBody | undefined;
 
 		if (!body?.prompt || typeof body.prompt !== 'string') {

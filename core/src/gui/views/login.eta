@@ -17,12 +17,30 @@
       <% if (it.error) { %>
         <div class="alert-banner alert-banner-error"><%= it.error %></div>
       <% } %>
+      <% if (it.reason === 'password-required') { %>
+        <div class="alert-banner alert-banner-warning">Multiple admin accounts exist — please log in with your Telegram user ID and password.</div>
+      <% } %>
+
+      <!-- Primary: Telegram user ID + password -->
       <form method="post" action="/gui/login">
         <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
-        <label for="token">Authentication Token</label>
-        <input type="password" id="token" name="token" placeholder="Enter your token" required autofocus autocomplete="current-password" />
+        <label for="userId">Telegram User ID</label>
+        <input type="text" id="userId" name="userId" placeholder="Your Telegram user ID (e.g. 123456789)" required autofocus autocomplete="username" inputmode="numeric" />
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Your password" required autocomplete="current-password" />
         <button type="submit">Login</button>
       </form>
+
+      <!-- Legacy: single-admin token (collapsed) -->
+      <details style="margin-top:1.5rem">
+        <summary style="cursor:pointer;color:var(--pico-muted-color);font-size:0.875rem">Single-admin install? Use authentication token</summary>
+        <form method="post" action="/gui/login" style="margin-top:0.75rem">
+          <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+          <label for="legacyToken" style="font-size:0.875rem">Authentication Token</label>
+          <input type="password" id="legacyToken" name="legacyToken" placeholder="Enter your token" autocomplete="off" />
+          <button type="submit" class="outline secondary" style="width:100%">Login with token</button>
+        </form>
+      </details>
     </div>
   </main>
   <script>

@@ -9,6 +9,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import { DEFAULT_REMOTE_PRICING, MODEL_PRICING, getModelPricing } from '../../services/llm/model-pricing.js';
@@ -160,6 +161,9 @@ function isModelRefActive(model: { id: string; provider?: string }, ref: ModelRe
 
 export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsageOptions): void {
 	const { llm, modelSelector, modelCatalog, providerRegistry, logger } = options;
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// Main LLM page
 	server.get('/llm', async (_request: FastifyRequest, reply: FastifyReply) => {

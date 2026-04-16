@@ -9,15 +9,35 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContextStoreServiceImpl } from '../../services/context-store/index.js';
+import { CredentialService } from '../../services/credentials/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerContextRoutes } from '../routes/context.js';
 
 const AUTH_TOKEN = 'test-token';
+const TEST_USER_ID = '123';
+const TEST_PASSWORD = 'test-password';
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
+
+function makeUserManager(users: Array<{ id: string; name: string; isAdmin: boolean }>) {
+	return {
+		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
+		getAllUsers: () => users as ReadonlyArray<{ id: string; name: string; isAdmin: boolean }>,
+	};
+}
+
+function makeHouseholdService(
+	userToHousehold: Record<string, string>,
+	households: Array<{ id: string; adminUserIds: string[] }>,
+) {
+	return {
+		getHouseholdForUser: (userId: string) => userToHousehold[userId] ?? null,
+		getHousehold: (id: string) => households.find((h) => h.id === id) ?? null,
+	};
+}
 
 function createMockConfig(): SystemConfig {
 	return {
@@ -64,9 +84,23 @@ async function buildApp(tempDir: string) {
 		layout: 'layout',
 	});
 
+	// D5b-4: wire per-user auth so requirePlatformAdmin can inspect request.user
+	const credService = new CredentialService({ dataDir: tempDir });
+	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
+	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+	const householdService = makeHouseholdService(
+		{ [TEST_USER_ID]: 'hh-1' },
+		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
+	);
+
 	await app.register(
 		async (gui) => {
-			await registerAuth(gui, { authToken: AUTH_TOKEN });
+			await registerAuth(gui, {
+				authToken: AUTH_TOKEN,
+				credentialService: credService,
+				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+			});
 			await registerCsrfProtection(gui);
 			registerContextRoutes(gui, { contextStore, config, logger });
 		},
@@ -80,7 +114,7 @@ async function authenticatedGet(app: ReturnType<typeof Fastify>, url: string) {
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const cookies = collectCookies(loginRes);
 	return app.inject({ method: 'GET', url, cookies });
@@ -94,7 +128,7 @@ async function authenticatedPost(
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const loginCookies = collectCookies(loginRes);
 	const getRes = await app.inject({ method: 'GET', url: '/gui/context', cookies: loginCookies });
