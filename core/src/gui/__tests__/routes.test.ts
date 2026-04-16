@@ -16,6 +16,7 @@ import type { ModelSelector } from '../../services/llm/model-selector.js';
 import { CronManager } from '../../services/scheduler/cron-manager.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import { OneOffManager } from '../../services/scheduler/oneoff-manager.js';
+import { CredentialService } from '../../services/credentials/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -27,9 +28,28 @@ import { registerLogsRoutes } from '../routes/logs.js';
 import { registerSchedulerRoutes } from '../routes/scheduler.js';
 
 const AUTH_TOKEN = 'test-token';
+const TEST_USER_ID = '123';
+const TEST_PASSWORD = 'test-password';
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
+
+function makeUserManager(users: Array<{ id: string; name: string; isAdmin: boolean }>) {
+	return {
+		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
+		getAllUsers: () => users as ReadonlyArray<{ id: string; name: string; isAdmin: boolean }>,
+	};
+}
+
+function makeHouseholdService(
+	userToHousehold: Record<string, string>,
+	households: Array<{ id: string; adminUserIds: string[] }>,
+) {
+	return {
+		getHouseholdForUser: (userId: string) => userToHousehold[userId] ?? null,
+		getHousehold: (id: string) => households.find((h) => h.id === id) ?? null,
+	};
+}
 
 function createMockConfig(): SystemConfig {
 	return {
@@ -131,9 +151,23 @@ async function buildApp(tempDir: string) {
 		has: () => false,
 	} as unknown as import('../../services/llm/providers/provider-registry.js').ProviderRegistry;
 
+	// D5b-4: wire per-user auth so requirePlatformAdmin can inspect request.user
+	const credService = new CredentialService({ dataDir: tempDir });
+	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
+	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+	const householdService = makeHouseholdService(
+		{ [TEST_USER_ID]: 'hh-1' },
+		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
+	);
+
 	await app.register(
 		async (gui) => {
-			await registerAuth(gui, { authToken: AUTH_TOKEN });
+			await registerAuth(gui, {
+				authToken: AUTH_TOKEN,
+				credentialService: credService,
+				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+			});
 			await registerCsrfProtection(gui);
 			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir: tempDir, logger });
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
@@ -168,11 +202,11 @@ function collectCookies(
 }
 
 async function authenticatedGet(app: Awaited<ReturnType<typeof Fastify>>, url: string) {
-	// Login (no CSRF needed on login POST)
+	// Login with per-user credentials (D5b-4: routes require platform-admin actor)
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const cookies = collectCookies(loginRes);
 
@@ -189,11 +223,11 @@ async function authenticatedPost(
 	url: string,
 	payload: Record<string, unknown>,
 ) {
-	// 1. Login
+	// 1. Login with per-user credentials
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const loginCookies = collectCookies(loginRes);
 
@@ -512,9 +546,23 @@ describe('GUI Routes', () => {
 				layout: 'layout',
 			});
 
+			// D5b-4: wire per-user auth
+			const cfgCredService = new CredentialService({ dataDir: configTempDir });
+			await cfgCredService.setPassword(TEST_USER_ID, TEST_PASSWORD);
+			const cfgUserManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+			const cfgHouseholdService = makeHouseholdService(
+				{ [TEST_USER_ID]: 'hh-1' },
+				[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
+			);
+
 			await fastifyApp.register(
 				async (gui) => {
-					await registerAuth(gui, { authToken: AUTH_TOKEN });
+					await registerAuth(gui, {
+						authToken: AUTH_TOKEN,
+						credentialService: cfgCredService,
+						userManager: cfgUserManager as unknown as import('../../services/user-manager/index.js').UserManager,
+						householdService: cfgHouseholdService as unknown as import('../../services/household/index.js').HouseholdService,
+					});
 					await registerCsrfProtection(gui);
 					registerDashboardRoutes(gui, {
 						registry,
@@ -540,7 +588,7 @@ describe('GUI Routes', () => {
 			const loginRes = await fastifyApp.inject({
 				method: 'POST',
 				url: '/gui/login',
-				payload: { token: AUTH_TOKEN },
+				payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 			});
 			const loginCookies = collectCookies(loginRes);
 

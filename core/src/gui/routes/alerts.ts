@@ -8,6 +8,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import {
@@ -64,8 +65,13 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	}
 
 	// --- List ---
-	server.get('/alerts', async (_request: FastifyRequest, reply: FastifyReply) => {
-		const alerts = await alertService.listAlerts();
+	server.get('/alerts', async (request: FastifyRequest, reply: FastifyReply) => {
+		const actor = request.user;
+		const allAlerts = await alertService.listAlerts();
+		// D5b-5: non-admin sees only alerts where they are in the delivery list.
+		const alerts = actor
+			? allAlerts.filter((a) => isDeliveryVisible(a.delivery ?? [], actor))
+			: allAlerts;
 		const now = new Date();
 
 		return reply.viewAsync('alerts', {
@@ -101,7 +107,11 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	});
 
 	// --- New form ---
-	server.get('/alerts/new', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/alerts/new', async (request: FastifyRequest, reply: FastifyReply) => {
+		// D5b-5: only platform-admin can create alerts.
+		if (request.user && !request.user.isPlatformAdmin) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
 		return reply.viewAsync('alert-edit', {
 			title: 'Create Alert — PAS',
 			activePage: 'alerts',
@@ -130,6 +140,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	server.get(
 		'/alerts/:id/edit',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can edit alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+			}
 			const alert = await alertService.getAlert(request.params.id);
 			if (!alert) {
 				return reply.code(404).send('Alert not found');
@@ -150,6 +164,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	server.post(
 		'/alerts',
 		async (request: FastifyRequest<{ Body: Record<string, string> }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can create alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const body = request.body as Record<string, string>;
 			const def = parseFormToAlert(body);
 
@@ -179,6 +197,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 			}>,
 			reply: FastifyReply,
 		) => {
+			// D5b-5: only platform-admin can update alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const body = request.body as Record<string, string>;
 			const def = parseFormToAlert(body);
 			def.id = request.params.id;
@@ -203,6 +225,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	server.post(
 		'/alerts/:id/delete',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can delete alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			await alertService.deleteAlert(request.params.id);
 			return reply.redirect('/gui/alerts');
 		},
@@ -212,6 +238,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	server.post(
 		'/alerts/:id/toggle',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can toggle alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).send('Forbidden');
+			}
 			const alert = await alertService.getAlert(request.params.id);
 			if (!alert) {
 				return reply.code(404).send('Alert not found');
@@ -240,6 +270,10 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 	server.post(
 		'/alerts/:id/test',
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+			// D5b-5: only platform-admin can test/run alerts.
+			if (request.user && !request.user.isPlatformAdmin) {
+				return reply.status(403).type('text/html').send('<article><p>Access denied.</p></article>');
+			}
 			const result = await alertService.evaluate(request.params.id, {
 				preview: true,
 			});

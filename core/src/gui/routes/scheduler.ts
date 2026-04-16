@@ -7,6 +7,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import {
 	describeCron,
@@ -23,6 +24,9 @@ export interface SchedulerOptions {
 
 export function registerSchedulerRoutes(server: FastifyInstance, options: SchedulerOptions): void {
 	const { scheduler, timezone, logger } = options;
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	server.get('/scheduler', async (_request: FastifyRequest, reply: FastifyReply) => {
 		const now = new Date();

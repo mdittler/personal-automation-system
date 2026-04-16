@@ -6,6 +6,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
@@ -32,6 +33,9 @@ function escapeHtml(str: string): string {
 
 export function registerUserRoutes(server: FastifyInstance, options: UserRoutesOptions): void {
 	const { userManager, userMutationService, registry, spaceService, logger } = options;
+
+	// D5b-4: platform-admin gate — all user management routes require admin
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// --- List all users ---
 	server.get('/users', async (_request: FastifyRequest, reply: FastifyReply) => {

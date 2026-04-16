@@ -29,8 +29,13 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 	const allUsers = userManager.getAllUsers();
 
 	// --- List ---
-	server.get('/spaces', async (_request: FastifyRequest, reply: FastifyReply) => {
-		const spaces = spaceService.listSpaces();
+	server.get('/spaces', async (request: FastifyRequest, reply: FastifyReply) => {
+		const actor = request.user;
+		// D5b-5: non-admin sees only spaces they are a member of.
+		const allSpaces = spaceService.listSpaces();
+		const spaces = actor && !actor.isPlatformAdmin
+			? allSpaces.filter((s) => s.members.includes(actor.userId))
+			: allSpaces;
 
 		const spacesWithNames = spaces.map((s) => ({
 			...s,
@@ -52,7 +57,11 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 	});
 
 	// --- New ---
-	server.get('/spaces/new', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/spaces/new', async (request: FastifyRequest, reply: FastifyReply) => {
+		// D5b-5: only platform-admin can create spaces.
+		if (request.user && !request.user.isPlatformAdmin) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
 		return reply.viewAsync('space-edit', {
 			title: 'Create Space — PAS',
 			activePage: 'spaces',
@@ -98,6 +107,11 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 		};
 
 		const isNew = body.isNew === 'true';
+
+		// D5b-5: only platform-admin can create spaces.
+		if (isNew && request.user && !request.user.isPlatformAdmin) {
+			return reply.status(403).send('Forbidden');
+		}
 		const members = Array.isArray(body.members) ? body.members : body.members ? [body.members] : [];
 
 		const def = {

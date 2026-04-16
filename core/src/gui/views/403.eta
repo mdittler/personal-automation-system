@@ -1,0 +1,10 @@
+<div class="page-header">
+  <h2>403 — Insufficient Privileges</h2>
+</div>
+<article>
+  <p>You don't have permission to access this page.</p>
+  <p>This area requires <strong>platform administrator</strong> access. Contact your system administrator if you believe this is an error.</p>
+  <footer>
+    <a href="/gui/" role="button" class="outline">Back to Dashboard</a>
+  </footer>
+</article>

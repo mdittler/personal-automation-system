@@ -7,6 +7,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
 import type { SystemConfig } from '../../types/config.js';
@@ -21,6 +22,9 @@ export interface ConfigOptions {
 
 export function registerConfigRoutes(server: FastifyInstance, options: ConfigOptions): void {
 	const { registry, config, dataDir, logger } = options;
+
+	// D5b-4: platform-admin gate
+	server.addHook('preHandler', requirePlatformAdmin);
 
 	// Cache AppConfigServiceImpl instances per appId to avoid re-creation on each request
 	const configServiceCache = new Map<string, AppConfigServiceImpl>();

@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyCookie from '@fastify/cookie';
@@ -5,7 +7,8 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CredentialService } from '../../services/credentials/index.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { CatalogModel, ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
@@ -15,9 +18,28 @@ import { registerCsrfProtection } from '../csrf.js';
 import { escapeHtml, parseUsageMarkdown, registerLlmUsageRoutes } from '../routes/llm-usage.js';
 
 const AUTH_TOKEN = 'test-token';
+const TEST_USER_ID = '123';
+const TEST_PASSWORD = 'test-password';
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
+
+function makeUserManager(users: Array<{ id: string; name: string; isAdmin: boolean }>) {
+	return {
+		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
+		getAllUsers: () => users as ReadonlyArray<{ id: string; name: string; isAdmin: boolean }>,
+	};
+}
+
+function makeHouseholdService(
+	userToHousehold: Record<string, string>,
+	households: Array<{ id: string; adminUserIds: string[] }>,
+) {
+	return {
+		getHouseholdForUser: (userId: string) => userToHousehold[userId] ?? null,
+		getHousehold: (id: string) => households.find((h) => h.id === id) ?? null,
+	};
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,6 +85,7 @@ async function buildApp(options?: {
 	providerRegistry?: ProviderRegistry;
 	modelCatalog?: ModelCatalog;
 	usageContent?: string;
+	tempDir?: string;
 }) {
 	const modelSelector = options?.modelSelector ?? createMockModelSelector();
 	const providerRegistry =
@@ -70,6 +93,7 @@ async function buildApp(options?: {
 		createMockProviderRegistry([{ id: 'anthropic', type: 'anthropic' }]);
 	const modelCatalog = options?.modelCatalog ?? createMockCatalog();
 	const usageContent = options?.usageContent ?? '';
+	const tempDir = options?.tempDir ?? (await mkdtemp(join(tmpdir(), 'pas-llm-test-')));
 
 	const costTracker = { readUsage: vi.fn().mockResolvedValue(usageContent) };
 	const llm = { costTracker } as unknown as LLMServiceImpl;
@@ -85,9 +109,23 @@ async function buildApp(options?: {
 		layout: 'layout',
 	});
 
+	// D5b-4: wire per-user auth so requirePlatformAdmin can inspect request.user
+	const credService = new CredentialService({ dataDir: tempDir });
+	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
+	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+	const householdService = makeHouseholdService(
+		{ [TEST_USER_ID]: 'hh-1' },
+		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
+	);
+
 	await app.register(
 		async (gui) => {
-			await registerAuth(gui, { authToken: AUTH_TOKEN });
+			await registerAuth(gui, {
+				authToken: AUTH_TOKEN,
+				credentialService: credService,
+				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+			});
 			await registerCsrfProtection(gui);
 			registerLlmUsageRoutes(gui, {
 				llm,
@@ -100,7 +138,7 @@ async function buildApp(options?: {
 		{ prefix: '/gui' },
 	);
 
-	return { app, modelSelector, providerRegistry, modelCatalog };
+	return { app, modelSelector, providerRegistry, modelCatalog, tempDir };
 }
 
 function collectCookies(
@@ -119,7 +157,7 @@ async function authenticatedGet(app: Awaited<ReturnType<typeof Fastify>>, url: s
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const cookies = collectCookies(loginRes);
 	return app.inject({ method: 'GET', url, cookies });
@@ -133,7 +171,7 @@ async function authenticatedPost(
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
-		payload: { token: AUTH_TOKEN },
+		payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
 	});
 	const loginCookies = collectCookies(loginRes);
 
