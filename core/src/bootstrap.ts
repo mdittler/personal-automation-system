@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { registerApiRoutes } from './api/index.js';
 import { registerGuiRoutes } from './gui/index.js';
 import { registerGlobalErrorHandlers } from './middleware/error-handler.js';
+import { CredentialService } from './services/credentials/index.js';
 import { HouseholdService } from './services/household/index.js';
 import { runHouseholdMigration } from './services/household/migration.js';
 import {
@@ -254,6 +255,14 @@ export async function main(): Promise<void> {
 		config,
 		appToggle,
 		logger: createChildLogger(logger, { service: 'user-manager' }),
+	});
+
+	// 8b-cred. Credential Service — per-user password hashes + session versions.
+	// No consumers until D5b-3 (GUI login). Instantiated here so it is available
+	// before any route registration.
+	const credentialService = new CredentialService({
+		dataDir: config.dataDir,
+		logger: createChildLogger(logger, { service: 'credentials' }),
 	});
 
 	// 8b-hh. Household Service — tenant boundary enforcement
