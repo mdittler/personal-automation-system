@@ -17,7 +17,7 @@ Copy `.env.example` to `.env` and fill in the values before starting the server.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Required | Bot token from [@BotFather](https://t.me/BotFather) |
 | `ANTHROPIC_API_KEY` | Required | Anthropic API key for Claude (fast/standard/reasoning tiers) |
-| `GUI_AUTH_TOKEN` | Required | Password for the management GUI |
+| `GUI_AUTH_TOKEN` | Required | Legacy single-admin GUI token. Accepted only when exactly one user has `is_admin: true`. Set to any strong random string; new installs should use per-user password login instead. |
 | `GOOGLE_AI_API_KEY` | Optional | Google Gemini API key |
 | `OPENAI_API_KEY` | Optional | OpenAI-compatible API key (also used for Together, etc.) |
 | `GROQ_API_KEY` | Optional | Groq API key |
@@ -29,6 +29,8 @@ Copy `.env.example` to `.env` and fill in the values before starting the server.
 | `TELEGRAM_WEBHOOK_SECRET` | Optional | Secret token to validate incoming Telegram webhook requests |
 | `GUI_SECURE_COOKIES` | Optional | Set to `true` to force secure cookies without `NODE_ENV=production` |
 | `OLLAMA_URL` | Optional | Ollama base URL for local LLM (e.g. `http://localhost:11434`) |
+
+> **D5b note:** The GUI now uses per-user password login. Set a password for your admin user via the **Account** page in the GUI (`/gui/account`), or by calling `CredentialService.setPassword(userId, plaintext)` from a one-off script. The legacy `GUI_AUTH_TOKEN` continues to work for single-admin installs as a bridge.
 
 ---
 
@@ -94,11 +96,13 @@ backup:
    node dist/core/src/main.js   # production build
    ```
 
-5. **Register via Telegram:**
+5. **Set up GUI access + register users:**
    - Open the management GUI at `http://localhost:3000`
-   - Log in with `GUI_AUTH_TOKEN`
+   - Log in with your `GUI_AUTH_TOKEN` (single-admin bridge — works until you set a password)
+   - Go to **Account → Change Password** to set a personal password, then log in with your Telegram user ID + password
    - Create an invite code under **Users → Invite Codes**
-   - Message your bot: `/register <invite_code>`
+   - Share the code with new users — they send it to the bot (or `/start <code>`) and receive a guided welcome
+   - New users set their own password at **Account → Change Password** after first contact
 
 6. **Verify health:**
    ```bash
@@ -329,4 +333,42 @@ The marker is **not written** on failure, so the migration will retry on the nex
 
 ### GUI / API access in D5a
 
-The management GUI (`/`) and REST API (`/api/`) use a single bearer token (`GUI_AUTH_TOKEN` / `API_TOKEN`). Access is system-owner-only — there is no per-household authentication in D5a. Per-household GUI and API auth is planned for D5b.
+As of D5b (2026-04-15), the management GUI uses per-user password login and the REST API supports per-user scoped API keys. See the [Per-User Auth](#per-user-auth-d5b) section below.
+
+---
+
+## Per-User Auth (D5b)
+
+### GUI Login
+
+The management GUI requires a Telegram user ID and password.
+
+1. **First login** — use the legacy `GUI_AUTH_TOKEN` (works when exactly one `is_admin: true` user is configured).
+2. **Set a password** — navigate to **Account → Change Password**, enter and confirm a new password. The GUI issues a fresh session cookie; the legacy token continues to work in parallel.
+3. **Subsequent logins** — enter your Telegram user ID and password on the login page.
+
+If `GUI_AUTH_TOKEN` login stops working, it means more than one admin user exists. All admins must log in with their personal passwords.
+
+### REST API Keys
+
+The REST API accepts two auth methods:
+
+**Legacy `API_TOKEN`** (existing integrations):
+```
+Authorization: Bearer <API_TOKEN>
+```
+Maps to the `platform-system` actor with full `scopes: ['*']`. No changes needed for existing n8n / webhook integrations.
+
+**Per-user API keys** (new):
+1. Log in to the GUI and go to **Account → API Keys**.
+2. Click **Create New Key**, choose a label and scopes, optionally set an expiry.
+3. Copy the full token (shown only once): `pas_<keyId>_<secret>`.
+4. Pass it as a bearer token: `Authorization: Bearer pas_<keyId>_<secret>`.
+
+Per-user keys are scoped — a key without `data:write` cannot write data even if the user is an admin. Available scopes: `data:read`, `data:write`, `messages:send`, `telegram:send`, `reports:read`, `reports:run`, `alerts:read`, `alerts:run`, `schedules:read`, `llm:complete`.
+
+### Session Invalidation
+
+Changing a user's password bumps their `sessionVersion`. Any outstanding GUI sessions for that user are invalidated on the next request. The acting browser gets a fresh cookie so the user stays logged in.
+
+To force-invalidate all sessions for a user (e.g., suspected compromise), an admin can use **Users → Reset Password** to set a new password for the target user.
