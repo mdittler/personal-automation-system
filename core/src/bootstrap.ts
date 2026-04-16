@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import './types/fastify-augmentation.js'; // D5b-2: module augmentation — adds user/actor to FastifyRequest
 import { registerApiRoutes } from './api/index.js';
 import { registerGuiRoutes } from './gui/index.js';
 import { registerGlobalErrorHandlers } from './middleware/error-handler.js';
