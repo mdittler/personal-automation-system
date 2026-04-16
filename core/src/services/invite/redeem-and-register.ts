@@ -10,6 +10,7 @@ import type { InviteService } from './index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { TelegramService } from '../../types/telegram.js';
+import { beginFirstRunWizard } from '../onboarding/first-run-wizard.js';
 
 export interface RedeemAndRegisterDeps {
 	inviteService: InviteService;
@@ -18,6 +19,8 @@ export interface RedeemAndRegisterDeps {
 	logger: Logger;
 	/** Optional — when present, auto-join logic runs for initialSpaces on the invite. */
 	spaceService?: SpaceService;
+	/** Optional — when present, the first-run wizard is triggered after registration. */
+	dataDir?: string;
 }
 
 export type RedeemAndRegisterResult =
@@ -109,13 +112,23 @@ export async function redeemInviteAndRegister(
 		}
 	}
 
-	try {
-		await telegram.send(
-			userId,
-			`Welcome to PAS, ${invite.name}! Type /help to see available commands.`,
-		);
-	} catch (err) {
-		logger.error({ userId, err }, 'Failed to send welcome message after registration');
+	// D5b-9a: trigger guided first-run wizard (welcome + digest preference).
+	// Falls back to a plain welcome if dataDir is not provided (legacy callers).
+	if (deps.dataDir) {
+		try {
+			await beginFirstRunWizard({ telegram, dataDir: deps.dataDir, logger }, userId, invite.name);
+		} catch (err) {
+			logger.error({ userId, err }, 'Failed to start first-run wizard after registration');
+		}
+	} else {
+		try {
+			await telegram.send(
+				userId,
+				`Welcome to PAS, ${invite.name}! Type /help to see available commands.`,
+			);
+		} catch (err) {
+			logger.error({ userId, err }, 'Failed to send welcome message after registration');
+		}
 	}
 
 	return { success: true, name: invite.name };

@@ -38,6 +38,7 @@ import { ChangeLog } from './services/data-store/change-log.js';
 import { DataStoreServiceImpl } from './services/data-store/index.js';
 import { EventBusServiceImpl } from './services/event-bus/index.js';
 import { InviteService } from './services/invite/index.js';
+import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { requestContext } from './services/context/request-context.js';
@@ -908,6 +909,16 @@ export async function main(): Promise<void> {
 							}
 						}
 					});
+					return;
+				}
+
+				// First-run wizard callbacks (onboard:digest-yes / onboard:digest-no)
+				if (data.startsWith('onboard:')) {
+					await handleFirstRunWizardCallback(
+						{ telegram: telegramService, dataDir: config.dataDir, logger: callbackLogger },
+						userId,
+						data,
+					);
 					return;
 				}
 
