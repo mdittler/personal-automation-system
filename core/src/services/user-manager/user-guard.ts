@@ -22,6 +22,8 @@ export interface UserGuardOptions {
 	logger: Logger;
 	inviteService?: InviteService;
 	userMutationService?: UserMutationService;
+	/** When present, the first-run wizard is triggered after invite redemption. */
+	dataDir?: string;
 }
 
 export class UserGuard {
@@ -30,6 +32,7 @@ export class UserGuard {
 	private readonly logger: Logger;
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
+	private readonly dataDir?: string;
 
 	constructor(options: UserGuardOptions) {
 		this.userManager = options.userManager;
@@ -37,6 +40,7 @@ export class UserGuard {
 		this.logger = options.logger;
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
+		this.dataDir = options.dataDir;
 	}
 
 	/**
@@ -75,6 +79,7 @@ export class UserGuard {
 						userMutationService: this.userMutationService,
 						telegram: this.telegram,
 						logger: this.logger,
+						dataDir: this.dataDir,
 					},
 					potentialCode,
 					userId,

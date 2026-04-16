@@ -310,6 +310,7 @@ export async function main(): Promise<void> {
 		logger: createChildLogger(logger, { service: 'user-guard' }),
 		inviteService,
 		userMutationService,
+		dataDir: config.dataDir,
 	});
 
 	// 8b2. Space service (shared data spaces with membership)
@@ -799,7 +800,12 @@ export async function main(): Promise<void> {
 			const messageCtx = adaptTextMessage(ctx);
 			if (!messageCtx) return;
 
+			// Record whether this user was registered before the guard runs.
+			// If UserGuard registers a new user via invite redemption (e.g. /start <code>),
+			// the wizard is already started — skip routing to avoid double-processing.
+			const wasRegisteredBefore = userManager.isRegistered(messageCtx.userId);
 			if (!(await userGuard.checkUser(messageCtx.userId, messageCtx.text))) return;
+			if (!wasRegisteredBefore && userManager.isRegistered(messageCtx.userId)) return;
 
 			if (!telegramRateLimiter.isAllowed(messageCtx.userId)) {
 				await telegramService.send(messageCtx.userId, 'Please slow down. Try again in a moment.');
@@ -912,13 +918,16 @@ export async function main(): Promise<void> {
 					return;
 				}
 
-				// First-run wizard callbacks (onboard:digest-yes / onboard:digest-no)
+				// First-run wizard callbacks (onboard:digest-yes / onboard:digest-no).
+				// Wrapped in requestContext.run so D5b-9b report/data writes can attribute correctly.
 				if (data.startsWith('onboard:')) {
-					await handleFirstRunWizardCallback(
-						{ telegram: telegramService, dataDir: config.dataDir, logger: callbackLogger },
-						userId,
-						data,
-					);
+					await requestContext.run({ userId }, async () => {
+						await handleFirstRunWizardCallback(
+							{ telegram: telegramService, dataDir: config.dataDir, logger: callbackLogger },
+							userId,
+							data,
+						);
+					});
 					return;
 				}
 
