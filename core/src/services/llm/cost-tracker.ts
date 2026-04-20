@@ -120,6 +120,11 @@ export class CostTracker {
 						this.monthlyUserCosts.set(userId, cost);
 					}
 				}
+				for (const [hhId, cost] of Object.entries(data.households ?? {})) {
+					if (typeof cost === 'number') {
+						this.monthlyHouseholdCosts.set(hhId, cost);
+					}
+				}
 				this.monthlyTotal = typeof data.total === 'number' ? data.total : 0;
 				this.logger.info(
 					{ month: this.currentMonth, total: this.monthlyTotal, apps: this.monthlyCosts.size },
