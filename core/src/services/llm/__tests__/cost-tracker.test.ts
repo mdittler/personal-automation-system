@@ -8,6 +8,40 @@ import { CostTracker } from '../cost-tracker.js';
 
 const logger = pino({ level: 'silent' });
 
+// ---------------------------------------------------------------------------
+// Header constants for multi-version migration tests
+// ---------------------------------------------------------------------------
+const HEADER_7 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+const SEP_7    = '|-----------|----------|-------|-------------|---------------|----------|-----|';
+const HEADER_8 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
+const SEP_8    = '|-----------|----------|-------|-------------|---------------|----------|-----|------|';
+const HEADER_9 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
+const SEP_9    = '|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
+
+/**
+ * Write a minimal valid usage log with given table rows.
+ * `version` selects which header/separator variant to use (default 8 for backward compat).
+ */
+async function writeUsageLog(
+	systemDir: string,
+	rows: string[],
+	version: 7 | 8 | 9 = 8,
+): Promise<void> {
+	await mkdir(systemDir, { recursive: true });
+	const header = version === 9 ? HEADER_9 : version === 7 ? HEADER_7 : HEADER_8;
+	const sep    = version === 9 ? SEP_9    : version === 7 ? SEP_7    : SEP_8;
+	const content = [
+		'# LLM Usage Log',
+		'',
+		header,
+		sep,
+		'',
+		...rows,
+		'',
+	].join('\n');
+	await writeFile(join(systemDir, 'llm-usage.md'), content, 'utf-8');
+}
+
 describe('CostTracker', () => {
 	let tempDir: string;
 
@@ -570,20 +604,6 @@ describe('CostTracker', () => {
 	describe('rebuildFromLog (F13)', () => {
 		const currentMonth = new Date().toISOString().slice(0, 7);
 
-		/** Write a minimal valid usage log with given table rows. */
-		async function writeUsageLog(systemDir: string, rows: string[]): Promise<void> {
-			await mkdir(systemDir, { recursive: true });
-			const header = [
-				'# LLM Usage Log',
-				'',
-				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |',
-				'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
-				'',
-			].join('\n');
-			const body = rows.join('\n') + '\n';
-			await writeFile(join(systemDir, 'llm-usage.md'), header + body, 'utf-8');
-		}
-
 		it('rebuilds totals from usage log when YAML cache is missing', async () => {
 			const systemDir = join(tempDir, 'system');
 			await writeUsageLog(systemDir, [
@@ -724,6 +744,306 @@ describe('CostTracker', () => {
 			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.0115, 5);
 			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.0105, 6);
 			expect(t.getMonthlyAppCost('notes')).toBeCloseTo(0.001, 6);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Household dimension
+	// ---------------------------------------------------------------------------
+	describe('household dimension', () => {
+		const month = new Date().toISOString().slice(0, 7);
+
+		it('writes 9-col header and household cell on first record', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+			await tracker.record({
+				model: 'claude-haiku-4-5-20251001',
+				provider: 'anthropic',
+				providerType: 'anthropic',
+				inputTokens: 100,
+				outputTokens: 50,
+				appId: 'app1',
+				userId: 'u1',
+				householdId: 'h1',
+			});
+			const content = await tracker.readUsage();
+			expect(content).toContain('| Household |');
+			expect(content).toContain('| h1 |');
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeGreaterThan(0);
+			expect(tracker.getMonthlyHouseholdCost('h2')).toBe(0);
+		});
+
+		it('excludes __platform__ household from aggregate but still updates app/user totals', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+			await tracker.record({
+				model: 'claude-haiku-4-5-20251001',
+				provider: 'anthropic',
+				providerType: 'anthropic',
+				inputTokens: 100,
+				outputTokens: 50,
+				appId: 'app1',
+				userId: 'u1',
+				householdId: '__platform__',
+			});
+			const content = await tracker.readUsage();
+			// Log row should have '-' in household cell, not __platform__
+			expect(content).toMatch(/\| u1 \| - \|/);
+			expect(tracker.getMonthlyHouseholdCost('__platform__')).toBe(0);
+			expect(tracker.getMonthlyAppCost('app1')).toBeGreaterThan(0);
+			expect(tracker.getMonthlyUserCost('u1')).toBeGreaterThan(0);
+		});
+
+		it('migrates 8-col log to 9-col on loadMonthlyCache; legacy rows excluded from household aggregate', async () => {
+			const systemDir = join(tempDir, 'system');
+			// Write an 8-col log with a current-month row
+			const row8 = `| ${month}-10T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 |`;
+			await writeUsageLog(systemDir, [row8], 8);
+
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			const content = await tracker.readUsage();
+			expect(content).toContain(HEADER_9);
+			expect(content).toContain('schema upgraded to 9-col');
+			// Legacy row still present
+			expect(content).toContain(row8);
+			// User total populated from 8-col row
+			expect(tracker.getMonthlyUserCost('u1')).toBeCloseTo(0.000188, 6);
+			// But household aggregate NOT populated from legacy row (no 9th cell)
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0);
+		});
+
+		it('migrates 7-col log to 9-col on loadMonthlyCache without crash', async () => {
+			const systemDir = join(tempDir, 'system');
+			const row7 = `| ${month}-10T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 |`;
+			await writeUsageLog(systemDir, [row7], 7);
+
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			const content = await tracker.readUsage();
+			expect(content).toContain(HEADER_9);
+			expect(content).toContain(row7); // legacy row preserved
+			// No crash; tracker alive and household map empty
+			expect(tracker.getMonthlyHouseholdCost('any')).toBe(0);
+		});
+
+		it('migration is idempotent — second loadMonthlyCache does not add second marker', async () => {
+			const systemDir = join(tempDir, 'system');
+			const row8 = `| ${month}-10T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 |`;
+			await writeUsageLog(systemDir, [row8], 8);
+
+			const tracker1 = new CostTracker(tempDir, logger);
+			await tracker1.loadMonthlyCache();
+			const contentAfterFirst = await tracker1.readUsage();
+
+			const tracker2 = new CostTracker(tempDir, logger);
+			await tracker2.loadMonthlyCache();
+			const contentAfterSecond = await tracker2.readUsage();
+
+			expect(contentAfterFirst).toBe(contentAfterSecond);
+		});
+
+		it('rebuildFromLog handles mixed 8-col and 9-col rows correctly', async () => {
+			const systemDir = join(tempDir, 'system');
+			// Seed a 9-col file with one 8-col legacy row and one 9-col row
+			await mkdir(systemDir, { recursive: true });
+			const content = [
+				'# LLM Usage Log',
+				'',
+				HEADER_9,
+				SEP_9,
+				`<!-- schema upgraded to 9-col at 2026-04-01T00:00:00.000Z -->`,
+				`| ${month}-01T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 |`,   // 8-col
+				`| ${month}-02T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u2 | h1 |`, // 9-col
+				'',
+			].join('\n');
+			await writeFile(join(systemDir, 'llm-usage.md'), content, 'utf-8');
+
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			// Both rows contribute to user/app/total
+			expect(tracker.getMonthlyUserCost('u1')).toBeCloseTo(0.000188, 6);
+			expect(tracker.getMonthlyUserCost('u2')).toBeCloseTo(0.000188, 6);
+			// Only 9-col row contributes to household
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.000188, 6);
+			expect(tracker.getMonthlyHouseholdCost('h2')).toBe(0);
+		});
+
+		it('YAML upgrade trigger: rebuilds and populates household map when households key absent', async () => {
+			const systemDir = join(tempDir, 'system');
+			await mkdir(systemDir, { recursive: true });
+
+			// Write YAML without households key
+			await writeFile(join(systemDir, 'monthly-costs.yaml'), [
+				`month: ${month}`,
+				`apps:`,
+				`  app1: 0.001`,
+				`users:`,
+				`  u1: 0.001`,
+				`total: 0.001`,
+			].join('\n'), 'utf-8');
+
+			// Write a 9-col log with a current-month row
+			const row9 = `| ${month}-10T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 | h1 |`;
+			await writeUsageLog(systemDir, [row9], 9);
+
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.000188, 6);
+		});
+
+		it('YAML upgrade: preserves apps/users/total when no current-month rows exist in log', async () => {
+			const systemDir = join(tempDir, 'system');
+			await mkdir(systemDir, { recursive: true });
+
+			// Write YAML without households key but with valid data
+			await writeFile(join(systemDir, 'monthly-costs.yaml'), [
+				`month: ${month}`,
+				`apps:`,
+				`  app1: 0.05`,
+				`users:`,
+				`  u1: 0.05`,
+				`total: 0.05`,
+			].join('\n'), 'utf-8');
+
+			// No log file — simulates empty/missing log scenario
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			// Existing app/user/total data must be preserved
+			expect(tracker.getMonthlyAppCost('app1')).toBeCloseTo(0.05, 6);
+			expect(tracker.getMonthlyUserCost('u1')).toBeCloseTo(0.05, 6);
+			expect(tracker.getMonthlyTotalCost()).toBeCloseTo(0.05, 6);
+			// Household map empty but not broken
+			expect(tracker.getMonthlyHouseholdCost('any')).toBe(0);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Reservation API
+	// ---------------------------------------------------------------------------
+	describe('reservation API', () => {
+		let tracker: CostTracker;
+
+		beforeEach(async () => {
+			tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+		});
+
+		afterEach(async () => {
+			await tracker.flush();
+		});
+
+		it('reserveEstimated returns a string reservation ID', () => {
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			expect(typeof id).toBe('string');
+			expect(id.length).toBeGreaterThan(10);
+		});
+
+		it('getMonthlyHouseholdCost includes outstanding reservations', () => {
+			tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.10, 6);
+			expect(tracker.getMonthlyHouseholdCost('h2')).toBe(0); // other household not affected
+		});
+
+		it('reservation + persisted cost sum correctly', async () => {
+			await tracker.record({
+				model: 'claude-haiku-4-5-20251001',
+				provider: 'anthropic',
+				providerType: 'anthropic',
+				inputTokens: 100,
+				outputTokens: 50,
+				appId: 'app1',
+				householdId: 'h1',
+			});
+			const persisted = tracker.getMonthlyHouseholdCost('h1');
+			tracker.reserveEstimated('h1', 'app1', undefined, 0.10);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(persisted + 0.10, 5);
+		});
+
+		it('releaseReservation removes reservation from pending sum', () => {
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			tracker.releaseReservation(id, 0.08);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0); // reservation gone
+		});
+
+		it('releaseReservation with null actualCost removes reservation without error', () => {
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			expect(() => tracker.releaseReservation(id, null)).not.toThrow();
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0);
+		});
+
+		it('releaseReservation with unknown id does not throw', () => {
+			expect(() => tracker.releaseReservation('unknown-id', null)).not.toThrow();
+		});
+
+		it('throws on invalid reservation amounts', () => {
+			expect(() => tracker.reserveEstimated('h1', undefined, undefined, Number.NaN)).toThrow();
+			expect(() => tracker.reserveEstimated('h1', undefined, undefined, Infinity)).toThrow();
+			expect(() => tracker.reserveEstimated('h1', undefined, undefined, -0.01)).toThrow();
+			// Zero is allowed (e.g. Ollama free-tier call)
+			expect(() => tracker.reserveEstimated('h1', undefined, undefined, 0)).not.toThrow();
+		});
+
+		it('10 concurrent reserveEstimated calls sum correctly in getMonthlyHouseholdCost', async () => {
+			const ids = await Promise.all(
+				Array.from({ length: 10 }, (_, i) =>
+					Promise.resolve(tracker.reserveEstimated('h1', 'app', `u${i}`, 0.10)),
+				),
+			);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(1.00, 5);
+			ids.forEach((id) => tracker.releaseReservation(id, null));
+		});
+
+		it('expired reservations are excluded from getMonthlyHouseholdCost (fake timers)', async () => {
+			vi.useFakeTimers();
+			try {
+				tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+				expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.10, 6);
+
+				// Advance past expiry (60 s)
+				vi.advanceTimersByTime(61_000);
+
+				expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('flush stops the cleanup timer; new reservation after flush works', async () => {
+			tracker.reserveEstimated('h1', 'app', 'u1', 0.05);
+			await tracker.flush();
+			// After flush + new reserve, tracker should still work
+			tracker.reserveEstimated('h2', 'app', 'u2', 0.05);
+			expect(tracker.getMonthlyHouseholdCost('h2')).toBeCloseTo(0.05, 6);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// parseUsageMarkdown 9-col compatibility
+	// ---------------------------------------------------------------------------
+	describe('parseUsageMarkdown 9-col compatibility', () => {
+		it('correctly parses a 9-column row', async () => {
+			const { parseUsageMarkdown } = await import('../../../gui/routes/llm-usage.js');
+			const today = new Date().toISOString().slice(0, 10);
+			const content = [
+				'# LLM Usage Log',
+				'',
+				HEADER_9,
+				SEP_9,
+				`| ${today}T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 | h1 |`,
+			].join('\n');
+			const result = parseUsageMarkdown(content);
+			expect(result.rows).toHaveLength(1);
+			expect(result.rows[0]!.user).toBe('u1');
+			expect(result.rows[0]!.app).toBe('app1');
+			expect(result.todayCost).toBeCloseTo(0.000188, 6);
+			expect(result.monthCost).toBeCloseTo(0.000188, 6);
+			expect(result.totalCost).toBeCloseTo(0.000188, 6);
 		});
 	});
 });
