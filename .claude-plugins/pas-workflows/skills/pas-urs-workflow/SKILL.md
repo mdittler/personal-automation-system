@@ -1,41 +1,120 @@
 ---
 name: pas-urs-workflow
-description: URS requirement tracking, traceability matrix, and error fix tracking. Use when adding features, completing phases, or fixing bugs that need requirement traceability.
+description: PAS project URS (User Requirements Specification) workflow. How to add requirements, tests, and fixes to docs/urs.md and the traceability matrix. Use when updating the URS after implementing a feature or fix.
 ---
 
 # PAS URS Workflow
 
-`docs/urs.md` is a living document — update it during every session that adds, changes, or removes functionality.
+Use when adding or updating entries in `docs/urs.md` after implementing features, fixes, or test coverage.
 
-## Requirement-Driven Development
+---
 
-### Before Implementation
-1. Identify all user requirements for the work
-2. Add them to `docs/urs.md` with status `Planned`
-3. Each requirement must list expected tests across relevant categories (see `pas-testing-standards` skill for the category checklist)
-4. If a requirement is unclear, ask the user before adding it
+## Document Structure
 
-### After Implementation
-1. Update requirement status from `Planned` to `Implemented`
-2. Replace TBD test lists with actual test references (`file.test.ts` > `describe` > `test name`)
-3. Add or update the traceability matrix row (test file, standard count, edge count, status)
-4. Update the **Totals** row at the bottom of the matrix
+Each requirement section follows this format:
 
-### Rules
-- Duplicate test references across requirements are acceptable; use "See also: REQ-XXX-NNN" when cross-referencing gets complex
-- When tests are added outside of a phase (e.g., gap review, refactoring), add corresponding URS entries and update the matrix in the same session
+```markdown
+### REQ-XXX-NNN: Short description
 
-## Error Fix Tracking
+**Phase:** N | **Status:** Implemented
 
-When a bug is found and fixed:
-1. Add a `**Fixes:**` entry to the affected requirement in `docs/urs.md` with: date, brief description, and the Change Log entry reference
-2. Update any deferred issue lists to mark items as resolved when fixed
+Description of what the requirement covers.
 
-## Traceability Matrix Format
+**Standard tests:**
+- `test-file.test.ts` > Describe block > test name
 
-Each row in the matrix at the bottom of `docs/urs.md`:
+**Edge case tests:**
+- `test-file.test.ts` > Describe block > edge test name
 
-| Requirement | Test File | Std | Edge | Status |
-|-------------|-----------|-----|------|--------|
+**Error handling tests:**
+- `test-file.test.ts` > Describe block > error test name
 
-Keep the **Totals** row accurate after every update.
+**Security tests:**
+- `test-file.test.ts` > Describe block > security test name
+
+**Fixes:**
+- **D14 (2026-04-13):** Description of what changed. CL: label.
+```
+
+Not all sections are required — include only the categories that apply.
+
+---
+
+## Test Name Format
+
+Test references use the exact hierarchy from Vitest describe/it nesting:
+
+```
+`file.test.ts` > OuterDescribe > InnerDescribe > it name
+```
+
+Example: `alert-service.test.ts` > CRUD > creates and retrieves an alert
+
+Use the exact `it(...)` string — do not paraphrase.
+
+---
+
+## Traceability Matrix
+
+The matrix lives near the end of `docs/urs.md` under `## Traceability Matrix`. Columns are:
+
+| Requirement | Test File(s) | Std | Edge | Status |
+
+- **Std** = count of standard (happy path) tests
+- **Edge** = count of edge case + error handling + security + concurrency tests
+- Multiple test files are comma-separated
+
+**To count tests:** grep the test file for `it(` and categorize each test. Do not use arithmetic from memory — recount from the actual file after edits.
+
+---
+
+## Adding a New Requirement
+
+1. Find the appropriate phase section in `docs/urs.md`
+2. Add a new `### REQ-XXX-NNN:` section with description + tests
+3. Add a row to the traceability matrix
+4. Update the **Totals** row — recount from all modified files
+
+---
+
+## Updating an Existing Requirement
+
+1. Find the requirement by heading (use `grep '### REQ-XXX-NNN'`) — not by line number
+2. Add new tests under the appropriate category sub-section
+3. If a test name changed (e.g. bug fix renamed a test), update the old name
+4. Update the **Fixes:** sub-section with the fix description and CL label
+5. Update the traceability matrix row counts
+
+---
+
+## Fixes Format
+
+Each fix entry:
+```
+- **DNN (YYYY-MM-DD):** What changed and why. CL: <label>.
+```
+
+- **DNN** = deferred issue number (D14, D39, etc.) or finding number (F41, etc.)
+- **CL** = change label (e.g. `D14-fix`, `D39-fix`, `CR9-fix`)
+
+---
+
+## Totals Row Update
+
+After all matrix edits, update:
+```
+| **Totals** | **N test files** | **std** | **edge** | **total tests** |
+```
+
+- Count distinct test file names that appear anywhere in the matrix
+- Sum all Std and Edge columns
+- Total = Std + Edge
+
+---
+
+## Common Mistakes
+
+- Using line numbers as anchors — they shift with every edit. Use `### REQ-XXX-NNN` headings.
+- Using arithmetic instead of recounting — always grep the actual test file after edits.
+- Paraphrasing test names — use the exact string from `it(...)`.
+- Forgetting to update the Totals row after adding files/tests.

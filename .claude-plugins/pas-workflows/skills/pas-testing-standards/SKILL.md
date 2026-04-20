@@ -1,157 +1,183 @@
 ---
 name: pas-testing-standards
-description: PAS-specific testing patterns and conventions. Use when writing tests in the Personal Automation System. Also apply the global testing-standards skill for universal rules.
+description: Universal testing standards for TypeScript/Node projects. Category checklist (happy path, edge cases, security, concurrency, state, config) and trust-boundary rules (LLM output, post-routing auth, output encoding, contract tests, concurrency, date/numeric edges).
 ---
 
-# PAS Testing Patterns
+# Testing Standards
 
-These are the PAS-specific conventions for structuring test files. Also apply the global `testing-standards` skill for the category checklist and trust-boundary rules.
+Apply these standards when writing tests in any TypeScript/Node project.
 
 ---
 
-## File Naming and Location
+## Test Category Checklist
 
-- All test files: `__tests__/<name>.test.ts` co-located with source
-- Integration tests: `__tests__/<name>.integration.test.ts`
-- Sub-area tests (e.g. food handlers): `__tests__/handlers/<name>.test.ts`
+Every new feature or service must be tested across **all applicable** categories:
 
-## Imports
+| Category | What to Test |
+|----------|-------------|
+| **Happy path** | Normal usage, expected inputs, correct behavior |
+| **Edge cases** | Boundary values, empty inputs, null/undefined, zero, max values, off-by-one |
+| **Error handling** | Invalid inputs, network failures, thrown exceptions, malformed data |
+| **Security** | Injection (XSS, path traversal, prompt injection), unauthorized access, input validation bypass |
+| **Concurrency/timing** | Race conditions, overlapping writes, cooldown windows, cache expiry, timeout behavior |
+| **State transitions** | Reset after success, re-enable after disable, count rollover, idempotency |
+| **Configuration** | Defaults, overrides, invalid config, missing optional values |
 
-Vitest globals are disabled — always import explicitly:
+Default to more tests, not fewer. If a test would be considered best practice, write it.
+
+---
+
+## Trust Boundary & Cross-Layer Testing Rules
+
+These categories are systematically undertested in most projects. Apply them whenever writing tests at a boundary between two layers.
+
+### 1. LLM Output Is Untrusted Data
+
+Every place LLM output is used to write state needs **table-driven invalid-output tests** — not just malformed JSON tests.
+
+For each LLM→state boundary, test all of: wrong types, negative numbers, `NaN`, `Infinity`, absurdly large values, missing required fields, extra unexpected fields, placeholder strings (`"unknown"`, `""`), and enum values outside the expected set.
+
+**Rule:** Invalid LLM output must be rejected or safely defaulted. It must never be written to state in a corrupt form.
+
+Examples:
+- Cost estimator returns `"free"`, `-5`, `NaN`, `1e20` → blocked, not stored
+- Vision classifier returns a verbose non-enum response → rejected, not treated as a valid classification
+- Required field missing from structured output → write rejected, not stored as partial record
+- Enum value outside valid set → rejected, not stored as-is
+
+### 2. Post-Routing Authorization
+
+When a second component (verifier, callback resolver, classifier, middleware) changes the routing target, authorization must be rechecked against the **new** target — not just the original.
+
+**Rule:** For each routing handoff, write a test where the secondary component selects a different target than the primary, and assert the result is correct for the secondary target.
+
+Examples:
+- Classifier picks handler A (authorized) → verifier redirects to handler B (unauthorized) → handler B must NOT run
+- A callback resolver picks a resource the calling user cannot access → access must be denied
+- Middleware rewrites the request destination mid-flight → downstream auth applies to the rewritten destination
+
+### 3. Output-Context Encoding
+
+Assertions must match the **exact rendering sink**, not just "escaping happens somewhere."
+
+| Sink | Required test |
+|------|--------------|
+| HTML text content | Escaping applied before all renders |
+| HTML attribute | Values are properly quoted and escaped |
+| Inline `<script>` | Dangerous characters serialized as `\u003c`/`\u003e`/`\u0026`, not `<`/`>`/`&` |
+| JSON in script tags | `JSON.stringify` alone is not safe — use unicode escapes for `<`, `>`, `&` |
+| DOM `innerHTML` | Client-side builders insert untrusted values as `.textContent`, not `innerHTML` |
+| Messaging APIs | Escaping matches the parse mode of the target API (Markdown, HTML, plain text) |
+
+Seed persisted data with hostile strings (e.g. `</script><script>window.__xss=1</script>`, `<img onerror=alert(1)>`, quotes, backslashes) and assert the rendered output does not contain attacker-supplied executable content.
+
+### 4. Contract Tests
+
+Schema, docs, UI copy, and runtime behavior must stay synchronized. Test the contracts explicitly rather than trusting they stay in sync manually.
+
+- **Declared capabilities match runtime enforcement** — what a manifest/schema declares as allowed must match what the runtime actually enforces
+- **UI placeholder tokens** — tokens shown in UI (e.g. `{date}`, `{user}`) must resolve correctly at runtime; test with frozen time/data
+- **Duplicate ID rejection** — registries must reject duplicate IDs before any duplicate handler runs
+- **Schema service IDs** — every service identifier in a schema must map to a real runtime property
+- **Doc examples** — example values in docs/comments must work if copy-pasted into a real config
+
+### 5. Production Wiring Tests
+
+Testing a component in isolation is not enough if the production composition is never tested.
+
+**Rule:** For each major subsystem, write at least one integration test that uses the real wrapper/guard from production configuration, not a bare mock.
+
+Examples:
+- API routes: wire through the actual auth guard used in production, assert attribution is correct
+- Scheduler: use the production handler resolver, assert due tasks are not silently dropped on unknown app/handler
+- External service clients: test with the real retry/rate-limit wrapper, not just the raw client
+
+These tests often live in `*.integration.test.ts` files.
+
+### 6. Real Concurrency Tests
+
+Concurrency tests must use `Promise.all` where two calls genuinely overlap before either writes state — not sequential calls where the second observes the first's result.
 
 ```typescript
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Wrong — second call sees first call's completed state
+await doThing('resource', 'caller1');
+await doThing('resource', 'caller2'); // observes already-modified state
+
+// Right — both calls overlap before either writes
+const [r1, r2] = await Promise.all([
+  doThing('resource', 'caller1'),
+  doThing('resource', 'caller2'),
+]);
+// Assert exactly one won and one lost
 ```
 
-## Mocking CoreServices (App Tests)
+Examples:
+- Redemption/claim flows: two simultaneous calls → exactly one succeeds
+- Queue operations: rejected operation followed by a valid one → valid one still executes
+- Write-then-read races: interleaved writes must not corrupt the read result
 
-Use the central mock factory. This is the dominant pattern for all app-level tests:
+### 7. Date, Time, and Numeric Edge Cases
+
+These give false confidence when only the happy path is tested.
+
+**Numeric parsing — reject partial parses:**
+- Inputs like `600abc`, `2000cal`, `1e3`, `150g` must be rejected as invalid
+- Use `Number()` + `isFinite()` or strict regex; never rely on `parseInt()`/`parseFloat()` alone for validated inputs
+
+**Date/time boundaries:**
+- DST start/end: date-range arithmetic crossing clock changes must produce correct day counts
+- ISO week 53: week-based grouping must handle years where the last week is W53 (e.g. 2020)
+- Month/year boundaries: weekly aggregations must not double-count or mis-assign weeks that span month/year end
+- Timezone-aware "today": operations that define "today" must use the configured timezone, not UTC
+
+**Numeric validity for externally-derived values:**
+- Finite, non-negative, and capped: reject `NaN`, `Infinity`, negative, and absurdly large values
+- These checks apply to any value arriving from LLM output, user input, or external APIs
+
+---
+
+## General Guidelines
+
+### Zero Failures Policy
+
+Full test suite must pass with zero failures at all times. Fix the code or the test — never skip, mark todo, or dismiss failures.
+
+### Time-Sensitive Tests
+
+Never hardcode absolute dates in tests that compare against "today." Use relative time so tests don't rot:
 
 ```typescript
-import { createMockCoreServices } from '@pas/core/testing';
-import { createTestMessageContext } from '@pas/core/testing/helpers';
+// Wrong
+const date = new Date('2024-01-01');
 
-let services: CoreServices;
-beforeEach(() => {
-  services = createMockCoreServices();
-});
+// Right
+const date = new Date(Date.now() - 86400000); // yesterday
 ```
 
-Core service tests (testing internal components) use inline ad-hoc mocks instead — do not reach for `createMockCoreServices()` when testing a core service's internals.
+### Filesystem Tests
 
-Override specific methods:
-
-```typescript
-services = createMockCoreServices({
-  telegram: { send: vi.fn().mockRejectedValue(new Error('network')) },
-});
-```
-
-## Mocking ScopedStore
-
-```typescript
-import { createMockScopedStore } from '@pas/core/testing';
-
-const store = createMockScopedStore({
-  read: vi.fn().mockResolvedValue('# Active\n- item'),
-  list: vi.fn().mockResolvedValue(['file.md']),
-});
-```
-
-Defaults: `read → ''`, `write/append/archive → undefined`, `exists → false`, `list → []`.
-
-## Context Factories
-
-```typescript
-import { createTestMessageContext, createTestPhotoContext } from '@pas/core/testing/helpers';
-
-const ctx = createTestMessageContext({ userId: 'user-123', text: 'show me recipes' });
-const photo = createTestPhotoContext(); // fake JPEG buffer, image/jpeg
-```
-
-## Domain Object Factory Pattern
-
-For complex domain objects, define a `make<Thing>` factory at the top of the test file:
-
-```typescript
-function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
-  return {
-    id: 'chicken-stir-fry-abc',
-    title: 'Chicken Stir Fry',
-    ingredients: [],
-    servings: 4,
-    ...overrides,
-  };
-}
-```
-
-Use `as never` (not `as any`) when passing partial mocks to typed parameters.
-
-## Filesystem Tests (DataStore, ChangeLog, etc.)
-
-Use real temp directories — never mock the filesystem for DataStore tests:
+For tests touching the filesystem, use real temp dirs — never mock I/O at the layer you're testing:
 
 ```typescript
 import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let tempDir: string;
-beforeEach(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), 'pas-test-'));
-});
-afterEach(async () => {
-  await rm(tempDir, { recursive: true, force: true });
-});
+beforeEach(async () => { tempDir = await mkdtemp(join(tmpdir(), 'test-<feature>-')); });
+afterEach(async () => { await rm(tempDir, { recursive: true, force: true }); });
 ```
 
-Temp dir prefix must start with `pas-` (e.g. `pas-test-`, `pas-gui-spaces-`, `pas-api-alerts-`).
+### Load-Time Validation Tests
 
-## HTTP Route Tests
-
-**GUI routes** — build a real Fastify instance with auth/CSRF middleware, use `app.inject()`, extract CSRF token via `authenticatedGet()`/`authenticatedPost()` helpers:
+To test how a service handles corrupt or structurally invalid persisted data, write the raw file directly to disk (bypassing the service's write path), then call the service's load/init method:
 
 ```typescript
-const res = await authenticatedPost(app, '/gui/spaces', { name: 'family' });
-expect(res.statusCode).toBe(302);
+// Write invalid data directly, bypassing service validation
+await mkdir(join(tempDir, 'data'), { recursive: true });
+await writeFile(join(tempDir, 'data', 'record.yaml'), 'invalid: [[[corrupt yaml');
+
+// Then test how the service handles it at load time
+await service.init();
+expect(service.list()).toHaveLength(0); // or assert warning logged, etc.
 ```
-
-Assert on `statusCode`, `res.body` (HTML via `toContain`), `res.headers.location` (redirects), and mock service calls.
-
-**API routes** — use `app.inject()` with a Bearer token header:
-
-```typescript
-const res = await app.inject({
-  method: 'POST',
-  url: '/api/data',
-  headers: { authorization: 'Bearer test-token' },
-  payload: { appId: 'food', key: 'pantry', content: '...' },
-});
-expect(res.json()).toEqual(expect.objectContaining({ ok: true }));
-```
-
-Always test auth (401), validation (400), not-found (404), and error (500) paths alongside happy paths.
-
-## Loggers
-
-Suppress all logger output in tests:
-
-```typescript
-import pino from 'pino';
-const logger = pino({ level: 'silent' });
-// or
-const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() };
-```
-
-## vi.mock() Usage
-
-Use sparingly. Place module-level mock declarations before imports (vitest hoists them). Use only when:
-- Mocking external SDKs (`@anthropic-ai/sdk`, `openai`)
-- Mocking sibling modules to isolate a handler from a flow it calls
-
-## What Does Not Exist (Don't Add)
-
-- No `__mocks__/` directories
-- No snapshot tests
-- No shared `fixtures/` directory
-- No test-specific `.env` files — tests must not require real API keys
