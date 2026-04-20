@@ -2888,6 +2888,24 @@ The LLM management GUI must display configured providers, tier assignments with 
 **Standard tests:** `llm-usage.test.ts` > `POST /gui/llm/tiers` > updates fast tier, updates standard tier, updates reasoning tier
 **Edge case tests:** `POST /gui/llm/tiers` > rejects invalid tier, rejects missing tier, rejects invalid provider pattern, rejects invalid model pattern, rejects unknown provider
 
+### REQ-LLM-025: Per-household LLM rate limiting
+
+**Phase:** D5c | **Status:** Planned
+
+LLM calls must be subject to a household-wide rate limit (not per-app-per-household) enforced by a single `HouseholdLLMLimiter` instance created in bootstrap and injected into every `LLMGuard` and `SystemLLMGuard`. Key: `householdId` only. If `getCurrentHouseholdId()` returns `undefined` or the API platform sentinel (`__platform__`), the call is attributed to `platform` and exempt from per-household rate limit (still counted toward global cap). Default: 200 req/hour per household (configurable via `llm.safeguards.default_household_rate_limit` in `pas.yaml`). `RateLimiter` must be extended with a peek/commit API so that multi-guard checks do not mutate state on partial denial.
+
+### REQ-LLM-026: Per-household monthly cost cap
+
+**Phase:** D5c | **Status:** Planned
+
+Each household must have a configurable monthly cost cap enforced via `CostTracker.getMonthlyHouseholdCost()` + outstanding reservations. Default: $20/month per household. Optional per-household override via `llm.safeguards.household_overrides.<id>.monthly_cost_cap`. When the cap is reached, further LLM calls from that household throw `LLMCostCapError('household', ...)`. Platform-attributed calls (no real household context) are exempt from the per-household cap but counted toward the global cap. System/API calls that run under a real household context are enforced.
+
+### REQ-LLM-027: Estimated-cost reservation for cap enforcement
+
+**Phase:** D5c | **Status:** Planned
+
+`CostTracker` must provide `reserveEstimated(householdId, appId, userId, estimatedCost) → reservationId` and `releaseReservation(reservationId, actualCost | null)`. `checkCostCap()` must sum persisted costs plus outstanding reservations to prevent concurrent LLM bursts from bypassing the cap. Reservations expire after 60 seconds if not released. Acceptable overshoot bound: one concurrent batch × max per-request estimate (≈ $0.20 worst case). Reservation expiry must be tested. Billing reconciliation on `record()` must replace the reservation amount with the actual cost.
+
 ### REQ-GUI-004: Log viewer htmx partial
 
 **Phase:** 15 | **Status:** Implemented
@@ -5050,7 +5068,7 @@ On startup, `loadFromDisk()` is awaited before Telegram handlers register. It re
 
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
+The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-LLM-025, REQ-LLM-026, REQ-LLM-027) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|

@@ -62,6 +62,10 @@
 | D2c | Interaction Context & /edit | **Complete** | ~18 | InteractionContextService, context-aware routing, food interaction recording, EditService, /edit command |
 | D3 | Security Hardening | **Complete** | ~12 | Secure cookie (auth+CSRF), inline JS→data-attributes, target validation, CSRF in spaces forms, Docker dep gap, cookie reissue upgrade |
 | D4 | Concurrency & Ops | **Complete** | ~40 | Central FileMutex (withFileLock/withMultiFileLock), 6 food store lock wrappers + 28 RMW call sites, EditService PathLock migrated to FileMutex, archivePurchased same-day merge, /health/live + /health/ready endpoints with 4 checks, BackupService (tar.gz, rolling retention), deployment docs |
+| D5a | Per-Household Data Boundary Hardening | **Complete** | ~20 | EditService household guard, resolveScopedDataDir path containment, DataStore + Scheduler scope enforcement, household-aware ContextStore/FallbackHandler/VaultService, API + GUI data-browser household filtering, multi-household isolation tests |
+| D5b | Per-Household GUI + REST API Auth | **Complete** | ~22 | CredentialService (scrypt, sessionVersion), AuthenticatedActor shape, per-user GUI login + cookie, ApiKeyService + API Bearer auth, GUI admin gating + household route filtering, API resource-kind gates, credential/API key UI, Telegram first-run wizard |
+| D6 | InteractionContextService Disk Persistence | **Complete** | ~6 | Disk persistence for InteractionContextService, bootstrap wiring, drain-flush guarantee, load validation + sort-on-load |
+| D5c | Per-Household LLM Governance + Ops + Load Test | **Planned** | TBD | Household cost ledger (9th column), shared household rate limiter, per-household cost caps + reservations, ops dashboard, 40-user load test with bootstrap composeRuntime refactor. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md` |
 
 ### Dependency Graph
 
@@ -2266,12 +2270,28 @@ With the FileIndexService providing a metadata index of all user data files (D2a
 
 ---
 
-## Deferred Phases (Future)
+## Phase D5c: Per-Household LLM Governance + Ops + Load Test
 
-These are documented but not scheduled. Implementation depends on ecosystem growth.
+**Status:** Planned — plan ready at `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 
-| Item | Description | Trigger |
-|------|-------------|---------|
-| App registry / marketplace | Static JSON index, GUI browse page | When 10+ apps exist |
-| App signing | Cryptographic verification for reviewed apps | When community review process is established |
-| Backup script | Copies `data/` to configured location (URS-NF-020) | When production deployment is stable |
+**Goal:** Per-household resource governance so no single household monopolizes LLM bandwidth or cost, plus operational visibility and a load-test proving correctness at 40 concurrent users.
+
+**6 chunks (one per session + review):**
+
+| Chunk | Description |
+|---|---|
+| 0 | Semantics decisions: household-wide vs per-app rate limit, exemption policy, overshoot policy. Docs + URS only. |
+| A | Fix 3 remaining ALS dispatch gaps (bootstrap Telegram + onboard paths + GUI context routes). |
+| B | CostTracker household dimension: 9th column in llm-usage.md, `households:` map in monthly-costs.yaml, cost reservations. |
+| C | `HouseholdLLMLimiter` (shared, cross-app, injected from bootstrap) + `RateLimiter` peek/commit API + config/schema/error surface. |
+| D | Ops dashboard: extend `/gui/llm` with Per-Household Breakdown + live metrics via htmx. |
+| E | `composeRuntime()` bootstrap refactor + `scripts/load-test.ts` (40 users × 8 households). |
+
+**Depends on:** D5a (ALS householdId propagation is mostly there), D5b (HouseholdService + auth infrastructure).
+**Deferred from this phase:** D5a §1 (forShared scope migration), D5a §4 (collaboration space UX).
+
+---
+
+## Deferred / Open Items
+
+See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
