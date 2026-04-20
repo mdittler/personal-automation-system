@@ -401,6 +401,71 @@ export class CostTracker {
 	}
 
 	/**
+	 * Reserve an estimated cost against a household's monthly cap.
+	 * Returns a reservation ID to pass to releaseReservation() when the call completes.
+	 * Reservation expires after 60 seconds if not released.
+	 */
+	reserveEstimated(
+		householdId: string,
+		appId: string | undefined,
+		userId: string | undefined,
+		amount: number,
+	): string {
+		if (!Number.isFinite(amount) || amount < 0) {
+			throw new Error(`reserveEstimated: invalid amount ${String(amount)}`);
+		}
+		const id = randomUUID();
+		this.reservations.set(id, {
+			householdId,
+			appId,
+			userId,
+			amount,
+			expiresAt: Date.now() + 60_000,
+		});
+		this.ensureReservationCleanupTimer();
+		return id;
+	}
+
+	/**
+	 * Release a reservation created by reserveEstimated().
+	 * Pass actualCost when the LLM call completed; pass null when it failed (no cost incurred).
+	 * The actual cost is recorded via the normal record() call — this method only removes the reservation.
+	 */
+	releaseReservation(id: string, actualCost: number | null): void {
+		const r = this.reservations.get(id);
+		if (!r) {
+			this.logger.debug({ id }, 'releaseReservation: unknown id (already expired or released)');
+			return;
+		}
+		this.reservations.delete(id);
+		if (actualCost !== null && Number.isFinite(actualCost)) {
+			this.logger.debug(
+				{ id, reserved: r.amount, actual: actualCost, drift: actualCost - r.amount },
+				'Reservation reconciled',
+			);
+		}
+	}
+
+	private ensureReservationCleanupTimer(): void {
+		if (this.reservationCleanupTimer) return;
+		this.reservationCleanupTimer = setInterval(() => {
+			const now = Date.now();
+			for (const [id, r] of this.reservations) {
+				if (r.expiresAt <= now) {
+					this.reservations.delete(id);
+					this.logger.warn(
+						{ id, amount: r.amount, householdId: r.householdId },
+						'Reservation expired without release (LLM call may have hung)',
+					);
+				}
+			}
+		}, 10_000);
+		if (this.reservationCleanupTimer.unref) {
+			this.reservationCleanupTimer.unref();
+		}
+	}
+
+	/**
 	 * Read the current usage file content.
 	 */
 	async readUsage(): Promise<string> {
@@ -422,6 +487,10 @@ export class CostTracker {
 		}
 		if (this.persistDirty) {
 			await this.persistMonthlyCosts();
+		}
+		if (this.reservationCleanupTimer) {
+			clearInterval(this.reservationCleanupTimer);
+			this.reservationCleanupTimer = null;
 		}
 	}
 
