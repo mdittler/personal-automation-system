@@ -15,7 +15,7 @@ import {
 	type ProviderType,
 } from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
-import { getCurrentUserId } from '../../context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../../context/request-context.js';
 import { withRetry } from '../retry.js';
 
 export interface BaseProviderOptions {
@@ -101,6 +101,7 @@ export abstract class BaseProvider implements LLMProviderClient {
 					outputTokens: result.usage.outputTokens,
 					appId: extractAppId(options),
 					userId: getCurrentUserId(),
+					householdId: getCurrentHouseholdId(),
 				})
 				.catch((err: unknown) => {
 					this.logger.error(
