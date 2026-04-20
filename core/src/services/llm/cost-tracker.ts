@@ -131,6 +131,38 @@ export class CostTracker {
 					'Monthly cost cache loaded',
 				);
 				yamlLoaded = true;
+
+				if (data.households === undefined) {
+					// YAML is current-month but has no household dimension — upgrade it
+					this.logger.info(
+						{ month: this.currentMonth },
+						'Monthly cost cache missing household dimension — upgrading',
+					);
+					// Attempt rebuild to populate household aggregates
+					// Capture existing apps/users/total before rebuild resets them
+					const savedApps = new Map(this.monthlyCosts);
+					const savedUsers = new Map(this.monthlyUserCosts);
+					const savedTotal = this.monthlyTotal;
+					const rebuilt = await this.rebuildFromLog();
+					if (!rebuilt) {
+						// Rebuild found no current-month rows — preserve existing data
+						this.monthlyCosts = savedApps;
+						this.monthlyUserCosts = savedUsers;
+						this.monthlyTotal = savedTotal;
+						this.monthlyHouseholdCosts = new Map();
+						this.logger.info(
+							{ month: this.currentMonth },
+							'Monthly cost cache missing household dimension and no current-month rows to rebuild from — keeping existing cache and initializing empty household map',
+						);
+					} else {
+						this.logger.info(
+							{ month: this.currentMonth },
+							'Monthly cost cache missing household dimension — rebuilt from usage log',
+						);
+					}
+					this.schedulePersist();
+					yamlLoaded = true;
+				}
 			} else if (data) {
 				// (b) Cache is for a different month (month rolled over)
 				this.logger.info(
@@ -175,6 +207,9 @@ export class CostTracker {
 				);
 			}
 		}
+
+		// One-time header migration (idempotent)
+		await this.migrateUsageLogHeader();
 	}
 
 	/**
@@ -490,6 +525,52 @@ export class CostTracker {
 		return p;
 	}
 
+	private async migrateUsageLogHeader(): Promise<void> {
+		let content: string;
+		try {
+			content = await readFile(this.usageFilePath, 'utf-8');
+		} catch {
+			return; // No file yet — nothing to migrate
+		}
+
+		const nineColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
+		if (content.includes(nineColHeader)) {
+			return; // Already at 9-col — idempotent
+		}
+
+		// Detect and replace the 8-col or 7-col header + separator
+		const eightColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
+		const sevenColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const nineColSeparator = '|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
+
+		let migrated: string;
+		if (content.includes(eightColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(
+					eightColHeader,
+					nineColHeader,
+				)
+				.replace(
+					'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
+					nineColSeparator + '\n' + marker,
+				);
+		} else if (content.includes(sevenColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(sevenColHeader, nineColHeader)
+				.replace(
+					'|-----------|----------|-------|-------------|---------------|----------|-----|',
+					nineColSeparator + '\n' + marker,
+				);
+		} else {
+			return; // Unknown format — leave as-is
+		}
+
+		await atomicWrite(this.usageFilePath, migrated);
+		this.logger.info({ path: this.usageFilePath }, 'llm-usage.md header migrated to 9-col schema');
+	}
+
 	private async doAppendEntry(entry: UsageEntry): Promise<void> {
 		await ensureDir(dirname(this.usageFilePath));
 
@@ -506,15 +587,15 @@ export class CostTracker {
 			const header = [
 				'# LLM Usage Log',
 				'',
-				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |',
-				'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
+				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |',
+				'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|',
 				'',
 			].join('\n');
 			await appendFile(this.usageFilePath, header, 'utf-8');
 		}
 
 		const safe = (v: string) => v.replace(/[|\n\r]/g, '_');
-		const line = `| ${entry.timestamp} | ${safe(entry.provider ?? '-')} | ${safe(entry.model)} | ${entry.inputTokens} | ${entry.outputTokens} | ${entry.estimatedCost.toFixed(6)} | ${safe(entry.appId ?? '-')} | ${safe(entry.userId ?? '-')} |\n`;
+		const line = `| ${entry.timestamp} | ${safe(entry.provider ?? '-')} | ${safe(entry.model)} | ${entry.inputTokens} | ${entry.outputTokens} | ${entry.estimatedCost.toFixed(6)} | ${safe(entry.appId ?? '-')} | ${safe(entry.userId ?? '-')} | ${safe(entry.householdId ?? '-')} |\n`;
 		await appendFile(this.usageFilePath, line, 'utf-8');
 	}
 }
