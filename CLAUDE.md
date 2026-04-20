@@ -126,16 +126,16 @@ All infrastructure (phases 0–30), food app (H1–H12b), security remediation (
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
-### Current Priority: Phase D5c — Chunk A
-**D5c** (per-household LLM governance + ops + load test) is the active priority, ahead of all other open items. Chunk 0 (semantics docs) is complete. **Start each new session with Chunk A.**
+### Current Priority: Phase D5c — Chunk B
+**D5c** (per-household LLM governance + ops + load test) is the active priority, ahead of all other open items. Chunks 0 and A are complete. **Start each new session with Chunk B.**
 
 Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 
 | Chunk | Status | What it does |
 |---|---|---|
 | 0 | ✓ Complete | Semantics decisions + URS entries + open-items.md fix |
-| **A** | **▶ Next** | Fix 3 ALS dispatch gaps (bootstrap:816/835/924, context.ts:60/115/163/191) + regression guard |
-| B | Pending | CostTracker household dimension + reservations |
+| A | ✓ Complete | Fix 3 ALS dispatch gaps (bootstrap:816/835/924, context.ts:60/115/163/191) + regression guard |
+| **B** | **▶ Next** | CostTracker household dimension + reservations |
 | C | Pending | HouseholdLLMLimiter + RateLimiter peek/commit + config surface + error types |
 | D | Pending | Ops dashboard (/gui/llm Per-Household section + live metrics) |
 | E | Pending | composeRuntime() bootstrap refactor + load-test harness |

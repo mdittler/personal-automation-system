@@ -102,7 +102,12 @@ async function buildApp(tempDir: string) {
 				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
 			});
 			await registerCsrfProtection(gui);
-			registerContextRoutes(gui, { contextStore, config, logger });
+			registerContextRoutes(gui, {
+					contextStore,
+					config,
+					logger,
+					householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				});
 		},
 		{ prefix: '/gui' },
 	);

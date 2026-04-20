@@ -33,9 +33,9 @@ import { registerViewLocals } from './view-locals.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
-import { registerCredentialRoutes } from './routes/credentials.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerContextRoutes } from './routes/context.js';
+import { registerCredentialRoutes } from './routes/credentials.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
@@ -138,7 +138,18 @@ export async function registerGuiRoutes(
 			});
 			registerConfigRoutes(gui, { registry, config, dataDir, logger });
 			if (contextStore) {
-				registerContextRoutes(gui, { contextStore, config, logger });
+				if (!options.householdService) {
+					throw new Error(
+						'registerContextRoutes requires householdService — refusing to register ' +
+							'/gui/context routes without per-household ALS attribution',
+					);
+				}
+				registerContextRoutes(gui, {
+					contextStore,
+					config,
+					logger,
+					householdService: options.householdService,
+				});
 			}
 			registerLlmUsageRoutes(gui, { llm, modelSelector, modelCatalog, providerRegistry, logger });
 			// Cron description API (used by cron-helper.js)
