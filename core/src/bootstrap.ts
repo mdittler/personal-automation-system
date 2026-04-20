@@ -813,7 +813,11 @@ export async function main(): Promise<void> {
 			}
 
 			// Wrap in LLM context so cost tracking can attribute LLM calls to this user
-			await requestContext.run({ userId: messageCtx.userId }, () => router.routeMessage(messageCtx));
+			const msgHouseholdId = householdService.getHouseholdForUser(messageCtx.userId) ?? undefined;
+			await requestContext.run(
+				{ userId: messageCtx.userId, householdId: msgHouseholdId },
+				() => router.routeMessage(messageCtx),
+			);
 		});
 	});
 
@@ -832,7 +836,11 @@ export async function main(): Promise<void> {
 
 			const photoCtx = await adaptPhotoMessage(ctx, photoLogger);
 			if (photoCtx) {
-				await requestContext.run({ userId: photoCtx.userId }, () => router.routePhoto(photoCtx));
+				const photoHouseholdId = householdService.getHouseholdForUser(photoCtx.userId) ?? undefined;
+				await requestContext.run(
+					{ userId: photoCtx.userId, householdId: photoHouseholdId },
+					() => router.routePhoto(photoCtx),
+				);
 			} else if (ctx.message?.photo) {
 				// Photo was present but adapter returned null (download failed)
 				if (userId) {
@@ -921,7 +929,8 @@ export async function main(): Promise<void> {
 				// First-run wizard callbacks (onboard:digest-yes / onboard:digest-no).
 				// Wrapped in requestContext.run so D5b-9b report/data writes can attribute correctly.
 				if (data.startsWith('onboard:')) {
-					await requestContext.run({ userId }, async () => {
+					const onboardHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
+					await requestContext.run({ userId, householdId: onboardHouseholdId }, async () => {
 						await handleFirstRunWizardCallback(
 							{ telegram: telegramService, dataDir: config.dataDir, logger: callbackLogger },
 							userId,

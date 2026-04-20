@@ -386,7 +386,7 @@ Scheduled jobs declared with `user_scope: all` in an app manifest must be invoke
 
 **Phase:** 30 | **Status:** Implemented
 
-Every infrastructure dispatch point that has a userId in scope must wrap the dispatched work in `requestContext.run({ userId }, ...)` so that downstream `AppConfigService.get(key)` calls automatically resolve to the caller's per-user overrides. The unified `requestContext` AsyncLocalStorage (core/src/services/context/request-context.ts) is consumed by both the LLM cost attribution in `base-provider.ts` and the config service's `loadOverrides` path.
+Every infrastructure dispatch point that has a userId in scope must wrap the dispatched work in `requestContext.run({ userId, householdId }, ...)` so that downstream `AppConfigService.get(key)` calls automatically resolve to the caller's per-user overrides, and so that the per-household LLM governance layer (D5c Chunk B+) can attribute every LLM call to the correct household. The unified `requestContext` AsyncLocalStorage (core/src/services/context/request-context.ts) is consumed by both the LLM cost attribution in `base-provider.ts` and the config service's `loadOverrides` path. `householdId` is resolved via `HouseholdService.getHouseholdForUser(userId)` with `null→undefined` coercion.
 
 Dispatch sites covered:
 1. Telegram message (bootstrap.ts)
@@ -396,16 +396,22 @@ Dispatch sites covered:
 5. HTTP POST /api/messages (api/routes/messages.ts)
 6. Alert executor `dispatch_message` action (services/alerts/alert-executor.ts)
 7. Scheduled jobs with `user_scope: all` (services/scheduler/per-user-dispatch.ts — see REQ-SCHED-006)
+8. Telegram onboard callback (bootstrap.ts)
+9. GUI context routes `/gui/context/*` (gui/routes/context.ts via `buildCtx` helper)
 
 **Standard tests:**
 - `messages.test.ts` > dispatches inside requestContext so config.get resolves per-user
 - `alert-executor-enhanced.test.ts` > dispatches inside requestContext so downstream config.get is per-user
-- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routeMessage call is wrapped in requestContext.run
-- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routePhoto call is wrapped in requestContext.run
-- `dispatch-context-wrap.test.ts` > bootstrap.ts > the verification-callback dispatch block is wrapped in requestContext.run
-- `dispatch-context-wrap.test.ts` > bootstrap.ts > the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routeMessage call is wrapped in requestContext.run with userId and householdId
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > every router.routePhoto call is wrapped in requestContext.run with userId and householdId
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > the verification-callback dispatch block is wrapped in requestContext.run with userId and householdId
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > the onboard-callback dispatch is wrapped in requestContext.run with userId and householdId
+- `dispatch-context-wrap.test.ts` > bootstrap.ts > the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run with userId and householdId
 - `dispatch-context-wrap.test.ts` > api/routes/messages.ts > wraps router.routeMessage in requestContext.run
 - `dispatch-context-wrap.test.ts` > services/alerts/alert-executor.ts > wraps deps.router.routeMessage in requestContext.run with the action user_id
+- `dispatch-context-wrap.test.ts` > gui/routes/context.ts > defines a buildCtx helper that carries both userId and householdId
+- `dispatch-context-wrap.test.ts` > gui/routes/context.ts > every requestContext.run wrap uses buildCtx (or an inline object with both keys)
+- `dispatch-context-wrap.test.ts` > gui/index.ts > throws loudly when contextStore is present but householdService is missing
 
 **Edge case tests:**
 - `dispatch-context-wrap.test.ts` > bootstrap.ts > imports requestContext from the context module (not from llm/)
@@ -413,6 +419,7 @@ Dispatch sites covered:
 
 **Fixes:**
 - Per-user config runtime propagation (2026-04-09): the former bespoke `llmContext` only served LLM cost attribution. Promoted to a unified `requestContext` also consumed by `AppConfigService` so per-user config reads work at every dispatch point. Canonical regression: `per-user-runtime.integration.test.ts`.
+- **D5c Chunk A (2026-04-20):** Extended all remaining ALS dispatch entry points to include `householdId` alongside `userId`, enabling per-household LLM cost attribution in Chunk B. Added sites 8 (onboard callback) and 9 (GUI context routes via `buildCtx` helper). Added a loud-throw misconfiguration guard in `gui/index.ts`. Added structural regression tests for all 5 bootstrap dispatch sites (including previously-untested onboard callback), all 4 GUI context route handlers, and the gui/index.ts guard. CL: d5c-chunk-a.
 
 ---
 
@@ -3345,29 +3352,31 @@ GUI CRUD for per-user context entries at `/gui/context`. htmx partials for list/
 **Tests:** `core/src/gui/__tests__/context-routes.test.ts`
 
 **Standard tests:**
-- `context-routes.test.ts` > GET /gui/context > renders main context page
-- `context-routes.test.ts` > GET /gui/context/list > lists entries for a user
-- `context-routes.test.ts` > GET /gui/context/list > lists entries for a different user
-- `context-routes.test.ts` > GET /gui/context/edit > renders edit form for existing entry
-- `context-routes.test.ts` > GET /gui/context/edit > renders create form for new entry
-- `context-routes.test.ts` > POST /gui/context/save > saves a new entry
-- `context-routes.test.ts` > POST /gui/context/save > updates an existing entry
-- `context-routes.test.ts` > POST /gui/context/delete > deletes an entry
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context > returns 200 with user list
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context/:userId (htmx partial) > returns empty state when user has no entries
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context/:userId (htmx partial) > returns entry list when entries exist
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context/:userId (htmx partial) > lists multiple entries
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context/:userId/edit > returns create form when key is empty
+- `context-routes.test.ts` > Context GUI Routes > GET /gui/context/:userId/edit > returns edit form with existing content
+- `context-routes.test.ts` > Context GUI Routes > POST /gui/context/:userId (save) > creates entry and redirects
+- `context-routes.test.ts` > Context GUI Routes > POST /gui/context/:userId (save) > redirects to context page after save
+- `context-routes.test.ts` > Context GUI Routes > POST /gui/context/:userId/delete > deletes entry and redirects
 
 **Edge case tests:**
-- `context-routes.test.ts` > POST /gui/context/save > rejects empty key
-- `context-routes.test.ts` > POST /gui/context/save > rejects empty content
-- `context-routes.test.ts` > POST /gui/context/save > handles symbols-only key
-- `context-routes.test.ts` > GET /gui/context/edit > returns 404 for non-existent key
+- `context-routes.test.ts` > Context GUI Routes > edge cases > POST with empty key returns 400
+- `context-routes.test.ts` > Context GUI Routes > edge cases > POST with empty content returns 400
+- `context-routes.test.ts` > Context GUI Routes > edge cases > POST with symbols-only key returns 400 (slugifies to empty)
+- `context-routes.test.ts` > Context GUI Routes > edge cases > GET edit for non-existent key returns empty form
 
 **Error tests:**
-- `context-routes.test.ts` > GET /gui/context/list > rejects invalid userId
-- `context-routes.test.ts` > GET /gui/context/list > rejects unregistered userId
+- `context-routes.test.ts` > Context GUI Routes > error handling > invalid userId format returns 400
+- `context-routes.test.ts` > Context GUI Routes > error handling > unregistered userId on save returns 400
 
 **Security tests:**
-- `context-routes.test.ts` > security > escapes HTML in content
-- `context-routes.test.ts` > security > rejects path traversal in userId
-- `context-routes.test.ts` > security > includes CSRF token in forms
+- `context-routes.test.ts` > Context GUI Routes > security > escapes HTML in entry content display
+- `context-routes.test.ts` > Context GUI Routes > security > path traversal in userId rejected for list
+- `context-routes.test.ts` > Context GUI Routes > security > CSRF token included in forms
+- `context-routes.test.ts` > Context GUI Routes > security > delete button uses data-confirm-delete instead of inline onclick
 
 **Fixes:** None
 
@@ -5084,6 +5093,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-SCHED-003 | task-runner.test.ts | 2 | 3 | Implemented |
 | REQ-SCHED-004 | task-runner.test.ts | 1 | 1 | Implemented |
 | REQ-SCHED-005 | job-failure-notifier.test.ts | 10 | 16 | Implemented |
+| REQ-SCHED-006 | per-user-dispatch.test.ts, request-context.test.ts | 10 | 6 | Implemented |
+| REQ-SCHED-007 | dispatch-context-wrap.test.ts, messages.test.ts, alert-executor-enhanced.test.ts | 12 | 2 | Implemented |
 | REQ-COND-001 | rule-parser.test.ts | 4 | 3 | Implemented |
 | REQ-COND-002 | evaluator.test.ts | 7 | 3 | Implemented |
 | REQ-COND-003 | cooldown-tracker.test.ts, evaluator.test.ts | 11 | 6 | Implemented |
@@ -5199,7 +5210,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-ERROR-001 | llm-errors.test.ts | 9 | 5 | Implemented |
 | REQ-TIMEZONE-001 | notes.test.ts, chatbot.test.ts | 1 | 0 | Implemented |
 | REQ-GUI-006 | data.test.ts | 16 | 6 | Implemented |
-| REQ-GUI-007 | context-routes.test.ts | 8 | 10 | Implemented |
+| REQ-GUI-007 | context-routes.test.ts | 9 | 10 | Implemented |
 | REQ-JOURNAL-001 | model-journal.test.ts | 18 | 26 | Implemented |
 | REQ-JOURNAL-002 | chatbot.test.ts | 9 | 16 | Implemented |
 | REQ-JOURNAL-003 | data.test.ts | 6 | 13 | Implemented |
@@ -5285,4 +5296,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **148 test files** | **1056** | **1266** | **2322 tests** |
+| **Totals** | **151 test files** | **1079** | **1274** | **2353 tests** |

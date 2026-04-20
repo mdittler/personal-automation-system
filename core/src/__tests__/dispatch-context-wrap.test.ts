@@ -7,6 +7,10 @@
  * of the calling user's override — a bug that is invisible at runtime
  * because everything still "works", just with the wrong values.
  *
+ * D5c Chunk A (2026-04-20) extended each wrap to include `householdId` so
+ * the per-household LLM governance layer (Chunk C) can attribute every LLM
+ * call to the correct household without needing separate wiring.
+ *
  * Most dispatch sites have behavioral regression tests elsewhere:
  *
  * - `core/src/api/__tests__/messages.test.ts` — API /messages route
@@ -20,13 +24,13 @@
  * - `core/src/services/config/__tests__/per-user-runtime.integration.test.ts`
  *   — end-to-end config propagation inside requestContext.run
  *
- * The four dispatch sites inside `core/src/bootstrap.ts` (message, photo,
- * verification callback, app callback) live inside inline telegram bot
- * callback registrations and cannot be independently imported for
- * behavioral testing without standing up the entire bootstrap composition
- * root. This file closes that gap with a structural source-scan: it
- * reads bootstrap.ts and asserts that every known dispatch call site is
- * wrapped in `requestContext.run`.
+ * The five dispatch sites inside `core/src/bootstrap.ts` (message, photo,
+ * verification callback, onboard callback, app callback) live inside inline
+ * telegram bot callback registrations and cannot be independently imported
+ * for behavioral testing without standing up the entire bootstrap composition
+ * root. This file closes that gap with a structural source-scan: it reads
+ * bootstrap.ts and asserts that every known dispatch call site is wrapped in
+ * `requestContext.run` with BOTH `userId` and `householdId`.
  *
  * If a future refactor reshapes these dispatch sites, this test will
  * fail loudly rather than silently allowing the wrap to disappear. The
@@ -59,63 +63,89 @@ function stripComments(source: string): string {
 	return noBlock.replace(/\/\/.*$/gm, '');
 }
 
+/**
+ * Lookahead-based pattern that matches a single-line `{...}` object literal
+ * containing BOTH `userId` and `householdId` keys in any order.
+ *
+ * `[^}]*` intentionally restricts to single-line objects: multi-line wraps
+ * will cause the test to fail loudly, signalling that the pattern needs an
+ * explicit update — the desired behaviour for structural guard tests.
+ */
+const hasBothKeys = String.raw`\{(?=[^}]*\buserId\b)(?=[^}]*\bhouseholdId\b)[^}]*\}`;
+
 describe('dispatch-site requestContext wraps', () => {
 	describe('bootstrap.ts', () => {
-		it('every router.routeMessage call is wrapped in requestContext.run', async () => {
+		it('every router.routeMessage call is wrapped in requestContext.run with userId and householdId', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// Count raw router.routeMessage(...) invocations.
 			const totalCalls = source.match(/\brouter\.routeMessage\s*\(/g) ?? [];
 
-			// Count calls that are the immediate callee of a requestContext.run
-			// whose store object declares a userId key. The pattern allows
-			// arbitrary whitespace and optional arrow-body prefix.
+			// Require both userId AND householdId in the context object (any field order).
 			const wrappedCalls =
 				source.match(
-					/requestContext\.run\s*\(\s*\{[^}]*\buserId\b[^}]*\}\s*,\s*\(\s*\)\s*=>\s*router\.routeMessage\s*\(/g,
+					new RegExp(
+						String.raw`requestContext\.run\s*\(\s*` +
+							hasBothKeys +
+							String.raw`\s*,\s*\(\s*\)\s*=>\s*router\.routeMessage\s*\(`,
+						'g',
+					),
 				) ?? [];
 
 			expect(totalCalls.length).toBeGreaterThan(0);
 			expect(wrappedCalls.length).toBe(totalCalls.length);
 		});
 
-		it('every router.routePhoto call is wrapped in requestContext.run', async () => {
+		it('every router.routePhoto call is wrapped in requestContext.run with userId and householdId', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
 			const totalCalls = source.match(/\brouter\.routePhoto\s*\(/g) ?? [];
+
 			const wrappedCalls =
 				source.match(
-					/requestContext\.run\s*\(\s*\{[^}]*\buserId\b[^}]*\}\s*,\s*\(\s*\)\s*=>\s*router\.routePhoto\s*\(/g,
+					new RegExp(
+						String.raw`requestContext\.run\s*\(\s*` +
+							hasBothKeys +
+							String.raw`\s*,\s*\(\s*\)\s*=>\s*router\.routePhoto\s*\(`,
+						'g',
+					),
 				) ?? [];
 
 			expect(totalCalls.length).toBeGreaterThan(0);
 			expect(wrappedCalls.length).toBe(totalCalls.length);
 		});
 
-		it('the verification-callback dispatch block is wrapped in requestContext.run', async () => {
+		it('the verification-callback dispatch block is wrapped in requestContext.run with userId and householdId', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// The verification callback block dispatches to either chatbotApp
-			// or the resolved appEntry inside an async IIFE passed to
-			// requestContext.run. We assert the wrap appears in the 'rv:'
-			// branch by searching for the characteristic handoff between
-			// resolveCallback and requestContext.run.
-			// I-6: the rv: callback block now includes householdId in the context object
 			const rvBranch = source.match(
-				/resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*\{\s*userId/,
+				new RegExp(
+					String.raw`resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*` + hasBothKeys,
+				),
 			);
 			expect(rvBranch).not.toBeNull();
 		});
 
-		it('the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run', async () => {
+		it('the onboard-callback dispatch is wrapped in requestContext.run with userId and householdId', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// The 'app:' callback branch ends with
-			//   await requestContext.run({ userId, householdId: ... }, () => handler(customData, callbackCtx));
-			// I-6: householdId is now also set in the context object.
-			// We assert that requestContext.run is called with userId and that handler() is invoked.
+			const onboardWrap = source.match(
+				new RegExp(
+					String.raw`startsWith\(['"]onboard:['"]\)[\s\S]{0,400}requestContext\.run\s*\(\s*` +
+						hasBothKeys,
+				),
+			);
+			expect(onboardWrap).not.toBeNull();
+		});
+
+		it('the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run with userId and householdId', async () => {
+			const source = stripComments(await readSource('bootstrap.ts'));
+
 			const appCallbackWrap = source.match(
-				/requestContext\.run\s*\(\s*\{[\s\S]{0,120}userId[\s\S]{0,200}\(\s*\)\s*=>\s*handler\s*\(/,
+				new RegExp(
+					String.raw`requestContext\.run\s*\(\s*` +
+						hasBothKeys +
+						String.raw`\s*,\s*[\s\S]{0,80}=>\s*handler\s*\(`,
+				),
 			);
 			expect(appCallbackWrap).not.toBeNull();
 		});
@@ -130,9 +160,6 @@ describe('dispatch-site requestContext wraps', () => {
 		it('access check runs BEFORE resolveCallback in the rv: branch (H1 fix)', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// The isEnabled guard must appear before resolveCallback so the pending
-			// entry is NOT consumed when access is denied. We assert that within
-			// the rv: branch, isEnabled(...) precedes resolveCallback(...).
 			const accessBeforeResolve = source.match(
 				/isEnabled\s*\([^)]*\)[\s\S]{0,600}resolveCallback\s*\(/,
 			);
@@ -142,10 +169,6 @@ describe('dispatch-site requestContext wraps', () => {
 		it('no chatbot exemption in the rv: branch access check (L4 fix)', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// The old code skipped the access check for chatbot with:
-			//   if (chosenAppId !== 'chatbot') { ... isEnabled ... }
-			// All apps including chatbot must now pass through the same check.
-			// We assert the exemption pattern does not appear near the rv: branch.
 			const rvIdx = source.indexOf("data.startsWith('rv:')");
 			expect(rvIdx).toBeGreaterThan(-1);
 			const rvSection = source.slice(rvIdx, rvIdx + 1000);
@@ -155,12 +178,61 @@ describe('dispatch-site requestContext wraps', () => {
 		it('answeredCallback flag prevents double answerCallbackQuery (M2 fix)', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
 
-			// The denial path sets answeredCallback = true and calls
-			// answerCallbackQuery with a user-facing text message. The finally
-			// block checks this flag before calling the bare answerCallbackQuery.
 			expect(source).toMatch(/answeredCallback\s*=\s*true/);
 			expect(source).toMatch(/answerCallbackQuery\s*\(\s*\{[^}]*You no longer have access/);
 			expect(source).toMatch(/if\s*\(\s*!answeredCallback\s*\)[\s\S]{0,200}answerCallbackQuery/);
+		});
+	});
+
+	describe('gui/routes/context.ts', () => {
+		it('defines a buildCtx helper that carries both userId and householdId', async () => {
+			const source = stripComments(await readSource('gui/routes/context.ts'));
+
+			// Match the arrow function body (content between { and }) — both userId and
+			// householdId must appear, and householdId must derive from householdService.
+			const buildCtxMatch = source.match(
+				/buildCtx\s*=\s*\(\s*userId[^)]*\)\s*=>\s*\(\s*\{([\s\S]{0,300}?)\}\s*\)/,
+			);
+			expect(buildCtxMatch).not.toBeNull();
+			const body = (buildCtxMatch as RegExpMatchArray)[1];
+			expect(body).toMatch(/\buserId\b/);
+			expect(body).toMatch(/\bhouseholdId\b/);
+			expect(body).toMatch(/householdService\.getHouseholdForUser\s*\(\s*userId\s*\)/);
+			// null must be coerced to undefined, not passed through as null
+			expect(body).toMatch(/\?\?\s*undefined/);
+		});
+
+		it('every requestContext.run wrap uses buildCtx (or an inline object with both keys)', async () => {
+			const source = stripComments(await readSource('gui/routes/context.ts'));
+
+			const totalCalls = source.match(/\brequestContext\.run\s*\(/g) ?? [];
+
+			// Accepts either the buildCtx(userId) helper form OR a literal inline object
+			// containing both userId and householdId keys.
+			const wrappedCalls =
+				source.match(
+					new RegExp(
+						String.raw`requestContext\.run\s*\(\s*(?:buildCtx\s*\(|` + hasBothKeys + String.raw`)`,
+						'g',
+					),
+				) ?? [];
+
+			expect(totalCalls.length).toBe(4);
+			expect(wrappedCalls.length).toBe(totalCalls.length);
+		});
+	});
+
+	describe('gui/index.ts', () => {
+		it('throws loudly when contextStore is present but householdService is missing', async () => {
+			const source = stripComments(await readSource('gui/index.ts'));
+
+			// The guard must appear: if (!options.householdService) throw, adjacent to contextStore check.
+			// This prevents silent misconfiguration where context routes are registered without
+			// per-household ALS attribution.
+			const throwGuard = source.match(
+				/contextStore[\s\S]{0,300}!options\.householdService[\s\S]{0,200}throw\s+new\s+Error/,
+			);
+			expect(throwGuard).not.toBeNull();
 		});
 	});
 
@@ -200,9 +272,6 @@ describe('dispatch-site requestContext wraps', () => {
 	describe('bootstrap.ts — F37: condition-eval service name', () => {
 		it('uses "condition-eval" (not "condition-evaluator") to guard conditionEvaluator injection', async () => {
 			const source = stripComments(await readSource('bootstrap.ts'));
-			// The schema only allows "condition-eval" in requirements.services.
-			// If bootstrap checks for "condition-evaluator" instead, no app can ever
-			// receive the conditionEvaluator service.
 			expect(source).toMatch(/declaredServices\.has\s*\(\s*['"]condition-eval['"]\s*\)/);
 			expect(source).not.toMatch(/declaredServices\.has\s*\(\s*['"]condition-evaluator['"]\s*\)/);
 		});

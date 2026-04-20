@@ -13,12 +13,14 @@ import type { Logger } from 'pino';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { ContextStoreServiceImpl } from '../../services/context-store/index.js';
 import { requestContext } from '../../services/context/request-context.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { SystemConfig } from '../../types/config.js';
 
 export interface ContextRoutesOptions {
 	contextStore: ContextStoreServiceImpl;
 	config: SystemConfig;
 	logger: Logger;
+	householdService: Pick<HouseholdService, 'getHouseholdForUser'>;
 }
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
@@ -36,7 +38,12 @@ export function registerContextRoutes(
 	server: FastifyInstance,
 	options: ContextRoutesOptions,
 ): void {
-	const { contextStore, config, logger } = options;
+	const { contextStore, config, logger, householdService } = options;
+
+	const buildCtx = (userId: string) => ({
+		userId,
+		householdId: householdService.getHouseholdForUser(userId) ?? undefined,
+	});
 
 	// D5b-4: platform-admin gate
 	server.addHook('preHandler', requirePlatformAdmin);
@@ -57,7 +64,7 @@ export function registerContextRoutes(
 			return reply.status(400).type('text/html').send('Invalid user ID');
 		}
 
-		const entries = await requestContext.run({ userId }, () => contextStore.listForUser(userId));
+		const entries = await requestContext.run(buildCtx(userId), () => contextStore.listForUser(userId));
 		const csrfToken = (request as unknown as Record<string, unknown>).csrfToken as string;
 		const safeUserId = escapeHtml(userId);
 
@@ -112,7 +119,7 @@ export function registerContextRoutes(
 
 			let content = '';
 			if (isEdit) {
-				const existing = await requestContext.run({ userId }, () => contextStore.getForUser(key, userId));
+				const existing = await requestContext.run(buildCtx(userId), () => contextStore.getForUser(key, userId));
 				content = existing ?? '';
 			}
 
@@ -160,7 +167,7 @@ export function registerContextRoutes(
 		}
 
 		try {
-			await requestContext.run({ userId }, () => contextStore.save(userId, key, content));
+			await requestContext.run(buildCtx(userId), () => contextStore.save(userId, key, content));
 			logger.info({ userId, key }, 'Context entry saved via GUI');
 		} catch (err) {
 			logger.error({ userId, key, error: err }, 'Failed to save context entry');
@@ -188,7 +195,7 @@ export function registerContextRoutes(
 		}
 
 		try {
-			await requestContext.run({ userId }, () => contextStore.remove(userId, key));
+			await requestContext.run(buildCtx(userId), () => contextStore.remove(userId, key));
 			logger.info({ userId, key }, 'Context entry deleted via GUI');
 		} catch (err) {
 			logger.error({ userId, key, error: err }, 'Failed to delete context entry');
