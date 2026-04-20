@@ -12,13 +12,17 @@ const logger = pino({ level: 'silent' });
 // Header constants for multi-version migration tests
 // ---------------------------------------------------------------------------
 const HEADER_6 = '| Timestamp | Model | Input Tokens | Output Tokens | Cost ($) | App |';
-const SEP_6    = '|-----------|-------|-------------|---------------|----------|-----|';
+const SEP_6 = '|-----------|-------|-------------|---------------|----------|-----|';
 const HEADER_7 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
-const SEP_7    = '|-----------|----------|-------|-------------|---------------|----------|-----|';
-const HEADER_8 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
-const SEP_8    = '|-----------|----------|-------|-------------|---------------|----------|-----|------|';
-const HEADER_9 = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
-const SEP_9    = '|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
+const SEP_7 = '|-----------|----------|-------|-------------|---------------|----------|-----|';
+const HEADER_8 =
+	'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
+const SEP_8 =
+	'|-----------|----------|-------|-------------|---------------|----------|-----|------|';
+const HEADER_9 =
+	'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
+const SEP_9 =
+	'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
 
 /**
  * Write a minimal valid usage log with given table rows.
@@ -30,17 +34,10 @@ async function writeUsageLog(
 	version: 6 | 7 | 8 | 9 = 8,
 ): Promise<void> {
 	await mkdir(systemDir, { recursive: true });
-	const header = version === 9 ? HEADER_9 : version === 7 ? HEADER_7 : version === 6 ? HEADER_6 : HEADER_8;
-	const sep    = version === 9 ? SEP_9    : version === 7 ? SEP_7    : version === 6 ? SEP_6    : SEP_8;
-	const content = [
-		'# LLM Usage Log',
-		'',
-		header,
-		sep,
-		'',
-		...rows,
-		'',
-	].join('\n');
+	const header =
+		version === 9 ? HEADER_9 : version === 7 ? HEADER_7 : version === 6 ? HEADER_6 : HEADER_8;
+	const sep = version === 9 ? SEP_9 : version === 7 ? SEP_7 : version === 6 ? SEP_6 : SEP_8;
+	const content = ['# LLM Usage Log', '', header, sep, '', ...rows, ''].join('\n');
 	await writeFile(join(systemDir, 'llm-usage.md'), content, 'utf-8');
 }
 
@@ -856,8 +853,8 @@ describe('CostTracker', () => {
 				'',
 				HEADER_9,
 				SEP_9,
-				`<!-- schema upgraded to 9-col at 2026-04-01T00:00:00.000Z -->`,
-				`| ${month}-01T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 |`,   // 8-col
+				'<!-- schema upgraded to 9-col at 2026-04-01T00:00:00.000Z -->',
+				`| ${month}-01T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 |`, // 8-col
 				`| ${month}-02T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u2 | h1 |`, // 9-col
 				'',
 			].join('\n');
@@ -879,14 +876,13 @@ describe('CostTracker', () => {
 			await mkdir(systemDir, { recursive: true });
 
 			// Write YAML without households key
-			await writeFile(join(systemDir, 'monthly-costs.yaml'), [
-				`month: ${month}`,
-				`apps:`,
-				`  app1: 0.001`,
-				`users:`,
-				`  u1: 0.001`,
-				`total: 0.001`,
-			].join('\n'), 'utf-8');
+			await writeFile(
+				join(systemDir, 'monthly-costs.yaml'),
+				[`month: ${month}`, 'apps:', '  app1: 0.001', 'users:', '  u1: 0.001', 'total: 0.001'].join(
+					'\n',
+				),
+				'utf-8',
+			);
 
 			// Write a 9-col log with a current-month row
 			const row9 = `| ${month}-10T10:00:00.000Z | anthropic | claude-haiku-4-5-20251001 | 100 | 50 | 0.000188 | app1 | u1 | h1 |`;
@@ -911,26 +907,27 @@ describe('CostTracker', () => {
 				householdId: 'h1',
 			});
 			// Create outstanding reservation — must NOT appear in getMonthlyHouseholdCosts()
-			tracker.reserveEstimated('h1', 'app1', undefined, 0.10);
+			tracker.reserveEstimated('h1', 'app1', undefined, 0.1);
 
 			const map = tracker.getMonthlyHouseholdCosts();
 			// Persisted value is whatever record() wrote (> 0)
-			const persistedCost = tracker.getMonthlyHouseholdCost('h1') - 0.10;
+			const persistedCost = tracker.getMonthlyHouseholdCost('h1') - 0.1;
 			expect(map.get('h1')).toBeCloseTo(persistedCost, 5);
 			// Reservation must not be included
 			expect(map.get('h1')).toBeLessThan(tracker.getMonthlyHouseholdCost('h1'));
 
 			// Defensive copy: mutating returned map must not affect tracker
 			map.set('h1', 999);
-			expect(tracker.getMonthlyHouseholdCost('h1') - 0.10).toBeCloseTo(persistedCost, 5);
+			expect(tracker.getMonthlyHouseholdCost('h1') - 0.1).toBeCloseTo(persistedCost, 5);
 
 			await tracker.flush();
 		});
 
 		it('migrates 6-col legacy header to 9-col on loadMonthlyCache', async () => {
 			const systemDir = join(tempDir, 'system');
-			const row6a = `| 2026-04-01T10:00:00.000Z | claude-3-sonnet | 100 | 50 | 0.001500 | chatbot |`;
-			const row6b = `| 2026-04-02T11:00:00.000Z | claude-3-sonnet | 200 | 80 | 0.002800 | food |`;
+			const row6a =
+				'| 2026-04-01T10:00:00.000Z | claude-3-sonnet | 100 | 50 | 0.001500 | chatbot |';
+			const row6b = '| 2026-04-02T11:00:00.000Z | claude-3-sonnet | 200 | 80 | 0.002800 | food |';
 			await writeUsageLog(systemDir, [row6a, row6b], 6);
 
 			const tracker = new CostTracker(tempDir, logger);
@@ -949,14 +946,13 @@ describe('CostTracker', () => {
 			await mkdir(systemDir, { recursive: true });
 
 			// Write YAML without households key but with valid data
-			await writeFile(join(systemDir, 'monthly-costs.yaml'), [
-				`month: ${month}`,
-				`apps:`,
-				`  app1: 0.05`,
-				`users:`,
-				`  u1: 0.05`,
-				`total: 0.05`,
-			].join('\n'), 'utf-8');
+			await writeFile(
+				join(systemDir, 'monthly-costs.yaml'),
+				[`month: ${month}`, 'apps:', '  app1: 0.05', 'users:', '  u1: 0.05', 'total: 0.05'].join(
+					'\n',
+				),
+				'utf-8',
+			);
 
 			// No log file — simulates empty/missing log scenario
 			const tracker = new CostTracker(tempDir, logger);
@@ -987,14 +983,14 @@ describe('CostTracker', () => {
 		});
 
 		it('reserveEstimated returns a string reservation ID', () => {
-			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
 			expect(typeof id).toBe('string');
 			expect(id.length).toBeGreaterThan(10);
 		});
 
 		it('getMonthlyHouseholdCost includes outstanding reservations', () => {
-			tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
-			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.10, 6);
+			tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.1, 6);
 			expect(tracker.getMonthlyHouseholdCost('h2')).toBe(0); // other household not affected
 		});
 
@@ -1009,18 +1005,18 @@ describe('CostTracker', () => {
 				householdId: 'h1',
 			});
 			const persisted = tracker.getMonthlyHouseholdCost('h1');
-			tracker.reserveEstimated('h1', 'app1', undefined, 0.10);
-			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(persisted + 0.10, 5);
+			tracker.reserveEstimated('h1', 'app1', undefined, 0.1);
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(persisted + 0.1, 5);
 		});
 
 		it('releaseReservation removes reservation from pending sum', () => {
-			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
 			tracker.releaseReservation(id, 0.08);
 			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0); // reservation gone
 		});
 
 		it('releaseReservation with null actualCost removes reservation without error', () => {
-			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			const id = tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
 			expect(() => tracker.releaseReservation(id, null)).not.toThrow();
 			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0);
 		});
@@ -1031,7 +1027,9 @@ describe('CostTracker', () => {
 
 		it('throws on invalid reservation amounts', () => {
 			expect(() => tracker.reserveEstimated('h1', undefined, undefined, Number.NaN)).toThrow();
-			expect(() => tracker.reserveEstimated('h1', undefined, undefined, Infinity)).toThrow();
+			expect(() =>
+				tracker.reserveEstimated('h1', undefined, undefined, Number.POSITIVE_INFINITY),
+			).toThrow();
 			expect(() => tracker.reserveEstimated('h1', undefined, undefined, -0.01)).toThrow();
 			// Zero is allowed (e.g. Ollama free-tier call)
 			expect(() => tracker.reserveEstimated('h1', undefined, undefined, 0)).not.toThrow();
@@ -1040,18 +1038,18 @@ describe('CostTracker', () => {
 		it('10 concurrent reserveEstimated calls sum correctly in getMonthlyHouseholdCost', async () => {
 			const ids = await Promise.all(
 				Array.from({ length: 10 }, (_, i) =>
-					Promise.resolve(tracker.reserveEstimated('h1', 'app', `u${i}`, 0.10)),
+					Promise.resolve(tracker.reserveEstimated('h1', 'app', `u${i}`, 0.1)),
 				),
 			);
-			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(1.00, 5);
-			ids.forEach((id) => tracker.releaseReservation(id, null));
+			expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(1.0, 5);
+			for (const id of ids) tracker.releaseReservation(id, null);
 		});
 
 		it('expired reservations are excluded from getMonthlyHouseholdCost (fake timers)', async () => {
 			vi.useFakeTimers();
 			try {
-				tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
-				expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.10, 6);
+				tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
+				expect(tracker.getMonthlyHouseholdCost('h1')).toBeCloseTo(0.1, 6);
 
 				// Advance past expiry (60 s)
 				vi.advanceTimersByTime(61_000);
@@ -1071,7 +1069,7 @@ describe('CostTracker', () => {
 		});
 
 		it('flush clears all outstanding reservations', async () => {
-			tracker.reserveEstimated('h1', 'app', 'u1', 0.10);
+			tracker.reserveEstimated('h1', 'app', 'u1', 0.1);
 			await tracker.flush();
 			// Reservation must be gone immediately after flush
 			expect(tracker.getMonthlyHouseholdCost('h1')).toBe(0);
@@ -1102,8 +1100,8 @@ describe('CostTracker', () => {
 			].join('\n');
 			const result = parseUsageMarkdown(content);
 			expect(result.rows).toHaveLength(1);
-			expect(result.rows[0]!.user).toBe('u1');
-			expect(result.rows[0]!.app).toBe('app1');
+			expect(result.rows[0]?.user).toBe('u1');
+			expect(result.rows[0]?.app).toBe('app1');
 			expect(result.todayCost).toBeCloseTo(0.000188, 6);
 			expect(result.monthCost).toBeCloseTo(0.000188, 6);
 			expect(result.totalCost).toBeCloseTo(0.000188, 6);

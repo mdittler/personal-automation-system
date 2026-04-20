@@ -665,6 +665,7 @@ All providers must extend a base class that handles retry, cost recording, and m
 - `base-provider.test.ts` > uses default model when no override is specified
 - `base-provider.test.ts` > exposes providerId and providerType
 - `base-provider.test.ts` > satisfies LLMClient interface
+- `base-provider.test.ts` > propagates householdId from request context to costTracker
 
 **Edge case tests:**
 - `base-provider.test.ts` > resolves model from claudeModel for backward compat
@@ -5149,7 +5150,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-003 | retry.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-004 | llm-service.test.ts | 5 | 9 | Implemented |
 | REQ-LLM-005 | provider-registry.test.ts | 4 | 3 | Implemented |
-| REQ-LLM-006 | base-provider.test.ts | 8 | 3 | Implemented |
+| REQ-LLM-006 | base-provider.test.ts | 9 | 3 | Implemented |
 | REQ-LLM-007 | provider-factory.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-008 | model-selector.test.ts | 5 | 5 | Implemented |
 | REQ-LLM-009 | cost-tracker.test.ts | 20 | 39 | Implemented |
@@ -5340,4 +5341,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **151 test files** | **1091** | **1302** | **2393 tests** |
+| **Totals** | **151 test files** | **1092** | **1302** | **2394 tests** |

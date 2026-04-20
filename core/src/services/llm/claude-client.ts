@@ -8,9 +8,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import type { LLMCompletionOptions } from '../../types/llm.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { CostTracker } from './cost-tracker.js';
 import { withRetry } from './retry.js';
-import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 
 export interface ClaudeClientOptions {
 	/** Anthropic API key. */

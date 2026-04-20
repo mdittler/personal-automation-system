@@ -8,13 +8,13 @@
  * persisted to data/system/monthly-costs.yaml for LLMGuard enforcement.
  */
 
-import { appendFile, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { appendFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import { parse as parseYaml } from 'yaml';
-import type { ProviderType } from '../../types/llm.js';
 import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../types/auth-actor.js';
+import type { ProviderType } from '../../types/llm.js';
 import { toISO } from '../../utils/date.js';
 import { atomicWrite, ensureDir } from '../../utils/file.js';
 import { writeYamlFile } from '../../utils/yaml.js';
@@ -65,13 +65,16 @@ export class CostTracker {
 	private persistTimer: ReturnType<typeof setTimeout> | null = null;
 	private monthlyHouseholdCosts = new Map<string, number>();
 	// Reservation state — populated in Task 3
-	private reservations = new Map<string, {
-		householdId: string;
-		appId?: string;
-		userId?: string;
-		amount: number;
-		expiresAt: number;
-	}>();
+	private reservations = new Map<
+		string,
+		{
+			householdId: string;
+			appId?: string;
+			userId?: string;
+			amount: number;
+			expiresAt: number;
+		}
+	>();
 	private reservationCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 	constructor(dataDir: string, logger: Logger) {
@@ -239,7 +242,10 @@ export class CostTracker {
 			// Match markdown table data rows: must start with '| 20' (timestamp prefix)
 			if (!line.startsWith('| 20')) continue;
 
-			const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+			const cells = line
+				.split('|')
+				.map((c) => c.trim())
+				.filter(Boolean);
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 
@@ -374,7 +380,7 @@ export class CostTracker {
 			timestamp: toISO(),
 			estimatedCost,
 			...entry,
-			householdId: effectiveHouseholdId,  // override to strip __platform__
+			householdId: effectiveHouseholdId, // override to strip __platform__
 		};
 
 		// Update in-memory monthly cost cache
@@ -607,25 +613,26 @@ export class CostTracker {
 		// Detect line ending style to preserve it during header rewrite
 		const eol = content.includes('\r\n') ? '\r\n' : '\n';
 
-		const nineColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
+		const nineColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
 		if (content.includes(nineColHeader)) {
 			return; // Already at 9-col — idempotent
 		}
 
 		// Detect and replace the 8-col, 7-col, or 6-col header + separator
-		const eightColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
-		const sevenColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
-		const sixColHeader   = '| Timestamp | Model | Input Tokens | Output Tokens | Cost ($) | App |';
-		const nineColSeparator = '|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
+		const eightColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
+		const sevenColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const sixColHeader = '| Timestamp | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const nineColSeparator =
+			'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
 
 		let migrated: string;
 		if (content.includes(eightColHeader)) {
 			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
 			migrated = content
-				.replace(
-					eightColHeader,
-					nineColHeader,
-				)
+				.replace(eightColHeader, nineColHeader)
 				.replace(
 					'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
 					nineColSeparator + eol + marker,
