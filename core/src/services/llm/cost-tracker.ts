@@ -243,11 +243,11 @@ export class CostTracker {
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 
-			const timestamp = cells[0]!; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
+			const timestamp = cells[0] ?? ''; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
 			// Only count entries for the current month
 			if (!timestamp.startsWith(this.currentMonth)) continue;
 
-			const cost = parseFloat(cells[5]!);
+			const cost = Number.parseFloat(cells[5] ?? '');
 			if (!Number.isFinite(cost) || cost < 0) continue;
 
 			const appId = cells[6] === '-' ? undefined : cells[6];
@@ -478,6 +478,7 @@ export class CostTracker {
 
 	/**
 	 * Flush pending monthly cost data to disk and stop the debounce timer.
+	 * Also releases all pending reservations (shutdown/dispose method).
 	 * Call on shutdown to avoid losing cached cost data.
 	 */
 	async flush(): Promise<void> {
@@ -492,6 +493,7 @@ export class CostTracker {
 			clearInterval(this.reservationCleanupTimer);
 			this.reservationCleanupTimer = null;
 		}
+		this.reservations.clear();
 	}
 
 	private updateMonthlyCache(
@@ -610,9 +612,10 @@ export class CostTracker {
 			return; // Already at 9-col — idempotent
 		}
 
-		// Detect and replace the 8-col or 7-col header + separator
+		// Detect and replace the 8-col, 7-col, or 6-col header + separator
 		const eightColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
 		const sevenColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const sixColHeader   = '| Timestamp | Model | Input Tokens | Output Tokens | Cost ($) | App |';
 		const nineColSeparator = '|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
 
 		let migrated: string;
@@ -633,6 +636,14 @@ export class CostTracker {
 				.replace(sevenColHeader, nineColHeader)
 				.replace(
 					'|-----------|----------|-------|-------------|---------------|----------|-----|',
+					nineColSeparator + eol + marker,
+				);
+		} else if (content.includes(sixColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(sixColHeader, nineColHeader)
+				.replace(
+					'|-----------|-------|-------------|---------------|----------|-----|',
 					nineColSeparator + eol + marker,
 				);
 		} else {
