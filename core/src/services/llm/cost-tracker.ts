@@ -139,7 +139,7 @@ export class CostTracker {
 						'Monthly cost cache missing household dimension — upgrading',
 					);
 					// Attempt rebuild to populate household aggregates
-					// Capture existing apps/users/total before rebuild resets them
+					// Must snapshot before rebuildFromLog() — that method calls .clear() on the Maps
 					const savedApps = new Map(this.monthlyCosts);
 					const savedUsers = new Map(this.monthlyUserCosts);
 					const savedTotal = this.monthlyTotal;
@@ -533,6 +533,9 @@ export class CostTracker {
 			return; // No file yet — nothing to migrate
 		}
 
+		// Detect line ending style to preserve it during header rewrite
+		const eol = content.includes('\r\n') ? '\r\n' : '\n';
+
 		const nineColHeader = '| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
 		if (content.includes(nineColHeader)) {
 			return; // Already at 9-col — idempotent
@@ -553,7 +556,7 @@ export class CostTracker {
 				)
 				.replace(
 					'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
-					nineColSeparator + '\n' + marker,
+					nineColSeparator + eol + marker,
 				);
 		} else if (content.includes(sevenColHeader)) {
 			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
@@ -561,7 +564,7 @@ export class CostTracker {
 				.replace(sevenColHeader, nineColHeader)
 				.replace(
 					'|-----------|----------|-------|-------------|---------------|----------|-----|',
-					nineColSeparator + '\n' + marker,
+					nineColSeparator + eol + marker,
 				);
 		} else {
 			return; // Unknown format — leave as-is
