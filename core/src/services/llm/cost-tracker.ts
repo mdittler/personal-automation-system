@@ -9,12 +9,14 @@
  */
 
 import { appendFile, readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import { parse as parseYaml } from 'yaml';
 import type { ProviderType } from '../../types/llm.js';
+import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../types/auth-actor.js';
 import { toISO } from '../../utils/date.js';
-import { ensureDir } from '../../utils/file.js';
+import { atomicWrite, ensureDir } from '../../utils/file.js';
 import { writeYamlFile } from '../../utils/yaml.js';
 import { estimateCallCost, hasPricing } from './model-pricing.js';
 
@@ -31,6 +33,8 @@ export interface UsageEntry {
 	providerType?: ProviderType;
 	/** User ID from LLM request context. */
 	userId?: string;
+	/** Household ID from LLM request context. Undefined or '__platform__' means no household attribution. */
+	householdId?: string;
 }
 
 /** Shape of the monthly-costs.yaml persistence file. */
@@ -38,6 +42,7 @@ interface MonthlyCostData {
 	month: string;
 	apps: Record<string, number>;
 	users: Record<string, number>;
+	households?: Record<string, number>;
 	total: number;
 }
 
@@ -58,6 +63,16 @@ export class CostTracker {
 	private currentMonth = '';
 	private persistDirty = false;
 	private persistTimer: ReturnType<typeof setTimeout> | null = null;
+	private monthlyHouseholdCosts = new Map<string, number>();
+	// Reservation state — populated in Task 3
+	private reservations = new Map<string, {
+		householdId: string;
+		appId?: string;
+		userId?: string;
+		amount: number;
+		expiresAt: number;
+	}>();
+	private reservationCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 	constructor(dataDir: string, logger: Logger) {
 		this.usageFilePath = join(dataDir, 'system', 'llm-usage.md');
@@ -174,6 +189,7 @@ export class CostTracker {
 		// Reset accumulators so this method is idempotent (safe to call multiple times)
 		this.monthlyCosts.clear();
 		this.monthlyUserCosts.clear();
+		this.monthlyHouseholdCosts.clear();
 		this.monthlyTotal = 0;
 
 		const lines = content.split('\n');
@@ -196,6 +212,7 @@ export class CostTracker {
 
 			const appId = cells[6] === '-' ? undefined : cells[6];
 			const userId = cells[7] === '-' ? undefined : cells[7];
+			const householdId = cells.length >= 9 && cells[8] !== '-' ? cells[8] : undefined;
 
 			if (appId) {
 				const current = this.monthlyCosts.get(appId) ?? 0;
@@ -204,6 +221,10 @@ export class CostTracker {
 			if (userId) {
 				const current = this.monthlyUserCosts.get(userId) ?? 0;
 				this.monthlyUserCosts.set(userId, Math.round((current + cost) * 1e6) / 1e6);
+			}
+			if (householdId) {
+				const current = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+				this.monthlyHouseholdCosts.set(householdId, Math.round((current + cost) * 1e6) / 1e6);
 			}
 			this.monthlyTotal = Math.round((this.monthlyTotal + cost) * 1e6) / 1e6;
 			rebuilt = true;
@@ -253,6 +274,28 @@ export class CostTracker {
 	}
 
 	/**
+	 * Get the accumulated monthly cost for a specific household (persisted + outstanding reservations).
+	 */
+	getMonthlyHouseholdCost(householdId: string): number {
+		this.checkMonthRollover();
+		const persisted = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+		const now = Date.now();
+		let pending = 0;
+		for (const r of this.reservations.values()) {
+			if (r.householdId === householdId && r.expiresAt > now) pending += r.amount;
+		}
+		return Math.round((persisted + pending) * 1e6) / 1e6;
+	}
+
+	/**
+	 * Get all per-household monthly costs as a Map (defensive copy, persisted only).
+	 */
+	getMonthlyHouseholdCosts(): Map<string, number> {
+		this.checkMonthRollover();
+		return new Map(this.monthlyHouseholdCosts);
+	}
+
+	/**
 	 * Estimate the cost of an LLM API call.
 	 */
 	estimateCost(
@@ -282,14 +325,20 @@ export class CostTracker {
 			);
 		}
 
+		const effectiveHouseholdId =
+			entry.householdId && entry.householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID
+				? entry.householdId
+				: undefined;
+
 		const usageEntry: UsageEntry = {
 			timestamp: toISO(),
 			estimatedCost,
 			...entry,
+			householdId: effectiveHouseholdId,  // override to strip __platform__
 		};
 
 		// Update in-memory monthly cost cache
-		this.updateMonthlyCache(entry.appId, estimatedCost, entry.userId);
+		this.updateMonthlyCache(entry.appId, estimatedCost, entry.userId, effectiveHouseholdId);
 
 		try {
 			await this.appendEntry(usageEntry);
@@ -340,6 +389,7 @@ export class CostTracker {
 		appId: string | undefined,
 		cost: number,
 		userId: string | undefined,
+		householdId: string | undefined,
 	): void {
 		this.checkMonthRollover();
 		if (appId) {
@@ -349,6 +399,10 @@ export class CostTracker {
 		if (userId) {
 			const current = this.monthlyUserCosts.get(userId) ?? 0;
 			this.monthlyUserCosts.set(userId, Math.round((current + cost) * 1e6) / 1e6);
+		}
+		if (householdId) {
+			const current = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+			this.monthlyHouseholdCosts.set(householdId, Math.round((current + cost) * 1e6) / 1e6);
 		}
 		this.monthlyTotal = Math.round((this.monthlyTotal + cost) * 1e6) / 1e6;
 		this.schedulePersist();
@@ -363,6 +417,15 @@ export class CostTracker {
 			}
 			this.monthlyCosts.clear();
 			this.monthlyUserCosts.clear();
+			this.monthlyHouseholdCosts.clear();
+			// Warn for any outstanding reservations that span a month boundary
+			for (const [id, r] of this.reservations) {
+				this.logger.warn(
+					{ id, amount: r.amount, householdId: r.householdId },
+					'Reservation cleared on month rollover',
+				);
+			}
+			this.reservations.clear();
 			this.monthlyTotal = 0;
 			this.currentMonth = now;
 			this.schedulePersist();
@@ -393,6 +456,7 @@ export class CostTracker {
 			month: this.currentMonth,
 			apps: Object.fromEntries(this.monthlyCosts),
 			users: Object.fromEntries(this.monthlyUserCosts),
+			households: Object.fromEntries(this.monthlyHouseholdCosts),
 			total: this.monthlyTotal,
 		};
 		try {
