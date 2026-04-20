@@ -67,11 +67,17 @@ function stripComments(source: string): string {
  * Lookahead-based pattern that matches a single-line `{...}` object literal
  * containing BOTH `userId` and `householdId` keys in any order.
  *
+ * `householdId` is matched as a property key only — either shorthand
+ * (`{..., householdId, ...}`, preceded by `{` or `,`) or explicit
+ * (`householdId: value`). This prevents a regression like
+ * `{ userId, hh: householdId }` from satisfying the guard even though
+ * the ALS store would lack a `householdId` property.
+ *
  * `[^}]*` intentionally restricts to single-line objects: multi-line wraps
  * will cause the test to fail loudly, signalling that the pattern needs an
  * explicit update — the desired behaviour for structural guard tests.
  */
-const hasBothKeys = String.raw`\{(?=[^}]*\buserId\b)(?=[^}]*\bhouseholdId\b)[^}]*\}`;
+const hasBothKeys = String.raw`\{(?=[^}]*\buserId\b)(?=[^}]*(?:[{,]\s*\bhouseholdId\b|\bhouseholdId\s*:))[^}]*\}`;
 
 describe('dispatch-site requestContext wraps', () => {
 	describe('bootstrap.ts', () => {
