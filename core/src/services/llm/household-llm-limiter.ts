@@ -14,10 +14,10 @@ export interface HouseholdLLMLimiterOptions {
 
 export type HouseholdAttribution = 'platform' | 'enforced';
 
-export const PLATFORM_LIMIT_METADATA = Object.freeze({
+export const PLATFORM_LIMIT_METADATA: Readonly<{ maxRequests: number; windowSeconds: number }> = Object.freeze({
     maxRequests: Number.POSITIVE_INFINITY,
     windowSeconds: Number.POSITIVE_INFINITY,
-}) as const;
+});
 
 export const PLATFORM_NOOP_RESERVATION = 'PLATFORM_NOOP' as const;
 
