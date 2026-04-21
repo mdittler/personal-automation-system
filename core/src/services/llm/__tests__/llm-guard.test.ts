@@ -4,10 +4,16 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
+import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../../types/auth-actor.js';
+import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
 import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
 import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
+import {
+    createMockHouseholdLimiter,
+    PLATFORM_NOOP_RESERVATION,
+} from './helpers/mock-household-limiter.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -413,5 +419,110 @@ describe('LLMGuard + CostTracker — unknown-model cost cap integration (Gap 8)'
 
 		guard.dispose();
 		await realTracker.flush();
+	});
+});
+
+// ==========================================================================
+// LLMGuard + HouseholdLLMLimiter integration tests
+// ==========================================================================
+describe('LLMGuard + HouseholdLLMLimiter integration', () => {
+
+	function makeGuardWithHH(overrides: { hhLimiter?: ReturnType<typeof createMockHouseholdLimiter> } = {}) {
+		const hhLimiter = overrides.hhLimiter ?? createMockHouseholdLimiter();
+		const ct = createMockCostTracker();
+		const innerSvc = createMockInner();
+		const g = new LLMGuard({
+			inner: innerSvc,
+			appId: 'chatbot',
+			costTracker: ct,
+			config: defaultConfig,
+			logger,
+			householdLimiter: hhLimiter,
+		});
+		return { guard: g, hhLimiter, costTracker: ct, inner: innerSvc };
+	}
+
+	it('app rate denied: household check NOT called; nothing committed; nothing reserved', async () => {
+		const { guard, hhLimiter } = makeGuardWithHH();
+		// Exhaust app rate
+		for (let i = 0; i < defaultConfig.maxRequests; i++) await guard.complete('hi');
+		vi.clearAllMocks();
+
+		await expect(guard.complete('hi')).rejects.toThrow(LLMRateLimitError);
+		expect(hhLimiter.check).not.toHaveBeenCalled();
+		expect(hhLimiter.reserveEstimated).not.toHaveBeenCalled();
+	});
+
+	it('household rate denied: no app rate slot committed on either', async () => {
+		const hhLimiter = createMockHouseholdLimiter({
+			check: vi.fn().mockReturnValue({ allowed: false, commit: vi.fn(), limit: { maxRequests: 200, windowSeconds: 3600 } }),
+		});
+		const { guard } = makeGuardWithHH({ hhLimiter });
+		await expect(guard.complete('hi')).rejects.toThrow(LLMRateLimitError);
+		expect(hhLimiter.reserveEstimated).not.toHaveBeenCalled();
+	});
+
+	it('household cost denied: no rate commits; no reserve; inner NOT called', async () => {
+		const hhLimiter = createMockHouseholdLimiter({
+			checkCost: vi.fn().mockImplementation(() => {
+				throw new LLMCostCapError({ scope: 'household', householdId: 'h1', currentCost: 20, cap: 20 });
+			}),
+		});
+		const { guard, inner } = makeGuardWithHH({ hhLimiter });
+		await expect(guard.complete('hi')).rejects.toMatchObject({ scope: 'household' });
+		expect(hhLimiter.reserveEstimated).not.toHaveBeenCalled();
+		expect(inner.complete).not.toHaveBeenCalled();
+	});
+
+	it('success path: releaseReservation called exactly once with (id, null)', async () => {
+		const { guard, hhLimiter } = makeGuardWithHH();
+		(hhLimiter.reserveEstimated as any).mockReturnValue('res-42');
+		await guard.complete('hi');
+		expect(hhLimiter.releaseReservation).toHaveBeenCalledTimes(1);
+		expect(hhLimiter.releaseReservation).toHaveBeenCalledWith('res-42', null);
+	});
+
+	it('inner rejects: releaseReservation called once; original error propagates', async () => {
+		const hhLimiter = createMockHouseholdLimiter();
+		(hhLimiter.reserveEstimated as any).mockReturnValue('res-42');
+		const innerSvc = createMockInner();
+		(innerSvc.complete as any).mockRejectedValue(new Error('provider down'));
+		const ct = createMockCostTracker();
+		const g = new LLMGuard({ inner: innerSvc, appId: 'chatbot', costTracker: ct, config: defaultConfig, logger, householdLimiter: hhLimiter });
+
+		await expect(g.complete('hi')).rejects.toThrow('provider down');
+		expect(hhLimiter.releaseReservation).toHaveBeenCalledTimes(1);
+		expect(hhLimiter.releaseReservation).toHaveBeenCalledWith('res-42', null);
+	});
+
+	it('reserveEstimated throws unexpectedly → both rate slots rolled back; LLMCostCapError(reservation-exceeded)', async () => {
+		const hhLimiter = createMockHouseholdLimiter({
+			reserveEstimated: vi.fn().mockImplementation(() => { throw new Error('cost tracker blew up'); }),
+			revokeLastCheckCommit: vi.fn(),
+		});
+		const { guard } = makeGuardWithHH({ hhLimiter });
+		await expect(guard.complete('hi')).rejects.toMatchObject({ scope: 'reservation-exceeded' });
+		expect(hhLimiter.revokeLastCheckCommit).toHaveBeenCalled();
+		expect(hhLimiter.releaseReservation).not.toHaveBeenCalled();
+	});
+
+	it('platform context: PLATFORM_NOOP returned; costTracker.reserveEstimated never called', async () => {
+		const { guard, hhLimiter, costTracker: ct } = makeGuardWithHH();
+		(hhLimiter.reserveEstimated as any).mockReturnValue(PLATFORM_NOOP_RESERVATION);
+		await requestContext.run({ userId: 'u1', householdId: undefined }, async () => {
+			await guard.complete('hi');
+		});
+		expect(ct.reserveEstimated).not.toHaveBeenCalled();
+	});
+
+	it('household rate error carries override limit metadata from check().limit', async () => {
+		const hhLimiter = createMockHouseholdLimiter({
+			check: vi.fn().mockReturnValue({ allowed: false, commit: vi.fn(), limit: { maxRequests: 400, windowSeconds: 1800 } }),
+		});
+		const { guard } = makeGuardWithHH({ hhLimiter });
+		const err = await guard.complete('hi').catch((e: unknown) => e) as LLMRateLimitError;
+		expect(err.scope).toBe('household');
+		expect(err.maxRequests).toBe(400);
+		expect(err.windowSeconds).toBe(1800);
 	});
 });
