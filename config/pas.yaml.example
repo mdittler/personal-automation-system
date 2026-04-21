@@ -34,6 +34,16 @@ defaults:
 #       window_seconds: 3600    # 1 hour
 #     default_monthly_cost_cap: 10.00   # USD per app per month
 #     global_monthly_cost_cap: 50.00    # USD total system per month
+#     # Per-household rate + cost limits (multi-household deployments)
+#     default_household_rate_limit:
+#       max_requests: 200       # per household, per window
+#       window_seconds: 3600    # 1 hour
+#     default_household_monthly_cost_cap: 20.00   # USD per household per month
+#     # Override specific households:
+#     # household_overrides:
+#     #   <household-id>:
+#     #     rate_limit: { max_requests: 400, window_seconds: 3600 }
+#     #     monthly_cost_cap: 40.00
 #
 #   # Custom OpenAI-compatible providers (optional)
 #   # Add Groq, Together, Mistral, vLLM, or any OpenAI-compatible endpoint.

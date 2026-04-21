@@ -79,7 +79,7 @@ backup:
 
 2. **Create the config file:**
    ```bash
-   cp config/pas.example.yaml config/pas.yaml
+   cp config/pas.yaml.example config/pas.yaml
    # Edit config/pas.yaml — add your Telegram user ID under users
    ```
 

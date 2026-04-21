@@ -636,7 +636,7 @@ data/
 
 ### Config File
 
-Create `config/pas.example.yaml`:
+Create `config/pas.yaml.example`:
 ```yaml
 # PAS System Configuration
 # Copy to config/pas.yaml and edit
@@ -1973,7 +1973,7 @@ Add a post-classification verification step for grey-zone messages (confidence 0
 - `core/src/services/router/index.ts` — Grey-zone check in `routeMessage()` and `routePhoto()`
 - `core/src/bootstrap.ts` — Wire verification services, `rv:` callback handler
 - `config/pas.yaml.example` — Route verification config section
-- `config/pas.example.yaml` — Route verification config section
+- `config/pas.yaml.example` — Route verification config section
 - `CLAUDE.md` — Route verification architecture decision, key file paths
 
 ### Key Decisions
