@@ -9,7 +9,7 @@ User manual actions are tracked separately in `user_actions.md`.
 
 These are greenlit but not yet planned. Each needs a spec/plan before coding.
 
-- **D5c** ⬅ **ACTIVE PRIORITY** — Per-household LLM cost caps + rate limits + ops dashboard + 40-user load test. Chunk 0 (semantics docs) complete. **Chunk A is next** (fix ALS dispatch gaps: bootstrap.ts:816/835/924, gui/routes/context.ts:60/115/163/191). Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`. One chunk per session; Claude+Codex review between each. Does NOT depend on §1 or §4 below.
+- **D5c** ⬅ **ACTIVE PRIORITY** — Per-household LLM cost caps + rate limits + ops dashboard + 40-user load test. Chunk A complete ✓, Chunk B complete ✓ — Chunk C is next. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`. One chunk per session; Claude+Codex review between each. Does NOT depend on §1 or §4 below.
 - **LLM Enhancement #2** — Replace Food's regex router with a fast structured classifier. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
 - **LLM Enhancements #3–#7** — Ambiguous extraction via LLM, DataQuery keyword gate removal, chatbot system-data categorization, knowledge reranker, photo caption confidence routing. Same plan.
 - **Phase H12c** — Alcohol + Meal Quality Signals. Deferred pending H12a stabilization.

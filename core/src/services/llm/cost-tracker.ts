@@ -8,13 +8,15 @@
  * persisted to data/system/monthly-costs.yaml for LLMGuard enforcement.
  */
 
+import { randomUUID } from 'node:crypto';
 import { appendFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import { parse as parseYaml } from 'yaml';
+import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../types/auth-actor.js';
 import type { ProviderType } from '../../types/llm.js';
 import { toISO } from '../../utils/date.js';
-import { ensureDir } from '../../utils/file.js';
+import { atomicWrite, ensureDir } from '../../utils/file.js';
 import { writeYamlFile } from '../../utils/yaml.js';
 import { estimateCallCost, hasPricing } from './model-pricing.js';
 
@@ -31,6 +33,8 @@ export interface UsageEntry {
 	providerType?: ProviderType;
 	/** User ID from LLM request context. */
 	userId?: string;
+	/** Household ID from LLM request context. Undefined or '__platform__' means no household attribution. */
+	householdId?: string;
 }
 
 /** Shape of the monthly-costs.yaml persistence file. */
@@ -38,6 +42,7 @@ interface MonthlyCostData {
 	month: string;
 	apps: Record<string, number>;
 	users: Record<string, number>;
+	households?: Record<string, number>;
 	total: number;
 }
 
@@ -58,6 +63,19 @@ export class CostTracker {
 	private currentMonth = '';
 	private persistDirty = false;
 	private persistTimer: ReturnType<typeof setTimeout> | null = null;
+	private monthlyHouseholdCosts = new Map<string, number>();
+	// Reservation state — populated in Task 3
+	private reservations = new Map<
+		string,
+		{
+			householdId: string;
+			appId?: string;
+			userId?: string;
+			amount: number;
+			expiresAt: number;
+		}
+	>();
+	private reservationCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 	constructor(dataDir: string, logger: Logger) {
 		this.usageFilePath = join(dataDir, 'system', 'llm-usage.md');
@@ -105,12 +123,49 @@ export class CostTracker {
 						this.monthlyUserCosts.set(userId, cost);
 					}
 				}
+				for (const [hhId, cost] of Object.entries(data.households ?? {})) {
+					if (typeof cost === 'number') {
+						this.monthlyHouseholdCosts.set(hhId, cost);
+					}
+				}
 				this.monthlyTotal = typeof data.total === 'number' ? data.total : 0;
 				this.logger.info(
 					{ month: this.currentMonth, total: this.monthlyTotal, apps: this.monthlyCosts.size },
 					'Monthly cost cache loaded',
 				);
 				yamlLoaded = true;
+
+				if (data.households === undefined) {
+					// YAML is current-month but has no household dimension — upgrade it
+					this.logger.info(
+						{ month: this.currentMonth },
+						'Monthly cost cache missing household dimension — upgrading',
+					);
+					// Attempt rebuild to populate household aggregates
+					// Must snapshot before rebuildFromLog() — that method calls .clear() on the Maps
+					const savedApps = new Map(this.monthlyCosts);
+					const savedUsers = new Map(this.monthlyUserCosts);
+					const savedTotal = this.monthlyTotal;
+					const rebuilt = await this.rebuildFromLog();
+					if (!rebuilt) {
+						// Rebuild found no current-month rows — preserve existing data
+						this.monthlyCosts = savedApps;
+						this.monthlyUserCosts = savedUsers;
+						this.monthlyTotal = savedTotal;
+						this.monthlyHouseholdCosts = new Map();
+						this.logger.info(
+							{ month: this.currentMonth },
+							'Monthly cost cache missing household dimension and no current-month rows to rebuild from — keeping existing cache and initializing empty household map',
+						);
+					} else {
+						this.logger.info(
+							{ month: this.currentMonth },
+							'Monthly cost cache missing household dimension — rebuilt from usage log',
+						);
+					}
+					this.schedulePersist();
+					yamlLoaded = true;
+				}
 			} else if (data) {
 				// (b) Cache is for a different month (month rolled over)
 				this.logger.info(
@@ -155,6 +210,9 @@ export class CostTracker {
 				);
 			}
 		}
+
+		// One-time header migration (idempotent)
+		await this.migrateUsageLogHeader();
 	}
 
 	/**
@@ -174,6 +232,7 @@ export class CostTracker {
 		// Reset accumulators so this method is idempotent (safe to call multiple times)
 		this.monthlyCosts.clear();
 		this.monthlyUserCosts.clear();
+		this.monthlyHouseholdCosts.clear();
 		this.monthlyTotal = 0;
 
 		const lines = content.split('\n');
@@ -183,19 +242,23 @@ export class CostTracker {
 			// Match markdown table data rows: must start with '| 20' (timestamp prefix)
 			if (!line.startsWith('| 20')) continue;
 
-			const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+			const cells = line
+				.split('|')
+				.map((c) => c.trim())
+				.filter(Boolean);
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 
-			const timestamp = cells[0]!; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
+			const timestamp = cells[0] ?? ''; // e.g. "2026-04-10T14:30:00.000Z" (length >= 8 checked above)
 			// Only count entries for the current month
 			if (!timestamp.startsWith(this.currentMonth)) continue;
 
-			const cost = parseFloat(cells[5]!);
+			const cost = Number.parseFloat(cells[5] ?? '');
 			if (!Number.isFinite(cost) || cost < 0) continue;
 
 			const appId = cells[6] === '-' ? undefined : cells[6];
 			const userId = cells[7] === '-' ? undefined : cells[7];
+			const householdId = cells.length >= 9 && cells[8] !== '-' ? cells[8] : undefined;
 
 			if (appId) {
 				const current = this.monthlyCosts.get(appId) ?? 0;
@@ -204,6 +267,10 @@ export class CostTracker {
 			if (userId) {
 				const current = this.monthlyUserCosts.get(userId) ?? 0;
 				this.monthlyUserCosts.set(userId, Math.round((current + cost) * 1e6) / 1e6);
+			}
+			if (householdId) {
+				const current = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+				this.monthlyHouseholdCosts.set(householdId, Math.round((current + cost) * 1e6) / 1e6);
 			}
 			this.monthlyTotal = Math.round((this.monthlyTotal + cost) * 1e6) / 1e6;
 			rebuilt = true;
@@ -253,6 +320,28 @@ export class CostTracker {
 	}
 
 	/**
+	 * Get the accumulated monthly cost for a specific household (persisted + outstanding reservations).
+	 */
+	getMonthlyHouseholdCost(householdId: string): number {
+		this.checkMonthRollover();
+		const persisted = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+		const now = Date.now();
+		let pending = 0;
+		for (const r of this.reservations.values()) {
+			if (r.householdId === householdId && r.expiresAt > now) pending += r.amount;
+		}
+		return Math.round((persisted + pending) * 1e6) / 1e6;
+	}
+
+	/**
+	 * Get all per-household monthly costs as a Map (defensive copy, persisted only).
+	 */
+	getMonthlyHouseholdCosts(): Map<string, number> {
+		this.checkMonthRollover();
+		return new Map(this.monthlyHouseholdCosts);
+	}
+
+	/**
 	 * Estimate the cost of an LLM API call.
 	 */
 	estimateCost(
@@ -282,14 +371,20 @@ export class CostTracker {
 			);
 		}
 
+		const effectiveHouseholdId =
+			entry.householdId && entry.householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID
+				? entry.householdId
+				: undefined;
+
 		const usageEntry: UsageEntry = {
 			timestamp: toISO(),
 			estimatedCost,
 			...entry,
+			householdId: effectiveHouseholdId, // override to strip __platform__
 		};
 
 		// Update in-memory monthly cost cache
-		this.updateMonthlyCache(entry.appId, estimatedCost, entry.userId);
+		this.updateMonthlyCache(entry.appId, estimatedCost, entry.userId, effectiveHouseholdId);
 
 		try {
 			await this.appendEntry(usageEntry);
@@ -312,6 +407,71 @@ export class CostTracker {
 	}
 
 	/**
+	 * Reserve an estimated cost against a household's monthly cap.
+	 * Returns a reservation ID to pass to releaseReservation() when the call completes.
+	 * Reservation expires after 60 seconds if not released.
+	 */
+	reserveEstimated(
+		householdId: string,
+		appId: string | undefined,
+		userId: string | undefined,
+		amount: number,
+	): string {
+		if (!Number.isFinite(amount) || amount < 0) {
+			throw new Error(`reserveEstimated: invalid amount ${String(amount)}`);
+		}
+		const id = randomUUID();
+		this.reservations.set(id, {
+			householdId,
+			appId,
+			userId,
+			amount,
+			expiresAt: Date.now() + 60_000,
+		});
+		this.ensureReservationCleanupTimer();
+		return id;
+	}
+
+	/**
+	 * Release a reservation created by reserveEstimated().
+	 * Pass actualCost when the LLM call completed; pass null when it failed (no cost incurred).
+	 * The actual cost is recorded via the normal record() call — this method only removes the reservation.
+	 */
+	releaseReservation(id: string, actualCost: number | null): void {
+		const r = this.reservations.get(id);
+		if (!r) {
+			this.logger.debug({ id }, 'releaseReservation: unknown id (already expired or released)');
+			return;
+		}
+		this.reservations.delete(id);
+		if (actualCost !== null && Number.isFinite(actualCost)) {
+			this.logger.debug(
+				{ id, reserved: r.amount, actual: actualCost, drift: actualCost - r.amount },
+				'Reservation reconciled',
+			);
+		}
+	}
+
+	private ensureReservationCleanupTimer(): void {
+		if (this.reservationCleanupTimer) return;
+		this.reservationCleanupTimer = setInterval(() => {
+			const now = Date.now();
+			for (const [id, r] of this.reservations) {
+				if (r.expiresAt <= now) {
+					this.reservations.delete(id);
+					this.logger.warn(
+						{ id, amount: r.amount, householdId: r.householdId },
+						'Reservation expired without release (LLM call may have hung)',
+					);
+				}
+			}
+		}, 10_000);
+		if (this.reservationCleanupTimer.unref) {
+			this.reservationCleanupTimer.unref();
+		}
+	}
+
+	/**
 	 * Read the current usage file content.
 	 */
 	async readUsage(): Promise<string> {
@@ -324,6 +484,7 @@ export class CostTracker {
 
 	/**
 	 * Flush pending monthly cost data to disk and stop the debounce timer.
+	 * Also releases all pending reservations (shutdown/dispose method).
 	 * Call on shutdown to avoid losing cached cost data.
 	 */
 	async flush(): Promise<void> {
@@ -334,12 +495,18 @@ export class CostTracker {
 		if (this.persistDirty) {
 			await this.persistMonthlyCosts();
 		}
+		if (this.reservationCleanupTimer) {
+			clearInterval(this.reservationCleanupTimer);
+			this.reservationCleanupTimer = null;
+		}
+		this.reservations.clear();
 	}
 
 	private updateMonthlyCache(
 		appId: string | undefined,
 		cost: number,
 		userId: string | undefined,
+		householdId: string | undefined,
 	): void {
 		this.checkMonthRollover();
 		if (appId) {
@@ -349,6 +516,10 @@ export class CostTracker {
 		if (userId) {
 			const current = this.monthlyUserCosts.get(userId) ?? 0;
 			this.monthlyUserCosts.set(userId, Math.round((current + cost) * 1e6) / 1e6);
+		}
+		if (householdId) {
+			const current = this.monthlyHouseholdCosts.get(householdId) ?? 0;
+			this.monthlyHouseholdCosts.set(householdId, Math.round((current + cost) * 1e6) / 1e6);
 		}
 		this.monthlyTotal = Math.round((this.monthlyTotal + cost) * 1e6) / 1e6;
 		this.schedulePersist();
@@ -363,6 +534,15 @@ export class CostTracker {
 			}
 			this.monthlyCosts.clear();
 			this.monthlyUserCosts.clear();
+			this.monthlyHouseholdCosts.clear();
+			// Warn for any outstanding reservations that span a month boundary
+			for (const [id, r] of this.reservations) {
+				this.logger.warn(
+					{ id, amount: r.amount, householdId: r.householdId },
+					'Reservation cleared on month rollover',
+				);
+			}
+			this.reservations.clear();
 			this.monthlyTotal = 0;
 			this.currentMonth = now;
 			this.schedulePersist();
@@ -393,6 +573,7 @@ export class CostTracker {
 			month: this.currentMonth,
 			apps: Object.fromEntries(this.monthlyCosts),
 			users: Object.fromEntries(this.monthlyUserCosts),
+			households: Object.fromEntries(this.monthlyHouseholdCosts),
 			total: this.monthlyTotal,
 		};
 		try {
@@ -421,6 +602,65 @@ export class CostTracker {
 		return p;
 	}
 
+	private async migrateUsageLogHeader(): Promise<void> {
+		let content: string;
+		try {
+			content = await readFile(this.usageFilePath, 'utf-8');
+		} catch {
+			return; // No file yet — nothing to migrate
+		}
+
+		// Detect line ending style to preserve it during header rewrite
+		const eol = content.includes('\r\n') ? '\r\n' : '\n';
+
+		const nineColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |';
+		if (content.includes(nineColHeader)) {
+			return; // Already at 9-col — idempotent
+		}
+
+		// Detect and replace the 8-col, 7-col, or 6-col header + separator
+		const eightColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |';
+		const sevenColHeader =
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const sixColHeader = '| Timestamp | Model | Input Tokens | Output Tokens | Cost ($) | App |';
+		const nineColSeparator =
+			'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|';
+
+		let migrated: string;
+		if (content.includes(eightColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(eightColHeader, nineColHeader)
+				.replace(
+					'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
+					nineColSeparator + eol + marker,
+				);
+		} else if (content.includes(sevenColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(sevenColHeader, nineColHeader)
+				.replace(
+					'|-----------|----------|-------|-------------|---------------|----------|-----|',
+					nineColSeparator + eol + marker,
+				);
+		} else if (content.includes(sixColHeader)) {
+			const marker = `<!-- schema upgraded to 9-col at ${toISO()} -->`;
+			migrated = content
+				.replace(sixColHeader, nineColHeader)
+				.replace(
+					'|-----------|-------|-------------|---------------|----------|-----|',
+					nineColSeparator + eol + marker,
+				);
+		} else {
+			return; // Unknown format — leave as-is
+		}
+
+		await atomicWrite(this.usageFilePath, migrated);
+		this.logger.info({ path: this.usageFilePath }, 'llm-usage.md header migrated to 9-col schema');
+	}
+
 	private async doAppendEntry(entry: UsageEntry): Promise<void> {
 		await ensureDir(dirname(this.usageFilePath));
 
@@ -437,15 +677,15 @@ export class CostTracker {
 			const header = [
 				'# LLM Usage Log',
 				'',
-				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User |',
-				'|-----------|----------|-------|-------------|---------------|----------|-----|------|',
+				'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |',
+				'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|',
 				'',
 			].join('\n');
 			await appendFile(this.usageFilePath, header, 'utf-8');
 		}
 
 		const safe = (v: string) => v.replace(/[|\n\r]/g, '_');
-		const line = `| ${entry.timestamp} | ${safe(entry.provider ?? '-')} | ${safe(entry.model)} | ${entry.inputTokens} | ${entry.outputTokens} | ${entry.estimatedCost.toFixed(6)} | ${safe(entry.appId ?? '-')} | ${safe(entry.userId ?? '-')} |\n`;
+		const line = `| ${entry.timestamp} | ${safe(entry.provider ?? '-')} | ${safe(entry.model)} | ${entry.inputTokens} | ${entry.outputTokens} | ${entry.estimatedCost.toFixed(6)} | ${safe(entry.appId ?? '-')} | ${safe(entry.userId ?? '-')} | ${safe(entry.householdId ?? '-')} |\n`;
 		await appendFile(this.usageFilePath, line, 'utf-8');
 	}
 }

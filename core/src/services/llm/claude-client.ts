@@ -8,6 +8,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import type { LLMCompletionOptions } from '../../types/llm.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { CostTracker } from './cost-tracker.js';
 import { withRetry } from './retry.js';
 
@@ -74,6 +75,8 @@ export class ClaudeClient {
 					inputTokens: response.usage.input_tokens,
 					outputTokens: response.usage.output_tokens,
 					appId: this.appId,
+					userId: getCurrentUserId(),
+					householdId: getCurrentHouseholdId(),
 				});
 
 				return text;

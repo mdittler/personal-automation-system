@@ -7,15 +7,15 @@
 
 import type { Logger } from 'pino';
 import {
-	VALID_IMAGE_MIME_TYPES,
 	type LLMCompletionOptions,
 	type LLMCompletionResult,
 	type LLMProviderClient,
 	type ProviderModel,
 	type ProviderType,
+	VALID_IMAGE_MIME_TYPES,
 } from '../../../types/llm.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../../context/request-context.js';
 import type { CostTracker } from '../cost-tracker.js';
-import { getCurrentUserId } from '../../context/request-context.js';
 import { withRetry } from '../retry.js';
 
 export interface BaseProviderOptions {
@@ -73,9 +73,7 @@ export abstract class BaseProvider implements LLMProviderClient {
 		options?: LLMCompletionOptions,
 	): Promise<LLMCompletionResult> {
 		if (options?.images?.length && !this.supportsVision) {
-			throw new Error(
-				`Provider ${this.providerId} does not support vision (image input)`,
-			);
+			throw new Error(`Provider ${this.providerId} does not support vision (image input)`);
 		}
 
 		if (options?.images?.length) {
@@ -101,6 +99,7 @@ export abstract class BaseProvider implements LLMProviderClient {
 					outputTokens: result.usage.outputTokens,
 					appId: extractAppId(options),
 					userId: getCurrentUserId(),
+					householdId: getCurrentHouseholdId(),
 				})
 				.catch((err: unknown) => {
 					this.logger.error(

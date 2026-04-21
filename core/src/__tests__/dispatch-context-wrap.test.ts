@@ -272,6 +272,7 @@ describe('dispatch-site requestContext wraps', () => {
 			// reads, which is the bug the unification was meant to prevent.
 			expect(source).toContain("from '../../context/request-context.js'");
 			expect(source).toMatch(/\bgetCurrentUserId\s*\(/);
+			expect(source).toMatch(/\bgetCurrentHouseholdId\s*\(/);
 		});
 	});
 

@@ -102,6 +102,34 @@ describe('BaseProvider', () => {
 			outputTokens: 20,
 			appId: undefined,
 			userId: undefined,
+			householdId: undefined,
+		});
+	});
+
+	it('propagates householdId from request context to costTracker', async () => {
+		const { requestContext } = await import('../../context/request-context.js');
+		const mockCostTracker = {
+			record: vi.fn().mockResolvedValue(undefined),
+			estimateCost: vi.fn().mockReturnValue(0),
+			readUsage: vi.fn().mockResolvedValue(''),
+		};
+
+		const provider = new TestProvider({
+			providerId: 'test',
+			providerType: 'anthropic',
+			apiKey: 'test-key',
+			defaultModel: 'test-model',
+			logger,
+			costTracker: mockCostTracker as never,
+		});
+
+		await requestContext.run({ userId: 'u1', householdId: 'h1' }, async () => {
+			await provider.completeWithUsage('test prompt', {});
+			// Wait for async cost recording
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			expect(mockCostTracker.record).toHaveBeenCalledWith(
+				expect.objectContaining({ userId: 'u1', householdId: 'h1' }),
+			);
 		});
 	});
 

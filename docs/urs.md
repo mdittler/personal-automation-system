@@ -665,6 +665,7 @@ All providers must extend a base class that handles retry, cost recording, and m
 - `base-provider.test.ts` > uses default model when no override is specified
 - `base-provider.test.ts` > exposes providerId and providerType
 - `base-provider.test.ts` > satisfies LLMClient interface
+- `base-provider.test.ts` > propagates householdId from request context to costTracker
 
 **Edge case tests:**
 - `base-provider.test.ts` > resolves model from claudeModel for backward compat
@@ -729,19 +730,63 @@ All LLM calls must be logged with model, token counts, cost estimate, and option
 - `cost-tracker.test.ts` > monthly cost cache > loadMonthlyCache loads costs from YAML file
 - `cost-tracker.test.ts` > monthly cost cache > accumulates costs after record() calls
 - `cost-tracker.test.ts` > monthly cost cache > flush persists costs to YAML
+- `cost-tracker.test.ts` > getMonthlyAppCosts > returns all per-app costs as a Map
+- `cost-tracker.test.ts` > per-user cost tracking > accumulates costs per user after record() calls
+- `cost-tracker.test.ts` > per-user cost tracking > loadMonthlyCache loads per-user costs from YAML
+- `cost-tracker.test.ts` > per-user cost tracking > flush persists per-user costs to YAML
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > rebuilds totals from usage log when YAML cache is missing
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > persists rebuilt cache to YAML after rebuild
+- `cost-tracker.test.ts` > household dimension > writes 9-col header and household cell on first record
+- `cost-tracker.test.ts` > reservation API > reserveEstimated returns a string reservation ID
+- `cost-tracker.test.ts` > reservation API > getMonthlyHouseholdCost includes outstanding reservations
+- `cost-tracker.test.ts` > reservation API > reservation + persisted cost sum correctly
+- `cost-tracker.test.ts` > reservation API > releaseReservation removes reservation from pending sum
+- `cost-tracker.test.ts` > parseUsageMarkdown 9-col compatibility > correctly parses a 9-column row
 
 **Edge case tests:**
 - `cost-tracker.test.ts` > uses dash for missing app ID
-- `cost-tracker.test.ts` > returns zero cost for unknown models
+- `cost-tracker.test.ts` > returns zero cost for unknown ollama models
+- `cost-tracker.test.ts` > returns conservative fallback cost for unknown remote models
 - `cost-tracker.test.ts` > readUsage returns empty string when file does not exist
+- `cost-tracker.test.ts` > writeQueue recovers after a failed write
+- `cost-tracker.test.ts` > writeQueue .then(fn,fn) design: in-memory cost cache is updated even when file write fails
 - `cost-tracker.test.ts` > serializes concurrent writes correctly (no duplicate headers)
 - `cost-tracker.test.ts` > monthly cost cache > loadMonthlyCache starts fresh when no file exists
 - `cost-tracker.test.ts` > monthly cost cache > loadMonthlyCache resets when month differs
 - `cost-tracker.test.ts` > monthly cost cache > getMonthlyAppCost returns 0 for unknown app
 - `cost-tracker.test.ts` > monthly cost cache > record without appId still increments total
+- `cost-tracker.test.ts` > monthly cost cache > maintains precision after many small additions (D5)
+- `cost-tracker.test.ts` > unknown model warning (D1/F10) > logs warning with fallback cost for unknown remote model
+- `cost-tracker.test.ts` > unknown model warning (D1/F10) > does not warn for known models
+- `cost-tracker.test.ts` > unknown model warning (D1/F10) > does not warn for ollama models (ollama is free by design)
+- `cost-tracker.test.ts` > getMonthlyAppCosts > returns a defensive copy (mutations do not affect tracker)
+- `cost-tracker.test.ts` > per-user cost tracking > getMonthlyUserCosts returns a defensive copy
+- `cost-tracker.test.ts` > per-user cost tracking > getMonthlyUserCost returns 0 for unknown user
+- `cost-tracker.test.ts` > per-user cost tracking > record without userId does not add to user costs
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > rebuilds when YAML cache is corrupt/malformed
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > rebuilds when YAML cache is from a different (old) month
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > only includes current-month entries during rebuild
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > handles empty usage log gracefully (starts fresh)
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > starts fresh on clean install (no files at all)
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > is idempotent — repeated loadMonthlyCache calls do not double-count
+- `cost-tracker.test.ts` > rebuildFromLog (F13) > ignores malformed log lines (missing columns, non-numeric cost)
+- `cost-tracker.test.ts` > household dimension > excludes __platform__ household from aggregate but still updates app/user totals
+- `cost-tracker.test.ts` > household dimension > migrates 8-col log to 9-col on loadMonthlyCache; legacy rows excluded from household aggregate
+- `cost-tracker.test.ts` > household dimension > migrates 7-col log to 9-col on loadMonthlyCache without crash
+- `cost-tracker.test.ts` > household dimension > migration is idempotent — second loadMonthlyCache does not add second marker
+- `cost-tracker.test.ts` > household dimension > rebuildFromLog handles mixed 8-col and 9-col rows correctly
+- `cost-tracker.test.ts` > household dimension > YAML upgrade trigger: rebuilds and populates household map when households key absent
+- `cost-tracker.test.ts` > household dimension > YAML upgrade: preserves apps/users/total when no current-month rows exist in log
+- `cost-tracker.test.ts` > reservation API > releaseReservation with null actualCost removes reservation without error
+- `cost-tracker.test.ts` > reservation API > releaseReservation with unknown id does not throw
+- `cost-tracker.test.ts` > reservation API > throws on invalid reservation amounts
+- `cost-tracker.test.ts` > reservation API > 10 concurrent reserveEstimated calls sum correctly in getMonthlyHouseholdCost
+- `cost-tracker.test.ts` > reservation API > expired reservations are excluded from getMonthlyHouseholdCost (fake timers)
+- `cost-tracker.test.ts` > reservation API > flush stops the cleanup timer; new reservation after flush works
 
 **Fixes:**
 - 2026-03-11: Month rollover now flushes old data before clearing cache (Phase 13 security review Fix 4)
+- **D5c Chunk B (2026-04-20):** Extended cost log with householdId dimension — 9-col llm-usage.md (+ one-shot migration), households map in monthly-costs.yaml (non-lossy upgrade), getMonthlyHouseholdCost / getMonthlyHouseholdCosts read APIs, base-provider + claude-client plumb getCurrentHouseholdId(). Reservation primitive (reserveEstimated / releaseReservation) shipped as plumbing for Chunk C enforcement. CL: D5c-ChunkB.
 
 ### REQ-LLM-010: Per-app rate limiting via LLMGuard
 
@@ -5105,10 +5150,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-003 | retry.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-004 | llm-service.test.ts | 5 | 9 | Implemented |
 | REQ-LLM-005 | provider-registry.test.ts | 4 | 3 | Implemented |
-| REQ-LLM-006 | base-provider.test.ts | 8 | 3 | Implemented |
+| REQ-LLM-006 | base-provider.test.ts | 9 | 3 | Implemented |
 | REQ-LLM-007 | provider-factory.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-008 | model-selector.test.ts | 5 | 5 | Implemented |
-| REQ-LLM-009 | cost-tracker.test.ts | 8 | 11 | Implemented |
+| REQ-LLM-009 | cost-tracker.test.ts | 20 | 39 | Implemented |
 | REQ-LLM-010 | llm-guard.test.ts | 5 | 4 | Implemented |
 | REQ-LLM-011 | llm-guard.test.ts | 6 | 2 | Implemented |
 | REQ-LLM-012 | llm-guard.test.ts | 1 | 4 | Implemented |
@@ -5296,4 +5341,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **151 test files** | **1079** | **1274** | **2353 tests** |
+| **Totals** | **151 test files** | **1092** | **1302** | **2394 tests** |
