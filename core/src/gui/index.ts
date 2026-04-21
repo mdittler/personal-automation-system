@@ -10,26 +10,27 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
 import type { AlertService } from '../services/alerts/index.js';
+import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { AppRegistry } from '../services/app-registry/index.js';
 import type { AppToggleStore } from '../services/app-toggle/index.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
+import type { CredentialService } from '../services/credentials/index.js';
 import type { HouseholdService } from '../services/household/index.js';
+import type { CostTracker } from '../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../services/llm/index.js';
 import type { ModelCatalog } from '../services/llm/model-catalog.js';
 import type { ModelSelector } from '../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../services/llm/providers/provider-registry.js';
+import type { MessageRateTracker } from '../services/metrics/message-rate-tracker.js';
 import type { ReportService } from '../services/reports/index.js';
 import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
-import type { ApiKeyService } from '../services/api-keys/index.js';
-import type { CredentialService } from '../services/credentials/index.js';
-import type { SystemConfig } from '../types/config.js';
+import type { LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
-import { registerViewLocals } from './view-locals.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
@@ -44,6 +45,7 @@ import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
+import { registerViewLocals } from './view-locals.js';
 
 export interface GuiOptions {
 	registry: AppRegistry;
@@ -67,11 +69,20 @@ export interface GuiOptions {
 	 * Optional — when present, householdId can be derived for simulated message dispatch
 	 * and the data browser routes user/shared scopes through the household layout.
 	 */
-	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'listHouseholds' | 'getHousehold'>;
+	householdService?: Pick<
+		HouseholdService,
+		'getHouseholdForUser' | 'listHouseholds' | 'getHousehold' | 'getMembers'
+	>;
 	/** D5b-3: Per-user credential store (password hashes + session versions). */
 	credentialService?: CredentialService;
 	/** D5b-8: Per-user API key store (for self-service key management UI). */
 	apiKeyService?: ApiKeyService;
+	/** D5c-D: Cost tracker for live per-household monthly costs in the ops dashboard. */
+	costTracker?: CostTracker;
+	/** D5c-D: Message rate tracker for live ops metrics. */
+	messageRateTracker?: MessageRateTracker;
+	/** D5c-D: LLM safeguards config for per-household cap display. */
+	llmSafeguards?: LLMSafeguardsConfig;
 }
 
 /**
@@ -101,6 +112,9 @@ export async function registerGuiRoutes(
 		loginRateLimiter,
 		credentialService,
 		apiKeyService,
+		costTracker,
+		messageRateTracker,
+		llmSafeguards,
 	} = options;
 
 	await server.register(
@@ -112,7 +126,9 @@ export async function registerGuiRoutes(
 				authToken: config.gui.authToken,
 				credentialService,
 				userManager: userManager ?? undefined,
-				householdService: options.householdService as Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> | undefined,
+				householdService: options.householdService as
+					| Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>
+					| undefined,
 				loginRateLimiter,
 			});
 
@@ -151,7 +167,17 @@ export async function registerGuiRoutes(
 					householdService: options.householdService,
 				});
 			}
-			registerLlmUsageRoutes(gui, { llm, modelSelector, modelCatalog, providerRegistry, logger });
+			registerLlmUsageRoutes(gui, {
+				llm,
+				modelSelector,
+				modelCatalog,
+				providerRegistry,
+				logger,
+				costTracker,
+				householdService: options.householdService,
+				messageRateTracker,
+				llmSafeguards,
+			});
 			// Cron description API (used by cron-helper.js)
 			gui.get(
 				'/cron-describe',

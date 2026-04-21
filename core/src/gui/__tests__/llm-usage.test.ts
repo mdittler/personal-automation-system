@@ -408,6 +408,77 @@ describe('parseUsageMarkdown', () => {
 
 		expect(result.perUser).toHaveLength(0);
 	});
+
+	it('parses 9-column format with household', () => {
+		const content = [
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |',
+			'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|',
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.rows[0].user).toBe('alice');
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+		expect(result.perHousehold[0].callCount).toBe(1);
+		expect(result.perHousehold[0].totalCost).toBeCloseTo(0.001, 6);
+	});
+
+	it('aggregates per-household costs across multiple rows', () => {
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |',
+			'| 2026-03-11T11:00:00Z | anthropic | sonnet | 200 | 100 | 0.002 | echo | bob | hh-1 |',
+			'| 2026-03-11T12:00:00Z | anthropic | sonnet | 100 | 50 | 0.003 | echo | carol | hh-2 |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(2);
+		const hh1 = result.perHousehold.find((h) => h.householdId === 'hh-1');
+		expect(hh1?.callCount).toBe(2);
+		expect(hh1?.totalCost).toBeCloseTo(0.003, 6);
+		const hh2 = result.perHousehold.find((h) => h.householdId === 'hh-2');
+		expect(hh2?.callCount).toBe(1);
+	});
+
+	it('handles mixed 8-col and 9-col rows — 8-col rows excluded from perHousehold', () => {
+		const content = [
+			// 8-col row (no household)
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice |',
+			// 9-col row with household
+			'| 2026-03-11T11:00:00Z | anthropic | sonnet | 100 | 50 | 0.002 | echo | bob | hh-1 |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(2);
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+		expect(result.totalCost).toBeCloseTo(0.003, 6);
+	});
+
+	it('excludes - and __platform__ household values from perHousehold aggregation', () => {
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | - |',
+			'| 2026-03-11T11:00:00Z | anthropic | sonnet | 100 | 50 | 0.002 | echo | bob | __platform__ |',
+			'| 2026-03-11T12:00:00Z | anthropic | sonnet | 100 | 50 | 0.003 | echo | carol | hh-real |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-real');
+	});
+
+	it('returns empty perHousehold when no 9-col rows exist', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | model | 100 | 50 | 0.001 | app | user |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(0);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -635,6 +706,21 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
+		});
+	});
+
+	describe('GET /gui/llm/metrics', () => {
+		it('returns live metrics HTML fragment', async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGet(app, '/gui/llm/metrics');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.headers['content-type']).toContain('text/html');
+			// Default: 0 active households, 0 msg/min
+			expect(res.body).toContain('0');
+			expect(res.body).toContain('msg/min');
 		});
 	});
 

@@ -10,22 +10,33 @@
  */
 
 import type { Logger } from 'pino';
+import { getCurrentHouseholdId, requestContext } from '../../services/context/request-context.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
-import type { MessageContext, PhotoContext, RouteInfo, RouteSource, RouteVerifierStatus, TelegramService } from '../../types/telegram.js';
+import type {
+	MessageContext,
+	PhotoContext,
+	RouteInfo,
+	RouteSource,
+	RouteVerifierStatus,
+	TelegramService,
+} from '../../types/telegram.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
-import { requestContext } from '../../services/context/request-context.js';
 import type { HouseholdService } from '../household/index.js';
-import type { InviteService } from '../invite/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
+import type { InviteService } from '../invite/index.js';
+import { redeemInviteAndRegister } from '../invite/redeem-and-register.js';
+import type { MessageRateTracker } from '../metrics/message-rate-tracker.js';
+import {
+	handleFirstRunWizardReply,
+	hasPendingFirstRunWizard,
+} from '../onboarding/first-run-wizard.js';
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import { redeemInviteAndRegister } from '../invite/redeem-and-register.js';
-import { hasPendingFirstRunWizard, handleFirstRunWizardReply } from '../onboarding/first-run-wizard.js';
-import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -43,12 +54,24 @@ const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
 
 /** RouteInfo for a successfully matched /command. */
 function routeForCommand(appId: string, commandName: string): RouteInfo {
-	return { appId, intent: commandName, confidence: 1.0, source: 'command', verifierStatus: 'not-run' };
+	return {
+		appId,
+		intent: commandName,
+		confidence: 1.0,
+		source: 'command',
+		verifierStatus: 'not-run',
+	};
 }
 
 /** RouteInfo for the chatbot/notes fallback branch. */
 function routeForFallback(): RouteInfo {
-	return { appId: 'chatbot', intent: 'chatbot', confidence: 0, source: 'fallback', verifierStatus: 'not-run' };
+	return {
+		appId: 'chatbot',
+		intent: 'chatbot',
+		confidence: 0,
+		source: 'fallback',
+		verifierStatus: 'not-run',
+	};
 }
 
 /**
@@ -138,6 +161,8 @@ export interface RouterOptions {
 	interactionContext?: InteractionContextService;
 	/** Optional — when present, householdId is derived and injected into request context for each dispatch. */
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/** Optional — when present, records a message hit per routeMessage call for ops metrics. */
+	messageRateTracker?: MessageRateTracker;
 }
 
 export class Router {
@@ -160,6 +185,7 @@ export class Router {
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	private readonly messageRateTracker?: MessageRateTracker;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -183,6 +209,7 @@ export class Router {
 		this.userMutationService = options.userMutationService;
 		this.interactionContext = options.interactionContext;
 		this.householdService = options.householdService;
+		this.messageRateTracker = options.messageRateTracker;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -216,6 +243,8 @@ export class Router {
 	 * This is the main entry point from the bot middleware.
 	 */
 	async routeMessage(ctx: MessageContext): Promise<void> {
+		this.messageRateTracker?.recordMessage(getCurrentHouseholdId());
+
 		// Parse command once for use throughout the method
 		const parsed = parseCommand(ctx.text);
 
@@ -293,23 +322,25 @@ export class Router {
 			) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
 				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
-				const result = await this.routeVerifier.verify(
-					enrichedCtx,
-					match,
-					undefined,
-					resolvedApps,
-				);
+				const result = await this.routeVerifier.verify(enrichedCtx, match, undefined, resolvedApps);
 				if (result.action === 'held') return;
 				if (result.action !== 'route') return;
 				// Verifier confirmed (possibly different app) — check access before dispatch
 				const verifiedAppId = result.appId;
 				if (!(await this.isAppEnabled(enrichedCtx.userId, verifiedAppId, user.enabledApps))) {
-					await this.trySend(enrichedCtx.userId, `You don't have access to the ${verifiedAppId} app.`);
+					await this.trySend(
+						enrichedCtx.userId,
+						`You don't have access to the ${verifiedAppId} app.`,
+					);
 					return;
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp) {
-					await this.dispatchMessage(verifiedApp, enrichedCtx, routeFromVerifyAction(result, 'intent'));
+					await this.dispatchMessage(
+						verifiedApp,
+						enrichedCtx,
+						routeFromVerifyAction(result, 'intent'),
+					);
 					return;
 				}
 			}
@@ -482,7 +513,10 @@ export class Router {
 
 		if (app.module.handleCommand) {
 			try {
-				await app.module.handleCommand(commandName, result.parsedArgs, { ...ctx, route: commandRoute });
+				await app.module.handleCommand(commandName, result.parsedArgs, {
+					...ctx,
+					route: commandRoute,
+				});
 			} catch (error) {
 				this.logger.error(
 					{ appId: result.appId, command: result.command.name, error },
@@ -507,7 +541,11 @@ export class Router {
 	 * enforcement downstream can read the correct householdId even when the outer
 	 * bootstrap context was established before householdService was available.
 	 */
-	private async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
+	private async dispatchMessage(
+		app: RegisteredApp,
+		ctx: MessageContext,
+		route: RouteInfo,
+	): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -526,7 +564,11 @@ export class Router {
 	 *
 	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
 	 */
-	private async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
+	private async dispatchPhoto(
+		app: RegisteredApp,
+		ctx: PhotoContext,
+		route: RouteInfo,
+	): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -895,7 +937,11 @@ export class Router {
 		}
 
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? 'default';
-		const code = await this.inviteService.createInvite(name, ctx.userId, { householdId, role: 'member', initialSpaces: [] });
+		const code = await this.inviteService.createInvite(name, ctx.userId, {
+			householdId,
+			role: 'member',
+			initialSpaces: [],
+		});
 		await this.trySend(
 			ctx.userId,
 			`Invite code for *${escapeMarkdown(name)}*: \`${code}\`\n\nShare this code. They should send \`/start ${code}\` to the bot. Expires in 24 hours.`,

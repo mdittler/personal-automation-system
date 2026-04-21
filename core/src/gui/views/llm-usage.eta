@@ -2,6 +2,15 @@
   <h1>LLM</h1>
 </div>
 
+<h2>Live</h2>
+<div id="live-metrics"
+     hx-get="/gui/llm/metrics"
+     hx-trigger="every 5s"
+     hx-swap="innerHTML">
+  <span id="live-active-households"><%= it.activeHouseholds %></span> active household<%= it.activeHouseholds !== 1 ? 's' : '' %> &mdash;
+  <span id="live-rpm"><%= it.messagesPerMinute %></span> msg/min
+</div>
+
 <% if (it.providers.length > 0) { %>
   <h2>Providers</h2>
   <table>
@@ -53,6 +62,41 @@
 <div id="available-models" hx-get="/gui/llm/available-models" hx-trigger="load" hx-swap="innerHTML">
   <p aria-busy="true">Loading available models...</p>
 </div>
+
+<% if (it.perHouseholdRows && it.perHouseholdRows.length > 0) { %>
+<h2>Per-Household Breakdown</h2>
+<div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Household</th>
+        <th>Members</th>
+        <th>Calls (month)</th>
+        <th>Cost ($)</th>
+        <th>Cap ($)</th>
+        <th>% of Cap</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const h of it.perHouseholdRows) { %>
+        <tr>
+          <td><%= h.householdName %> <small style="color:var(--pico-muted-color)">(<%= h.householdId %>)</small></td>
+          <td><%= h.memberCount %></td>
+          <td><%= h.callCount.toLocaleString() %></td>
+          <td><%= h.monthlyCost.toFixed(6) %></td>
+          <td><%= h.cap.toFixed(2) %></td>
+          <td>
+            <progress value="<%= Math.min(h.pctOfCap, 100) %>" max="100"
+              <% if (h.overCap) { %>style="accent-color:var(--pico-del-color)"<% } else if (h.pctOfCap >= 80) { %>style="accent-color:var(--pico-ins-color)"<% } %>
+            ></progress>
+            <small><%= h.pctOfCap %>%<% if (h.overCap) { %> <strong style="color:var(--pico-del-color)">OVER CAP</strong><% } %></small>
+          </td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+<% } %>
 
 <h2>Cost Summary</h2>
 <% if (!it.hasData) { %>

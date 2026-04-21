@@ -80,6 +80,7 @@ import { DataQueryServiceImpl } from './services/data-query/index.js';
 import type { DataQueryOptions } from './types/data-query.js';
 import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
 import { EditServiceImpl, EditLog } from './services/edit/index.js';
+import { MessageRateTracker } from './services/metrics/message-rate-tracker.js';
 import { VaultService } from './services/vault/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
@@ -778,6 +779,8 @@ export async function main(): Promise<void> {
 	}
 
 	// 10. Router
+	const messageRateTracker = new MessageRateTracker();
+
 	const router = new Router({
 		registry,
 		llm: systemLlm,
@@ -795,6 +798,7 @@ export async function main(): Promise<void> {
 		userMutationService,
 		interactionContext: interactionContextService,
 		householdService,
+		messageRateTracker,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
@@ -1042,6 +1046,9 @@ export async function main(): Promise<void> {
 		userMutationService,
 		householdService,
 		credentialService, // D5b-3: per-user password auth
+		costTracker,
+		messageRateTracker,
+		llmSafeguards: safeguardsConfig,
 	});
 
 	// 13b. External Data API (optional — disabled when API_TOKEN is empty)
@@ -1184,6 +1191,8 @@ export async function main(): Promise<void> {
 			...llmGuards.map((g) => () => g.dispose()),
 			// Dispose shared household LLM limiter
 			() => householdLimiter.dispose(),
+			// Dispose message rate tracker cleanup timer
+			() => messageRateTracker.dispose(),
 			// Flush monthly cost cache to disk
 			() => costTracker.flush(),
 			// Dispose webhook service event subscriptions

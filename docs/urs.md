@@ -2917,10 +2917,38 @@ Individual provider implementations for Google, OpenAI-compatible, and Ollama mu
 
 **Scope:** Usage data parsing (`parseUsageMarkdown`), cost aggregation logic, `escapeHtml` utility, and route handler request/response validation. See also REQ-GUI-003 (template rendering) and REQ-LLM-024 (tier POST endpoint).
 
-The LLM usage GUI route must parse the usage markdown log into structured rows and per-model breakdowns. It must handle both old 6-column and new 7-column (provider) log formats. Cost accumulation must use 6-decimal rounding to match CostTracker precision (D11). Available models must be grouped by provider with correct active-status comparison using both provider and model (not just model ID). All dynamic HTML content must be escaped for XSS prevention.
+The LLM usage GUI route must parse the usage markdown log into structured rows and per-model breakdowns. It must handle 6-column, 7-column (+ Provider), 8-column (+ User), and 9-column (+ Household) log formats. Cost accumulation must use 6-decimal rounding to match CostTracker precision (D11). Available models must be grouped by provider with correct active-status comparison using both provider and model (not just model ID). All dynamic HTML content must be escaped for XSS prevention. The 9-column format supports per-household aggregation; mixed 8/9-col files must parse without data loss.
 
-**Standard tests:** `llm-usage.test.ts` > `parseUsageMarkdown` > parses 7-column format, parses 6-column format, aggregates per-model correctly, computes today/month costs, keys per-model by provider:model, returns rows in reverse chronological order; `escapeHtml` > escapes all dangerous characters; `POST /gui/llm/models` > still works for standard model
-**Edge case tests:** `parseUsageMarkdown` > empty input, malformed rows, non-numeric values, rounds accumulated costs (D11), rounds per-model breakdown costs (D11); `escapeHtml` > ampersands and single quotes, empty string; `POST /gui/llm/models` > rejects invalid model ID
+**Standard tests:**
+- `llm-usage.test.ts` > `parseUsageMarkdown` > parses 7-column format correctly
+- `llm-usage.test.ts` > `parseUsageMarkdown` > parses 6-column format (backward compat)
+- `llm-usage.test.ts` > `parseUsageMarkdown` > aggregates per-model correctly across multiple rows
+- `llm-usage.test.ts` > `parseUsageMarkdown` > computes today/month costs based on timestamps
+- `llm-usage.test.ts` > `parseUsageMarkdown` > keys per-model by provider:model (same model ID, different providers)
+- `llm-usage.test.ts` > `parseUsageMarkdown` > returns rows in reverse chronological order
+- `llm-usage.test.ts` > `parseUsageMarkdown` > parses 8-column format with user
+- `llm-usage.test.ts` > `parseUsageMarkdown` > aggregates per-user costs
+- `llm-usage.test.ts` > `parseUsageMarkdown` > parses 9-column format with household
+- `llm-usage.test.ts` > `parseUsageMarkdown` > aggregates per-household costs across multiple rows
+- `llm-usage.test.ts` > `escapeHtml` > escapes all dangerous characters
+- `llm-usage.test.ts` > `POST /gui/llm/models (backward compat)` > still works for standard model update
+- `llm-usage.test.ts` > `LLM Usage Routes` > `GET /gui/llm/metrics` > returns live metrics HTML fragment
+
+**Edge case tests:**
+- `llm-usage.test.ts` > `parseUsageMarkdown` > returns zeros for empty input
+- `llm-usage.test.ts` > `parseUsageMarkdown` > skips malformed rows with fewer than 6 columns
+- `llm-usage.test.ts` > `parseUsageMarkdown` > handles non-numeric cost/token values gracefully
+- `llm-usage.test.ts` > `parseUsageMarkdown` > rounds accumulated costs to 6 decimal places (D11)
+- `llm-usage.test.ts` > `parseUsageMarkdown` > rounds per-model breakdown costs to 6 decimal places (D11)
+- `llm-usage.test.ts` > `parseUsageMarkdown` > defaults user to - when 7-column format
+- `llm-usage.test.ts` > `parseUsageMarkdown` > excludes - user from per-user aggregation
+- `llm-usage.test.ts` > `parseUsageMarkdown` > returns empty perUser for content without user column
+- `llm-usage.test.ts` > `parseUsageMarkdown` > handles mixed 8-col and 9-col rows — 8-col rows excluded from perHousehold
+- `llm-usage.test.ts` > `parseUsageMarkdown` > excludes - and __platform__ household values from perHousehold aggregation
+- `llm-usage.test.ts` > `parseUsageMarkdown` > returns empty perHousehold when no 9-col rows exist
+- `llm-usage.test.ts` > `escapeHtml` > escapes ampersands and single quotes
+- `llm-usage.test.ts` > `escapeHtml` > returns empty string unchanged
+- `llm-usage.test.ts` > `POST /gui/llm/models (backward compat)` > rejects invalid model ID with 400
 
 ### REQ-LLM-023: System LLM Guard (infrastructure cost cap)
 
@@ -3041,6 +3069,32 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > reservation-exceeded → "try again" copy (not "monthly limit reached")
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > reservation-exceeded does NOT mention household — it is a transient retry signal
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > Nina's reservation-exceeded also gets the retry-later copy
+
+### REQ-LLM-028: Per-household ops dashboard
+
+**Phase:** D5c | **Status:** Implemented
+
+The `/gui/llm` page must display a Live section with active household count and messages-per-minute (updated every 5 seconds via `hx-get="/gui/llm/metrics"`), and a Per-Household Breakdown table showing each household's name, member count, monthly call count, live monthly cost (including outstanding reservations), monthly cap, and % of cap (with a progress bar; red when over cap, orange when ≥80%). The data is sourced from `MessageRateTracker` (rolling 60-second window), `CostTracker.getMonthlyHouseholdCost()`, and `HouseholdService.listHouseholds()`/`getMembers()`. `MessageRateTracker` uses per-household bucketing with a cleanup timer that prunes entries older than 60 seconds every 10 seconds.
+
+**Standard tests:**
+- `message-rate-tracker.test.ts` > MessageRateTracker > recordMessage / getMessagesPerMinute > returns 0 with no messages
+- `message-rate-tracker.test.ts` > MessageRateTracker > recordMessage / getMessagesPerMinute > counts messages within the 60s window
+- `message-rate-tracker.test.ts` > MessageRateTracker > getActiveHouseholds > returns 0 with no messages
+- `message-rate-tracker.test.ts` > MessageRateTracker > getActiveHouseholds > counts distinct non-platform households
+- `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > returns empty map with no messages
+- `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > returns correct per-household counts
+- `llm-usage.test.ts` > LLM Usage Routes > GET /gui/llm/metrics > returns live metrics HTML fragment
+
+**Edge case tests:**
+- `message-rate-tracker.test.ts` > MessageRateTracker > recordMessage / getMessagesPerMinute > excludes messages older than 60s
+- `message-rate-tracker.test.ts` > MessageRateTracker > recordMessage / getMessagesPerMinute > includes platform-sentinel messages in total count
+- `message-rate-tracker.test.ts` > MessageRateTracker > getActiveHouseholds > excludes platform/undefined entries from active count
+- `message-rate-tracker.test.ts` > MessageRateTracker > getActiveHouseholds > excludes households with all-expired entries
+- `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > does not include platform entries in per-household map
+- `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > excludes expired entries from per-household map
+- `message-rate-tracker.test.ts` > MessageRateTracker > cleanup timer (prune) > prunes old entries after cleanup interval
+- `message-rate-tracker.test.ts` > MessageRateTracker > dispose > after dispose, recordMessage is a no-op
+- `message-rate-tracker.test.ts` > MessageRateTracker > dispose > double dispose does not throw
 
 ### REQ-GUI-004: Log viewer htmx partial
 
@@ -5308,12 +5362,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-NFR-004 | error-handler.test.ts | 5 | 4 | Implemented |
 | REQ-INTEG-001 | e2e-echo.test.ts | 5 | 1 | Implemented |
 | REQ-INTEG-002 | echo.test.ts | 5 | 1 | Implemented |
-| REQ-LLM-022 | llm-usage.test.ts | 8 | 8 | Implemented |
+| REQ-LLM-022 | llm-usage.test.ts | 13 | 11 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
 | REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 9 | 9 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
+| REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 9 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5432,4 +5487,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **156 test files** | **1123** | **1337** | **2460 tests** |
+| **Totals** | **157 test files** | **1135** | **1349** | **2484 tests** |

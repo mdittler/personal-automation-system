@@ -10,11 +10,20 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
+import { DEFAULT_LLM_SAFEGUARDS } from '../../services/config/defaults.js';
+import type { HouseholdService } from '../../services/household/index.js';
+import type { CostTracker } from '../../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
-import { DEFAULT_REMOTE_PRICING, MODEL_PRICING, getModelPricing } from '../../services/llm/model-pricing.js';
+import {
+	DEFAULT_REMOTE_PRICING,
+	MODEL_PRICING,
+	getModelPricing,
+} from '../../services/llm/model-pricing.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
+import type { MessageRateTracker } from '../../services/metrics/message-rate-tracker.js';
+import type { LLMSafeguardsConfig } from '../../types/config.js';
 import type { ModelRef, ModelTier } from '../../types/llm.js';
 
 export interface LlmUsageOptions {
@@ -23,6 +32,14 @@ export interface LlmUsageOptions {
 	modelCatalog: ModelCatalog;
 	providerRegistry: ProviderRegistry;
 	logger: Logger;
+	/** Cost tracker for live per-household monthly costs (includes reservations). */
+	costTracker?: CostTracker;
+	/** Household service for member counts. */
+	householdService?: Pick<HouseholdService, 'listHouseholds' | 'getMembers'>;
+	/** Message rate tracker for live ops metrics. */
+	messageRateTracker?: MessageRateTracker;
+	/** LLM safeguards config for displaying per-household caps. */
+	llmSafeguards?: LLMSafeguardsConfig;
 }
 
 export interface UsageRow {
@@ -51,6 +68,12 @@ export interface ModelBreakdown {
 	callCount: number;
 }
 
+export interface HouseholdBreakdown {
+	householdId: string;
+	callCount: number;
+	totalCost: number;
+}
+
 export function escapeHtml(str: string): string {
 	return str
 		.replace(/&/g, '&amp;')
@@ -67,6 +90,7 @@ export function parseUsageMarkdown(content: string): {
 	totalCost: number;
 	perModel: ModelBreakdown[];
 	perUser: UserBreakdown[];
+	perHousehold: HouseholdBreakdown[];
 } {
 	const lines = content.trim().split('\n');
 	const rows: UsageRow[] = [];
@@ -75,6 +99,7 @@ export function parseUsageMarkdown(content: string): {
 	let monthCost = 0;
 	const modelMap = new Map<string, ModelBreakdown>();
 	const userMap = new Map<string, UserBreakdown>();
+	const householdMap = new Map<string, HouseholdBreakdown>();
 
 	const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 	const today = new Date().toISOString().slice(0, 10);
@@ -91,7 +116,8 @@ export function parseUsageMarkdown(content: string): {
 			.filter(Boolean);
 		if (cells.length < 6) continue;
 
-		// Support old 6-column, 7-column (with Provider), and new 8-column (with User) formats
+		// Support 6-col, 7-col (+ Provider), 8-col (+ User), and 9-col (+ Household) formats
+		const hasHousehold = cells.length >= 9;
 		const hasUser = cells.length >= 8;
 		const hasProvider = cells.length >= 7;
 		const timestamp = cells[0] ?? '';
@@ -102,6 +128,7 @@ export function parseUsageMarkdown(content: string): {
 		const cost = hasProvider ? (cells[5] ?? '') : (cells[4] ?? '');
 		const app = hasProvider ? (cells[6] ?? '') : (cells[5] ?? '');
 		const user = hasUser ? (cells[7] ?? '-') : '-';
+		const household = hasHousehold ? (cells[8] ?? '-') : '-';
 		const costNum = Number.parseFloat(cost) || 0;
 		const inputNum = Number.parseInt(inputTokens, 10) || 0;
 		const outputNum = Number.parseInt(outputTokens, 10) || 0;
@@ -141,14 +168,80 @@ export function parseUsageMarkdown(content: string): {
 			userBreakdown.callCount += 1;
 			userBreakdown.totalCost = round6(userBreakdown.totalCost + costNum);
 		}
+
+		// Per-household aggregation (9-col rows only; '-' and '__platform__' excluded)
+		if (household && household !== '-' && household !== '__platform__') {
+			let hhBreakdown = householdMap.get(household);
+			if (!hhBreakdown) {
+				hhBreakdown = { householdId: household, callCount: 0, totalCost: 0 };
+				householdMap.set(household, hhBreakdown);
+			}
+			hhBreakdown.callCount += 1;
+			hhBreakdown.totalCost = round6(hhBreakdown.totalCost + costNum);
+		}
 	}
 
 	// Sort per-model by cost descending
 	const perModel = [...modelMap.values()].sort((a, b) => b.totalCost - a.totalCost);
 	// Sort per-user by cost descending
 	const perUser = [...userMap.values()].sort((a, b) => b.totalCost - a.totalCost);
+	// Sort per-household by cost descending
+	const perHousehold = [...householdMap.values()].sort((a, b) => b.totalCost - a.totalCost);
 
-	return { rows: rows.reverse(), todayCost, monthCost, totalCost, perModel, perUser };
+	return { rows: rows.reverse(), todayCost, monthCost, totalCost, perModel, perUser, perHousehold };
+}
+
+export interface PerHouseholdRow {
+	householdId: string;
+	householdName: string;
+	memberCount: number;
+	callCount: number;
+	monthlyCost: number;
+	cap: number;
+	pctOfCap: number;
+	overCap: boolean;
+}
+
+function buildPerHouseholdRows(
+	usageContent: string,
+	costTracker: CostTracker | undefined,
+	householdService: Pick<HouseholdService, 'listHouseholds' | 'getMembers'> | undefined,
+	llmSafeguards: LLMSafeguardsConfig | undefined,
+): PerHouseholdRow[] {
+	if (!householdService) return [];
+
+	const defaultCap =
+		llmSafeguards?.defaultHouseholdMonthlyCostCap ??
+		DEFAULT_LLM_SAFEGUARDS.defaultHouseholdMonthlyCostCap;
+
+	// Parse log for call counts per household
+	const callCounts = new Map<string, number>();
+	if (usageContent.trim()) {
+		const { perHousehold } = parseUsageMarkdown(usageContent);
+		for (const h of perHousehold) {
+			callCounts.set(h.householdId, h.callCount);
+		}
+	}
+
+	const rows: PerHouseholdRow[] = [];
+	for (const hh of householdService.listHouseholds()) {
+		const monthlyCost = costTracker?.getMonthlyHouseholdCost(hh.id) ?? 0;
+		const cap = llmSafeguards?.householdOverrides?.[hh.id]?.monthlyCostCap ?? defaultCap;
+		const pctOfCap = cap > 0 ? Math.round((monthlyCost / cap) * 100) : 0;
+		const members = householdService.getMembers(hh.id);
+		rows.push({
+			householdId: hh.id,
+			householdName: hh.name,
+			memberCount: members.length,
+			callCount: callCounts.get(hh.id) ?? 0,
+			monthlyCost,
+			cap,
+			pctOfCap,
+			overCap: pctOfCap >= 100,
+		});
+	}
+
+	return rows.sort((a, b) => b.monthlyCost - a.monthlyCost);
 }
 
 const MODEL_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,100}$/;
@@ -160,7 +253,17 @@ function isModelRefActive(model: { id: string; provider?: string }, ref: ModelRe
 }
 
 export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsageOptions): void {
-	const { llm, modelSelector, modelCatalog, providerRegistry, logger } = options;
+	const {
+		llm,
+		modelSelector,
+		modelCatalog,
+		providerRegistry,
+		logger,
+		costTracker,
+		householdService,
+		messageRateTracker,
+		llmSafeguards,
+	} = options;
 
 	// D5b-4: platform-admin gate
 	server.addHook('preHandler', requirePlatformAdmin);
@@ -178,6 +281,18 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			type: p.providerType,
 		}));
 
+		// Live ops metrics
+		const activeHouseholds = messageRateTracker?.getActiveHouseholds() ?? 0;
+		const messagesPerMinute = messageRateTracker?.getMessagesPerMinute() ?? 0;
+
+		// Per-household breakdown combining live monthly costs + log call counts + member counts
+		const perHouseholdRows = buildPerHouseholdRows(
+			content,
+			costTracker,
+			householdService,
+			llmSafeguards,
+		);
+
 		if (!content.trim()) {
 			return reply.viewAsync('llm-usage', {
 				title: 'LLM — PAS',
@@ -189,10 +304,13 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 				rows: [],
 				perModel: [],
 				perUser: [],
+				perHouseholdRows,
 				todayCost: '0.000000',
 				monthCost: '0.000000',
 				totalCost: '0.000000',
 				hasData: false,
+				activeHouseholds,
+				messagesPerMinute,
 			});
 		}
 
@@ -209,11 +327,24 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			rows,
 			perModel,
 			perUser,
+			perHouseholdRows,
 			todayCost: todayCost.toFixed(6),
 			monthCost: monthCost.toFixed(6),
 			totalCost: totalCost.toFixed(6),
 			hasData: true,
+			activeHouseholds,
+			messagesPerMinute,
 		});
+	});
+
+	// htmx partial: live metrics (polled every 5s by the Live card)
+	server.get('/llm/metrics', async (_request: FastifyRequest, reply: FastifyReply) => {
+		const active = messageRateTracker?.getActiveHouseholds() ?? 0;
+		const rpm = messageRateTracker?.getMessagesPerMinute() ?? 0;
+		const html =
+			`<span id="live-active-households">${escapeHtml(String(active))}</span> active household${active !== 1 ? 's' : ''} &mdash; ` +
+			`<span id="live-rpm">${escapeHtml(String(rpm))}</span> msg/min`;
+		return reply.type('text/html').send(html);
 	});
 
 	// Update tier assignment (new multi-provider route)
