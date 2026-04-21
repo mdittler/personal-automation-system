@@ -49,7 +49,7 @@ describe('classifyLLMError', () => {
 			expect(info.isRetryable).toBe(true);
 		});
 
-		it('should classify PAS LLMRateLimitError by name', () => {
+		it('should classify PAS LLMRateLimitError by name (app scope)', () => {
 			const error = new Error('Rate limited');
 			error.name = 'LLMRateLimitError';
 			const info = classifyLLMError(error);
@@ -57,13 +57,56 @@ describe('classifyLLMError', () => {
 			expect(info.isRetryable).toBe(true);
 		});
 
-		it('should classify PAS LLMCostCapError by name', () => {
+		it('should classify LLMRateLimitError with scope:household as household-rate-limit', () => {
+			const error = Object.assign(new Error('Household rate limit'), {
+				name: 'LLMRateLimitError',
+				scope: 'household',
+			});
+			const info = classifyLLMError(error);
+			expect(info.category).toBe('household-rate-limit');
+			expect(info.isRetryable).toBe(true);
+			expect(info.userMessage).toContain('household');
+		});
+
+		it('should classify LLMRateLimitError with scope:reservation-exceeded as reservation-exceeded', () => {
+			const error = Object.assign(new Error('Reservation exceeded'), {
+				name: 'LLMRateLimitError',
+				scope: 'reservation-exceeded',
+			});
+			const info = classifyLLMError(error);
+			expect(info.category).toBe('reservation-exceeded');
+			expect(info.isRetryable).toBe(true);
+			expect(info.userMessage).toContain('try again');
+		});
+
+		it('should classify PAS LLMCostCapError by name (app scope)', () => {
 			const error = new Error('Cost cap exceeded');
 			error.name = 'LLMCostCapError';
 			const info = classifyLLMError(error);
 			expect(info.category).toBe('cost-cap');
 			expect(info.isRetryable).toBe(false);
 			expect(info.userMessage).toContain('usage limit');
+		});
+
+		it('should classify LLMCostCapError with scope:household as household-cost-cap', () => {
+			const error = Object.assign(new Error('Household cost cap'), {
+				name: 'LLMCostCapError',
+				scope: 'household',
+			});
+			const info = classifyLLMError(error);
+			expect(info.category).toBe('household-cost-cap');
+			expect(info.isRetryable).toBe(false);
+			expect(info.userMessage).toContain('household');
+		});
+
+		it('should classify LLMCostCapError with scope:reservation-exceeded as reservation-exceeded', () => {
+			const error = Object.assign(new Error('Reservation exceeded'), {
+				name: 'LLMCostCapError',
+				scope: 'reservation-exceeded',
+			});
+			const info = classifyLLMError(error);
+			expect(info.category).toBe('reservation-exceeded');
+			expect(info.isRetryable).toBe(true);
 		});
 
 		it('should classify generic Error as unknown', () => {

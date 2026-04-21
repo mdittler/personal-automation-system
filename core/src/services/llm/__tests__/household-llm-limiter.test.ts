@@ -272,9 +272,9 @@ describe('HouseholdLLMLimiter', () => {
 			expect(() => limiter.reserveEstimated('h1', 'chatbot', 'u1', 0.05)).toThrow(/disposed/i);
 		});
 
-		it('subsequent releaseReservation() throws', () => {
+		it('subsequent releaseReservation() is a no-op (safe to call from finally blocks after dispose)', () => {
 			limiter.dispose();
-			expect(() => limiter.releaseReservation('ct-res-42', 0.05)).toThrow(/disposed/i);
+			expect(() => limiter.releaseReservation('ct-res-42', 0.05)).not.toThrow();
 		});
 
 		it('dispose() is idempotent', () => {
