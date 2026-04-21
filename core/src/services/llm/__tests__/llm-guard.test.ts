@@ -7,6 +7,7 @@ import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
 import { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
 import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
+import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -17,18 +18,6 @@ function createMockInner(): LLMService {
 		classify: vi.fn().mockResolvedValue({ category: 'test', confidence: 0.9 }),
 		extractStructured: vi.fn().mockResolvedValue({ key: 'value' }),
 	};
-}
-
-function createMockCostTracker(appCost = 0, totalCost = 0): CostTracker {
-	return {
-		getMonthlyAppCost: vi.fn().mockReturnValue(appCost),
-		getMonthlyTotalCost: vi.fn().mockReturnValue(totalCost),
-		record: vi.fn().mockResolvedValue(undefined),
-		estimateCost: vi.fn().mockReturnValue(0),
-		readUsage: vi.fn().mockResolvedValue(''),
-		loadMonthlyCache: vi.fn().mockResolvedValue(undefined),
-		flush: vi.fn().mockResolvedValue(undefined),
-	} as unknown as CostTracker;
 }
 
 const defaultConfig: LLMGuardConfig = {

@@ -1,9 +1,9 @@
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
-import type { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError } from '../errors.js';
 import { SystemLLMGuard } from '../system-llm-guard.js';
+import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -15,17 +15,6 @@ function createMockInner(): LLMService {
 	};
 }
 
-function createMockCostTracker(totalCost = 0): CostTracker {
-	return {
-		getMonthlyAppCost: vi.fn().mockReturnValue(0),
-		getMonthlyTotalCost: vi.fn().mockReturnValue(totalCost),
-		record: vi.fn().mockResolvedValue(undefined),
-		estimateCost: vi.fn().mockReturnValue(0),
-		readUsage: vi.fn().mockResolvedValue(''),
-		loadMonthlyCache: vi.fn().mockResolvedValue(undefined),
-		flush: vi.fn().mockResolvedValue(undefined),
-	} as unknown as CostTracker;
-}
 
 describe('SystemLLMGuard', () => {
 	let inner: LLMService;
@@ -34,7 +23,7 @@ describe('SystemLLMGuard', () => {
 
 	beforeEach(() => {
 		inner = createMockInner();
-		costTracker = createMockCostTracker(0);
+		costTracker = createMockCostTracker(0, 0);
 		guard = new SystemLLMGuard({
 			inner,
 			costTracker,
@@ -77,7 +66,7 @@ describe('SystemLLMGuard', () => {
 		});
 
 		it('throws LLMCostCapError when global cap exceeded', async () => {
-			costTracker = createMockCostTracker(50.01);
+			costTracker = createMockCostTracker(0, 50.01);
 			guard = new SystemLLMGuard({
 				inner,
 				costTracker,
@@ -96,7 +85,7 @@ describe('SystemLLMGuard', () => {
 		});
 
 		it('blocks when cost is exactly at cap (>=)', async () => {
-			costTracker = createMockCostTracker(50.0);
+			costTracker = createMockCostTracker(0, 50.0);
 			guard = new SystemLLMGuard({
 				inner,
 				costTracker,
@@ -108,7 +97,7 @@ describe('SystemLLMGuard', () => {
 		});
 
 		it('allows when cost is just below cap', async () => {
-			costTracker = createMockCostTracker(49.99);
+			costTracker = createMockCostTracker(0, 49.99);
 			guard = new SystemLLMGuard({
 				inner,
 				costTracker,
@@ -123,7 +112,7 @@ describe('SystemLLMGuard', () => {
 
 	describe('classify()', () => {
 		it('checks global cap before delegating', async () => {
-			costTracker = createMockCostTracker(50.0);
+			costTracker = createMockCostTracker(0, 50.0);
 			guard = new SystemLLMGuard({
 				inner,
 				costTracker,
@@ -147,7 +136,7 @@ describe('SystemLLMGuard', () => {
 
 	describe('extractStructured()', () => {
 		it('checks global cap before delegating', async () => {
-			costTracker = createMockCostTracker(50.0);
+			costTracker = createMockCostTracker(0, 50.0);
 			guard = new SystemLLMGuard({
 				inner,
 				costTracker,
@@ -277,7 +266,7 @@ describe('SystemLLMGuard', () => {
 			const warnSpy = vi.spyOn(logger, 'warn');
 			const apiGuard = new SystemLLMGuard({
 				inner,
-				costTracker: createMockCostTracker(50.0),
+				costTracker: createMockCostTracker(0, 50.0),
 				globalMonthlyCostCap: 50.0,
 				logger,
 				attributionId: 'api',
