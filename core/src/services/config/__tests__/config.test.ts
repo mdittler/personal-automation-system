@@ -381,6 +381,129 @@ describe('loadSystemConfig', () => {
 		expect(config.llm?.safeguards?.globalMonthlyCostCap).toBe(25.0);
 	});
 
+	// --- Household safeguard config tests ---
+
+	async function loadConfigFromYamlObj(yamlObj: unknown) {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(yamlPath, stringify(yamlObj), 'utf-8');
+		return loadSystemConfig({ envPath, configPath: yamlPath });
+	}
+
+	it('parses household safeguard fields from pas.yaml', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: {
+				safeguards: {
+					default_household_rate_limit: { max_requests: 200, window_seconds: 3600 },
+					default_household_monthly_cost_cap: 20.0,
+				},
+			},
+		});
+		expect(config.llm?.safeguards?.defaultHouseholdRateLimit).toEqual({ maxRequests: 200, windowSeconds: 3600 });
+		expect(config.llm?.safeguards?.defaultHouseholdMonthlyCostCap).toBe(20.0);
+	});
+
+	it('accepts household_overrides: {} as empty record', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: { safeguards: { household_overrides: {} } },
+		});
+		expect(config.llm?.safeguards?.householdOverrides).toEqual({});
+	});
+
+	it('accepts omitted household_overrides → undefined', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: { safeguards: { default_household_monthly_cost_cap: 20 } },
+		});
+		expect(config.llm?.safeguards?.householdOverrides).toBeUndefined();
+	});
+
+	it('household override with only monthly_cost_cap parses correctly', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: { safeguards: { household_overrides: { h1: { monthly_cost_cap: 40 } } } },
+		});
+		expect(config.llm?.safeguards?.householdOverrides?.['h1']).toEqual({ monthlyCostCap: 40 });
+	});
+
+	it('household override with only rate_limit parses correctly', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: {
+				safeguards: {
+					household_overrides: { h1: { rate_limit: { max_requests: 400, window_seconds: 3600 } } },
+				},
+			},
+		});
+		expect(config.llm?.safeguards?.householdOverrides?.['h1']).toEqual({
+			rateLimit: { maxRequests: 400, windowSeconds: 3600 },
+		});
+	});
+
+	it('rejects household_overrides: null (no null coercion)', async () => {
+		await expect(
+			loadConfigFromYamlObj({ llm: { safeguards: { household_overrides: null } } }),
+		).rejects.toThrow();
+	});
+
+	it('rejects negative default_household_monthly_cost_cap', async () => {
+		await expect(
+			loadConfigFromYamlObj({ llm: { safeguards: { default_household_monthly_cost_cap: -1 } } }),
+		).rejects.toThrow();
+	});
+
+	it('rejects NaN-like string for default_household_monthly_cost_cap', async () => {
+		await expect(
+			loadConfigFromYamlObj({ llm: { safeguards: { default_household_monthly_cost_cap: 'bad' } } }),
+		).rejects.toThrow();
+	});
+
+	it('rejects default_household_rate_limit.max_requests = 0', async () => {
+		await expect(
+			loadConfigFromYamlObj({
+				llm: {
+					safeguards: { default_household_rate_limit: { max_requests: 0, window_seconds: 3600 } },
+				},
+			}),
+		).rejects.toThrow();
+	});
+
+	it('rejects default_household_rate_limit.window_seconds = 0', async () => {
+		await expect(
+			loadConfigFromYamlObj({
+				llm: {
+					safeguards: { default_household_rate_limit: { max_requests: 200, window_seconds: 0 } },
+				},
+			}),
+		).rejects.toThrow();
+	});
+
+	it('rejects default_household_rate_limit with only max_requests', async () => {
+		await expect(
+			loadConfigFromYamlObj({
+				llm: { safeguards: { default_household_rate_limit: { max_requests: 200 } } },
+			}),
+		).rejects.toThrow();
+	});
+
+	it('rejects household override with negative monthly_cost_cap', async () => {
+		await expect(
+			loadConfigFromYamlObj({
+				llm: { safeguards: { household_overrides: { h1: { monthly_cost_cap: -1 } } } },
+			}),
+		).rejects.toThrow();
+	});
+
+	it('household override key with special chars preserved verbatim (opaque key)', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: { safeguards: { household_overrides: { 'h-1_abc': { monthly_cost_cap: 40 } } } },
+		});
+		expect(config.llm?.safeguards?.householdOverrides?.['h-1_abc']?.monthlyCostCap).toBe(40);
+	});
+
+	it('when top-level safeguards absent, config.llm.safeguards is undefined', async () => {
+		const config = await loadConfigFromYamlObj({ llm: {} });
+		expect(config.llm?.safeguards).toBeUndefined();
+	});
+
 	it('throws on malformed pas.yaml (fail fast)', async () => {
 		const envPath = join(tempDir, '.env');
 		const yamlPath = join(tempDir, 'pas.yaml');

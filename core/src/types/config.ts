@@ -35,6 +35,12 @@ export type TierAssignment = {
 	reasoning?: ModelRef;
 } & Partial<Record<ModelTier, ModelRef>>;
 
+/** Per-household override config. Fields are optional; absent fields fall back to household defaults. */
+export interface HouseholdSafeguardOverride {
+	rateLimit?: { maxRequests: number; windowSeconds: number };
+	monthlyCostCap?: number;
+}
+
 /** Safeguard defaults for LLM usage. */
 export interface LLMSafeguardsConfig {
 	/** Default per-app rate limit. */
@@ -46,6 +52,15 @@ export interface LLMSafeguardsConfig {
 	defaultMonthlyCostCap: number;
 	/** Global monthly cost cap in USD (kill switch). */
 	globalMonthlyCostCap: number;
+	/** Default household-wide rate limit. */
+	defaultHouseholdRateLimit: {
+		maxRequests: number;
+		windowSeconds: number;
+	};
+	/** Default household monthly cost cap in USD. */
+	defaultHouseholdMonthlyCostCap: number;
+	/** Per-household overrides, keyed by householdId. */
+	householdOverrides?: Record<string, HouseholdSafeguardOverride>;
 }
 
 /** Top-level LLM configuration (multi-provider). */
