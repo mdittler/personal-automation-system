@@ -164,10 +164,8 @@ describe('RateLimiter', () => {
 	});
 
 	describe('boundary configurations', () => {
-		it('maxAttempts=0 rejects all requests', () => {
-			const limiter = new RateLimiter({ maxAttempts: 0, windowMs: 60_000 });
-			expect(limiter.isAllowed('user1')).toBe(false);
-			expect(limiter.getRemainingAttempts('user1')).toBe(0);
+		it('maxAttempts=0 is rejected by constructor', () => {
+			expect(() => new RateLimiter({ maxAttempts: 0, windowMs: 60_000 })).toThrow();
 		});
 
 		it('maxAttempts=1 with very small window recovers quickly', () => {
@@ -178,6 +176,134 @@ describe('RateLimiter', () => {
 			// Advance past 1ms window
 			vi.advanceTimersByTime(2);
 			expect(limiter.isAllowed('user1')).toBe(true);
+		});
+	});
+
+	describe('check() peek/commit API', () => {
+		it('check() returns limit metadata matching constructor', () => {
+			const limiter = new RateLimiter({ maxAttempts: 7, windowMs: 2000 });
+			const r = limiter.check('k');
+			expect(r.limit).toEqual({ maxAttempts: 7, windowMs: 2000 });
+		});
+
+		it('check() + commit() records one slot; second check reflects it', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			const r1 = limiter.check('k');
+			expect(r1.allowed).toBe(true);
+			r1.commit();
+			expect(limiter.getRemainingAttempts('k')).toBe(2);
+		});
+
+		it('isAllowed() remains equivalent to atomic check+commit', () => {
+			const limiter = new RateLimiter({ maxAttempts: 2, windowMs: 10_000 });
+			expect(limiter.isAllowed('k')).toBe(true);
+			expect(limiter.isAllowed('k')).toBe(true);
+			expect(limiter.isAllowed('k')).toBe(false);
+		});
+
+		it('peeked-but-not-committed slots are not reserved (two peeks both see empty)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 1, windowMs: 1000 });
+			const a = limiter.check('k');
+			const b = limiter.check('k');
+			expect(a.allowed).toBe(true);
+			expect(b.allowed).toBe(true);
+		});
+
+		it('burst: 2 peeks + 2 commits against cap 1 — only first commit lands', () => {
+			const limiter = new RateLimiter({ maxAttempts: 1, windowMs: 1000 });
+			const a = limiter.check('k');
+			const b = limiter.check('k');
+			a.commit();
+			b.commit();
+			expect(limiter.getRemainingAttempts('k')).toBe(0);
+		});
+
+		it('burst: commit() called twice on same result object records only once (idempotent)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 5, windowMs: 10_000 });
+			const r = limiter.check('k');
+			r.commit();
+			r.commit();
+			expect(limiter.getRemainingAttempts('k')).toBe(4);
+		});
+
+		it('burst: Promise.all of 100 sync check()+commit() under cap 10 leaves exactly 10 committed', async () => {
+			const limiter = new RateLimiter({ maxAttempts: 10, windowMs: 10_000 });
+			await Promise.all(
+				Array.from({ length: 100 }, () =>
+					Promise.resolve().then(() => {
+						const r = limiter.check('k');
+						if (r.allowed) r.commit();
+					}),
+				),
+			);
+			expect(limiter.getRemainingAttempts('k')).toBe(0);
+		});
+
+		it('maxAttempts: 1 — single commit fills the cap', () => {
+			const limiter = new RateLimiter({ maxAttempts: 1, windowMs: 10_000 });
+			limiter.check('k').commit();
+			expect(limiter.check('k').allowed).toBe(false);
+		});
+
+		it('expiry: entry at exactly now - windowMs is treated as expired (strict < comparison)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 1, windowMs: 1000 });
+			vi.setSystemTime(1_000);
+			limiter.check('k').commit();
+			vi.setSystemTime(2_000); // exactly windowMs later — expired
+			expect(limiter.check('k').allowed).toBe(true);
+		});
+
+		it('reset("k") on a never-seen key does not throw and does not create an entry', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			expect(() => limiter.reset('never-seen')).not.toThrow();
+		});
+
+		it('after dispose(), check() throws "disposed" (no silent allowed)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			limiter.dispose();
+			expect(() => limiter.check('k')).toThrow(/disposed/i);
+		});
+	});
+
+	describe('constructor validation', () => {
+		it.each([NaN, Infinity, -Infinity, -1, 0, 1.5])(
+			'rejects invalid maxAttempts = %s',
+			(v) => {
+				expect(() => new RateLimiter({ maxAttempts: v as number, windowMs: 1000 })).toThrow();
+			},
+		);
+
+		it.each([NaN, Infinity, -Infinity, -1, 0])('rejects invalid windowMs = %s', (v) => {
+			expect(() => new RateLimiter({ maxAttempts: 3, windowMs: v as number })).toThrow();
+		});
+	});
+
+	describe('revokeLastCommit()', () => {
+		it('pops the most recent committed slot', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			limiter.check('k').commit();
+			expect(limiter.getRemainingAttempts('k')).toBe(2);
+			limiter.revokeLastCommit('k');
+			expect(limiter.getRemainingAttempts('k')).toBe(3);
+		});
+
+		it('no-op on never-seen key', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			expect(() => limiter.revokeLastCommit('never-seen')).not.toThrow();
+		});
+
+		it('no-op on empty key (already expired or reset)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 1, windowMs: 10_000 });
+			limiter.check('k').commit();
+			limiter.reset('k');
+			expect(() => limiter.revokeLastCommit('k')).not.toThrow();
+		});
+
+		it('no-op after dispose (does not throw)', () => {
+			const limiter = new RateLimiter({ maxAttempts: 3, windowMs: 10_000 });
+			limiter.check('k').commit();
+			limiter.dispose();
+			expect(() => limiter.revokeLastCommit('k')).not.toThrow();
 		});
 	});
 

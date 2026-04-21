@@ -122,12 +122,12 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 ## Implementation Status
 
-All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement item #1 (route metadata) complete. D5c Chunk B complete. 6723 tests / 282 files.
+All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement item #1 (route metadata) complete. D5c Chunks 0–C complete. ~6894 tests / ~290 files.
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
-### Current Priority: Phase D5c — Chunk C
-**D5c** (per-household LLM governance + ops + load test) is the active priority, ahead of all other open items. Chunks 0, A, and B are complete. **Start each new session with Chunk C.**
+### Current Priority: Phase D5c — Chunk D
+**D5c** (per-household LLM governance + ops + load test) is the active priority, ahead of all other open items. Chunks 0, A, B, and C are complete. **Start each new session with Chunk D.**
 
 Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 
@@ -136,8 +136,8 @@ Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 | 0 | ✓ Complete | Semantics decisions + URS entries + open-items.md fix |
 | A | ✓ Complete | Fix 3 ALS dispatch gaps (bootstrap:816/835/924, context.ts:60/115/163/191) + regression guard |
 | B | ✓ Complete | CostTracker household dimension + reservations |
-| **C** | **▶ Next** | HouseholdLLMLimiter + RateLimiter peek/commit + config surface + error types |
-| D | Pending | Ops dashboard (/gui/llm Per-Household section + live metrics) |
+| C | ✓ Complete | HouseholdLLMLimiter + RateLimiter peek/commit + config surface + error types |
+| **D** | **▶ Next** | Ops dashboard (/gui/llm Per-Household section + live metrics) |
 | E | Pending | composeRuntime() bootstrap refactor + load-test harness |
 
 ### Open Items

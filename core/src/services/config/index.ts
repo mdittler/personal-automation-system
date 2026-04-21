@@ -13,11 +13,13 @@ import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { cleanEnv, port, str } from 'envalid';
 import type {
+	HouseholdSafeguardOverride,
 	LLMConfig,
 	LLMProviderConfig,
 	SystemConfig,
 	TierAssignment,
 } from '../../types/config.js';
+import { DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
 import type { ModelRef } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
@@ -46,6 +48,12 @@ interface YamlLLMConfig {
 		default_rate_limit?: { max_requests: number; window_seconds: number };
 		default_monthly_cost_cap?: number;
 		global_monthly_cost_cap?: number;
+		default_household_rate_limit?: { max_requests: number; window_seconds: number };
+		default_household_monthly_cost_cap?: number;
+		household_overrides?: Record<
+			string,
+			{ rate_limit?: { max_requests: number; window_seconds: number }; monthly_cost_cap?: number }
+		>;
 	};
 }
 
@@ -375,12 +383,44 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 	// Parse safeguards
 	const safeguards = yamlLLM?.safeguards
 		? {
-				defaultRateLimit: {
-					maxRequests: yamlLLM.safeguards.default_rate_limit?.max_requests ?? 60,
-					windowSeconds: yamlLLM.safeguards.default_rate_limit?.window_seconds ?? 3600,
-				},
-				defaultMonthlyCostCap: yamlLLM.safeguards.default_monthly_cost_cap ?? 10.0,
-				globalMonthlyCostCap: yamlLLM.safeguards.global_monthly_cost_cap ?? 50.0,
+				defaultRateLimit: yamlLLM.safeguards.default_rate_limit
+					? {
+							maxRequests: yamlLLM.safeguards.default_rate_limit.max_requests,
+							windowSeconds: yamlLLM.safeguards.default_rate_limit.window_seconds,
+						}
+					: DEFAULT_LLM_SAFEGUARDS.defaultRateLimit,
+				defaultMonthlyCostCap:
+					yamlLLM.safeguards.default_monthly_cost_cap ??
+					DEFAULT_LLM_SAFEGUARDS.defaultMonthlyCostCap,
+				globalMonthlyCostCap:
+					yamlLLM.safeguards.global_monthly_cost_cap ??
+					DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
+				defaultHouseholdRateLimit: yamlLLM.safeguards.default_household_rate_limit
+					? {
+							maxRequests: yamlLLM.safeguards.default_household_rate_limit.max_requests,
+							windowSeconds: yamlLLM.safeguards.default_household_rate_limit.window_seconds,
+						}
+					: DEFAULT_LLM_SAFEGUARDS.defaultHouseholdRateLimit,
+				defaultHouseholdMonthlyCostCap:
+					yamlLLM.safeguards.default_household_monthly_cost_cap ??
+					DEFAULT_LLM_SAFEGUARDS.defaultHouseholdMonthlyCostCap,
+				householdOverrides: yamlLLM.safeguards.household_overrides
+					? Object.fromEntries(
+							Object.entries(yamlLLM.safeguards.household_overrides).map(([id, override]) => {
+								const mapped: HouseholdSafeguardOverride = {};
+								if (override.rate_limit) {
+									mapped.rateLimit = {
+										maxRequests: override.rate_limit.max_requests,
+										windowSeconds: override.rate_limit.window_seconds,
+									};
+								}
+								if (override.monthly_cost_cap !== undefined) {
+									mapped.monthlyCostCap = override.monthly_cost_cap;
+								}
+								return [id, mapped];
+							}),
+						)
+					: undefined,
 			}
 		: undefined;
 

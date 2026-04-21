@@ -59,6 +59,27 @@ const YamlLLMConfigSchema = z
 					.optional(),
 				default_monthly_cost_cap: z.number().nonnegative().optional(),
 				global_monthly_cost_cap: z.number().nonnegative().optional(),
+				default_household_rate_limit: z
+					.object({
+						max_requests: z.number().int().positive(),
+						window_seconds: z.number().int().positive(),
+					})
+					.optional(),
+				default_household_monthly_cost_cap: z.number().nonnegative().optional(),
+				household_overrides: z
+					.record(
+						z.string(),
+						z.object({
+							rate_limit: z
+								.object({
+									max_requests: z.number().int().positive(),
+									window_seconds: z.number().int().positive(),
+								})
+								.optional(),
+							monthly_cost_cap: z.number().nonnegative().optional(),
+						}),
+					)
+					.optional(),
 			})
 			.passthrough()
 			.optional(),

@@ -20,7 +20,7 @@ const logger = pino({ level: 'silent' });
 const LEGACY_TOKEN = 'legacy-api-token-for-tests';
 
 function makeRateLimiter(): RateLimiter {
-	return new RateLimiter({ windowMs: 60_000, max: 10_000 });
+	return new RateLimiter({ windowMs: 60_000, maxAttempts: 10_000 });
 }
 
 function makeUserManager(users: Array<{ id: string; name: string; isAdmin?: boolean }>) {

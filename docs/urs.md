@@ -2942,21 +2942,84 @@ The LLM management GUI must display configured providers, tier assignments with 
 
 ### REQ-LLM-025: Per-household LLM rate limiting
 
-**Phase:** D5c | **Status:** Planned
+**Phase:** D5c | **Status:** Implemented
 
 LLM calls must be subject to a household-wide rate limit (not per-app-per-household) enforced by a single `HouseholdLLMLimiter` instance created in bootstrap and injected into every `LLMGuard` and `SystemLLMGuard`. Key: `householdId` only. If `getCurrentHouseholdId()` returns `undefined` or the API platform sentinel (`__platform__`), the call is attributed to `platform` and exempt from per-household rate limit (still counted toward global cap). Default: 200 req/hour per household (configurable via `llm.safeguards.default_household_rate_limit` in `pas.yaml`). `RateLimiter` must be extended with a peek/commit API so that multi-guard checks do not mutate state on partial denial.
 
+**Standard tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() enforced > allowed + limit metadata matches default config
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() enforced > commit() records a slot; after 200 commits, denied
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() platform > returns PLATFORM_LIMIT_METADATA sentinel for undefined
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() with overrides > per-household override surfaces via check().limit
+- `rate-limiter.test.ts` > RateLimiter > check() peek/commit API > check() returns limit metadata matching constructor
+- `rate-limiter.test.ts` > RateLimiter > check() peek/commit API > check() + commit() records one slot
+
+**Edge case tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() enforced > isolation: exhausting hA does not affect hB
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > attribute() > does not pollute Object.prototype when given "__proto__"
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > attribute() > treats extremely long string as opaque "enforced" (no OOM)
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > revokeLastCheckCommit() > revokes last committed slot for an enforced household
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > burst-semantics (sync re-entry) > Promise.all over synchronous check()+commit() respects cap
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > window expiry > rate slots restored after windowSeconds elapses
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > dispose() > subsequent check() throws "disposed"
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > dispose() > dispose() is idempotent
+- `rate-limiter.test.ts` > RateLimiter > burst-semantics (sync re-entry) > burst: 2 peeks + 2 commits against cap 1 — only first commit lands
+- `rate-limiter.test.ts` > RateLimiter > burst-semantics (sync re-entry) > burst: commit() called twice on same result object records only once (idempotent)
+- `rate-limiter.test.ts` > RateLimiter > State (window expiry) > expiry: entry at exactly now - windowMs is treated as expired (strict < comparison)
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > app rate denied: household check NOT called; nothing committed; nothing reserved
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > household rate denied: no app rate slot committed on either
+- `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > household rate denied → LLMRateLimitError{scope:household}; inner NOT called
+- `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > household rate cap > household A hits rate cap → LLMRateLimitError; household B still succeeds
+- `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > household rate cap > hA rate denied does NOT consume hB rate slot
+
+**Configuration tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > constructor validation > rejects defaultHouseholdRateLimit.maxRequests = 0
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > constructor validation > rejects defaultHouseholdRateLimit.windowSeconds = 0
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > constructor validation > override with only rateLimit uses default cost cap
+
 ### REQ-LLM-026: Per-household monthly cost cap
 
-**Phase:** D5c | **Status:** Planned
+**Phase:** D5c | **Status:** Implemented
 
 Each household must have a configurable monthly cost cap enforced via `CostTracker.getMonthlyHouseholdCost()` + outstanding reservations. Default: $20/month per household. Optional per-household override via `llm.safeguards.household_overrides.<id>.monthly_cost_cap`. When the cap is reached, further LLM calls from that household throw `LLMCostCapError('household', ...)`. Platform-attributed calls (no real household context) are exempt from the per-household cap but counted toward the global cap. System/API calls that run under a real household context are enforced.
 
+**Standard tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > allows when persisted + estimate < cap
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > denies when persisted + estimate >= cap (exact equality = deny)
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > household cost denied: no rate commits; no reserve; inner NOT called
+- `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > household cost denied → LLMCostCapError{scope:household}; inner NOT called
+
+**Edge case tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > thrown error carries scope, householdId, cap
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > platform: no-op even when estimate would exceed any cap
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > override: denies against override cap (40) not default (20)
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > rejects invalid estimatedCost = NaN
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > constructor validation > rejects defaultHouseholdMonthlyCostCap = NaN
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > constructor validation > override with negative monthlyCostCap rejected
+- `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > household cost cap > household A hits cost cap → LLMCostCapError; household B still succeeds
+- `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > platform attribution > platform call (no householdId) bypasses household caps; global cap still applies
+- `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > SystemLLMGuard household enforcement > requestContext householdId triggers household cost enforcement for system guard
+
 ### REQ-LLM-027: Estimated-cost reservation for cap enforcement
 
-**Phase:** D5c | **Status:** Planned
+**Phase:** D5c | **Status:** Implemented
 
 `CostTracker` must provide `reserveEstimated(householdId, appId, userId, estimatedCost) → reservationId` and `releaseReservation(reservationId, actualCost | null)`. `checkCostCap()` must sum persisted costs plus outstanding reservations to prevent concurrent LLM bursts from bypassing the cap. Reservations expire after 60 seconds if not released. Acceptable overshoot bound: one concurrent batch × max per-request estimate (≈ $0.20 worst case). Reservation expiry must be tested. Billing reconciliation on `record()` must replace the reservation amount with the actual cost.
+
+**Standard tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > delegates to CostTracker for enforced household (returns the tracker id)
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > releaseReservation() > delegates to CostTracker for real reservation ids
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > success path: releaseReservation called exactly once with (id, null)
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > inner rejects: releaseReservation called once; original error propagates
+- `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > success: releaseReservation called once with (id, null)
+
+**Edge case tests:**
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > returns PLATFORM_NOOP_RESERVATION for platform id = undefined; CostTracker untouched
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > does NOT re-check cap (wildly over cap still delegates)
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > rejects invalid est = NaN
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > releaseReservation() > no-op for PLATFORM_NOOP_RESERVATION even with non-null actual
+- `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > reserveEstimated throws unexpectedly → both rate slots rolled back; LLMCostCapError(reservation-exceeded)
+- `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > inner rejects: releaseReservation called once; error propagates
 
 ### REQ-GUI-004: Log viewer htmx partial
 
@@ -5122,7 +5185,7 @@ On startup, `loadFromDisk()` is awaited before Telegram handlers register. It re
 
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-LLM-025, REQ-LLM-026, REQ-LLM-027) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
+The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|
@@ -5223,6 +5286,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-022 | llm-usage.test.ts | 8 | 8 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
+| REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts | 6 | 17 | Implemented |
+| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts | 4 | 9 | Implemented |
+| REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts | 5 | 6 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5341,4 +5407,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **151 test files** | **1092** | **1302** | **2394 tests** |
+| **Totals** | **155 test files** | **1107** | **1334** | **2441 tests** |

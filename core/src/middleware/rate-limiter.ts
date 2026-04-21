@@ -7,10 +7,17 @@
  */
 
 export interface RateLimiterOptions {
-	/** Maximum events allowed within the window. */
+	/** Maximum events allowed within the window. Must be a positive integer. */
 	maxAttempts: number;
-	/** Window duration in milliseconds. */
+	/** Window duration in milliseconds. Must be > 0. */
 	windowMs: number;
+}
+
+export interface RateLimitCheckResult {
+	allowed: boolean;
+	/** Record the attempt. Idempotent; re-checks cap at write time. No-op if disposed. */
+	commit: () => void;
+	limit: { maxAttempts: number; windowMs: number };
 }
 
 export class RateLimiter {
@@ -18,10 +25,42 @@ export class RateLimiter {
 	private readonly windowMs: number;
 	private readonly entries = new Map<string, number[]>();
 	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+	private disposed = false;
 
 	constructor(options: RateLimiterOptions) {
-		this.maxAttempts = options.maxAttempts;
-		this.windowMs = options.windowMs;
+		const { maxAttempts, windowMs } = options;
+		if (!Number.isFinite(maxAttempts) || !Number.isInteger(maxAttempts) || maxAttempts <= 0) {
+			throw new Error(`RateLimiter: maxAttempts must be a positive integer, got ${maxAttempts}`);
+		}
+		if (!Number.isFinite(windowMs) || windowMs <= 0) {
+			throw new Error(`RateLimiter: windowMs must be a positive finite number, got ${windowMs}`);
+		}
+		this.maxAttempts = maxAttempts;
+		this.windowMs = windowMs;
+	}
+
+	/**
+	 * Peek — check if a request would be allowed WITHOUT recording it.
+	 * Call commit() on the result to record the attempt.
+	 * Throws if disposed.
+	 */
+	check(key: string): RateLimitCheckResult {
+		if (this.disposed) throw new Error('RateLimiter disposed');
+		this.purgeExpiredForKey(key);
+		const entries = this.entries.get(key) ?? [];
+		const allowed = entries.length < this.maxAttempts;
+		const committed = { done: false };
+		const limit = { maxAttempts: this.maxAttempts, windowMs: this.windowMs };
+		const commit = () => {
+			if (committed.done) return;
+			committed.done = true;
+			this.purgeExpiredForKey(key);
+			const latest = this.entries.get(key) ?? [];
+			if (latest.length >= this.maxAttempts) return;
+			latest.push(Date.now());
+			this.entries.set(key, latest);
+		};
+		return { allowed, commit, limit };
 	}
 
 	/**
@@ -35,7 +74,6 @@ export class RateLimiter {
 
 		let timestamps = this.entries.get(key);
 		if (timestamps) {
-			// Remove expired timestamps
 			timestamps = timestamps.filter((t) => t > cutoff);
 		} else {
 			timestamps = [];
@@ -72,15 +110,29 @@ export class RateLimiter {
 	}
 
 	/**
+	 * Revoke the most recently committed slot for a key.
+	 * Used for rollback when a downstream operation fails after rate commit.
+	 * No-op if disposed, key unknown, or key has no entries.
+	 */
+	revokeLastCommit(key: string): void {
+		if (this.disposed) return;
+		const entries = this.entries.get(key);
+		if (!entries || entries.length === 0) return;
+		entries.pop();
+		if (entries.length === 0) {
+			this.entries.delete(key);
+		}
+	}
+
+	/**
 	 * Start periodic cleanup of expired entries to prevent memory leaks.
 	 * Call this once at startup.
 	 */
 	startCleanup(): void {
 		if (this.cleanupTimer) return;
 		this.cleanupTimer = setInterval(() => {
-			this.purgeExpired();
+			this.purgeExpiredAll();
 		}, this.windowMs);
-		// Don't block process exit
 		if (this.cleanupTimer.unref) {
 			this.cleanupTimer.unref();
 		}
@@ -90,6 +142,7 @@ export class RateLimiter {
 	 * Stop the cleanup timer and clear all entries.
 	 */
 	dispose(): void {
+		this.disposed = true;
 		if (this.cleanupTimer) {
 			clearInterval(this.cleanupTimer);
 			this.cleanupTimer = null;
@@ -97,8 +150,21 @@ export class RateLimiter {
 		this.entries.clear();
 	}
 
-	/** Remove entries with no timestamps within the current window. */
-	private purgeExpired(): void {
+	/** Purge expired entries for a single key. Uses strict < so exact-boundary entries expire. */
+	private purgeExpiredForKey(key: string): void {
+		const entries = this.entries.get(key);
+		if (!entries) return;
+		const cutoff = Date.now() - this.windowMs;
+		const kept = entries.filter((t) => t > cutoff);
+		if (kept.length === 0) {
+			this.entries.delete(key);
+		} else {
+			this.entries.set(key, kept);
+		}
+	}
+
+	/** Remove entries with no timestamps within the current window (global cleanup). */
+	private purgeExpiredAll(): void {
 		const cutoff = Date.now() - this.windowMs;
 		for (const [key, timestamps] of this.entries) {
 			const active = timestamps.filter((t) => t > cutoff);

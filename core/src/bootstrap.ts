@@ -39,10 +39,12 @@ import { DataStoreServiceImpl } from './services/data-store/index.js';
 import { EventBusServiceImpl } from './services/event-bus/index.js';
 import { InviteService } from './services/invite/index.js';
 import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
+import { DEFAULT_LLM_SAFEGUARDS } from './services/config/defaults.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { requestContext } from './services/context/request-context.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
+import { HouseholdLLMLimiter } from './services/llm/household-llm-limiter.js';
 import { ModelCatalog } from './services/llm/model-catalog.js';
 import { ModelSelector } from './services/llm/model-selector.js';
 import { createProvider } from './services/llm/providers/provider-factory.js';
@@ -194,21 +196,31 @@ export async function main(): Promise<void> {
 	// Load monthly cost cache for LLMGuard enforcement
 	await costTracker.loadMonthlyCache();
 
+	// Shared household-wide LLM limiter — one instance, injected into every guard
+	const safeguardsConfig = config.llm?.safeguards ?? DEFAULT_LLM_SAFEGUARDS;
+	const householdLimiter = new HouseholdLLMLimiter({
+		costTracker,
+		config: safeguardsConfig,
+		logger: createChildLogger(logger, { service: 'household-llm-limiter' }),
+	});
+
 	// System-level LLM guard for infrastructure calls (D3 fix)
 	const systemLlm = new SystemLLMGuard({
 		inner: llm,
 		costTracker,
-		globalMonthlyCostCap: config.llm?.safeguards?.globalMonthlyCostCap ?? 50.0,
+		globalMonthlyCostCap: safeguardsConfig.globalMonthlyCostCap ?? DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
 		logger: createChildLogger(logger, { service: 'system-llm-guard' }),
+		householdLimiter,
 	});
 
 	// API-level LLM guard — same global cap but attributes costs to 'api' (F14 fix)
 	const apiLlm = new SystemLLMGuard({
 		inner: llm,
 		costTracker,
-		globalMonthlyCostCap: config.llm?.safeguards?.globalMonthlyCostCap ?? 50.0,
+		globalMonthlyCostCap: safeguardsConfig.globalMonthlyCostCap ?? DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
 		logger: createChildLogger(logger, { service: 'api-llm-guard' }),
 		attributionId: 'api',
+		householdLimiter,
 	});
 
 	// 4. Scheduler
@@ -411,11 +423,7 @@ export async function main(): Promise<void> {
 		cronManager: scheduler.cron,
 		userManager,
 		appRegistry: registry,
-		safeguards: config.llm?.safeguards ?? {
-			defaultRateLimit: { maxRequests: 60, windowSeconds: 3600 },
-			defaultMonthlyCostCap: 10.0,
-			globalMonthlyCostCap: 50.0,
-		},
+		safeguards: safeguardsConfig,
 		timezone: config.timezone,
 		fallbackMode: config.fallback ?? 'chatbot',
 		logger: createChildLogger(logger, { service: 'system-info' }),
@@ -424,12 +432,11 @@ export async function main(): Promise<void> {
 	// Per-app LLM guards — collected for shutdown cleanup
 	const llmGuards: LLMGuard[] = [];
 
-	// Safeguard defaults from config (or hardcoded fallbacks)
-	const safeguards = config.llm?.safeguards;
-	const defaultMaxRequests = safeguards?.defaultRateLimit.maxRequests ?? 60;
-	const defaultWindowSeconds = safeguards?.defaultRateLimit.windowSeconds ?? 3600;
-	const defaultMonthlyCostCap = safeguards?.defaultMonthlyCostCap ?? 10.0;
-	const globalMonthlyCostCap = safeguards?.globalMonthlyCostCap ?? 50.0;
+	// Safeguard defaults from config (or DEFAULT_LLM_SAFEGUARDS)
+	const defaultMaxRequests = safeguardsConfig.defaultRateLimit?.maxRequests ?? DEFAULT_LLM_SAFEGUARDS.defaultRateLimit.maxRequests;
+	const defaultWindowSeconds = safeguardsConfig.defaultRateLimit?.windowSeconds ?? DEFAULT_LLM_SAFEGUARDS.defaultRateLimit.windowSeconds;
+	const defaultMonthlyCostCap = safeguardsConfig.defaultMonthlyCostCap ?? DEFAULT_LLM_SAFEGUARDS.defaultMonthlyCostCap;
+	const globalMonthlyCostCap = safeguardsConfig.globalMonthlyCostCap ?? DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap;
 
 	// D2b: Lazy facade for DataQueryService.
 	// serviceFactory runs during registry.loadAll() — before FileIndexService is instantiated.
@@ -494,6 +501,7 @@ export async function main(): Promise<void> {
 					globalMonthlyCostCap,
 				},
 				logger: appLogger,
+				householdLimiter,
 			});
 			llmGuards.push(guard);
 			appLlm = guard;
@@ -1174,6 +1182,8 @@ export async function main(): Promise<void> {
 		onShutdown: [
 			// Dispose per-app LLM guard rate limiters
 			...llmGuards.map((g) => () => g.dispose()),
+			// Dispose shared household LLM limiter
+			() => householdLimiter.dispose(),
 			// Flush monthly cost cache to disk
 			() => costTracker.flush(),
 			// Dispose webhook service event subscriptions

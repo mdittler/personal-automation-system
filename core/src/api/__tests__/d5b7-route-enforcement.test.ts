@@ -44,7 +44,7 @@ const OTHER_HOUSEHOLD_ID = 'hh-2';
 const SPACE_ID = 'space-abc';
 
 function makeRateLimiter(): RateLimiter {
-	return new RateLimiter({ windowMs: 60_000, max: 10_000 });
+	return new RateLimiter({ windowMs: 60_000, maxAttempts: 10_000 });
 }
 
 function makeUserManager(
