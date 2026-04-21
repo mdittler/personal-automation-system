@@ -10,7 +10,10 @@
  */
 
 import type { Logger } from 'pino';
-import { getCurrentHouseholdId } from '../../services/context/request-context.js';
+import {
+	getCurrentHouseholdId,
+	getCurrentUserId,
+} from '../../services/context/request-context.js';
 import type {
 	ClassifyResult,
 	LLMCompletionOptions,
@@ -147,12 +150,22 @@ export class SystemLLMGuard implements LLMService {
 		// 5. Reserve estimated cost
 		let reservationId = DEFAULT_LLM_SAFEGUARDS.reservationExpiryMs.toString();
 		if (this.householdLimiter) {
-			reservationId = this.householdLimiter.reserveEstimated(
-				hhId,
-				this.attributionId,
-				undefined,
-				estCost,
-			);
+			try {
+				reservationId = this.householdLimiter.reserveEstimated(
+					hhId,
+					this.attributionId,
+					getCurrentUserId(),
+					estCost,
+				);
+			} catch (err) {
+				this.householdLimiter.revokeLastCheckCommit(hhId);
+				throw new LLMCostCapError({
+					scope: 'reservation-exceeded',
+					currentCost: 0,
+					cap: 0,
+					cause: err,
+				});
+			}
 		}
 
 		// 6. Provider call

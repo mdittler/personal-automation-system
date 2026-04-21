@@ -15,7 +15,10 @@
 
 import type { Logger } from 'pino';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
-import { getCurrentHouseholdId } from '../../services/context/request-context.js';
+import {
+	getCurrentHouseholdId,
+	getCurrentUserId,
+} from '../../services/context/request-context.js';
 import type {
 	ClassifyResult,
 	LLMCompletionOptions,
@@ -217,7 +220,7 @@ export class LLMGuard implements LLMService {
 				reservationId = this.householdLimiter.reserveEstimated(
 					hhId,
 					this.appId,
-					undefined,
+					getCurrentUserId(),
 					estCost,
 				);
 			} catch (err) {

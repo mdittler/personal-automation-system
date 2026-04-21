@@ -53,6 +53,7 @@ export class RateLimiter {
 		const limit = { maxAttempts: this.maxAttempts, windowMs: this.windowMs };
 		const commit = () => {
 			if (committed.done) return;
+			if (this.disposed) return;
 			committed.done = true;
 			this.purgeExpiredForKey(key);
 			const latest = this.entries.get(key) ?? [];

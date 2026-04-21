@@ -379,4 +379,17 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 		).rejects.toThrow('provider down');
 		expect(hhLimiter.releaseReservation).toHaveBeenCalledWith('res-err', null);
 	});
+
+	it('reserveEstimated throws → household rate slot rolled back; LLMCostCapError{scope:reservation-exceeded} thrown', async () => {
+		const hhLimiter = createMockHouseholdLimiter();
+		(hhLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mockImplementation(() => {
+			throw new Error('CostTracker write error');
+		});
+		const { guard } = makeGuardWithHH({ hhLimiter });
+		await expect(
+			requestContext.run({ userId: 'u1', householdId: 'h1' }, () => guard.complete('hi')),
+		).rejects.toMatchObject({ name: 'LLMCostCapError', scope: 'reservation-exceeded' });
+		expect(hhLimiter.revokeLastCheckCommit).toHaveBeenCalledWith('h1');
+		expect(hhLimiter.releaseReservation).not.toHaveBeenCalled();
+	});
 });

@@ -173,7 +173,7 @@ export class HouseholdLLMLimiter {
 	}
 
 	releaseReservation(reservationId: string, actual: number | null): void {
-		if (this.disposed) throw new Error('HouseholdLLMLimiter disposed');
+		if (this.disposed) return;
 		if (reservationId === PLATFORM_NOOP_RESERVATION) return;
 		this.costTracker.releaseReservation(reservationId, actual);
 	}
