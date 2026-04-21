@@ -79,7 +79,7 @@ export class SystemLLMGuard implements LLMService {
 				{ totalCost, cap: this.globalMonthlyCostCap },
 				`Global monthly LLM cost cap exceeded (${this.attributionId} call)`,
 			);
-			throw new LLMCostCapError('global', totalCost, this.globalMonthlyCostCap);
+			throw new LLMCostCapError({ scope: 'global', currentCost: totalCost, cap: this.globalMonthlyCostCap });
 		}
 	}
 }

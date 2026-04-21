@@ -140,11 +140,12 @@ export class LLMGuard implements LLMService {
 	private checkRateLimit(): void {
 		if (!this.rateLimiter.isAllowed(this.appId)) {
 			this.logger.warn({ appId: this.appId }, 'LLM rate limit exceeded');
-			throw new LLMRateLimitError(
-				this.appId,
-				this.guardConfig.maxRequests,
-				this.guardConfig.windowSeconds,
-			);
+			throw new LLMRateLimitError({
+				scope: 'app',
+				appId: this.appId,
+				maxRequests: this.guardConfig.maxRequests,
+				windowSeconds: this.guardConfig.windowSeconds,
+			});
 		}
 	}
 
@@ -155,7 +156,7 @@ export class LLMGuard implements LLMService {
 				{ appId: this.appId, cost: appCost, cap: this.guardConfig.monthlyCostCap },
 				'Per-app monthly LLM cost cap exceeded',
 			);
-			throw new LLMCostCapError('app', appCost, this.guardConfig.monthlyCostCap, this.appId);
+			throw new LLMCostCapError({ scope: 'app', appId: this.appId, currentCost: appCost, cap: this.guardConfig.monthlyCostCap });
 		}
 
 		const totalCost = this.costTracker.getMonthlyTotalCost();
@@ -164,7 +165,7 @@ export class LLMGuard implements LLMService {
 				{ totalCost, cap: this.guardConfig.globalMonthlyCostCap },
 				'Global monthly LLM cost cap exceeded',
 			);
-			throw new LLMCostCapError('global', totalCost, this.guardConfig.globalMonthlyCostCap);
+			throw new LLMCostCapError({ scope: 'global', currentCost: totalCost, cap: this.guardConfig.globalMonthlyCostCap });
 		}
 	}
 }

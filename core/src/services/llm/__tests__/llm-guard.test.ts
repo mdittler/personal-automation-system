@@ -341,7 +341,7 @@ describe('LLMGuard', () => {
 
 	describe('error details', () => {
 		it('LLMRateLimitError includes correct details', () => {
-			const err = new LLMRateLimitError('my-app', 100, 3600);
+			const err = new LLMRateLimitError({ appId: 'my-app', maxRequests: 100, windowSeconds: 3600 });
 			expect(err.name).toBe('LLMRateLimitError');
 			expect(err.appId).toBe('my-app');
 			expect(err.maxRequests).toBe(100);
@@ -351,7 +351,7 @@ describe('LLMGuard', () => {
 		});
 
 		it('LLMCostCapError includes correct details for app scope', () => {
-			const err = new LLMCostCapError('app', 11.5, 10.0, 'my-app');
+			const err = new LLMCostCapError({ scope: 'app', appId: 'my-app', currentCost: 11.5, cap: 10.0 });
 			expect(err.name).toBe('LLMCostCapError');
 			expect(err.scope).toBe('app');
 			expect(err.currentCost).toBe(11.5);
@@ -362,7 +362,7 @@ describe('LLMGuard', () => {
 		});
 
 		it('LLMCostCapError includes correct details for global scope', () => {
-			const err = new LLMCostCapError('global', 55.0, 50.0);
+			const err = new LLMCostCapError({ scope: 'global', currentCost: 55.0, cap: 50.0 });
 			expect(err.scope).toBe('global');
 			expect(err.message).toContain('Global');
 			expect(err.message).toContain('$55.00');
