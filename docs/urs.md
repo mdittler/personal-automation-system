@@ -2954,6 +2954,12 @@ LLM calls must be subject to a household-wide rate limit (not per-app-per-househ
 - `rate-limiter.test.ts` > RateLimiter > check() peek/commit API > check() returns limit metadata matching constructor
 - `rate-limiter.test.ts` > RateLimiter > check() peek/commit API > check() + commit() records one slot
 
+**Natural-language persona tests:**
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: Matt hits household rate cap > casual chat messages succeed when under the cap
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: Matt hits household rate cap > another casual message also succeeds
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: Matt hits household rate cap > message that triggers household rate cap → reply names the household limit (not generic app limit)
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: Matt hits household rate cap > household rate cap reply is marked retryable (says "try again later", not "service unavailable")
+
 **Edge case tests:**
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > check() enforced > isolation: exhausting hA does not affect hB
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > attribute() > does not pollute Object.prototype when given "__proto__"
@@ -2966,6 +2972,7 @@ LLM calls must be subject to a household-wide rate limit (not per-app-per-househ
 - `rate-limiter.test.ts` > RateLimiter > burst-semantics (sync re-entry) > burst: 2 peeks + 2 commits against cap 1 — only first commit lands
 - `rate-limiter.test.ts` > RateLimiter > burst-semantics (sync re-entry) > burst: commit() called twice on same result object records only once (idempotent)
 - `rate-limiter.test.ts` > RateLimiter > State (window expiry) > expiry: entry at exactly now - windowMs is treated as expired (strict < comparison)
+- `rate-limiter.test.ts` > RateLimiter > dispose() > commit() called after dispose() is a no-op (does not re-populate entries)
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > app rate denied: household check NOT called; nothing committed; nothing reserved
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > household rate denied: no app rate slot committed on either
 - `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > household rate denied → LLMRateLimitError{scope:household}; inner NOT called
@@ -3000,6 +3007,13 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > platform attribution > platform call (no householdId) bypasses household caps; global cap still applies
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > SystemLLMGuard household enforcement > requestContext householdId triggers household cost enforcement for system guard
 
+**Natural-language persona tests:**
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Matt hits household monthly cost cap → reply mentions household budget, not app budget
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > household cost cap mentions the monthly limit so Matt knows it's not a transient error
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Nina in the same household sees the household cap reply (not a generic error)
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Alice in hB is unaffected — her messages get normal chatbot responses
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > error scope messages are distinct from each other > household-rate-limit, household-cost-cap, and reservation-exceeded produce different Telegram replies
+
 ### REQ-LLM-027: Estimated-cost reservation for cap enforcement
 
 **Phase:** D5c | **Status:** Implemented
@@ -3020,6 +3034,13 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > releaseReservation() > no-op for PLATFORM_NOOP_RESERVATION even with non-null actual
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > reserveEstimated throws unexpectedly → both rate slots rolled back; LLMCostCapError(reservation-exceeded)
 - `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > inner rejects: releaseReservation called once; error propagates
+- `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > reserveEstimated throws → household rate slot rolled back; LLMCostCapError{scope:reservation-exceeded} thrown
+- `household-llm-limiter.test.ts` > HouseholdLLMLimiter > dispose() > subsequent releaseReservation() is a no-op (safe to call from finally blocks after dispose)
+
+**Natural-language persona tests:**
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > reservation-exceeded → "try again" copy (not "monthly limit reached")
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > reservation-exceeded does NOT mention household — it is a transient retry signal
+- `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: reservation-exceeded surfaces as retry-later > Nina's reservation-exceeded also gets the retry-later copy
 
 ### REQ-GUI-004: Log viewer htmx partial
 
@@ -3375,7 +3396,7 @@ The notes example app demonstrates commands (/note, /notes, /summarize), intents
 
 **Phase:** Post-19 | **Status:** Implemented
 
-`core/src/utils/llm-errors.ts` classifies LLM errors into user-friendly categories (billing, rate-limit, cost-cap, auth, overloaded, unknown) using duck-typing on error properties. Apps import via `@pas/core/utils/llm-errors`.
+`core/src/utils/llm-errors.ts` classifies LLM errors into user-friendly categories (billing, rate-limit, household-rate-limit, cost-cap, household-cost-cap, reservation-exceeded, auth, overloaded, unknown) using duck-typing on `name` + `scope` properties. Apps import via `@pas/core/utils/llm-errors`.
 
 **Tests:** `core/src/utils/__tests__/llm-errors.test.ts`
 
@@ -3386,8 +3407,12 @@ Standard:
 - `classifyLLMError` > auth error (status 401)
 - `classifyLLMError` > server error (status 500)
 - `classifyLLMError` > overloaded (status 529)
-- `classifyLLMError` > PAS LLMRateLimitError by name
-- `classifyLLMError` > PAS LLMCostCapError by name
+- `classifyLLMError` > PAS LLMRateLimitError by name (app scope)
+- `classifyLLMError` > LLMRateLimitError with scope:household as household-rate-limit
+- `classifyLLMError` > LLMRateLimitError with scope:reservation-exceeded as reservation-exceeded
+- `classifyLLMError` > PAS LLMCostCapError by name (app scope)
+- `classifyLLMError` > LLMCostCapError with scope:household as household-cost-cap
+- `classifyLLMError` > LLMCostCapError with scope:reservation-exceeded as reservation-exceeded
 - `classifyLLMError` > generic Error as unknown
 
 Edge:
@@ -5286,9 +5311,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-022 | llm-usage.test.ts | 8 | 8 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
-| REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts | 6 | 17 | Implemented |
-| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts | 4 | 9 | Implemented |
-| REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts | 5 | 6 | Implemented |
+| REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
+| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 9 | 9 | Implemented |
+| REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5318,7 +5343,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-EXAMPLE-001 | notes.test.ts | 7 | 7 | Implemented |
 | REQ-DOC-001 | — | — | — | Implemented |
 | REQ-DOC-002 | — | — | — | Implemented |
-| REQ-ERROR-001 | llm-errors.test.ts | 9 | 5 | Implemented |
+| REQ-ERROR-001 | llm-errors.test.ts | 13 | 5 | Implemented |
 | REQ-TIMEZONE-001 | notes.test.ts, chatbot.test.ts | 1 | 0 | Implemented |
 | REQ-GUI-006 | data.test.ts | 16 | 6 | Implemented |
 | REQ-GUI-007 | context-routes.test.ts | 9 | 10 | Implemented |
@@ -5407,4 +5432,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **155 test files** | **1107** | **1334** | **2441 tests** |
+| **Totals** | **156 test files** | **1123** | **1337** | **2460 tests** |
