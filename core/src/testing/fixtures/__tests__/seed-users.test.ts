@@ -95,21 +95,27 @@ describe('seedUsers', () => {
 		}
 	});
 
-	it('throws a meaningful error when households <= 0', async () => {
+	it('throws a meaningful error when households is invalid', async () => {
 		await expect(seedUsers({ dataDir, users: 2, households: 0 })).rejects.toThrow(
-			'seedUsers: households must be > 0',
+			'seedUsers: households must be a positive integer',
 		);
 		await expect(seedUsers({ dataDir, users: 2, households: -1 })).rejects.toThrow(
-			'seedUsers: households must be > 0',
+			'seedUsers: households must be a positive integer',
+		);
+		await expect(seedUsers({ dataDir, users: 2, households: NaN })).rejects.toThrow(
+			'seedUsers: households must be a positive integer',
 		);
 	});
 
-	it('throws a meaningful error when users <= 0', async () => {
+	it('throws a meaningful error when users is invalid', async () => {
 		await expect(seedUsers({ dataDir, users: 0, households: 1 })).rejects.toThrow(
-			'seedUsers: users must be > 0',
+			'seedUsers: users must be a positive integer',
 		);
 		await expect(seedUsers({ dataDir, users: -1, households: 1 })).rejects.toThrow(
-			'seedUsers: users must be > 0',
+			'seedUsers: users must be a positive integer',
+		);
+		await expect(seedUsers({ dataDir, users: NaN, households: 1 })).rejects.toThrow(
+			'seedUsers: users must be a positive integer',
 		);
 	});
 });

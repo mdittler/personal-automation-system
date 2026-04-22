@@ -36,11 +36,11 @@ export interface SeedResult {
 export async function seedUsers(opts: SeedOptions): Promise<SeedResult> {
 	const { dataDir, users: userCount, households: householdCount } = opts;
 
-	if (householdCount <= 0) {
-		throw new Error('seedUsers: households must be > 0');
+	if (!Number.isInteger(householdCount) || householdCount <= 0) {
+		throw new Error('seedUsers: households must be a positive integer');
 	}
-	if (userCount <= 0) {
-		throw new Error('seedUsers: users must be > 0');
+	if (!Number.isInteger(userCount) || userCount <= 0) {
+		throw new Error('seedUsers: users must be a positive integer');
 	}
 
 	await mkdir(join(dataDir, 'data', 'system'), { recursive: true });

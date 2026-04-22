@@ -180,10 +180,23 @@ export class Metrics {
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a Pino destination stream that parses each log record
- * (newline-delimited JSON) and counts entries where `record.err?.name` is
- * `'LLMCostCapError'` or `'LLMRateLimitError'`, routing them to the
- * appropriate cap-hit counter on `metrics`.
+ * Pattern matching every pre-throw warn emitted by LLMGuard, SystemLLMGuard,
+ * and HouseholdLLMLimiter before they raise a cap/rate-limit error.
+ *
+ * Filtering on `msg` (not on a caught `error` object) is necessary because
+ * Router.dispatchMessage() swallows thrown exceptions (router/index.ts:554-556)
+ * and those warn records are the only reliable cap-enforcement signal.
+ */
+const CAP_MSG_RE = /rate limit exceeded|cost cap exceeded/i;
+
+/**
+ * Build a Pino `Writable` destination stream that intercepts guard-level warn
+ * records and routes them to the appropriate cap-hit counter on `metrics`.
+ *
+ * Scope is derived from which context fields the guard included in the record:
+ *   householdId present → 'household'
+ *   totalCost present   → 'global'
+ *   otherwise           → 'app'
  */
 export function createCapCapturingTransport(metrics: Metrics): Writable {
 	return new Writable({
@@ -198,13 +211,16 @@ export function createCapCapturingTransport(metrics: Metrics): Writable {
 					cb();
 					return;
 				}
-				const record = JSON.parse(line) as {
-					err?: { name?: string; scope?: string; key?: string };
-				};
-				const name = record.err?.name;
-				if (name === 'LLMCostCapError' || name === 'LLMRateLimitError') {
-					const scope = (record.err?.scope as 'household' | 'app' | 'global') ?? 'app';
-					const key = record.err?.key ?? 'unknown';
+				const record = JSON.parse(line) as Record<string, unknown>;
+				const msg = typeof record.msg === 'string' ? record.msg : '';
+				if (CAP_MSG_RE.test(msg)) {
+					const scope: 'household' | 'app' | 'global' =
+						'householdId' in record ? 'household' :
+						'totalCost' in record   ? 'global'    : 'app';
+					const key =
+						(record.householdId as string | undefined) ??
+						(record.appId as string | undefined) ??
+						'unknown';
 					metrics.recordCapHit(scope, key);
 				}
 			} catch {
@@ -393,6 +409,19 @@ async function main(): Promise<void> {
 	const users      = parseInt(args.users ?? '40', 10);
 	const households = parseInt(args.households ?? '8', 10);
 	const duration   = parseInt(args.duration ?? '120', 10);
+
+	if (!Number.isInteger(users) || users <= 0) {
+		console.error(`Invalid --users value: "${args.users}". Must be a positive integer.`);
+		process.exit(1);
+	}
+	if (!Number.isInteger(households) || households <= 0) {
+		console.error(`Invalid --households value: "${args.households}". Must be a positive integer.`);
+		process.exit(1);
+	}
+	if (!Number.isInteger(duration) || duration <= 0) {
+		console.error(`Invalid --duration value: "${args.duration}". Must be a positive integer.`);
+		process.exit(1);
+	}
 	const today      = new Date().toISOString().slice(0, 10);
 	const report     = args.report || `docs/load-test-report-${today}.md`;
 

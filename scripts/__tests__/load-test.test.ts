@@ -126,33 +126,57 @@ describe('createCapCapturingTransport', () => {
 		});
 	}
 
-	it('counts LLMCostCapError log records', async () => {
+	// Each test uses the actual log record shape emitted by the guard before it
+	// throws — the Router swallows the exception, so the pre-throw warn is the
+	// only reliable signal (see router/index.ts:554-556).
+
+	it('counts app rate-limit hit from LLMGuard warn record', async () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
-		await writeRecord(stream, {
-			level: 50,
-			err: { name: 'LLMCostCapError', scope: 'app', key: 'food' },
-		});
+		// LLMGuard:165 — logger.warn({ appId }, 'LLM rate limit exceeded')
+		await writeRecord(stream, { level: 40, appId: 'food', msg: 'LLM rate limit exceeded' });
 		expect(m.getCapHits().app).toBe(1);
 	});
 
-	it('counts LLMRateLimitError log records', async () => {
+	it('counts household rate-limit hit from LLMGuard warn record', async () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
-		await writeRecord(stream, {
-			level: 50,
-			err: { name: 'LLMRateLimitError', scope: 'household', key: 'hh-1' },
-		});
+		// LLMGuard:177 — logger.warn({ householdId }, 'Household LLM rate limit exceeded')
+		await writeRecord(stream, { level: 40, householdId: 'hh-1', msg: 'Household LLM rate limit exceeded' });
 		expect(m.getCapHits().household).toBe(1);
 	});
 
-	it('ignores other error names', async () => {
+	it('counts household cost cap hit from HouseholdLLMLimiter warn record', async () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
-		await writeRecord(stream, {
-			level: 50,
-			err: { name: 'SomeOtherError', scope: 'app', key: 'food' },
-		});
+		// HouseholdLLMLimiter:142 — logger.warn({ householdId, current, estimatedCost, cap }, 'Household monthly LLM cost cap exceeded')
+		await writeRecord(stream, { level: 40, householdId: 'hh-2', current: 18, estimatedCost: 3, cap: 20, msg: 'Household monthly LLM cost cap exceeded' });
+		expect(m.getCapHits().household).toBe(1);
+	});
+
+	it('counts global cost cap hit from LLMGuard warn record', async () => {
+		const m = new Metrics();
+		const stream = createCapCapturingTransport(m);
+		// LLMGuard:204 — logger.warn({ totalCost }, 'Global monthly LLM cost cap exceeded')
+		await writeRecord(stream, { level: 40, totalCost: 50.01, msg: 'Global monthly LLM cost cap exceeded' });
+		expect(m.getCapHits().global).toBe(1);
+		expect(m.getCapHits().app).toBe(0);
+		expect(m.getCapHits().household).toBe(0);
+	});
+
+	it('counts SystemLLMGuard household rate-limit warn (different msg suffix)', async () => {
+		const m = new Metrics();
+		const stream = createCapCapturingTransport(m);
+		// SystemLLMGuard:121 — 'Household LLM rate limit exceeded (system)'
+		await writeRecord(stream, { level: 40, householdId: 'hh-3', msg: 'Household LLM rate limit exceeded (system)' });
+		expect(m.getCapHits().household).toBe(1);
+	});
+
+	it('ignores unrelated warn/error records', async () => {
+		const m = new Metrics();
+		const stream = createCapCapturingTransport(m);
+		await writeRecord(stream, { level: 40, msg: 'App message handler failed', appId: 'food' });
+		await writeRecord(stream, { level: 50, msg: 'Some other error occurred' });
 		const hits = m.getCapHits();
 		expect(hits.household + hits.app + hits.global).toBe(0);
 	});
@@ -160,7 +184,6 @@ describe('createCapCapturingTransport', () => {
 	it('handles non-JSON lines without throwing', async () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
-		// Should resolve without error
 		await new Promise<void>((resolve, reject) => {
 			stream.write(Buffer.from('this is not json\n'), 'utf8', (err) =>
 				err ? reject(err) : resolve(),
@@ -168,17 +191,5 @@ describe('createCapCapturingTransport', () => {
 		});
 		const hits = m.getCapHits();
 		expect(hits.household + hits.app + hits.global).toBe(0);
-	});
-
-	it('uses err.scope for the capHit scope', async () => {
-		const m = new Metrics();
-		const stream = createCapCapturingTransport(m);
-		await writeRecord(stream, {
-			level: 50,
-			err: { name: 'LLMCostCapError', scope: 'global', key: 'system' },
-		});
-		expect(m.getCapHits().global).toBe(1);
-		expect(m.getCapHits().app).toBe(0);
-		expect(m.getCapHits().household).toBe(0);
 	});
 });

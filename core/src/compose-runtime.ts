@@ -168,6 +168,8 @@ export interface RuntimeHandle {
  * LLM providers, Telegram, loggers, and the data directory.
  */
 export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<RuntimeHandle> {
+	const hasOverrides = Object.keys(overrides).length > 0;
+
 	// -------------------------------------------------------------------------
 	// Phase A: Config + Logger
 	// -------------------------------------------------------------------------
@@ -176,7 +178,11 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	let configPath: string;
 
 	if (overrides.config) {
-		// Test override: use config directly without loading from disk
+		// Test override: use config directly without loading from disk.
+		// FOOTGUN: if configPath is not also overridden, UserMutationService will
+		// write-back to the real config/pas.yaml on invite redemption or user
+		// mutation. Always pass configPath alongside config in test callers.
+		// See docs/open-items.md — "composeRuntime configPath footgun".
 		config = overrides.config;
 		configPath = overrides.configPath ?? resolve('config', 'pas.yaml');
 		// Apply dataDir override to config if provided
@@ -220,9 +226,16 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	logger.info('PAS starting...');
 
-	// Phase A continued: Shutdown manager + global error handlers
+	// Phase A continued: Shutdown manager + global error handlers.
+	// Global error handlers are only installed in production (no overrides). In
+	// test mode each composeRuntime() call would otherwise stack additive
+	// uncaughtException / unhandledRejection listeners on process — the same
+	// class of global-side-effect problem that the signal-handler split fixed.
+	// bootstrap.ts:main() calls registerGlobalErrorHandlers() after composeRuntime().
 	const shutdownManager = new ShutdownManager({ logger });
-	registerGlobalErrorHandlers(logger, (signal) => shutdownManager.shutdown(signal));
+	if (!hasOverrides) {
+		registerGlobalErrorHandlers(logger, (signal) => shutdownManager.shutdown(signal));
+	}
 
 	// Shared infrastructure
 	const changeLog = new ChangeLog(config.dataDir);
