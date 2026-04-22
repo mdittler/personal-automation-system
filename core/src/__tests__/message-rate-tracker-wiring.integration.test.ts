@@ -183,7 +183,8 @@ describe('MessageRateTracker production wiring', () => {
 
 	// F5
 	it('bootstrap.ts registers tracker.dispose() in the shutdown handler sequence (source-scan)', async () => {
-		const src = stripComments(await readSource('bootstrap.ts'));
+		// Task-4 refactor: shutdown wiring moved to compose-runtime.ts
+		const src = stripComments(await readSource('compose-runtime.ts'));
 
 		// messageRateTracker.dispose must appear in the shutdown registration block.
 		// The actual wiring: shutdownManager.registerServices({ ..., () => messageRateTracker.dispose() })

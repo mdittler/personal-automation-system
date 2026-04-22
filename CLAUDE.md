@@ -122,15 +122,14 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 ## Implementation Status
 
-All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement item #1 (route metadata) complete. D5c Chunks 0–D complete. ~6968 tests / ~291 files.
+All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement item #1 (route metadata) complete. D5c Chunks 0–E complete. ~7149 tests / ~297 files.
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
-### Current Priority: Phase D5c — Chunk E (or review/d5c-chunk-d first)
-**D5c** (per-household LLM governance + ops + load test) is the active priority, ahead of all other open items. Chunks 0–D are complete. Chunk D end-of-phase review is complete — no critical findings. **Chunk E is unblocked. However, 3 important bugs from the review should be fixed first on a `review/d5c-chunk-d` branch.**
+### Current Priority: LLM Enhancement #2 (Food classifier)
+**D5c** (per-household LLM governance + ops + load test) is complete through Chunk E. Next priority is **LLM Enhancement #2** — replace Food's regex router with a fast structured classifier. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`
 
-Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
-Review findings: `docs/d5c-chunk-d-review-findings.md`
+D5c plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 
 | Chunk | Status | What it does |
 |---|---|---|
@@ -138,8 +137,8 @@ Review findings: `docs/d5c-chunk-d-review-findings.md`
 | A | ✓ Complete | Fix 3 ALS dispatch gaps (bootstrap:816/835/924, context.ts:60/115/163/191) + regression guard |
 | B | ✓ Complete | CostTracker household dimension + reservations |
 | C | ✓ Complete | HouseholdLLMLimiter + RateLimiter peek/commit + config surface + error types |
-| D | ✓ Reviewed | Ops dashboard (/gui/llm Per-Household section + live metrics) — 3 important bugs pending `review/d5c-chunk-d` |
-| **E** | **▶ Next** | composeRuntime() bootstrap refactor + load-test harness |
+| D | ✓ Complete | Ops dashboard (/gui/llm Per-Household section + live metrics) |
+| E | ✓ Complete | composeRuntime() bootstrap refactor + load-test harness |
 
 ### Open Items
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

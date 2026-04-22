@@ -22,6 +22,7 @@ function createMockServices(overrides: Partial<ShutdownServices> = {}): Shutdown
 		registry: { shutdownAll: vi.fn().mockResolvedValue(undefined) },
 		eventBus: { clearAll: vi.fn() },
 		server: {
+			server: { listening: true },
 			close: vi.fn().mockResolvedValue(undefined),
 		} as unknown as ShutdownServices['server'],
 		rateLimiters: [],
@@ -136,6 +137,7 @@ describe('ShutdownManager', () => {
 			},
 			eventBus: { clearAll: vi.fn(() => callOrder.push('eventBus.clearAll')) },
 			server: {
+				server: { listening: true },
 				close: vi.fn(async () => {
 					callOrder.push('server.close');
 				}),
@@ -350,6 +352,122 @@ describe('ShutdownManager', () => {
 					typeof call[1] === 'string' && call[1].includes('Waiting for in-flight'),
 			);
 			expect(waitingCall).toBeUndefined();
+		});
+	});
+
+	describe('performTeardown()', () => {
+		it('runs disposal in correct order: bot.stop → scheduler.stop → telegram.cleanup → registry.shutdownAll → eventBus.clearAll → rateLimiter.dispose → onShutdown callbacks → server.close', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+			const callOrder: string[] = [];
+
+			const bot = { stop: vi.fn(() => callOrder.push('bot.stop')) };
+			const limiter = { dispose: vi.fn(() => callOrder.push('rateLimiter.dispose')) };
+			const cb = vi.fn(() => callOrder.push('onShutdown.cb'));
+
+			const services = createMockServices({
+				bot,
+				scheduler: { stop: vi.fn(() => callOrder.push('scheduler.stop')) },
+				telegram: { cleanup: vi.fn(() => callOrder.push('telegram.cleanup')) },
+				registry: {
+					shutdownAll: vi.fn(async () => {
+						callOrder.push('registry.shutdownAll');
+					}),
+				},
+				eventBus: { clearAll: vi.fn(() => callOrder.push('eventBus.clearAll')) },
+				rateLimiters: [limiter] as unknown as ShutdownServices['rateLimiters'],
+				onShutdown: [cb],
+				server: {
+					server: { listening: true },
+					close: vi.fn(async () => {
+						callOrder.push('server.close');
+					}),
+				} as unknown as ShutdownServices['server'],
+			});
+
+			manager.registerServices(services);
+			await manager.performTeardown();
+
+			expect(callOrder).toEqual([
+				'bot.stop',
+				'scheduler.stop',
+				'telegram.cleanup',
+				'registry.shutdownAll',
+				'eventBus.clearAll',
+				'rateLimiter.dispose',
+				'onShutdown.cb',
+				'server.close',
+			]);
+		});
+
+		it('calls server.close() when server.server.listening is true', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+			const services = createMockServices();
+			// Default mock has server.server.listening = true
+			manager.registerServices(services);
+
+			await manager.performTeardown();
+
+			expect(services.server.close).toHaveBeenCalledOnce();
+		});
+
+		it('does NOT call server.close() when server.server.listening is false', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+			const services = createMockServices({
+				server: {
+					server: { listening: false },
+					close: vi.fn().mockResolvedValue(undefined),
+				} as unknown as ShutdownServices['server'],
+			});
+
+			manager.registerServices(services);
+			await manager.performTeardown();
+
+			expect(services.server.close).not.toHaveBeenCalled();
+		});
+
+		it('is idempotent — second call is a no-op (does not call services again)', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+			const services = createMockServices();
+
+			manager.registerServices(services);
+
+			await manager.performTeardown();
+			await manager.performTeardown(); // second call
+
+			// All service methods should have been called exactly once
+			expect(services.scheduler.stop).toHaveBeenCalledOnce();
+			expect(services.telegram.cleanup).toHaveBeenCalledOnce();
+			expect(services.registry.shutdownAll).toHaveBeenCalledOnce();
+			expect(services.eventBus.clearAll).toHaveBeenCalledOnce();
+			expect(services.server.close).toHaveBeenCalledOnce();
+		});
+
+		it('returns without throwing if registerServices() was never called', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+
+			// No services registered — should resolve cleanly
+			await expect(manager.performTeardown()).resolves.toBeUndefined();
+		});
+
+		it('does not log "Shutdown complete" (that belongs in shutdown() only)', async () => {
+			const logger = createMockLogger();
+			const manager = new ShutdownManager({ logger });
+			const services = createMockServices();
+			manager.registerServices(services);
+
+			await manager.performTeardown();
+
+			const infoCalls = (logger.info as ReturnType<typeof vi.fn>).mock.calls;
+			const shutdownCompleteCall = infoCalls.find(
+				(call: unknown[]) =>
+					typeof call[0] === 'string' && call[0].includes('Shutdown complete'),
+			);
+			expect(shutdownCompleteCall).toBeUndefined();
 		});
 	});
 });

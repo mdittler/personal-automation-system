@@ -52,6 +52,20 @@ async function readSource(relative: string): Promise<string> {
 }
 
 /**
+ * Read a source file that may live in bootstrap.ts (legacy) or compose-runtime.ts
+ * (post-Task-4 refactor). Returns whichever has the content (compose-runtime wins).
+ */
+async function readBootstrapOrCompose(): Promise<string> {
+	const composeSource = await readSource('compose-runtime.ts');
+	// If the dispatch registration code is in compose-runtime.ts, use it.
+	// This supports the Task-4 refactor where bot middleware moved there.
+	if (composeSource.includes('router.routeMessage')) {
+		return composeSource;
+	}
+	return readSource('bootstrap.ts');
+}
+
+/**
  * Strip line comments and block comments from TypeScript source so that
  * commented-out code or documentation referencing a dispatch pattern
  * cannot satisfy the scan and accidentally pass the test.
@@ -82,7 +96,7 @@ const hasBothKeys = String.raw`\{(?=[^}]*\buserId\b)(?=[^}]*(?:[{,]\s*\bhousehol
 describe('dispatch-site requestContext wraps', () => {
 	describe('bootstrap.ts', () => {
 		it('every router.routeMessage call is wrapped in requestContext.run with userId and householdId', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const totalCalls = source.match(/\brouter\.routeMessage\s*\(/g) ?? [];
 
@@ -102,7 +116,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('every router.routePhoto call is wrapped in requestContext.run with userId and householdId', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const totalCalls = source.match(/\brouter\.routePhoto\s*\(/g) ?? [];
 
@@ -121,7 +135,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('the verification-callback dispatch block is wrapped in requestContext.run with userId and householdId', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const rvBranch = source.match(
 				new RegExp(
@@ -132,7 +146,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('the onboard-callback dispatch is wrapped in requestContext.run with userId and householdId', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const onboardWrap = source.match(
 				new RegExp(
@@ -144,7 +158,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('the app-callback dispatch (handleCallbackQuery) is wrapped in requestContext.run with userId and householdId', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const appCallbackWrap = source.match(
 				new RegExp(
@@ -157,14 +171,14 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('imports requestContext from the context module (not from llm/)', async () => {
-			const source = await readSource('bootstrap.ts');
+			const source = await readBootstrapOrCompose();
 			expect(source).toContain("from './services/context/request-context.js'");
 			// The old llmContext import path must not reappear
 			expect(source).not.toMatch(/from\s+['"][^'"]*llm\/llm-context/);
 		});
 
 		it('access check runs BEFORE resolveCallback in the rv: branch (H1 fix)', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const accessBeforeResolve = source.match(
 				/isEnabled\s*\([^)]*\)[\s\S]{0,600}resolveCallback\s*\(/,
@@ -173,7 +187,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('no chatbot exemption in the rv: branch access check (L4 fix)', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			const rvIdx = source.indexOf("data.startsWith('rv:')");
 			expect(rvIdx).toBeGreaterThan(-1);
@@ -182,7 +196,7 @@ describe('dispatch-site requestContext wraps', () => {
 		});
 
 		it('answeredCallback flag prevents double answerCallbackQuery (M2 fix)', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 
 			expect(source).toMatch(/answeredCallback\s*=\s*true/);
 			expect(source).toMatch(/answerCallbackQuery\s*\(\s*\{[^}]*You no longer have access/);
@@ -278,7 +292,7 @@ describe('dispatch-site requestContext wraps', () => {
 
 	describe('bootstrap.ts — F37: condition-eval service name', () => {
 		it('uses "condition-eval" (not "condition-evaluator") to guard conditionEvaluator injection', async () => {
-			const source = stripComments(await readSource('bootstrap.ts'));
+			const source = stripComments(await readBootstrapOrCompose());
 			expect(source).toMatch(/declaredServices\.has\s*\(\s*['"]condition-eval['"]\s*\)/);
 			expect(source).not.toMatch(/declaredServices\.has\s*\(\s*['"]condition-evaluator['"]\s*\)/);
 		});
