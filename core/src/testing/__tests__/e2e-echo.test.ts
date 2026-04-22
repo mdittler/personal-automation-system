@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRegistry, type ServiceFactory } from '../../services/app-registry/index.js';
@@ -91,8 +92,9 @@ describe('E2E: Echo App Pipeline', () => {
 		const changeLog = new ChangeLog(tempDir);
 		const config = createTestConfig({ dataDir: tempDir });
 
-		// Point the app registry at the real apps/echo directory
-		const appsDir = resolve('apps');
+		// Point the app registry at the real apps directory (project root, 4 levels up from __tests__).
+		// path.resolve('apps') would resolve from cwd (core/) which has no apps dir.
+		const appsDir = fileURLToPath(new URL('../../../../apps', import.meta.url));
 		registry = new AppRegistry({ appsDir, config, logger });
 
 		// Service factory: real DataStore, mock everything else

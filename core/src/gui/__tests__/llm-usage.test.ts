@@ -979,6 +979,88 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 		expect(result.perHousehold).toHaveLength(1);
 		expect(result.perHousehold[0].householdId).toBe('hh-real');
 	});
+
+	// B6 — both User and Household blank in a bordered 9-col row
+	it('9-col row with both User and Household blank → no household, no spurious user', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo |  |  |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(0);
+		expect(result.perUser).toHaveLength(0);
+	});
+
+	// B7 — blank App cell, populated User/Household → columns align positionally
+	it('9-col row with blank App cell still places User and Household in their correct slots', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  | alice | hh-1 |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+		expect(result.perUser).toHaveLength(1);
+		expect(result.perUser[0].userId).toBe('alice');
+	});
+
+	// B8 — row without a trailing bounding pipe still parses (hand-edited-log tolerance)
+	it('row without a trailing bounding pipe still parses positionally', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+	});
+
+	// B9 — consecutive blank interior cells do not collapse
+	it('9-col row with consecutive blank interior cells does not collapse columns', () => {
+		// Blank App AND blank User, household populated
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  |  | hh-consec |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-consec');
+	});
+
+	// B11 — hardening: truly-empty interior cells (`||`) behave the same as
+	// whitespace-only (`|  |`). B6/B7/B9 only exercise the whitespace form;
+	// this test locks the positional-trim semantics against a refactor that
+	// drops the .trim() step.
+	it('9-col row with truly-empty User cell (||) parses Household from cells[8]', () => {
+		// No spaces between pipes around the blank User column.
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo || hh-empty |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-empty');
+		expect(result.perUser).toHaveLength(0);
+	});
+
+	// B10 — pipe-only / all-blank rows must not be pushed into `rows`.
+	// Regression: Minor #1 from the review-round audit of the BUG-2 fix.
+	it('pipe-only row (no timestamp) is skipped, not pushed with blank fields', () => {
+		// One valid row + three degenerate forms: whitespace-only between pipes,
+		// pipes only (no interior characters), and a single whitespace cell.
+		// Only the valid row should survive.
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |',
+			'|  |  |  |  |  |  |  |  |  |',
+			'|||||||||',
+			'|          |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.rows[0].timestamp).toBe('2026-03-11T10:00:00Z');
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+	});
 });
 
 // ============================================================================
@@ -1197,6 +1279,43 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 		const res = await authenticatedGet(app, '/gui/llm');
 
 		expect(res.body).not.toContain('Per-Household Breakdown');
+	});
+
+	// Hardening for BUG-1 polarity — see docs/d5c-chunk-d-review-findings.md
+	it('cost exactly equal to cap → overCap=false (strict >, not >=)', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-eq', name: 'Equal' }],
+			{ 'hh-eq': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	it('cost slightly above cap → overCap=true', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-over', name: 'Slightly Over' }],
+			{ 'hh-over': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.01 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('OVER CAP');
 	});
 });
 

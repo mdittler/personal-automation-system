@@ -110,11 +110,20 @@ export function parseUsageMarkdown(content: string): {
 			continue;
 		}
 
-		const cells = line
-			.split('|')
-			.map((c) => c.trim())
-			.filter(Boolean);
+		// Markdown table rows are bounded by '|' on both sides. Split produces empty
+		// leading/trailing tokens from those bounding pipes — drop only those. Do NOT
+		// .filter(Boolean) the entire array: a blank interior cell (e.g. a 9-col row
+		// with a blank User column) must preserve its slot so later columns do not
+		// shift left. Regression: BUG-2 in docs/d5c-chunk-d-review-findings.md.
+		const parts = line.split('|').map((c) => c.trim());
+		if (parts[0] === '') parts.shift();
+		if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+		const cells = parts;
 		if (cells.length < 6) continue;
+		// Reject rows where the timestamp cell is empty — e.g. pipe-only or all-whitespace
+		// rows that survived the column-count check after removing .filter(Boolean).
+		// Regression: Minor #1 from the BUG-2 review-round audit.
+		if (!cells[0]) continue;
 
 		// Support 6-col, 7-col (+ Provider), 8-col (+ User), and 9-col (+ Household) formats
 		const hasHousehold = cells.length >= 9;
@@ -237,7 +246,7 @@ function buildPerHouseholdRows(
 			monthlyCost,
 			cap,
 			pctOfCap,
-			overCap: pctOfCap >= 100,
+			overCap: monthlyCost > cap,
 		});
 	}
 

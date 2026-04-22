@@ -2949,6 +2949,17 @@ The LLM usage GUI route must parse the usage markdown log into structured rows a
 - `llm-usage.test.ts` > `escapeHtml` > escapes ampersands and single quotes
 - `llm-usage.test.ts` > `escapeHtml` > returns empty string unchanged
 - `llm-usage.test.ts` > `POST /gui/llm/models (backward compat)` > rejects invalid model ID with 400
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with blank User cell still parses Household from cells[8] (blank middle cell must not shift columns left)
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with both User and Household blank → no household, no spurious user
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with blank App cell still places User and Household in their correct slots
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > row without a trailing bounding pipe still parses positionally
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with consecutive blank interior cells does not collapse columns
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with truly-empty User cell (||) parses Household from cells[8]
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > pipe-only row (no timestamp) is skipped, not pushed with blank fields
+
+**Fixes:**
+- **D2 (2026-04-21):** `.filter(Boolean)` on the pipe-split dropped empty interior cells, shifting later columns left when a 9-col row had a blank User cell. Replaced with positional trim (drop leading/trailing bounding pipe empties only). Regression tests B5–B9 added. CL: `review/d5c-chunk-d`.
+- **D2-followup (2026-04-21):** Added a `cells[0]`-non-empty guard after the positional trim to reject pipe-only / all-whitespace rows that survived the `cells.length < 6` check once `.filter(Boolean)` was removed. B10 locks the fix; B11 adds truly-empty-cell (`||`) hardening. CL: `review/d5c-chunk-d`.
 
 ### REQ-LLM-023: System LLM Guard (infrastructure cost cap)
 
@@ -3034,6 +3045,9 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > household cost cap > household A hits cost cap → LLMCostCapError; household B still succeeds
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > platform attribution > platform call (no householdId) bypasses household caps; global cap still applies
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > SystemLLMGuard household enforcement > requestContext householdId triggers household cost enforcement for system guard
+- `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row with blank User cell attributes cost to household, NOT to user bucket
+- `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row with blank App cell still attributes user + household correctly
+- `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row without trailing bounding pipe still attributes user + household
 
 **Natural-language persona tests:**
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Matt hits household monthly cost cap → reply mentions household budget, not app budget
@@ -3041,6 +3055,9 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Nina in the same household sees the household cap reply (not a generic error)
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Alice in hB is unaffected — her messages get normal chatbot responses
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > error scope messages are distinct from each other > household-rate-limit, household-cost-cap, and reservation-exceeded produce different Telegram replies
+
+**Fixes:**
+- **D2-twin (2026-04-21):** `rebuildFromLog` used the same `.filter(Boolean)` pipe-split as the GUI parser, corrupting monthly-cost cache at startup when a 9-col row had a blank User cell (household value leaked into the user bucket). Replaced with positional trim matching `parseUsageMarkdown`. CL: `review/d5c-chunk-d`.
 
 ### REQ-LLM-027: Estimated-cost reservation for cap enforcement
 
@@ -3095,6 +3112,15 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `message-rate-tracker.test.ts` > MessageRateTracker > cleanup timer (prune) > prunes old entries after cleanup interval
 - `message-rate-tracker.test.ts` > MessageRateTracker > dispose > after dispose, recordMessage is a no-op
 - `message-rate-tracker.test.ts` > MessageRateTracker > dispose > double dispose does not throw
+- `message-rate-tracker.test.ts` > MessageRateTracker > sentinel identity > recordMessage with PLATFORM_SYSTEM_HOUSEHOLD_ID is bucketed under the canonical sentinel (not a separate entry)
+- `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > overCap is true only when monthlyCost > cap (NOT when pctOfCap rounds to 100)
+- `llm-usage.test.ts` > `Per-Household Breakdown rendering — Chunk D` > pctOfCap rounding boundary: cost/cap=0.995 rounds to 100 but overCap=false (no OVER CAP label)
+- `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost exactly equal to cap → overCap=false (strict >, not >=)
+- `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost slightly above cap → overCap=true
+
+**Fixes:**
+- **D1 (2026-04-21):** `overCap` used `pctOfCap >= 100` (rounded percentage) instead of `monthlyCost > cap` (strict dollar comparison). Any cost ≥ 99.5% of cap could round pctOfCap to 100 and falsely show "OVER CAP". Fixed to `monthlyCost > cap`. CL: `review/d5c-chunk-d`.
+- **D3 (2026-04-21):** `MessageRateTracker` duplicated the platform sentinel as a module-local constant instead of importing `PLATFORM_SYSTEM_HOUSEHOLD_ID` from `core/src/types/auth-actor.ts`. The local constant matched the canonical value but was a maintenance hazard. Fixed by removing the duplicate and importing from the single source of truth. CL: `review/d5c-chunk-d`.
 
 ### REQ-GUI-004: Log viewer htmx partial
 
@@ -5362,13 +5388,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-NFR-004 | error-handler.test.ts | 5 | 4 | Implemented |
 | REQ-INTEG-001 | e2e-echo.test.ts | 5 | 1 | Implemented |
 | REQ-INTEG-002 | echo.test.ts | 5 | 1 | Implemented |
-| REQ-LLM-022 | llm-usage.test.ts | 13 | 11 | Implemented |
+| REQ-LLM-022 | llm-usage.test.ts | 13 | 18 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
-| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 9 | 9 | Implemented |
+| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 12 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
-| REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 9 | Implemented |
+| REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5487,4 +5513,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **157 test files** | **1135** | **1349** | **2484 tests** |
+| **Totals** | **157 test files** | **1135** | **1364** | **2499 tests** |
