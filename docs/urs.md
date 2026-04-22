@@ -3122,6 +3122,45 @@ The `/gui/llm` page must display a Live section with active household count and 
 - **D1 (2026-04-21):** `overCap` used `pctOfCap >= 100` (rounded percentage) instead of `monthlyCost > cap` (strict dollar comparison). Any cost ≥ 99.5% of cap could round pctOfCap to 100 and falsely show "OVER CAP". Fixed to `monthlyCost > cap`. CL: `review/d5c-chunk-d`.
 - **D3 (2026-04-21):** `MessageRateTracker` duplicated the platform sentinel as a module-local constant instead of importing `PLATFORM_SYSTEM_HOUSEHOLD_ID` from `core/src/types/auth-actor.ts`. The local constant matched the canonical value but was a maintenance hazard. Fixed by removing the duplicate and importing from the single source of truth. CL: `review/d5c-chunk-d`.
 
+### REQ-LLM-029: Test-composable runtime
+
+**Phase:** D5c | **Status:** Implemented
+
+`composeRuntime(overrides?)` in `core/src/compose-runtime.ts` returns a `RuntimeHandle` with the full service graph, a constructed Fastify instance, and a constructed Telegraf bot — without starting Fastify, Telegraf, the scheduler, or signal handlers. Overrides allow injecting a stub provider registry, a fake telegram service, a custom dataDir, a custom configPath, and a custom config. `dispose()` delegates to `ShutdownManager.performTeardown()` for a single shared teardown path.
+
+**Standard tests:**
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > constructs a fully wired runtime without starting Telegraf, Fastify, or scheduler
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > routed messages appear as exactly one new 9-col row in llm-usage.md with correct userId + householdId
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > dispose() completes without throwing
+- `shutdown.test.ts` > performTeardown > runs full 8-step disposal order including server.close last
+- `shutdown.test.ts` > performTeardown > only calls server.close when server.server.listening is true
+- `shutdown.test.ts` > performTeardown > is idempotent — second call is a no-op
+- `shutdown.test.ts` > performTeardown > returns without throwing if registerServices was never called
+
+### REQ-LLM-030: 40-user load-test harness
+
+**Phase:** D5c | **Status:** Implemented
+
+`scripts/load-test.ts` (invoked via `pnpm load-test`) seeds N users into M households with LLM tiers bound to a stub provider, spawns N workers each calling `router.routeMessage` under `requestContext.run(...)` with traffic mix 70% chatbot / 20% /ask / 10% food. After all workers complete, reads `llm-usage.md` from disk and verifies every 9-col row's householdId matches `householdService.getHouseholdForUser(userId)`; exits 1 on mismatch. Emits a markdown report at `docs/load-test-report-YYYY-MM-DD.md`. Cap/rate-limit errors counted via Pino transport that filters `err.name ∈ {LLMCostCapError, LLMRateLimitError}`. Developer-invoked only; not gated in CI.
+
+**Standard tests:**
+- `load-test.test.ts` > quantile > computes p50 from 100 sorted samples
+- `load-test.test.ts` > quantile > computes p95 from 100 sorted samples
+- `load-test.test.ts` > quantile > computes p99 from 100 sorted samples
+- `load-test.test.ts` > quantile > works with unsorted input
+- `load-test.test.ts` > Metrics > aggregates latency per kind and overall
+- `load-test.test.ts` > Metrics > tracks per-household cost
+- `load-test.test.ts` > Metrics > tracks cap triggers keyed by scope
+- `load-test.test.ts` > createCapCapturingTransport > counts LLMCostCapError log records
+- `load-test.test.ts` > createCapCapturingTransport > counts LLMRateLimitError log records
+- `load-test.test.ts` > createCapCapturingTransport > uses err.scope for the capHit scope
+
+**Edge case tests:**
+- `load-test.test.ts` > quantile > returns NaN for empty array
+- `load-test.test.ts` > quantile > handles single-element array
+- `load-test.test.ts` > createCapCapturingTransport > ignores other error names
+- `load-test.test.ts` > createCapCapturingTransport > handles non-JSON lines without throwing
+
 ### REQ-GUI-004: Log viewer htmx partial
 
 **Phase:** 15 | **Status:** Implemented
@@ -5395,6 +5434,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 12 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
 | REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
+| REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 7 | 0 | Implemented |
+| REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5513,4 +5554,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **157 test files** | **1135** | **1364** | **2499 tests** |
+| **Totals** | **160 test files** | **1152** | **1368** | **2520 tests** |
