@@ -122,12 +122,14 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 ## Implementation Status
 
-All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement item #1 (route metadata) complete. D5c Chunks 0–E complete. ~7149 tests / ~297 files.
+All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement items #1 (route metadata) and #2 Chunk A (route-first dispatch in Food) complete. D5c Chunks 0–E complete. ~7149 tests / ~297 files.
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
 ### Current Priority: LLM Enhancement #2 (Food classifier)
-**D5c** (per-household LLM governance + ops + load test) is complete through Chunk E. Next priority is **LLM Enhancement #2** — replace Food's regex router with a fast structured classifier. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`
+**D5c** is complete. **LLM Enhancement #2 Chunk A** (route-first dispatch — Food's `handleMessage` now consults `ctx.route` before the regex cascade; 11-intent allowlist, 41 new tests) is complete. Next: **Chunk B** — Food-local fast-tier shadow classifier.
+
+Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`
 
 D5c plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 

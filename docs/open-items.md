@@ -76,3 +76,18 @@ Documented decisions to live with known imperfections.
 
 - **D40** — `getActiveSpace()` fire-and-forget persist. Acceptable: self-healing on next request.
 - **D42** — Conversation history anti-instruction framing removed. Accepted: continuity > theoretical injection risk.
+
+---
+
+## LLM Enhancement #2 — Chunk A follow-up (deferred from 2026-04-22)
+
+The following items are out of scope for Chunk A but must be addressed in future sessions:
+
+| Chunk | Scope | Why deferred |
+|---|---|---|
+| A.2 — Expand allowlist | Cover more manifest intents after auditing each for regex-branch collision. Likely adds pantry/grocery/leftovers/nutrition after manifest expansion or disambiguation. | Needs design decisions on ambiguous multi-sub-intent cases first. |
+| B — Food-local fast-tier shadow classifier | `apps/food/src/routing/shadow-classifier.ts` — returns {action, confidence} over Food's internal action taxonomy. Runs in parallel with regex cascade; log-only. | Needs stable Chunk A foundation. |
+| C — Switchover | Promote shadow classifier to primary once Chunk B telemetry shows ≥95% agreement. | Needs Chunk B data. |
+| Per-handler `is*Intent` classifiers | `apps/food/src/handlers/{budget,hosting,cultural-calendar-handler,health,nutrition,family}.ts` + `apps/food/src/services/price-store.ts`. | Many bypassed automatically when their manifest intent enters the allowlist. Remainder serve non-manifest sub-intents — stay as fallback. |
+| Chatbot `MODEL_SWITCH_INTENT_REGEX` | `apps/chatbot/src/index.ts:78`. Same route-first pattern applied to chatbot. | Same approach, different app — straightforward follow-up. |
+| Entity/slot extraction | Grocery items, quantities, stores, days, portions via `llm.extractStructured`. | User said classification only this session. |

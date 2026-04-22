@@ -3161,6 +3161,57 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `load-test.test.ts` > createCapCapturingTransport > ignores other error names
 - `load-test.test.ts` > createCapCapturingTransport > handles non-JSON lines without throwing
 
+### REQ-LLM-031: Route-first dispatch in Food (Chunk A)
+
+**Phase:** LLM Enhancement #2 Chunk A | **Status:** Implemented
+
+Food's `handleMessage` consults `ctx.route` (populated by the core `IntentClassifier` and verifier) before running its regex cascade. A 1:1 allowlist of 11 manifest intents maps to existing Food handlers. Route-first dispatch applies only to sources `command`, `intent`, `user-override`, `context-promotion`; `intent`-sourced routes require `confidence >= 0.75`. Per `RouteInfo` contract, `verifierStatus: 'degraded'` is treated the same as `'skipped'` (confidence alone). Once a trusted route claims the message, the regex cascade does not run — even if the handler emits a precondition error. Non-manifest regex behaviors (freezer view, waste, leftover view, grocery generate, pantry remove/view, meal swap, recipe edit/photo, price update) are preserved via the allowlist's tight 1:1 mapping and covered by regression tests.
+
+**Standard tests:**
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > intent source, agreed verifier, above threshold → returns true, handler called once
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > intent source, skipped verifier, high confidence → returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > IMPORTANT: degraded verifier treated as skipped — above threshold → returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > command source — confidence threshold skipped, not-run verifier → returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > user-override source — returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > context-promotion source, agreed verifier → returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > handler throws — error propagates (message is CLAIMED; no false return / regex cascade)
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > save recipe — "jot this one down for me" + route fires handler, not help msg
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > search recipe — "give me something tasty to try" + route fires handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > what's for dinner — "what did you plan for tonight" + route fires handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > start cooking — "kick off that recipe" + route fires cook handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > what can I make — "list things i can cook" + route fires handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > nutrition targets — "update my diet goals" + route fires beginTargetsFlow
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > macro adherence — "am i doing ok with nutrition" + route fires adherence handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > health correlation — "connect my meals to my health" + route fires health handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > cultural calendar — "cultural cooking ideas" + route fires cultural handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > hosting — "i'm having company" + route fires hosting handler
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > budget — "what's the grocery bill" + route fires budget handler
+
+**Edge case tests:**
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > route absent (ctx.route = undefined) → false, handler not called
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > appId mismatch — route.appId is "shopping", not "food" → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > low confidence, intent source, below threshold → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > IMPORTANT: degraded verifier BELOW threshold → false (threshold alone decides, not verifierStatus)
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > intent not in handlers map → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > fallback source (untrusted) → false even at high confidence
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > photo-intent source (untrusted) → false even at high confidence
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — security > regex metacharacters in intent — Map lookup only, no regex evaluation → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — security > prototype-pollution key "__proto__" — Object.hasOwn gate → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — security > constructor key — Object.hasOwn gate → false
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — custom appId argument > custom appId matches route.appId → returns true
+- `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — custom appId argument > custom appId does NOT match route.appId → false
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > freezer view — "show me the freezer" with nearby pantry route → freezer handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > freezer add — "add chicken to the freezer" with pantry route → freezer-add handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > waste — "the milk went bad" with leftover route → waste handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > leftover view — "show me the leftovers" with leftover route → leftover-view fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > grocery generate — "make me a grocery list for pasta" with grocery-add route → generate fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > meal swap — "swap tuesday for pizza" with meal-plan route → meal-swap handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe photo — "show me the recipe photo for lasagna" with search-recipe route → photo handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe edit — "edit the lasagna recipe" with save-recipe route → edit handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > price update — "eggs are $3.50 at costco" with store-prices route → price-update fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 3: deferred intents fall through > pantry NOT in allowlist — "check the pantry" at 0.95 → pantry view runs via regex
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 3: deferred intents fall through > leftover-add NOT in allowlist — "we have leftover chicken soup" at 0.95 → leftover-add via regex
+
 ### REQ-GUI-004: Log viewer htmx partial
 
 **Phase:** 15 | **Status:** Implemented
@@ -5436,6 +5487,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
 | REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 7 | 0 | Implemented |
 | REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
+| REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts | 18 | 23 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5554,4 +5606,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **160 test files** | **1152** | **1368** | **2520 tests** |
+| **Totals** | **162 test files** | **1170** | **1391** | **2561 tests** |
