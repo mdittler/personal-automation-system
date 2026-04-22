@@ -17,8 +17,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function readBootstrap(): Promise<string> {
-	const path = join(__dirname, '..', '..', '..', 'bootstrap.ts');
-	return readFile(path, 'utf8');
+	// Task-4 refactor: wiring code moved to compose-runtime.ts.
+	// Read that file instead of bootstrap.ts for source scans.
+	const composeRuntimePath = join(__dirname, '..', '..', '..', 'compose-runtime.ts');
+	return readFile(composeRuntimePath, 'utf8');
 }
 
 /** Strip line and block comments so documented-but-inactive code cannot pass scans. */

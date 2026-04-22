@@ -488,6 +488,14 @@ export class CostTracker {
 	}
 
 	/**
+	 * Wait for all pending usage-log writes to complete.
+	 * Use in tests to deterministically wait for fire-and-forget record() calls.
+	 */
+	async drainWrites(): Promise<void> {
+		await this.writeQueue;
+	}
+
+	/**
 	 * Flush pending monthly cost data to disk and stop the debounce timer.
 	 * Also releases all pending reservations (shutdown/dispose method).
 	 * Call on shutdown to avoid losing cached cost data.

@@ -57,7 +57,9 @@ export async function seedUsers(opts: SeedOptions): Promise<SeedResult> {
 	// temporarily assign names as placeholders; we'll patch with real IDs below.
 	for (let i = 0; i < userCount; i++) {
 		const id = `user-${i}`;
-		const householdId = householdNames[i % householdCount];
+		// householdNames is guaranteed non-empty (householdCount > 0 check above)
+		// biome-ignore lint/style/noNonNullAssertion: guaranteed by householdCount > 0 guard
+		const householdId = householdNames[i % householdCount]!;
 		seededUsers.push({ id, name: `User ${i}`, householdId });
 		registeredUsers.push({
 			id,
@@ -132,7 +134,8 @@ export async function seedUsers(opts: SeedOptions): Promise<SeedResult> {
 	const nameToActualId = new Map<string, string>();
 	const householdIds: string[] = [];
 	for (const hhName of householdNames) {
-		const firstUserId = firstUserByName.get(hhName) ?? seededUsers[0].id;
+		// biome-ignore lint/style/noNonNullAssertion: seededUsers is non-empty (users > 0 implied by householdCount > 0)
+		const firstUserId = firstUserByName.get(hhName) ?? seededUsers[0]!.id;
 		const household = await householdService.createHousehold(hhName, firstUserId, [firstUserId]);
 		nameToActualId.set(hhName, household.id);
 		householdIds.push(household.id);

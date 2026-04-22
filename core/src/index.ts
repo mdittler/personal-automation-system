@@ -71,6 +71,10 @@ export type {
 // Bootstrap entry point
 export { main } from './bootstrap.js';
 
+// Runtime composition API
+export { composeRuntime } from './compose-runtime.js';
+export type { RuntimeHandle, RuntimeOverrides, RuntimeServices } from './compose-runtime.js';
+
 // Service implementations (used by bootstrap and testing)
 export { AppRegistry, ManifestCache } from './services/app-registry/index.js';
 export type { RegisteredApp, ServiceFactory } from './services/app-registry/index.js';

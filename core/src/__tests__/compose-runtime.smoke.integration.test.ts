@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { composeRuntime } from '../compose-runtime.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
-import { createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
+import { createStubProviderRegistry, StubProvider } from '../testing/fixtures/stub-llm-provider.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { chatbotMessage } from '../testing/fixtures/messages.js';
 import { requestContext } from '../services/context/request-context.js';
@@ -30,19 +30,25 @@ describe('composeRuntime smoke', () => {
 		const logger = pino({ level: 'silent' });
 		const seed = await seedUsers({ dataDir: tempDir, users: 4, households: 2 });
 
-		// CostTracker is needed to build the StubProvider, which records usage.
-		// In Task 4, composeRuntime() will construct this internally; here we
-		// build a shared instance so the stub registry can log to the same file.
-		const costTracker = new CostTracker(join(tempDir, 'data'), logger);
+		// Build an initial stub registry with a throwaway cost tracker so composeRuntime()
+		// has a non-empty provider registry (needed to avoid "no providers" warning path).
+		// After composeRuntime() returns we re-register the stub using the REAL internal
+		// costTracker so assertions on runtime.services.costTracker are correct.
+		const tempCostTracker = new CostTracker(join(tempDir, 'data'), logger);
 
 		runtime = await composeRuntime({
 			dataDir: join(tempDir, 'data'),
 			configPath: seed.configPath,
 			config: seed.config,
-			providerRegistry: createStubProviderRegistry(costTracker, logger),
+			providerRegistry: createStubProviderRegistry(tempCostTracker, logger),
 			telegramService: fakeTelegramService(),
 			logger,
 		});
+
+		// Re-register the stub using the runtime's own costTracker so that all
+		// completeWithUsage() calls record to the instance under test.
+		const realCostTracker = runtime.services.costTracker as CostTracker;
+		runtime.services.providerRegistry.register(new StubProvider(realCostTracker, logger));
 	});
 
 	afterAll(async () => {
@@ -74,8 +80,8 @@ describe('composeRuntime smoke', () => {
 			router.routeMessage(chatbotMessage(userId, 0)),
 		);
 
-		// Allow the async write queue to flush
-		await new Promise((r) => setTimeout(r, 200));
+		// Deterministically wait for the fire-and-forget write queue to drain.
+		await costTracker.drainWrites();
 
 		const after = await costTracker.readUsage();
 		const afterLines = after.split('\n').filter((l) => l.startsWith('| 2'));
