@@ -269,6 +269,61 @@ export const handlePhoto: AppModule['handlePhoto'] = async (ctx: PhotoContext) =
 	await handlePhotoDispatch(services, ctx);
 };
 
+// ─── Route-First Dispatch (LLM Enhancement #2 Chunk A) ──────────────────────
+// Manifest-intent → handler allowlist. Only intents with a strict 1:1 mapping
+// to one existing handler belong here. See the plan for the deferred list.
+
+async function requireHouseholdOrMessage(
+	ctx: MessageContext,
+): Promise<Awaited<ReturnType<typeof requireHousehold>>> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return null;
+	}
+	return hh;
+}
+
+const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
+	'user wants to save a recipe':
+		(ctx) => handleSaveRecipe(ctx.text, ctx),
+	'user wants to search for a recipe':
+		(ctx) => handleSearchRecipe(ctx.text, ctx),
+	'user wants to know what\'s for dinner':
+		(ctx) => handleWhatsForDinner(ctx),
+	'user wants to start cooking a recipe':
+		(ctx) => handleCookIntent(services, ctx.text, ctx),
+	'user wants to know what they can make with what they have':
+		(ctx) => handleWhatCanIMake(ctx),
+	'user wants to set or change their nutrition or macro targets':
+		async (ctx) => { await beginTargetsFlow(services, ctx.userId); },
+	'user wants to see how well they are hitting their macro targets over time':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
+		},
+	'user wants to understand how their diet is affecting their health or energy':
+		(ctx) => handleHealthCorrelation(services, ctx),
+	'user wants holiday or cultural recipe suggestions':
+		(ctx) => handleCulturalCalendarMessage(services, ctx),
+	'user wants to plan for hosting guests':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
+		},
+	'user wants to see food spending':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+		},
+};
+
 // ─── Message Handler (Intent-Routed) ─────────────────────────────
 
 export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageContext) => {
