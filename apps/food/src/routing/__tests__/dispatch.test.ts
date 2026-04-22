@@ -5,7 +5,7 @@
  * All imports will fail, confirming RED state.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RouteInfo } from '@core/types/telegram.js';
 import { dispatchByRoute } from '../dispatch.js';
 
@@ -28,6 +28,12 @@ function makeRoute(overrides: Partial<RouteInfo> = {}): RouteInfo {
 function makeCtx(route?: RouteInfo): { route?: RouteInfo } {
 	return { route };
 }
+
+// ---------------------------------------------------------------------------
+// Shared setup — reset all mocks between tests
+// ---------------------------------------------------------------------------
+
+beforeEach(() => vi.clearAllMocks());
 
 // ---------------------------------------------------------------------------
 // Happy-path cases — all should return true and invoke the matched handler
