@@ -85,6 +85,8 @@ The following items are out of scope for Chunk A but must be addressed in future
 
 | Chunk | Scope | Why deferred |
 |---|---|---|
+| A.1 — Allowlist: 'save a recipe' | Add `'user wants to save a recipe'` back to ROUTE_HANDLERS once `handleEditRecipe` is declared as a manifest intent. Currently removed because phrases like "edit the lasagna recipe" classify as save-intent, causing misrouting. The overlap vanishes once both recipe-save and recipe-edit are manifest-declared with distinct intents. | Overlaps with `handleEditRecipe` — violates strict 1:1 mapping criterion. |
+| A.1 — Allowlist: 'search for a recipe' | Add `'user wants to search for a recipe'` back to ROUTE_HANDLERS once `handleRecipePhotoRetrieval` is declared as a manifest intent. Currently removed because phrases like "show me the recipe photo for X" classify as search-intent. | Overlaps with `handleRecipePhotoRetrieval` — violates strict 1:1 mapping criterion. |
 | A.2 — Expand allowlist | Cover more manifest intents after auditing each for regex-branch collision. Likely adds pantry/grocery/leftovers/nutrition after manifest expansion or disambiguation. | Needs design decisions on ambiguous multi-sub-intent cases first. |
 | B — Food-local fast-tier shadow classifier | `apps/food/src/routing/shadow-classifier.ts` — returns {action, confidence} over Food's internal action taxonomy. Runs in parallel with regex cascade; log-only. | Needs stable Chunk A foundation. |
 | C — Switchover | Promote shadow classifier to primary once Chunk B telemetry shows ≥95% agreement. | Needs Chunk B data. |

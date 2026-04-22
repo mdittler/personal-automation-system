@@ -273,6 +273,14 @@ export const handlePhoto: AppModule['handlePhoto'] = async (ctx: PhotoContext) =
 // ─── Route-First Dispatch (LLM Enhancement #2 Chunk A) ──────────────────────
 // Manifest-intent → handler allowlist. Only intents with a strict 1:1 mapping
 // to one existing handler belong here. See the plan for the deferred list.
+//
+// Deferred (overlap violations — cannot be cleanly allowlisted):
+//   'user wants to save a recipe'   — overlaps with handleEditRecipe (phrases
+//       like "edit the lasagna recipe" also classify as save-intent)
+//   'user wants to search for a recipe' — overlaps with handleRecipePhotoRetrieval
+//       (phrases like "show me the recipe photo for X" classify as search-intent)
+// Both will be eligible once recipe-edit and recipe-photo retrieval are declared
+// as manifest intents (giving the allowlist an unambiguous 1:1 target).
 
 async function requireHouseholdOrMessage(
 	ctx: MessageContext,
@@ -289,10 +297,6 @@ async function requireHouseholdOrMessage(
 }
 
 const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
-	'user wants to save a recipe':
-		(ctx) => handleSaveRecipe(ctx.text, ctx),
-	'user wants to search for a recipe':
-		(ctx) => handleSearchRecipe(ctx.text, ctx),
 	'user wants to know what\'s for dinner':
 		(ctx) => handleWhatsForDinner(ctx),
 	'user wants to start cooking a recipe':

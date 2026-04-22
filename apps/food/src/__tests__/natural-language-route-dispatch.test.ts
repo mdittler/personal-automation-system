@@ -6,23 +6,26 @@
  * from core's LLM-based IntentClassifier — correctly invoke the right handler
  * via Food's route-first dispatch (dispatchByRoute / ROUTE_HANDLERS).
  *
- * The 11 allowlisted intents introduced by LLM Enhancement #2 Chunk A:
- *   1.  "user wants to save a recipe"
- *   2.  "user wants to search for a recipe"
- *   3.  "user wants to know what's for dinner"
- *   4.  "user wants to start cooking a recipe"
- *   5.  "user wants to know what they can make with what they have"
- *   6.  "user wants to set or change their nutrition or macro targets"
- *   7.  "user wants to see how well they are hitting their macro targets over time"
- *   8.  "user wants to understand how their diet is affecting their health or energy"
- *   9.  "user wants holiday or cultural recipe suggestions"
- *  10.  "user wants to plan for hosting guests"
- *  11.  "user wants to see food spending"
+ * The 9 allowlisted intents after P1 fix (LLM Enhancement #2 Chunk A, P1/P2 review):
+ *   1.  "user wants to know what's for dinner"
+ *   2.  "user wants to start cooking a recipe"
+ *   3.  "user wants to know what they can make with what they have"
+ *   4.  "user wants to set or change their nutrition or macro targets"
+ *   5.  "user wants to see how well they are hitting their macro targets over time"
+ *   6.  "user wants to understand how their diet is affecting their health or energy"
+ *   7.  "user wants holiday or cultural recipe suggestions"
+ *   8.  "user wants to plan for hosting guests"
+ *   9.  "user wants to see food spending"
+ *
+ * Removed from allowlist (overlap violations):
+ *   "user wants to save a recipe"        — overlaps with handleEditRecipe
+ *   "user wants to search for a recipe"  — overlaps with handleRecipePhotoRetrieval
  *
  * Test groups:
  *   Group 1  — Allowlist intents: natural language + ctx.route → correct handler fires
  *   Group 2  — Non-allowlist regression: nearby intent in ctx.route, regex cascade runs instead
  *   Group 3  — End-to-end multi-step scenarios with ctx.route
+ *   Group 4  — Household-missing path for household-gated intents
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -141,60 +144,20 @@ describe('natural-language-route-dispatch persona tests', () => {
 
 	describe('Group 1: allowlist intents fire the correct handler via ctx.route', () => {
 
-		// -----------------------------------------------------------------
-		// Intent 1: "user wants to save a recipe"
-		// -----------------------------------------------------------------
-		describe('save a recipe (intent 1)', () => {
-			const INTENT = 'user wants to save a recipe';
-			const messages = [
-				'jot this one down for me',         // original from route-dispatch.test.ts (non-matching text)
-				'can you remember this dish',
-				'log this meal idea',
-				'keep this for later',
-				'store this meal please',
-				'hold onto this recipe idea',
-			];
-
-			it.each(messages)('"%s" + route → handler fires, not help msg', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
-			});
-		});
+		// Note: "user wants to save a recipe" (former intent 1) and
+		// "user wants to search for a recipe" (former intent 2) were removed from
+		// ROUTE_HANDLERS because they overlap with handleEditRecipe and
+		// handleRecipePhotoRetrieval respectively (P1 fix). Tests for those removed.
 
 		// -----------------------------------------------------------------
-		// Intent 2: "user wants to search for a recipe"
+		// Intent 1 (was 3): "user wants to know what's for dinner"
+		// Stronger assertion: dinner handler sends a meal-plan-specific message,
+		// not the generic help fallback or a grocery/recipe response.
+		// With an empty meal plan in the store, handleWhatsForDinner sends:
+		//   "No meal plan yet. Try "plan meals for this week" to generate one!"
+		// That text contains "meal plan" — distinct from any other handler output.
 		// -----------------------------------------------------------------
-		describe('search for a recipe (intent 2)', () => {
-			const INTENT = 'user wants to search for a recipe';
-			const messages = [
-				'give me something tasty to try',   // original from route-dispatch.test.ts
-				'what can we cook this week',
-				'find something with chicken',
-				'i feel like pasta tonight',
-				'what are some ideas for dinner',
-				'pull up something easy',
-			];
-
-			it.each(messages)('"%s" + route → handler fires, not help msg', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
-			});
-		});
-
-		// -----------------------------------------------------------------
-		// Intent 3: "user wants to know what's for dinner"
-		// -----------------------------------------------------------------
-		describe("what's for dinner (intent 3)", () => {
+		describe("what's for dinner (intent 1)", () => {
 			const INTENT = "user wants to know what's for dinner";
 			const messages = [
 				'what did you plan for tonight',    // original from route-dispatch.test.ts
@@ -205,21 +168,27 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'dinner tonight?',
 			];
 
-			it.each(messages)('"%s" + route → handler fires, not help msg', async (text) => {
+			it.each(messages)('"%s" + route → dinner handler fires (meal plan message)', async (text) => {
 				const ctx = createTestMessageContext({
 					userId: 'matt',
 					text,
 					route: makeRoute(INTENT),
 				});
 				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
+				// handleWhatsForDinner sends "No meal plan yet…" when plan is empty.
+				// handleSearchRecipe or other handlers would never emit this specific text.
+				const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+				expect(
+					calls.some(([, msg]) => msg.includes('meal plan') || msg.includes('for tonight')),
+					'Expected dinner handler output (meal plan message)',
+				).toBe(true);
 			});
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 4: "user wants to start cooking a recipe"
+		// Intent 2 (was 4): "user wants to start cooking a recipe"
 		// -----------------------------------------------------------------
-		describe('start cooking a recipe (intent 4)', () => {
+		describe('start cooking a recipe (intent 2)', () => {
 			const INTENT = 'user wants to start cooking a recipe';
 			const messages = [
 				'kick off that recipe',             // original from route-dispatch.test.ts
@@ -242,9 +211,11 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 5: "user wants to know what they can make with what they have"
+		// Intent 3 (was 5): "user wants to know what they can make with what they have"
+		// Stronger assertion: with empty pantry, handler sends "Your pantry is empty!"
+		// That message is unique to handleWhatCanIMake — no other handler emits it.
 		// -----------------------------------------------------------------
-		describe('what can I make (intent 5)', () => {
+		describe('what can I make (intent 3)', () => {
 			const INTENT = 'user wants to know what they can make with what they have';
 			const messages = [
 				'list things i can cook',           // original from route-dispatch.test.ts
@@ -255,21 +226,27 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'improvise something from our ingredients',
 			];
 
-			it.each(messages)('"%s" + route → handler fires, not help msg', async (text) => {
+			it.each(messages)('"%s" + route → what-can-I-make handler fires (pantry-empty message)', async (text) => {
 				const ctx = createTestMessageContext({
 					userId: 'matt',
 					text,
 					route: makeRoute(INTENT),
 				});
 				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
+				// handleWhatCanIMake sends "Your pantry is empty!" when no pantry items exist.
+				// No other handler emits this specific message.
+				const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+				expect(
+					calls.some(([, msg]) => msg.includes('pantry is empty') || msg.includes('pantry')),
+					'Expected pantry-empty message from handleWhatCanIMake',
+				).toBe(true);
 			});
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 6: "user wants to set or change their nutrition or macro targets"
+		// Intent 4 (was 6): "user wants to set or change their nutrition or macro targets"
 		// -----------------------------------------------------------------
-		describe('set or change nutrition targets (intent 6)', () => {
+		describe('set or change nutrition targets (intent 4)', () => {
 			const INTENT = 'user wants to set or change their nutrition or macro targets';
 			const messages = [
 				'update my diet goals',             // original from route-dispatch.test.ts
@@ -293,9 +270,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 7: "user wants to see how well they are hitting their macro targets over time"
+		// Intent 5 (was 7): "user wants to see how well they are hitting their macro targets over time"
 		// -----------------------------------------------------------------
-		describe('macro adherence (intent 7)', () => {
+		describe('macro adherence (intent 5)', () => {
 			const INTENT = 'user wants to see how well they are hitting their macro targets over time';
 			const messages = [
 				'am i doing ok with nutrition',     // original from route-dispatch.test.ts
@@ -318,9 +295,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 8: "user wants to understand how their diet is affecting their health or energy"
+		// Intent 6 (was 8): "user wants to understand how their diet is affecting their health or energy"
 		// -----------------------------------------------------------------
-		describe('diet-health correlation (intent 8)', () => {
+		describe('diet-health correlation (intent 6)', () => {
 			const INTENT = 'user wants to understand how their diet is affecting their health or energy';
 			const messages = [
 				'connect my meals to my health',    // original from route-dispatch.test.ts
@@ -343,9 +320,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 9: "user wants holiday or cultural recipe suggestions"
+		// Intent 7 (was 9): "user wants holiday or cultural recipe suggestions"
 		// -----------------------------------------------------------------
-		describe('holiday / cultural recipe suggestions (intent 9)', () => {
+		describe('holiday / cultural recipe suggestions (intent 7)', () => {
 			const INTENT = 'user wants holiday or cultural recipe suggestions';
 			const messages = [
 				'cultural cooking ideas',           // original from route-dispatch.test.ts
@@ -368,9 +345,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 10: "user wants to plan for hosting guests"
+		// Intent 8 (was 10): "user wants to plan for hosting guests"
 		// -----------------------------------------------------------------
-		describe('hosting guests (intent 10)', () => {
+		describe('hosting guests (intent 8)', () => {
 			const INTENT = 'user wants to plan for hosting guests';
 			const messages = [
 				"i'm having company",               // original from route-dispatch.test.ts
@@ -393,9 +370,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 11: "user wants to see food spending"
+		// Intent 9 (was 11): "user wants to see food spending"
 		// -----------------------------------------------------------------
-		describe('food spending (intent 11)', () => {
+		describe('food spending (intent 9)', () => {
 			const INTENT = 'user wants to see food spending';
 			const messages = [
 				"what's the grocery bill",          // original from route-dispatch.test.ts
@@ -553,11 +530,11 @@ describe('natural-language-route-dispatch persona tests', () => {
 		/**
 		 * Scenario A: "I want to cook something tonight"
 		 *
-		 * User asks what's for dinner (intent 3), sees a response, then decides
-		 * to search for a recipe (intent 2).  Two sequential messages, each with
+		 * User asks what's for dinner (intent 1), sees a response, then asks
+		 * what they can make (intent 3).  Two sequential messages, each with
 		 * the appropriate ctx.route.
 		 */
-		it('Scenario A: dinner inquiry then recipe search — two sequential route dispatches', async () => {
+		it('Scenario A: dinner inquiry then what-can-I-make — two sequential route dispatches', async () => {
 			// Step 1 — what's for dinner
 			const ctx1 = createTestMessageContext({
 				userId: 'nina',
@@ -574,11 +551,11 @@ describe('natural-language-route-dispatch persona tests', () => {
 			});
 			vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
 
-			// Step 2 — search for a recipe instead
+			// Step 2 — find out what we can make with pantry
 			const ctx2 = createTestMessageContext({
 				userId: 'nina',
-				text: 'ok find me something with chicken',
-				route: makeRoute('user wants to search for a recipe'),
+				text: 'ok what can we cook with what we have',
+				route: makeRoute('user wants to know what they can make with what they have'),
 			});
 			await handleMessage(ctx2);
 			assertHandlerFired(vi.mocked(services.telegram.send));
@@ -588,8 +565,8 @@ describe('natural-language-route-dispatch persona tests', () => {
 		 * Scenario B: "I'm having people over for the holidays"
 		 *
 		 * User sends a message that carries both a hosting intent AND a cultural
-		 * calendar flavour.  The ctx.route picks hosting (intent 10).  Separately
-		 * a cultural calendar message is sent (intent 9).  Both handlers should
+		 * calendar flavour.  The ctx.route picks hosting (intent 8).  Separately
+		 * a cultural calendar message is sent (intent 7).  Both handlers should
 		 * fire without interference.
 		 */
 		it('Scenario B: hosting enquiry then cultural-holiday recipe request — both handlers fire', async () => {
@@ -622,8 +599,8 @@ describe('natural-language-route-dispatch persona tests', () => {
 		/**
 		 * Scenario C: Budget review then macro target update
 		 *
-		 * User checks food spending (intent 11), then decides to tighten their
-		 * nutrition targets (intent 6).  Confirms that two different allowlisted
+		 * User checks food spending (intent 9), then decides to tighten their
+		 * nutrition targets (intent 4).  Confirms that two different allowlisted
 		 * intents fire correctly in sequence without any state leakage.
 		 */
 		it('Scenario C: food spending check then nutrition targets update — both handlers fire correctly', async () => {
@@ -663,11 +640,11 @@ describe('natural-language-route-dispatch persona tests', () => {
 		 */
 		it('Scenario D: low-confidence allowlist route is ignored — regex cascade handles the message', async () => {
 			// "check the pantry" is handled by regex (isPantryViewIntent)
-			// The route carries an allowlist intent at LOW confidence — must be rejected
+			// The route carries an allowlisted intent at LOW confidence (0.60 < 0.75 threshold) — must be rejected
 			const ctx = createTestMessageContext({
 				userId: 'matt',
 				text: 'check the pantry',
-				route: makeRoute('user wants to save a recipe', { confidence: 0.60 }),
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.60 }),
 			});
 			await handleMessage(ctx);
 			// Pantry view handler fires via regex (telegram.send called with pantry content)
@@ -685,7 +662,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 				text: 'show me the grocery list',
 				route: {
 					appId: 'chatbot',   // wrong app
-					intent: 'user wants to save a recipe',
+					intent: "user wants to know what's for dinner",
 					confidence: 0.99,
 					source: 'intent',
 					verifierStatus: 'agreed',
@@ -727,6 +704,64 @@ describe('natural-language-route-dispatch persona tests', () => {
 			});
 			await handleMessage(ctx2);
 			assertHandlerFired(vi.mocked(services.telegram.send));
+		});
+	});
+
+	// =========================================================================
+	// Group 4: Household-missing path for household-gated allowlist intents
+	//
+	// When an allowlisted intent fires via ctx.route but the handler requires a
+	// household and none exists, the handler sends the household-setup error and
+	// returns early.  dispatchByRoute already claimed the message so the regex
+	// cascade does NOT run.
+	// =========================================================================
+
+	describe('Group 4: household-missing path for household-gated allowlist intents', () => {
+
+		it('food spending with no household → household error sent, cascade skipped', async () => {
+			// Override store to return no household
+			vi.mocked(store.read).mockImplementation(async (_path: string) => '');
+
+			const ctx = createTestMessageContext({
+				userId: 'nina',
+				text: 'how much did we spend this month',
+				route: makeRoute('user wants to see food spending', { confidence: 0.92 }),
+			});
+			await handleMessage(ctx);
+
+			// dispatchByRoute claims the message, handler sends household-setup error
+			const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+			expect(
+				calls.some(([, msg]) => msg.includes('Set up a household first')),
+				'Expected household-setup error from the route-claimed handler',
+			).toBe(true);
+
+			// Regex cascade must NOT have fired — no "I'm not sure" help message
+			const helpCalls = calls.filter(([, msg]) => msg.includes("I'm not sure"));
+			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(0);
+		});
+
+		it('hosting with no household → household error sent, cascade skipped', async () => {
+			// Override store to return no household
+			vi.mocked(store.read).mockImplementation(async (_path: string) => '');
+
+			const ctx = createTestMessageContext({
+				userId: 'nina',
+				text: "friends are coming over saturday for dinner",
+				route: makeRoute('user wants to plan for hosting guests', { confidence: 0.91 }),
+			});
+			await handleMessage(ctx);
+
+			// dispatchByRoute claims the message, handler sends household-setup error
+			const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+			expect(
+				calls.some(([, msg]) => msg.includes('Set up a household first')),
+				'Expected household-setup error from the route-claimed handler',
+			).toBe(true);
+
+			// No help fallback
+			const helpCalls = calls.filter(([, msg]) => msg.includes("I'm not sure"));
+			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(0);
 		});
 	});
 });

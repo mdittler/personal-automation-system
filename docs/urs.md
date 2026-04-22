@@ -3175,8 +3175,6 @@ Food's `handleMessage` consults `ctx.route` (populated by the core `IntentClassi
 - `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > user-override source — returns true
 - `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > context-promotion source, agreed verifier → returns true
 - `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — happy path > handler throws — error propagates (message is CLAIMED; no false return / regex cascade)
-- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > save recipe — "jot this one down for me" + route fires handler, not help msg
-- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > search recipe — "give me something tasty to try" + route fires handler
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > what's for dinner — "what did you plan for tonight" + route fires handler
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > start cooking — "kick off that recipe" + route fires cook handler
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > what can I make — "list things i can cook" + route fires handler
@@ -3186,6 +3184,8 @@ Food's `handleMessage` consults `ctx.route` (populated by the core `IntentClassi
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > cultural calendar — "cultural cooking ideas" + route fires cultural handler
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > hosting — "i'm having company" + route fires hosting handler
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 1: route wins for allowlist intents > budget — "what's the grocery bill" + route fires budget handler
+- `apps/food/src/__tests__/natural-language-route-dispatch.test.ts` > Route-first dispatch > Group 1 (9 intent groups × 6 natural language phrasings each = 54 tests): casual user messages paired with ctx.route fire correct handler via ROUTE_HANDLERS allowlist
+- `apps/food/src/__tests__/natural-language-route-dispatch.test.ts` > Route-first dispatch > Group 3 (6 end-to-end scenarios): multi-step sequences with ctx.route — no state leakage between consecutive allowlisted dispatches
 
 **Edge case tests:**
 - `apps/food/src/routing/__tests__/dispatch.test.ts` > dispatchByRoute — edge cases returning false > route absent (ctx.route = undefined) → false, handler not called
@@ -3206,11 +3206,16 @@ Food's `handleMessage` consults `ctx.route` (populated by the core `IntentClassi
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > leftover view — "show me the leftovers" with leftover route → leftover-view fires
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > grocery generate — "make me a grocery list for pasta" with grocery-add route → generate fires
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > meal swap — "swap tuesday for pizza" with meal-plan route → meal-swap handler fires
-- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe photo — "show me the recipe photo for lasagna" with search-recipe route → photo handler fires
-- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe edit — "edit the lasagna recipe" with save-recipe route → edit handler fires
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe photo — "show me the recipe photo for lasagna" with search-recipe route → photo handler fires, NOT search handler (handler-specific oracle)
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > recipe edit — "edit the lasagna recipe" with save-recipe route → edit handler fires, NOT save handler (handler-specific oracle)
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 2: non-manifest regressions > price update — "eggs are $3.50 at costco" with store-prices route → price-update fires
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 3: deferred intents fall through > pantry NOT in allowlist — "check the pantry" at 0.95 → pantry view runs via regex
 - `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 3: deferred intents fall through > leftover-add NOT in allowlist — "we have leftover chicken soup" at 0.95 → leftover-add via regex
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 4: pending-flow takes precedence > active targets flow takes precedence over allowlist route
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 4: pending-flow takes precedence > active cook-mode pending recipe takes precedence over allowlist route
+- `apps/food/src/__tests__/route-dispatch.test.ts` > route-dispatch integration > Group 5: household-missing path > household-gated allowlist intent claims message and sends error when no household
+- `apps/food/src/__tests__/natural-language-route-dispatch.test.ts` > Route-first dispatch > Group 2 (11 non-allowlist regressions): nearby intent in ctx.route at high confidence, regex cascade fires the correct handler
+- `apps/food/src/__tests__/natural-language-route-dispatch.test.ts` > Route-first dispatch > Group 4 (2 household-missing tests): household-gated allowlist intent fires via route but sends household-setup error; regex cascade does not re-run
 
 ### REQ-GUI-004: Log viewer htmx partial
 
@@ -5487,7 +5492,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
 | REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 7 | 0 | Implemented |
 | REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
-| REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts | 18 | 23 | Implemented |
+| REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts, natural-language-route-dispatch.test.ts | 18 | 28 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5606,4 +5611,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **162 test files** | **1170** | **1391** | **2561 tests** |
+| **Totals** | **162 test files** | **1170** | **1396** | **2566 tests** |
