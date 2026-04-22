@@ -1198,6 +1198,43 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 		expect(res.body).not.toContain('Per-Household Breakdown');
 	});
+
+	// Hardening for BUG-1 polarity — see docs/d5c-chunk-d-review-findings.md
+	it('cost exactly equal to cap → overCap=false (strict >, not >=)', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-eq', name: 'Equal' }],
+			{ 'hh-eq': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	it('cost slightly above cap → overCap=true', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-over', name: 'Slightly Over' }],
+			{ 'hh-over': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.01 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('OVER CAP');
+	});
 });
 
 // ============================================================================

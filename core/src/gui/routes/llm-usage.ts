@@ -237,7 +237,7 @@ function buildPerHouseholdRows(
 			monthlyCost,
 			cap,
 			pctOfCap,
-			overCap: pctOfCap >= 100,
+			overCap: monthlyCost > cap,
 		});
 	}
 
