@@ -124,6 +124,7 @@ import { listWeeklyHistories, loadWeeklyHistory } from './services/budget-report
 import { getSession } from './services/cook-session.js';
 import { estimateGroceryListCost, estimatePlanCost } from './services/cost-estimator.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
+import { dispatchByRoute } from './routing/dispatch.js';
 import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
 import {
 	addFreezerItem,
@@ -400,6 +401,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		const handled = await handleGuestAddReply(services, hhForGuest.sharedStore, ctx.userId, text);
 		if (handled) return;
 	}
+
+	// LLM Enhancement #2 Chunk A: trust core router's LLM-derived route when it maps
+	// to an allowlisted handler.
+	if (await dispatchByRoute(ctx, ROUTE_HANDLERS)) return;
 
 	// Try to detect intent from the message
 	const lower = text.toLowerCase();

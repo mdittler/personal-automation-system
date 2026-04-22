@@ -196,7 +196,8 @@ describe('route-dispatch integration', () => {
 
 			await handleMessage(ctx);
 
-			assertHandlerFired(vi.mocked(services.telegram.send));
+			// beginTargetsFlow sends the first step via sendWithButtons (not send)
+			expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
 		});
 
 		it('macro adherence — "am i doing ok with nutrition" + route fires adherence handler', async () => {
