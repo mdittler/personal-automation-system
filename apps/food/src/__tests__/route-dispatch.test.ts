@@ -63,7 +63,7 @@ function makeRoute(intent: string, overrides: Partial<RouteInfo> = {}): RouteInf
 function assertHandlerFired(sendMock: ReturnType<typeof vi.fn>): void {
 	expect(sendMock).toHaveBeenCalled();
 	// Every call's second argument (the message text) must NOT be the help msg.
-	// (Using `every` so the assertion fails on the first mismatch.)
+	// (Using `find` to locate the first call whose message contains the help string.)
 	const calls = sendMock.mock.calls as [string, string][];
 	const helpCall = calls.find(([, msg]) => typeof msg === 'string' && msg.includes(HELP_MSG));
 	expect(helpCall, 'Expected no fallback help message, but one was sent').toBeUndefined();
