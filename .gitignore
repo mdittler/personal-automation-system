@@ -52,9 +52,11 @@ Thumbs.db
 .vscode/settings.json
 .idea/
 
-# Claude Code local settings (but keep commands)
+# Claude Code local settings (keep commands, hooks, and shared settings)
 .claude/*
 !.claude/commands/
+!.claude/hooks/
+!.claude/settings.json
 
 # Logs
 *.log
