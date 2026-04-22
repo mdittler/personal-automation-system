@@ -35,6 +35,7 @@ export class ShutdownManager {
 	private services: ShutdownServices | null = null;
 	private inFlightCount = 0;
 	private shuttingDown = false;
+	private teardownComplete = false;
 
 	constructor(options: ShutdownManagerOptions) {
 		this.logger = options.logger;
@@ -83,6 +84,24 @@ export class ShutdownManager {
 		// Wait for in-flight requests to drain
 		await this.waitForDrain();
 
+		await this.performTeardown();
+
+		this.logger.info('Shutdown complete');
+		process.exit(0);
+	}
+
+	/**
+	 * Tear down all registered services in the correct order.
+	 *
+	 * Idempotent — a second call is a no-op. Safe to call without registered
+	 * services (e.g. in tests that never called registerServices()).
+	 *
+	 * Does NOT log "Shutdown complete" or call process.exit — that is
+	 * the responsibility of shutdown().
+	 */
+	async performTeardown(): Promise<void> {
+		if (this.teardownComplete) return;
+
 		if (this.services) {
 			const { scheduler, telegram, registry, eventBus, server, rateLimiters, bot, onShutdown } =
 				this.services;
@@ -112,11 +131,14 @@ export class ShutdownManager {
 				}
 			}
 
-			await server.close();
+			// Only close the server if it is actually listening (guard prevents
+			// errors in test environments where listen() was never called).
+			if (server.server.listening) {
+				await server.close();
+			}
 		}
 
-		this.logger.info('Shutdown complete');
-		process.exit(0);
+		this.teardownComplete = true;
 	}
 
 	/**
