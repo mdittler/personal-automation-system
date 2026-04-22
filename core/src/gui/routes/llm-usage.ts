@@ -120,6 +120,10 @@ export function parseUsageMarkdown(content: string): {
 		if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
 		const cells = parts;
 		if (cells.length < 6) continue;
+		// Reject rows where the timestamp cell is empty — e.g. pipe-only or all-whitespace
+		// rows that survived the column-count check after removing .filter(Boolean).
+		// Regression: Minor #1 from the BUG-2 review-round audit.
+		if (!cells[0]) continue;
 
 		// Support 6-col, 7-col (+ Provider), 8-col (+ User), and 9-col (+ Household) formats
 		const hasHousehold = cells.length >= 9;

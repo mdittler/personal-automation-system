@@ -778,6 +778,23 @@ describe('CostTracker', () => {
 			expect(t.getMonthlyUserCost('alice')).toBeCloseTo(0.25, 6);
 			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.25, 6);
 		});
+
+		// Parity lock with parseUsageMarkdown B8. If the shift()/pop() pair is ever
+		// removed from rebuildFromLog in a future refactor, this test catches it.
+		it('9-col row without trailing bounding pipe still attributes user + household', async () => {
+			const systemDir = join(tempDir, 'system');
+			// Note: no trailing ' |' on the row below.
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.333333 | echo | alice | hh-trail`,
+			], 9);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyHouseholdCost('hh-trail')).toBeCloseTo(0.333333, 6);
+			expect(t.getMonthlyUserCost('alice')).toBeCloseTo(0.333333, 6);
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.333333, 6);
+		});
 	});
 
 	// ---------------------------------------------------------------------------

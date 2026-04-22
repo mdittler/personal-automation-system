@@ -2954,9 +2954,12 @@ The LLM usage GUI route must parse the usage markdown log into structured rows a
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with blank App cell still places User and Household in their correct slots
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > row without a trailing bounding pipe still parses positionally
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with consecutive blank interior cells does not collapse columns
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with truly-empty User cell (||) parses Household from cells[8]
+- `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > pipe-only row (no timestamp) is skipped, not pushed with blank fields
 
 **Fixes:**
 - **D2 (2026-04-21):** `.filter(Boolean)` on the pipe-split dropped empty interior cells, shifting later columns left when a 9-col row had a blank User cell. Replaced with positional trim (drop leading/trailing bounding pipe empties only). Regression tests B5–B9 added. CL: `review/d5c-chunk-d`.
+- **D2-followup (2026-04-21):** Added a `cells[0]`-non-empty guard after the positional trim to reject pipe-only / all-whitespace rows that survived the `cells.length < 6` check once `.filter(Boolean)` was removed. B10 locks the fix; B11 adds truly-empty-cell (`||`) hardening. CL: `review/d5c-chunk-d`.
 
 ### REQ-LLM-023: System LLM Guard (infrastructure cost cap)
 
@@ -3044,6 +3047,7 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `llm-household-governance.integration.test.ts` > LLM Household Governance Integration > SystemLLMGuard household enforcement > requestContext householdId triggers household cost enforcement for system guard
 - `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row with blank User cell attributes cost to household, NOT to user bucket
 - `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row with blank App cell still attributes user + household correctly
+- `cost-tracker.test.ts` > CostTracker > rebuildFromLog (F13) > 9-col row without trailing bounding pipe still attributes user + household
 
 **Natural-language persona tests:**
 - `natural-language-household-governance.test.ts` > Chatbot — Household Governance Persona Tests > Persona: household shares a cost cap (Matt + Nina in hA) > Matt hits household monthly cost cap → reply mentions household budget, not app budget
@@ -5384,11 +5388,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-NFR-004 | error-handler.test.ts | 5 | 4 | Implemented |
 | REQ-INTEG-001 | e2e-echo.test.ts | 5 | 1 | Implemented |
 | REQ-INTEG-002 | echo.test.ts | 5 | 1 | Implemented |
-| REQ-LLM-022 | llm-usage.test.ts | 13 | 16 | Implemented |
+| REQ-LLM-022 | llm-usage.test.ts | 13 | 18 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
-| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 11 | Implemented |
+| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 12 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
 | REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
@@ -5509,4 +5513,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **157 test files** | **1135** | **1361** | **2496 tests** |
+| **Totals** | **157 test files** | **1135** | **1364** | **2499 tests** |

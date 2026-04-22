@@ -1024,6 +1024,43 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 		expect(result.perHousehold).toHaveLength(1);
 		expect(result.perHousehold[0].householdId).toBe('hh-consec');
 	});
+
+	// B11 — hardening: truly-empty interior cells (`||`) behave the same as
+	// whitespace-only (`|  |`). B6/B7/B9 only exercise the whitespace form;
+	// this test locks the positional-trim semantics against a refactor that
+	// drops the .trim() step.
+	it('9-col row with truly-empty User cell (||) parses Household from cells[8]', () => {
+		// No spaces between pipes around the blank User column.
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo || hh-empty |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-empty');
+		expect(result.perUser).toHaveLength(0);
+	});
+
+	// B10 — pipe-only / all-blank rows must not be pushed into `rows`.
+	// Regression: Minor #1 from the review-round audit of the BUG-2 fix.
+	it('pipe-only row (no timestamp) is skipped, not pushed with blank fields', () => {
+		// One valid row + three degenerate forms: whitespace-only between pipes,
+		// pipes only (no interior characters), and a single whitespace cell.
+		// Only the valid row should survive.
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |',
+			'|  |  |  |  |  |  |  |  |  |',
+			'|||||||||',
+			'|          |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.rows[0].timestamp).toBe('2026-03-11T10:00:00Z');
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+	});
 });
 
 // ============================================================================
