@@ -45,6 +45,19 @@ export function isValidShadowLabel(v: unknown): v is FoodShadowLabel {
 }
 
 /**
+ * Manifest labels intentionally absent from REGEX_TO_MANIFEST_MAP.
+ * These two intents are LLM-only — no regex branch claims them today.
+ * The shadow classifier may still pick them; verdict math treats them like
+ * any other label (typically `one-side-none`). Keep in sync with the map.
+ * The `INTENTIONALLY_UNMAPPED_LABELS` test in shadow-taxonomy.test.ts
+ * enforces the invariant mechanically.
+ */
+export const INTENTIONALLY_UNMAPPED_LABELS: readonly FoodShadowLabel[] = [
+    'user wants to log an unfamiliar meal with a free-text description',
+    'user wants to save a frequent meal as a quick-meal template',
+] as const;
+
+/**
  * Build the shadow taxonomy at runtime from a manifest's intent list.
  * Deduplicates and appends "none" at the end. Used so the prompt stays
  * in lockstep with the live manifest.yaml.
@@ -110,7 +123,9 @@ export const REGEX_TO_MANIFEST_MAP: Record<string, FoodShadowLabel> = {
     data_query_fallback:    'none',
     help_fallthrough:       'none',
     pending_flow_consumed:  'none',
-    '(route-dispatched)':   'none',
+    // '(route-dispatched)' is intentionally absent — computeVerdict() short-circuits
+    // on shadow.kind === 'legacy-skipped' before consulting regexWinnerLabel, so this
+    // sentinel never reaches normalizeRegexLabel(). The fallback returns 'none' anyway.
 };
 
 export function normalizeRegexLabel(regexLabel: string): FoodShadowLabel {

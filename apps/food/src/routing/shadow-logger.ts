@@ -50,22 +50,33 @@ function fmtTs(d: Date): string {
     return d.toISOString().replace('T', ' ').substring(0, 19);
 }
 
-function sanitizeMessage(raw: string): string {
-    // Collapse CR/LF (and any combination) to a single space, then truncate.
-    const oneLine = raw.replace(/[\r\n]+/g, ' ').substring(0, MAX_MSG);
-    // JSON.stringify safely escapes quotes, backslashes, and remaining control chars.
-    // Remove the outer quotes so we can emit our own surrounding quotes.
-    return JSON.stringify(oneLine).slice(1, -1);
+/** Code-point-safe truncation + JSON-safe escaping for embedding in markdown log lines. */
+function safeForLog(raw: string, maxCodePoints: number): string {
+    const oneLine = raw.replace(/[\r\n]+/g, ' ');
+    // Array.from iterates by code point, not UTF-16 code unit, so emoji stay intact.
+    const truncated = Array.from(oneLine).slice(0, maxCodePoints).join('');
+    // JSON.stringify handles quotes, backslashes, and control characters.
+    return JSON.stringify(truncated).slice(1, -1);  // strip outer quotes
 }
 
 export class FoodShadowLogger {
     private readonly logPath: string;
+    private writeChain: Promise<void> = Promise.resolve();
 
     constructor(dataDir: string) {
         this.logPath = join(dataDir, 'shadow-classifier-log.md');
     }
 
-    async log(entry: ShadowLogEntry): Promise<void> {
+    log(entry: ShadowLogEntry): Promise<void> {
+        // Serialize all writes through the promise chain so concurrent callers
+        // cannot interleave their appendFile blocks.
+        const next = this.writeChain.then(() => this.doLog(entry));
+        // Keep the chain alive even if this call rejects, so later callers proceed.
+        this.writeChain = next.catch(() => undefined);
+        return next;
+    }
+
+    private async doLog(entry: ShadowLogEntry): Promise<void> {
         await mkdir(dirname(this.logPath), { recursive: true });
         const block = this.formatEntry(entry);
         try {
@@ -81,7 +92,7 @@ export class FoodShadowLogger {
 
     private formatEntry(e: ShadowLogEntry): string {
         const ts = fmtTs(e.timestamp);
-        const text = sanitizeMessage(e.messageText);
+        const text = safeForLog(e.messageText, MAX_MSG);
         const lines: string[] = [
             `## ${ts}`,
             '',
@@ -103,14 +114,14 @@ export class FoodShadowLogger {
 
     private fmtShadow(s: ShadowResult): string {
         switch (s.kind) {
-            case 'ok':                    return `{"action": "${s.action}", "confidence": ${s.confidence}}`;
+            case 'ok':                    return JSON.stringify({ action: s.action, confidence: s.confidence });
             case 'skipped-sample':        return 'skipped-sample';
             case 'skipped-no-caption':    return 'skipped-no-caption';
             case 'skipped-pending-flow':  return `skipped-pending-flow:${s.flow}`;
             case 'skipped-cook-mode':     return 'skipped-cook-mode';
             case 'skipped-number-select': return 'skipped-number-select';
             case 'legacy-skipped':        return 'legacy-skipped';
-            case 'parse-failed':          return `parse-failed (raw: ${JSON.stringify(s.raw.substring(0, MAX_RAW))})`;
+            case 'parse-failed':          return `parse-failed (raw: "${safeForLog(s.raw, MAX_RAW)}")`;
             case 'llm-error':             return `llm-error:${s.category}`;
         }
     }

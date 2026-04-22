@@ -64,7 +64,7 @@ describe('FoodShadowLogger', () => {
         expect(c).toMatch(/- \*\*Pending flow\*\*: \(none\)/);
         expect(c).toMatch(/- \*\*Core route\*\*: food \/ user wants to add items to the grocery list \(confidence: 0\.88, source: intent, verifier: agreed\)/);
         expect(c).toMatch(/- \*\*Regex winner\*\*: grocery_add → "user wants to add items to the grocery list"/);
-        expect(c).toMatch(/- \*\*Shadow\*\*: \{"action": "user wants to add items to the grocery list", "confidence": 0\.94\}/);
+        expect(c).toMatch(/- \*\*Shadow\*\*: \{"action":"user wants to add items to the grocery list","confidence":0\.94\}/);
         expect(c).toMatch(/- \*\*Verdict\*\*: agree/);
     });
 
