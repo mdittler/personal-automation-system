@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     FOOD_SHADOW_LABELS,
+    INTENTIONALLY_UNMAPPED_LABELS,
     REGEX_TO_MANIFEST_MAP,
     normalizeRegexLabel,
     isValidShadowLabel,
@@ -114,6 +115,38 @@ describe('REGEX_TO_MANIFEST_MAP', () => {
     it('unknown regex label falls back to "none"', () => {
         expect(normalizeRegexLabel('totally_fake_label')).toBe('none');
         expect(normalizeRegexLabel('')).toBe('none');
+    });
+
+    // Codex B.1.5: route-dispatch sentinel should NOT be a map entry — behavior via fallback
+    it('does NOT contain "(route-dispatched)" as a key — fallback handles it', () => {
+        expect(Object.keys(REGEX_TO_MANIFEST_MAP)).not.toContain('(route-dispatched)');
+        // Fallback still returns 'none' (same behavior as the removed explicit entry)
+        expect(normalizeRegexLabel('(route-dispatched)')).toBe('none');
+    });
+});
+
+// Codex B.1.5: executable documentation for intentionally-unmapped manifest labels
+describe('INTENTIONALLY_UNMAPPED_LABELS', () => {
+    it('contains exactly 2 labels', () => {
+        expect(INTENTIONALLY_UNMAPPED_LABELS).toHaveLength(2);
+    });
+
+    it('every unmapped label is in FOOD_SHADOW_LABELS', () => {
+        for (const label of INTENTIONALLY_UNMAPPED_LABELS) {
+            expect(FOOD_SHADOW_LABELS, `missing from taxonomy: ${label}`).toContain(label);
+        }
+    });
+
+    it('no unmapped label appears as a value in REGEX_TO_MANIFEST_MAP', () => {
+        const mappedValues = new Set(Object.values(REGEX_TO_MANIFEST_MAP));
+        for (const label of INTENTIONALLY_UNMAPPED_LABELS) {
+            expect(mappedValues, `${label} should not be reachable via regex`).not.toContain(label);
+        }
+    });
+
+    it('is exactly the two LLM-only orphan intents (snapshot)', () => {
+        expect(INTENTIONALLY_UNMAPPED_LABELS).toContain('user wants to log an unfamiliar meal with a free-text description');
+        expect(INTENTIONALLY_UNMAPPED_LABELS).toContain('user wants to save a frequent meal as a quick-meal template');
     });
 });
 

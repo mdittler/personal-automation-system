@@ -150,16 +150,67 @@ describe('FoodShadowLogger', () => {
         expect(c).toContain('code');
     });
 
-    it('concurrent log() calls from different users all appear (no data loss)', async () => {
+    // Codex B.1.5 cleanup — safeForLog helper
+
+    it('truncates messageText at code-point boundary, not code-unit boundary (surrogate-safe)', async () => {
+        // 'a😀' = 1 ASCII + 1 emoji (2 UTF-16 code units) = 2 code points.
+        // 100 repetitions → 300 code units, 200 code points.
+        // substring(0,200) splits the last emoji → lone surrogate → JSON.stringify emits \ud83d.
+        const mixed = ('a' + '\u{1F600}').repeat(100);
+        await logger.log(sampleEntry({ messageText: mixed }));
+        const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        expect(c).not.toMatch(/\\ud83d|\\ude00/i);
+        const msgLine = c.split('\n').find((l) => l.startsWith('- **Message**:'));
+        expect(msgLine).toBeDefined();
+    });
+
+    it('ok action with embedded quote renders as valid JSON on the Shadow line', async () => {
+        // Raw interpolation `"${s.action}"` would produce invalid JSON for actions with quotes.
+        await logger.log(sampleEntry({ shadow: { kind: 'ok', action: 'user says "hi"', confidence: 0.9 } }));
+        const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        const shadowLine = c.split('\n').find((l) => l.startsWith('- **Shadow**:'));
+        expect(shadowLine).toBeDefined();
+        const jsonPart = shadowLine!.replace(/^- \*\*Shadow\*\*: /, '');
+        expect(() => JSON.parse(jsonPart)).not.toThrow();
+    });
+
+    it('parse-failed raw with emoji truncates at code-point boundary (surrogate-safe)', async () => {
+        // '😀x' = 3 code units; substring(0,100) lands at code unit 99 = '\uD83D' (lone high surrogate).
+        const raw = ('\u{1F600}' + 'x').repeat(100);
+        await logger.log(sampleEntry({ shadow: { kind: 'parse-failed', raw }, verdict: 'error' }));
+        const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        expect(c).not.toMatch(/\\ud83d|\\ude00/i);
+        const shadowLine = c.split('\n').find((l) => l.startsWith('- **Shadow**:'));
+        expect(shadowLine).toBeDefined();
+        expect(shadowLine).toContain('parse-failed');
+    });
+
+    it('concurrent log() calls produce complete entries with no interleaved blocks', async () => {
         const N = 20;
         await Promise.all(
             Array.from({ length: N }, (_, i) =>
                 logger.log(sampleEntry({ userId: `user-${i}`, messageText: `msg ${i}` })),
         ));
         const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        // Split on section headers: first chunk is frontmatter, rest are entries
+        const sections = c.split(/(?=^## )/m);
+        expect(sections[0]).toContain('title: Food Shadow Classifier Log');
+        const entries = sections.slice(1);
+        expect(entries).toHaveLength(N);
+        // Each entry must contain all 8 required field lines (partial interleave would break this)
+        const requiredFields = [
+            '**Message**', '**Kind**', '**User**', '**Pending flow**',
+            '**Core route**', '**Regex winner**', '**Shadow**', '**Verdict**',
+        ];
+        for (const entry of entries) {
+            for (const field of requiredFields) {
+                expect(entry, `missing ${field} in entry`).toContain(field);
+            }
+        }
+        // Every user appears exactly once (no duplicated entries)
         for (let i = 0; i < N; i++) {
-            expect(c, `missing user-${i}`).toContain(`user-${i}`);
-            expect(c, `missing msg ${i}`).toContain(`msg ${i}`);
+            const count = (c.match(new RegExp(`\\buser-${i}\\b`, 'g')) ?? []).length;
+            expect(count, `user-${i} should appear exactly once`).toBe(1);
         }
     });
 
