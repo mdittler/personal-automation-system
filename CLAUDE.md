@@ -127,7 +127,7 @@ All infrastructure (phases 0–30), food app (H1–H12b), security remediation (
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
 ### Current Priority: LLM Enhancement #2 (Food classifier)
-**D5c** is complete. **LLM Enhancement #2 Chunk A** (route-first dispatch — Food's `handleMessage` now consults `ctx.route` before the regex cascade; 11-intent allowlist, 41 new tests) is complete. Next: **Chunk B** — Food-local fast-tier shadow classifier.
+**D5c** is complete. **LLM Enhancement #2 Chunk A** (route-first dispatch — Food's `handleMessage` now consults `ctx.route` before the regex cascade; 9-intent allowlist after Codex review removed save/search due to regex overlap, ~74 net new tests) is complete. Next: **Chunk B** — Food-local fast-tier shadow classifier.
 
 Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`
 
