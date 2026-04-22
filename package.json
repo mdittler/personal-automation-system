@@ -19,13 +19,15 @@
 		"scaffold-app": "tsx core/src/cli/scaffold-app.ts",
 		"install-app": "tsx core/src/cli/install-app.ts",
 		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",
-		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts"
+		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts",
+		"load-test": "tsx scripts/load-test.ts"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",
+		"pino": "^10.3.1",
 		"tsx": "^4.19.0",
 		"typescript": "^5.7.0",
 		"vitest": "^3.0.0"

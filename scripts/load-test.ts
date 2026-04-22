@@ -6,15 +6,33 @@
  * kinds, collecting latency percentiles, per-household cost, and cap-hit
  * counts so that the D5c per-household limiter can be exercised end-to-end.
  *
- * Usage (once Task 6 is complete):
- *   pnpm tsx scripts/load-test.ts [--households=N] [--duration=60] [--concurrency=10]
+ * Usage:
+ *   pnpm load-test [--users=N] [--households=H] [--duration=S] [--report=path]
  *
  * This file also exports the Metrics layer (Task 5) and the quantile helper
  * so they can be unit-tested independently.
  */
 
-import { Writable } from 'node:stream';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { performance } from 'node:perf_hooks';
+import { Writable } from 'node:stream';
+import pino from 'pino';
+import { composeRuntime } from '../core/src/compose-runtime.js';
+import type { RuntimeHandle, RuntimeServices } from '../core/src/compose-runtime.js';
+import {
+	createStubProviderRegistry,
+} from '../core/src/testing/fixtures/stub-llm-provider.js';
+import { fakeTelegramService } from '../core/src/testing/fixtures/fake-telegram.js';
+import { seedUsers } from '../core/src/testing/fixtures/seed-users.js';
+import type { SeededUser } from '../core/src/testing/fixtures/seed-users.js';
+import { chatbotMessage, askMessage, foodMessage } from '../core/src/testing/fixtures/messages.js';
+import { requestContext } from '../core/src/services/context/request-context.js';
+import type { MessageContext } from '../core/src/types/telegram.js';
+import type { ProviderRegistry } from '../core/src/services/llm/providers/provider-registry.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -196,14 +214,248 @@ export function createCapCapturingTransport(metrics: Metrics): Writable {
 }
 
 // ---------------------------------------------------------------------------
-// Main entry point (Task 6 will flesh this out)
+// rewireStubCostTracker
 // ---------------------------------------------------------------------------
 
-async function main() {
-	console.log('load-test harness not yet fully implemented (Task 6)');
-	process.exit(0);
+/**
+ * After composeRuntime() returns, the StubProvider inside the registry was
+ * constructed with a no-op cost tracker. Patch it to use the real CostTracker
+ * so that all simulated LLM calls are attributed correctly.
+ */
+function rewireStubCostTracker(
+	costTracker: unknown,
+	_runtime: RuntimeHandle,
+	providerRegistry: ProviderRegistry,
+): void {
+	const provider = providerRegistry.get('stub');
+	if (!provider) {
+		throw new Error('rewireStubCostTracker: stub provider not found in registry — check provider ID');
+	}
+	(provider as any).costTracker = costTracker;
+}
+
+// ---------------------------------------------------------------------------
+// worker helpers
+// ---------------------------------------------------------------------------
+
+function pickKind(): TrafficKind {
+	const r = Math.random();
+	if (r < 0.70) return 'chatbot';
+	if (r < 0.90) return 'ask';
+	return 'food';
+}
+
+function buildMessage(kind: TrafficKind, user: SeededUser, i: number): MessageContext {
+	if (kind === 'chatbot') return chatbotMessage(user.id, i);
+	if (kind === 'ask') return askMessage(user.id, i);
+	return foodMessage(user.id, i);
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
+}
+
+async function worker(
+	user: SeededUser,
+	runtime: RuntimeHandle,
+	metrics: Metrics,
+	endAt: number,
+): Promise<void> {
+	let i = 0;
+	while (Date.now() < endAt) {
+		const kind = pickKind();
+		const msg = buildMessage(kind, user, i++);
+		const t0 = performance.now();
+		try {
+			await requestContext.run({ userId: user.id, householdId: user.householdId }, () =>
+				runtime.services.router.routeMessage(msg),
+			);
+			metrics.record(kind, performance.now() - t0, 'ok');
+		} catch {
+			metrics.record(kind, performance.now() - t0, 'err');
+		}
+		// Think time: 500ms–1500ms (shortened for reasonable test runs)
+		await sleep(500 + Math.random() * 1000);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// verifyAttribution
+// ---------------------------------------------------------------------------
+
+async function verifyAttribution(
+	services: RuntimeServices,
+	_metrics: Metrics,
+): Promise<boolean> {
+	// Wait for any in-flight writes to complete
+	await services.costTracker.drainWrites();
+
+	const markdown = await services.costTracker.readUsage();
+	const rows = markdown.split('\n').filter((l: string) => l.startsWith('| 2'));
+	let allCorrect = true;
+	for (const row of rows) {
+		const cols = row.split('|').slice(1, -1).map((c: string) => c.trim());
+		if (cols.length < 9) continue;
+		const userId = cols[7];
+		const householdId = cols[8];
+		if (!householdId || householdId === '-') continue; // platform-attributed rows
+		const expected = services.householdService.getHouseholdForUser(userId);
+		if (expected && expected !== householdId) {
+			console.error(
+				`Attribution mismatch: user=${userId} expected=${expected} actual=${householdId}`,
+			);
+			allCorrect = false;
+		}
+	}
+	return allCorrect;
+}
+
+// ---------------------------------------------------------------------------
+// renderReport
+// ---------------------------------------------------------------------------
+
+function renderReport(
+	metrics: Metrics,
+	opts: {
+		users: number;
+		households: number;
+		duration: number;
+		correct: boolean;
+		householdIds: string[];
+	},
+): string {
+	const s = metrics.summary();
+	const today = new Date().toISOString().slice(0, 10);
+	const fms = (n: number) => (Number.isNaN(n) ? 'n/a' : `${Math.round(n)}ms`);
+	const latencyRows = ALL_KINDS
+		.map((k) => {
+			const ks = s.byKind[k];
+			return `| ${k} | ${ks.count} | ${ks.errorCount} | ${fms(ks.p50)} | ${fms(ks.p95)} | ${fms(ks.p99)} |`;
+		})
+		.join('\n');
+	const totalRow = `| **overall** | ${s.overall.count} | ${s.overall.errorCount} | ${fms(s.overall.p50)} | ${fms(s.overall.p95)} | ${fms(s.overall.p99)} |`;
+
+	const costRows = opts.householdIds
+		.map((hhId) => {
+			const cost = metrics.getHouseholdCost(hhId);
+			return `| ${hhId} | $${cost.toFixed(4)} |`;
+		})
+		.join('\n');
+
+	const capStr = Object.entries(s.capHits)
+		.map(([k, v]) => `- ${k}: ${v}`)
+		.join('\n');
+
+	return `# PAS Load Test Report — ${today}
+
+**Users:** ${opts.users}  **Households:** ${opts.households}  **Duration:** ${opts.duration}s
+**Attribution correctness:** ${opts.correct ? 'PASS ✓' : 'FAIL ✗'}
+
+## Latency
+| Kind | Count | Errors | p50 | p95 | p99 |
+|---|---|---|---|---|---|
+${latencyRows}
+${totalRow}
+
+## Per-household cost
+| Household | Cost ($) |
+|---|---|
+${costRows}
+
+## Cap triggers
+${capStr}
+
+## Baselines
+- Max writeQueue in-flight: ${metrics.getMaxInFlightWrites()}
+- file-mutex contention: not measured (future)
+- Router same-user interleaving: not measured (future)
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+	const { values: args } = parseArgs({
+		options: {
+			users:      { type: 'string', default: '40' },
+			households: { type: 'string', default: '8' },
+			duration:   { type: 'string', default: '120' },
+			report:     { type: 'string', default: '' },
+		},
+	});
+
+	const users      = parseInt(args.users ?? '40', 10);
+	const households = parseInt(args.households ?? '8', 10);
+	const duration   = parseInt(args.duration ?? '120', 10);
+	const today      = new Date().toISOString().slice(0, 10);
+	const report     = args.report || `docs/load-test-report-${today}.md`;
+
+	console.log(`Starting load test: ${users} users × ${households} households × ${duration}s`);
+
+	let runtime: RuntimeHandle | undefined;
+	const tempDir = await mkdtemp(join(tmpdir(), 'pas-load-test-'));
+
+	try {
+		const metrics = new Metrics();
+		const logger = pino({}, createCapCapturingTransport(metrics));
+
+		const seed = await seedUsers({ dataDir: tempDir, users, households });
+
+		const providerRegistry = createStubProviderRegistry(
+			{ record: async () => {}, estimateCost: () => 0, flush: async () => {}, readUsage: async () => '' } as any,
+			logger,
+		);
+
+		runtime = await composeRuntime({
+			dataDir: join(tempDir, 'data'),
+			configPath: seed.configPath,
+			config: seed.config,
+			providerRegistry,
+			telegramService: fakeTelegramService(),
+			logger,
+		});
+
+		// Rewire stub provider to use real CostTracker
+		rewireStubCostTracker(runtime.services.costTracker, runtime, providerRegistry);
+
+		// Run workers
+		const endAt = Date.now() + duration * 1000;
+		await Promise.all(seed.users.map((u) => worker(u, runtime!, metrics, endAt)));
+
+		// After workers finish, drain writes then read per-household costs from CostTracker
+		await runtime.services.costTracker.drainWrites();
+		for (const hhId of seed.households) {
+			const cost = runtime.services.costTracker.getMonthlyHouseholdCost(hhId);
+			if (cost > 0) metrics.recordCost(hhId, cost);
+		}
+
+		// Verify attribution correctness
+		const correct = await verifyAttribution(runtime.services, metrics);
+
+		// Render and write report
+		const reportText = renderReport(metrics, {
+			users,
+			households,
+			duration,
+			correct,
+			householdIds: seed.households,
+		});
+		await writeFile(report, reportText, 'utf8');
+		console.log(reportText);
+		console.log(`\nReport written to: ${report}`);
+
+		process.exitCode = correct ? 0 : 1;
+	} finally {
+		if (runtime) await runtime.dispose();
+		await rm(tempDir, { recursive: true, force: true });
+	}
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	main().catch(console.error);
+	main().catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
 }
