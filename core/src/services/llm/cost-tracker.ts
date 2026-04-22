@@ -242,10 +242,15 @@ export class CostTracker {
 			// Match markdown table data rows: must start with '| 20' (timestamp prefix)
 			if (!line.startsWith('| 20')) continue;
 
-			const cells = line
-				.split('|')
-				.map((c) => c.trim())
-				.filter(Boolean);
+			// Preserve interior empty cells so a blank column does not shift later columns
+			// left (e.g. a 9-col row with blank User would otherwise write household cost
+			// into the user bucket). Drop only the leading/trailing empties produced by the
+			// bounding pipes. Matches parseUsageMarkdown in core/src/gui/routes/llm-usage.ts.
+			// Regression: BUG-2 twin in docs/d5c-chunk-d-review-findings.md.
+			const parts = line.split('|').map((c) => c.trim());
+			if (parts[0] === '') parts.shift();
+			if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+			const cells = parts;
 			// Expect: timestamp | provider | model | inputTokens | outputTokens | cost | app | user
 			if (cells.length < 8) continue;
 

@@ -979,6 +979,51 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 		expect(result.perHousehold).toHaveLength(1);
 		expect(result.perHousehold[0].householdId).toBe('hh-real');
 	});
+
+	// B6 — both User and Household blank in a bordered 9-col row
+	it('9-col row with both User and Household blank → no household, no spurious user', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo |  |  |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(0);
+		expect(result.perUser).toHaveLength(0);
+	});
+
+	// B7 — blank App cell, populated User/Household → columns align positionally
+	it('9-col row with blank App cell still places User and Household in their correct slots', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  | alice | hh-1 |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+		expect(result.perUser).toHaveLength(1);
+		expect(result.perUser[0].userId).toBe('alice');
+	});
+
+	// B8 — row without a trailing bounding pipe still parses (hand-edited-log tolerance)
+	it('row without a trailing bounding pipe still parses positionally', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+	});
+
+	// B9 — consecutive blank interior cells do not collapse
+	it('9-col row with consecutive blank interior cells does not collapse columns', () => {
+		// Blank App AND blank User, household populated
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  |  | hh-consec |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-consec');
+	});
 });
 
 // ============================================================================

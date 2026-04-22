@@ -744,6 +744,40 @@ describe('CostTracker', () => {
 			expect(t.getMonthlyAppCost('chatbot')).toBeCloseTo(0.0105, 6);
 			expect(t.getMonthlyAppCost('notes')).toBeCloseTo(0.001, 6);
 		});
+
+		// Regression for BUG-2 twin — see docs/d5c-chunk-d-review-findings.md
+		it('9-col row with blank User cell attributes cost to household, NOT to user bucket', async () => {
+			const systemDir = join(tempDir, 'system');
+			// Blank User cell (not '-') while Household is populated.
+			// Under the buggy .filter(Boolean) parser, the blank User is dropped,
+			// cells shift left, and 'hh-real' lands in cells[7] (user) instead of cells[8].
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.500000 | echo |  | hh-real |`,
+			], 9);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			// Household bucket MUST have the cost
+			expect(t.getMonthlyHouseholdCost('hh-real')).toBeCloseTo(0.5, 6);
+			// Under the buggy parser 'hh-real' would be misread as the user — must not be
+			expect(t.getMonthlyUserCost('hh-real')).toBe(0);
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.5, 6);
+		});
+
+		it('9-col row with blank App cell still attributes user + household correctly', async () => {
+			const systemDir = join(tempDir, 'system');
+			await writeUsageLog(systemDir, [
+				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.250000 |  | alice | hh-1 |`,
+			], 9);
+
+			const t = new CostTracker(tempDir, logger);
+			await t.loadMonthlyCache();
+
+			expect(t.getMonthlyHouseholdCost('hh-1')).toBeCloseTo(0.25, 6);
+			expect(t.getMonthlyUserCost('alice')).toBeCloseTo(0.25, 6);
+			expect(t.getMonthlyTotalCost()).toBeCloseTo(0.25, 6);
+		});
 	});
 
 	// ---------------------------------------------------------------------------

@@ -136,12 +136,14 @@ These were test-design errors corrected during Phase 4. Not counted as impl bugs
 
 ## Deferred to `review/d5c-chunk-d`
 
-| # | File | Fix |
-|---|---|---|
-| D1 | `core/src/gui/routes/llm-usage.ts:240` | `overCap: monthlyCost > cap` |
-| D2 | `core/src/gui/routes/llm-usage.ts` (parseUsageMarkdown) | Remove `.filter(Boolean)` column-shift |
-| D3 | `core/src/services/metrics/message-rate-tracker.ts:11` | Import `PLATFORM_SYSTEM_HOUSEHOLD_ID` from auth-actor |
-| D4 | `core/src/gui/views/llm-usage.eta:90` | Align warning color token with URS "orange" (cosmetic) |
+| # | File | Fix | Status |
+|---|---|---|---|
+| D1 | `core/src/gui/routes/llm-usage.ts:240` | `overCap: monthlyCost > cap` | ✓ Done — `01623c4` |
+| D2 | `core/src/gui/routes/llm-usage.ts` (parseUsageMarkdown) | Remove `.filter(Boolean)` column-shift | ✓ Done — see BUG-2 commit on `review/d5c-chunk-d` |
+| D3 | `core/src/services/metrics/message-rate-tracker.ts:11` | Import `PLATFORM_SYSTEM_HOUSEHOLD_ID` from auth-actor | ✓ Done — see BUG-2 commit on `review/d5c-chunk-d` |
+| D4 | `core/src/gui/views/llm-usage.eta:90` | Align warning color token with URS "orange" (cosmetic) | Deferred — see `docs/open-items.md` |
+
+**Note:** The twin of D2 was also found in `CostTracker.rebuildFromLog` (`core/src/services/llm/cost-tracker.ts`) during planning. This was user-confirmed in scope and fixed in the BUG-2 commit alongside D2 and D3. A blank User cell in a persisted 9-col row would corrupt the monthly-cost cache at startup (household value leaked into the user bucket), potentially desynchronizing REQ-LLM-026 cost-cap enforcement from REQ-LLM-028 display.
 
 ---
 

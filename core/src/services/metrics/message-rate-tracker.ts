@@ -6,9 +6,10 @@
  * A cleanup timer prunes entries older than the window every 10 seconds.
  */
 
+import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../types/auth-actor.js';
+
 const WINDOW_MS = 60_000;
 const CLEANUP_INTERVAL_MS = 10_000;
-const PLATFORM_SENTINEL = '__platform__';
 
 interface Entry {
 	ts: number;
@@ -35,7 +36,7 @@ export class MessageRateTracker {
 	 */
 	recordMessage(householdId?: string): void {
 		if (this.disposed) return;
-		const hhId = householdId && householdId !== PLATFORM_SENTINEL ? householdId : PLATFORM_SENTINEL;
+		const hhId = householdId && householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID ? householdId : PLATFORM_SYSTEM_HOUSEHOLD_ID;
 		this.entries.push({ ts: Date.now(), householdId: hhId });
 	}
 
@@ -44,7 +45,7 @@ export class MessageRateTracker {
 		const cutoff = Date.now() - WINDOW_MS;
 		const seen = new Set<string>();
 		for (const e of this.entries) {
-			if (e.ts >= cutoff && e.householdId !== PLATFORM_SENTINEL) {
+			if (e.ts >= cutoff && e.householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID) {
 				seen.add(e.householdId);
 			}
 		}
@@ -66,7 +67,7 @@ export class MessageRateTracker {
 		const cutoff = Date.now() - WINDOW_MS;
 		const result = new Map<string, number>();
 		for (const e of this.entries) {
-			if (e.ts >= cutoff && e.householdId !== PLATFORM_SENTINEL) {
+			if (e.ts >= cutoff && e.householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID) {
 				result.set(e.householdId, (result.get(e.householdId) ?? 0) + 1);
 			}
 		}
