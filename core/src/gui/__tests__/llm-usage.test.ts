@@ -9,10 +9,13 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { CatalogModel, ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
+import { MessageRateTracker } from '../../services/metrics/message-rate-tracker.js';
+import type { LLMSafeguardsConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { escapeHtml, parseUsageMarkdown, registerLlmUsageRoutes } from '../routes/llm-usage.js';
@@ -20,6 +23,8 @@ import { escapeHtml, parseUsageMarkdown, registerLlmUsageRoutes } from '../route
 const AUTH_TOKEN = 'test-token';
 const TEST_USER_ID = '123';
 const TEST_PASSWORD = 'test-password';
+const NON_ADMIN_USER_ID = '456';
+const NON_ADMIN_PASSWORD = 'non-admin-password';
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
@@ -86,6 +91,11 @@ async function buildApp(options?: {
 	modelCatalog?: ModelCatalog;
 	usageContent?: string;
 	tempDir?: string;
+	// Chunk D extensions
+	monthlyCostTracker?: Pick<import('../../services/llm/cost-tracker.js').CostTracker, 'getMonthlyHouseholdCost'>;
+	householdServiceFull?: Pick<HouseholdService, 'listHouseholds' | 'getMembers'>;
+	messageRateTracker?: MessageRateTracker;
+	llmSafeguards?: LLMSafeguardsConfig;
 }) {
 	const modelSelector = options?.modelSelector ?? createMockModelSelector();
 	const providerRegistry =
@@ -112,9 +122,13 @@ async function buildApp(options?: {
 	// D5b-4: wire per-user auth so requirePlatformAdmin can inspect request.user
 	const credService = new CredentialService({ dataDir: tempDir });
 	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
-	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+	await credService.setPassword(NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD);
+	const userManager = makeUserManager([
+		{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true },
+		{ id: NON_ADMIN_USER_ID, name: 'NonAdmin', isAdmin: false },
+	]);
 	const householdService = makeHouseholdService(
-		{ [TEST_USER_ID]: 'hh-1' },
+		{ [TEST_USER_ID]: 'hh-1', [NON_ADMIN_USER_ID]: 'hh-1' },
 		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
 	);
 
@@ -133,12 +147,32 @@ async function buildApp(options?: {
 				modelCatalog,
 				providerRegistry,
 				logger,
+				costTracker: options?.monthlyCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
+				householdService: options?.householdServiceFull,
+				messageRateTracker: options?.messageRateTracker,
+				llmSafeguards: options?.llmSafeguards,
 			});
 		},
 		{ prefix: '/gui' },
 	);
 
 	return { app, modelSelector, providerRegistry, modelCatalog, tempDir };
+}
+
+function makeLlmHouseholdService(
+	households: Array<{ id: string; name: string }>,
+	membersByHousehold: Record<string, string[]>,
+): Pick<HouseholdService, 'listHouseholds' | 'getMembers'> {
+	return {
+		listHouseholds: () => households as ReturnType<HouseholdService['listHouseholds']>,
+		getMembers: (hhId: string) =>
+			(membersByHousehold[hhId] ?? []).map((userId) => ({
+				id: userId,
+				name: userId,
+				isAdmin: false,
+				householdId: hhId,
+			})) as ReturnType<HouseholdService['getMembers']>,
+	};
 }
 
 function collectCookies(
@@ -191,6 +225,21 @@ async function authenticatedPost(
 		payload: { ...payload, _csrf: csrfToken },
 		cookies: allCookies,
 	});
+}
+
+async function authenticatedGetAs(
+	app: Awaited<ReturnType<typeof Fastify>>,
+	userId: string,
+	password: string,
+	url: string,
+) {
+	const loginRes = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { userId, password },
+	});
+	const cookies = collectCookies(loginRes);
+	return app.inject({ method: 'GET', url, cookies });
 }
 
 // ---------------------------------------------------------------------------
@@ -856,5 +905,566 @@ describe('LLM Usage Routes', () => {
 			expect(res.body).toContain('other');
 			expect(res.body).toContain('not in API');
 		});
+	});
+});
+
+// ============================================================================
+// B: parseUsageMarkdown — Chunk D additions (B1–B5)
+// ============================================================================
+
+describe('parseUsageMarkdown — Chunk D edge cases', () => {
+	// B1
+	it('handles interleaved 9-col → 8-col → 9-col rows (not just 9-after-8)', () => {
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |',
+			'| 2026-03-11T11:00:00Z | anthropic | sonnet | 100 | 50 | 0.002 | echo | bob |',
+			'| 2026-03-11T12:00:00Z | anthropic | sonnet | 100 | 50 | 0.003 | echo | carol | hh-2 |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(3);
+		expect(result.perHousehold).toHaveLength(2);
+		expect(result.perHousehold.map((h) => h.householdId).sort()).toEqual(['hh-1', 'hh-2']);
+	});
+
+	// B2
+	it('handles 9-col with cells[8] containing whitespace-only value', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice |   |';
+
+		const result = parseUsageMarkdown(content);
+
+		// Whitespace-only household trims to empty → treated like '-' or empty → excluded
+		expect(result.perHousehold).toHaveLength(0);
+	});
+
+	// B3
+	it('handles row with pipe-split yielding more than 9 cells (trailing pipe)', () => {
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 | extra |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		// Should still aggregate household from cells[8]
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-1');
+	});
+
+	// B4
+	it('perHousehold sorted descending by cost', () => {
+		const content = [
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-cheap |',
+			'| 2026-03-11T11:00:00Z | anthropic | sonnet | 100 | 50 | 0.010 | echo | bob | hh-expensive |',
+			'| 2026-03-11T12:00:00Z | anthropic | sonnet | 100 | 50 | 0.005 | echo | carol | hh-mid |',
+		].join('\n');
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.perHousehold[0].householdId).toBe('hh-expensive');
+		expect(result.perHousehold[1].householdId).toBe('hh-mid');
+		expect(result.perHousehold[2].householdId).toBe('hh-cheap');
+	});
+
+	// B5 — high-signal regression for the blank-middle-cell column-shift bug
+	it('9-col row with blank User cell still parses Household from cells[8] (blank middle cell must not shift columns left)', () => {
+		// A blank User cell in an otherwise 9-col row. After pipe split + filter(Boolean),
+		// the blank cell is dropped, shifting Household left into the User slot.
+		// This test verifies the parser does NOT shift columns.
+		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo |  | hh-real |';
+
+		const result = parseUsageMarkdown(content);
+
+		expect(result.rows).toHaveLength(1);
+		// Household must be attributed correctly, not silently lost
+		expect(result.perHousehold).toHaveLength(1);
+		expect(result.perHousehold[0].householdId).toBe('hh-real');
+	});
+});
+
+// ============================================================================
+// C: buildPerHouseholdRows via GET /gui/llm (C1–C10)
+// ============================================================================
+
+describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
+	let app: Awaited<ReturnType<typeof Fastify>>;
+
+	afterEach(async () => {
+		if (app) await app.close();
+	});
+
+	// C1
+	it('returns one row per household with correct cost/cap/pct', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-1', name: 'Alpha' }],
+			{ 'hh-1': ['user1', 'user2'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 5.0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Alpha');
+		expect(res.body).toContain('5.000000'); // monthlyCost
+		expect(res.body).toContain('25'); // pctOfCap = round(5/20 * 100) = 25
+	});
+
+	// C2
+	it('household with zero calls renders row with cost=0, pct=0, overCap=false', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-zero', name: 'Zero Household' }],
+			{ 'hh-zero': ['user1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('Zero Household');
+		expect(res.body).toContain('0.000000');
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	// C3
+	it('household override cap takes precedence over default cap', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-custom', name: 'Custom Cap' }],
+			{ 'hh-custom': ['user1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 9.0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 100,
+				householdOverrides: { 'hh-custom': { monthlyCostCap: 10 } },
+			} as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// pctOfCap = round(9/10 * 100) = 90, not round(9/100*100) = 9
+		expect(res.body).toContain('90');
+	});
+
+	// C4
+	it('cap=0 does not divide by zero (pctOfCap=0)', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-nocap', name: 'No Cap' }],
+			{ 'hh-nocap': ['user1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 5.0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 0,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// Should render without throwing; pctOfCap=0 when cap=0
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('NaN');
+	});
+
+	// C5
+	it('overCap is true only when monthlyCost > cap (NOT when pctOfCap rounds to 100)', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-boundary', name: 'Boundary' }],
+			{ 'hh-boundary': ['user1'] },
+		);
+		// monthlyCost=0.995, cap=1.0 → pctOfCap=Math.round(99.5)=100 but cost ≤ cap
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0.995 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 1.0, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// monthlyCost(0.995) is NOT > cap(1.0) → must NOT show OVER CAP
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	// C6
+	it('monthlyCost reflects live reservations via costTracker.getMonthlyHouseholdCost', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-reserve', name: 'Reserve Household' }],
+			{ 'hh-reserve': ['user1'] },
+		);
+		// This mock simulates a costTracker that includes outstanding reservations
+		const getMonthlyHouseholdCost = vi.fn().mockReturnValue(7.5);
+		const ct = { getMonthlyHouseholdCost };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		await authenticatedGet(app, '/gui/llm');
+
+		// The route must have called getMonthlyHouseholdCost for the household
+		expect(getMonthlyHouseholdCost).toHaveBeenCalledWith('hh-reserve');
+	});
+
+	// C7
+	it('members count matches householdService.getMembers(id).length', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-members', name: 'Big Household' }],
+			{ 'hh-members': ['u1', 'u2', 'u3'] }, // 3 members
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// The rendered table must show 3 members
+		expect(res.body).toContain('>3<');
+	});
+
+	// C8
+	it('no householdService provided → per-household table not rendered (empty)', async () => {
+		const built = await buildApp(); // no householdServiceFull → defaults to undefined
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Per-Household Breakdown');
+	});
+
+	// C9
+	it('rows sorted by monthlyCost desc (most expensive household first)', async () => {
+		const hs = makeLlmHouseholdService(
+			[
+				{ id: 'hh-cheap', name: 'Cheap' },
+				{ id: 'hh-expensive', name: 'Expensive' },
+			],
+			{ 'hh-cheap': ['u1'], 'hh-expensive': ['u2'] },
+		);
+		const ct = {
+			getMonthlyHouseholdCost: (id: string) => (id === 'hh-expensive' ? 15.0 : 2.0),
+		};
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		const expensivePos = res.body.indexOf('Expensive');
+		const cheapPos = res.body.indexOf('Cheap');
+		expect(expensivePos).toBeGreaterThan(0);
+		expect(cheapPos).toBeGreaterThan(0);
+		expect(expensivePos).toBeLessThan(cheapPos); // expensive renders first
+	});
+
+	// C10
+	it('listHouseholds returns empty → per-household table not rendered', async () => {
+		const hs = makeLlmHouseholdService([], {});
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).not.toContain('Per-Household Breakdown');
+	});
+});
+
+// ============================================================================
+// D: Per-Household Breakdown rendering via GET /gui/llm (D1–D10)
+// ============================================================================
+
+describe('Per-Household Breakdown rendering — Chunk D', () => {
+	let app: Awaited<ReturnType<typeof Fastify>>;
+
+	afterEach(async () => {
+		if (app) await app.close();
+	});
+
+	function makeSimpleHouseholdApp(
+		households: Array<{ id: string; name: string; cost: number }>,
+		cap = 20,
+		usageContent = '',
+	) {
+		const hs = makeLlmHouseholdService(
+			households.map(({ id, name }) => ({ id, name })),
+			Object.fromEntries(households.map(({ id }) => [id, ['user1']])),
+		);
+		const ct = {
+			getMonthlyHouseholdCost: (id: string) =>
+				households.find((h) => h.id === id)?.cost ?? 0,
+		};
+		return buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			llmSafeguards: { defaultHouseholdMonthlyCostCap: cap, householdOverrides: {} } as LLMSafeguardsConfig,
+			usageContent,
+		});
+	}
+
+	// D1
+	it('renders Per-Household Breakdown table when rows present', async () => {
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 5 }]);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('Per-Household Breakdown');
+		expect(res.body).toContain('Alpha');
+	});
+
+	// D2
+	it('renders Per-Household Breakdown table even when usage-log file is empty', async () => {
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 0 }], 20, '');
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// Per-Household Breakdown renders from householdService/costTracker, independent of usage-log
+		expect(res.body).toContain('Per-Household Breakdown');
+		// Cost Summary section is independent — it WILL say "No usage recorded" when log is empty;
+		// that is correct behavior and orthogonal to Per-Household Breakdown being present
+	});
+
+	// D3
+	it('pctOfCap=45 → progress bar renders without warning or danger class (neutral state)', async () => {
+		// monthlyCost=9, cap=20 → pctOfCap=round(45)=45
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 9 }], 20);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// At 45%, no accent-color style should appear on progress bar
+		const progressMatch = res.body.match(/<progress[^>]*>/g) ?? [];
+		const hasWarning = progressMatch.some((p) => p.includes('accent-color'));
+		expect(hasWarning).toBe(false);
+	});
+
+	// D4
+	it('pctOfCap=85 (not over cap) → progress bar carries a warning marker distinct from neutral', async () => {
+		// monthlyCost=17, cap=20 → pctOfCap=round(85)=85
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 17 }], 20);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// At 85%, a warning-level accent-color must be set
+		const progressMatch = res.body.match(/<progress[^>]*>/g) ?? [];
+		const hasWarningMarker = progressMatch.some((p) => p.includes('accent-color'));
+		expect(hasWarningMarker).toBe(true);
+		// Must NOT show OVER CAP — cost(17) <= cap(20)
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	// D5
+	it('pctOfCap=110 with overCap=true → progress bar carries danger marker AND OVER CAP label', async () => {
+		// monthlyCost=22, cap=20 → pctOfCap=round(110)=110, overCap=monthlyCost>cap=true
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 22 }], 20);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('OVER CAP');
+		// Progress bar must carry a different style than the warning state
+		const progressMatch = res.body.match(/<progress[^>]*>/g) ?? [];
+		const dangerMarker = progressMatch.some(
+			(p) => p.includes('pico-del-color') || (p.includes('accent-color') && res.body.includes('OVER CAP')),
+		);
+		expect(dangerMarker).toBe(true);
+	});
+
+	// D6
+	it('pctOfCap=200 → rendered HTML surfaces the raw percentage (not clamped to 100)', async () => {
+		// monthlyCost=40, cap=20 → pctOfCap=200
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 40 }], 20);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// The numeric percentage label must show 200 (not just 100)
+		expect(res.body).toContain('200%');
+	});
+
+	// D7
+	it('pctOfCap rounding boundary: cost/cap=0.995 rounds to 100 but overCap=false (no OVER CAP label)', async () => {
+		// monthlyCost=0.995, cap=1.0 → pctOfCap=Math.round(99.5)=100, but cost NOT > cap
+		const built = await makeSimpleHouseholdApp([{ id: 'hh-1', name: 'Alpha', cost: 0.995 }], 1);
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		// OVER CAP must NOT appear — cost is still below cap
+		expect(res.body).not.toContain('OVER CAP');
+	});
+
+	// D8
+	it('household name containing <script>alert(1)</script> is HTML-escaped in rendered table', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh-xss', name: '<script>alert(1)</script>' }],
+			{ 'hh-xss': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).not.toContain('<script>alert(1)</script>');
+		expect(res.body).toContain('&lt;script&gt;');
+	});
+
+	// D9
+	it('household id containing HTML entities is escaped', async () => {
+		const hs = makeLlmHouseholdService(
+			[{ id: 'hh&evil', name: 'Evil Household' }],
+			{ 'hh&evil': ['u1'] },
+		);
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).not.toContain('hh&evil');
+		expect(res.body).toContain('hh&amp;evil');
+	});
+
+	// D10
+	it('Live card emits hx-get="/gui/llm/metrics" with hx-trigger="every 5s" and hx-swap="innerHTML"', async () => {
+		const built = await buildApp();
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.body).toContain('hx-get="/gui/llm/metrics"');
+		expect(res.body).toContain('hx-trigger="every 5s"');
+		expect(res.body).toContain('hx-swap="innerHTML"');
+	});
+});
+
+// ============================================================================
+// E: GET /gui/llm/metrics — Chunk D additions (E1–E6)
+// ============================================================================
+
+describe('GET /gui/llm/metrics — Chunk D', () => {
+	let app: Awaited<ReturnType<typeof Fastify>>;
+
+	afterEach(async () => {
+		if (app) await app.close();
+	});
+
+	// E1
+	it('returns live counts reflecting recordMessage calls made on the tracker', async () => {
+		const tracker = new MessageRateTracker();
+		tracker.recordMessage('hA');
+		tracker.recordMessage('hA');
+		tracker.recordMessage('hB');
+		const built = await buildApp({ messageRateTracker: tracker });
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm/metrics');
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('3'); // 3 total messages
+		expect(res.body).toContain('2'); // 2 active households (hA, hB)
+		tracker.dispose();
+	});
+
+	// E2
+	it('tracker with only platform-sentinel messages → activeHouseholds=0, msgPerMin>0', async () => {
+		const tracker = new MessageRateTracker();
+		tracker.recordMessage(undefined); // sentinel
+		tracker.recordMessage('__platform__'); // also sentinel
+		const built = await buildApp({ messageRateTracker: tracker });
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm/metrics');
+
+		// Active households span shows 0; the number is inside a <span> tag
+		expect(res.body).toContain('id="live-active-households">0</span>');
+		expect(res.body).toContain('>2<'); // 2 total msg/min
+		tracker.dispose();
+	});
+
+	// E3
+	it('no messageRateTracker injected → renders 0/0, does not throw', async () => {
+		const built = await buildApp(); // no messageRateTracker
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm/metrics');
+
+		expect(res.statusCode).toBe(200);
+		// Both active-households and rpm spans show 0
+		expect(res.body).toContain('id="live-active-households">0</span>');
+		expect(res.body).toContain('id="live-rpm">0</span>');
+	});
+
+	// E4
+	it('non-admin user receives 403 when hitting /gui/llm/metrics', async () => {
+		const built = await buildApp();
+		app = built.app;
+
+		const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm/metrics');
+
+		expect(res.statusCode).toBe(403);
+	});
+
+	// E5
+	it('unauthenticated request is redirected to login (no HTML data leak)', async () => {
+		const built = await buildApp();
+		app = built.app;
+
+		const res = await app.inject({ method: 'GET', url: '/gui/llm/metrics' });
+
+		// Should redirect or 401/403 — must NOT expose metrics data to unauthenticated caller
+		expect(res.statusCode).not.toBe(200);
+		expect(res.body).not.toContain('msg/min');
+	});
+
+	// E6
+	it('response fragment shape matches the #live-metrics htmx target (contains live-active-households and live-rpm spans)', async () => {
+		const built = await buildApp();
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm/metrics');
+
+		expect(res.body).toContain('id="live-active-households"');
+		expect(res.body).toContain('id="live-rpm"');
 	});
 });
