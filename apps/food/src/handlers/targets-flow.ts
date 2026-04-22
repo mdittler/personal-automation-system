@@ -381,3 +381,12 @@ async function applyValueAndAdvance(
 export function __resetTargetsFlowForTests(): void {
 	pending.clear();
 }
+
+/** Test-only — sets an awaiting-custom-input state so handleTargetsFlowReply processes text. */
+export function __setTargetsFlowAwaitingCustomInputForTests(userId: string): void {
+	pending.set(userId, {
+		step: 'awaiting_calories',
+		awaitingCustomInput: true,
+		expiresAt: Date.now() + 10 * 60 * 1000,
+	});
+}
