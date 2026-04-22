@@ -103,4 +103,13 @@ describe('seedUsers', () => {
 			'seedUsers: households must be > 0',
 		);
 	});
+
+	it('throws a meaningful error when users <= 0', async () => {
+		await expect(seedUsers({ dataDir, users: 0, households: 1 })).rejects.toThrow(
+			'seedUsers: users must be > 0',
+		);
+		await expect(seedUsers({ dataDir, users: -1, households: 1 })).rejects.toThrow(
+			'seedUsers: users must be > 0',
+		);
+	});
 });

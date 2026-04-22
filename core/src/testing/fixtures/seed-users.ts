@@ -39,6 +39,9 @@ export async function seedUsers(opts: SeedOptions): Promise<SeedResult> {
 	if (householdCount <= 0) {
 		throw new Error('seedUsers: households must be > 0');
 	}
+	if (userCount <= 0) {
+		throw new Error('seedUsers: users must be > 0');
+	}
 
 	await mkdir(join(dataDir, 'data', 'system'), { recursive: true });
 

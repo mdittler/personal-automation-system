@@ -24,6 +24,7 @@ import pino from 'pino';
 import { composeRuntime } from '../core/src/compose-runtime.js';
 import type { RuntimeHandle, RuntimeServices } from '../core/src/compose-runtime.js';
 import {
+	StubProvider,
 	createStubProviderRegistry,
 } from '../core/src/testing/fixtures/stub-llm-provider.js';
 import { fakeTelegramService } from '../core/src/testing/fixtures/fake-telegram.js';
@@ -33,6 +34,7 @@ import { chatbotMessage, askMessage, foodMessage } from '../core/src/testing/fix
 import { requestContext } from '../core/src/services/context/request-context.js';
 import type { MessageContext } from '../core/src/types/telegram.js';
 import type { ProviderRegistry } from '../core/src/services/llm/providers/provider-registry.js';
+import type { CostTracker } from '../core/src/services/llm/cost-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -223,15 +225,17 @@ export function createCapCapturingTransport(metrics: Metrics): Writable {
  * so that all simulated LLM calls are attributed correctly.
  */
 function rewireStubCostTracker(
-	costTracker: unknown,
-	_runtime: RuntimeHandle,
+	costTracker: CostTracker,
 	providerRegistry: ProviderRegistry,
 ): void {
 	const provider = providerRegistry.get('stub');
 	if (!provider) {
 		throw new Error('rewireStubCostTracker: stub provider not found in registry — check provider ID');
 	}
-	(provider as any).costTracker = costTracker;
+	if (!(provider instanceof StubProvider)) {
+		throw new Error('rewireStubCostTracker: provider is not a StubProvider — cannot rewire');
+	}
+	provider.setCostTracker(costTracker);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +422,7 @@ async function main(): Promise<void> {
 		});
 
 		// Rewire stub provider to use real CostTracker
-		rewireStubCostTracker(runtime.services.costTracker, runtime, providerRegistry);
+		rewireStubCostTracker(runtime.services.costTracker, providerRegistry);
 
 		// Run workers
 		const endAt = Date.now() + duration * 1000;

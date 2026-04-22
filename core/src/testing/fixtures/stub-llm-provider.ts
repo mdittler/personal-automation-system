@@ -130,6 +130,16 @@ export class StubProvider extends BaseProvider {
 	protected override getRetryOptions() {
 		return { maxRetries: 0, initialDelayMs: 0, logger: this.logger };
 	}
+
+	/**
+	 * Rewire the cost tracker post-construction.
+	 * Used by the load-test harness after composeRuntime() returns the real CostTracker.
+	 */
+	setCostTracker(ct: CostTracker): void {
+		// BaseProvider.costTracker is protected readonly; this method on the
+		// subclass is the single sanctioned escape hatch for test rewiring.
+		(this as unknown as { costTracker: CostTracker }).costTracker = ct;
+	}
 }
 
 /**
