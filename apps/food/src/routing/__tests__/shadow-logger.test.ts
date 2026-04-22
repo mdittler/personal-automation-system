@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FoodShadowLogger, type ShadowLogEntry } from '../shadow-logger.js';
@@ -171,9 +171,9 @@ describe('FoodShadowLogger', () => {
     });
 
     it('propagates write errors to caller (caller controls catch policy)', async () => {
-        // Write the file as a directory to provoke a write error
-        const badDir = join(dir, 'shadow-classifier-log.md');
-        mkdtempSync(badDir);  // create as directory, not file
+        // Create the log path as a directory to provoke a write error
+        const badPath = join(dir, 'shadow-classifier-log.md');
+        mkdirSync(badPath);
         await expect(logger.log(sampleEntry())).rejects.toThrow();
     });
 });
