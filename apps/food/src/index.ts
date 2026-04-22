@@ -404,7 +404,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// LLM Enhancement #2 Chunk A: trust core router's LLM-derived route when it maps
 	// to an allowlisted handler.
-	if (await dispatchByRoute(ctx, ROUTE_HANDLERS)) return;
+	if (await dispatchByRoute(ctx, ROUTE_HANDLERS, { logger: services.logger })) return;
 
 	// Try to detect intent from the message
 	const lower = text.toLowerCase();

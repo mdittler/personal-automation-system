@@ -238,7 +238,7 @@ describe('dispatchByRoute — custom appId argument', () => {
 		const handler = vi.fn(() => Promise.resolve());
 		const ctx = makeCtx(makeRoute({ appId: 'shopping', intent: 'K1', source: 'intent', confidence: 0.92, verifierStatus: 'agreed' }));
 
-		const result = await dispatchByRoute(ctx, { K1: handler }, 'shopping');
+		const result = await dispatchByRoute(ctx, { K1: handler }, { appId: 'shopping' });
 
 		expect(result).toBe(true);
 		expect(handler).toHaveBeenCalledOnce();
@@ -249,7 +249,7 @@ describe('dispatchByRoute — custom appId argument', () => {
 		const ctx = makeCtx(makeRoute({ appId: 'food', intent: 'K1', source: 'intent', confidence: 0.92, verifierStatus: 'agreed' }));
 
 		// Passing 'shopping' as appId, but route says 'food' → mismatch
-		const result = await dispatchByRoute(ctx, { K1: handler }, 'shopping');
+		const result = await dispatchByRoute(ctx, { K1: handler }, { appId: 'shopping' });
 
 		expect(result).toBe(false);
 		expect(handler).not.toHaveBeenCalled();
