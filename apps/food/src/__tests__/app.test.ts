@@ -3,6 +3,7 @@ import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import {
 	handleCallbackQuery,
 	handleCommand,
@@ -95,6 +96,7 @@ describe('Food App', () => {
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 		vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
 		await init(services);
+		__clearShadowDepsForTests();
 	});
 
 	describe('init', () => {

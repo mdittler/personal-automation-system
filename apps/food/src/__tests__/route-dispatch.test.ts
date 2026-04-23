@@ -23,7 +23,16 @@ import { stringify } from 'yaml';
 import { init, handleMessage } from '../index.js';
 import type { Household, Recipe } from '../types.js';
 import { beginTargetsFlow, __resetTargetsFlowForTests, __setTargetsFlowAwaitingCustomInputForTests } from '../handlers/targets-flow.js';
-import { hasPendingCookRecipe, handleCookCommand } from '../handlers/cook-mode.js';
+import { hasPendingCookRecipe, handleCookCommand, isCookModeActive } from '../handlers/cook-mode.js';
+import { createSession, endSession } from '../services/cook-session.js';
+import {
+    __setShadowDepsForTests,
+    __clearShadowDepsForTests,
+    __flushShadowForTests,
+    type ShadowClassifierInterface,
+    type ShadowLoggerInterface,
+} from '../routing/shadow-integration.js';
+import type { ShadowLogEntry, ShadowResult } from '../routing/shadow-logger.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -543,6 +552,180 @@ describe('route-dispatch integration', () => {
 				msg.includes('for dinner') || msg.includes('meal plan'),
 			);
 			expect(dinnerCalls, 'Dinner handler must not fire when cook recipe is pending').toHaveLength(0);
+		});
+	});
+
+	// =========================================================================
+	// Group 4b: Shadow gate-ordering guards
+	//
+	// Mirrors Group 4's scenarios but asserts on shadow log entries, confirming
+	// early-exit gates emit the correct skipped-* variants and that the shadow
+	// classifier is never invoked on these paths.  A future refactor that moves
+	// finalizeShadow above an early-exit gate would break these tests.
+	// =========================================================================
+
+	describe('Group 4b: shadow gate-ordering guards (pending-flow / cook-mode / number-select)', () => {
+		// --- Inline capture logger + never-calling classifier stub ---
+
+		class CaptureShadowLogger implements ShadowLoggerInterface {
+			entries: ShadowLogEntry[] = [];
+			async log(entry: ShadowLogEntry): Promise<void> { this.entries.push(entry); }
+		}
+
+		function makeNeverClassifier(): ShadowClassifierInterface & { callCount: number } {
+			const stub = {
+				callCount: 0,
+				async classify(_text: string, _rate: number): Promise<ShadowResult> {
+					stub.callCount++;
+					return { kind: 'ok', action: 'none', confidence: 0 };
+				},
+			};
+			return stub;
+		}
+
+		let captureLogger: CaptureShadowLogger;
+		let neverClassifier: ReturnType<typeof makeNeverClassifier>;
+
+		beforeEach(() => {
+			captureLogger = new CaptureShadowLogger();
+			neverClassifier = makeNeverClassifier();
+			__setShadowDepsForTests(neverClassifier, captureLogger);
+		});
+
+		afterEach(() => {
+			__clearShadowDepsForTests();
+			endSession('user1');  // clean up any active cook session created in this group
+		});
+
+		// ------------------------------------------------------------------
+		// Test 1: targets-flow reply preempts shadow (skipped-pending-flow)
+		// ------------------------------------------------------------------
+		it('targets-flow reply: skipped-pending-flow logged, classifier not called', async () => {
+			__setTargetsFlowAwaitingCustomInputForTests('user1');
+
+			const ctx = createTestMessageContext({
+				userId: 'user1',
+				text: '2000',
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.95 }),
+			});
+			await handleMessage(ctx);
+			await __flushShadowForTests();
+
+			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(0);
+			expect(captureLogger.entries).toHaveLength(1);
+			const entry = captureLogger.entries[0]!;
+			expect(entry.shadow).toMatchObject({ kind: 'skipped-pending-flow', flow: 'targets-set' });
+			expect(entry.pendingFlow).toBe('targets-set');
+			expect(entry.verdict).toBe('skipped');
+		});
+
+		// ------------------------------------------------------------------
+		// Test 2: cook-servings reply preempts shadow (skipped-pending-flow)
+		// ------------------------------------------------------------------
+		it('cook-servings reply: skipped-pending-flow logged, classifier not called', async () => {
+			const sharedStore = createMockScopedStore({
+				read: vi.fn().mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path.startsWith('recipes/') && path.endsWith('.yaml')) return stringify(sampleRecipe);
+					return '';
+				}),
+				list: vi.fn().mockImplementation(async (dir: string) => {
+					if (dir === 'recipes') return [`recipes/${sampleRecipe.id}.yaml`];
+					return [];
+				}),
+			});
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+			const cookCtx = createTestMessageContext({ userId: 'user1', text: 'lasagna' });
+			await handleCookCommand(services, ['lasagna'], cookCtx);
+			expect(hasPendingCookRecipe('user1')).toBe(true);
+
+			vi.clearAllMocks();
+			vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
+			// Re-inject capture logger after clearAllMocks resets vi mocks
+			captureLogger = new CaptureShadowLogger();
+			__setShadowDepsForTests(neverClassifier, captureLogger);
+
+			const ctx = createTestMessageContext({
+				userId: 'user1',
+				text: '3',
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.95 }),
+			});
+			await handleMessage(ctx);
+			await __flushShadowForTests();
+
+			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(0);
+			expect(captureLogger.entries).toHaveLength(1);
+			const entry = captureLogger.entries[0]!;
+			expect(entry.shadow).toMatchObject({ kind: 'skipped-pending-flow', flow: 'cook-servings' });
+			expect(entry.pendingFlow).toBe('cook-servings');
+			expect(entry.verdict).toBe('skipped');
+		});
+
+		// ------------------------------------------------------------------
+		// Test 3: active cook-mode preempts shadow (skipped-cook-mode)
+		// ------------------------------------------------------------------
+		it('active cook-mode: skipped-cook-mode logged, classifier not called', async () => {
+			// Create an active cook session directly (no DB round-trip needed)
+			createSession('user1', sampleRecipe, sampleRecipe.servings, [], null);
+			expect(isCookModeActive('user1')).toBe(true);
+
+			const ctx = createTestMessageContext({
+				userId: 'user1',
+				text: 'next',
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.95 }),
+			});
+			await handleMessage(ctx);
+			await __flushShadowForTests();
+
+			expect(neverClassifier.callCount, 'classifier must not be invoked during active cook mode').toBe(0);
+			expect(captureLogger.entries).toHaveLength(1);
+			const entry = captureLogger.entries[0]!;
+			expect(entry.shadow).toMatchObject({ kind: 'skipped-cook-mode' });
+			expect(entry.verdict).toBe('skipped');
+		});
+
+		// ------------------------------------------------------------------
+		// Test 4: number-select preempts shadow (skipped-number-select)
+		// ------------------------------------------------------------------
+		it('number-select: skipped-number-select logged, classifier not called', async () => {
+			// Populate lastSearchResults by running a recipe search
+			const sharedStore = createMockScopedStore({
+				read: vi.fn().mockImplementation(async (path: string) => {
+					if (path === 'household.yaml') return stringify(sampleHousehold);
+					if (path.endsWith('.yaml')) return stringify(sampleRecipe);
+					return '';
+				}),
+				list: vi.fn().mockResolvedValue(['lasagna-001.yaml']),
+			});
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+			const searchCtx = createTestMessageContext({ userId: 'user1', text: 'search for lasagna' });
+			await handleMessage(searchCtx);
+
+			vi.clearAllMocks();
+			// Fresh stub + logger so the search step's call doesn't pollute the assertion
+			const freshClassifier = makeNeverClassifier();
+			captureLogger = new CaptureShadowLogger();
+			__setShadowDepsForTests(freshClassifier, captureLogger);
+
+			// "1" with an allowlisted route — number-select wins before dispatchByRoute
+			const ctx = createTestMessageContext({
+				userId: 'user1',
+				text: '1',
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.95 }),
+			});
+			await handleMessage(ctx);
+			await __flushShadowForTests();
+
+			expect(freshClassifier.callCount, 'classifier must not be invoked on number-select path').toBe(0);
+			expect(captureLogger.entries).toHaveLength(1);
+			const entry = captureLogger.entries[0]!;
+			expect(entry.shadow).toMatchObject({ kind: 'skipped-number-select' });
+			expect(entry.verdict).toBe('skipped');
+			// Handler-specific oracle: recipe detail was sent via sendRecipeWithApproval
+			const sendCalls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+			expect(sendCalls.some(([, msg]) => msg.includes('Ingredients'))).toBe(true);
 		});
 	});
 

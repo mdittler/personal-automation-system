@@ -3336,6 +3336,40 @@ Shadow mode observation layer for Food's internal routing. Provides the 27-label
 - `shadow-classifier.persona.test.ts` > FOOD_PERSONAS — structural invariants > every persona has at least 2 deterministicRejectFor + advisoryNearMisses entries combined
 - `shadow-classifier.persona.test.ts` > FOOD_PERSONAS — structural invariants > no phrase appears in both accept and deterministicRejectFor for the same persona
 
+### REQ-LLM-034: Shadow classifier integration in Food handleMessage (Chunk C)
+
+**Phase:** LLM Enhancement #2 Chunk C | **Status:** Implemented
+
+`FoodShadowClassifier` is wired into `handleMessage` in shadow-only mode: the classifier runs concurrently with the regex cascade, the result plus the regex winner is written to `shadow-classifier-log.md` via `FoodShadowLogger`, and neither the user path nor the regex cascade's dispatch outcome is affected. `shadow_sample_rate` (manifest `user_config`, default 1) is read per-message from `AppConfigService` so the rate can be changed via the GUI without a restart. A `computeVerdict()` helper (`shadow-verdict.ts`) maps `(regexWinnerLabel, ShadowResult)` → `ShadowVerdict` (agree / disagree / one-side-none / both-none / skipped / error / legacy-skipped). Every inbound text message produces exactly one log entry; early-exit gates (empty text, number-select, cook-mode, pending flows, Chunk A route-dispatch) substitute a synthetic `Promise.resolve({kind:...})` so no duplicate LLM call is ever made. LLM and logger errors are caught and surfaced only via `services.logger.warn`; no exception propagates to the user path.
+
+**Standard tests:**
+- `shadow-verdict.test.ts` > computeVerdict > same non-"none" labels → agree
+- `shadow-verdict.test.ts` > computeVerdict > differing non-"none" labels → disagree
+- `shadow-verdict.test.ts` > computeVerdict > regex "none", shadow non-"none" → one-side-none
+- `shadow-verdict.test.ts` > computeVerdict > non-"none" regex, shadow "none" → one-side-none
+- `shadow-verdict.test.ts` > computeVerdict > both "none" → both-none
+- `shadow-verdict.test.ts` > computeVerdict > shadow.kind = skipped-sample → skipped
+- `shadow-verdict.test.ts` > computeVerdict > shadow.kind = skipped-no-caption → skipped
+- `shadow-verdict.test.ts` > computeVerdict > shadow.kind = parse-failed → error
+- `shadow-verdict.test.ts` > computeVerdict > shadow.kind = llm-error → error
+- `shadow-verdict.test.ts` > computeVerdict > shadow.kind = legacy-skipped → legacy-skipped (short-circuit; regexWinnerLabel irrelevant)
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > agree: grocery_view regex fires and shadow agrees
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > disagree: grocery_view regex fires but shadow says pantry
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > both-none: unrecognised text falls to help, shadow also says none
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > one-side-none: unrecognised text falls to help but shadow returns real label
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > data_query_fallback: DataQuery returns result → regexWinner set correctly
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > legacy-skipped: Chunk A allowlist route fires → shadow classify NOT invoked
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > error: classifier rejects → user path succeeds, warn logged, verdict is error
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > error: logger rejects → user path succeeds, warn logged
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > skipped-sample: shadow_sample_rate = 0 → verdict is skipped
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > sample_rate re-read per message — rate change takes effect immediately
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > smoke: real FoodShadowLogger writes entry to disk
+- `shadow-integration.test.ts` > Shadow classifier integration (Chunk C) > persona — unmapped label: LLM classifies into label the regex cannot reach
+- `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > targets-flow reply: skipped-pending-flow logged, classifier not called
+- `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > cook-servings reply: skipped-pending-flow logged, classifier not called
+- `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > active cook-mode: skipped-cook-mode logged, classifier not called
+- `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > number-select: skipped-number-select logged, classifier not called
+
 ### REQ-GUI-004: Log viewer htmx partial
 
 **Phase:** 15 | **Status:** Implemented
@@ -5614,6 +5648,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts, natural-language-route-dispatch.test.ts | 18 | 28 | Implemented |
 | REQ-LLM-032 | shadow-taxonomy.test.ts, shadow-logger.test.ts | 54 | 30 | Implemented |
 | REQ-LLM-033 | shadow-classifier.test.ts, shadow-classifier.persona.test.ts | 42 | 113 | Implemented |
+| REQ-LLM-034 | shadow-verdict.test.ts, shadow-integration.test.ts, route-dispatch.test.ts | 10 | 16 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |

@@ -9,7 +9,7 @@ User manual actions are tracked separately in `user_actions.md`.
 
 These are greenlit but not yet planned. Each needs a spec/plan before coding.
 
-- **D5c** ⬅ **ACTIVE PRIORITY** — Per-household LLM cost caps + rate limits + ops dashboard + 40-user load test. Chunk A complete ✓, Chunk B complete ✓ — Chunk C is next. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`. One chunk per session; Claude+Codex review between each. Does NOT depend on §1 or §4 below.
+- **D5c** — Per-household LLM cost caps + rate limits + ops dashboard + 40-user load test. All chunks (0–E) complete ✓. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`.
 - **LLM Enhancement #2** — Replace Food's regex router with a fast structured classifier. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
 - **LLM Enhancements #3–#7** — Ambiguous extraction via LLM, DataQuery keyword gate removal, chatbot system-data categorization, knowledge reranker, photo caption confidence routing. Same plan.
 - **Phase H12c** — Alcohol + Meal Quality Signals. Deferred pending H12a stabilization.
@@ -96,8 +96,9 @@ The following items are out of scope for Chunk A but must be addressed in future
 | A.1 — Allowlist: 'save a recipe' | Add `'user wants to save a recipe'` back to ROUTE_HANDLERS once `handleEditRecipe` is declared as a manifest intent. Currently removed because phrases like "edit the lasagna recipe" classify as save-intent, causing misrouting. The overlap vanishes once both recipe-save and recipe-edit are manifest-declared with distinct intents. | Overlaps with `handleEditRecipe` — violates strict 1:1 mapping criterion. |
 | A.1 — Allowlist: 'search for a recipe' | Add `'user wants to search for a recipe'` back to ROUTE_HANDLERS once `handleRecipePhotoRetrieval` is declared as a manifest intent. Currently removed because phrases like "show me the recipe photo for X" classify as search-intent. | Overlaps with `handleRecipePhotoRetrieval` — violates strict 1:1 mapping criterion. |
 | A.2 — Expand allowlist | Cover more manifest intents after auditing each for regex-branch collision. Likely adds pantry/grocery/leftovers/nutrition after manifest expansion or disambiguation. | Needs design decisions on ambiguous multi-sub-intent cases first. |
-| B — Food-local fast-tier shadow classifier | `apps/food/src/routing/shadow-classifier.ts` — returns {action, confidence} over Food's internal action taxonomy. Runs in parallel with regex cascade; log-only. | Needs stable Chunk A foundation. |
-| C — Switchover | Promote shadow classifier to primary once Chunk B telemetry shows ≥95% agreement. | Needs Chunk B data. |
+| B — Food-local fast-tier shadow classifier | `apps/food/src/routing/shadow-classifier.ts` — returns {action, confidence} over Food's internal action taxonomy. Runs in parallel with regex cascade; log-only. | **Complete (2026-04-22).** |
+| C — Shadow integration | Wire `FoodShadowClassifier` + `FoodShadowLogger` into `handleMessage`; `computeVerdict`; `shadow_sample_rate` config; skipped-* gates for all early-exit paths. | **Complete (2026-04-22).** |
+| D — Switchover | Promote shadow classifier to primary once `shadow-classifier-log.md` shows ≥95% agreement over ≥1 week of real usage. After switchover, remove regex cascade or demote to fallback. | Needs Chunk C telemetry data. |
 | Per-handler `is*Intent` classifiers | `apps/food/src/handlers/{budget,hosting,cultural-calendar-handler,health,nutrition,family}.ts` + `apps/food/src/services/price-store.ts`. | Many bypassed automatically when their manifest intent enters the allowlist. Remainder serve non-manifest sub-intents — stay as fallback. |
 | Chatbot `MODEL_SWITCH_INTENT_REGEX` | `apps/chatbot/src/index.ts:78`. Same route-first pattern applied to chatbot. | Same approach, different app — straightforward follow-up. |
 | Entity/slot extraction | Grocery items, quantities, stores, days, portions via `llm.extractStructured`. | User said classification only this session. |

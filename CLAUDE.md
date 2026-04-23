@@ -122,12 +122,12 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 ## Implementation Status
 
-All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement items #1 (route metadata) and #2 Chunks A–B complete. D5c Chunks 0–E complete. ~7503 tests / ~304 files.
+All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement items #1 (route metadata) and #2 Chunks A–C complete. D5c Chunks 0–E complete. ~7529 tests / ~306 files.
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
 ### Current Priority: LLM Enhancement #2 (Food classifier)
-**D5c** is complete. **LLM Enhancement #2 Chunk A** (route-first dispatch — Food's `handleMessage` now consults `ctx.route` before the regex cascade; 9-intent allowlist after Codex review removed save/search due to regex overlap, ~74 net new tests) is complete. **LLM Enhancement #2 Chunk B** (shadow classifier infrastructure B.1 + fast-tier LLM classifier B.2 + FOOD_PERSONAS persona dataset spec; ~239 tests) is complete. Next: **Chunk C** — wiring shadow classifier results into `handleMessage` (B.3 integration).
+**D5c** is complete. **LLM Enhancement #2 Chunks A–C** are complete: Chunk A (route-first dispatch, 9-intent allowlist, ~74 new tests), Chunk B (shadow classifier infrastructure B.1 + B.2 + FOOD_PERSONAS, ~239 tests), Chunk C (shadow pipeline wired into `handleMessage` — `computeVerdict`, `finalizeShadow`, `regexWinner` per branch, skipped-* gates, `shadow_sample_rate` config; +26 tests). Next: **Chunk D** — promote shadow classifier to primary router once ≥95% agreement telemetry is available.
 
 Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`
 

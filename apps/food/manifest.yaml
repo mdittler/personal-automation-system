@@ -355,3 +355,7 @@ user_config:
     type: string
     default: "Edit the seasonal-nudge and weekly-nutrition-summary cron schedules via the GUI Scheduler page"
     description: "Schedule cron expressions are managed via the GUI Scheduler page, not here"
+  - key: shadow_sample_rate
+    type: number
+    default: 1
+    description: "Fraction of text messages to send to the shadow LLM classifier (0 = off, 1 = all). Used for telemetry before classifier switchover."

@@ -36,6 +36,7 @@ import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import { deduplicateAndAssignDepartments } from '../services/grocery-dedup.js';
 import {
 	normalizeIngredientName,
@@ -98,6 +99,7 @@ describe('H11.z Natural Language — Ingredient normalization personas', () => {
 		vi.mocked(services.data.forShared).mockReturnValue(store as never);
 		vi.mocked(services.data.forUser).mockReturnValue(store as never);
 		await init(services);
+		__clearShadowDepsForTests();
 	});
 
 	function msg(text: string, userId = 'matt') {

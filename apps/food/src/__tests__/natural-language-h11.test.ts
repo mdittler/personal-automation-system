@@ -33,6 +33,7 @@ import {
 	isNutritionViewIntent,
 	isHostingIntent,
 } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import type { ChildFoodLog, GuestProfile, Household, Recipe } from '../types.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -123,6 +124,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 		vi.mocked(services.data.forShared).mockReturnValue(store as any);
 		vi.mocked(services.data.forUser).mockReturnValue(store as any);
 		await init(services);
+		__clearShadowDepsForTests();
 	});
 
 	function setupHousehold(
