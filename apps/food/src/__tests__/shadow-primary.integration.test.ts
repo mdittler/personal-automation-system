@@ -198,10 +198,10 @@ describe('shadow-primary router integration (Chunk D)', () => {
         await __flushShadowForTests();
 
         expect(stub.callCount).toBe(1);
-        // Shadow-primary dispatched → handler sent grocery-add reply (not help)
         const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
-        const helpCall = sends.find(([, msg]) => msg.startsWith(HELP_MSG));
-        expect(helpCall, 'help message must NOT fire when shadow dispatched').toBeUndefined();
+        // handleGroceryAdd confirmation — unique to this handler
+        const addedCall = sends.find(([, msg]) => msg.startsWith('Added') && msg.includes('item(s)'));
+        expect(addedCall, 'handleGroceryAdd must have sent "Added N item(s)" confirmation').toBeDefined();
 
         const e = lastEntry();
         expect(e.regexWinner).toBe('(shadow-dispatched)');
@@ -541,12 +541,14 @@ describe('shadow-primary router integration (Chunk D)', () => {
         await __flushShadowForTests();
 
         expect(stub.callCount).toBe(1);
-        // Handler dispatched via shadow-primary
         const e = lastEntry();
         expect(e.regexWinner).toBe('(shadow-dispatched)');
         expect(e.verdict).toBe('shadow-dispatched');
-        // Household guard was called (handler ran) — telegram.send fired
-        expect(vi.mocked(services.telegram.send)).toHaveBeenCalled();
+        // handleNutritionLogNL parses the label, finds no recipe/quick-meal match,
+        // calls estimateMacros (llm.complete returns non-JSON in tests) → unique send
+        const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+        const nlCall = sends.find(([, msg]) => msg.includes("Couldn't estimate macros for"));
+        expect(nlCall, 'handleNutritionLogNL must have attempted macro estimation').toBeDefined();
     });
 
     // =========================================================================
