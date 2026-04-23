@@ -38,6 +38,9 @@ export const FOOD_SHADOW_LABELS = [
 
 export type FoodShadowLabel = (typeof FOOD_SHADOW_LABELS)[number];
 
+/** The "decline / no classification" label returned by the shadow classifier. */
+export const SHADOW_DECLINE_LABEL: FoodShadowLabel = 'none';
+
 const LABEL_SET: ReadonlySet<string> = new Set(FOOD_SHADOW_LABELS);
 
 export function isValidShadowLabel(v: unknown): v is FoodShadowLabel {

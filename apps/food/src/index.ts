@@ -235,6 +235,9 @@ import { sanitizeInput } from './utils/sanitize.js';
 
 let services: CoreServices;
 
+/** Tracks (primary:rate) combinations that have already been warned, to emit once per process. */
+const warnedShadowConfigs = new Set<string>();
+
 /** Per-user cache of last search results for number selection. */
 const lastSearchResults = new Map<string, Recipe[]>();
 
@@ -282,17 +285,29 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 		new FoodShadowLogger(resolve(process.cwd(), 'data', 'system', 'food')),
 	);
 
-	// LLM Enhancement #2 Chunk D: warn when shadow primary is on but sample rate<1,
-	// which produces inconsistent routing (some messages skip the classifier).
+	// LLM Enhancement #2 Chunk D: warn once at startup when shadow primary + low sample rate
+	// would produce inconsistent routing. Also called per-message to catch live config flips.
 	const chunkDPrimary = (await s.config.get<string>('routing_primary')) ?? 'regex';
 	const chunkDRate = (await s.config.get<number>('shadow_sample_rate')) ?? 1;
-	if (chunkDPrimary === 'shadow' && chunkDRate < 1) {
-		s.logger.warn(
-			'food: routing_primary=shadow combined with shadow_sample_rate=%s produces inconsistent routing — messages that skip the classifier fall to regex. Set shadow_sample_rate=1 or routing_primary=regex.',
-			chunkDRate,
-		);
-	}
+	warnInconsistentShadowConfig(chunkDPrimary, chunkDRate);
 };
+
+/**
+ * Emits a logger.warn when routing_primary=shadow combined with shadow_sample_rate<1
+ * would produce inconsistent routing. Called at init() and once per message path so
+ * a live config flip is caught without a restart. Fires at most once per process per
+ * distinct (primary, rate) combination to avoid log spam.
+ */
+function warnInconsistentShadowConfig(primary: string, rate: number): void {
+	if (primary !== 'shadow' || rate >= 1) return;
+	const key = `${primary}:${rate}`;
+	if (warnedShadowConfigs.has(key)) return;
+	warnedShadowConfigs.add(key);
+	services.logger.warn(
+		'food: routing_primary=shadow combined with shadow_sample_rate=%s produces inconsistent routing — messages that skip the classifier fall to regex. Set shadow_sample_rate=1 or routing_primary=regex.',
+		rate,
+	);
+}
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
 
@@ -366,16 +381,27 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 // Parity enforced by shadow-handlers-parity.test.ts.
 export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageContext) => Promise<void>>> = {
 	'user wants to save a recipe':
-		(ctx) => handleSaveRecipe(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isEditRecipeIntent(lower) ? handleEditRecipe(ctx.text, ctx) : handleSaveRecipe(ctx.text, ctx);
+		},
 	'user wants to search for a recipe':
-		(ctx) => handleSearchRecipe(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isRecipePhotoIntent(lower) ? handleRecipePhotoRetrieval(ctx.text, ctx) : handleSearchRecipe(ctx.text, ctx);
+		},
 	'user wants to plan meals for the week':
 		(ctx) => {
 			const lower = ctx.text.toLowerCase();
-			return isMealPlanViewIntent(lower) ? handleMealPlanView(ctx) : handleMealPlanGenerate(ctx);
+			// Match regex cascade order: swap → generate → view
+			if (isMealSwapIntent(lower)) return handleMealSwap(ctx.text, ctx);
+			return isMealPlanGenerateIntent(lower) ? handleMealPlanGenerate(ctx) : handleMealPlanView(ctx);
 		},
 	'user wants to see or modify the grocery list':
-		(ctx) => handleGroceryView(ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isGroceryGenerateIntent(lower) ? handleGroceryGenerate(ctx.text, ctx) : handleGroceryView(ctx);
+		},
 	'user wants to add items to the grocery list':
 		(ctx) => handleGroceryAdd(ctx.text, ctx),
 	"user wants to know what's for dinner":
@@ -387,12 +413,21 @@ export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageConte
 	'user wants to check or update the pantry':
 		(ctx) => {
 			const lower = ctx.text.toLowerCase();
+			// Match regex cascade order: freezer_add → freezer_view → pantry_add → pantry_remove → pantry_view
+			if (isFreezerAddIntent(lower)) return handleFreezerAddIntent(ctx.text, ctx);
+			if (isFreezerViewIntent(lower)) return handleFreezerView(ctx);
 			if (isPantryAddIntent(lower)) return handlePantryAdd(ctx.text, ctx);
 			if (isPantryRemoveIntent(lower)) return handlePantryRemove(ctx.text, ctx);
 			return handlePantryView(ctx);
 		},
 	'user wants to log leftovers':
-		(ctx) => handleLeftoverAddIntent(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			// Match regex cascade order: view → waste → add
+			if (isLeftoverViewIntent(lower)) return handleLeftoversView(ctx);
+			if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
+			return handleLeftoverAddIntent(ctx.text, ctx);
+		},
 	'user wants to plan for hosting guests':
 		async (ctx) => {
 			const hh = await requireHouseholdOrMessage(ctx);
@@ -631,6 +666,8 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	const sampleRate = (await services.config.get<number>('shadow_sample_rate')) ?? 1;
 	const primary = (await services.config.get<string>('routing_primary')) ?? 'regex';
 	const minConfidence = (await services.config.get<number>('shadow_min_confidence')) ?? 0.7;
+	// Catch live config flips: emit warn once per process if combination is inconsistent.
+	warnInconsistentShadowConfig(primary, sampleRate);
 
 	// LLM Enhancement #2 Chunk D: shadow-primary dispatch.
 	// Classify once, dispatch if confident. On fall-through, REUSE the awaited result
@@ -3920,4 +3957,9 @@ export function __setPendingFreezerAddForTests(userId: string): void {
 export function __clearPendingLeftoverFreezerForTests(): void {
 	pendingLeftoverAdd.clear();
 	pendingFreezerAdd.clear();
+}
+
+/** Test-only — resets the once-per-process shadow config warning tracker. */
+export function __resetWarnedShadowConfigsForTests(): void {
+	warnedShadowConfigs.clear();
 }

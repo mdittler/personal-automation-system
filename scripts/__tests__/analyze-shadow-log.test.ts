@@ -5,8 +5,13 @@
  * produced by FoodShadowLogger.formatEntry (verified against shadow-logger.ts).
  */
 
-import { describe, it, expect } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { parseShadowLogEntry, analyzeLog } from '../analyze-shadow-log.js';
+import { FoodShadowLogger } from '../../apps/food/src/routing/shadow-logger.js';
+import type { ShadowLogEntry } from '../../apps/food/src/routing/shadow-logger.js';
 
 // ─── Synthetic log fixture ────────────────────────────────────────────────────
 
@@ -346,5 +351,90 @@ describe('analyzeLog', () => {
         expect(stats.judgmentTotal).toBe(1);
         expect(stats.verdicts['both-none']).toBe(1);
         expect(stats.agreementRate).toBe(0); // both-none ≠ agree
+    });
+});
+
+// ─── FoodShadowLogger ↔ parseShadowLogEntry round-trip ───────────────────────
+
+describe('FoodShadowLogger ↔ parseShadowLogEntry round-trip', () => {
+    let tmpDir: string;
+    let logger: FoodShadowLogger;
+
+    beforeEach(async () => {
+        tmpDir = await mkdtemp(join(tmpdir(), 'shadow-log-rt-'));
+        logger = new FoodShadowLogger(tmpDir);
+    });
+
+    afterEach(async () => {
+        await rm(tmpDir, { recursive: true, force: true });
+    });
+
+    async function parseWrittenEntries(dir: string) {
+        const logPath = join(dir, 'shadow-classifier-log.md');
+        const md = await readFile(logPath, 'utf-8');
+        const blocks = md.split(/\n(?=## )/).filter((b) => b.startsWith('## '));
+        return blocks.map((b) => parseShadowLogEntry(b)).filter((e): e is NonNullable<typeof e> => e !== null);
+    }
+
+    it('round-trips a baseline agree entry preserving every field', async () => {
+        const ts = new Date('2026-04-24T12:00:00.000Z');
+        const entry: ShadowLogEntry = {
+            timestamp: ts,
+            userId: 'rt-user-1',
+            messageText: 'add milk',
+            messageKind: 'text',
+            regexWinner: 'grocery_add',
+            regexWinnerLabel: 'user wants to add items to the grocery list',
+            shadow: { kind: 'ok', action: 'user wants to add items to the grocery list', confidence: 0.95 },
+            verdict: 'agree',
+        };
+
+        await logger.log(entry);
+
+        const entries = await parseWrittenEntries(tmpDir);
+        expect(entries).toHaveLength(1);
+        const p = entries[0]!;
+
+        expect(p.timestamp).toBe('2026-04-24 12:00:00');
+        expect(p.userId).toBe('rt-user-1');
+        expect(p.pendingFlow).toBe('(none)');
+        expect(p.regexWinner).toBe('grocery_add');
+        expect(p.regexWinnerLabel).toBe('user wants to add items to the grocery list');
+        expect(p.shadowKind).toBe('ok');
+        expect(p.shadowAction).toBe('user wants to add items to the grocery list');
+        expect(p.shadowConfidence).toBe(0.95);
+        expect(p.verdict).toBe('agree');
+        expect(p.suppressedByThreshold).toBe(false);
+    });
+
+    it('round-trips an entry with shadowSuppressedByThreshold=true preserving the flag', async () => {
+        const ts = new Date('2026-04-24T12:05:00.000Z');
+        const entry: ShadowLogEntry = {
+            timestamp: ts,
+            userId: 'rt-user-2',
+            messageText: 'add juice',
+            messageKind: 'text',
+            regexWinner: 'grocery_add',
+            regexWinnerLabel: 'user wants to add items to the grocery list',
+            shadow: { kind: 'ok', action: 'user wants to add items to the grocery list', confidence: 0.5 },
+            verdict: 'agree',
+            shadowSuppressedByThreshold: true,
+        };
+
+        await logger.log(entry);
+
+        const entries = await parseWrittenEntries(tmpDir);
+        expect(entries).toHaveLength(1);
+        const p = entries[0]!;
+
+        expect(p.timestamp).toBe('2026-04-24 12:05:00');
+        expect(p.userId).toBe('rt-user-2');
+        expect(p.regexWinner).toBe('grocery_add');
+        expect(p.regexWinnerLabel).toBe('user wants to add items to the grocery list');
+        expect(p.shadowKind).toBe('ok');
+        expect(p.shadowAction).toBe('user wants to add items to the grocery list');
+        expect(p.shadowConfidence).toBe(0.5);
+        expect(p.verdict).toBe('agree');
+        expect(p.suppressedByThreshold).toBe(true);
     });
 });

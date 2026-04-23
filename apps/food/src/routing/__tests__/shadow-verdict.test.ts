@@ -75,8 +75,7 @@ describe('shadow-dispatched short-circuit (Chunk D)', () => {
         expect(verdict).toBe('agree');
     });
 
-    it('computeVerdict stays pure — no threshold-awareness, no side effects', () => {
-        // Calling it multiple times with same args returns same result
+    it('computeVerdict is deterministic across repeated calls — same args always return same result', () => {
         const r1 = computeVerdict(GROCERY_ADD, ok(GROCERY_ADD));
         const r2 = computeVerdict(GROCERY_ADD, ok(GROCERY_ADD));
         expect(r1).toBe('agree');
