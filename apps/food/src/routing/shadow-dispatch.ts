@@ -1,4 +1,5 @@
 import type { ShadowResult } from './shadow-logger.js';
+import { SHADOW_DECLINE_LABEL } from './shadow-taxonomy.js';
 import type { FoodShadowLabel } from './shadow-taxonomy.js';
 
 export interface DispatchShadowResult {
@@ -28,7 +29,7 @@ export async function dispatchShadow<Ctx>(
     if (shadow.kind !== 'ok') {
         return { dispatched: false, suppressedByThreshold: false };
     }
-    if (shadow.action === 'none') {
+    if (shadow.action === SHADOW_DECLINE_LABEL) {
         return { dispatched: false, suppressedByThreshold: false };
     }
     if (shadow.confidence < minConfidence) {

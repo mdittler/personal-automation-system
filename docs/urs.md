@@ -3390,6 +3390,7 @@ Promotes the Food shadow classifier to an optional primary router, gated behind 
 - `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (r) pantry add sub-intent: handlePantryAdd fires, not view
 - `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > returns "shadow-dispatched" when rawRegexWinner is the shadow-dispatched sentinel
 - `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > without the sentinel, existing verdict semantics are preserved
+- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > computeVerdict is deterministic across repeated calls — same args always return same result
 
 **Edge case tests:**
 - `shadow-dispatch.test.ts` > dispatchShadow > marks suppressedByThreshold=true when confidence<threshold, does not dispatch
@@ -3417,7 +3418,6 @@ Promotes the Food shadow classifier to an optional primary router, gated behind 
 - `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (m) pending quickmeal-add preempts shadow; classify not called
 - `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (p) blocklisted receipt-details label falls through to regex; verdict=one-side-none
 - `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > short-circuits before consulting shadow — works even if shadow is parse-failed
-- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > computeVerdict stays pure — no threshold-awareness, no side effects
 - `shadow-logger.test.ts` > FoodShadowLogger > emits ShadowSuppressedByThreshold line when true (Chunk D)
 - `shadow-logger.test.ts` > FoodShadowLogger > omits ShadowSuppressedByThreshold line when undefined (Chunk D)
 - `shadow-taxonomy.test.ts` > label categorization (Chunk D) > every label is categorized exactly once across {regex-mapped, intentionally-unmapped, no-text-handler}
@@ -5737,7 +5737,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-032 | shadow-taxonomy.test.ts, shadow-logger.test.ts | 54 | 30 | Implemented |
 | REQ-LLM-033 | shadow-classifier.test.ts, shadow-classifier.persona.test.ts | 42 | 113 | Implemented |
 | REQ-LLM-034 | shadow-verdict.test.ts, shadow-integration.test.ts, route-dispatch.test.ts | 10 | 16 | Implemented |
-| REQ-LLM-035 | shadow-dispatch.test.ts, shadow-handlers-parity.test.ts, shadow-primary.integration.test.ts, shadow-verdict.test.ts, shadow-logger.test.ts, shadow-taxonomy.test.ts | 13 | 30 | Implemented |
+| REQ-LLM-035 | shadow-dispatch.test.ts, shadow-handlers-parity.test.ts, shadow-primary.integration.test.ts, shadow-verdict.test.ts, shadow-logger.test.ts, shadow-taxonomy.test.ts | 14 | 29 | Implemented |
 | REQ-LLM-036 | analyze-shadow-log.test.ts | 15 | 6 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |

@@ -590,7 +590,8 @@ describe('shadow-primary router integration (Chunk D)', () => {
         });
         __setShadowDepsForTests(stub, captureLogger);
 
-        // Text that doesn't match any regex → falls to help_fallthrough
+        // Text must not match any current regex so verdict stays one-side-none.
+        // If a future receipt_view regex is added this test's intent silently changes.
         await handleMessage(createTestMessageContext({
             userId: 'user1', text: 'show me the receipt from yesterday please',
         }));
