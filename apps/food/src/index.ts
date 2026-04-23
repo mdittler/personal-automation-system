@@ -71,6 +71,7 @@ import { correlateHealth } from './services/health-correlator.js';
 import { emitRecipeScheduled } from './events/emitters.js';
 import { registerHealthSubscribers } from './events/subscribers.js';
 import {
+	beginQuickMealAdd,
 	handleQuickMealAddCallback,
 	handleQuickMealAddReply,
 	handleQuickMealEditCallback,
@@ -126,10 +127,12 @@ import { getSession } from './services/cook-session.js';
 import { estimateGroceryListCost, estimatePlanCost } from './services/cost-estimator.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
 import { dispatchByRoute } from './routing/dispatch.js';
+import { dispatchShadow } from './routing/shadow-dispatch.js';
 import { FoodShadowClassifier } from './routing/shadow-classifier.js';
 import type { ShadowResult } from './routing/shadow-logger.js';
 import { FoodShadowLogger } from './routing/shadow-logger.js';
-import { FOOD_SHADOW_LABELS } from './routing/shadow-taxonomy.js';
+import { FOOD_SHADOW_LABELS, SHADOW_LABELS_WITHOUT_TEXT_HANDLER } from './routing/shadow-taxonomy.js';
+import type { FoodShadowLabel } from './routing/shadow-taxonomy.js';
 import {
 	finalizeShadow,
 	initShadowDeps,
@@ -344,6 +347,130 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
 		},
 };
+
+// ─── Shadow-Primary Dispatch Table (LLM Enhancement #2 Chunk D) ─────────────
+// Maps every FOOD_SHADOW_LABEL that has a text-side handler to its handler.
+// Excludes: 'none' (fall-through), SHADOW_LABELS_WITHOUT_TEXT_HANDLER (blocklist).
+// INTENTIONALLY_UNMAPPED_LABELS are mapped to their nearest handler.
+// Parity enforced by shadow-handlers-parity.test.ts.
+export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageContext) => Promise<void>>> = {
+	'user wants to save a recipe':
+		(ctx) => handleSaveRecipe(ctx.text, ctx),
+	'user wants to search for a recipe':
+		(ctx) => handleSearchRecipe(ctx.text, ctx),
+	'user wants to plan meals for the week':
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isMealPlanViewIntent(lower) ? handleMealPlanView(ctx) : handleMealPlanGenerate(ctx);
+		},
+	'user wants to see or modify the grocery list':
+		(ctx) => handleGroceryView(ctx),
+	'user wants to add items to the grocery list':
+		(ctx) => handleGroceryAdd(ctx.text, ctx),
+	"user wants to know what's for dinner":
+		(ctx) => handleWhatsForDinner(ctx),
+	'user has a food-related question':
+		(ctx) => handleFoodQuestion(ctx.text, ctx),
+	'user wants to start cooking a recipe':
+		(ctx) => handleCookIntent(services, ctx.text, ctx),
+	'user wants to check or update the pantry':
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			if (isPantryAddIntent(lower)) return handlePantryAdd(ctx.text, ctx);
+			if (isPantryRemoveIntent(lower)) return handlePantryRemove(ctx.text, ctx);
+			return handlePantryView(ctx);
+		},
+	'user wants to log leftovers':
+		(ctx) => handleLeftoverAddIntent(ctx.text, ctx),
+	'user wants to plan for hosting guests':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
+		},
+	'user wants to see food spending':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+		},
+	'user asks about prices at a specific store':
+		(ctx) => handlePriceUpdateIntent(ctx.text, ctx),
+	'user wants to see nutrition information':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
+		},
+	'user wants to know what they can make with what they have':
+		(ctx) => handleWhatCanIMake(ctx),
+	'user wants to adapt a recipe for a child':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
+			if (!adaptEnabled) {
+				await services.telegram.send(ctx.userId, 'Kid meal adaptation is disabled. Enable it in your Food settings.');
+				return;
+			}
+			const cached = lastSearchResults.get(ctx.userId);
+			const recipe = cached?.[0] ?? null;
+			const allRecipes = await loadAllRecipes(hh.sharedStore);
+			const msg = await handleKidAdaptIntent(services, ctx.text, ctx.userId, hh.sharedStore, recipe, allRecipes);
+			if (msg) await services.telegram.send(ctx.userId, msg);
+		},
+	'user wants to log a new food introduction for a child':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			const waitDays = ((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
+			const result = await handleFoodIntroduction(services, ctx.text, ctx.userId, hh.sharedStore, waitDays);
+			if (result.buttons) {
+				await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
+			} else {
+				await services.telegram.send(ctx.userId, result.text);
+			}
+		},
+	'user wants to tag a recipe as kid-approved or rejected':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			const allChildren = await loadAllChildren(hh.sharedStore);
+			const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
+			const allRecipes = await loadAllRecipes(hh.sharedStore);
+			const msg = await handleChildApprovalIntent(services, ctx.text, hh.sharedStore, allRecipes, childNames);
+			if (msg) await services.telegram.send(ctx.userId, msg);
+		},
+	'user wants to log a meal they cooked by name with an optional portion':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
+		},
+	// Unmapped → nearest-handler decisions (per Chunk D design)
+	'user wants to log an unfamiliar meal with a free-text description':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
+		},
+	'user wants to save a frequent meal as a quick-meal template':
+		async (ctx) => { await beginQuickMealAdd(services, ctx.userId); },
+	'user wants to set or change their nutrition or macro targets':
+		async (ctx) => { await beginTargetsFlow(services, ctx.userId); },
+	'user wants to see how well they are hitting their macro targets over time':
+		async (ctx) => {
+			const hh = await requireHouseholdOrMessage(ctx);
+			if (!hh) return;
+			await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
+		},
+	'user wants to understand how their diet is affecting their health or energy':
+		(ctx) => handleHealthCorrelation(services, ctx),
+	'user wants holiday or cultural recipe suggestions':
+		(ctx) => handleCulturalCalendarMessage(services, ctx),
+};
+
+const SHADOW_LABELS_WITHOUT_TEXT_HANDLER_SET = new Set<string>(SHADOW_LABELS_WITHOUT_TEXT_HANDLER);
 
 // ─── Message Handler (Intent-Routed) ─────────────────────────────
 
