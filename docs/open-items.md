@@ -17,6 +17,14 @@ These are greenlit but not yet planned. Each needs a spec/plan before coding.
 
 ---
 
+## Planned Review Work
+
+Cross-cutting review work that should happen in staged sessions before any cleanup or backfill implementation begins.
+
+- **Staged test/spec coverage review** — Review-only effort to assess whether repo-local tests cover intended behavior, use meaningful assertions, avoid brittle or over-mocked patterns, and identify obsolete or superseded tests. Run this across multiple sessions by stage using `docs/test-review-roadmap.md`.
+
+---
+
 ## Deferred Infrastructure Work
 
 Confirmed gaps that need to be addressed; timing depends on which phase picks them up.
