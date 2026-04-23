@@ -3370,6 +3370,94 @@ Shadow mode observation layer for Food's internal routing. Provides the 27-label
 - `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > active cook-mode: skipped-cook-mode logged, classifier not called
 - `route-dispatch.test.ts` > Group 4b: shadow gate-ordering guards > number-select: skipped-number-select logged, classifier not called
 
+### REQ-LLM-035: Shadow-primary router in Food (Chunk D)
+
+**Phase:** LLM Enhancement #2 Chunk D | **Status:** Implemented
+
+Promotes the Food shadow classifier to an optional primary router, gated behind `routing_primary` user config (enum `regex` | `shadow`, default `regex`). When `routing_primary=shadow` the classifier is awaited before the regex cascade; if the result is `{kind:'ok', action∈SHADOW_HANDLERS, confidence≥shadow_min_confidence}` the message is dispatched directly (log: `regexWinner='(shadow-dispatched)'`, `verdict='shadow-dispatched'`). On any fall-through (low confidence, `action='none'`, parse-failed, llm-error, blocklist, no handler) the already-awaited result is reused in the regex cascade so the classifier is called at most once per message. `shadowSuppressedByThreshold?: boolean` is added to `ShadowLogEntry` and emitted when shadow confidence was below threshold. `SHADOW_HANDLERS` (25 entries) covers all FOOD_SHADOW_LABELS except `'none'` (fall-through sentinel) and `SHADOW_LABELS_WITHOUT_TEXT_HANDLER` (photo-only receipt-details label). Two INTENTIONALLY_UNMAPPED_LABELS are routed to their nearest handler. Sub-intent disambiguation (pantry add/remove/view, meal-plan generate/view) is preserved inside handler closures via existing `is*Intent` predicates. `computeVerdict` gains a `rawRegexWinner?` parameter that short-circuits to `'shadow-dispatched'` when the sentinel `'(shadow-dispatched)'` is passed. Pre-shadow gates (empty text, number-select, cook-mode, cook-servings, pending flows, `dispatchByRoute`) all preempt shadow and the classifier is not called. `init()` logs a warning when `routing_primary=shadow && shadow_sample_rate<1`. Parity invariant: `shadow-handlers-parity.test.ts` breaks if any FOOD_SHADOW_LABEL is added without a corresponding handler or blocklist entry.
+
+**Standard tests:**
+- `shadow-dispatch.test.ts` > dispatchShadow > dispatches when kind=ok, confidence≥threshold, action in handlers
+- `shadow-dispatch.test.ts` > dispatchShadow > calls handler when confidence exactly equals threshold
+- `shadow-handlers-parity.test.ts` > SHADOW_HANDLERS parity > every shadow label is exactly one of {SHADOW_HANDLERS key, blocklist entry, "none"}
+- `shadow-handlers-parity.test.ts` > SHADOW_HANDLERS parity > INTENTIONALLY_UNMAPPED_LABELS route to SHADOW_HANDLERS (nearest-handler decision)
+- `shadow-handlers-parity.test.ts` > SHADOW_HANDLERS parity > SHADOW_HANDLERS never routes to keys outside FOOD_SHADOW_LABELS
+- `shadow-handlers-parity.test.ts` > SHADOW_HANDLERS parity > SHADOW_HANDLERS has a handler for every value — no undefined entries
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (a) high-confidence shadow dispatches; regexWinner=(shadow-dispatched)
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (n) unmapped unfamiliar-meal label → nearest handler dispatched
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (o) unmapped quick-meal-template label → beginQuickMealAdd dispatched
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (q) meal-plan view sub-intent: handleMealPlanView fires, not generate
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (r) pantry add sub-intent: handlePantryAdd fires, not view
+- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > returns "shadow-dispatched" when rawRegexWinner is the shadow-dispatched sentinel
+- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > without the sentinel, existing verdict semantics are preserved
+
+**Edge case tests:**
+- `shadow-dispatch.test.ts` > dispatchShadow > marks suppressedByThreshold=true when confidence<threshold, does not dispatch
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when action is "none"
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when action is in blocklist
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when action has no handler
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is parse-failed
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is llm-error
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is skipped-sample
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is skipped-no-caption
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is skipped-pending-flow
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is skipped-cook-mode
+- `shadow-dispatch.test.ts` > dispatchShadow > falls through when shadow.kind is legacy-skipped
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (b) low-confidence falls through to regex cascade; classify called exactly once
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (c) shadow action='none' falls through; regex also misses → both-none
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (d) parse-failed falls through to regex cascade; classify called once
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (e) llm-error falls through to regex cascade; classify called once
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (f) sample-rate=0 → classifier returns skipped-sample; falls through to regex
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (g) trusted route preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (h) empty text preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (i) active cook-mode preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (j) pending targets-flow preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (k) pending leftover-add preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (l) pending freezer-add preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (m) pending quickmeal-add preempts shadow; classify not called
+- `shadow-primary.integration.test.ts` > shadow-primary router integration (Chunk D) > (p) blocklisted receipt-details label falls through to regex; verdict=one-side-none
+- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > short-circuits before consulting shadow — works even if shadow is parse-failed
+- `shadow-verdict.test.ts` > shadow-dispatched short-circuit (Chunk D) > computeVerdict stays pure — no threshold-awareness, no side effects
+- `shadow-logger.test.ts` > FoodShadowLogger > emits ShadowSuppressedByThreshold line when true (Chunk D)
+- `shadow-logger.test.ts` > FoodShadowLogger > omits ShadowSuppressedByThreshold line when undefined (Chunk D)
+- `shadow-taxonomy.test.ts` > label categorization (Chunk D) > every label is categorized exactly once across {regex-mapped, intentionally-unmapped, no-text-handler}
+- `shadow-taxonomy.test.ts` > label categorization (Chunk D) > SHADOW_LABELS_WITHOUT_TEXT_HANDLER contains the receipt-details label
+
+---
+
+### REQ-LLM-036: Shadow classifier log analysis CLI
+
+**Phase:** LLM Enhancement #2 Chunk D | **Status:** Implemented
+
+`scripts/analyze-shadow-log.ts` is a CLI tool (invoked via `pnpm analyze-shadow-log`) that parses `data/system/food/shadow-classifier-log.md` and prints agreement statistics. `parseShadowLogEntry(block)` parses one `## …` block into a `ParsedEntry` struct, handling all shadow field sentinels (`ok` JSON, `skipped-sample`, `skipped-no-caption`, `skipped-pending-flow:<flow>`, `skipped-cook-mode`, `skipped-number-select`, `legacy-skipped`, `parse-failed (raw: "…")`, `llm-error:<category>`) and the Chunk D additions (`(shadow-dispatched)` regex winner, `ShadowSuppressedByThreshold`). `analyzeLog(markdown)` splits the log into blocks, computes verdict counts, agreement rate (agree / judgment-total, excluding `shadow-dispatched` / `skipped` / `error` / `legacy-skipped`), per-label agreement sorted worst-first, top disagreement pairs, and suppressed-by-threshold count. CLI accepts `--log <path>` (default: `data/system/food/shadow-classifier-log.md`).
+
+**Standard tests:**
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses an agree entry with JSON Shadow field
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses a sentinel Shadow field (skipped-sample)
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses shadow-dispatched verdict and (shadow-dispatched) sentinel regex winner
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses ShadowSuppressedByThreshold=true when present
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses llm-error:<category> Shadow sentinel
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses parse-failed Shadow sentinel
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses skipped-pending-flow:<flow> sentinel
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > parses core route field when present
+- `analyze-shadow-log.test.ts` > analyzeLog > computes correct totals from synthetic log
+- `analyze-shadow-log.test.ts` > analyzeLog > excludes shadow-dispatched and skipped from judgment total
+- `analyze-shadow-log.test.ts` > analyzeLog > counts verdict distribution correctly
+- `analyze-shadow-log.test.ts` > analyzeLog > computes agreement rate over judgment entries only
+- `analyze-shadow-log.test.ts` > analyzeLog > counts suppressedByThreshold entries
+- `analyze-shadow-log.test.ts` > analyzeLog > groups disagreements by regex/shadow label pair
+- `analyze-shadow-log.test.ts` > analyzeLog > computes per-label agreement correctly
+
+**Edge case tests:**
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > returns null for empty string
+- `analyze-shadow-log.test.ts` > parseShadowLogEntry > returns null for a block that does not start with ##
+- `analyze-shadow-log.test.ts` > analyzeLog > tolerates an empty log body (just frontmatter)
+- `analyze-shadow-log.test.ts` > analyzeLog > tolerates an empty string
+- `analyze-shadow-log.test.ts` > analyzeLog > handles a log with only skipped/shadow-dispatched entries (0 judgment entries)
+- `analyze-shadow-log.test.ts` > analyzeLog > handles both-none verdict correctly (counts as judgment, not agree)
+
+---
+
 ### REQ-GUI-004: Log viewer htmx partial
 
 **Phase:** 15 | **Status:** Implemented
@@ -5649,6 +5737,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-032 | shadow-taxonomy.test.ts, shadow-logger.test.ts | 54 | 30 | Implemented |
 | REQ-LLM-033 | shadow-classifier.test.ts, shadow-classifier.persona.test.ts | 42 | 113 | Implemented |
 | REQ-LLM-034 | shadow-verdict.test.ts, shadow-integration.test.ts, route-dispatch.test.ts | 10 | 16 | Implemented |
+| REQ-LLM-035 | shadow-dispatch.test.ts, shadow-handlers-parity.test.ts, shadow-primary.integration.test.ts, shadow-verdict.test.ts, shadow-logger.test.ts, shadow-taxonomy.test.ts | 13 | 30 | Implemented |
+| REQ-LLM-036 | analyze-shadow-log.test.ts | 15 | 6 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -5767,4 +5857,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
 Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **166 test files** | **1266** | **1539** | **2805 tests** |
+| **Totals** | **170 test files** | **1294** | **1575** | **2869 tests** |

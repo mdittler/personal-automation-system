@@ -54,3 +54,32 @@ describe('computeVerdict', () => {
         expect(computeVerdict(GROCERY_ADD, { kind: 'legacy-skipped' })).toBe('legacy-skipped');
     });
 });
+
+describe('shadow-dispatched short-circuit (Chunk D)', () => {
+    it('returns "shadow-dispatched" when rawRegexWinner is the shadow-dispatched sentinel', () => {
+        const verdict = computeVerdict(
+            NONE,
+            { kind: 'ok', action: GROCERY_ADD, confidence: 0.95 },
+            '(shadow-dispatched)',
+        );
+        expect(verdict).toBe('shadow-dispatched');
+    });
+
+    it('short-circuits before consulting shadow — works even if shadow is parse-failed', () => {
+        const verdict = computeVerdict(NONE, { kind: 'parse-failed', raw: 'junk' }, '(shadow-dispatched)');
+        expect(verdict).toBe('shadow-dispatched');
+    });
+
+    it('without the sentinel, existing verdict semantics are preserved', () => {
+        const verdict = computeVerdict(GROCERY_ADD, { kind: 'ok', action: GROCERY_ADD, confidence: 0.95 });
+        expect(verdict).toBe('agree');
+    });
+
+    it('computeVerdict stays pure — no threshold-awareness, no side effects', () => {
+        // Calling it multiple times with same args returns same result
+        const r1 = computeVerdict(GROCERY_ADD, ok(GROCERY_ADD));
+        const r2 = computeVerdict(GROCERY_ADD, ok(GROCERY_ADD));
+        expect(r1).toBe('agree');
+        expect(r2).toBe('agree');
+    });
+});

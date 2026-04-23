@@ -185,7 +185,7 @@ When an app is installed or enabled for a space, inspect its manifest, docs, com
 
 1. ✓ Add optional routing metadata to `MessageContext` and photo context, and pass verifier-confirmed intent and confidence through router dispatch.
 2. ✓ Update Food handlers to prefer high-confidence routed intent metadata while keeping existing regex predicates as fallback. (Chunk A complete 2026-04-22)
-3. Add a Food fast-tier structured classifier in shadow mode and log disagreements with the existing router.
+3. ✓ Add a Food fast-tier structured classifier in shadow mode and log disagreements with the existing router. (Chunks B+C+D complete 2026-04-23 — shadow-primary machinery + telemetry CLI; production flip gated on ≥95% telemetry from `pnpm analyze-shadow-log`)
 4. Add structured extractors for messy Food text inputs, beginning with grocery, pantry/freezer, leftovers, waste, prices, and nutrition.
 5. Replace chatbot system-data keyword categorization with a fast structured selector.
 6. Replace AppKnowledge and ContextStore keyword-only selection with deterministic candidate generation plus fast LLM reranking.

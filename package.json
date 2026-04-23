@@ -20,7 +20,8 @@
 		"install-app": "tsx core/src/cli/install-app.ts",
 		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",
 		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts",
-		"load-test": "tsx scripts/load-test.ts"
+		"load-test": "tsx scripts/load-test.ts",
+		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]

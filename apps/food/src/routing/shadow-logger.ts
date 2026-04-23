@@ -15,7 +15,7 @@ export type ShadowResult =
 
 export type ShadowVerdict =
     | 'agree' | 'disagree' | 'one-side-none' | 'both-none'
-    | 'skipped' | 'error' | 'legacy-skipped';
+    | 'skipped' | 'error' | 'legacy-skipped' | 'shadow-dispatched';
 
 export interface ShadowLogEntry {
     timestamp: Date;
@@ -33,6 +33,11 @@ export interface ShadowLogEntry {
     regexWinnerLabel: string;
     shadow: ShadowResult;
     verdict: ShadowVerdict;
+    /**
+     * True when shadow returned {kind:'ok', action≠'none'} but confidence was below
+     * shadow_min_confidence and we fell through to the regex cascade. Purely telemetry.
+     */
+    shadowSuppressedByThreshold?: boolean;
 }
 
 const FRONTMATTER = `---
@@ -106,9 +111,11 @@ export class FoodShadowLogger {
             `- **Regex winner**: ${e.regexWinner} → "${e.regexWinnerLabel}"`,
             `- **Shadow**: ${this.fmtShadow(e.shadow)}`,
             `- **Verdict**: ${e.verdict}`,
-            '',
-            '',
         ];
+        if (e.shadowSuppressedByThreshold) {
+            lines.push(`- **ShadowSuppressedByThreshold**: true`);
+        }
+        lines.push('', '');
         return lines.join('\n');
     }
 

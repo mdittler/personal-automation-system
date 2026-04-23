@@ -227,4 +227,16 @@ describe('FoodShadowLogger', () => {
         mkdirSync(badPath);
         await expect(logger.log(sampleEntry())).rejects.toThrow();
     });
+
+    it('emits ShadowSuppressedByThreshold line when true (Chunk D)', async () => {
+        await logger.log(sampleEntry({ shadowSuppressedByThreshold: true }));
+        const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        expect(c).toMatch(/- \*\*ShadowSuppressedByThreshold\*\*: true/);
+    });
+
+    it('omits ShadowSuppressedByThreshold line when undefined (Chunk D)', async () => {
+        await logger.log(sampleEntry());
+        const c = readFileSync(join(dir, 'shadow-classifier-log.md'), 'utf8');
+        expect(c).not.toMatch(/ShadowSuppressedByThreshold/);
+    });
 });

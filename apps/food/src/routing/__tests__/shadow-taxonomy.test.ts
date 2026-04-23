@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     FOOD_SHADOW_LABELS,
     INTENTIONALLY_UNMAPPED_LABELS,
+    SHADOW_LABELS_WITHOUT_TEXT_HANDLER,
     REGEX_TO_MANIFEST_MAP,
     normalizeRegexLabel,
     isValidShadowLabel,
@@ -172,5 +173,28 @@ describe('isValidShadowLabel', () => {
         ['(route-dispatched)',            'sentinel string'],
     ])('rejects %j (%s)', (val) => {
         expect(isValidShadowLabel(val as unknown)).toBe(false);
+    });
+});
+
+describe('label categorization (Chunk D)', () => {
+    it('every label is categorized exactly once across {regex-mapped, intentionally-unmapped, no-text-handler}', () => {
+        const regexMapped = new Set(Object.values(REGEX_TO_MANIFEST_MAP));
+        const unmapped = new Set(INTENTIONALLY_UNMAPPED_LABELS);
+        const noTextHandler = new Set(SHADOW_LABELS_WITHOUT_TEXT_HANDLER);
+
+        for (const label of FOOD_SHADOW_LABELS) {
+            if (label === 'none') continue;
+            const inRegex = regexMapped.has(label);
+            const inUnmapped = unmapped.has(label);
+            const inNoText = noTextHandler.has(label);
+            const count = [inRegex, inUnmapped, inNoText].filter(Boolean).length;
+            expect(count, `label "${label}" must appear in exactly one bucket, found ${count}`).toBe(1);
+        }
+    });
+
+    it('SHADOW_LABELS_WITHOUT_TEXT_HANDLER contains the receipt-details label', () => {
+        expect(SHADOW_LABELS_WITHOUT_TEXT_HANDLER).toContain(
+            'user wants to see receipt details or look up items from a receipt',
+        );
     });
 });
