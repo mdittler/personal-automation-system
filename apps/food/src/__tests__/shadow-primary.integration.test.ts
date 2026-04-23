@@ -938,6 +938,42 @@ describe('shadow-primary router integration (Chunk D)', () => {
         expect(viewNoplanCall, 'handleMealPlanView must NOT fire for a generate phrase').toBeUndefined();
     });
 
+    // ─── A4: routing_primary='regex' regression ───────────────────────────────
+
+    it("(t) routing_primary='regex': high-confidence shadow does NOT dispatch; regex cascade wins", async () => {
+        vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+            if (key === 'shadow_sample_rate') return 1 as never;
+            if (key === 'routing_primary') return 'regex' as never;
+            if (key === 'shadow_min_confidence') return 0.7 as never;
+            return undefined as never;
+        });
+        vi.mocked(store.read).mockImplementation(async (path: string) => {
+            if (path === 'household.yaml') return stringify(sampleHousehold);
+            return '';
+        });
+
+        const stub = makeStubClassifier({
+            kind: 'ok', action: GROCERY_ADD_LABEL, confidence: 0.95,
+        });
+        __setShadowDepsForTests(stub, captureLogger);
+
+        await handleMessage(createTestMessageContext({ userId: 'user1', text: 'we need milk' }));
+        await __flushShadowForTests();
+
+        // Shadow classifier still ran as background telemetry (not for dispatch)
+        expect(stub.callCount).toBe(1);
+
+        const e = lastEntry();
+        // Regex cascade determined the winner — shadow-dispatched must NOT appear
+        expect(e.regexWinner).toBe('grocery_add');
+        expect(e.verdict).toBe('agree');
+
+        // handleGroceryAdd ran via regex cascade
+        const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+        const addedCall = sends.find(([, msg]) => msg.startsWith('Added') && msg.includes('item(s)'));
+        expect(addedCall, 'handleGroceryAdd must have fired via regex cascade').toBeDefined();
+    });
+
     // ─── A2: warnInconsistentShadowConfig ─────────────────────────────────────
 
     describe('warnInconsistentShadowConfig', () => {
