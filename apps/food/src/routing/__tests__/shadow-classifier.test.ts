@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Logger } from 'pino';
-import type { LLMService } from '@pas/core/types';
+import type { AppLogger, LLMService } from '@pas/core/types';
 import {
     buildShadowClassifierPrompt,
     parseShadowResponse,
@@ -40,10 +39,10 @@ function asyncThrowingLLM(err: unknown): LLMService {
     } as unknown as LLMService;
 }
 
-const silentLogger: Logger = {
+const silentLogger: AppLogger = {
     warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn(),
     trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
-} as unknown as Logger;
+} as unknown as AppLogger;
 
 function makeClassifier(opts: Partial<FoodShadowClassifierOptions> = {}): FoodShadowClassifier {
     return new FoodShadowClassifier({
@@ -384,7 +383,7 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
 
     async function assertLLMError(err: unknown, expectedCategory: string): Promise<void> {
         const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn(),
-            trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() } as unknown as Logger;
+            trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() } as unknown as AppLogger;
         const c = new FoodShadowClassifier({
             llm: throwingLLM(err),
             logger,
@@ -393,9 +392,7 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
         const r = await c.classify('test message', 1.0);
         expect(r).toEqual({ kind: 'llm-error', category: expectedCategory });
         expect(vi.mocked(logger.warn)).toHaveBeenCalledOnce();
-        // First arg must be an object with an `err` property
-        const firstArg = vi.mocked(logger.warn).mock.calls[0]?.[0];
-        expect(firstArg).toMatchObject({ err });
+        expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain('FoodShadowClassifier: LLM call failed');
     }
 
     it('LLMCostCapError → cost-cap', async () => {
@@ -489,7 +486,7 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
     it('LLM rejects asynchronously → same category as synchronous throw', async () => {
         const err = Object.assign(new Error('async rate limit'), { name: 'LLMRateLimitError' });
         const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn(),
-            trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() } as unknown as Logger;
+            trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() } as unknown as AppLogger;
         const c = new FoodShadowClassifier({
             llm: asyncThrowingLLM(err),
             logger,

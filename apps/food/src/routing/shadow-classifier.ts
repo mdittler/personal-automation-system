@@ -1,11 +1,10 @@
-import type { Logger } from 'pino';
-import type { LLMService } from '@pas/core/types';
+import type { AppLogger, LLMService } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import type { ShadowResult } from './shadow-logger.js';
 
 export interface FoodShadowClassifierOptions {
     llm: LLMService;
-    logger: Logger;
+    logger: AppLogger;
     labels: readonly string[];
 }
 
@@ -96,7 +95,7 @@ export class FoodShadowClassifier {
             let category = 'unknown';
             try { category = classifyLLMError(err).category; }
             catch { /* classifyLLMError is expected never to throw; defense-in-depth */ }
-            this.opts.logger.warn({ err }, 'FoodShadowClassifier: LLM call failed — degrading gracefully');
+            this.opts.logger.warn('FoodShadowClassifier: LLM call failed — %s', String(err));
             return { kind: 'llm-error', category };
         }
         return parseShadowResponse(raw, this.opts.labels);

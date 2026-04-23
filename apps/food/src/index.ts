@@ -8,6 +8,7 @@
  * Phase H10: Cost tracking — price DB, budget reports, cost annotations.
  */
 
+import { resolve } from 'node:path';
 import type {
 	AppModule,
 	CallbackContext,
@@ -125,6 +126,15 @@ import { getSession } from './services/cook-session.js';
 import { estimateGroceryListCost, estimatePlanCost } from './services/cost-estimator.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
 import { dispatchByRoute } from './routing/dispatch.js';
+import { FoodShadowClassifier } from './routing/shadow-classifier.js';
+import type { ShadowResult } from './routing/shadow-logger.js';
+import { FoodShadowLogger } from './routing/shadow-logger.js';
+import { FOOD_SHADOW_LABELS } from './routing/shadow-taxonomy.js';
+import {
+	finalizeShadow,
+	initShadowDeps,
+	startShadow,
+} from './routing/shadow-integration.js';
 import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
 import {
 	addFreezerItem,
@@ -250,7 +260,6 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 	// Non-blocking: failures here must not prevent app startup.
 	try {
 		const { existsSync, statSync } = await import('node:fs');
-		const { resolve } = await import('node:path');
 		const logPath = resolve(process.cwd(), 'data', 'system', 'food', 'migration-unresolved.log');
 		if (existsSync(logPath) && statSync(logPath).size > 0) {
 			s.logger.warn(
@@ -262,6 +271,13 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 	}
 	// H12a: Register health:daily-metrics subscriber (fire-and-forget, non-blocking)
 	registerHealthSubscribers(s);
+
+	// LLM Enhancement #2 Chunk C: wire shadow classifier + logger.
+	// shadow_sample_rate default 1 = classify every message; set to 0 to disable.
+	initShadowDeps(
+		new FoodShadowClassifier({ llm: s.llm, logger: s.logger, labels: FOOD_SHADOW_LABELS }),
+		new FoodShadowLogger(resolve(process.cwd(), 'data', 'system', 'food')),
+	);
 };
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
@@ -333,7 +349,15 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 
 export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageContext) => {
 	const text = ctx.text.trim();
-	if (!text) return;
+
+	// Empty text — log skipped-no-caption and return; no user response needed.
+	if (!text) {
+		void finalizeShadow(
+			Promise.resolve<ShadowResult>({ kind: 'skipped-no-caption' }),
+			ctx, 'help_fallthrough', undefined, services.logger,
+		);
+		return;
+	}
 
 	// Check for number selection from previous search results
 	const num = Number.parseInt(text, 10);
@@ -343,6 +367,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			const selected = cached[num - 1];
 			if (selected) {
 				await sendRecipeWithApproval(ctx.userId, selected, formatRecipe(selected));
+				void finalizeShadow(
+					Promise.resolve<ShadowResult>({ kind: 'skipped-number-select' }),
+					ctx, 'pending_flow_consumed', undefined, services.logger,
+				);
 				return;
 			}
 		}
@@ -351,24 +379,42 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H5: Cook mode text intercept — handle "next", "back", etc. during active session
 	if (isCookModeActive(ctx.userId)) {
 		const handled = await handleCookTextAction(services, text, ctx);
-		if (handled) return;
+		if (handled) {
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-cook-mode' }),
+				ctx, 'pending_flow_consumed', undefined, services.logger,
+			);
+			return;
+		}
 	}
 
 	// H5: Servings reply — handle number/text response after /cook recipe selection
 	if (hasPendingCookRecipe(ctx.userId)) {
 		await handleServingsReply(services, text, ctx);
+		void finalizeShadow(
+			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'cook-servings' }),
+			ctx, 'pending_flow_consumed', 'cook-servings', services.logger,
+		);
 		return;
 	}
 
 	// H6: Pending leftover add — next text message after "Yes, log leftovers"
 	if (hasPendingLeftoverAdd(ctx.userId)) {
 		await handlePendingLeftoverAdd(text, ctx);
+		void finalizeShadow(
+			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'leftover-add' }),
+			ctx, 'pending_flow_consumed', 'leftover-add', services.logger,
+		);
 		return;
 	}
 
 	// H6: Pending freezer add — next text message after "Add to freezer" button
 	if (hasPendingFreezerAdd(ctx.userId)) {
 		await handlePendingFreezerAdd(text, ctx);
+		void finalizeShadow(
+			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'freezer-add' }),
+			ctx, 'pending_flow_consumed', 'freezer-add', services.logger,
+		);
 		return;
 	}
 
@@ -376,21 +422,39 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (hasPendingQuickMealAdd(ctx.userId)) {
 		const userStore = services.data.forUser(ctx.userId);
 		const handled = await handleQuickMealAddReply(services, userStore, ctx.userId, text);
-		if (handled) return;
+		if (handled) {
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'quickmeal-add' }),
+				ctx, 'pending_flow_consumed', 'quickmeal-add', services.logger,
+			);
+			return;
+		}
 	}
 
 	// H11.w: Pending quick-meal edit guided flow
 	if (hasPendingQuickMealEdit(ctx.userId)) {
 		const userStore = services.data.forUser(ctx.userId);
 		const handled = await handleQuickMealEditReply(services, userStore, ctx.userId, text);
-		if (handled) return;
+		if (handled) {
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'quickmeal-edit' }),
+				ctx, 'pending_flow_consumed', 'quickmeal-edit', services.logger,
+			);
+			return;
+		}
 	}
 
 	// H11.y: Pending targets-set guided flow
 	if (hasPendingTargetsFlow(ctx.userId)) {
 		const userStore = services.data.forUser(ctx.userId);
 		const handled = await handleTargetsFlowReply(services, userStore, ctx.userId, text);
-		if (handled) return;
+		if (handled) {
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'targets-set' }),
+				ctx, 'pending_flow_consumed', 'targets-set', services.logger,
+			);
+			return;
+		}
 	}
 
 	// H11.y: Pending guest-add guided flow
@@ -400,97 +464,132 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			// Household dissolved — cancel the in-progress flow so it doesn't leak
 			cancelGuestAddFlow(ctx.userId);
 			await services.telegram.send(ctx.userId, 'Guest setup cancelled — household no longer found.');
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'guest-add' }),
+				ctx, 'pending_flow_consumed', 'guest-add', services.logger,
+			);
 			return;
 		}
 		const handled = await handleGuestAddReply(services, hhForGuest.sharedStore, ctx.userId, text);
-		if (handled) return;
+		if (handled) {
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'guest-add' }),
+				ctx, 'pending_flow_consumed', 'guest-add', services.logger,
+			);
+			return;
+		}
 	}
 
 	// LLM Enhancement #2 Chunk A: trust core router's LLM-derived route when it maps
 	// to an allowlisted handler.
-	if (await dispatchByRoute(ctx, ROUTE_HANDLERS, { logger: services.logger })) return;
+	if (await dispatchByRoute(ctx, ROUTE_HANDLERS, { logger: services.logger })) {
+		void finalizeShadow(
+			Promise.resolve<ShadowResult>({ kind: 'legacy-skipped' }),
+			ctx, '(route-dispatched)', undefined, services.logger,
+		);
+		return;
+	}
+
+	const sampleRate = (await services.config.get<number>('shadow_sample_rate')) ?? 1;
+	const shadowPromise = startShadow(ctx.text, sampleRate);
+	let regexWinner = 'help_fallthrough';
 
 	// Try to detect intent from the message
 	const lower = text.toLowerCase();
+	try {
 
 	// Recipe save intent
 	if (isSaveRecipeIntent(lower)) {
+		regexWinner = 'save_recipe';
 		await handleSaveRecipe(text, ctx);
 		return;
 	}
 
 	// Recipe search intent
 	if (isSearchRecipeIntent(lower)) {
+		regexWinner = 'search_recipe';
 		await handleSearchRecipe(text, ctx);
 		return;
 	}
 
 	// H8: Recipe photo retrieval intent
 	if (isRecipePhotoIntent(lower)) {
+		regexWinner = 'recipe_photo';
 		await handleRecipePhotoRetrieval(text, ctx);
 		return;
 	}
 
 	// Recipe edit intent
 	if (isEditRecipeIntent(lower)) {
+		regexWinner = 'edit_recipe';
 		await handleEditRecipe(text, ctx);
 		return;
 	}
 
 	// Meal plan generate intent (before view — "plan meals" vs "show plan")
 	if (isMealPlanGenerateIntent(lower)) {
+		regexWinner = 'meal_plan_generate';
 		await handleMealPlanGenerate(ctx);
 		return;
 	}
 
 	// Meal plan view intent
 	if (isMealPlanViewIntent(lower)) {
+		regexWinner = 'meal_plan_view';
 		await handleMealPlanView(ctx);
 		return;
 	}
 
 	// What's for dinner intent
 	if (isWhatsForDinnerIntent(lower)) {
+		regexWinner = 'whats_for_dinner';
 		await handleWhatsForDinner(ctx);
 		return;
 	}
 
 	// What can I make intent
 	if (isWhatCanIMakeIntent(lower)) {
+		regexWinner = 'what_can_i_make';
 		await handleWhatCanIMake(ctx);
 		return;
 	}
 
 	// Meal swap intent
 	if (isMealSwapIntent(lower)) {
+		regexWinner = 'meal_swap';
 		await handleMealSwap(text, ctx);
 		return;
 	}
 
 	// H6: Leftover intents
 	if (isLeftoverAddIntent(lower)) {
+		regexWinner = 'leftover_add';
 		await handleLeftoverAddIntent(text, ctx);
 		return;
 	}
 
 	if (isLeftoverViewIntent(lower)) {
+		regexWinner = 'leftover_view';
 		await handleLeftoversView(ctx);
 		return;
 	}
 
 	// H6: Freezer intents
 	if (isFreezerAddIntent(lower)) {
+		regexWinner = 'freezer_add';
 		await handleFreezerAddIntent(text, ctx);
 		return;
 	}
 
 	if (isFreezerViewIntent(lower)) {
+		regexWinner = 'freezer_view';
 		await handleFreezerView(ctx);
 		return;
 	}
 
 	// H6: Waste intent
 	if (isWasteIntent(lower)) {
+		regexWinner = 'waste_log';
 		await handleWasteIntent(text, ctx);
 		return;
 	}
@@ -509,6 +608,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 						ctx.userId,
 						'Kid meal adaptation is disabled. Enable it in your Food settings.',
 					);
+					regexWinner = 'kid_adapt';
 					return;
 				}
 				const cached = lastSearchResults.get(ctx.userId);
@@ -524,6 +624,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 				);
 				if (msg) {
 					await services.telegram.send(ctx.userId, msg);
+					regexWinner = 'kid_adapt';
 					return;
 				}
 			}
@@ -543,6 +644,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 				} else {
 					await services.telegram.send(ctx.userId, result.text);
 				}
+				regexWinner = 'food_intro';
 				return;
 			}
 
@@ -557,6 +659,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 				);
 				if (msg) {
 					await services.telegram.send(ctx.userId, msg);
+					regexWinner = 'child_approval';
 					return;
 				}
 			}
@@ -565,6 +668,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// H10: Price update intent — "eggs are $3.50 at costco"
 	if (isPriceUpdateIntent(lower)) {
+		regexWinner = 'price_update';
 		await handlePriceUpdateIntent(text, ctx);
 		return;
 	}
@@ -576,6 +680,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// get eaten by the macro-view intent, and the exclusion list in
 	// isLogMealNLIntent keeps "how are my macros" on the view path.
 	if (isLogMealNLIntent(text)) {
+		regexWinner = 'meal_log_nl';
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
 			await services.telegram.send(
@@ -590,12 +695,14 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
 	if (isTargetsSetIntent(text)) {
+		regexWinner = 'targets_set';
 		await beginTargetsFlow(services, ctx.userId);
 		return;
 	}
 
 	// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
 	if (isAdherenceIntent(text)) {
+		regexWinner = 'adherence';
 		const hhAdh = await requireHousehold(services, ctx.userId);
 		if (!hhAdh) {
 			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
@@ -607,12 +714,14 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// H12a: Health correlation intent — "how does my diet affect my energy"
 	if (isHealthCorrelationIntent(text)) {
+		regexWinner = 'health_correlation';
 		await handleHealthCorrelation(services, ctx);
 		return;
 	}
 
 	// H11: Nutrition intent — "how are my macros", "show nutrition summary"
 	if (isNutritionViewIntent(text)) {
+		regexWinner = 'nutrition_view';
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
 			await services.telegram.send(
@@ -628,12 +737,14 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// H12b: Cultural calendar intent — "holiday recipes", "what should I cook for Thanksgiving"
 	// Must come BEFORE isHostingIntent to not be blocked by it, but uses exclusion for "host/party/guests"
 	if (isCulturalCalendarIntent(text)) {
+		regexWinner = 'cultural_calendar';
 		await handleCulturalCalendarMessage(services, ctx);
 		return;
 	}
 
 	// H11: Hosting intent — "we're having people over", "plan a dinner party"
 	if (isHostingIntent(lower)) {
+		regexWinner = 'hosting';
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
 			await services.telegram.send(
@@ -648,6 +759,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// H10: Budget view intent — "how much did we spend on food"
 	if (isBudgetViewIntent(lower)) {
+		regexWinner = 'budget_view';
 		const hh = await requireHousehold(services, ctx.userId);
 		if (!hh) {
 			await services.telegram.send(
@@ -662,54 +774,63 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// Food question intent
 	if (isFoodQuestionIntent(lower)) {
+		regexWinner = 'food_question';
 		await handleFoodQuestion(text, ctx);
 		return;
 	}
 
 	// Grocery generate intent (must come before add/view — "make grocery list for X")
 	if (isGroceryGenerateIntent(lower)) {
+		regexWinner = 'grocery_generate';
 		await handleGroceryGenerate(text, ctx);
 		return;
 	}
 
 	// Grocery view intent (must come before add — "what do we need" has "we need" substring)
 	if (isGroceryViewIntent(lower)) {
+		regexWinner = 'grocery_view';
 		await handleGroceryView(ctx);
 		return;
 	}
 
 	// Grocery add intent
 	if (isGroceryAddIntent(lower)) {
+		regexWinner = 'grocery_add';
 		await handleGroceryAdd(text, ctx);
 		return;
 	}
 
 	// Pantry add intent (must come before pantry view)
 	if (isPantryAddIntent(lower)) {
+		regexWinner = 'pantry_add';
 		await handlePantryAdd(text, ctx);
 		return;
 	}
 
 	// Pantry remove intent
 	if (isPantryRemoveIntent(lower)) {
+		regexWinner = 'pantry_remove';
 		await handlePantryRemove(text, ctx);
 		return;
 	}
 
 	// Pantry view intent
 	if (isPantryViewIntent(lower)) {
+		regexWinner = 'pantry_view';
 		await handlePantryView(ctx);
 		return;
 	}
 
 	// H5: Cook mode intent
 	if (isCookIntent(lower)) {
+		regexWinner = 'cook_intent';
 		await handleCookIntent(services, text, ctx);
 		return;
 	}
 
 	// Fallback: try to interpret as a recipe save if it looks like recipe text
 	if (looksLikeRecipe(text)) {
+		regexWinner = 'save_recipe';
 		await handleSaveRecipe(text, ctx);
 		return;
 	}
@@ -731,6 +852,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			if (!result.empty) {
 				const answer = await formatDataAnswer(ctx.text, result, services.llm, services.logger);
 				if (answer) {
+					regexWinner = 'data_query_fallback';
 					await services.telegram.send(ctx.userId, answer);
 					return;
 				}
@@ -761,6 +883,9 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• /foodbudget — view food spending\n' +
 			'• /household — manage your household',
 	);
+	} finally {
+		void finalizeShadow(shadowPromise, ctx, regexWinner, undefined, services.logger);
+	}
 };
 
 // ─── Command Handler ─────────────────────────────────────────────

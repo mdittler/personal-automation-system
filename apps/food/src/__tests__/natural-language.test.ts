@@ -45,6 +45,7 @@ import {
 	isHostingIntent,
 } from '../index.js';
 import { endSession, hasActiveSession } from '../services/cook-session.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import type { ChildFoodLog, FreezerItem, GroceryList, GuestProfile, Household, MealPlan, PantryItem, Recipe } from '../types.js';
 
 // ─── Shared Fixtures ─────────────────────────────────────────────
@@ -396,6 +397,7 @@ describe('Natural Language — Real User Messages', () => {
 		vi.mocked(services.data.forShared).mockReturnValue(store as any);
 		vi.mocked(services.data.forUser).mockReturnValue(store as any);
 		await init(services);
+		__clearShadowDepsForTests();
 	});
 
 	/** Helper: set up a household with recipes and optionally a grocery list, pantry, meal plan, and children. */

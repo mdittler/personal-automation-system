@@ -15,6 +15,7 @@ import type { CoreServices } from '@pas/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import { createSession, endSession } from '../services/cook-session.js';
 import type { Household, Recipe } from '../types.js';
 
@@ -86,6 +87,7 @@ describe('Contextual Food Questions', () => {
 		vi.mocked(services.llm.complete).mockResolvedValue('Use herbs and a light salad.');
 
 		await init(services);
+		__clearShadowDepsForTests();
 	});
 
 	afterEach(() => {

@@ -2352,6 +2352,61 @@ Food's `handleMessage` uses a long ordered regex cascade for routing. Chunk B ad
 
 ---
 
+## Phase LLM Enhancement #2 Chunk C: Shadow Classifier Integration
+
+**Date:** 2026-04-22  **Status:** Complete  **Part of:** LLM Enhancement Opportunities Plan (item #2)
+
+### Motivation
+
+Chunks A and B shipped route-first dispatch and the shadow classifier infrastructure. Chunk C wires the classifier into `handleMessage` in shadow-only (observe) mode: it runs concurrently with the regex cascade, logs an agreement verdict to `shadow-classifier-log.md`, and has zero effect on user-visible routing. This produces the telemetry needed before the eventual Chunk D switchover.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| Verdict helper | New `apps/food/src/routing/shadow-verdict.ts` — `computeVerdict(regexWinnerLabel, shadow)` pure function mapping `(FoodShadowLabel, ShadowResult)` → `ShadowVerdict` |
+| Integration shim | New `apps/food/src/routing/shadow-integration.ts` — `startShadow()`, `finalizeShadow()`, `initShadowDeps()`, test seams `__setShadowDepsForTests` / `__clearShadowDepsForTests` / `__flushShadowForTests` |
+| `handleMessage` wiring | `apps/food/src/index.ts` — `regexWinner` mutable variable set per branch; all early-exit gates substitute synthetic promises; try/finally on regex cascade calls `finalizeShadow`; `shadow_sample_rate` read per-message from `services.config`; `init()` constructs default `FoodShadowClassifier` + `FoodShadowLogger` |
+| Shadow classifier fix | `apps/food/src/routing/shadow-classifier.ts` — changed `Logger` (pino) → `AppLogger` (@pas/core/types); updated `warn()` to string-first form |
+| Manifest | `apps/food/manifest.yaml` — added `shadow_sample_rate: number` (default 1) to `user_config` |
+| Tests | New `shadow-verdict.test.ts` (10 unit), `shadow-integration.test.ts` (12 integration + 1 Layer 4 persona); `route-dispatch.test.ts` Group 4b extended (+4 gate-ordering guards); `shadow-classifier.test.ts` updated for `AppLogger` |
+| Test pollution fixes | `app.test.ts`, `contextual-food-question.test.ts`, `natural-language.test.ts`, `natural-language-h11.test.ts`, `natural-language-h11z.test.ts` — added `__clearShadowDepsForTests()` in `beforeEach` to prevent module-level shadow state from consuming LLM stubs |
+| URS | `docs/urs.md` — REQ-LLM-034 added; traceability matrix updated |
+
+### Files Touched
+
+- **New:** `apps/food/src/routing/shadow-verdict.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-verdict.test.ts`
+- **New:** `apps/food/src/routing/shadow-integration.ts`
+- **New:** `apps/food/src/__tests__/shadow-integration.test.ts`
+- **Modified:** `apps/food/src/index.ts` — shadow pipeline wired into `handleMessage`
+- **Modified:** `apps/food/src/routing/shadow-classifier.ts` — AppLogger fix
+- **Modified:** `apps/food/src/routing/__tests__/shadow-classifier.test.ts` — AppLogger update
+- **Modified:** `apps/food/manifest.yaml` — `shadow_sample_rate` user_config entry
+- **Modified:** `apps/food/src/__tests__/route-dispatch.test.ts` — Group 4b (4 new tests)
+- **Modified:** `apps/food/src/__tests__/app.test.ts` — shadow pollution fix
+- **Modified:** `apps/food/src/__tests__/contextual-food-question.test.ts` — shadow pollution fix
+- **Modified:** `apps/food/src/__tests__/natural-language.test.ts` — shadow pollution fix
+- **Modified:** `apps/food/src/__tests__/natural-language-h11.test.ts` — shadow pollution fix
+- **Modified:** `apps/food/src/__tests__/natural-language-h11z.test.ts` — shadow pollution fix
+- **Modified:** `docs/urs.md` — REQ-LLM-034 added; traceability matrix updated
+- **Modified:** `CLAUDE.md` — Chunk C status updated to Complete
+- **Modified:** `docs/implementation-phases.md` — this entry
+
+### Verification
+
+- `pnpm test` — 7529 tests across 306 test files, all green (+26 new tests)
+- `pnpm lint` — clean
+
+### Consequences
+
+- The shadow classifier now writes one log entry per inbound text message to `data/system/food/shadow-classifier-log.md`.
+- All early-exit gates (empty text, number-select, cook-mode, pending flows, Chunk A route-dispatch) produce `skipped-*` entries rather than silence, giving Chunk D a complete traffic picture.
+- `shadow_sample_rate` config (default 1) can be set to 0 via GUI to halt classifier calls without restart.
+- Chunk D (switchover: promote shadow classifier to primary router once ≥95% agreement over ≥1 week) is the final remaining step for LLM Enhancement #2.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
