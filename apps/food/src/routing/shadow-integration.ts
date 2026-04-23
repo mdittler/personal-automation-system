@@ -71,9 +71,10 @@ export function finalizeShadow(
     regexWinner: string,
     pendingFlow: string | undefined,
     appLogger: AppLogger,
+    extra?: { shadowSuppressedByThreshold?: boolean },
 ): void {
     if (!shadowLogger) return;  // deps not initialised — no-op (e.g. most existing tests)
-    const p = doFinalize(shadowPromise, ctx, regexWinner, pendingFlow, appLogger);
+    const p = doFinalize(shadowPromise, ctx, regexWinner, pendingFlow, appLogger, extra);
     // Chain so __flushShadowForTests() covers all concurrent calls.
     shadowChain = shadowChain.then(() => p).catch(() => undefined);
 }
@@ -84,6 +85,7 @@ async function doFinalize(
     regexWinner: string,
     pendingFlow: string | undefined,
     appLogger: AppLogger,
+    extra?: { shadowSuppressedByThreshold?: boolean },
 ): Promise<void> {
     let shadow: ShadowResult;
     try {
@@ -114,6 +116,7 @@ async function doFinalize(
         regexWinnerLabel,
         shadow,
         verdict,
+        ...(extra?.shadowSuppressedByThreshold ? { shadowSuppressedByThreshold: true } : {}),
     };
 
     try {

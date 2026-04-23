@@ -281,6 +281,17 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 		new FoodShadowClassifier({ llm: s.llm, logger: s.logger, labels: FOOD_SHADOW_LABELS }),
 		new FoodShadowLogger(resolve(process.cwd(), 'data', 'system', 'food')),
 	);
+
+	// LLM Enhancement #2 Chunk D: warn when shadow primary is on but sample rate<1,
+	// which produces inconsistent routing (some messages skip the classifier).
+	const chunkDPrimary = (await s.config.get<string>('routing_primary')) ?? 'regex';
+	const chunkDRate = (await s.config.get<number>('shadow_sample_rate')) ?? 1;
+	if (chunkDPrimary === 'shadow' && chunkDRate < 1) {
+		s.logger.warn(
+			'food: routing_primary=shadow combined with shadow_sample_rate=%s produces inconsistent routing — messages that skip the classifier fall to regex. Set shadow_sample_rate=1 or routing_primary=regex.',
+			chunkDRate,
+		);
+	}
 };
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
@@ -618,7 +629,33 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	}
 
 	const sampleRate = (await services.config.get<number>('shadow_sample_rate')) ?? 1;
-	const shadowPromise = startShadow(ctx.text, sampleRate);
+	const primary = (await services.config.get<string>('routing_primary')) ?? 'regex';
+	const minConfidence = (await services.config.get<number>('shadow_min_confidence')) ?? 0.7;
+
+	// LLM Enhancement #2 Chunk D: shadow-primary dispatch.
+	// Classify once, dispatch if confident. On fall-through, REUSE the awaited result
+	// in the regex cascade so the classifier is called at most once per message.
+	let preAwaitedShadow: ShadowResult | undefined;
+	let shadowSuppressedByThreshold = false;
+	if (primary === 'shadow') {
+		const shadow = await startShadow(ctx.text, sampleRate);
+		preAwaitedShadow = shadow;
+		const outcome = await dispatchShadow(ctx, shadow, minConfidence, SHADOW_HANDLERS, SHADOW_LABELS_WITHOUT_TEXT_HANDLER_SET);
+		if (outcome.dispatched) {
+			void finalizeShadow(
+				Promise.resolve(shadow),
+				ctx, '(shadow-dispatched)', undefined, services.logger,
+			);
+			return;
+		}
+		shadowSuppressedByThreshold = outcome.suppressedByThreshold;
+	}
+
+	// Regex cascade: reuse preAwaitedShadow if available (shadow-primary fall-through),
+	// otherwise kick off a fresh shadow classify call in parallel.
+	const shadowPromise = preAwaitedShadow !== undefined
+		? Promise.resolve(preAwaitedShadow)
+		: startShadow(ctx.text, sampleRate);
 	let regexWinner = 'help_fallthrough';
 
 	// Try to detect intent from the message
@@ -1011,7 +1048,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			'• /household — manage your household',
 	);
 	} finally {
-		void finalizeShadow(shadowPromise, ctx, regexWinner, undefined, services.logger);
+		void finalizeShadow(
+			shadowPromise, ctx, regexWinner, undefined, services.logger,
+			shadowSuppressedByThreshold ? { shadowSuppressedByThreshold: true } : undefined,
+		);
 	}
 };
 
