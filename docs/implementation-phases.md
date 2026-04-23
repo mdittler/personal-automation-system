@@ -2292,6 +2292,66 @@ With the FileIndexService providing a metadata index of all user data files (D2a
 
 ---
 
+---
+
+## Phase LLM Enhancement #2 Chunk B: Food Shadow Classifier
+
+**Date:** 2026-04-22  **Status:** Complete  **Part of:** LLM Enhancement Opportunities Plan (item #2)
+
+### Motivation
+
+Food's `handleMessage` uses a long ordered regex cascade for routing. Chunk B adds a shadow observation layer: a fast-tier LLM classifier runs alongside (never replacing) the regex cascade, logs its result, and computes an agreement verdict. The data from shadow mode will inform whether the LLM can safely replace the cascade in a later chunk.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| Shadow taxonomy | New `apps/food/src/routing/shadow-taxonomy.ts` — `FOOD_SHADOW_LABELS` (27-label set from manifest + 'none'), `buildLabelsFromManifest()`, `REGEX_TO_MANIFEST_MAP` (cascade key → manifest intent), `INTENTIONALLY_UNMAPPED_LABELS`, `isValidShadowLabel()`, `normalizeRegexLabel()` |
+| Shadow logger | New `apps/food/src/routing/shadow-logger.ts` — `FoodShadowLogger` writes per-user markdown log entries with YAML frontmatter, code-point-safe truncation, concurrent-write mutex, anti-injection escaping |
+| Shadow classifier | New `apps/food/src/routing/shadow-classifier.ts` — `FoodShadowClassifier` (fast-tier LLM call, per-call sample rate, 9-category error degrade, never throws), `buildShadowClassifierPrompt()`, `parseShadowResponse()` |
+| Persona dataset | New `apps/food/src/routing/__tests__/shadow-classifier.personas.ts` — 27-persona curated spec with `deterministicRejectFor` (provable regex-cascade routes for B.3 integration tests) and `advisoryNearMisses` (LLM-dependent near-misses) |
+| Tests | New `shadow-taxonomy.test.ts` (66 tests), `shadow-logger.test.ts` (18), `shadow-classifier.test.ts` (118), `shadow-classifier.persona.test.ts` (37) |
+| URS | `docs/urs.md` — REQ-LLM-032 (taxonomy + logger) and REQ-LLM-033 (classifier + personas) added; matrix updated |
+
+### End-of-Phase Review Fixes (Codex P1/P2/M1–M4)
+
+| ID | Severity | Finding | Fix |
+|----|----------|---------|-----|
+| P1 | Important | `rejectFor` did not distinguish deterministic routes from LLM-dependent near-misses; "eggs are $3.50 at Costco" was a price-update (write) phrase in the price-query accept array | Split into `deterministicRejectFor` + `advisoryNearMisses`; moved 3 non-deterministic entries; replaced price-update phrase with query phrasing |
+| P2 | Important | Duplicate 27-row `PERSONA_TABLE` in `shadow-classifier.test.ts` superseded by persona dataset smoke tests | Deleted the taxonomy/plumbing spec block (28 tests removed) |
+| P2 | Important | Stale `REGEX_TO_MANIFEST_MAP` docblock claimed "(route-dispatched) maps to 'none'" but the key is intentionally absent | Removed the two stale docblock lines |
+| M1 | Minor | 2 error paths in `classifyLLMError` untested: `LLMCostCapError + scope:reservation-exceeded` and `status:429` | Added 2 tests; updated comment to document all reachable paths |
+| M2 | Minor | Fence-strip lines in `parseShadowResponse` had no explanation | Added inline comments explaining why fences are stripped defensively |
+| M3 | Minor | `sanitizeInput` had `maxLength = 2000` default (different from `MAX_INPUT_CODE_UNITS = 1000`) — dead-code drift risk | Dropped the default; function always called with explicit value |
+| M4 | Minor | `classify()` passed original `userText` to `buildShadowClassifierPrompt` after early-exit trim — double-trim silently skipped | Changed to pass `trimmed` |
+
+### Files Touched
+
+- **New:** `apps/food/src/routing/shadow-taxonomy.ts`
+- **New:** `apps/food/src/routing/shadow-logger.ts`
+- **New:** `apps/food/src/routing/shadow-classifier.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-taxonomy.test.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-logger.test.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-classifier.test.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-classifier.personas.ts`
+- **New:** `apps/food/src/routing/__tests__/shadow-classifier.persona.test.ts`
+- **Modified:** `docs/urs.md` — REQ-LLM-032 + REQ-LLM-033 added; traceability matrix updated
+- **Modified:** `CLAUDE.md` — Chunk B status updated to Complete
+- **Modified:** `docs/implementation-phases.md` — this entry
+
+### Verification
+
+- `pnpm test` — 7503 tests across 304 test files, all green
+- `pnpm lint` — clean
+
+### Consequences
+
+- The shadow classifier runs in observe-only mode; Food routing behavior is unchanged.
+- `FOOD_PERSONAS.deterministicRejectFor` entries are ready to drive B.3 integration tests that assert the regex cascade routes each phrase to `correctLabel`, not `persona.label`.
+- Chunk C (B.3 wiring into `handleMessage` + shadow logger call + verdict computation) is the next phase.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
