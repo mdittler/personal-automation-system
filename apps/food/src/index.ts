@@ -366,16 +366,27 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 // Parity enforced by shadow-handlers-parity.test.ts.
 export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageContext) => Promise<void>>> = {
 	'user wants to save a recipe':
-		(ctx) => handleSaveRecipe(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isEditRecipeIntent(lower) ? handleEditRecipe(ctx.text, ctx) : handleSaveRecipe(ctx.text, ctx);
+		},
 	'user wants to search for a recipe':
-		(ctx) => handleSearchRecipe(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isRecipePhotoIntent(lower) ? handleRecipePhotoRetrieval(ctx.text, ctx) : handleSearchRecipe(ctx.text, ctx);
+		},
 	'user wants to plan meals for the week':
 		(ctx) => {
 			const lower = ctx.text.toLowerCase();
-			return isMealPlanViewIntent(lower) ? handleMealPlanView(ctx) : handleMealPlanGenerate(ctx);
+			// Match regex cascade order: swap → generate → view
+			if (isMealSwapIntent(lower)) return handleMealSwap(ctx.text, ctx);
+			return isMealPlanGenerateIntent(lower) ? handleMealPlanGenerate(ctx) : handleMealPlanView(ctx);
 		},
 	'user wants to see or modify the grocery list':
-		(ctx) => handleGroceryView(ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			return isGroceryGenerateIntent(lower) ? handleGroceryGenerate(ctx.text, ctx) : handleGroceryView(ctx);
+		},
 	'user wants to add items to the grocery list':
 		(ctx) => handleGroceryAdd(ctx.text, ctx),
 	"user wants to know what's for dinner":
@@ -387,12 +398,21 @@ export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageConte
 	'user wants to check or update the pantry':
 		(ctx) => {
 			const lower = ctx.text.toLowerCase();
+			// Match regex cascade order: freezer_add → freezer_view → pantry_add → pantry_remove → pantry_view
+			if (isFreezerAddIntent(lower)) return handleFreezerAddIntent(ctx.text, ctx);
+			if (isFreezerViewIntent(lower)) return handleFreezerView(ctx);
 			if (isPantryAddIntent(lower)) return handlePantryAdd(ctx.text, ctx);
 			if (isPantryRemoveIntent(lower)) return handlePantryRemove(ctx.text, ctx);
 			return handlePantryView(ctx);
 		},
 	'user wants to log leftovers':
-		(ctx) => handleLeftoverAddIntent(ctx.text, ctx),
+		(ctx) => {
+			const lower = ctx.text.toLowerCase();
+			// Match regex cascade order: view → waste → add
+			if (isLeftoverViewIntent(lower)) return handleLeftoversView(ctx);
+			if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
+			return handleLeftoverAddIntent(ctx.text, ctx);
+		},
 	'user wants to plan for hosting guests':
 		async (ctx) => {
 			const hh = await requireHouseholdOrMessage(ctx);
