@@ -235,6 +235,9 @@ import { sanitizeInput } from './utils/sanitize.js';
 
 let services: CoreServices;
 
+/** Tracks (primary:rate) combinations that have already been warned, to emit once per process. */
+const warnedShadowConfigs = new Set<string>();
+
 /** Per-user cache of last search results for number selection. */
 const lastSearchResults = new Map<string, Recipe[]>();
 
@@ -282,17 +285,29 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 		new FoodShadowLogger(resolve(process.cwd(), 'data', 'system', 'food')),
 	);
 
-	// LLM Enhancement #2 Chunk D: warn when shadow primary is on but sample rate<1,
-	// which produces inconsistent routing (some messages skip the classifier).
+	// LLM Enhancement #2 Chunk D: warn once at startup when shadow primary + low sample rate
+	// would produce inconsistent routing. Also called per-message to catch live config flips.
 	const chunkDPrimary = (await s.config.get<string>('routing_primary')) ?? 'regex';
 	const chunkDRate = (await s.config.get<number>('shadow_sample_rate')) ?? 1;
-	if (chunkDPrimary === 'shadow' && chunkDRate < 1) {
-		s.logger.warn(
-			'food: routing_primary=shadow combined with shadow_sample_rate=%s produces inconsistent routing — messages that skip the classifier fall to regex. Set shadow_sample_rate=1 or routing_primary=regex.',
-			chunkDRate,
-		);
-	}
+	warnInconsistentShadowConfig(chunkDPrimary, chunkDRate);
 };
+
+/**
+ * Emits a logger.warn when routing_primary=shadow combined with shadow_sample_rate<1
+ * would produce inconsistent routing. Called at init() and once per message path so
+ * a live config flip is caught without a restart. Fires at most once per process per
+ * distinct (primary, rate) combination to avoid log spam.
+ */
+function warnInconsistentShadowConfig(primary: string, rate: number): void {
+	if (primary !== 'shadow' || rate >= 1) return;
+	const key = `${primary}:${rate}`;
+	if (warnedShadowConfigs.has(key)) return;
+	warnedShadowConfigs.add(key);
+	services.logger.warn(
+		'food: routing_primary=shadow combined with shadow_sample_rate=%s produces inconsistent routing — messages that skip the classifier fall to regex. Set shadow_sample_rate=1 or routing_primary=regex.',
+		rate,
+	);
+}
 
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
 
@@ -651,6 +666,8 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	const sampleRate = (await services.config.get<number>('shadow_sample_rate')) ?? 1;
 	const primary = (await services.config.get<string>('routing_primary')) ?? 'regex';
 	const minConfidence = (await services.config.get<number>('shadow_min_confidence')) ?? 0.7;
+	// Catch live config flips: emit warn once per process if combination is inconsistent.
+	warnInconsistentShadowConfig(primary, sampleRate);
 
 	// LLM Enhancement #2 Chunk D: shadow-primary dispatch.
 	// Classify once, dispatch if confident. On fall-through, REUSE the awaited result
@@ -3940,4 +3957,9 @@ export function __setPendingFreezerAddForTests(userId: string): void {
 export function __clearPendingLeftoverFreezerForTests(): void {
 	pendingLeftoverAdd.clear();
 	pendingFreezerAdd.clear();
+}
+
+/** Test-only — resets the once-per-process shadow config warning tracker. */
+export function __resetWarnedShadowConfigsForTests(): void {
+	warnedShadowConfigs.clear();
 }

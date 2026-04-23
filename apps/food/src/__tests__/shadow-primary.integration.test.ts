@@ -31,6 +31,7 @@ import {
     __setPendingLeftoverAddForTests,
     __setPendingFreezerAddForTests,
     __clearPendingLeftoverFreezerForTests,
+    __resetWarnedShadowConfigsForTests,
 } from '../index.js';
 import {
     __setShadowDepsForTests,
@@ -933,5 +934,59 @@ describe('shadow-primary router integration (Chunk D)', () => {
         const buttonCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls as [string, string, any][];
         const viewNoplanCall = buttonCalls.find(([, msg]) => msg.includes('No meal plan yet'));
         expect(viewNoplanCall, 'handleMealPlanView must NOT fire for a generate phrase').toBeUndefined();
+    });
+
+    // ─── A2: warnInconsistentShadowConfig ─────────────────────────────────────
+
+    describe('warnInconsistentShadowConfig', () => {
+        afterEach(() => {
+            __resetWarnedShadowConfigsForTests();
+        });
+
+        it('shadow+rate=1 does not emit a config warning', async () => {
+            // Default outer beforeEach: routing_primary='shadow', shadow_sample_rate=1 (silent)
+            await handleMessage(createTestMessageContext({ userId: 'user1', text: 'hi' }));
+            expect(vi.mocked(services.logger.warn)).not.toHaveBeenCalledWith(
+                expect.stringContaining('routing_primary=shadow'),
+                expect.anything(),
+            );
+        });
+
+        it('shadow+rate<1 warns on first message and is silenced on repeat', async () => {
+            vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+                if (key === 'shadow_sample_rate') return 0.5 as never;
+                if (key === 'routing_primary') return 'shadow' as never;
+                if (key === 'shadow_min_confidence') return 0.7 as never;
+                return undefined as never;
+            });
+
+            await handleMessage(createTestMessageContext({ userId: 'user1', text: 'hi' }));
+            expect(vi.mocked(services.logger.warn)).toHaveBeenCalledWith(
+                expect.stringContaining('routing_primary=shadow'),
+                0.5,
+            );
+
+            vi.mocked(services.logger.warn).mockClear();
+            await handleMessage(createTestMessageContext({ userId: 'user1', text: 'hello' }));
+            expect(vi.mocked(services.logger.warn)).not.toHaveBeenCalledWith(
+                expect.stringContaining('routing_primary=shadow'),
+                expect.anything(),
+            );
+        });
+
+        it('regex+rate<1 does not emit a config warning', async () => {
+            vi.mocked(services.config.get).mockImplementation(async (key: string) => {
+                if (key === 'shadow_sample_rate') return 0.5 as never;
+                if (key === 'routing_primary') return 'regex' as never;
+                if (key === 'shadow_min_confidence') return 0.7 as never;
+                return undefined as never;
+            });
+
+            await handleMessage(createTestMessageContext({ userId: 'user1', text: 'hi' }));
+            expect(vi.mocked(services.logger.warn)).not.toHaveBeenCalledWith(
+                expect.stringContaining('routing_primary=shadow'),
+                expect.anything(),
+            );
+        });
     });
 });
