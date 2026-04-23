@@ -3903,3 +3903,21 @@ function looksLikeRecipe(text: string): boolean {
 	const isLongEnough = text.length > 100;
 	return isLongEnough && (hasIngredientPattern || hasStepPattern);
 }
+
+// ─── Test seams ─────────────────────────────────────────────────────────────
+
+/** Test-only — sets pending leftover-add state for userId (mirrors setPendingLeftoverAdd). */
+export function __setPendingLeftoverAddForTests(userId: string): void {
+	setPendingLeftoverAdd(userId);
+}
+
+/** Test-only — sets pending freezer-add state for userId (mirrors setPendingFreezerAdd). */
+export function __setPendingFreezerAddForTests(userId: string): void {
+	setPendingFreezerAdd(userId);
+}
+
+/** Test-only — clears all pending leftover/freezer-add state. */
+export function __clearPendingLeftoverFreezerForTests(): void {
+	pendingLeftoverAdd.clear();
+	pendingFreezerAdd.clear();
+}
