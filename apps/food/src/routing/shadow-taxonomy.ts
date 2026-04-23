@@ -58,6 +58,16 @@ export const INTENTIONALLY_UNMAPPED_LABELS: readonly FoodShadowLabel[] = [
 ] as const;
 
 /**
+ * Labels that represent photo-only intents with NO text-side handler.
+ * When the shadow classifier returns one of these for a text message, the
+ * dispatcher falls through to the regex cascade (which resolves to help_fallthrough).
+ * Parity enforced by shadow-taxonomy.test.ts 'label categorization (Chunk D)'.
+ */
+export const SHADOW_LABELS_WITHOUT_TEXT_HANDLER: readonly FoodShadowLabel[] = [
+    'user wants to see receipt details or look up items from a receipt',
+] as const;
+
+/**
  * Build the shadow taxonomy at runtime from a manifest's intent list.
  * Deduplicates and appends "none" at the end. Used so the prompt stays
  * in lockstep with the live manifest.yaml.
