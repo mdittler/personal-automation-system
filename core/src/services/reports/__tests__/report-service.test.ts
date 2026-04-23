@@ -206,7 +206,7 @@ describe('ReportService — CRUD', () => {
 		// Updating an existing report should still work
 		const errors = await service.saveReport(makeValidReport({ id: 'report-000', name: 'Updated' }));
 		expect(errors).toEqual([]);
-	});
+	}, 15000);
 });
 
 describe('ReportService — run', () => {

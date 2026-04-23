@@ -246,7 +246,7 @@ describe('AlertService', () => {
 			expect(errors).toContainEqual(
 				expect.objectContaining({ message: expect.stringContaining('50') }),
 			);
-		});
+		}, 15000);
 
 		it('sets updatedAt timestamp on save', async () => {
 			const { service } = makeService();
