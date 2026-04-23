@@ -9,7 +9,12 @@ import type { FoodShadowLabel } from './shadow-taxonomy.js';
  * immediately when the Chunk A route-dispatch path wins; regexWinnerLabel is
  * never consulted in that case.
  */
-export function computeVerdict(regexWinnerLabel: FoodShadowLabel, shadow: ShadowResult): ShadowVerdict {
+export function computeVerdict(
+    regexWinnerLabel: FoodShadowLabel,
+    shadow: ShadowResult,
+    rawRegexWinner?: string,
+): ShadowVerdict {
+    if (rawRegexWinner === '(shadow-dispatched)') return 'shadow-dispatched';
     switch (shadow.kind) {
         case 'legacy-skipped':
             return 'legacy-skipped';

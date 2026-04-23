@@ -94,7 +94,7 @@ async function doFinalize(
     }
 
     const regexWinnerLabel = normalizeRegexLabel(regexWinner);
-    const verdict = computeVerdict(regexWinnerLabel, shadow);
+    const verdict = computeVerdict(regexWinnerLabel, shadow, regexWinner);
 
     const entry: ShadowLogEntry = {
         timestamp: new Date(),
