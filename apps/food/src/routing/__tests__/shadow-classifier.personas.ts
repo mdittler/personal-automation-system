@@ -6,18 +6,23 @@
  * shadow-classifier.persona.test.ts for structural invariant checks and
  * a thin smoke roundtrip per label.
  *
- * B.3 integration tests can pull rejectFor entries to assert that the
- * *deterministic* routing (regex cascade + handleMessage) sends each
- * phrase to correctLabel, not to persona.label. That is where real
- * accept/reject coverage lives; this file is the spec that drives it.
+ * B.3 integration tests can pull deterministicRejectFor entries to assert that
+ * the *deterministic* routing (regex cascade + handleMessage) sends each phrase
+ * to correctLabel, not to persona.label. That is where real accept/reject
+ * coverage lives; this file is the spec that drives it.
  *
  * Schema:
- *   accept[]     — phrases that SHOULD classify as `label` under current product semantics
- *   rejectFor[]  — phrases a casual reader might file under `label` but that current
- *                  Food routing sends to correctLabel instead
- *   synthesized  — true when the label has no existing test phrasing (photo-only or
- *                  LLM-only intent); accept phrases are invented rather than drawn from
- *                  existing test suites
+ *   accept[]                — phrases that SHOULD classify as `label`
+ *   deterministicRejectFor  — phrases with a provable deterministic route to
+ *                             correctLabel (regex or handler precedence); B.3
+ *                             integration tests should assert these directly
+ *   advisoryNearMisses      — phrases where the "wrong" routing is plausible
+ *                             but depends on LLM classification or ambiguous
+ *                             regex overlap; documented for reviewer awareness,
+ *                             not for mechanical B.3 assertion
+ *   synthesized             — true when the label has no existing test phrasing
+ *                             (photo-only or LLM-only intent); accept phrases are
+ *                             invented rather than drawn from existing test suites
  */
 
 import type { FoodShadowLabel } from '../shadow-taxonomy.js';
@@ -32,7 +37,8 @@ export interface RejectEntry {
 export interface Persona {
     label: FoodShadowLabel;
     accept: string[];
-    rejectFor: RejectEntry[];
+    deterministicRejectFor: RejectEntry[];
+    advisoryNearMisses: RejectEntry[];
     synthesized?: true;
 }
 
@@ -45,7 +51,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'keep the bolognese recipe for later',
             'store the chicken tikka masala recipe',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'find me a pasta recipe',
                 correctLabel: 'user wants to search for a recipe',
@@ -59,6 +65,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:3075',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -69,7 +76,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'show me dinner recipes',
             'look up how to make risotto',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'what can I make with chicken?',
                 correctLabel: 'user wants to know what they can make with what they have',
@@ -83,6 +90,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:417',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -93,7 +101,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'what should we eat this week?',
             'make a weekly meal plan for us',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: "what's for dinner tonight?",
                 correctLabel: "user wants to know what's for dinner",
@@ -107,6 +115,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:459',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -117,7 +126,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'view my grocery list',
             'display the shopping list please',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'add eggs to the grocery list',
                 correctLabel: 'user wants to add items to the grocery list',
@@ -131,6 +140,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:3183',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -141,7 +151,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'put bread on the shopping list',
             'get chicken from the grocery store',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'show me the grocery list',
                 correctLabel: 'user wants to see or modify the grocery list',
@@ -155,6 +165,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:694',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -165,7 +176,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'what are we having for dinner',
             "what's on the menu tonight",
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'plan meals for this week',
                 correctLabel: 'user wants to plan meals for the week',
@@ -179,6 +190,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:459',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -189,7 +201,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'is it safe to eat pink salmon?',
             'what goes well with roast chicken?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'I had pasta for lunch',
                 correctLabel: 'user wants to log a meal they cooked by name with an optional portion',
@@ -203,6 +215,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:650',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -213,7 +226,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'ready to make the pasta carbonara',
             'can we cook the curry now?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'find me a recipe for pasta',
                 correctLabel: 'user wants to search for a recipe',
@@ -227,6 +240,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:441',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -237,17 +251,19 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'add chicken to the pantry',
             "what do I have in stock?",
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'add eggs to the grocery list',
                 correctLabel: 'user wants to add items to the grocery list',
                 reason: 'isGroceryAddIntent /\\b(add)\\b.*\\b(to)\\s+(the\\s+)?(grocery)\\b/ — explicit "grocery list" routes to grocery-add, not pantry',
                 source: 'apps/food/src/index.ts:3181',
             },
+        ],
+        advisoryNearMisses: [
             {
                 text: 'add eggs to the list',
                 correctLabel: 'user wants to add items to the grocery list',
-                reason: 'isGroceryAddIntent /\\b(add|put|get|buy)\\b.*\\b(to|on)\\s+(the\\s+)?(grocery|shopping)\\b/ may not match "the list" without grocery/shopping keyword; falls to LLM routing which typically classifies as grocery-add intent',
+                reason: 'isGroceryAddIntent /\\b(add|put|get|buy)\\b.*\\b(to|on)\\s+(the\\s+)?(grocery|shopping)\\b/ may not match "the list" without grocery/shopping keyword; falls to LLM routing which typically classifies as grocery-add',
                 source: 'apps/food/src/index.ts:3181',
             },
         ],
@@ -261,7 +277,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'save the leftover pasta',
             "I've got some leftovers from dinner",
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'I had leftover pasta for lunch',
                 correctLabel: 'user wants to log a meal they cooked by name with an optional portion',
@@ -275,6 +291,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:459',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -285,7 +302,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'planning a dinner for guests',
             'need to prep for a dinner party',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'what should I cook for Christmas dinner?',
                 correctLabel: 'user wants holiday or cultural recipe suggestions',
@@ -299,6 +316,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:630',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -309,17 +327,19 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             "what's our grocery spending?",
             'how much have we spent on groceries?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'show me the grocery list',
                 correctLabel: 'user wants to see or modify the grocery list',
                 reason: 'isGroceryViewIntent (line 676) fires on "show...grocery list" — viewing the list, not spending data',
                 source: 'apps/food/src/index.ts:676',
             },
+        ],
+        advisoryNearMisses: [
             {
                 text: 'what are the prices at Costco?',
                 correctLabel: 'user asks about prices at a specific store',
-                reason: 'isPriceUpdateIntent (line 567) or LLM routing sends store-price queries to the price intent; spending view is for aggregate budget, not per-store pricing',
+                reason: 'store-price query — may route via isPriceUpdateIntent (line 567) or LLM routing; aggregate budget view vs per-store pricing is often LLM-decided for ambiguous phrasing',
                 source: 'apps/food/src/index.ts:567',
             },
         ],
@@ -336,7 +356,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'look up items from last week\'s grocery receipt',
             'find the receipt from Whole Foods',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'how much did we spend at Costco?',
                 correctLabel: 'user wants to see food spending',
@@ -350,6 +370,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:567',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -357,10 +378,10 @@ export const FOOD_PERSONAS: readonly Persona[] = [
         accept: [
             'how much are eggs at Costco?',
             'what does chicken cost at Whole Foods?',
-            'eggs are $3.50 at Costco',
+            'what are eggs going for at Costco?',
             'how much is milk at Safeway?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'how much did we spend on groceries?',
                 correctLabel: 'user wants to see food spending',
@@ -373,6 +394,17 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 reason: 'viewing a receipt document is distinct from asking about current store prices; receipt intent handles document lookups',
             },
         ],
+        advisoryNearMisses: [
+            {
+                // "eggs are $3.50 at Costco" is a price-UPDATE statement (write path via
+                // isPriceUpdateIntent:566), not a price-query; same shadow label but different
+                // action semantics — accept array reflects query phrasings only.
+                text: 'eggs are $3.50 at Costco',
+                correctLabel: 'user asks about prices at a specific store',
+                reason: 'isPriceUpdateIntent (line 566) saves a new price — same shadow label as price-query intent but write semantics; accept array should reflect query phrasings, not update statements',
+                source: 'apps/food/src/index.ts:566',
+            },
+        ],
     },
 
     {
@@ -383,7 +415,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'how many calories are in this?',
             "show me today's nutrition summary",
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'how am I doing on my macros?',
                 correctLabel: 'user wants to see how well they are hitting their macro targets over time',
@@ -397,6 +429,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:578',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -407,7 +440,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'what can we make with leftover chicken?',
             'what meals can I put together tonight?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: "what's for dinner tonight?",
                 correctLabel: "user wants to know what's for dinner",
@@ -421,6 +454,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:423',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -431,7 +465,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'make a kid-friendly version of the curry',
             'can you simplify this recipe for Margot?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'Margot tried peanut butter today',
                 correctLabel: 'user wants to log a new food introduction for a child',
@@ -445,6 +479,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:549',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -455,7 +490,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'gave Margot hummus for the first time',
             'Margot had strawberries today — first time',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'Margot loved the chicken stir fry',
                 correctLabel: 'user wants to tag a recipe as kid-approved or rejected',
@@ -469,6 +504,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:505',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -479,7 +515,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'Margot approved the mac and cheese',
             'kids rejected the lentil soup',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'Margot tried avocado today',
                 correctLabel: 'user wants to log a new food introduction for a child',
@@ -493,6 +529,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:505',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -503,7 +540,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'just had some leftover chicken',
             'logged the salad I had for lunch',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: "there's leftover soup from dinner",
                 correctLabel: 'user wants to log leftovers',
@@ -517,6 +554,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:615',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -530,7 +568,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             "I ate this stew but I have no idea what it was",
             "I just had something at my friend's — no clue what it was called",
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'I had pasta for dinner',
                 correctLabel: 'user wants to log a meal they cooked by name with an optional portion',
@@ -544,6 +582,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:417',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -555,7 +594,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'add this to my quick meals',
             'make this a template for quick dinners',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'save this recipe',
                 correctLabel: 'user wants to save a recipe',
@@ -569,6 +608,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:578',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -579,7 +619,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'update my protein target',
             'adjust my daily carb goal',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'how am I doing on my macros?',
                 correctLabel: 'user wants to see how well they are hitting their macro targets over time',
@@ -593,6 +633,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:615',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -603,7 +644,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'how am I tracking with my macros this week?',
             'macro adherence for this week',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'change my calorie targets',
                 correctLabel: 'user wants to set or change their nutrition or macro targets',
@@ -617,6 +658,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:615',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -627,7 +669,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             "does what I eat affect my sleep?",
             'how does my nutrition affect my health?',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: 'how am I doing on my macros?',
                 correctLabel: 'user wants to see how well they are hitting their macro targets over time',
@@ -641,6 +683,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:615',
             },
         ],
+        advisoryNearMisses: [],
     },
 
     {
@@ -651,13 +694,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'what are good recipes for Eid?',
             'looking for Lunar New Year dishes',
         ],
-        rejectFor: [
-            {
-                text: "we're having 10 people over for Thanksgiving dinner",
-                correctLabel: 'user wants to plan for hosting guests',
-                reason: 'isHostingIntent (line 636) may capture the "people over" phrasing; cultural intent (line 630) runs first but if it does not match, hosting takes over',
-                source: 'apps/food/src/index.ts:636',
-            },
+        deterministicRejectFor: [
             {
                 text: 'plan meals for next week',
                 correctLabel: 'user wants to plan meals for the week',
@@ -665,11 +702,19 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:441',
             },
         ],
+        advisoryNearMisses: [
+            {
+                text: "we're having 10 people over for Thanksgiving dinner",
+                correctLabel: 'user wants to plan for hosting guests',
+                reason: 'isHostingIntent (line 636) may capture "people over" phrasing if isCulturalCalendarIntent (line 630) does not match the Thanksgiving keyword in this phrasing; outcome depends on LLM routing for this ambiguous combination',
+                source: 'apps/food/src/index.ts:636',
+            },
+        ],
     },
 
     {
-        // 'none' captures non-food messages. rejectFor documents phrases that seem
-        // non-food but that Food's regex cascade actually claims.
+        // 'none' captures non-food messages. deterministicRejectFor documents phrases that
+        // seem non-food but that Food's regex cascade actually claims via deterministic rules.
         label: 'none',
         accept: [
             'hello there',
@@ -678,7 +723,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
             'good morning',
             'lol that was funny',
         ],
-        rejectFor: [
+        deterministicRejectFor: [
             {
                 text: "we're out of pasta",
                 correctLabel: 'user wants to check or update the pantry',
@@ -692,5 +737,6 @@ export const FOOD_PERSONAS: readonly Persona[] = [
                 source: 'apps/food/src/index.ts:549',
             },
         ],
+        advisoryNearMisses: [],
     },
 ] as const;

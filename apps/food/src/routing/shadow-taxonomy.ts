@@ -80,10 +80,6 @@ export function buildLabelsFromManifest(manifestIntents: readonly string[]): str
  * Maps the regex cascade's internal label onto the nearest manifest intent.
  * Used only to compute the agreement verdict for the shadow log — never surfaced
  * to handlers or users.
- *
- * The sentinel '(route-dispatched)' maps to 'none' because route-dispatch
- * outcomes are logged as { kind: 'legacy-skipped' } and the verdict is
- * 'legacy-skipped', so the mapped value is never used for agreement math.
  */
 export const REGEX_TO_MANIFEST_MAP: Record<string, FoodShadowLabel> = {
     save_recipe:            'user wants to save a recipe',

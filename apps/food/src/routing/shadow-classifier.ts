@@ -15,8 +15,9 @@ const MAX_INPUT_CODE_UNITS = 1000;
  * Truncate to maxLength UTF-16 code units and collapse runs of ≥3 consecutive
  * backticks (ASCII U+0060 or fullwidth U+FF40, any mix) to a single ASCII backtick.
  * Matches the contract of core/src/services/llm/prompt-templates.ts#sanitizeInput.
+ * Always called with an explicit maxLength — omit the default to keep the two copies in sync.
  */
-function sanitizeInput(text: string, maxLength = 2000): string {
+function sanitizeInput(text: string, maxLength: number): string {
     const truncated = text.length > maxLength ? text.slice(0, maxLength) : text;
     return truncated.replace(/[`｀]{3,}/g, '`');
 }
@@ -47,8 +48,8 @@ export function buildShadowClassifierPrompt(userText: string, labels: readonly s
 export function parseShadowResponse(raw: string, labels: readonly string[]): ShadowResult {
     const labelSet = new Set(labels);
     const stripped = raw.trim()
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/, '')
+        .replace(/^```(?:json)?\s*/i, '')  // strip leading fence (LLM sometimes ignores "no fences" instruction)
+        .replace(/\s*```$/, '')             // strip trailing fence
         .trim();
     try {
         const parsed: unknown = JSON.parse(stripped);
@@ -83,7 +84,7 @@ export class FoodShadowClassifier {
         if (rate <= 0) return { kind: 'skipped-sample' };
         if (rate < 1 && Math.random() >= rate) return { kind: 'skipped-sample' };
 
-        const prompt = buildShadowClassifierPrompt(userText, this.opts.labels);
+        const prompt = buildShadowClassifierPrompt(trimmed, this.opts.labels);
         let raw: string;
         try {
             raw = await this.opts.llm.complete(prompt, {

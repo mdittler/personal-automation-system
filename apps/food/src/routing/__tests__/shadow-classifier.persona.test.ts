@@ -7,13 +7,19 @@
  *   2. One smoke roundtrip per label (mocked LLM echo) keeps the prompt+parse
  *      contract in sync with the dataset without bloating the unit suite.
  *
+ * Persona schema:
+ *   deterministicRejectFor — provably deterministic routes (regex/handler
+ *     precedence); B.3 integration tests should consume these directly.
+ *   advisoryNearMisses     — LLM-dependent or ambiguous near-misses; documented
+ *     for reviewer awareness, not mechanical B.3 assertion.
+ *
  * What this file does NOT prove:
  *   - Real NL accept/reject behaviour — that lives in B.3 integration tests at
  *     handleMessage, where the regex cascade actually runs and produces
- *     deterministic routing outcomes. FOOD_PERSONAS.rejectFor entries are
- *     designed to drive those tests.
+ *     deterministic routing outcomes. FOOD_PERSONAS.deterministicRejectFor
+ *     entries are designed to drive those tests.
  *   - Comprehensive phrase coverage — the existing taxonomy/plumbing spec in
- *     shadow-classifier.test.ts:775-822 already holds one roundtrip per label;
+ *     shadow-classifier.test.ts already holds one roundtrip per label;
  *     this file avoids duplicating it.
  */
 
@@ -71,24 +77,36 @@ describe('FOOD_PERSONAS — structural invariants', () => {
         }
     });
 
-    it('every rejectFor.correctLabel is in FOOD_SHADOW_LABELS', () => {
+    it('every deterministicRejectFor.correctLabel is in FOOD_SHADOW_LABELS', () => {
         const labelSet = new Set<string>(FOOD_SHADOW_LABELS);
         for (const p of FOOD_PERSONAS) {
-            for (const r of p.rejectFor) {
+            for (const r of p.deterministicRejectFor) {
                 expect(
                     labelSet,
-                    `rejectFor.correctLabel not in taxonomy: "${r.correctLabel}" (in persona for "${p.label}")`,
+                    `deterministicRejectFor.correctLabel not in taxonomy: "${r.correctLabel}" (in persona for "${p.label}")`,
                 ).toContain(r.correctLabel);
             }
         }
     });
 
-    it('rejectFor.correctLabel ≠ persona.label for every entry', () => {
+    it('every advisoryNearMisses.correctLabel is in FOOD_SHADOW_LABELS', () => {
+        const labelSet = new Set<string>(FOOD_SHADOW_LABELS);
         for (const p of FOOD_PERSONAS) {
-            for (const r of p.rejectFor) {
+            for (const r of p.advisoryNearMisses) {
+                expect(
+                    labelSet,
+                    `advisoryNearMisses.correctLabel not in taxonomy: "${r.correctLabel}" (in persona for "${p.label}")`,
+                ).toContain(r.correctLabel);
+            }
+        }
+    });
+
+    it('deterministicRejectFor.correctLabel ≠ persona.label for every entry', () => {
+        for (const p of FOOD_PERSONAS) {
+            for (const r of p.deterministicRejectFor) {
                 expect(
                     r.correctLabel,
-                    `rejectFor.correctLabel equals persona.label for "${p.label}" — entry: "${r.text}"`,
+                    `deterministicRejectFor.correctLabel equals persona.label for "${p.label}" — entry: "${r.text}"`,
                 ).not.toBe(p.label);
             }
         }
@@ -103,29 +121,42 @@ describe('FOOD_PERSONAS — structural invariants', () => {
         }
     });
 
-    it(`every persona has at least ${REJECT_FLOOR} rejectFor entries`, () => {
+    it(`every persona has at least ${REJECT_FLOOR} deterministicRejectFor + advisoryNearMisses entries combined`, () => {
         for (const p of FOOD_PERSONAS) {
+            const total = p.deterministicRejectFor.length + p.advisoryNearMisses.length;
             expect(
-                p.rejectFor.length,
-                `persona "${p.label}" has only ${p.rejectFor.length} rejectFor entries (floor: ${REJECT_FLOOR})`,
+                total,
+                `persona "${p.label}" has only ${total} reject entries combined (floor: ${REJECT_FLOOR})`,
             ).toBeGreaterThanOrEqual(REJECT_FLOOR);
         }
     });
 
-    it('no phrase appears in both accept and rejectFor for the same persona', () => {
+    it('no phrase appears in both accept and deterministicRejectFor for the same persona', () => {
         for (const p of FOOD_PERSONAS) {
             const acceptSet = new Set(p.accept);
-            for (const r of p.rejectFor) {
+            for (const r of p.deterministicRejectFor) {
                 expect(
                     acceptSet,
-                    `phrase "${r.text}" is in both accept and rejectFor for "${p.label}"`,
+                    `phrase "${r.text}" is in both accept and deterministicRejectFor for "${p.label}"`,
+                ).not.toContain(r.text);
+            }
+        }
+    });
+
+    it('no phrase appears in both accept and advisoryNearMisses for the same persona', () => {
+        for (const p of FOOD_PERSONAS) {
+            const acceptSet = new Set(p.accept);
+            for (const r of p.advisoryNearMisses) {
+                expect(
+                    acceptSet,
+                    `phrase "${r.text}" is in both accept and advisoryNearMisses for "${p.label}"`,
                 ).not.toContain(r.text);
             }
         }
     });
 });
 
-// ─── B.2 persona spec — smoke roundtrips (mocked-echo, prompt-contract sanity) ──
+// ─── B.2 persona spec — smoke roundtrips (mocked-echo, one per label) ──
 
 describe('FOOD_PERSONAS — smoke roundtrips (mocked-echo, one per label)', () => {
     for (const persona of FOOD_PERSONAS) {

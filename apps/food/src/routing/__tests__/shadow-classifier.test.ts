@@ -365,19 +365,21 @@ describe('FoodShadowClassifier.classify — edge cases', () => {
 });
 
 // ---------------------------------------------------------------------------
-// B.2.1.f — Error handling: all 9 classifyLLMError categories + non-Error throws
+// B.2.1.f — Error handling: classifyLLMError categories + non-Error throws
 // ---------------------------------------------------------------------------
 
 describe('FoodShadowClassifier.classify — LLM error handling', () => {
     // Verified patterns from core/src/utils/llm-errors.ts:
     // err.name === 'LLMCostCapError' → 'cost-cap'
     // err.name === 'LLMCostCapError' + scope === 'household' → 'household-cost-cap'
+    // err.name === 'LLMCostCapError' + scope === 'reservation-exceeded' → 'reservation-exceeded'
     // err.name === 'LLMRateLimitError' → 'rate-limit'
     // err.name === 'LLMRateLimitError' + scope === 'household' → 'household-rate-limit'
     // err.name === 'LLMRateLimitError' + scope === 'reservation-exceeded' → 'reservation-exceeded'
     // status === 400 + message includes 'billing' or 'credit' → 'billing'
     // status === 401 → 'auth'
-    // status === 529 → 'overloaded'
+    // status === 429 → 'rate-limit'
+    // status === 529 (or ≥500) → 'overloaded'
     // default → 'unknown'
 
     async function assertLLMError(err: unknown, expectedCategory: string): Promise<void> {
@@ -425,6 +427,13 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
         );
     });
 
+    it('LLMCostCapError + scope:reservation-exceeded → reservation-exceeded', async () => {
+        await assertLLMError(
+            Object.assign(new Error('cost cap reservation exceeded'), { name: 'LLMCostCapError', scope: 'reservation-exceeded' }),
+            'reservation-exceeded',
+        );
+    });
+
     it('billing shape (status:400 + billing message) → billing', async () => {
         await assertLLMError(
             Object.assign(new Error('billing credits issue'), { status: 400 }),
@@ -443,6 +452,13 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
         await assertLLMError(
             Object.assign(new Error('overloaded'), { status: 529 }),
             'overloaded',
+        );
+    });
+
+    it('HTTP 429 (too many requests) → rate-limit', async () => {
+        await assertLLMError(
+            Object.assign(new Error('too many requests'), { status: 429 }),
+            'rate-limit',
         );
     });
 
@@ -762,69 +778,7 @@ describe('FoodShadowClassifier.classify — sampleRate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// B.2.1.k — Taxonomy/plumbing spec: one concrete scenario per manifest intent
-//
-// WHAT THIS IS: A plumbing/taxonomy spec. The LLM is mocked to return the expected
-// label, so these tests prove label round-trip through the prompt serializer and
-// parseShadowResponse without typo drift. They do NOT prove classification accuracy.
-//
-// Rows 13, 14, 21, 22 are SYNTHESIZED (photo-only or LLM-only intent phrasings).
-// All others are derived from existing persona suites.
-// ---------------------------------------------------------------------------
-
-describe('FoodShadowClassifier — taxonomy/plumbing spec (persona round-trips)', () => {
-    // Invariant: every persona intent must be in FOOD_SHADOW_LABELS (protects against taxonomy drift)
-    const PERSONA_TABLE: Array<{ phrasing: string; intent: string; note?: string }> = [
-        { phrasing: 'save this recipe',                               intent: 'user wants to save a recipe' },
-        { phrasing: 'find me a chicken recipe',                       intent: 'user wants to search for a recipe' },
-        { phrasing: 'plan meals for next week',                       intent: 'user wants to plan meals for the week' },
-        { phrasing: 'show me the grocery list',                       intent: 'user wants to see or modify the grocery list' },
-        { phrasing: 'add milk to the grocery list',                   intent: 'user wants to add items to the grocery list' },
-        { phrasing: 'whats for dinner',                               intent: "user wants to know what's for dinner" },
-        { phrasing: 'how long should I cook chicken thighs',          intent: 'user has a food-related question' },
-        { phrasing: "let's cook the chicken stir fry",                intent: 'user wants to start cooking a recipe' },
-        { phrasing: "what's in the pantry",                           intent: 'user wants to check or update the pantry' },
-        { phrasing: "there's leftover soup from last night",          intent: 'user wants to log leftovers' },
-        { phrasing: 'hosting a dinner party',                         intent: 'user wants to plan for hosting guests' },
-        { phrasing: 'how much did we spend on food',                  intent: 'user wants to see food spending' },
-        { phrasing: 'show me the costco receipt',                     intent: 'user wants to see receipt details or look up items from a receipt', note: 'SYNTHESIZED (photo-only intent)' },
-        { phrasing: 'how much are eggs at Costco?',                   intent: 'user asks about prices at a specific store', note: 'SYNTHESIZED (true ask phrasing)' },
-        { phrasing: 'show me my macros',                              intent: 'user wants to see nutrition information' },
-        { phrasing: 'what can I make',                                intent: 'user wants to know what they can make with what they have' },
-        { phrasing: 'make the chicken stir fry for margot',           intent: 'user wants to adapt a recipe for a child' },
-        { phrasing: 'margot tried peanut butter today',               intent: 'user wants to log a new food introduction for a child' },
-        { phrasing: 'margot loved the chicken stir fry',              intent: 'user wants to tag a recipe as kid-approved or rejected' },
-        { phrasing: 'I ate two slices of pizza',                      intent: 'user wants to log a meal they cooked by name with an optional portion' },
-        { phrasing: "I had some weird stew I can't describe",         intent: 'user wants to log an unfamiliar meal with a free-text description', note: 'SYNTHESIZED (LLM-only label)' },
-        { phrasing: 'save this as a quick meal',                      intent: 'user wants to save a frequent meal as a quick-meal template', note: 'SYNTHESIZED (LLM-only label)' },
-        { phrasing: 'change my macro targets',                        intent: 'user wants to set or change their nutrition or macro targets' },
-        { phrasing: 'how am I doing on my macros',                    intent: 'user wants to see how well they are hitting their macro targets over time' },
-        { phrasing: 'how is my diet affecting me',                    intent: 'user wants to understand how their diet is affecting their health or energy' },
-        { phrasing: 'what should I cook for Thanksgiving',            intent: 'user wants holiday or cultural recipe suggestions' },
-        { phrasing: 'hello there',                                    intent: 'none' },
-    ];
-
-    it('every persona intent is in FOOD_SHADOW_LABELS (taxonomy parity invariant)', () => {
-        for (const row of PERSONA_TABLE) {
-            expect(
-                FOOD_SHADOW_LABELS as readonly string[],
-                `intent not in taxonomy: "${row.intent}"`,
-            ).toContain(row.intent);
-        }
-    });
-
-    for (const { phrasing, intent } of PERSONA_TABLE) {
-        it(`persona: "${phrasing}" → { kind: "ok", action: "${intent}", confidence: 0.92 }`, async () => {
-            const llm = mockLLM(makeOkJson(intent, 0.92));
-            const c = makeClassifier({ llm });
-            const r = await c.classify(phrasing, 1.0);
-            expect(r).toEqual({ kind: 'ok', action: intent, confidence: 0.92 });
-        });
-    }
-});
-
-// ---------------------------------------------------------------------------
-// B.2.1.l — Near-miss label rejection (hardens trust boundary rule #1)
+// B.2.1.k — Near-miss label rejection (hardens trust boundary rule #1)
 // ---------------------------------------------------------------------------
 
 describe('parseShadowResponse — near-miss label rejection', () => {
