@@ -2885,35 +2885,37 @@ Reusable prompt-composition helpers must live at `core/src/services/prompt-assem
 - preserves text at exactly maxLength
 - does NOT neutralize U+FF40 fullwidth grave accents (parity with chatbot regex)
 
-`fencing.test.ts` (6 tests):
-- returns empty array for empty input
-- all turns are [Recent] when ≤ 4
-- marks earlier turns [Earlier] when more than 4 (cutoff at length−4)
-- includes relative timestamp when turn has a timestamp
-- omits timestamp part when timestamp is absent
-- sanitizes turn content (truncates at 500, neutralizes triple backticks)
+`fencing.test.ts` (8 tests):
+- returns empty array for no turns
+- marks all turns [Recent] when 4 or fewer
+- marks earlier turns [Earlier] when more than 4
+- applies [Recent]/[Earlier] split exactly at turns.length - 4
+- includes relative timestamp when present
+- omits timestamp part when timestamp is empty string
+- truncates turn content to 500 chars via sanitizeInput
+- neutralizes triple backticks in turn content
 
-`model-journal.test.ts` (16 tests):
-- `JOURNAL_TAG_REGEX` matches a single tag
-- `JOURNAL_TAG_REGEX` matches multiple tags (global flag)
-- `extractJournalEntries` returns unchanged response and empty entries when no tags present
-- `extractJournalEntries` removes tag and returns entry
-- `extractJournalEntries` handles multiple tags
-- `extractJournalEntries` handles tag at start of response
-- `extractJournalEntries` handles multiline tag content
-- `extractJournalEntries` ignores empty tags
-- `extractJournalEntries` ignores whitespace-only tags
-- `extractJournalEntries` preserves unclosed tags
+`model-journal.test.ts` (20 tests):
+- `JOURNAL_TAG_REGEX` has global flag for multi-match replace
+- `JOURNAL_TAG_REGEX` matches single-line content between tags
+- `extractJournalEntries` returns unchanged response and empty entries when no tags
+- `extractJournalEntries` extracts a single entry and removes the tag
+- `extractJournalEntries` extracts multiple entries
+- `extractJournalEntries` trims whitespace from entries
+- `extractJournalEntries` ignores empty tags (empty trimmed content)
 - `extractJournalEntries` collapses excess blank lines left by tag removal
+- `extractJournalEntries` handles multiline journal content
+- `extractJournalEntries` preserves unclosed tags (no match, no extraction)
 - `writeJournalEntries` is a no-op when entries array is empty
 - `writeJournalEntries` is a no-op when modelJournal is undefined
-- `writeJournalEntries` calls append for each entry
-- `writeJournalEntries` logs warning and continues on per-entry failure
+- `writeJournalEntries` is a no-op when modelSlug is empty string
+- `writeJournalEntries` calls append for each entry and logs warn on per-entry failure
 - `appendJournalPromptSection` is a no-op when modelJournal is undefined
-- `appendJournalPromptSection` emits instruction block when journal is empty
-- `appendJournalPromptSection` emits instruction block + fenced journal content when non-empty
-- `appendJournalPromptSection` truncates journal content to MAX_JOURNAL_CHARS
-- `appendJournalPromptSection` logs warning and keeps instruction block on read error
+- `appendJournalPromptSection` is a no-op when modelSlug is undefined
+- `appendJournalPromptSection` appends instruction block when journal is empty
+- `appendJournalPromptSection` appends instruction + fenced content when journal is non-empty
+- `appendJournalPromptSection` truncates journal content at MAX_JOURNAL_CHARS via sanitizeInput
+- `appendJournalPromptSection` logs warn and still includes instruction block on read error
 
 `system-prompt.test.ts` (9 tests):
 - `appendUserContextSection` is a no-op when userCtx is undefined
@@ -6049,7 +6051,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-CHATBOT-016 | data-query-wiring.test.ts | 8 | 6 | Implemented |
 | REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
 | REQ-CHATBOT-018 | conversation-history.test.ts (core) | 10 | 8 | Implemented |
-| REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 28 | 9 | Implemented |
+| REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 34 | 9 | Implemented |
 | REQ-IC-001 | interaction-context.test.ts, integration.test.ts | 5 | 6 | Implemented |
 | REQ-IC-002 | bootstrap-wiring.test.ts | 8 | 0 | Implemented |
 | REQ-IC-003 | persistence.test.ts | 5 | 4 | Implemented |
