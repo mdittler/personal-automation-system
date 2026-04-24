@@ -29,14 +29,14 @@ The staged review should focus only on repo-local, non-vendored tests and suppor
 
 | Stage | Name | Status | Findings / Follow-up |
 |---|---|---|---|
-| 1 | Documentation and Traceability Baseline | Not Started | TBD |
-| 2 | Core Trust Boundaries and Runtime Entry Points | Not Started | TBD |
-| 3 | Core Data, Identity, and Shared-State Services | Not Started | TBD |
-| 4 | Core Automation, Reporting, and Operational Services | Not Started | TBD |
-| 5 | Core LLM, Routing, Query, and Edit Flows | Not Started | TBD |
-| 6 | Platform Packaging, Registry, CLI, and Test Infrastructure | Not Started | TBD |
-| 7 | Food App Foundations | Not Started | TBD |
-| 8 | Food App User Workflows and Feature Coverage | Not Started | TBD |
+| 1 | Documentation and Traceability Baseline | Completed | `docs/test-review-stage-1-findings.md` (remediation update 2026-04-23) |
+| 2 | Core Trust Boundaries and Runtime Entry Points | Completed | `docs/test-review-stage-2-findings.md` (remediation update 2026-04-23) |
+| 3 | Core Data, Identity, and Shared-State Services | Completed | `docs/test-review-stage-3-findings.md` (remediation update 2026-04-23) |
+| 4 | Core Automation, Reporting, and Operational Services | Completed | `docs/test-review-stage-4-findings.md` (remediation update 2026-04-23) |
+| 5 | Core LLM, Routing, Query, and Edit Flows | Completed | `docs/test-review-stage-5-findings.md` |
+| 6 | Platform Packaging, Registry, CLI, and Test Infrastructure | Completed | `docs/test-review-stage-6-findings.md` |
+| 7 | Food App Foundations | Completed | `docs/test-review-stage-7-findings.md` |
+| 8 | Food App User Workflows and Feature Coverage | Completed | `docs/test-review-stage-8-findings.md` |
 
 ## Stage Overview
 
@@ -66,7 +66,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 1 — Documentation and Traceability Baseline
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-1-findings.md`
 
 **Sources**
 
@@ -94,7 +96,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 2 — Core Trust Boundaries and Runtime Entry Points
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-2-findings.md`
 
 **Primary scope**
 
@@ -120,7 +124,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 3 — Core Data, Identity, and Shared-State Services
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-3-findings.md` (remediation update 2026-04-23)
 
 **Primary scope**
 
@@ -150,7 +156,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 4 — Core Automation, Reporting, and Operational Services
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-4-findings.md` (remediation update 2026-04-23)
 
 **Primary scope**
 
@@ -182,7 +190,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 5 — Core LLM, Routing, Query, and Edit Flows
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-5-findings.md`
 
 **Primary scope**
 
@@ -209,7 +219,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 6 — Platform Packaging, Registry, CLI, and Test Infrastructure
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-6-findings.md`
 
 **Primary scope**
 
@@ -243,7 +255,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 7 — Food App Foundations
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-7-findings.md`
 
 **Primary scope**
 
@@ -268,7 +282,9 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 8 — Food App User Workflows and Feature Coverage
 
-**Status:** Not Started
+**Status:** Completed
+
+**Findings:** `docs/test-review-stage-8-findings.md`
 
 **Primary scope**
 

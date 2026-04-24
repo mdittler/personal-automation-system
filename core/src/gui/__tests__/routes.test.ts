@@ -7,13 +7,14 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppRegistry, RegisteredApp } from '../../services/app-registry/index.js';
 import { AppToggleStore } from '../../services/app-toggle/index.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import { CronManager } from '../../services/scheduler/cron-manager.js';
+import { JobFailureNotifier } from '../../services/scheduler/job-failure-notifier.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import { OneOffManager } from '../../services/scheduler/oneoff-manager.js';
 import { CredentialService } from '../../services/credentials/index.js';
@@ -126,6 +127,16 @@ async function buildApp(tempDir: string) {
 	const registry = createMockRegistry();
 	const cronManager = new CronManager(logger, 'UTC', tempDir);
 	const oneOffManager = new OneOffManager(tempDir, logger);
+	const notifier = new JobFailureNotifier({
+		logger,
+		sender: { send: vi.fn().mockResolvedValue(undefined) },
+		adminChatId: TEST_USER_ID,
+		autoDisableAfter: 1,
+		notificationCooldownMs: 0,
+		persistPath: join(tempDir, 'system', 'disabled-jobs.yaml'),
+	});
+	cronManager.setNotifier(notifier);
+	oneOffManager.setNotifier(notifier);
 	const scheduler = { cron: cronManager, oneOff: oneOffManager } as unknown as SchedulerServiceImpl;
 	const appToggle = new AppToggleStore({ dataDir: tempDir, logger });
 	const costTracker = { readUsage: async () => '' };
@@ -185,7 +196,7 @@ async function buildApp(tempDir: string) {
 		{ prefix: '/gui' },
 	);
 
-	return { app, appToggle };
+	return { app, appToggle, cronManager, notifier };
 }
 
 /** Collect cookies from a Fastify inject response into a key-value map. */
@@ -256,12 +267,16 @@ describe('GUI Routes', () => {
 	let tempDir: string;
 	let app: Awaited<ReturnType<typeof Fastify>>;
 	let appToggle: AppToggleStore;
+	let cronManager: CronManager;
+	let notifier: JobFailureNotifier;
 
 	beforeEach(async () => {
 		tempDir = await mkdtemp(join(tmpdir(), 'pas-gui-'));
 		const built = await buildApp(tempDir);
 		app = built.app;
 		appToggle = built.appToggle;
+		cronManager = built.cronManager;
+		notifier = built.notifier;
 	});
 
 	afterEach(async () => {
@@ -327,6 +342,46 @@ describe('GUI Routes', () => {
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('Scheduler');
 			expect(res.body).toContain('Cron Jobs');
+		});
+
+		it('shows disabled cron jobs and allows re-enable', async () => {
+			cronManager.register(
+				{
+					id: 'daily-diff',
+					appId: 'system',
+					cron: '0 2 * * *',
+					handler: 'daily-diff',
+					description: 'Generate daily diff',
+					userScope: 'system',
+				},
+				() => async () => {},
+			);
+			await notifier.onFailure('system', 'daily-diff', 'boom');
+
+			const page = await authenticatedGet(app, '/gui/scheduler');
+			expect(page.statusCode).toBe(200);
+			expect(page.body).toContain('Disabled');
+			expect(page.body).toContain('/gui/scheduler/system/daily-diff/re-enable');
+
+			const reenable = await authenticatedPost(app, '/gui/scheduler/system/daily-diff/re-enable', {});
+			expect(reenable.statusCode).toBe(302);
+			expect(reenable.headers.location).toBe('/gui/scheduler');
+
+			const refreshed = await authenticatedGet(app, '/gui/scheduler');
+			expect(refreshed.body).not.toContain('Disabled');
+			expect(refreshed.body).toContain('Active');
+		});
+
+		it('rejects invalid scheduler identifiers on re-enable', async () => {
+			const res = await authenticatedPost(app, '/gui/scheduler/system/daily.diff/re-enable', {});
+			expect(res.statusCode).toBe(400);
+			expect(res.body).toContain('Invalid schedule identifier.');
+		});
+
+		it('returns 404 when re-enable target does not exist', async () => {
+			const res = await authenticatedPost(app, '/gui/scheduler/system/missing/re-enable', {});
+			expect(res.statusCode).toBe(404);
+			expect(res.body).toContain('Schedule not found.');
 		});
 	});
 

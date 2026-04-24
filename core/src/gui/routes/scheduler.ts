@@ -16,6 +16,8 @@ import {
 	getNextRun,
 } from '../../utils/cron-describe.js';
 
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
 export interface SchedulerOptions {
 	scheduler: SchedulerServiceImpl;
 	timezone: string;
@@ -62,6 +64,8 @@ export function registerSchedulerRoutes(server: FastifyInstance, options: Schedu
 					nextRunRelative: nextRun ? formatRelativeTime(nextRun, now) : null,
 					lastRunAt: j.lastRunAt ? formatDateTime(j.lastRunAt, timezone) : null,
 					lastRunRelative: j.lastRunAt ? formatRelativeTime(j.lastRunAt, now) : null,
+					disabled: j.disabled,
+					failureCount: j.failureCount,
 				};
 			}),
 			pendingTasks: pendingTasks.map((t) => ({
@@ -71,7 +75,27 @@ export function registerSchedulerRoutes(server: FastifyInstance, options: Schedu
 				runAt: formatDateTime(t.runAt, timezone),
 				runAtRelative: formatRelativeTime(t.runAt, now),
 				createdAt: formatDateTime(t.createdAt, timezone),
+				disabled: scheduler.oneOff.isDisabled(t.appId, t.jobId),
+				failureCount: scheduler.oneOff.getFailureCount(t.appId, t.jobId),
 			})),
 		});
 	});
+
+	server.post(
+		'/scheduler/:appId/:jobId/re-enable',
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { appId, jobId } = request.params as { appId: string; jobId: string };
+			if (!appId || !jobId || !SAFE_SEGMENT.test(appId) || !SAFE_SEGMENT.test(jobId)) {
+				logger.warn({ appId, jobId }, 'Rejected invalid scheduler re-enable request');
+				return reply.status(400).type('text/plain').send('Invalid schedule identifier.');
+			}
+			if (!scheduler.cron.hasJob(`${appId}:${jobId}`)) {
+				logger.warn({ appId, jobId }, 'Scheduler job not found for GUI re-enable request');
+				return reply.status(404).type('text/plain').send('Schedule not found.');
+			}
+			const reEnabled = scheduler.cron.reEnable(appId, jobId);
+			logger.info({ appId, jobId, reEnabled }, 'Scheduler job re-enabled via GUI');
+			return reply.redirect('/gui/scheduler');
+		},
+	);
 }

@@ -297,20 +297,49 @@ describe('WebhookService', () => {
 		expect(eventBus.off).toHaveBeenCalledWith('report:completed', expect.any(Function));
 	});
 
-	it('double init does not duplicate subscriptions', () => {
+	it('double init is idempotent and does not duplicate deliveries', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+		vi.stubGlobal('fetch', fetchMock);
+
 		const webhooks: WebhookDefinition[] = [
 			{ id: 'wh1', url: 'http://localhost:5678/webhook/test', events: ['alert:fired'] },
 		];
 
 		const service = new WebhookService({ webhooks, eventBus, logger });
 		service.init();
-		service.init(); // second call
+		service.init();
 
-		// EventBus.on called twice for same event (since handlers map gets overwritten)
+		expect(eventBus.on).toHaveBeenCalledTimes(1);
+
+		eventBus.emit('alert:fired', { alertId: 'test' });
+		await vi.waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledOnce();
+		});
+
+		service.dispose();
+		expect(eventBus.off).toHaveBeenCalledTimes(1);
+	});
+
+	it('dispose followed by init re-subscribes and delivers again', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+		vi.stubGlobal('fetch', fetchMock);
+
+		const webhooks: WebhookDefinition[] = [
+			{ id: 'wh1', url: 'http://localhost:5678/webhook/test', events: ['alert:fired'] },
+		];
+
+		const service = new WebhookService({ webhooks, eventBus, logger });
+		service.init();
+		service.dispose();
+		service.init();
+
 		expect(eventBus.on).toHaveBeenCalledTimes(2);
+		expect(eventBus.off).toHaveBeenCalledTimes(1);
 
-		// But dispose only removes the latest handler — the first one leaks
-		// This is acceptable since init() is only called once in production
+		eventBus.emit('alert:fired', { alertId: 'test' });
+		await vi.waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledOnce();
+		});
 	});
 
 	it('wraps non-object payload in value field', async () => {

@@ -72,6 +72,8 @@ describe('API Schedules Route', () => {
 			stop: vi.fn(),
 			unregister: vi.fn(),
 			getRegisteredJobs: vi.fn(() => []),
+			hasJob: vi.fn(() => true),
+			reEnable: vi.fn(() => true),
 		};
 
 		app = Fastify({ logger: false });
@@ -116,6 +118,15 @@ describe('API Schedules Route', () => {
 			method: 'GET',
 			url: '/api/schedules',
 			headers: { authorization: `Bearer ${API_TOKEN}` },
+		});
+	}
+
+	function post(url: string) {
+		return app.inject({
+			method: 'POST',
+			url,
+			headers: { authorization: `Bearer ${API_TOKEN}` },
+			payload: {},
 		});
 	}
 
@@ -176,6 +187,8 @@ describe('API Schedules Route', () => {
 					userScope: 'system',
 				},
 				lastRunAt: lastRun,
+				disabled: true,
+				failureCount: 5,
 			},
 		]);
 
@@ -184,6 +197,8 @@ describe('API Schedules Route', () => {
 		expect(body.jobs[0].lastRunAt).not.toBeNull();
 		// Verify ISO format
 		expect(body.jobs[0].lastRunAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(body.jobs[0].disabled).toBe(true);
+		expect(body.jobs[0].failureCount).toBe(5);
 	});
 
 	it('handles multiple jobs', async () => {
@@ -267,6 +282,8 @@ describe('API Schedules Route', () => {
 			stop: vi.fn(),
 			unregister: vi.fn(),
 			getRegisteredJobs: vi.fn(() => []),
+			hasJob: vi.fn(() => true),
+			reEnable: vi.fn(() => true),
 		};
 
 		app = Fastify({ logger: false });
@@ -311,5 +328,113 @@ describe('API Schedules Route', () => {
 			headers: { authorization: `Bearer ${API_TOKEN}` },
 		});
 		expect(res.statusCode).toBe(500);
+	});
+
+	it('re-enables a schedule via POST route', async () => {
+		const mockCronManager = {
+			getJobDetails: vi.fn(() => []),
+			register: vi.fn(),
+			start: vi.fn(),
+			stop: vi.fn(),
+			unregister: vi.fn(),
+			getRegisteredJobs: vi.fn(() => []),
+			hasJob: vi.fn(() => true),
+			reEnable: vi.fn(() => true),
+		};
+
+		app = Fastify({ logger: false });
+		await registerApiRoutes(app, {
+			apiToken: API_TOKEN,
+			rateLimiter: new RateLimiter({ maxAttempts: 100, windowMs: 60_000 }),
+			dataDir,
+			changeLog: new ChangeLog(dataDir),
+			spaceService: createMockSpaceService() as any,
+			userManager: createMockUserManager() as any,
+			router: createMockRouter() as any,
+			cronManager: mockCronManager as any,
+			timezone: 'America/New_York',
+			reportService: {
+				listReports: vi.fn(() => []),
+				getReport: vi.fn(),
+				run: vi.fn(),
+				saveReport: vi.fn(),
+				deleteReport: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			alertService: {
+				listAlerts: vi.fn(() => []),
+				getAlert: vi.fn(),
+				evaluate: vi.fn(),
+				saveAlert: vi.fn(),
+				deleteAlert: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as any,
+			llm: {
+				complete: vi.fn(() => 'mock response'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			} as any,
+			logger,
+		});
+
+		const res = await post('/api/schedules/system/daily-diff/re-enable');
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true, reEnabled: true });
+		expect(mockCronManager.hasJob).toHaveBeenCalledWith('system:daily-diff');
+		expect(mockCronManager.reEnable).toHaveBeenCalledWith('system', 'daily-diff');
+	});
+
+	it('re-enable returns 404 when the schedule does not exist', async () => {
+		const mockCronManager = {
+			getJobDetails: vi.fn(() => []),
+			register: vi.fn(),
+			start: vi.fn(),
+			stop: vi.fn(),
+			unregister: vi.fn(),
+			getRegisteredJobs: vi.fn(() => []),
+			hasJob: vi.fn(() => false),
+			reEnable: vi.fn(() => false),
+		};
+
+		app = Fastify({ logger: false });
+		await registerApiRoutes(app, {
+			apiToken: API_TOKEN,
+			rateLimiter: new RateLimiter({ maxAttempts: 100, windowMs: 60_000 }),
+			dataDir,
+			changeLog: new ChangeLog(dataDir),
+			spaceService: createMockSpaceService() as any,
+			userManager: createMockUserManager() as any,
+			router: createMockRouter() as any,
+			cronManager: mockCronManager as any,
+			timezone: 'America/New_York',
+			reportService: {
+				listReports: vi.fn(() => []),
+				getReport: vi.fn(),
+				run: vi.fn(),
+				saveReport: vi.fn(),
+				deleteReport: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			alertService: {
+				listAlerts: vi.fn(() => []),
+				getAlert: vi.fn(),
+				evaluate: vi.fn(),
+				saveAlert: vi.fn(),
+				deleteAlert: vi.fn(),
+				init: vi.fn(),
+			} as any,
+			telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as any,
+			llm: {
+				complete: vi.fn(() => 'mock response'),
+				classify: vi.fn(),
+				extractStructured: vi.fn(),
+			} as any,
+			logger,
+		});
+
+		const res = await post('/api/schedules/system/missing/re-enable');
+		expect(res.statusCode).toBe(404);
+		expect(res.json()).toEqual({ ok: false, error: 'Schedule not found.' });
 	});
 });

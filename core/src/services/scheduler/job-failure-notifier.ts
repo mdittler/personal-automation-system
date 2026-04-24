@@ -13,7 +13,10 @@
  * URS-SCH-005 — Failed job notification.
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { Logger } from 'pino';
+import { parse, stringify } from 'yaml';
 import type { SchedulerJobNotifier } from './notifier.js';
 
 /** Minimal Telegram send interface to avoid circular dependencies. */
@@ -30,6 +33,8 @@ export interface JobFailureNotifierOptions {
 	notificationCooldownMs?: number;
 	/** Number of consecutive failures before auto-disabling a job (default: 5). */
 	autoDisableAfter?: number;
+	/** Optional persisted disabled-job state path (YAML). */
+	persistPath?: string;
 }
 
 interface JobFailureState {
@@ -39,12 +44,18 @@ interface JobFailureState {
 	consecutiveFailures: number;
 }
 
+interface PersistedDisabledJobs {
+	version: 1;
+	disabledJobs: string[];
+}
+
 export class JobFailureNotifier implements SchedulerJobNotifier {
 	private readonly logger: Logger;
 	private readonly sender: NotificationSender;
 	private readonly adminChatId: string;
 	private readonly cooldownMs: number;
 	private readonly autoDisableAfter: number;
+	private readonly persistPath?: string;
 
 	/** Per-job failure tracking. Key = "appId:jobId". */
 	private readonly state = new Map<string, JobFailureState>();
@@ -57,10 +68,13 @@ export class JobFailureNotifier implements SchedulerJobNotifier {
 		this.adminChatId = options.adminChatId;
 		this.cooldownMs = options.notificationCooldownMs ?? 60 * 60 * 1000; // 1 hour
 		this.autoDisableAfter = options.autoDisableAfter ?? 5;
+		this.persistPath = options.persistPath;
 
 		if (this.autoDisableAfter < 1) {
 			throw new Error('autoDisableAfter must be at least 1');
 		}
+
+		this.loadDisabledJobs();
 	}
 
 	/**
@@ -82,6 +96,7 @@ export class JobFailureNotifier implements SchedulerJobNotifier {
 		// Check if auto-disable threshold reached
 		if (jobState.consecutiveFailures >= this.autoDisableAfter) {
 			this.disabledJobs.add(key);
+			this.persistDisabledJobs();
 
 			// Always notify on auto-disable (ignore cooldown)
 			try {
@@ -140,12 +155,15 @@ export class JobFailureNotifier implements SchedulerJobNotifier {
 	 */
 	reEnable(appId: string, jobId: string): void {
 		const key = `${appId}:${jobId}`;
-		this.disabledJobs.delete(key);
+		const hadKey = this.disabledJobs.delete(key);
 
 		// Reset failure counter on re-enable
 		const jobState = this.state.get(key);
 		if (jobState) {
 			jobState.consecutiveFailures = 0;
+		}
+		if (hadKey) {
+			this.persistDisabledJobs();
 		}
 
 		this.logger.info({ appId, jobId }, 'Job re-enabled');
@@ -163,5 +181,40 @@ export class JobFailureNotifier implements SchedulerJobNotifier {
 	 */
 	getFailureCount(appId: string, jobId: string): number {
 		return this.state.get(`${appId}:${jobId}`)?.consecutiveFailures ?? 0;
+	}
+
+	private loadDisabledJobs(): void {
+		if (!this.persistPath) return;
+
+		try {
+			const raw = readFileSync(this.persistPath, 'utf-8');
+			const parsed = parse(raw) as Partial<PersistedDisabledJobs> | null;
+			// version is persisted for future schema migrations; if the payload
+			// shape ever changes, validate parsed.version here before trusting the
+			// disabledJobs list.
+			const disabledJobs = Array.isArray(parsed?.disabledJobs)
+				? parsed.disabledJobs.filter((entry): entry is string => typeof entry === 'string')
+				: [];
+			for (const key of disabledJobs) {
+				this.disabledJobs.add(key);
+			}
+		} catch {
+			// Missing or malformed file — start with an empty disabled-job set.
+		}
+	}
+
+	private persistDisabledJobs(): void {
+		if (!this.persistPath) return;
+
+		try {
+			mkdirSync(dirname(this.persistPath), { recursive: true });
+			const payload: PersistedDisabledJobs = {
+				version: 1,
+				disabledJobs: Array.from(this.disabledJobs).sort(),
+			};
+			writeFileSync(this.persistPath, stringify(payload), 'utf-8');
+		} catch (error) {
+			this.logger.warn({ error }, 'Failed to persist disabled job state');
+		}
 	}
 }

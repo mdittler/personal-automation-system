@@ -261,7 +261,7 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 	});
 
 	// G2
-	it('Nina (non-admin) is redirected or receives 403 when opening /gui/llm', async () => {
+	it('Nina (non-admin) receives 403 when opening /gui/llm', async () => {
 		const built = await buildPersonaApp();
 		app = built.app;
 		tempDir = built.tempDir;
@@ -269,7 +269,7 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 		const cookies = await loginAs(app, NINA.userId, NINA.password);
 		const res = await app.inject({ method: 'GET', url: '/gui/llm', cookies });
 
-		expect(res.statusCode).not.toBe(200);
+		expect(res.statusCode).toBe(403);
 	});
 
 	// G3

@@ -469,6 +469,84 @@ describe('AlertService', () => {
 			expect(result.actionTriggered).toBe(true);
 			expect(reportService.run).toHaveBeenCalledWith('daily-summary');
 		});
+
+		it('treats all-action-failure evaluations as fired for cooldown, history, and event emission', async () => {
+			const eventBus = makeEventBus();
+			const telegram = {
+				...makeTelegram(),
+				send: vi.fn().mockRejectedValue(new Error('telegram offline')),
+			} as unknown as TelegramService;
+			const { service } = makeService({ eventBus, telegram });
+
+			await service.saveAlert(
+				makeValidAlertDef({
+					condition: {
+						type: 'deterministic',
+						expression: 'not empty',
+						data_sources: [{ app_id: 'notes', user_id: '123456789', path: 'data.md' }],
+					},
+				}),
+			);
+			await writeDataFile('123456789', 'notes', 'data.md', 'content');
+
+			const result = await service.evaluate('grocery-check');
+
+			expect(result).toEqual({
+				alertId: 'grocery-check',
+				conditionMet: true,
+				actionTriggered: true,
+				actionsExecuted: 0,
+			});
+			expect(eventBus.emit).toHaveBeenCalledWith('alert:fired', {
+				alertId: 'grocery-check',
+				conditionMet: true,
+				actionsExecuted: 0,
+			});
+
+			const alert = await service.getAlert('grocery-check');
+			expect(alert?.lastFired).toBeDefined();
+
+			const historyDir = join(tempDir, 'system', 'alert-history', 'grocery-check');
+			const files = await readdir(historyDir);
+			expect(files).toHaveLength(1);
+
+			const history = await readFile(join(historyDir, files[0]!), 'utf-8');
+			expect(history).toContain('Actions triggered:** true');
+			expect(history).toContain('Actions executed:** 0');
+		});
+
+		it('applies cooldown after mixed delivery failures once any action succeeds', async () => {
+			const userManager = makeUserManager(['123456789', '987654321']);
+			const telegram = {
+				...makeTelegram(),
+				send: vi
+					.fn()
+					.mockRejectedValueOnce(new Error('first delivery failed'))
+					.mockResolvedValue(undefined),
+			} as unknown as TelegramService;
+			const { service } = makeService({ userManager, telegram });
+
+			await service.saveAlert(
+				makeValidAlertDef({
+					delivery: ['123456789', '987654321'],
+					condition: {
+						type: 'deterministic',
+						expression: 'not empty',
+						data_sources: [{ app_id: 'notes', user_id: '123456789', path: 'data.md' }],
+					},
+				}),
+			);
+			await writeDataFile('123456789', 'notes', 'data.md', 'content');
+
+			const first = await service.evaluate('grocery-check');
+			const second = await service.evaluate('grocery-check');
+
+			expect(first.actionTriggered).toBe(true);
+			expect(first.actionsExecuted).toBe(1);
+			expect(second.conditionMet).toBe(true);
+			expect(second.actionTriggered).toBe(false);
+			expect((telegram.send as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+		});
 	});
 
 	// --- Cooldown ---

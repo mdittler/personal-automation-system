@@ -1,5 +1,9 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 import { JobFailureNotifier, type NotificationSender } from '../job-failure-notifier.js';
 
 const logger = pino({ level: 'silent' });
@@ -277,6 +281,46 @@ describe('JobFailureNotifier', () => {
 				callsAfterDisable,
 			);
 		});
+
+		it('persists disabled jobs and reloads them when persistPath is configured', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-job-failure-notifier-'));
+			try {
+				const persistPath = join(tempDir, 'system', 'disabled-jobs.yaml');
+				const notifier = new JobFailureNotifier({
+					logger,
+					sender,
+					adminChatId: ADMIN_CHAT_ID,
+					autoDisableAfter: 1,
+					notificationCooldownMs: 0,
+					persistPath,
+				});
+
+				await notifier.onFailure('my-app', 'job-1', 'Error');
+
+				const persisted = parse(await readFile(persistPath, 'utf-8')) as {
+					disabledJobs?: string[];
+				};
+				expect(persisted.disabledJobs).toContain('my-app:job-1');
+
+				const reloaded = new JobFailureNotifier({
+					logger,
+					sender,
+					adminChatId: ADMIN_CHAT_ID,
+					autoDisableAfter: 1,
+					notificationCooldownMs: 0,
+					persistPath,
+				});
+				expect(reloaded.isDisabled('my-app', 'job-1')).toBe(true);
+
+				reloaded.reEnable('my-app', 'job-1');
+				const afterReEnable = parse(await readFile(persistPath, 'utf-8')) as {
+					disabledJobs?: string[];
+				};
+				expect(afterReEnable.disabledJobs ?? []).not.toContain('my-app:job-1');
+			} finally {
+				await rm(tempDir, { recursive: true, force: true });
+			}
+		});
 	});
 
 	describe('isDisabled', () => {
@@ -329,6 +373,26 @@ describe('JobFailureNotifier', () => {
 						autoDisableAfter: 0,
 					}),
 			).toThrow('autoDisableAfter must be at least 1');
+		});
+
+		it('ignores malformed persisted state and starts clean', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-job-failure-notifier-bad-'));
+			try {
+				const persistPath = join(tempDir, 'system', 'disabled-jobs.yaml');
+				await mkdir(join(tempDir, 'system'), { recursive: true });
+				await writeFile(persistPath, 'not: [valid', 'utf-8');
+
+				const notifier = new JobFailureNotifier({
+					logger,
+					sender,
+					adminChatId: ADMIN_CHAT_ID,
+					persistPath,
+				});
+
+				expect(notifier.getDisabledJobs()).toEqual([]);
+			} finally {
+				await rm(tempDir, { recursive: true, force: true });
+			}
 		});
 	});
 });

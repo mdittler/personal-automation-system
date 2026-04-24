@@ -67,6 +67,14 @@ export class OneOffManager {
 		this.notifier = notifier;
 	}
 
+	isDisabled(appId: string, jobId: string): boolean {
+		return this.notifier?.isDisabled(appId, jobId) ?? false;
+	}
+
+	getFailureCount(appId: string, jobId: string): number {
+		return this.notifier?.getFailureCount?.(appId, jobId) ?? 0;
+	}
+
 	/**
 	 * Enqueue a write operation, ensuring serial execution even after failures.
 	 */

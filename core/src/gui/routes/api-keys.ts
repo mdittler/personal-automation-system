@@ -23,6 +23,7 @@ const AVAILABLE_SCOPES = [
 	'alerts:read',
 	'alerts:run',
 	'schedules:read',
+	'schedules:write',
 	'llm:complete',
 ] as const;
 

@@ -12,11 +12,11 @@ Practical end-to-end verification that PAS works as expected. Walk through seque
 
 Before starting, ensure:
 
-- [x] `.env` is configured with valid `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, and `GUI_AUTH_TOKEN`
+- [x] `.env` is configured with valid `TELEGRAM_BOT_TOKEN`, `GUI_AUTH_TOKEN`, and whichever LLM provider credentials this run expects (for example Anthropic, OpenAI-compatible, Google, or Ollama)
 - [x] `config/pas.yaml` exists with your Telegram user ID registered
 - [x] Dependencies installed: `pnpm install`
 - [x] Build succeeds: `pnpm build` (no errors)
-- [x] Tests pass: `pnpm test` (2156 tests, 0 failures)
+- [x] Tests pass: `pnpm test` (use the current Vitest summary as the source of truth; suite counts drift over time)
 
 ---
 
@@ -129,7 +129,7 @@ Tests that free-text messages go to the chatbot (not notes-only fallback).
 |---|--------|-----------------|-------|
 | 10.1 | Go to GUI > LLM | See current tier assignments (fast, standard, reasoning) with provider and model | ✅ |
 | 10.2 | See usage statistics | Cost, token counts for recent usage shown (may be small if just started) | ✅ |
-| 10.3 | See available models list | Models load (htmx lazy-load); shows Anthropic models at minimum | ✅ |
+| 10.3 | See available models list | Models load (htmx lazy-load); shows the providers configured for this environment | ✅ |
 | 10.4 | Check per-model breakdown | Table shows models that have been used with token/cost details | ✅ |
 | 10.5 | (Optional) Switch fast tier to a different model via Set button | Tier assignment updates, page refreshes showing new assignment | ✅ |
 
@@ -458,7 +458,7 @@ Verifies that natural language data queries route correctly to DataQueryService 
 |---|--------|----------------|--------|
 | 23.1 | Run `pnpm test core/src/services/data-query/__tests__/data-query.test.ts` | All DataQueryService unit tests pass (file selection, path hardening, malformed JSON, regex edge cases) | |
 | 23.2 | Run `pnpm test apps/chatbot/src/__tests__/data-query-wiring.test.ts` | All chatbot wiring tests pass (YES_DATA routing, /ask classifier, category suppression, security) | |
-| 23.3 | Run `pnpm test` | Full suite passes (6103+ tests, 243 files) | |
+| 23.3 | Run `pnpm test` | Full suite passes; use the current Vitest summary for exact test and file counts | |
 | 23.4 | Send Telegram message: "what are my Costco prices?" | Chatbot calls DataQueryService, includes relevant price data in response | |
 | 23.5 | Send Telegram message: "what's in my pantry?" | Chatbot calls DataQueryService, returns pantry contents | |
 | 23.6 | Send Telegram message: "what did I eat last week?" | Chatbot calls DataQueryService, returns nutrition log data | |

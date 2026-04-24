@@ -49,6 +49,45 @@ interface FileEntry {
 	modified: string;
 }
 
+function denyDataAccess(reply: FastifyReply): FastifyReply {
+	return reply.status(403).type('text/html').send('Access denied.');
+}
+
+function enforceDataActorScope(
+	request: FastifyRequest,
+	reply: FastifyReply,
+	scope: string,
+	userId?: string,
+	householdId?: string,
+	spaceService?: { isMember(spaceId: string, userId: string): boolean },
+): FastifyReply | null {
+	const actor = request.user;
+	if (!actor || actor.isPlatformAdmin) {
+		return null;
+	}
+
+	if (scope === 'system' || scope === 'household') {
+		return denyDataAccess(reply);
+	}
+	if (scope === 'user' && userId && userId !== actor.userId) {
+		return denyDataAccess(reply);
+	}
+	if (scope === 'shared') {
+		const resolvedHh = householdId ?? actor.householdId ?? null;
+		if (!resolvedHh || resolvedHh !== actor.householdId) {
+			return denyDataAccess(reply);
+		}
+	}
+	if (scope === 'space' && userId) {
+		// For space scope, userId carries the spaceId.
+		if (spaceService && !spaceService.isMember(userId, actor.userId)) {
+			return denyDataAccess(reply);
+		}
+	}
+
+	return null;
+}
+
 /**
  * List files in a directory, returning metadata for each entry.
  * Returns empty array if directory doesn't exist.
@@ -209,7 +248,11 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 	const { config, dataDir, householdService, spaceService } = options;
 
 	// Full page — overview of all data directories
-	server.get('/data', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/data', async (request: FastifyRequest, reply: FastifyReply) => {
+		if (request.user && !request.user.isPlatformAdmin) {
+			return denyDataAccess(reply);
+		}
+
 		// Build user sections. When householdService is wired, read from
 		// households/<hh>/users/<u> for each known household. Otherwise fall back
 		// to the legacy data/users/<u> layout so the browser is functional before
@@ -315,37 +358,29 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			return reply.status(400).type('text/html').send('Missing scope parameter.');
 		}
 
-		// D5b-5: actor-based resource-kind enforcement.
-		// When request.user is present and is not a platform admin, apply resource-kind rules.
-		const actor = request.user;
-		if (actor && !actor.isPlatformAdmin) {
-			if (scope === 'system' || scope === 'household') {
-				return reply.status(403).type('text/html').send('Access denied.');
-			}
-			if (scope === 'user' && userId && userId !== actor.userId) {
-				return reply.status(403).type('text/html').send('Access denied.');
-			}
-			if (scope === 'shared') {
-				const resolvedHh = householdId ?? null;
-				if (resolvedHh && resolvedHh !== actor.householdId) {
-					return reply.status(403).type('text/html').send('Access denied.');
-				}
-			}
-			if (scope === 'space' && userId) {
-				// For space scope, userId carries the spaceId
-				if (spaceService && !spaceService.isMember(userId, actor.userId)) {
-					return reply.status(403).type('text/html').send('Access denied.');
-				}
-			}
+		const actorDenied = enforceDataActorScope(
+			request,
+			reply,
+			scope,
+			userId,
+			householdId,
+			spaceService,
+		);
+		if (actorDenied) {
+			return actorDenied;
 		}
 
 		// Household-aware validation and path resolution.
 		// When householdService is wired:
 		//   - scope=user: auto-derive householdId from userId if not provided; if
 		//     provided, verify it matches (403 on mismatch).
-		//   - scope=shared: householdId is required (400 if absent).
+		//   - scope=shared: non-admin callers default to their own household if one
+		//     is not provided explicitly.
 		let resolvedHouseholdId = householdId;
 		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId && request.user && !request.user.isPlatformAdmin) {
+				resolvedHouseholdId = request.user.householdId ?? undefined;
+			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
 				return reply
 					.status(400)
@@ -445,9 +480,24 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			return reply.status(400).type('text/html').send('Missing parameters.');
 		}
 
+		const actorDenied = enforceDataActorScope(
+			request,
+			reply,
+			scope,
+			userId,
+			householdId,
+			spaceService,
+		);
+		if (actorDenied) {
+			return actorDenied;
+		}
+
 		// Household-aware validation (mirrors /data/browse)
 		let resolvedHouseholdId = householdId;
 		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId && request.user && !request.user.isPlatformAdmin) {
+				resolvedHouseholdId = request.user.householdId ?? undefined;
+			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
 				return reply
 					.status(400)
@@ -516,6 +566,18 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			return reply.status(400).type('text/html').send('<small>Missing parameters.</small>');
 		}
 
+		const actorDenied = enforceDataActorScope(
+			request,
+			reply,
+			scope,
+			userId,
+			householdId,
+			spaceService,
+		);
+		if (actorDenied) {
+			return actorDenied;
+		}
+
 		if (!/^[A-Za-z0-9_-]+$/.test(target)) {
 			return reply.status(400).type('text/html').send('<small>Invalid target parameter.</small>');
 		}
@@ -527,6 +589,9 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		// Household-aware validation (mirrors /data/browse)
 		let resolvedHouseholdId = householdId;
 		if (householdService) {
+			if (scope === 'shared' && !resolvedHouseholdId && request.user && !request.user.isPlatformAdmin) {
+				resolvedHouseholdId = request.user.householdId ?? undefined;
+			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
 				return reply
 					.status(400)

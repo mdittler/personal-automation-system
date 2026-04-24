@@ -11,6 +11,7 @@
       <tr>
         <th>App</th>
         <th>Job</th>
+        <th>Status</th>
         <th>Schedule</th>
         <th>Next Run</th>
         <th>Last Run</th>
@@ -24,6 +25,20 @@
             <code><%= job.id %></code>
             <% if (job.description) { %>
               <br><small><%= job.description %></small>
+            <% } %>
+          </td>
+          <td>
+            <% if (job.disabled) { %>
+              <strong style="color:var(--pico-del-color)">Disabled</strong>
+              <% if (job.failureCount > 0) { %>
+                <br><small><%= job.failureCount %> consecutive failure<%= job.failureCount === 1 ? '' : 's' %></small>
+              <% } %>
+              <form method="post" action="/gui/scheduler/<%= job.appId %>/<%= job.id %>/re-enable" style="margin-top:0.5rem">
+                <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+                <button type="submit" class="outline secondary" style="padding:0.15rem 0.4rem;font-size:0.8rem">Re-enable</button>
+              </form>
+            <% } else { %>
+              Active
             <% } %>
           </td>
           <td><%= job.humanSchedule %></td>
@@ -58,15 +73,28 @@
       <tr>
         <th>App</th>
         <th>Job ID</th>
+        <th>Status</th>
         <th>Runs At</th>
         <th>Created</th>
       </tr>
     </thead>
     <tbody>
+      <!-- Disabled one-off tasks are informational only: they represent a specific
+           scheduled execution and are not re-enabled from the GUI. -->
       <% for (const task of it.pendingTasks) { %>
         <tr>
           <td><%= task.appId %></td>
           <td><code><%= task.jobId %></code></td>
+          <td>
+            <% if (task.disabled) { %>
+              <strong style="color:var(--pico-del-color)">Disabled</strong>
+              <% if (task.failureCount > 0) { %>
+                <br><small><%= task.failureCount %> consecutive failure<%= task.failureCount === 1 ? '' : 's' %></small>
+              <% } %>
+            <% } else { %>
+              Pending
+            <% } %>
+          </td>
           <td>
             <%= task.runAt %>
             <br><small><%= task.runAtRelative %></small>

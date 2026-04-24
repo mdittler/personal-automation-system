@@ -9,7 +9,7 @@
  * - LLM scope enforcement (test 17)
  */
 
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -39,6 +39,7 @@ const LEGACY_TOKEN = 'legacy-api-token-for-d5b7-tests';
 
 const ACTOR_USER_ID = 'user-1';
 const OTHER_USER_ID = 'user-2';
+const ADMIN_USER_ID = 'admin-1';
 const HOUSEHOLD_ID = 'hh-1';
 const OTHER_HOUSEHOLD_ID = 'hh-2';
 const SPACE_ID = 'space-abc';
@@ -170,6 +171,17 @@ function makeFakeChangeLog(dataDir: string): ChangeLog {
 	} as unknown as ChangeLog;
 }
 
+async function seedChangeLog(
+	dataDir: string,
+	lines: Array<Record<string, unknown>>,
+): Promise<void> {
+	await mkdir(join(dataDir, 'system'), { recursive: true });
+	await writeFile(
+		join(dataDir, 'system', 'change-log.jsonl'),
+		`${lines.map((line) => JSON.stringify(line)).join('\n')}\n`,
+	);
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe('D5b-7: API route enforcement', () => {
@@ -177,10 +189,12 @@ describe('D5b-7: API route enforcement', () => {
 	let apiKeyService: ApiKeyService;
 
 	const users = [
+		{ id: ADMIN_USER_ID, name: 'Admin User', isAdmin: true },
 		{ id: ACTOR_USER_ID, name: 'User One', isAdmin: false },
 		{ id: OTHER_USER_ID, name: 'User Two', isAdmin: false },
 	];
 	const userToHousehold: Record<string, string> = {
+		[ADMIN_USER_ID]: HOUSEHOLD_ID,
 		[ACTOR_USER_ID]: HOUSEHOLD_ID,
 		[OTHER_USER_ID]: HOUSEHOLD_ID, // same household as actor
 	};
@@ -513,6 +527,8 @@ describe('D5b-7: API route enforcement', () => {
 	function makeCronManager(): CronManager {
 		return {
 			getJobDetails: vi.fn().mockReturnValue([]),
+			hasJob: vi.fn().mockReturnValue(true),
+			reEnable: vi.fn().mockReturnValue(true),
 		} as unknown as CronManager;
 	}
 
@@ -551,6 +567,87 @@ describe('D5b-7: API route enforcement', () => {
 		await server.close();
 	});
 
+	it('test 14b: non-admin key POST /api/schedules/:appId/:jobId/re-enable → 403', async () => {
+		const { fullToken } = await apiKeyService.createKey(ACTOR_USER_ID, {
+			scopes: ['schedules:write'],
+		});
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			cronManager: makeCronManager(),
+		});
+
+		const res = await server.inject({
+			method: 'POST',
+			url: '/api/schedules/system/daily-diff/re-enable',
+			headers: { authorization: `Bearer ${fullToken}` },
+			payload: {},
+		});
+
+		expect(res.statusCode).toBe(403);
+		await server.close();
+	});
+
+	it('test 14c: legacy API_TOKEN POST /api/schedules/:appId/:jobId/re-enable → 200', async () => {
+		const cronManager = makeCronManager();
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			cronManager,
+		});
+
+		const res = await server.inject({
+			method: 'POST',
+			url: '/api/schedules/system/daily-diff/re-enable',
+			headers: { authorization: `Bearer ${LEGACY_TOKEN}` },
+			payload: {},
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(JSON.parse(res.body)).toEqual({ ok: true, reEnabled: true });
+		expect((cronManager.hasJob as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+			'system:daily-diff',
+		);
+		expect((cronManager.reEnable as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+			'system',
+			'daily-diff',
+		);
+		await server.close();
+	});
+
+	it('test 14d: platform-admin key POST /api/schedules/:appId/:jobId/re-enable → 200', async () => {
+		const { fullToken } = await apiKeyService.createKey(ADMIN_USER_ID, {
+			scopes: ['schedules:write'],
+		});
+		const cronManager = makeCronManager();
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			cronManager,
+		});
+
+		const res = await server.inject({
+			method: 'POST',
+			url: '/api/schedules/system/daily-diff/re-enable',
+			headers: { authorization: `Bearer ${fullToken}` },
+			payload: {},
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(JSON.parse(res.body)).toEqual({ ok: true, reEnabled: true });
+		expect((cronManager.hasJob as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+			'system:daily-diff',
+		);
+		expect((cronManager.reEnable as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+			'system',
+			'daily-diff',
+		);
+		await server.close();
+	});
+
 	// ─── Changes tests (15-16) ────────────────────────────────────────────────
 
 	it('test 15: GET /api/changes with no actor (no auth hook) → 401 (contract #14)', async () => {
@@ -571,11 +668,37 @@ describe('D5b-7: API route enforcement', () => {
 		await server.close();
 	});
 
-	it('test 16: GET /api/changes with valid key → 200, household filter from ALS context', async () => {
+	it('test 16: GET /api/changes with valid key returns only caller household rows plus global rows', async () => {
 		const { fullToken } = await apiKeyService.createKey(ACTOR_USER_ID, {
 			scopes: ['data:read'],
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
+		const now = new Date().toISOString();
+		await seedChangeLog(tempDir, [
+			{
+				timestamp: now,
+				operation: 'write',
+				path: 'actor.md',
+				appId: 'notes',
+				userId: ACTOR_USER_ID,
+				householdId: HOUSEHOLD_ID,
+			},
+			{
+				timestamp: now,
+				operation: 'write',
+				path: 'other-household.md',
+				appId: 'notes',
+				userId: OTHER_USER_ID,
+				householdId: OTHER_HOUSEHOLD_ID,
+			},
+			{
+				timestamp: now,
+				operation: 'append',
+				path: 'system.md',
+				appId: 'system',
+				userId: 'system',
+			},
+		]);
 		const server = await buildServer({
 			apiKeyService, userManager: um, householdService: hs,
 			changeLog,
@@ -592,6 +715,18 @@ describe('D5b-7: API route enforcement', () => {
 		expect(res.statusCode).toBe(200);
 		const body = JSON.parse(res.body);
 		expect(body.ok).toBe(true);
+		expect(body.count).toBe(2);
+		expect(body.entries).toHaveLength(2);
+		expect(body.entries.map((entry: { path: string }) => entry.path)).toEqual([
+			'actor.md',
+			'system.md',
+		]);
+		expect(
+			body.entries.some(
+				(entry: { householdId?: string; path: string }) =>
+					entry.householdId === OTHER_HOUSEHOLD_ID || entry.path === 'other-household.md',
+			),
+		).toBe(false);
 		await server.close();
 	});
 

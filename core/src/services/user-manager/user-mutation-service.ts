@@ -92,8 +92,22 @@ export class UserMutationService {
 			}
 		}
 
+		const previousUsers = this.snapshotUsers();
+		// No async boundary exists between the existence check above and this
+		// synchronous mutation, so the user cannot disappear under current
+		// UserManager semantics.
 		this.userManager.removeUser(telegramId);
-		await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+
+		try {
+			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		} catch (err) {
+			// householdService is updated only after config sync succeeds, so a
+			// rollback here only needs to restore the in-memory UserManager state.
+			this.restoreUsers(previousUsers);
+			this.logger.error({ userId: telegramId, err }, 'Config sync failed — user removal rolled back');
+			throw err;
+		}
+
 		this.householdService?.removeUser(telegramId);
 		this.logger.info({ userId: telegramId }, 'User removed and config synced');
 		return {};
@@ -103,8 +117,23 @@ export class UserMutationService {
 	 * Update the enabled apps list for a user and sync to config.
 	 */
 	async updateUserApps(telegramId: string, enabledApps: string[]): Promise<void> {
-		this.userManager.updateUserApps(telegramId, enabledApps);
-		await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		const previousUsers = this.snapshotUsers();
+		const updated = this.userManager.updateUserApps(telegramId, enabledApps);
+		if (!updated) {
+			throw new Error('User not found.');
+		}
+
+		try {
+			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		} catch (err) {
+			this.restoreUsers(previousUsers);
+			this.logger.error(
+				{ userId: telegramId, err },
+				'Config sync failed — user app update rolled back',
+			);
+			throw err;
+		}
+
 		this.logger.info({ userId: telegramId }, 'User apps updated and config synced');
 	}
 
@@ -112,8 +141,47 @@ export class UserMutationService {
 	 * Update the shared scopes list for a user and sync to config.
 	 */
 	async updateUserSharedScopes(telegramId: string, sharedScopes: string[]): Promise<void> {
-		this.userManager.updateUserSharedScopes(telegramId, sharedScopes);
-		await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		const previousUsers = this.snapshotUsers();
+		const updated = this.userManager.updateUserSharedScopes(telegramId, sharedScopes);
+		if (!updated) {
+			throw new Error('User not found.');
+		}
+
+		try {
+			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+		} catch (err) {
+			this.restoreUsers(previousUsers);
+			this.logger.error(
+				{ userId: telegramId, err },
+				'Config sync failed — user shared-scope update rolled back',
+			);
+			throw err;
+		}
+
 		this.logger.info({ userId: telegramId }, 'User shared scopes updated and config synced');
+	}
+
+	private snapshotUsers(): RegisteredUser[] {
+		return this.userManager.getAllUsers().map((user) => ({
+			...user,
+			enabledApps: [...user.enabledApps],
+			sharedScopes: [...user.sharedScopes],
+		}));
+	}
+
+	private restoreUsers(users: ReadonlyArray<RegisteredUser>): void {
+		// Restores only UserManager state. HouseholdService does not need a
+		// rollback companion because removeUser mutates it only after config sync
+		// succeeds.
+		for (const userId of this.userManager.getAllUsers().map((user) => user.id)) {
+			this.userManager.removeUser(userId);
+		}
+		for (const user of users) {
+			this.userManager.addUser({
+				...user,
+				enabledApps: [...user.enabledApps],
+				sharedScopes: [...user.sharedScopes],
+			});
+		}
 	}
 }

@@ -776,6 +776,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			logger: createChildLogger(logger, { service: 'job-failure-notifier' }),
 			sender: telegramService,
 			adminChatId: adminUser.id,
+			persistPath: join(config.dataDir, 'system', 'disabled-jobs.yaml'),
 		});
 		scheduler.setNotifier(jobFailureNotifier);
 	} else {

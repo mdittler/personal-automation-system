@@ -44,6 +44,11 @@ export class WebhookService {
 	 * Subscribe to EventBus for all configured webhook events.
 	 */
 	init(): void {
+		if (this.handlers.size > 0) {
+			this.logger.debug('Webhook service already initialized, skipping duplicate init');
+			return;
+		}
+
 		// Collect unique event names across all webhooks
 		const eventMap = new Map<string, WebhookDefinition[]>();
 		for (const wh of this.webhooks) {

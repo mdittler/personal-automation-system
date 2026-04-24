@@ -8,10 +8,11 @@
  * Once Task 4 lands, all assertions here should pass without modification.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import cron from 'node-cron';
 import pino from 'pino';
 import { composeRuntime } from '../compose-runtime.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
@@ -62,6 +63,38 @@ describe('composeRuntime smoke', () => {
 		expect(runtime.services.costTracker).toBeDefined();
 		// Server must be registered but not listening
 		expect((runtime.server as any).server?.listening ?? false).toBeFalsy();
+	});
+
+	it('wires the job failure notifier with persisted disabled-job state', async () => {
+		const createTaskSpy = vi.spyOn(cron, 'createTask');
+		const jobId = 'persist-disabled-state';
+		const jobKey = `system:${jobId}`;
+		const failingHandler = vi.fn().mockRejectedValue(new Error('boom'));
+
+		runtime.services.scheduler.cron.register(
+			{
+				id: jobId,
+				appId: 'system',
+				cron: '*/5 * * * *',
+				handler: 'persist-disabled-state',
+				description: 'Persist disabled jobs in composeRuntime',
+				userScope: 'system',
+			},
+			() => failingHandler,
+		);
+
+		const cronCallback = createTaskSpy.mock.calls.at(-1)?.[1] as (() => Promise<void>) | undefined;
+		expect(cronCallback).toBeDefined();
+
+		for (let i = 0; i < 5; i++) {
+			await cronCallback?.();
+		}
+
+		const persisted = await readFile(join(tempDir, 'data', 'system', 'disabled-jobs.yaml'), 'utf-8');
+		expect(persisted).toContain(jobKey);
+
+		runtime.services.scheduler.cron.unregister(jobKey);
+		createTaskSpy.mockRestore();
 	});
 
 	it('routed messages appear as exactly one new 9-col row in llm-usage.md with correct userId + householdId', async () => {

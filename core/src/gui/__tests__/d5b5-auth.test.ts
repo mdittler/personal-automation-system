@@ -5,7 +5,7 @@
  * alerts, and spaces routes.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +115,23 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		const config = createMockConfig();
 		config.dataDir = tempDir;
 
+		await mkdir(join(tempDir, 'households', HOUSEHOLD_ID, 'users', MEMBER_ID, 'notes'), {
+			recursive: true,
+		});
+		await mkdir(join(tempDir, 'households', OTHER_HOUSEHOLD_ID, 'users', ADMIN_ID, 'notes'), {
+			recursive: true,
+		});
+		await mkdir(join(tempDir, 'system', 'daily-diff'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'households', HOUSEHOLD_ID, 'users', MEMBER_ID, 'notes', 'private.md'),
+			'member-private\n',
+		);
+		await writeFile(
+			join(tempDir, 'households', OTHER_HOUSEHOLD_ID, 'users', ADMIN_ID, 'notes', 'admin.md'),
+			'admin-private\n',
+		);
+		await writeFile(join(tempDir, 'system', 'daily-diff', 'latest.md'), 'system\n');
+
 		const credService = new CredentialService({ dataDir: tempDir });
 		await credService.setPassword(ADMIN_ID, ADMIN_PASSWORD);
 		await credService.setPassword(MEMBER_ID, MEMBER_PASSWORD);
@@ -193,6 +210,16 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		expect(res.statusCode).toBe(200);
 	});
 
+	it('non-admin GET /gui/data/browse?scope=shared with no householdId → 200', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/data/browse?scope=shared',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
 	it('non-admin GET /gui/data/browse?scope=shared&householdId=other → 403', async () => {
 		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
 		const res = await app.inject({
@@ -233,6 +260,78 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 			cookies,
 		});
 		expect(systemRes.statusCode).toBe(200);
+	});
+
+	it('non-admin GET /gui/data → 403', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/data',
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+
+	it('non-admin GET /gui/data/view?scope=user&userId=self → 200', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: `/gui/data/view?scope=user&userId=${MEMBER_ID}&appId=notes&subpath=private.md`,
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('member-private');
+	});
+
+	it('non-admin GET /gui/data/view?scope=user&userId=other → 403', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: `/gui/data/view?scope=user&userId=${ADMIN_ID}&householdId=${OTHER_HOUSEHOLD_ID}&appId=notes&subpath=admin.md`,
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+
+	it('non-admin GET /gui/data/view?scope=system → 403', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/data/view?scope=system&subpath=daily-diff/latest.md',
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+
+	it('non-admin GET /gui/data/files?scope=user&userId=self → 200', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: `/gui/data/files?scope=user&userId=${MEMBER_ID}&appId=notes&target=report-path`,
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('private.md');
+	});
+
+	it('non-admin GET /gui/data/files?scope=user&userId=other → 403', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: `/gui/data/files?scope=user&userId=${ADMIN_ID}&appId=notes&target=report-path&householdId=${OTHER_HOUSEHOLD_ID}`,
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+
+	it('non-admin GET /gui/data/files?scope=system → 403', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/data/files?scope=system&target=report-path',
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
 	});
 });
 

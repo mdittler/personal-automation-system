@@ -14,6 +14,7 @@ import { parse } from 'yaml';
 import type { SystemConfig } from '../../../types/config.js';
 import type { RegisteredUser } from '../../../types/users.js';
 import type { AppToggleStore } from '../../app-toggle/index.js';
+import * as configWriter from '../../config/config-writer.js';
 import { UserManager } from '../index.js';
 import { UserMutationService } from '../user-mutation-service.js';
 
@@ -266,6 +267,23 @@ describe('removeUser', () => {
 		const defaults = await readConfigDefaults();
 		expect(defaults.log_level).toBe('info');
 	});
+
+	it('rolls back in-memory removal if config sync fails', async () => {
+		const syncSpy = vi
+			.spyOn(configWriter, 'syncUsersToConfig')
+			.mockRejectedValueOnce(new Error('disk full'));
+
+		await expect(service.removeUser('222')).rejects.toThrow('disk full');
+
+		expect(userManager.isRegistered('222')).toBe(true);
+		expect(userManager.getAllUsers()).toHaveLength(2);
+
+		const users = await readConfigUsers();
+		expect(users).toHaveLength(2);
+		expect(users.find((u) => u.id === '222')).toMatchObject({ name: 'Bob' });
+
+		syncSpy.mockRestore();
+	});
 });
 
 // ─── updateUserApps ──────────────────────────────────────────────────────────
@@ -300,6 +318,29 @@ describe('updateUserApps', () => {
 		const defaults = await readConfigDefaults();
 		expect(defaults.log_level).toBe('info');
 	});
+
+	it('rolls back in-memory apps if config sync fails', async () => {
+		const syncSpy = vi
+			.spyOn(configWriter, 'syncUsersToConfig')
+			.mockRejectedValueOnce(new Error('disk full'));
+
+		await expect(service.updateUserApps('222', ['food'])).rejects.toThrow('disk full');
+
+		expect(userManager.getUserApps('222')).toEqual(['chatbot', 'notes']);
+
+		const users = await readConfigUsers();
+		const bob = users.find((u) => u.id === '222');
+		expect(bob?.enabled_apps).toEqual(['chatbot', 'notes']);
+
+		syncSpy.mockRestore();
+	});
+
+	it('throws if the user does not exist', async () => {
+		await expect(service.updateUserApps('999', ['food'])).rejects.toThrow('User not found.');
+
+		const users = await readConfigUsers();
+		expect(users).toHaveLength(2);
+	});
 });
 
 // ─── updateUserSharedScopes ──────────────────────────────────────────────────
@@ -332,5 +373,30 @@ describe('updateUserSharedScopes', () => {
 
 		const defaults = await readConfigDefaults();
 		expect(defaults.log_level).toBe('info');
+	});
+
+	it('rolls back in-memory shared scopes if config sync fails', async () => {
+		const syncSpy = vi
+			.spyOn(configWriter, 'syncUsersToConfig')
+			.mockRejectedValueOnce(new Error('disk full'));
+
+		await expect(service.updateUserSharedScopes('222', ['work'])).rejects.toThrow('disk full');
+
+		expect(userManager.getSharedScopes('222')).toEqual(['grocery']);
+
+		const users = await readConfigUsers();
+		const bob = users.find((u) => u.id === '222');
+		expect(bob?.shared_scopes).toEqual(['grocery']);
+
+		syncSpy.mockRestore();
+	});
+
+	it('throws if the user does not exist', async () => {
+		await expect(service.updateUserSharedScopes('999', ['work'])).rejects.toThrow(
+			'User not found.',
+		);
+
+		const users = await readConfigUsers();
+		expect(users).toHaveLength(2);
 	});
 });

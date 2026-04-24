@@ -1,16 +1,16 @@
 # Test Strategy Summary
 
-This document summarizes the current testing picture after reviewing `docs/codebase-review-findings.md` and the existing non-vendored test suite under `core/` and `apps/`.
+This document summarizes the current testing picture after reviewing `docs/codebase-review-findings.md` and the existing non-vendored test suite under `core/`, `apps/`, and `scripts/`.
 
 The main conclusion is not that PAS lacks tests. It has a large and useful test suite. The repeated gap is that many tests stop at a helper, service, or happy-path route boundary, while the findings happen where trust, permissions, serialized data, documented contracts, or production wiring cross from one layer into another.
 
 ## Review Scope
 
 - Reviewed findings 1-42 across phases 1-10 in `docs/codebase-review-findings.md`.
-- Reviewed the non-vendored test inventory under `core/` and `apps/`.
-- Counted 223 non-vendored test files and about 4,896 `it()` / `test()` cases.
-- Distribution by area: `core` has 133 test files, `apps` has 90. Of the app tests, `apps/food` has 86 files, `apps/chatbot` has 2, `apps/echo` has 1, and `apps/notes` has 1.
-- Distribution by core area: 92 core service test files, 10 GUI route files, 10 API route files, 4 CLI/template files, 8 utility files, and smaller middleware/server/schema/testing groups.
+- Reviewed the non-vendored test inventory under `core/`, `apps/`, and `scripts/`.
+- Current inventory snapshot (2026-04-23): 311 non-vendored test files and about 6,799 `it()` / `test()` blocks across those repo-local roots.
+- Distribution by area: `core` has 192 test files, `apps` has 116, and `scripts` has 3. Of the app tests, `apps/food` has 103 files, `apps/chatbot` has 11, `apps/echo` has 1, and `apps/notes` has 1.
+- Distribution by core area: 128 core service test files, 17 GUI files, 11 API files, 5 CLI files, 14 utility files, plus smaller middleware, server, schema, testing, and other support groups.
 - Found 3 intentional skipped tests in `apps/food/src/__tests__/natural-language-h11z.test.ts`, all documented as future natural-language grocery normalization gaps.
 
 The prior phase evidence in `docs/codebase-review-findings.md` also shows many targeted Vitest runs passing. This pass focused on reviewing coverage shape and gaps rather than rerunning the whole suite.

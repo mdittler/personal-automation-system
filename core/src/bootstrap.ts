@@ -7,6 +7,7 @@
  */
 
 import { resolve } from 'node:path';
+import { registerDailyDiffCron } from './bootstrap/register-daily-diff-cron.js';
 import { composeRuntime } from './compose-runtime.js';
 import { createChildLogger } from './services/logger/index.js';
 
@@ -57,28 +58,12 @@ export async function main(): Promise<void> {
 	}
 
 	// 14. Register daily diff cron (runs at 2am daily)
-	scheduler.cron.register(
-		{
-			id: 'daily-diff',
-			appId: 'system',
-			cron: '0 2 * * *',
-			handler: 'daily-diff',
-			description: 'Generate daily diff report from change log',
-			userScope: 'system',
-		},
-		() => async () => {
-			if (n8nDispatcher.enabled) {
-				const dispatched = await n8nDispatcher.dispatch({
-					type: 'daily_diff',
-					id: 'daily-diff',
-					action: 'run',
-				});
-				if (dispatched) return;
-				logger.info('n8n dispatch failed for daily-diff, running internally');
-			}
-			await dailyDiff.run();
-		},
-	);
+	registerDailyDiffCron({
+		cronManager: scheduler.cron,
+		dailyDiff,
+		n8nDispatcher,
+		logger,
+	});
 
 	// 14b. Register system backup cron job (if enabled)
 	if (config.backup.enabled) {

@@ -271,6 +271,19 @@ describe('OneOffManager', () => {
 		expect(pending).toHaveLength(1);
 	});
 
+	it('exposes disabled state and failure count from the shared notifier', () => {
+		const notifier: SchedulerJobNotifier = {
+			isDisabled: vi.fn().mockReturnValue(true),
+			onFailure: vi.fn().mockResolvedValue(false),
+			onSuccess: vi.fn(),
+			getFailureCount: vi.fn().mockReturnValue(4),
+		};
+		manager.setNotifier(notifier);
+
+		expect(manager.isDisabled('app1', 'job1')).toBe(true);
+		expect(manager.getFailureCount('app1', 'job1')).toBe(4);
+	});
+
 	// --- in-flight drain ---
 
 	it('stop() awaits in-flight one-off task before resolving', async () => {

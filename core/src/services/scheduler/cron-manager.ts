@@ -6,7 +6,7 @@
  * Logs start time, end time, and success/failure (URS-SCH-004).
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Logger } from 'pino';
@@ -58,13 +58,8 @@ export class CronManager {
 
 	private persistLastRunData(): void {
 		try {
-			// Ensure directory exists (data/system/ is always created at startup, but be safe)
 			const dir = dirname(this.persistPath);
-			try {
-				readFileSync(dir); // probe — will throw if missing
-			} catch {
-				// ignore — writeFileSync will fail if dir is missing, caught below
-			}
+			mkdirSync(dir, { recursive: true });
 			const data: Record<string, string> = {};
 			for (const [key, date] of this.lastRunAt) {
 				data[key] = date.toISOString();
@@ -206,14 +201,33 @@ export class CronManager {
 		return Array.from(this.jobs.keys());
 	}
 
+	hasJob(jobKey: string): boolean {
+		return this.jobs.has(jobKey);
+	}
+
+	reEnable(appId: string, jobId: string): boolean {
+		if (!this.notifier?.reEnable) return false;
+		const wasDisabled = this.notifier.isDisabled(appId, jobId);
+		this.notifier.reEnable(appId, jobId);
+		return wasDisabled;
+	}
+
 	/**
 	 * Get all registered jobs with their full details.
 	 */
-	getJobDetails(): Array<{ job: ScheduledJob; key: string; lastRunAt: Date | null }> {
+	getJobDetails(): Array<{
+		job: ScheduledJob;
+		key: string;
+		lastRunAt: Date | null;
+		disabled: boolean;
+		failureCount: number;
+	}> {
 		return Array.from(this.jobs.entries()).map(([key, { job }]) => ({
 			job,
 			key,
 			lastRunAt: this.lastRunAt.get(key) ?? null,
+			disabled: this.notifier?.isDisabled(job.appId, job.id) ?? false,
+			failureCount: this.notifier?.getFailureCount?.(job.appId, job.id) ?? 0,
 		}));
 	}
 }
