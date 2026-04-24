@@ -667,6 +667,52 @@ describe('VaultService', () => {
 			expect(await pathExists(join(tempDir, 'vaults', '222', '_spaces', 'family'))).toBe(false);
 		});
 
+		it('should remove stale vault links when SpaceService.saveSpace drops a member', async () => {
+			await createDir('spaces', 'family', 'grocery');
+
+			const userManager = makeUserManager([
+				{ id: '111', name: 'User 1' },
+				{ id: '222', name: 'User 2' },
+			]);
+
+			const { SpaceService } = await import('../../spaces/index.js');
+			const spaceService = new SpaceService({
+				dataDir: tempDir,
+				userManager,
+				logger,
+			});
+			await spaceService.init();
+
+			await spaceService.saveSpace({
+				id: 'family',
+				name: 'Family',
+				members: ['111', '222'],
+				createdBy: '111',
+			});
+
+			const vaultService = new VaultService({
+				dataDir: tempDir,
+				spaceService,
+				userManager,
+				logger,
+			});
+			spaceService.setVaultService(vaultService);
+
+			await vaultService.rebuildVault('222');
+			expect(await isSymlink(join(tempDir, 'vaults', '222', '_spaces', 'family', 'grocery'))).toBe(
+				true,
+			);
+
+			await spaceService.saveSpace({
+				id: 'family',
+				name: 'Family',
+				members: ['111'],
+				createdBy: '111',
+			});
+
+			expect(await pathExists(join(tempDir, 'vaults', '222', '_spaces', 'family'))).toBe(false);
+		});
+
 		it('should call vault hooks from SpaceService.deleteSpace', async () => {
 			await createDir('spaces', 'family', 'grocery');
 
