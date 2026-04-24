@@ -27,7 +27,7 @@ import { slugifyModelId } from '@pas/core/utils/slugify';
 import { formatRelativeTime } from '@pas/core/utils/cron-describe';
 import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
 import { ConversationHistory, type ConversationTurn } from '@pas/core/services/conversation-history';
-import { sanitizeInput } from '@pas/core/services/prompt-assembly';
+import { sanitizeInput, formatConversationHistory } from '@pas/core/services/prompt-assembly';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });
@@ -524,26 +524,6 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		services.logger.warn('Failed to save conversation history: %s', error);
 	}
 };
-
-/**
- * Format conversation turns with recency markers and relative timestamps.
- * Last 4 turns (2 exchanges) are tagged [Recent]; earlier turns are [Earlier].
- * Accepts an optional `now` for deterministic testing.
- */
-export function formatConversationHistory(
-	turns: ConversationTurn[],
-	now: Date = new Date(),
-): string[] {
-	const recentCutoff = turns.length - 4;
-	return turns.map((turn, i) => {
-		const role = turn.role === 'user' ? 'User' : 'Assistant';
-		const recencyTag = i >= recentCutoff ? '[Recent]' : '[Earlier]';
-		const timePart = turn.timestamp
-			? ` (${formatRelativeTime(new Date(turn.timestamp), now)})`
-			: '';
-		return `- ${recencyTag}${timePart} ${role}: ${sanitizeInput(turn.content, 500)}`;
-	});
-}
 
 /**
  * Build app-aware system prompt with metadata, knowledge, system data,

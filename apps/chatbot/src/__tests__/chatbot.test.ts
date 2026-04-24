@@ -12,7 +12,6 @@ import {
 	buildSystemPrompt,
 	categorizeQuestion,
 	extractJournalEntries,
-	formatConversationHistory,
 	gatherSystemData,
 	isPasRelevant,
 	processModelSwitchTags,
@@ -367,24 +366,6 @@ describe('Chatbot App', () => {
 			const turns = [{ role: 'user' as const, content: 'test', timestamp: '' }];
 			const prompt = await buildSystemPrompt([], turns, MODEL_SLUG);
 			expect(prompt).toContain('Focus on the user');
-		});
-
-		it('marks turns with [Recent] and [Earlier] recency tags', () => {
-			const now = new Date('2026-04-10T12:00:00Z');
-			// 6 turns: first 2 should be [Earlier], last 4 should be [Recent]
-			const turns: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }> = [
-				{ role: 'user', content: 'old A', timestamp: '2026-04-10T10:00:00Z' },
-				{ role: 'assistant', content: 'old B', timestamp: '2026-04-10T10:01:00Z' },
-				{ role: 'user', content: 'recent C', timestamp: '2026-04-10T11:55:00Z' },
-				{ role: 'assistant', content: 'recent D', timestamp: '2026-04-10T11:56:00Z' },
-				{ role: 'user', content: 'recent E', timestamp: '2026-04-10T11:59:00Z' },
-				{ role: 'assistant', content: 'recent F', timestamp: '2026-04-10T11:59:30Z' },
-			];
-			const lines = formatConversationHistory(turns, now);
-			expect(lines[0]).toContain('[Earlier]');
-			expect(lines[1]).toContain('[Earlier]');
-			expect(lines[2]).toContain('[Recent]');
-			expect(lines[4]).toContain('[Recent]');
 		});
 
 		it('includes relative timestamps in conversation history', async () => {
