@@ -29,6 +29,19 @@ export interface RequestContext {
 	 * yet been wired (e.g. before Task J bootstrap wiring).
 	 */
 	householdId?: string;
+
+	/**
+	 * The chat session the current request belongs to.
+	 *
+	 * P0 adds the field; no production dispatch site populates it yet. P3 wires
+	 * `ChatSessionStore` to set it on every conversation turn, and P5 reads it
+	 * when indexing messages into the FTS5 transcript store.
+	 *
+	 * Undefined for non-conversation dispatch (scheduled jobs, alert actions,
+	 * non-fallback router branches, admin/API writes). Validation is a
+	 * consumer responsibility (the ALS stores the value verbatim).
+	 */
+	sessionId?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

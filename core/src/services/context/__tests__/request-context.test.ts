@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getCurrentHouseholdId, getCurrentUserId, requestContext } from '../request-context.js';
+import {
+	enterRequestContext,
+	getCurrentHouseholdId,
+	getCurrentUserId,
+	requestContext,
+} from '../request-context.js';
 
 describe('requestContext', () => {
 	it('returns undefined outside any run() scope', () => {
@@ -86,6 +91,132 @@ describe('requestContext', () => {
 			const seen = requestContext.run({ userId: uid }, () => getCurrentUserId());
 			expect(seen).toBe(uid);
 		}
+	});
+});
+
+describe('sessionId (via run)', () => {
+	it('returns undefined when store is present but sessionId is omitted', () => {
+		const seen = requestContext.run({ userId: 'alice' }, () => requestContext.getStore()?.sessionId);
+		expect(seen).toBeUndefined();
+	});
+
+	it('returns undefined when sessionId is explicitly undefined', () => {
+		const seen = requestContext.run(
+			{ userId: 'alice', sessionId: undefined },
+			() => requestContext.getStore()?.sessionId,
+		);
+		expect(seen).toBeUndefined();
+	});
+
+	it('exposes sessionId set by run()', () => {
+		const seen = requestContext.run(
+			{ userId: 'alice', sessionId: '20260423_121530_a1b2c3d4' },
+			() => requestContext.getStore()?.sessionId,
+		);
+		expect(seen).toBe('20260423_121530_a1b2c3d4');
+	});
+
+	it('sessionId is independent of userId and householdId', () => {
+		const seen = requestContext.run(
+			{ userId: 'bob', householdId: 'hh-jones', sessionId: 'sess-1' },
+			() => ({
+				u: getCurrentUserId(),
+				h: getCurrentHouseholdId(),
+				s: requestContext.getStore()?.sessionId,
+			}),
+		);
+		expect(seen).toEqual({ u: 'bob', h: 'hh-jones', s: 'sess-1' });
+	});
+
+	it('inner run() overrides sessionId', () => {
+		const seen = requestContext.run(
+			{ userId: 'u', sessionId: 'sess-outer' },
+			() =>
+				requestContext.run(
+					{ userId: 'u', sessionId: 'sess-inner' },
+					() => requestContext.getStore()?.sessionId,
+				),
+		);
+		expect(seen).toBe('sess-inner');
+	});
+
+	it('inner run() with sessionId: undefined shadows the outer sessionId', () => {
+		const seen = requestContext.run(
+			{ userId: 'u', sessionId: 'sess-outer' },
+			() =>
+				requestContext.run(
+					{ userId: 'u', sessionId: undefined },
+					() => requestContext.getStore()?.sessionId,
+				),
+		);
+		expect(seen).toBeUndefined();
+	});
+
+	it('propagates sessionId through awaited async boundaries', async () => {
+		async function deep(): Promise<string | undefined> {
+			await Promise.resolve();
+			await new Promise((r) => setTimeout(r, 1));
+			return requestContext.getStore()?.sessionId;
+		}
+		const seen = await requestContext.run(
+			{ userId: 'u', sessionId: 'sess-async' },
+			() => deep(),
+		);
+		expect(seen).toBe('sess-async');
+	});
+
+	it('does not leak sessionId across sibling run() calls', async () => {
+		const results: Array<string | undefined> = [];
+		await Promise.all([
+			requestContext.run({ userId: 'u1', sessionId: 'sess-a' }, async () => {
+				await Promise.resolve();
+				results.push(requestContext.getStore()?.sessionId);
+			}),
+			requestContext.run({ userId: 'u2', sessionId: 'sess-b' }, async () => {
+				await Promise.resolve();
+				results.push(requestContext.getStore()?.sessionId);
+			}),
+		]);
+		expect(results.sort()).toEqual(['sess-a', 'sess-b']);
+	});
+
+	it('preserves arbitrary string sessionIds verbatim (validation is consumer responsibility)', () => {
+		const suspicious = ['', '../../etc/passwd', 'id with space', 'unicode-Ω'];
+		for (const sid of suspicious) {
+			const seen = requestContext.run(
+				{ userId: 'u', sessionId: sid },
+				() => requestContext.getStore()?.sessionId,
+			);
+			expect(seen).toBe(sid);
+		}
+	});
+});
+
+describe('sessionId (via enterRequestContext — Fastify hook path)', () => {
+	it('exposes sessionId set via enterRequestContext within the same async scope', async () => {
+		const seen = await requestContext.run({}, async () => {
+			enterRequestContext({ userId: 'alice', sessionId: 'sess-enter' });
+			return requestContext.getStore()?.sessionId;
+		});
+		expect(seen).toBe('sess-enter');
+	});
+
+	it('enterRequestContext with sessionId propagates through awaited boundaries', async () => {
+		const seen = await requestContext.run({}, async () => {
+			enterRequestContext({ userId: 'u', sessionId: 'sess-enter-async' });
+			await Promise.resolve();
+			await new Promise((r) => setTimeout(r, 1));
+			return requestContext.getStore()?.sessionId;
+		});
+		expect(seen).toBe('sess-enter-async');
+	});
+
+	it('enterRequestContext with sessionId omitted leaves sessionId undefined', async () => {
+		const seen = await requestContext.run({}, async () => {
+			enterRequestContext({ userId: 'u' });
+			return requestContext.getStore()?.sessionId;
+		});
+		expect(seen).toBeUndefined();
 	});
 });
 
