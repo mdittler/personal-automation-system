@@ -8,3 +8,8 @@ export {
 	appendJournalPromptSection,
 } from './model-journal.js';
 export type { JournalLogger } from './model-journal.js';
+export {
+	appendUserContextSection,
+	appendContextEntriesSection,
+	appendConversationHistorySection,
+} from './system-prompt.js';

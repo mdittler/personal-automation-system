@@ -1025,6 +1025,24 @@ describe('SpaceService — household boundary enforcement (B1/R5)', () => {
 		expect(errors.some((e) => e.field === 'members')).toBe(true);
 	});
 
+	it('saveSpace rejects household member with no household assignment', async () => {
+		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': null });
+		await svc.init();
+
+		const errors = await svc.saveSpace(
+			makeSpace({
+				kind: 'household',
+				householdId: 'hh-alpha',
+				members: ['111', '222'],
+				createdBy: '111',
+			}),
+		);
+
+		expect(errors.length).toBeGreaterThan(0);
+		expect(errors.some((e) => e.field === 'members')).toBe(true);
+		expect(errors.some((e) => e.message.includes('not assigned to household'))).toBe(true);
+	});
+
 	it('addMember rejects cross-household member with error in array', async () => {
 		// Space is hh-alpha; '111' is creator (hh-alpha); '222' is cross-household (hh-beta)
 		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': 'hh-beta' });
@@ -1045,6 +1063,26 @@ describe('SpaceService — household boundary enforcement (B1/R5)', () => {
 
 		expect(errors.length).toBeGreaterThan(0);
 		expect(errors.some((e) => e.field === 'members' || e.field === 'userId')).toBe(true);
+	});
+
+	it('addMember rejects user with no household assignment', async () => {
+		const svc = makeServiceWithHousehold({ '111': 'hh-alpha', '222': null });
+		await svc.init();
+
+		await svc.saveSpace(
+			makeSpace({
+				kind: 'household',
+				householdId: 'hh-alpha',
+				members: ['111'],
+				createdBy: '111',
+			}),
+		);
+
+		const errors = await svc.addMember('family', '222');
+
+		expect(errors.length).toBeGreaterThan(0);
+		expect(errors.some((e) => e.field === 'members' || e.field === 'userId')).toBe(true);
+		expect(errors.some((e) => e.message.includes('not assigned to household'))).toBe(true);
 	});
 
 	it('legacy mode (no HouseholdService) skips cross-household check on saveSpace', async () => {
