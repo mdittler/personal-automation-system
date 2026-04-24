@@ -143,7 +143,11 @@ export class SpaceService {
 
 		return this.enqueue(async () => {
 			// Check max spaces limit (only on create)
-			const isNew = !this.spaces[def.id];
+			const existing = this.spaces[def.id];
+			const existingSpace = existing
+				? { ...existing, members: [...existing.members] }
+				: null;
+			const isNew = !existingSpace;
 			if (isNew && Object.keys(this.spaces).length >= MAX_SPACES) {
 				throw new SpaceLimitError(`Maximum ${MAX_SPACES} spaces allowed`);
 			}
@@ -162,6 +166,19 @@ export class SpaceService {
 							this.logger.warn(
 								{ err, userId: memberId },
 								'Failed to rebuild vault after space save',
+							),
+						);
+				}
+
+				const removedMembers =
+					existingSpace?.members.filter((memberId) => !def.members.includes(memberId)) ?? [];
+				for (const memberId of removedMembers) {
+					await this.vaultService
+						.removeSpaceLink(memberId, def.id)
+						.catch((err) =>
+							this.logger.warn(
+								{ err, userId: memberId, spaceId: def.id },
+								'Failed to remove stale space link after space save',
 							),
 						);
 				}
@@ -258,11 +275,14 @@ export class SpaceService {
 		// R5: Reject cross-household members for household-kind spaces (post-migration only).
 		if (space.kind === 'household' && space.householdId && this.householdService) {
 			const memberHousehold = this.householdService.getHouseholdForUser(userId);
-			if (memberHousehold !== null && memberHousehold !== space.householdId) {
+			if (memberHousehold !== space.householdId) {
 				return [
 					{
 						field: 'members',
-						message: `User ${userId} belongs to household "${memberHousehold}", not "${space.householdId}"`,
+						message:
+							memberHousehold === null
+								? `User ${userId} is not assigned to household "${space.householdId}"`
+								: `User ${userId} belongs to household "${memberHousehold}", not "${space.householdId}"`,
 					},
 				];
 			}
@@ -468,10 +488,13 @@ export class SpaceService {
 		if (def.kind === 'household' && def.householdId && this.householdService) {
 			for (const memberId of def.members ?? []) {
 				const memberHousehold = this.householdService.getHouseholdForUser(memberId);
-				if (memberHousehold !== null && memberHousehold !== def.householdId) {
+				if (memberHousehold !== def.householdId) {
 					errors.push({
 						field: 'members',
-						message: `User ${memberId} belongs to household "${memberHousehold}", not "${def.householdId}"`,
+						message:
+							memberHousehold === null
+								? `User ${memberId} is not assigned to household "${def.householdId}"`
+								: `User ${memberId} belongs to household "${memberHousehold}", not "${def.householdId}"`,
 					});
 				}
 			}

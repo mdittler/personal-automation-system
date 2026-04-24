@@ -5,7 +5,7 @@
  * Maintains a sliding window of recent turns for LLM context.
  */
 
-import type { ScopedDataStore } from '@pas/core/types';
+import type { ScopedDataStore } from '../../types/index.js';
 
 const HISTORY_FILE = 'history.json';
 

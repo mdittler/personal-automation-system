@@ -26,7 +26,7 @@ import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { slugifyModelId } from '@pas/core/utils/slugify';
 import { formatRelativeTime } from '@pas/core/utils/cron-describe';
 import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
-import { ConversationHistory, type ConversationTurn } from './conversation-history.js';
+import { ConversationHistory, type ConversationTurn } from '@pas/core/services/conversation-history';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });

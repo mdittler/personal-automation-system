@@ -54,6 +54,10 @@
 		"./testing/helpers": {
 			"import": "./dist/testing/test-helpers.js",
 			"types": "./dist/testing/test-helpers.d.ts"
+		},
+		"./services/conversation-history": {
+			"import": "./dist/services/conversation-history/index.js",
+			"types": "./dist/services/conversation-history/index.d.ts"
 		}
 	},
 	"scripts": {

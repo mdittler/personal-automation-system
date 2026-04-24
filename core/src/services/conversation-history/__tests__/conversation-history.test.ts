@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationHistory, type ConversationTurn } from '../conversation-history.js';
+import { ConversationHistory, type ConversationTurn } from '../index.js';
 
 function createMockStore(data: string | null = null) {
 	return {
