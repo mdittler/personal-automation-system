@@ -11,7 +11,6 @@ import {
 	buildAppAwareSystemPrompt,
 	buildSystemPrompt,
 	categorizeQuestion,
-	extractJournalEntries,
 	gatherSystemData,
 	isPasRelevant,
 	processModelSwitchTags,
@@ -1010,81 +1009,6 @@ describe('Chatbot App', () => {
 			expect(openFenceIdx).toBeGreaterThan(-1);
 			expect(historyIdx).toBeGreaterThan(openFenceIdx);
 			expect(closeFenceIdx).toBeGreaterThan(historyIdx);
-		});
-	});
-
-	describe('extractJournalEntries', () => {
-		it('returns unchanged response when no journal tags', () => {
-			const result = extractJournalEntries('Hello, how can I help?');
-			expect(result.cleanedResponse).toBe('Hello, how can I help?');
-			expect(result.entries).toEqual([]);
-		});
-
-		it('extracts single journal entry and cleans response', () => {
-			const response =
-				'Here is my answer.<model-journal>Interesting question about X</model-journal>';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Here is my answer.');
-			expect(result.entries).toEqual(['Interesting question about X']);
-		});
-
-		it('extracts multiple journal entries', () => {
-			const response =
-				'Part one.<model-journal>Note A</model-journal> Part two.<model-journal>Note B</model-journal>';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Part one. Part two.');
-			expect(result.entries).toEqual(['Note A', 'Note B']);
-		});
-
-		it('handles journal tag at the beginning of response', () => {
-			const response = '<model-journal>Thought</model-journal>The actual response.';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('The actual response.');
-			expect(result.entries).toEqual(['Thought']);
-		});
-
-		it('handles multiline journal content', () => {
-			const response = 'Response.\n<model-journal>\nLine one.\nLine two.\n</model-journal>';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Response.');
-			expect(result.entries).toEqual(['Line one.\nLine two.']);
-		});
-
-		it('ignores empty journal tags', () => {
-			const response = 'Response.<model-journal></model-journal>';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Response.');
-			expect(result.entries).toEqual([]);
-		});
-
-		it('ignores whitespace-only journal tags', () => {
-			const response = 'Response.<model-journal>   \n  </model-journal>';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Response.');
-			expect(result.entries).toEqual([]);
-		});
-
-		it('preserves unclosed journal tags (passes through to user)', () => {
-			const response = 'Response.<model-journal>Unclosed content';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Response.<model-journal>Unclosed content');
-			expect(result.entries).toEqual([]);
-		});
-
-		it('cleans up excess whitespace after tag removal', () => {
-			const response = 'Before.\n\n\n<model-journal>Note</model-journal>\n\n\nAfter.';
-			const result = extractJournalEntries(response);
-			expect(result.cleanedResponse).toBe('Before.\n\nAfter.');
-		});
-
-		it('handles nested journal tags by matching to first closing tag', () => {
-			const response =
-				'Text.<model-journal>outer <model-journal>inner</model-journal> more</model-journal>';
-			const result = extractJournalEntries(response);
-			// Non-greedy regex matches to the first </model-journal>, extracting "outer <model-journal>inner"
-			expect(result.entries).toEqual(['outer <model-journal>inner']);
-			// Remaining " more</model-journal>" stays in the cleaned response
-			expect(result.cleanedResponse).toContain('more</model-journal>');
 		});
 	});
 
