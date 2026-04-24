@@ -58,6 +58,10 @@
 		"./services/conversation-history": {
 			"import": "./dist/services/conversation-history/index.js",
 			"types": "./dist/services/conversation-history/index.d.ts"
+		},
+		"./services/prompt-assembly": {
+			"import": "./dist/services/prompt-assembly/index.js",
+			"types": "./dist/services/prompt-assembly/index.d.ts"
 		}
 	},
 	"scripts": {
