@@ -27,6 +27,7 @@ import { slugifyModelId } from '@pas/core/utils/slugify';
 import { formatRelativeTime } from '@pas/core/utils/cron-describe';
 import { escapeMarkdown } from '@pas/core/utils/escape-markdown';
 import { ConversationHistory, type ConversationTurn } from '@pas/core/services/conversation-history';
+import { sanitizeInput } from '@pas/core/services/prompt-assembly';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });
@@ -44,9 +45,6 @@ const MAX_CONTEXT_ENTRIES = 3;
 
 /** Max knowledge base entries to include in system prompt. */
 const MAX_KNOWLEDGE_ENTRIES = 5;
-
-/** Max length for user input before truncation. */
-const MAX_INPUT_LENGTH = 4000;
 
 /** Max chars for app metadata section in prompt. */
 const MAX_APP_METADATA_CHARS = 2000;
@@ -1283,16 +1281,6 @@ export function isPasRelevant(text: string): boolean {
 	}
 
 	return false;
-}
-
-/**
- * Sanitize user input for LLM prompts.
- * Truncates to maxLength and neutralizes triple backtick sequences.
- * Local copy — apps must not import core internals.
- */
-export function sanitizeInput(text: string, maxLength = MAX_INPUT_LENGTH): string {
-	const truncated = text.length > maxLength ? text.slice(0, maxLength) : text;
-	return truncated.replace(/`{3,}/g, '`');
 }
 
 /**

@@ -16,7 +16,6 @@ import {
 	gatherSystemData,
 	isPasRelevant,
 	processModelSwitchTags,
-	sanitizeInput,
 } from '../index.js';
 
 describe('Chatbot App', () => {
@@ -469,30 +468,6 @@ describe('Chatbot App', () => {
 			expect(openFenceIdx).toBeGreaterThan(-1);
 			expect(historyIdx).toBeGreaterThan(openFenceIdx);
 			expect(closeFenceIdx).toBeGreaterThan(historyIdx);
-		});
-	});
-
-	describe('sanitizeInput', () => {
-		it('passes through normal text', () => {
-			expect(sanitizeInput('hello world')).toBe('hello world');
-		});
-
-		it('neutralizes triple backticks', () => {
-			expect(sanitizeInput('```code```')).toBe('`code`');
-		});
-
-		it('neutralizes long backtick sequences', () => {
-			expect(sanitizeInput('`````')).toBe('`');
-		});
-
-		it('truncates text exceeding maxLength', () => {
-			const long = 'a'.repeat(5000);
-			expect(sanitizeInput(long, 100)).toHaveLength(100);
-		});
-
-		it('preserves text at exactly maxLength', () => {
-			const exact = 'a'.repeat(100);
-			expect(sanitizeInput(exact, 100)).toHaveLength(100);
 		});
 	});
 
