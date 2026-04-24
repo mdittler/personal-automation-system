@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-INFRA-001 |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-22 |
+| **Last Updated** | 2026-04-23 |
 
 ## Conventions
 
@@ -241,19 +241,23 @@ ScopedStore must emit a `data:changed` event via EventBus on every `write()`, `a
 
 **Phase:** 3 | **Status:** Implemented
 
-The scheduler must support registering cron jobs with valid cron expressions and timezone-aware execution. Duplicate job registrations and invalid cron expressions must be rejected gracefully. Multiple apps can register independent jobs.
+The scheduler must support registering cron jobs with valid cron expressions and timezone-aware execution. Duplicate job registrations and invalid cron expressions must be rejected gracefully. Multiple apps can register independent jobs. Successful runs must persist `lastRunAt` to `data/system/cron-last-run.json` and restore it on restart for scheduler/admin surfaces.
 
 **Standard tests:**
 - `cron-manager.test.ts` > registers a cron job
 - `cron-manager.test.ts` > registers multiple jobs from different apps
 - `cron-manager.test.ts` > start and stop do not throw
 - `cron-manager.test.ts` > passes timezone option to node-cron createTask
+- `cron-manager.test.ts` > persists lastRunAt to disk and reloads it on a fresh manager instance
 
 **Edge case tests:**
 - `cron-manager.test.ts` > rejects duplicate job registration
 - `cron-manager.test.ts` > rejects invalid cron expressions
+- `cron-manager.test.ts` > creates the persistence directory on first successful run
+- `cron-manager.test.ts` > ignores malformed persisted last-run data and starts clean
 
-**Fixes:** None
+**Fixes:**
+- **Stage 4 review remediation (2026-04-23):** `CronManager` now creates `data/system/` before writing `cron-last-run.json`, and malformed persisted data is treated as a clean-start condition instead of breaking scheduler startup visibility.
 
 ### REQ-SCHED-002: One-off task scheduling with persistence
 
@@ -315,7 +319,7 @@ The task runner must log start time, end time, success/failure, and duration of 
 
 **Phase:** Gap review | **Status:** Implemented
 
-When a scheduled job fails, a notification must be sent to the admin via Telegram. Notifications must be rate-limited (configurable cooldown, default 1 hour). After a configurable number of consecutive failures (default 5), the job must be auto-disabled. Disabled jobs can be re-enabled via management GUI. Notification send failures must be swallowed.
+When a scheduled job fails, a notification must be sent to the admin via Telegram. Notifications must be rate-limited (configurable cooldown, default 1 hour). After a configurable number of consecutive failures (default 5), the job must be auto-disabled. Disabled state must be persisted for operator visibility, surfaced through the scheduler GUI and schedules API, and recoverable through authenticated re-enable actions. Notification send failures must be swallowed.
 
 **Standard tests:**
 - `job-failure-notifier.test.ts` > onFailure > sends notification on first failure
@@ -328,6 +332,12 @@ When a scheduled job fails, a notification must be sent to the admin via Telegra
 - `job-failure-notifier.test.ts` > auto-disable > getDisabledJobs returns all disabled job keys
 - `job-failure-notifier.test.ts` > reEnable > re-enables a disabled job
 - `job-failure-notifier.test.ts` > reEnable > resets failure count on re-enable
+- `job-failure-notifier.test.ts` > reEnable > persists disabled jobs and reloads them when persistPath is configured
+- `cron-manager.test.ts` > getJobDetails reports disabled state and failure count from the notifier
+- `cron-manager.test.ts` > reEnable delegates to the notifier and reports whether the job was disabled
+- `oneoff-manager.test.ts` > exposes disabled state and failure count from the shared notifier
+- `routes.test.ts` > `GET /gui/scheduler` > shows disabled cron jobs and allows re-enable
+- `schedules.test.ts` > re-enables a schedule via POST route
 
 **Edge case tests:**
 - `job-failure-notifier.test.ts` > notification rate limiting > suppresses notifications within cooldown window
@@ -346,8 +356,12 @@ When a scheduled job fails, a notification must be sent to the admin via Telegra
 - `job-failure-notifier.test.ts` > error handling > swallows send errors on failure notification
 - `job-failure-notifier.test.ts` > error handling > swallows send errors on auto-disable notification
 - `job-failure-notifier.test.ts` > config validation > rejects autoDisableAfter less than 1
+- `job-failure-notifier.test.ts` > config validation > ignores malformed persisted state and starts clean
+- `schedules.test.ts` > re-enable returns 404 when the schedule does not exist
+- `d5b7-route-enforcement.test.ts` > test 14b: non-admin key POST /api/schedules/:appId/:jobId/re-enable → 403
 
-**Fixes:** None
+**Fixes:**
+- **Stage 4 review remediation (2026-04-23):** Disabled-job state is now persisted, exposed through scheduler/admin surfaces, and covered by end-to-end GUI/API re-enable tests rather than only in-memory notifier tests.
 
 ---
 
@@ -420,6 +434,28 @@ Dispatch sites covered:
 **Fixes:**
 - Per-user config runtime propagation (2026-04-09): the former bespoke `llmContext` only served LLM cost attribution. Promoted to a unified `requestContext` also consumed by `AppConfigService` so per-user config reads work at every dispatch point. Canonical regression: `per-user-runtime.integration.test.ts`.
 - **D5c Chunk A (2026-04-20):** Extended all remaining ALS dispatch entry points to include `householdId` alongside `userId`, enabling per-household LLM cost attribution in Chunk B. Added sites 8 (onboard callback) and 9 (GUI context routes via `buildCtx` helper). Added a loud-throw misconfiguration guard in `gui/index.ts`. Added structural regression tests for all 5 bootstrap dispatch sites (including previously-untested onboard callback), all 4 GUI context route handlers, and the gui/index.ts guard. CL: d5c-chunk-a.
+
+---
+
+### REQ-SCHED-008: sessionId field in RequestContext ALS
+
+**Phase:** P0 (chatbot-to-core migration) | **Status:** Implemented
+
+The `RequestContext` interface must include an optional `sessionId?: string` field so that P3 (`ChatSessionStore`) and P5 (FTS5 transcript index) can propagate chat-session identity through the existing AsyncLocalStorage without a separate ALS. The field is wired through both the `run()` callback API and the `enterRequestContext()` Fastify hook path. Validation is a consumer responsibility — the ALS stores the value verbatim. No production dispatch site populates `sessionId` yet; P3 and P5 wire it when those phases land.
+
+**Standard tests (`request-context.test.ts`):**
+- `sessionId (via run)` > returns undefined when store is present but sessionId is omitted
+- `sessionId (via run)` > returns undefined when sessionId is explicitly undefined
+- `sessionId (via run)` > exposes sessionId set by run()
+- `sessionId (via run)` > sessionId is independent of userId and householdId
+- `sessionId (via run)` > inner run() overrides sessionId
+- `sessionId (via run)` > inner run() with sessionId: undefined shadows the outer sessionId
+- `sessionId (via run)` > propagates sessionId through awaited async boundaries
+- `sessionId (via run)` > does not leak sessionId across sibling run() calls
+- `sessionId (via run)` > preserves arbitrary string sessionIds verbatim (validation is consumer responsibility)
+- `sessionId (via enterRequestContext — Fastify hook path)` > exposes sessionId set via enterRequestContext within the same async scope
+- `sessionId (via enterRequestContext — Fastify hook path)` > enterRequestContext with sessionId propagates through awaited boundaries
+- `sessionId (via enterRequestContext — Fastify hook path)` > enterRequestContext with sessionId omitted leaves sessionId undefined
 
 ---
 
@@ -1536,10 +1572,16 @@ The system must support adding, removing, and updating users at runtime. All mut
 - `user-mutation-service.test.ts` > removeUser > returns error if removing the last admin
 - `user-mutation-service.test.ts` > removeUser > returns error if user not found
 - `user-mutation-service.test.ts` > removeUser > allows removing an admin when another admin exists
+- `user-mutation-service.test.ts` > removeUser > rolls back in-memory removal if config sync fails
+- `user-mutation-service.test.ts` > updateUserApps > rolls back in-memory apps if config sync fails
+- `user-mutation-service.test.ts` > updateUserApps > throws if the user does not exist
+- `user-mutation-service.test.ts` > updateUserSharedScopes > rolls back in-memory shared scopes if config sync fails
+- `user-mutation-service.test.ts` > updateUserSharedScopes > throws if the user does not exist
 - `config-writer.test.ts` > creates file if it does not exist
 - `config-writer.test.ts` > handles empty user array
 
-**Fixes:** None
+**Fixes:**
+- Stage 3 remediation (2026-04-23) — `removeUser()`, `updateUserApps()`, and `updateUserSharedScopes()` now restore the pre-mutation in-memory user state if config sync fails, and update paths reject missing users instead of silently succeeding.
 
 ### REQ-USER-008: GUI user management
 
@@ -2574,11 +2616,11 @@ When the per-user `auto_detect_pas` config is enabled, the chatbot uses an LLM c
 - `chatbot.test.ts` > auto-detect PAS questions > defaults to false when config.getAll throws (no classifier call, basic prompt)
 - `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
 
-### REQ-CHATBOT-006: PAS relevance detection (isPasRelevant)
+### REQ-CHATBOT-006: Legacy PAS relevance compatibility (`isPasRelevant`)
 
-**Phase:** 18 | **Status:** Implemented (deprecated in D1)
+**Phase:** 18 | **Status:** Implemented (legacy compatibility only; deprecated in D1)
 
-The `isPasRelevant()` function determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost. **Deprecated in D1** — superseded by `classifyPASMessage()` (REQ-CHATBOT-012). Kept for backward compatibility; not called from active code paths.
+The legacy `isPasRelevant()` helper determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost. This is not part of the preferred current product path. It remains documented only because backward-compatibility code and tests still exist until the helper is fully removed. The active PAS-aware routing contract is `classifyPASMessage()` (REQ-CHATBOT-012).
 
 **Standard tests:**
 - `chatbot.test.ts` > isPasRelevant > detects "what apps do I have"
@@ -2801,6 +2843,89 @@ When `classifyPASMessage()` returns `YES_DATA`, the chatbot calls `DataQueryServ
 
 The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMessage`) to detect data queries, replacing the previous keyword-matching gate. When the classifier returns `YES_DATA`, `/ask` calls DataQueryService and injects the data context. This ensures consistent data detection behavior across both the main message handler and the `/ask` command.
 
+### REQ-CHATBOT-018: ConversationHistory module in core
+
+**Phase:** P0 (chatbot-to-core migration) | **Status:** Implemented
+
+`ConversationHistory` must live at `core/src/services/conversation-history/` and be importable from `@pas/core/services/conversation-history`. The class provides `load()` (reads sliding window of last N turns from `history.json`) and `append()` (atomic write with a serialized write queue to prevent concurrent corruption). `HISTORY_FILE = 'history.json'` is module-private (not exported). `ConversationHistoryOptions.maxTurns` defaults to 20. The chatbot app imports from the core subpath rather than maintaining a local copy.
+
+**Standard tests (`conversation-history.test.ts`):**
+- `load` > returns empty array if file does not exist
+- `load` > returns turns from an existing file
+- `load` > returns only the last maxTurns turns
+- `load` > returns default maxTurns (20) if not specified
+- `load` > handles malformed JSON gracefully (returns empty array)
+- `load` > handles malformed turns array gracefully
+- `load` > handles file read errors gracefully (returns empty array)
+- `load` > handles turns with missing fields
+- `load` > uses custom maxTurns when specified
+- `load` > handles empty turns array
+- `append` > creates the file if it does not exist
+- `append` > appends a new turn to existing turns
+- `append` > limits stored turns to maxTurns
+- `append` > handles concurrent appends without corruption (serialized write queue)
+- `append` > preserves existing turns when maxTurns not exceeded
+- `append` > handles very large maxTurns
+- `append` > handles empty initial file
+- `append` > creates parent directories if they do not exist
+
+### REQ-CHATBOT-019: prompt-assembly core module
+
+**Phase:** P0 (chatbot-to-core migration) | **Status:** Implemented
+
+Reusable prompt-composition helpers must live at `core/src/services/prompt-assembly/` and be importable from `@pas/core/services/prompt-assembly`. The module exports 11 symbols across four source files: `sanitizeInput`, `MAX_INPUT_LENGTH` (sanitization); `formatConversationHistory` (fencing); `JOURNAL_TAG_REGEX`, `MAX_JOURNAL_CHARS`, `extractJournalEntries`, `writeJournalEntries`, `appendJournalPromptSection`, `JournalLogger` (model-journal); `appendUserContextSection`, `appendContextEntriesSection`, `appendConversationHistorySection` (system-prompt). The `sanitizeInput` regex (`/\`{3,}/g`) is intentionally narrower than `prompt-templates.ts` (which also matches U+FF40 fullwidth grave) — chatbot parity is preserved, unification is deferred. The chatbot app imports all helpers from the core subpath.
+
+**Standard tests:**
+
+`sanitization.test.ts` (6 tests):
+- passes through normal text
+- neutralizes triple backticks
+- neutralizes long backtick sequences
+- truncates text exceeding maxLength
+- preserves text at exactly maxLength
+- does NOT neutralize U+FF40 fullwidth grave accents (parity with chatbot regex)
+
+`fencing.test.ts` (6 tests):
+- returns empty array for empty input
+- all turns are [Recent] when ≤ 4
+- marks earlier turns [Earlier] when more than 4 (cutoff at length−4)
+- includes relative timestamp when turn has a timestamp
+- omits timestamp part when timestamp is absent
+- sanitizes turn content (truncates at 500, neutralizes triple backticks)
+
+`model-journal.test.ts` (16 tests):
+- `JOURNAL_TAG_REGEX` matches a single tag
+- `JOURNAL_TAG_REGEX` matches multiple tags (global flag)
+- `extractJournalEntries` returns unchanged response and empty entries when no tags present
+- `extractJournalEntries` removes tag and returns entry
+- `extractJournalEntries` handles multiple tags
+- `extractJournalEntries` handles tag at start of response
+- `extractJournalEntries` handles multiline tag content
+- `extractJournalEntries` ignores empty tags
+- `extractJournalEntries` ignores whitespace-only tags
+- `extractJournalEntries` preserves unclosed tags
+- `extractJournalEntries` collapses excess blank lines left by tag removal
+- `writeJournalEntries` is a no-op when entries array is empty
+- `writeJournalEntries` is a no-op when modelJournal is undefined
+- `writeJournalEntries` calls append for each entry
+- `writeJournalEntries` logs warning and continues on per-entry failure
+- `appendJournalPromptSection` is a no-op when modelJournal is undefined
+- `appendJournalPromptSection` emits instruction block when journal is empty
+- `appendJournalPromptSection` emits instruction block + fenced journal content when non-empty
+- `appendJournalPromptSection` truncates journal content to MAX_JOURNAL_CHARS
+- `appendJournalPromptSection` logs warning and keeps instruction block on read error
+
+`system-prompt.test.ts` (9 tests):
+- `appendUserContextSection` is a no-op when userCtx is undefined
+- `appendUserContextSection` emits fenced block with anti-instruction framing
+- `appendUserContextSection` does not sanitize userCtx (caller owns sanitization)
+- `appendContextEntriesSection` is a no-op when contextEntries is empty
+- `appendContextEntriesSection` emits fenced list with anti-instruction framing
+- `appendContextEntriesSection` sanitizes entries at 2000-char default (triple backticks neutralized)
+- `appendConversationHistorySection` is a no-op when turns is empty
+- `appendConversationHistorySection` emits [Recent]/[Earlier] framed block with anti-instruction language
+- `appendConversationHistorySection` includes user and assistant content in the block
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -2956,6 +3081,7 @@ The LLM usage GUI route must parse the usage markdown log into structured rows a
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with consecutive blank interior cells does not collapse columns
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > 9-col row with truly-empty User cell (||) parses Household from cells[8]
 - `llm-usage.test.ts` > `parseUsageMarkdown — Chunk D edge cases` > pipe-only row (no timestamp) is skipped, not pushed with blank fields
+- `llm-usage-ops-persona.test.ts` > Nina (non-admin) receives 403 when opening `/gui/llm`
 
 **Fixes:**
 - **D2 (2026-04-21):** `.filter(Boolean)` on the pipe-split dropped empty interior cells, shifting later columns left when a 9-col row had a blank User cell. Replaced with positional trim (drop leading/trailing bounding pipe empties only). Regression tests B5–B9 added. CL: `review/d5c-chunk-d`.
@@ -3101,6 +3227,7 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > returns empty map with no messages
 - `message-rate-tracker.test.ts` > MessageRateTracker > getPerHouseholdRpm > returns correct per-household counts
 - `llm-usage.test.ts` > LLM Usage Routes > GET /gui/llm/metrics > returns live metrics HTML fragment
+- `message-rate-tracker-wiring.integration.test.ts` > MessageRateTracker production wiring > records the active household when the composed runtime router handles a message
 
 **Edge case tests:**
 - `message-rate-tracker.test.ts` > MessageRateTracker > recordMessage / getMessagesPerMinute > excludes messages older than 60s
@@ -3117,10 +3244,12 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `llm-usage.test.ts` > `Per-Household Breakdown rendering — Chunk D` > pctOfCap rounding boundary: cost/cap=0.995 rounds to 100 but overCap=false (no OVER CAP label)
 - `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost exactly equal to cap → overCap=false (strict >, not >=)
 - `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost slightly above cap → overCap=true
+- `message-rate-tracker-wiring.integration.test.ts` > MessageRateTracker production wiring > disposes the tracker through the runtime shutdown path
 
 **Fixes:**
 - **D1 (2026-04-21):** `overCap` used `pctOfCap >= 100` (rounded percentage) instead of `monthlyCost > cap` (strict dollar comparison). Any cost ≥ 99.5% of cap could round pctOfCap to 100 and falsely show "OVER CAP". Fixed to `monthlyCost > cap`. CL: `review/d5c-chunk-d`.
 - **D3 (2026-04-21):** `MessageRateTracker` duplicated the platform sentinel as a module-local constant instead of importing `PLATFORM_SYSTEM_HOUSEHOLD_ID` from `core/src/types/auth-actor.ts`. The local constant matched the canonical value but was a maintenance hazard. Fixed by removing the duplicate and importing from the single source of truth. CL: `review/d5c-chunk-d`.
+- **Stage 2 review remediation (2026-04-23):** Composition-root integration coverage now proves the runtime router records household traffic into `MessageRateTracker` and that runtime teardown disposes it through the real shutdown path.
 
 ### REQ-LLM-029: Test-composable runtime
 
@@ -3494,7 +3623,7 @@ The `POST /gui/config/:appId/:userId` route must validate appId/userId format, r
 
 **Phase:** 20 | **Status:** Implemented
 
-The scheduler GUI page must display cron jobs with human-readable schedule descriptions (e.g., "At 02:00 AM" instead of `0 2 * * *`), next run times with relative countdown, last run times, and timezone-aware date formatting. One-off tasks must also display formatted dates with countdowns.
+The scheduler GUI page must display cron jobs with human-readable schedule descriptions (e.g., "At 02:00 AM" instead of `0 2 * * *`), next run times with relative countdown, last run times, disabled/failure status, and timezone-aware date formatting. Disabled cron jobs must expose a re-enable action. One-off tasks must also display formatted dates with countdowns.
 
 **Standard tests:**
 - `cron-describe.test.ts` > `describeCron` > describes daily at 2am
@@ -3510,6 +3639,7 @@ The scheduler GUI page must display cron jobs with human-readable schedule descr
 - `cron-describe.test.ts` > `formatDateTime` > formats date in different timezone
 - `cron-manager.test.ts` > `CronManager` > getJobDetails includes lastRunAt as null before any runs
 - `routes.test.ts` > `GET /gui/scheduler` > returns 200 with scheduler content
+- `routes.test.ts` > `GET /gui/scheduler` > shows disabled cron jobs and allows re-enable
 
 **Edge case tests:**
 - `cron-describe.test.ts` > `describeCron` > returns raw expression for invalid cron
@@ -3850,13 +3980,13 @@ Edge:
 
 ---
 
-### REQ-GUI-006: Data browser page
+### REQ-GUI-008: Data browser page
 
 **Phase:** Post-19 | **Status:** Implemented
 
-GUI "Data" page with sidebar showing user data directories, shared data, and system data. htmx-powered directory navigation with file listing (name, size, modified). Path traversal protection via segment validation and resolve-within-dataDir checks.
+GUI "Data" page with sidebar showing user data directories, shared data, and system data. The full overview page is platform-admin-only because it enumerates user, system, household, and vault locations. The `browse`, `view`, and `files` partial routes must apply the same actor-based scope restrictions: non-admins may only access their own user scope, joined spaces, and shared data in their own household; system, household, and foreign user/household scopes must be denied. htmx-powered directory navigation must preserve path traversal protection via segment validation and resolve-within-dataDir checks.
 
-**Tests:** `core/src/gui/__tests__/data.test.ts`
+**Tests:** `core/src/gui/__tests__/data.test.ts`, `core/src/gui/__tests__/data-household.test.ts`, `core/src/gui/__tests__/d5b5-auth.test.ts`
 
 Standard:
 - `GET /gui/data` > renders data page with user sections
@@ -3882,6 +4012,19 @@ Standard (empty sections):
 - `GET /gui/data` > shows shared section even when empty
 - `GET /gui/data` > shows spaces section even when empty
 
+Standard (household-aware routing):
+- `GET /gui/data/browse` > scope=user returns files from household layout when householdService is wired
+- `GET /gui/data/browse` > scope=shared with householdId returns files from households/<hh>/shared
+- `GET /gui/data/view` > scope=user with correct householdId reads from household path
+
+Standard (actor-based authorization):
+- `non-admin GET /gui/data/browse?scope=user&userId=self` → 200
+- `non-admin GET /gui/data/browse?scope=shared&householdId=own` → 200
+- `non-admin GET /gui/data/browse?scope=space&userId=joined-space` → 200
+- `admin GET /gui/data/browse with any scope` → 200
+- `non-admin GET /gui/data/view?scope=user&userId=self` → 200
+- `non-admin GET /gui/data/files?scope=user&userId=self` → 200
+
 Security:
 - `security` > rejects path traversal in subpath
 - `security` > rejects invalid userId format
@@ -3889,6 +4032,19 @@ Security:
 - `security` > rejects absolute path in subpath
 - `GET /gui/data/files` > returns 400 for missing target parameter
 - `GET /gui/data/files` > rejects path traversal in subpath
+- `GET /gui/data/browse` > scope=shared without householdId returns 400 when householdService is wired
+- `GET /gui/data/browse` > scope=user with mismatched householdId returns 403
+- `GET /gui/data/view` > scope=shared without householdId returns 400 when householdService is wired
+- `GET /gui/data/view` > scope=user with mismatched householdId returns 403
+- `non-admin GET /gui/data/browse?scope=user&userId=other` → 403
+- `non-admin GET /gui/data/browse?scope=shared&householdId=other` → 403
+- `non-admin GET /gui/data/browse?scope=system` → 403
+- `non-admin GET /gui/data/browse?scope=space&userId=not-joined` → 403
+- `non-admin GET /gui/data` → 403
+- `non-admin GET /gui/data/view?scope=user&userId=other` → 403
+- `non-admin GET /gui/data/view?scope=system` → 403
+- `non-admin GET /gui/data/files?scope=user&userId=other` → 403
+- `non-admin GET /gui/data/files?scope=system` → 403
 
 ---
 
@@ -4252,7 +4408,7 @@ ReportService provides CRUD (save/get/list/delete) with YAML persistence, report
 
 **Phase:** 21 | **Status:** Implemented
 
-Reports register/unregister cron jobs on save/delete. Enabled reports get cron jobs; disabled do not. Toggling updates registration. Init loads all reports from disk and registers enabled ones.
+Reports register/unregister cron jobs on save/delete. Enabled reports get cron jobs; disabled do not. Toggling updates registration. Init loads all reports from disk and registers enabled ones. When `n8nDispatcher` is configured, cron callbacks dispatch to n8n first and fall back to local execution on failure.
 
 **Standard tests:**
 - `report-service.test.ts` > ReportService — cron lifecycle > registers cron job on save when enabled
@@ -4260,6 +4416,7 @@ Reports register/unregister cron jobs on save/delete. Enabled reports get cron j
 - `report-service.test.ts` > ReportService — cron lifecycle > registers when toggling from disabled to enabled
 - `report-service.test.ts` > ReportService — cron lifecycle > init registers enabled reports from disk
 - `cron-manager.test.ts` > CronManager > unregisters an existing job
+- `n8n-dispatch-integration.test.ts` > ReportService > dispatches cron-triggered report runs to n8n and skips local execution on success
 
 **Edge case tests:**
 - `report-service.test.ts` > ReportService — cron lifecycle > does not register cron job when disabled
@@ -4268,6 +4425,10 @@ Reports register/unregister cron jobs on save/delete. Enabled reports get cron j
 - `cron-manager.test.ts` > CronManager > returns false for nonexistent job unregister
 - `cron-manager.test.ts` > CronManager > removes lastRunAt on unregister
 - `cron-manager.test.ts` > CronManager > can re-register after unregister
+- `n8n-dispatch-integration.test.ts` > ReportService > falls back to local report execution when n8n dispatch fails
+
+**Fixes:**
+- **Stage 4 review remediation (2026-04-23):** Live cron callback coverage now proves both dispatch-first and fallback behavior for report runs instead of stopping at constructor/registration coverage.
 
 ---
 
@@ -4392,7 +4553,7 @@ Executes typed actions when conditions are met. Supports `telegram_message` (per
 
 **Status:** Implemented
 
-AlertService manages alert definitions (CRUD), scheduled condition evaluation, cooldown tracking, action execution, and history saving.
+AlertService manages alert definitions (CRUD), scheduled condition evaluation, cooldown tracking, action execution, and history saving. Service-level firing semantics are pinned even when downstream action delivery partially or fully fails.
 
 **Standard tests:**
 - `alert-service.test.ts` > CRUD > creates and retrieves an alert
@@ -4421,6 +4582,8 @@ AlertService manages alert definitions (CRUD), scheduled condition evaluation, c
 - `alert-service.test.ts` > evaluation > returns not-met when condition is false
 - `alert-service.test.ts` > evaluation > returns error result for nonexistent alert
 - `alert-service.test.ts` > evaluation > handles missing data source files
+- `alert-service.test.ts` > evaluation > treats all-action-failure evaluations as fired for cooldown, history, and event emission
+- `alert-service.test.ts` > evaluation > applies cooldown after mixed delivery failures once any action succeeds
 - `alert-service.test.ts` > error handling > returns error result on evaluation failure
 - `alert-service.test.ts` > error handling > returns empty list when alerts directory does not exist
 
@@ -4444,12 +4607,13 @@ AlertService manages alert definitions (CRUD), scheduled condition evaluation, c
 
 **Fixes:**
 - **D14 (2026-04-13):** Alert loading now uses `readYamlFileStrict()` + `safeValidateAlert()`. Corrupt YAML is skipped with logged warning. Invalid definitions are included in lists with `_validationErrors` attached but cannot be evaluated via `evaluate()`. `_validationErrors` is stripped before persisting to disk. CL: D14-fix.
+- **Stage 4 review remediation (2026-04-23):** Service-level tests now pin the current contract that fired alerts still update cooldown/history/event state when all deliveries fail, and that mixed delivery failures still count as fired once any delivery succeeds.
 
 ### REQ-ALERT-004: Alert cron lifecycle
 
 **Status:** Implemented
 
-Alerts register/unregister cron jobs on save/delete/toggle. Init registers all enabled alerts.
+Alerts register/unregister cron jobs on save/delete/toggle. Init registers all enabled alerts. When `n8nDispatcher` is configured, scheduled alert callbacks dispatch to n8n first and fall back to internal evaluation on failure.
 
 **Standard tests:**
 - `alert-service.test.ts` > cron lifecycle > registers cron job on save for enabled alert
@@ -4457,6 +4621,13 @@ Alerts register/unregister cron jobs on save/delete/toggle. Init registers all e
 - `alert-service.test.ts` > cron lifecycle > unregisters cron job on delete
 - `alert-service.test.ts` > cron lifecycle > re-syncs cron job on update
 - `alert-service.test.ts` > cron lifecycle > init registers enabled alerts as cron jobs
+- `n8n-dispatch-integration.test.ts` > AlertService > dispatches scheduled alert callbacks to n8n and skips internal evaluation on success
+
+**Edge case tests:**
+- `n8n-dispatch-integration.test.ts` > AlertService > falls back to internal evaluation when scheduled alert dispatch fails
+
+**Fixes:**
+- **Stage 4 review remediation (2026-04-23):** Scheduled alert trigger coverage now exercises the live dispatch-first and local-fallback callback path.
 
 ### REQ-ALERT-005: Alert event-based triggers
 
@@ -4472,6 +4643,7 @@ Event-triggered alerts subscribe to EventBus events instead of running on a cron
 - `alert-service.test.ts` > event trigger lifecycle > does not register cron job for event-triggered alert
 - `alert-service.test.ts` > event trigger lifecycle > init registers event subscriptions for enabled alerts
 - `alert-service.test.ts` > event trigger lifecycle > evaluates alert when event fires
+- `n8n-dispatch-integration.test.ts` > AlertService > dispatches event-triggered alert callbacks to n8n and skips internal evaluation on success
 - `alert-validator.test.ts` > accepts valid event-triggered alert
 - `alert-validator.test.ts` > accepts event names with colons, dots, hyphens, underscores
 - `alert-validator.test.ts` > event trigger does not require schedule field
@@ -4480,6 +4652,7 @@ Event-triggered alerts subscribe to EventBus events instead of running on a cron
 - `alert-service.test.ts` > event trigger without eventBus > returns validation error when saving enabled event alert without eventBus
 - `alert-service.test.ts` > event trigger without eventBus > allows saving disabled event alert without eventBus
 - `alert-service.test.ts` > event trigger without eventBus > cleans up map entry on delete, re-save works
+- `n8n-dispatch-integration.test.ts` > AlertService > falls back to internal evaluation when event-triggered alert dispatch fails
 - `alert-validator.test.ts` > rejects empty event_name
 - `alert-validator.test.ts` > rejects whitespace-only event_name
 - `alert-validator.test.ts` > rejects event_name with spaces
@@ -4635,7 +4808,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 
 ### REQ-SPACE-001: Space CRUD with validation
 **Status:** Implemented
-**Description:** Space service provides full CRUD operations (create, read, update, delete) with validation of space ID pattern, name, members (registered users only), and limits (max spaces, max members).
+**Description:** Space service provides full CRUD operations (create, read, update, delete) with validation of space ID pattern, name, members (registered users only), and limits (max spaces, max members). Household-kind spaces reject members whose household is missing or does not match the space household.
 
 **Tests:**
 - `spaces.test.ts` > init > loads spaces and active spaces from disk
@@ -4660,6 +4833,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 - `spaces.test.ts` > validation > rejects missing creator
 - `spaces.test.ts` > validation > rejects empty ID
 - `spaces.test.ts` > validation > rejects members exceeding max limit on create
+- `spaces.test.ts` > household boundary enforcement (B1/R5) > saveSpace rejects household member with no household assignment
 - `spaces.test.ts` > edge cases > saveSpace enforces max spaces limit
 - `spaces.test.ts` > edge cases > saveSpace allows update when at limit
 
@@ -4670,10 +4844,11 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 
 **Fixes:**
 - **D14 (2026-04-13):** Space `init()` now uses `readYamlFileStrict()` — corrupt `spaces.yaml` logs a warning instead of silently loading as empty. Each entry's structure (`id`, `name`, `members`, `createdBy`) is validated and invalid entries are excluded from the operational map with a logged warning. CL: D14-fix.
+- Stage 3 remediation (2026-04-23) — household-space validation now rejects members with no household assignment instead of treating `null` as acceptable.
 
 ### REQ-SPACE-002: Membership management
 **Status:** Implemented
-**Description:** Add/remove members from spaces with validation. Members must be registered users. Removal clears active space for the removed user.
+**Description:** Add/remove members from spaces with validation. Members must be registered users. Household-kind spaces reject members whose household is missing or does not match the space household. Removal clears active space for the removed user.
 
 **Tests:**
 - `spaces.test.ts` > isMember > returns true for a member
@@ -4691,6 +4866,10 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 - `spaces.test.ts` > edge cases > removeMember returns error for non-member
 - `spaces.test.ts` > edge cases > removeMember returns error for non-existent space
 - `spaces.test.ts` > security > addMember rejects unregistered user
+- `spaces.test.ts` > household boundary enforcement (B1/R5) > addMember rejects user with no household assignment
+
+**Fixes:**
+- Stage 3 remediation (2026-04-23) — `addMember()` now rejects users with no household assignment when adding to a household-kind space.
 
 ### REQ-SPACE-003: Active space tracking with stale cleanup
 **Status:** Implemented
@@ -4919,9 +5098,13 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 - Standard (happy path)
   - `vault.test.ts` > SpaceService integration > should call vault hooks from SpaceService.addMember
   - `vault.test.ts` > SpaceService integration > should call vault hooks from SpaceService.removeMember
+  - `vault.test.ts` > SpaceService integration > should remove stale vault links when SpaceService.saveSpace drops a member
   - `vault.test.ts` > SpaceService integration > should call vault hooks from SpaceService.deleteSpace
 - Edge cases
   - `vault.test.ts` > SpaceService integration > should work without vault service (backward compat)
+
+**Fixes:**
+- Stage 3 remediation (2026-04-23) — `saveSpace()` now removes stale `_spaces/<spaceId>` vault links for members dropped during a space edit.
 
 ---
 
@@ -5025,7 +5208,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 
 ### REQ-API-005: Schedule listing endpoint
 **Status:** Implemented
-**Description:** `GET /api/schedules` returns all registered cron jobs with human-readable descriptions, ISO 8601 next/last run times. System-wide, no user scoping. Auth required.
+**Description:** `GET /api/schedules` returns all registered cron jobs with human-readable descriptions, ISO 8601 next/last run times, and current disabled/failure state. System-wide, no user scoping. Auth required.
 
 **Tests:**
 - Standard (happy path)
@@ -5067,7 +5250,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
   - `webhooks.test.ts` > WebhookService > rate limits deliveries per URL
 - State transitions
   - `webhooks.test.ts` > WebhookService > dispose unsubscribes from all events
-  - `webhooks.test.ts` > WebhookService > double init does not duplicate subscriptions
+  - `webhooks.test.ts` > WebhookService > double init is idempotent and does not duplicate deliveries
 
 ---
 
@@ -5135,7 +5318,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 
 ### REQ-API-009: Change log read API
 **Status:** Implemented
-**Description:** `GET /api/changes` returns change log entries. Default: last 24 hours. Optional `since` (ISO 8601), `appFilter` (app ID), `limit` (default 500, max 5000) query parameters. Returns `{ ok, since, count, entries }`.
+**Description:** `GET /api/changes` returns change log entries. Default: last 24 hours. Optional `since` (ISO 8601), `appFilter` (app ID), `limit` (default 500, max 5000) query parameters. Returns `{ ok, since, count, entries }`. When the authenticated request context carries a householdId, the route must exclude entries from other households while still returning rows with no householdId (system/platform changes).
 
 **Tests:**
 - Standard
@@ -5151,6 +5334,7 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
   - `changes.test.ts` > returns 400 for invalid limit
 - Security
   - `changes.test.ts` > requires authentication
+  - `d5b7-route-enforcement.test.ts` > GET /api/changes with valid key returns only caller household rows plus global rows
 
 ### REQ-API-010: LLM proxy API
 **Status:** Implemented
@@ -5218,18 +5402,30 @@ GUI routes for alert management: list, create, edit, delete, toggle, test/previe
 
 ### REQ-API-013: n8n dispatch integration
 **Status:** Implemented
-**Description:** ReportService and AlertService accept optional `n8nDispatcher` parameter. When configured, cron handlers dispatch to n8n before executing internally. Dispatch failure triggers fallback to internal execution. Backward compatible — services work without dispatcher. Daily-diff cron in bootstrap also dispatches when configured.
+**Description:** ReportService and AlertService accept optional `n8nDispatcher` parameter. When configured, cron handlers dispatch to n8n before executing internally. Dispatch failure triggers fallback to internal execution. Backward compatible — services work without dispatcher. The bootstrap daily-diff cron follows the same dispatch-first/fallback contract.
 
 **Tests:**
 - Standard
   - `n8n-dispatch-integration.test.ts` > ReportService > accepts n8nDispatcher option without error
   - `n8n-dispatch-integration.test.ts` > ReportService > registers cron job when report is saved with dispatcher
+  - `n8n-dispatch-integration.test.ts` > ReportService > dispatches cron-triggered report runs to n8n and skips local execution on success
   - `n8n-dispatch-integration.test.ts` > AlertService > accepts n8nDispatcher option without error
   - `n8n-dispatch-integration.test.ts` > AlertService > registers cron job when alert is saved with dispatcher
+  - `n8n-dispatch-integration.test.ts` > AlertService > dispatches scheduled alert callbacks to n8n and skips internal evaluation on success
+  - `n8n-dispatch-integration.test.ts` > AlertService > dispatches event-triggered alert callbacks to n8n and skips internal evaluation on success
+  - `n8n-dispatch-integration.test.ts` > daily diff bootstrap > dispatches scheduled daily-diff callbacks to n8n and skips internal execution on success
   - `n8n-dispatch-integration.test.ts` > N8nDispatcherImpl — disabled mode > disabled dispatcher never calls fetch
 - Configuration
   - `n8n-dispatch-integration.test.ts` > ReportService > works without n8nDispatcher (backward compat)
   - `n8n-dispatch-integration.test.ts` > AlertService > works without n8nDispatcher (backward compat)
+- Fallback
+  - `n8n-dispatch-integration.test.ts` > ReportService > falls back to local report execution when n8n dispatch fails
+  - `n8n-dispatch-integration.test.ts` > AlertService > falls back to internal evaluation when scheduled alert dispatch fails
+  - `n8n-dispatch-integration.test.ts` > AlertService > falls back to internal evaluation when event-triggered alert dispatch fails
+  - `n8n-dispatch-integration.test.ts` > daily diff bootstrap > falls back to internal daily-diff execution when n8n dispatch fails
+
+**Fixes:**
+- **Stage 4 review remediation (2026-04-23):** Integration coverage now drives the live report cron, scheduled alert, event-triggered alert, and bootstrap daily-diff callback families through both dispatch-first and fallback behavior.
 
 ---
 
@@ -5637,13 +5833,14 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LOG-001 | logger.test.ts | 4 | 3 | Implemented |
 | REQ-EVENT-001 | event-bus.test.ts | 4 | 3 | Implemented |
 | REQ-EVENT-002 | scoped-store.test.ts, data.test.ts | 5 | 9 | Implemented |
-| REQ-SCHED-001 | cron-manager.test.ts | 4 | 2 | Implemented |
+| REQ-SCHED-001 | cron-manager.test.ts | 5 | 4 | Implemented |
 | REQ-SCHED-002 | oneoff-manager.test.ts | 4 | 7 | Implemented |
 | REQ-SCHED-003 | task-runner.test.ts | 2 | 3 | Implemented |
 | REQ-SCHED-004 | task-runner.test.ts | 1 | 1 | Implemented |
-| REQ-SCHED-005 | job-failure-notifier.test.ts | 10 | 16 | Implemented |
+| REQ-SCHED-005 | job-failure-notifier.test.ts, cron-manager.test.ts, oneoff-manager.test.ts, routes.test.ts, schedules.test.ts, d5b7-route-enforcement.test.ts | 16 | 19 | Implemented |
 | REQ-SCHED-006 | per-user-dispatch.test.ts, request-context.test.ts | 10 | 6 | Implemented |
 | REQ-SCHED-007 | dispatch-context-wrap.test.ts, messages.test.ts, alert-executor-enhanced.test.ts | 12 | 2 | Implemented |
+| REQ-SCHED-008 | request-context.test.ts | 9 | 3 | Implemented |
 | REQ-COND-001 | rule-parser.test.ts | 4 | 3 | Implemented |
 | REQ-COND-002 | evaluator.test.ts | 7 | 3 | Implemented |
 | REQ-COND-003 | cooldown-tracker.test.ts, evaluator.test.ts | 11 | 6 | Implemented |
@@ -5684,7 +5881,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-USER-004 | user-guard.test.ts | 2 | 3 | Implemented |
 | REQ-USER-005 | index.test.ts (invite) | 4 | 5 | Implemented |
 | REQ-USER-006 | invite-command.test.ts, user-guard.test.ts, realistic-invite-journey.test.ts | 2 | 11 + 31 journey | Implemented |
-| REQ-USER-007 | user-mutation-service.test.ts, config-writer.test.ts | 6 | 6 | Implemented |
+| REQ-USER-007 | user-mutation-service.test.ts, config-writer.test.ts | 6 | 11 | Implemented |
 | REQ-USER-008 | integration.test.ts (invite) | 3 | 3 | Implemented |
 | REQ-RATELIMIT-001 | rate-limiter.test.ts | 8 | 8 | Implemented |
 | REQ-TOGGLE-001 | app-toggle.test.ts | 7 | 3 | Implemented |
@@ -5701,7 +5898,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-GUI-002 | routes.test.ts | 10 | 3 | Implemented |
 | REQ-GUI-004 | routes.test.ts | 2 | 3 | Implemented |
 | REQ-GUI-005 | routes.test.ts | 3 | 4 | Implemented |
-| REQ-GUI-006 | cron-describe.test.ts, cron-manager.test.ts, routes.test.ts | 13 | 10 | Implemented |
+| REQ-GUI-006 | cron-describe.test.ts, cron-manager.test.ts, routes.test.ts | 14 | 10 | Implemented |
 | REQ-UTIL-001 | date.test.ts | 3 | 3 | Implemented |
 | REQ-UTIL-002 | file.test.ts | 4 | 2 | Implemented |
 | REQ-UTIL-003 | yaml.test.ts | 5 | 3 | Implemented |
@@ -5724,13 +5921,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-NFR-004 | error-handler.test.ts | 5 | 4 | Implemented |
 | REQ-INTEG-001 | e2e-echo.test.ts | 5 | 1 | Implemented |
 | REQ-INTEG-002 | echo.test.ts | 5 | 1 | Implemented |
-| REQ-LLM-022 | llm-usage.test.ts | 13 | 18 | Implemented |
+| REQ-LLM-022 | llm-usage.test.ts, llm-usage-ops-persona.test.ts | 13 | 19 | Implemented |
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
 | REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 12 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
-| REQ-LLM-028 | message-rate-tracker.test.ts, llm-usage.test.ts | 7 | 14 | Implemented |
+| REQ-LLM-028 | message-rate-tracker.test.ts, message-rate-tracker-wiring.integration.test.ts, llm-usage.test.ts | 8 | 15 | Implemented |
 | REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 7 | 0 | Implemented |
 | REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
 | REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts, natural-language-route-dispatch.test.ts | 18 | 28 | Implemented |
@@ -5751,7 +5948,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-CHATBOT-003 | chatbot.test.ts | 1 | 1 | Implemented |
 | REQ-CHATBOT-004 | chatbot.test.ts | 4 | 7 | Implemented |
 | REQ-CHATBOT-005 | chatbot.test.ts | 3 | 2 | Implemented |
-| REQ-CHATBOT-006 | chatbot.test.ts | 5 | 3 | Implemented |
+| REQ-CHATBOT-006 | chatbot.test.ts | 5 | 3 | Implemented (legacy compatibility only) |
 | REQ-CHATBOT-007 | chatbot.test.ts | 5 | 0 | Implemented |
 | REQ-APPMETA-001 | app-metadata.test.ts | 8 | 9 | Implemented |
 | REQ-APPKNOW-001 | app-knowledge.test.ts | 9 | 9 | Implemented |
@@ -5770,7 +5967,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-DOC-002 | — | — | — | Implemented |
 | REQ-ERROR-001 | llm-errors.test.ts | 13 | 5 | Implemented |
 | REQ-TIMEZONE-001 | notes.test.ts, chatbot.test.ts | 1 | 0 | Implemented |
-| REQ-GUI-006 | data.test.ts | 16 | 6 | Implemented |
+| REQ-GUI-008 | data.test.ts, data-household.test.ts, d5b5-auth.test.ts | 24 | 19 | Implemented |
 | REQ-GUI-007 | context-routes.test.ts | 9 | 10 | Implemented |
 | REQ-JOURNAL-001 | model-journal.test.ts | 18 | 26 | Implemented |
 | REQ-JOURNAL-002 | chatbot.test.ts | 9 | 16 | Implemented |
@@ -5784,18 +5981,18 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-REPORT-002 | section-collector.test.ts | 10 | 12 | Implemented |
 | REQ-REPORT-003 | report-formatter.test.ts | 7 | 4 | Implemented |
 | REQ-REPORT-004 | report-service.test.ts, report-load-validation.test.ts | 10 | 24 | Implemented |
-| REQ-REPORT-005 | report-service.test.ts, cron-manager.test.ts | 5 | 6 | Implemented |
+| REQ-REPORT-005 | report-service.test.ts, cron-manager.test.ts, n8n-dispatch-integration.test.ts | 6 | 7 | Implemented |
 | REQ-REPORT-006 | reports.test.ts, report-space-id.test.ts | 17 | 17 | Implemented |
 | REQ-ALERT-001 | alert-validator.test.ts | 19 | 30 | Implemented |
 | REQ-ALERT-002 | alert-executor.test.ts | 4 | 7 | Implemented |
-| REQ-ALERT-003 | alert-service.test.ts, alert-load-validation.test.ts | 14 | 25 | Implemented |
-| REQ-ALERT-004 | alert-service.test.ts | 5 | 0 | Implemented |
-| REQ-ALERT-005 | alert-service.test.ts, alert-validator.test.ts | 10 | 9 | Implemented |
+| REQ-ALERT-003 | alert-service.test.ts, alert-load-validation.test.ts | 14 | 27 | Implemented |
+| REQ-ALERT-004 | alert-service.test.ts, n8n-dispatch-integration.test.ts | 6 | 1 | Implemented |
+| REQ-ALERT-005 | alert-service.test.ts, alert-validator.test.ts, n8n-dispatch-integration.test.ts | 11 | 10 | Implemented |
 | REQ-ALERT-006 | alert-executor-enhanced.test.ts | 20 | 20 | Implemented |
 | REQ-ALERT-007 | alert-validator-actions.test.ts | 15 | 19 | Implemented |
 | REQ-ALERT-GUI-001 | alerts.test.ts, alert-space-id.test.ts | 14 | 17 | Implemented |
-| REQ-SPACE-001 | spaces.test.ts | 11 | 16 | Implemented |
-| REQ-SPACE-002 | spaces.test.ts | 9 | 6 | Implemented |
+| REQ-SPACE-001 | spaces.test.ts | 11 | 17 | Implemented |
+| REQ-SPACE-002 | spaces.test.ts | 9 | 7 | Implemented |
 | REQ-SPACE-003 | spaces.test.ts | 5 | 6 | Implemented |
 | REQ-SPACE-004 | router-spaces.test.ts | 17 | 8 | Implemented |
 | REQ-SPACE-005 | router-spaces.test.ts | 2 | 3 | Implemented |
@@ -5819,11 +6016,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-API-006 | webhooks.test.ts | 4 | 12 | Implemented |
 | REQ-API-007 | reports-api.test.ts | 8 | 16 | Implemented |
 | REQ-API-008 | alerts-api.test.ts | 6 | 10 | Implemented |
-| REQ-API-009 | changes.test.ts | 4 | 6 | Implemented |
+| REQ-API-009 | changes.test.ts, d5b7-route-enforcement.test.ts | 4 | 7 | Implemented |
 | REQ-API-010 | llm.test.ts | 4 | 10 | Implemented |
 | REQ-API-011 | telegram.test.ts | 2 | 7 | Implemented |
 | REQ-API-012 | n8n-dispatcher.test.ts | 5 | 6 | Implemented |
-| REQ-API-013 | n8n-dispatch-integration.test.ts | 5 | 2 | Implemented |
+| REQ-API-013 | n8n-dispatch-integration.test.ts | 9 | 6 | Implemented |
 | REQ-FMATTER-001 | frontmatter.test.ts | 9 | 23 | Implemented |
 | REQ-FMATTER-002 | file-frontmatter.test.ts | 4 | 3 | Implemented |
 | REQ-FMATTER-003 | migrate-frontmatter.test.ts | 9 | 7 | Implemented |
@@ -5838,7 +6035,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-VAULT-001 | vault.test.ts | 8 | 11 | Implemented |
 | REQ-VAULT-002 | vault.test.ts | 3 | 3 | Implemented |
 | REQ-VAULT-003 | vault.test.ts | 0 | 4 | Implemented |
-| REQ-VAULT-004 | vault.test.ts | 3 | 1 | Implemented |
+| REQ-VAULT-004 | vault.test.ts | 4 | 1 | Implemented |
 
 | REQ-FILEINDEX-001 | file-index.test.ts | 9 | 19 | Implemented |
 | REQ-FILEINDEX-002 | file-index.test.ts | 5 | 4 | Implemented |
@@ -5851,10 +6048,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
 | REQ-CHATBOT-016 | data-query-wiring.test.ts | 8 | 6 | Implemented |
 | REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
+| REQ-CHATBOT-018 | conversation-history.test.ts (core) | 10 | 8 | Implemented |
+| REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 28 | 9 | Implemented |
 | REQ-IC-001 | interaction-context.test.ts, integration.test.ts | 5 | 6 | Implemented |
 | REQ-IC-002 | bootstrap-wiring.test.ts | 8 | 0 | Implemented |
 | REQ-IC-003 | persistence.test.ts | 5 | 4 | Implemented |
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
-Note: Phase 26 requirements (REQ-API-007 through REQ-API-013) cover the n8n dispatch pattern endpoints and services. Full requirement descriptions deferred to next URS update session.
-| **Totals** | **170 test files** | **1294** | **1575** | **2869 tests** |
+| **Totals** | **170 test files** | **1310** | **1607** | **2900 tests** |
