@@ -244,7 +244,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await chatbot.handleCommand?.('/ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.stringContaining('Costco prices'),
@@ -260,7 +260,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('You have 3 apps installed.'); // main LLM
 
 		const ctx = makeMessageCtx('what apps do I have?');
-		await chatbot.handleCommand?.('/ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -273,7 +273,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await chatbot.handleCommand?.('/ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -285,7 +285,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 		const chatbot = await import('../index.js');
 
 		const ctx = makeMessageCtx('');
-		await chatbot.handleCommand?.('/ask', [], ctx);
+		await chatbot.handleCommand?.('ask', [], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});

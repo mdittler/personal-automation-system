@@ -57,6 +57,11 @@ export interface AppModule {
 	/**
 	 * Called when a user sends an explicit /command routed to the app.
 	 * Only called for commands declared in the manifest.
+	 *
+	 * IMPORTANT: `command` is the command name WITHOUT the leading slash —
+	 * the router strips it at `core/src/services/router/index.ts:511` before
+	 * dispatching here. Apps must compare against `'edit'`, `'ask'`, etc.
+	 * — never `'/edit'` or `'/ask'`.
 	 */
 	handleCommand?(command: string, args: string[], ctx: MessageContext): Promise<void>;
 

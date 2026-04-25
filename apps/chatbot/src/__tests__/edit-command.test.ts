@@ -72,7 +72,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -88,7 +88,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit');
-			await chatbot.handleCommand('/edit', [], ctx);
+			await chatbot.handleCommand('edit', [], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -103,7 +103,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit   ');
-			await chatbot.handleCommand('/edit', ['  '], ctx);
+			await chatbot.handleCommand('edit', ['  '], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -121,7 +121,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('/edit', ['fix something'], ctx);
+			await chatbot.handleCommand('edit', ['fix something'], ctx);
 
 			expect(editService.proposeEdit).toHaveBeenCalledWith('fix something', 'test-user');
 			expect(services.telegram.send).toHaveBeenCalledWith(
@@ -138,7 +138,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('/edit', ['fix something'], ctx);
+			await chatbot.handleCommand('edit', ['fix something'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -154,7 +154,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('/edit', ['fix something'], ctx);
+			await chatbot.handleCommand('edit', ['fix something'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -174,7 +174,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('/edit', ['fix something'], ctx);
+			await chatbot.handleCommand('edit', ['fix something'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'LLM output too large.');
 		});
@@ -191,7 +191,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
@@ -211,7 +211,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(editService.confirmEdit).toHaveBeenCalledWith(proposal);
 		});
@@ -227,7 +227,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -246,7 +246,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -267,7 +267,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(editService.confirmEdit).not.toHaveBeenCalled();
 		});
@@ -282,7 +282,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -302,7 +302,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
@@ -321,7 +321,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('/edit', ['fix something'], ctx);
+			await chatbot.handleCommand('edit', ['fix something'], ctx);
 
 			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
@@ -338,7 +338,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix', 'orange', 'price', 'to', '$4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix', 'orange', 'price', 'to', '$4.99'], ctx);
 
 			expect(editService.proposeEdit).toHaveBeenCalledWith(
 				'fix orange price to $4.99',
@@ -359,7 +359,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			// The map must be empty — the finally block must have cleaned it up
 			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
@@ -389,7 +389,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit edit A');
-			await chatbot.handleCommand('/edit', ['edit A'], ctx);
+			await chatbot.handleCommand('edit', ['edit A'], ctx);
 
 			// Proposal B must still be in the map (not deleted by A's finally block)
 			expect(chatbot.pendingEdits.get('test-user')).toBe(proposalB);
@@ -406,7 +406,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
 		});
@@ -421,7 +421,7 @@ describe('/edit command', () => {
 			await chatbot.init(services);
 
 			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('/edit', ['fix orange price to $4.99'], ctx);
+			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
 
 			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
 		});
