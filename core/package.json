@@ -62,6 +62,10 @@
 		"./services/prompt-assembly": {
 			"import": "./dist/services/prompt-assembly/index.js",
 			"types": "./dist/services/prompt-assembly/index.d.ts"
+		},
+		"./services/conversation": {
+			"import": "./dist/services/conversation/index.js",
+			"types": "./dist/services/conversation/index.d.ts"
 		}
 	},
 	"scripts": {

@@ -461,7 +461,7 @@ describe('Chatbot App', () => {
 		it('sends static intro when no args provided', async () => {
 			const ctx = createTestMessageContext({ text: '/ask' });
 
-			await chatbot.handleCommand?.('/ask', [], ctx);
+			await chatbot.handleCommand?.('ask', [], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -488,7 +488,7 @@ describe('Chatbot App', () => {
 			]);
 			const ctx = createTestMessageContext({ text: '/ask what apps do I have?' });
 
-			await chatbot.handleCommand?.('/ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+			await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 			expect(services.llm.complete).toHaveBeenCalled();
 			// /ask now runs classifier first (fast tier), then main response (standard tier)
@@ -504,7 +504,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.data.forUser).mockReturnValue(store);
 			const ctx = createTestMessageContext({ text: '/ask how does routing work?' });
 
-			await chatbot.handleCommand?.('/ask', ['how', 'does', 'routing', 'work?'], ctx);
+			await chatbot.handleCommand?.('ask', ['how', 'does', 'routing', 'work?'], ctx);
 
 			expect(store.write).toHaveBeenCalledWith('history.json', expect.stringContaining('/ask'));
 		});
@@ -518,7 +518,7 @@ describe('Chatbot App', () => {
 				timestamp: new Date('2026-03-11T10:00:00Z'),
 			});
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			expect(store.append).toHaveBeenCalledWith(
 				expect.stringMatching(/^daily-notes\/\d{4}-\d{2}-\d{2}\.md$/),
@@ -532,7 +532,7 @@ describe('Chatbot App', () => {
 		it('sends intro for empty string args', async () => {
 			const ctx = createTestMessageContext({ text: '/ask' });
 
-			await chatbot.handleCommand?.('/ask', ['', '  '], ctx);
+			await chatbot.handleCommand?.('ask', ['', '  '], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -546,7 +546,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
 			const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
-			await chatbot.handleCommand?.('/ask', ['what', 'apps?'], ctx);
+			await chatbot.handleCommand?.('ask', ['what', 'apps?'], ctx);
 
 			expect(services.llm.complete).toHaveBeenCalled();
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'No apps installed');
@@ -558,7 +558,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM down'));
 			const ctx = createTestMessageContext({ text: '/ask test' });
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -573,7 +573,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(billingError);
 			const ctx = createTestMessageContext({ text: '/ask test' });
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -587,7 +587,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(error);
 			const ctx = createTestMessageContext({ text: '/ask test' });
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -600,7 +600,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.appMetadata.getEnabledApps).mockRejectedValue(new Error('registry error'));
 			const ctx = createTestMessageContext({ text: '/ask test' });
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			// Should still call LLM and respond (graceful degradation)
 			expect(services.llm.complete).toHaveBeenCalled();
@@ -612,7 +612,7 @@ describe('Chatbot App', () => {
 			vi.mocked(services.appKnowledge.search).mockRejectedValue(new Error('knowledge error'));
 			const ctx = createTestMessageContext({ text: '/ask test' });
 
-			await chatbot.handleCommand?.('/ask', ['test'], ctx);
+			await chatbot.handleCommand?.('ask', ['test'], ctx);
 
 			expect(services.llm.complete).toHaveBeenCalled();
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Response');
@@ -637,7 +637,7 @@ describe('Chatbot App', () => {
 			]);
 			const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
-			await chatbot.handleCommand?.('/ask', ['what', 'apps?'], ctx);
+			await chatbot.handleCommand?.('ask', ['what', 'apps?'], ctx);
 
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 			// Inside sanitized sections, triple backticks should be neutralized
@@ -664,7 +664,7 @@ describe('Chatbot App', () => {
 			]);
 			const ctx = createTestMessageContext({ text: '/ask about apps' });
 
-			await chatbot.handleCommand?.('/ask', ['about', 'apps'], ctx);
+			await chatbot.handleCommand?.('ask', ['about', 'apps'], ctx);
 
 			const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
 			const prompt = standardCall?.[1]?.systemPrompt ?? '';
@@ -678,7 +678,7 @@ describe('Chatbot App', () => {
 				spaceName: 'Johnson Household',
 			});
 
-			await chatbot.handleCommand?.('/ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+			await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 			const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
 			const prompt = standardCall?.[1]?.systemPrompt ?? '';
@@ -1089,7 +1089,7 @@ describe('Chatbot App', () => {
 			);
 			const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
-			await chatbot.handleCommand?.('/ask', ['what', 'apps?'], ctx);
+			await chatbot.handleCommand?.('ask', ['what', 'apps?'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Help info.');
 			expect(services.modelJournal.append).toHaveBeenCalledWith(MODEL_SLUG, 'Observation');
@@ -1860,7 +1860,7 @@ describe('Chatbot App', () => {
 			);
 
 			const ctx = createTestMessageContext({ text: '/ask switch fast model to haiku' });
-			await chatbot.handleCommand?.('/ask', ['switch', 'fast', 'model', 'to', 'haiku'], ctx);
+			await chatbot.handleCommand?.('ask', ['switch', 'fast', 'model', 'to', 'haiku'], ctx);
 
 			expect(services.systemInfo.setTierModel).toHaveBeenCalledTimes(1);
 		});

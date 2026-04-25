@@ -11,7 +11,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Derive the repo root from this file's location (core/src/compose-runtime.ts → ../../)
+// so path defaults are not sensitive to the caller's CWD.
+const _repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 import './types/fastify-augmentation.js'; // D5b-2: module augmentation — adds user/actor to FastifyRequest
 import type { FastifyInstance } from 'fastify';
 import type { Bot } from 'grammy';
@@ -102,6 +107,8 @@ export interface RuntimeOverrides {
 	providerRegistry?: ProviderRegistry;
 	telegramService?: TelegramService & { cleanup(): void | Promise<void> };
 	logger?: Logger;
+	/** Override the apps directory path. Useful in tests running from a sub-package CWD. */
+	appsDir?: string;
 }
 
 /**
@@ -505,7 +512,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const loginRateLimiter = createLoginRateLimiter();
 
 	// 9. App Registry — discovers, loads, and initializes all apps
-	const appsDir = resolve('apps');
+	const appsDir = overrides.appsDir ?? join(_repoRoot, 'apps');
 	const registry = new AppRegistry({
 		appsDir,
 		config,
@@ -523,7 +530,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		registry,
 		appToggle,
 		config,
-		infraDocsDir: resolve('core/docs/help'),
+		infraDocsDir: join(_repoRoot, 'core/docs/help'),
 		logger: createChildLogger(logger, { service: 'app-knowledge' }),
 	});
 

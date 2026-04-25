@@ -50,13 +50,13 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	ctx: MessageContext,
 ) => {
 	switch (command) {
-		case '/note':
+		case 'note':
 			await saveNote(args.join(' '), ctx);
 			break;
-		case '/notes':
+		case 'notes':
 			await listNotes(ctx);
 			break;
-		case '/summarize':
+		case 'summarize':
 			await summarizeNotes(ctx);
 			break;
 	}
