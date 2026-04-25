@@ -20,6 +20,7 @@ import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import type { ConversationTurn } from '../conversation-history/index.js';
 import {
+	type JournalLogger,
 	appendContextEntriesSection,
 	appendConversationHistorySection,
 	appendJournalPromptSection,
@@ -89,7 +90,7 @@ export async function buildSystemPrompt(
 	return parts.join('\n');
 }
 
-const noopLogger = { warn: () => {} };
+const noopLogger: JournalLogger = { warn: () => {} };
 
 /**
  * Build app-aware system prompt with metadata, knowledge, system data,

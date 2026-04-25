@@ -80,9 +80,7 @@ export async function gatherContext(
 ): Promise<string[]> {
 	try {
 		if (!deps.contextStore) return [];
-		const entries = deps.contextStore.listForUser
-			? await deps.contextStore.listForUser(userId)
-			: await deps.contextStore.search('');
+		const entries = await deps.contextStore.listForUser(userId);
 		return entries.slice(0, MAX_CONTEXT_ENTRIES).map((e) => e.content);
 	} catch (error) {
 		deps.logger?.warn('Failed to load context store: %s', error);

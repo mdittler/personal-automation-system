@@ -31,7 +31,6 @@ import {
 import type { ConversationTurn } from '@pas/core/services/conversation-history';
 import { ConversationHistory } from '@pas/core/services/conversation-history';
 import type { AppModule, CoreServices, MessageContext } from '@pas/core/types';
-import type { MessageContext as CoreMessageContext } from '@pas/core/types';
 
 let services: CoreServices;
 const history = new ConversationHistory({ maxTurns: 20 });
@@ -147,7 +146,7 @@ function makePromptDeps() {
 }
 
 export async function buildUserContext(
-	ctx: CoreMessageContext,
+	ctx: MessageContext,
 	svc: CoreServices,
 ): Promise<string> {
 	return coreBuildUserContext(ctx, {
