@@ -42,6 +42,6 @@ export const CONVERSATION_LLM_SAFEGUARDS: ConversationLLMSafeguards = {
 export type { ManifestDataScope as ConversationDataScope };
 
 export const CONVERSATION_DATA_SCOPES: ManifestDataScope[] = [
-	{ path: 'history.json', access: 'read-write', description: 'Per-user conversation history (20 turns)' },
-	{ path: 'daily-notes/', access: 'read-write', description: 'Daily note log entries appended by the chatbot' },
+	{ path: 'history.json', access: 'read-write', description: 'Conversation history for context continuity' },
+	{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes fallback logging' },
 ];
