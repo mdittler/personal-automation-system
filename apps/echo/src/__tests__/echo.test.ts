@@ -70,14 +70,14 @@ describe('Echo App', () => {
 			const ctx = createTestMessageContext();
 
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
-			await echo.handleCommand!('/echo', ['hello', 'world'], ctx);
+			await echo.handleCommand!('echo', ['hello', 'world'], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'hello world');
 		});
 
 		it('escapes Markdown control characters in command args', async () => {
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
-			await echo.handleCommand!('/echo', ['*bold*', '_italic_'], createTestMessageContext());
+			await echo.handleCommand!('echo', ['*bold*', '_italic_'], createTestMessageContext());
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'test-user',
@@ -89,7 +89,7 @@ describe('Echo App', () => {
 			const ctx = createTestMessageContext();
 
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
-			await echo.handleCommand!('/echo', [], ctx);
+			await echo.handleCommand!('echo', [], ctx);
 
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', '(empty)');
 		});
@@ -101,7 +101,7 @@ describe('Echo App', () => {
 			const ctx = createTestMessageContext();
 
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
-			await echo.handleCommand!('/echo', ['hi'], ctx);
+			await echo.handleCommand!('echo', ['hi'], ctx);
 
 			expect(store.append).toHaveBeenCalledWith(
 				'log.md',

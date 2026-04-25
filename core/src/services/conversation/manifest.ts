@@ -5,6 +5,8 @@
  * conversation app from core without re-reading the YAML.
  */
 
+import type { ManifestDataScope } from '../../types/manifest.js';
+
 export interface ConversationUserConfigEntry {
 	key: string;
 	type: 'boolean';
@@ -37,12 +39,9 @@ export const CONVERSATION_LLM_SAFEGUARDS: ConversationLLMSafeguards = {
 	monthly_cost_cap: 15.0,
 };
 
-export interface ConversationDataScope {
-	path: string;
-	access: 'read' | 'read-write';
-}
+export type { ManifestDataScope as ConversationDataScope };
 
-export const CONVERSATION_DATA_SCOPES: ConversationDataScope[] = [
-	{ path: 'history.json', access: 'read-write' },
-	{ path: 'daily-notes/', access: 'read-write' },
+export const CONVERSATION_DATA_SCOPES: ManifestDataScope[] = [
+	{ path: 'history.json', access: 'read-write', description: 'Per-user conversation history (20 turns)' },
+	{ path: 'daily-notes/', access: 'read-write', description: 'Daily note log entries appended by the chatbot' },
 ];

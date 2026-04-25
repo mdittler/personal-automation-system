@@ -11,7 +11,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Resolve apps/ from the repo root (3 levels above core/src/__tests__/)
+const REPO_APPS_DIR = resolve(__dirname, '../../..', 'apps');
 import cron from 'node-cron';
 import pino from 'pino';
 import { composeRuntime } from '../compose-runtime.js';
@@ -44,6 +49,7 @@ describe('composeRuntime smoke', () => {
 			providerRegistry: createStubProviderRegistry(tempCostTracker, logger),
 			telegramService: fakeTelegramService(),
 			logger,
+			appsDir: REPO_APPS_DIR,
 		});
 
 		// Re-register the stub using the runtime's own costTracker so that all

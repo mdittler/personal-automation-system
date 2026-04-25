@@ -102,6 +102,8 @@ export interface RuntimeOverrides {
 	providerRegistry?: ProviderRegistry;
 	telegramService?: TelegramService & { cleanup(): void | Promise<void> };
 	logger?: Logger;
+	/** Override the apps directory path. Useful in tests running from a sub-package CWD. */
+	appsDir?: string;
 }
 
 /**
@@ -505,7 +507,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const loginRateLimiter = createLoginRateLimiter();
 
 	// 9. App Registry — discovers, loads, and initializes all apps
-	const appsDir = resolve('apps');
+	const appsDir = overrides.appsDir ?? resolve('apps');
 	const registry = new AppRegistry({
 		appsDir,
 		config,
