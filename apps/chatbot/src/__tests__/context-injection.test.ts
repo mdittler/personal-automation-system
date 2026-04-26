@@ -416,7 +416,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 			.mockResolvedValueOnce('Based on your recipe...');
 
 		const ctx = makeMessageCtx('show me that recipe');
-		await chatbot.handleCommand?.('/ask', ['show', 'me', 'that', 'recipe'], ctx);
+		await chatbot.handleCommand?.('ask', ['show', 'me', 'that', 'recipe'], ctx);
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const classifierCall = llmCalls.find((call) => call[1]?.tier === 'fast');
@@ -433,7 +433,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 			.mockResolvedValueOnce('Based on your recipe...');
 
 		const ctx = makeMessageCtx('show me that recipe');
-		await chatbot.handleCommand?.('/ask', ['show', 'me', 'that', 'recipe'], ctx);
+		await chatbot.handleCommand?.('ask', ['show', 'me', 'that', 'recipe'], ctx);
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.any(String),
@@ -454,7 +454,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 			.mockResolvedValueOnce('Here is some data.');
 
 		const ctx = makeMessageCtx('what are my prices?');
-		await chatbot.handleCommand?.('/ask', ['what', 'are', 'my', 'prices?'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'prices?'], ctx);
 
 		// DataQueryService should be called, but with no recentFilePaths
 		const calls = vi.mocked(services.dataQuery?.query as ReturnType<typeof vi.fn>).mock.calls;

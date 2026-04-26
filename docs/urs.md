@@ -2937,6 +2937,90 @@ Reusable prompt-composition helpers must live at `core/src/services/prompt-assem
 - `appendConversationHistorySection` emits [Recent]/[Earlier] framed block with anti-instruction language
 - `appendConversationHistorySection` includes user and assistant content in the block
 
+---
+
+## Conversation Service Migration (Hermes P1)
+
+### REQ-CONV-001: Conversation helper modules use explicit DI
+
+**Phase:** Hermes P1 Chunk A | **Status:** Implemented
+
+All helper functions in `core/src/services/conversation/` must accept their dependencies as explicit parameters. No helper may close over a module-level `services` variable. This enables unit testing without importing the full service graph and prepares for Chunk B where `ConversationService` provides these deps from its constructor.
+
+**Standard tests:**
+
+`command-contract.test.ts` (3 tests):
+- `handleAsk takes (args, ctx, deps) — no command name parameter`
+- `handleEdit takes (args, ctx, deps) — no command name parameter`
+- `handleAsk shows the static intro and skips LLM when args is empty`
+
+`auto-detect.test.ts` (5 tests):
+- `returns true when config has auto_detect_pas=true`
+- `returns true when config has auto_detect_pas="true" (string form)`
+- `returns false when config has auto_detect_pas=false`
+- `returns false when config service is unavailable (graceful default)`
+- `returns false when config.getAll throws`
+
+`pas-classifier.test.ts` (9 tests):
+- `returns true for PAS keyword messages (happy path)`
+- `returns false for off-topic messages`
+- `returns false for empty/whitespace`
+- `detects installed app names via deps.appMetadata`
+- `returns pasRelated=false without LLM call for empty text`
+- `returns pasRelated=true when LLM responds YES (PAS)`
+- `returns pasRelated=true and dataQueryCandidate=true on YES_DATA`
+- `returns pasRelated=false when LLM responds NO`
+- `fail-open: returns pasRelated=true when LLM throws`
+- `passes recentContext into the classifier system prompt when provided`
+
+`telegram-format.test.ts` (12 tests):
+- `returns the original message when under maxLength (happy path)`
+- `returns single chunk when message is exactly at maxLength boundary`
+- `splits a message over the limit at paragraph boundaries when possible`
+- `falls back to line boundaries when no paragraph break exists`
+- `hard-chunks when neither paragraph nor line break exists`
+- `handles a 5000-char message and produces non-empty chunks`
+- `strips fenced code blocks but preserves their content`
+- `strips inline code`
+- `strips bold and italic markers`
+- `calls telegram.send for each chunk (happy path)`
+- `falls back to plain text when telegram.send rejects with a Markdown error`
+- `splits long responses and sends multiple parts`
+
+`daily-notes.test.ts` (3 tests):
+- `writes to the user store with frontmatter (happy path)`
+- `logs and continues when store.append throws (graceful)`
+- `uses configured timezone for date formatting`
+
+### REQ-CONV-002: pendingEdits map relocated to core/src/services/conversation/pending-edits.ts
+
+**Phase:** Hermes P1 Chunk A | **Status:** Implemented
+
+The `pendingEdits: Map<string, EditProposal>` singleton is exported from `core/src/services/conversation/pending-edits.ts`. Semantics preserved: one pending edit per user, new `/edit` call replaces existing proposal, TTL enforced by `expiresAt` field at confirm time.
+
+**Standard tests:**
+
+`pending-edits.test.ts` (3 tests):
+- `is the same Map instance for both direct import and barrel export`
+- `supports set/get/delete operations`
+- `replacing a slot loses the old proposal (one slot per user)`
+
+### REQ-CONV-017: AppModule.handleCommand receives command without leading slash
+
+**Phase:** Hermes P1 Chunk A | **Status:** Implemented
+
+`AppModule.handleCommand` receives the command name WITHOUT a leading slash. The router strips the `/` prefix at `core/src/services/router/index.ts:511` before dispatching. Apps must compare against `'edit'`, `'ask'`, etc. — never `'/edit'` or `'/ask'`. The convention is documented in `core/src/types/app-module.ts`. The chatbot was the only app using slash-prefixed comparisons; both have been corrected.
+
+**Standard tests:**
+
+`apps/chatbot/src/__tests__/command-contract.test.ts` (4 tests):
+- `routes to /ask handler when command is 'ask' (no slash)`
+- `routes to /edit handler when command is 'edit' (no slash)`
+- `does NOT route to /ask handler when command is '/ask' (legacy slash form)`
+- `does NOT route to /edit handler when command is '/edit' (legacy slash form)`
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented

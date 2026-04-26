@@ -420,7 +420,7 @@ describe('/ask command with natural language questions', () => {
 	it('/ask with no question shows friendly examples a real user can follow', async () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
-		await chatbot.handleCommand?.('/ask', [], ctx);
+		await chatbot.handleCommand?.('ask', [], ctx);
 
 		const [, message] = vi.mocked(services.telegram.send).mock.calls[0];
 		// Should be user-friendly (not just a bare API error)
@@ -437,7 +437,7 @@ describe('/ask command with natural language questions', () => {
 			spaceName: 'My Household',
 		});
 
-		await chatbot.handleCommand?.('/ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 		// /ask now runs classifier first (fast tier), then main response (standard tier)
 		expect(services.llm.complete).toHaveBeenCalledTimes(2);
@@ -454,7 +454,7 @@ describe('/ask command with natural language questions', () => {
 			.mockResolvedValueOnce("You've spent $1.20 this month."); // main LLM
 		const ctx = createTestMessageContext({ text: '/ask how much have I spent this month?' });
 
-		await chatbot.handleCommand?.('/ask', ['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
+		await chatbot.handleCommand?.('ask', ['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
 
 		// /ask now runs classifier (fast tier) then main response (standard tier)
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');

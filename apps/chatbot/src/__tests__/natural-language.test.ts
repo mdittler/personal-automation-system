@@ -86,7 +86,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'You have Food installed.');
 		const ctx = createTestMessageContext({ text: `/ask ${question}` });
 
-		await chatbot.handleCommand?.('/ask', args, ctx);
+		await chatbot.handleCommand?.('ask', args, ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -98,7 +98,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Use the /install command to add a new app.');
 		const ctx = createTestMessageContext({ text: '/ask how do i add a new app' });
 
-		await chatbot.handleCommand?.('/ask', ['how', 'do', 'i', 'add', 'a', 'new', 'app'], ctx);
+		await chatbot.handleCommand?.('ask', ['how', 'do', 'i', 'add', 'a', 'new', 'app'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -112,7 +112,7 @@ describe('/ask command — natural language questions', () => {
 			.mockResolvedValueOnce("You've spent $3.21 this month.");
 		const ctx = createTestMessageContext({ text: "/ask what's my monthly cost" });
 
-		await chatbot.handleCommand?.('/ask', ["what's", 'my', 'monthly', 'cost'], ctx);
+		await chatbot.handleCommand?.('ask', ["what's", 'my', 'monthly', 'cost'], ctx);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -126,7 +126,7 @@ describe('/ask command — natural language questions', () => {
 			.mockResolvedValueOnce('Your spending this month is $1.50.');
 		const ctx = createTestMessageContext({ text: '/ask how much have i spent' });
 
-		await chatbot.handleCommand?.('/ask', ['how', 'much', 'have', 'i', 'spent'], ctx);
+		await chatbot.handleCommand?.('ask', ['how', 'much', 'have', 'i', 'spent'], ctx);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -138,7 +138,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'I am using claude-sonnet-4-6.');
 		const ctx = createTestMessageContext({ text: '/ask what model are you using' });
 
-		await chatbot.handleCommand?.('/ask', ['what', 'model', 'are', 'you', 'using'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'model', 'are', 'you', 'using'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -150,7 +150,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Switching to claude-haiku.');
 		const ctx = createTestMessageContext({ text: '/ask switch to a faster model' });
 
-		await chatbot.handleCommand?.('/ask', ['switch', 'to', 'a', 'faster', 'model'], ctx);
+		await chatbot.handleCommand?.('ask', ['switch', 'to', 'a', 'faster', 'model'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -164,7 +164,7 @@ describe('/ask command — natural language questions', () => {
 			.mockResolvedValueOnce('Your rate limit is 60 requests per hour.');
 		const ctx = createTestMessageContext({ text: "/ask what's my rate limit" });
 
-		await chatbot.handleCommand?.('/ask', ["what's", 'my', 'rate', 'limit'], ctx);
+		await chatbot.handleCommand?.('ask', ["what's", 'my', 'rate', 'limit'], ctx);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -176,7 +176,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Routing checks commands first, then photo classification, then free text.');
 		const ctx = createTestMessageContext({ text: '/ask how does routing work' });
 
-		await chatbot.handleCommand?.('/ask', ['how', 'does', 'routing', 'work'], ctx);
+		await chatbot.handleCommand?.('ask', ['how', 'does', 'routing', 'work'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -191,7 +191,7 @@ describe('/ask command — natural language questions', () => {
 		});
 
 		await chatbot.handleCommand?.(
-			'/ask',
+			'ask',
 			["what's", 'the', 'difference', 'between', 'fast', 'and', 'standard', 'tier'],
 			ctx,
 		);
@@ -206,7 +206,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'You have 2 scheduled jobs: daily-diff, weekly-report.');
 		const ctx = createTestMessageContext({ text: '/ask show me scheduled jobs' });
 
-		await chatbot.handleCommand?.('/ask', ['show', 'me', 'scheduled', 'jobs'], ctx);
+		await chatbot.handleCommand?.('ask', ['show', 'me', 'scheduled', 'jobs'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -218,7 +218,7 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Go to the alerts section in the GUI to set up an alert.');
 		const ctx = createTestMessageContext({ text: '/ask how do I set up an alert' });
 
-		await chatbot.handleCommand?.('/ask', ['how', 'do', 'I', 'set', 'up', 'an', 'alert'], ctx);
+		await chatbot.handleCommand?.('ask', ['how', 'do', 'I', 'set', 'up', 'an', 'alert'], ctx);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -233,7 +233,7 @@ describe('/ask command — natural language questions', () => {
 		);
 		const ctx = createTestMessageContext({ text: '/ask what is the context store' });
 
-		await chatbot.handleCommand?.('/ask', ['what', 'is', 'the', 'context', 'store'], ctx);
+		await chatbot.handleCommand?.('ask', ['what', 'is', 'the', 'context', 'store'], ctx);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
@@ -248,7 +248,7 @@ describe('/ask command — natural language questions', () => {
 		const ctx = createTestMessageContext({ text: '/ask can you show me my recent data' });
 
 		await chatbot.handleCommand?.(
-			'/ask',
+			'ask',
 			['can', 'you', 'show', 'me', 'my', 'recent', 'data'],
 			ctx,
 		);
@@ -265,7 +265,7 @@ describe('/ask command — natural language questions', () => {
 			.mockResolvedValueOnce('System has been running for 4h 22m.');
 		const ctx = createTestMessageContext({ text: "/ask what's your uptime" });
 
-		await chatbot.handleCommand?.('/ask', ["what's", 'your', 'uptime'], ctx);
+		await chatbot.handleCommand?.('ask', ["what's", 'your', 'uptime'], ctx);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -280,7 +280,7 @@ describe('/ask command — natural language questions', () => {
 		const ctx = createTestMessageContext({ text: '/ask how many users does pas have' });
 
 		await chatbot.handleCommand?.(
-			'/ask',
+			'ask',
 			['how', 'many', 'users', 'does', 'pas', 'have'],
 			ctx,
 		);
@@ -294,7 +294,7 @@ describe('/ask command — natural language questions', () => {
 	it('/ask with no args → shows examples without LLM call', async () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
-		await chatbot.handleCommand?.('/ask', [], ctx);
+		await chatbot.handleCommand?.('ask', [], ctx);
 
 		expect(services.llm.complete).not.toHaveBeenCalled();
 		const [, message] = vi.mocked(services.telegram.send).mock.calls[0];
@@ -342,7 +342,7 @@ describe('/edit command — natural language edit descriptions', () => {
 		await chatbot.init(editServices);
 
 		const ctx = createTestMessageContext({ text: `/edit ${description}` });
-		await chatbot.handleCommand?.('/edit', args, ctx);
+		await chatbot.handleCommand?.('edit', args, ctx);
 
 		expect(mockEditService.proposeEdit).toHaveBeenCalledWith(
 			description,
@@ -360,7 +360,7 @@ describe('/edit command — natural language edit descriptions', () => {
 		await chatbot.init(editServices);
 
 		const ctx = createTestMessageContext({ text: '/edit' });
-		await chatbot.handleCommand?.('/edit', [], ctx);
+		await chatbot.handleCommand?.('edit', [], ctx);
 
 		expect(mockEditService.proposeEdit).not.toHaveBeenCalled();
 		expect(editServices.telegram.send).toHaveBeenCalledWith(
@@ -375,7 +375,7 @@ describe('/edit command — natural language edit descriptions', () => {
 		await chatbot.init(noEditServices);
 
 		const ctx = createTestMessageContext({ text: '/edit fix something' });
-		await chatbot.handleCommand?.('/edit', ['fix', 'something'], ctx);
+		await chatbot.handleCommand?.('edit', ['fix', 'something'], ctx);
 
 		expect(noEditServices.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -743,7 +743,7 @@ describe('edge cases', () => {
 	it('/ask with no args → no LLM call, sends static intro message', async () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
-		await chatbot.handleCommand?.('/ask', [], ctx);
+		await chatbot.handleCommand?.('ask', [], ctx);
 
 		expect(services.llm.complete).not.toHaveBeenCalled();
 		expect(services.telegram.send).toHaveBeenCalledTimes(1);
