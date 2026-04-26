@@ -37,8 +37,14 @@ import {
 } from '../prompt-assembly/index.js';
 import { gatherContext } from './app-data.js';
 import { getAutoDetectSetting } from './auto-detect.js';
-import { SWITCH_MODEL_TAG_REGEX } from './control-tags.js';
+import {
+	CONFIG_SET_INSTRUCTION_BLOCK,
+	NOTES_INTENT_REGEX,
+	SWITCH_MODEL_TAG_REGEX,
+	processConfigSetTags,
+} from './control-tags.js';
 import { appendDailyNote } from './daily-notes.js';
+import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import {
 	extractRecentFilePaths,
 	formatDataQueryContext,
@@ -64,14 +70,18 @@ export interface HandleMessageDeps {
 	config?: AppConfigService;
 	dataQuery?: DataQueryService;
 	interactionContext?: InteractionContextService;
+	/** System-level default for daily-notes opt-in. Defaults to false if absent. */
+	chatLogToNotesDefault?: boolean;
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
-	// 1. Append to daily notes (preserve existing fallback behavior)
-	await appendDailyNote(ctx, {
+	// 1. Append to daily notes (opt-in per user)
+	const { wrote: noteWrote } = await appendDailyNote(ctx, {
 		data: deps.data,
 		logger: deps.logger,
 		timezone: deps.timezone,
+		config: deps.config,
+		systemDefault: deps.chatLogToNotesDefault ?? false,
 	});
 
 	// 2. Load conversation history
@@ -156,6 +166,11 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		systemPrompt = await buildSystemPrompt(contextEntries, turns, promptDeps, modelSlug, userCtx);
 	}
 
+	// Append <config-set> instruction post-prompt-build when the user message has notes intent
+	if (NOTES_INTENT_REGEX.test(ctx.text) && deps.config) {
+		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
+	}
+
 	// 6. Call LLM
 	let response: string;
 	try {
@@ -168,10 +183,8 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	} catch (error) {
 		deps.logger.error('Chatbot LLM call failed: %s', error);
 		const { userMessage } = classifyLLMError(error);
-		await deps.telegram.send(
-			ctx.userId,
-			`${userMessage}\n\nYour message was saved to daily notes.`,
-		);
+		const suffix = noteWrote ? '\n\nYour message was saved to daily notes.' : '';
+		await deps.telegram.send(ctx.userId, `${userMessage}${suffix}`);
 		return;
 	}
 
@@ -183,10 +196,28 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	}
 
 	// 8. Strip model-switch tags without executing — admin actions via /ask only
-	const finalResponse = afterJournal
-		.replace(SWITCH_MODEL_TAG_REGEX, '')
-		.replace(/\n{3,}/g, '\n\n')
-		.trim();
+	const afterSwitchStrip = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '');
+
+	// 9. Process <config-set> tags (user-facing config writes, allowlisted + intent-gated)
+	let finalResponse: string;
+	if (deps.config) {
+		const { cleanedResponse: afterConfigSet, confirmations } = await processConfigSetTags(
+			afterSwitchStrip,
+			{
+				userId: ctx.userId,
+				userMessage: ctx.text,
+				config: deps.config,
+				manifest: CONVERSATION_USER_CONFIG,
+				logger: deps.logger,
+			},
+		);
+		finalResponse =
+			confirmations.length > 0
+				? `${afterConfigSet}\n\n${confirmations.join('\n')}`.replace(/\n{3,}/g, '\n\n').trim()
+				: afterConfigSet.replace(/\n{3,}/g, '\n\n').trim();
+	} else {
+		finalResponse = afterSwitchStrip.replace(/\n{3,}/g, '\n\n').trim();
+	}
 
 	// 9. Send response, splitting if over Telegram message limit
 	await sendSplitResponse(ctx.userId, finalResponse, {

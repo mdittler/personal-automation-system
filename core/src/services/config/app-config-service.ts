@@ -17,6 +17,7 @@
 import { join } from 'node:path';
 import type { AppConfigService } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
+import { withFileLock } from '../../utils/file-mutex.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
 import { getCurrentUserId } from '../context/request-context.js';
 
@@ -87,6 +88,24 @@ export class AppConfigServiceImpl implements AppConfigService {
 		const overridePath = join(this.dataDir, 'system', 'app-config', this.appId, `${userId}.yaml`);
 
 		await writeYamlFile(overridePath, values);
+	}
+
+	/** Expose raw user overrides without merging manifest defaults. */
+	async getOverrides(userId: string): Promise<Record<string, unknown> | null> {
+		return this.loadOverrides(userId);
+	}
+
+	/** Locked read-modify-write of raw overrides. Writes only raw override keys — never manifest defaults. */
+	async updateOverrides(userId: string, partial: Record<string, unknown>): Promise<void> {
+		if (!/^[a-zA-Z0-9_-]+$/.test(userId)) throw new Error(`Invalid userId: ${userId}`);
+		if (Object.keys(partial).length === 0) return;
+
+		const overridePath = join(this.dataDir, 'system', 'app-config', this.appId, `${userId}.yaml`);
+
+		await withFileLock(overridePath, async () => {
+			const existing = (await readYamlFile<Record<string, unknown>>(overridePath)) ?? {};
+			await writeYamlFile(overridePath, { ...existing, ...partial });
+		});
 	}
 
 	/**

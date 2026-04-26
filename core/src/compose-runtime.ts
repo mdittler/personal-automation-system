@@ -962,6 +962,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 				}
 			: undefined,
 		interactionContext: interactionContextService,
+		editService: editServiceImpl ?? undefined,
+		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
 	});
 	logger.info('ConversationService: initialized');
 

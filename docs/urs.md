@@ -3091,6 +3091,116 @@ ConversationService is constructed with a `DataStoreServiceImpl` keyed by `appId
 
 ---
 
+### REQ-CONV-006: /notes built-in command
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`/notes`, `/notes on`, `/notes off`, and `/notes status` are Router built-ins that dispatch to `ConversationService.handleNotes` — not through the chatbot app's `handleCommand`. They are short-circuited before `lookupCommand` and bypass `AppToggleStore` (a user who toggles chatbot off can still manage notes logging).
+
+**Standard tests** (`core/src/services/conversation/__tests__/handle-notes.test.ts`): 8 cases — `/notes on`, `/notes off`, `/notes status` (OFF default), `/notes status` (ON override), bare `/notes`, `/notes on` status idempotency, system-default ON propagation, case-insensitive argument.
+
+**Standard tests** (`core/src/services/router/__tests__/conversation-builtin.test.ts`): 2 cases — `/notes` dispatch reaches `handleNotes`; `/notes@botname status` dispatch (suffix stripped by parser).
+
+**Standard tests** (`core/src/services/conversation/__tests__/builtin-commands.persona.test.ts`): 6 cases — `/notes status` OFF/ON, `/notes on`, `/notes off`, unknown subcommand usage, `/notes ON` uppercase.
+
+**Edge case tests** (`handle-notes.test.ts`): 6 cases — malformed args (usage msg), `updateOverrides` failure (graceful error), whitespace-only arg, case-insensitive, concurrent calls serialize.
+
+---
+
+### REQ-CONV-007: Daily-notes logging opt-in (default OFF)
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`appendDailyNote` checks per-user opt-in before writing. `resolveUserBool` reads raw user overrides via `AppConfigService.getOverrides` (never `getAll`) so the operator's `chat.log_to_notes` system default can differ from the manifest default of `false`. Returns `{ wrote: boolean }` so callers can conditionally include a note-save suffix in LLM error messages.
+
+**Standard tests** (`core/src/services/conversation/__tests__/daily-notes.test.ts`): 4 cases — opt-in user: file appended; opt-out user (default): file NOT created; system default ON + no override: appended; system default ON + user override false: NOT appended.
+
+**Standard tests** (`core/src/services/conversation/__tests__/settings-resolver.test.ts`): 5 cases — override true/false, no override + systemDefault true/false, the critical case: manifest default false / systemDefault true / no override → returns true.
+
+**Standard tests** (`core/src/services/conversation/__tests__/log-to-notes.persona.test.ts`): 4 cases in "opt-in gate" suite.
+
+**Edge case tests** (`settings-resolver.test.ts`): 4 cases — coerced string overrides ("on"/"off"/"1"/"0"), corrupted YAML → fail-closed.
+
+---
+
+### REQ-CONV-008: Conversational toggle via `<config-set>` LLM tag
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+The LLM may emit `<config-set key="log_to_notes" value="true"/>` in its response. The processor (`processConfigSetTags`) applies four guards in order: allowlist check, user-message intent gate (`NOTES_INTENT_REGEX`), coercion, then `AppConfigService.updateOverrides(userId, { [key]: coerced })`. Tags are always stripped from the response regardless of outcome. The instruction block is injected into the system prompt post-build (not inside the prompt builders) so it reaches both the app-aware and basic prompt paths.
+
+**Standard tests** (`core/src/services/conversation/__tests__/control-tags.config-set.test.ts`): 5 happy-path cases — turn on/off intent, tag stripped, confirmation appended, `updateOverrides` called with exact arg.
+
+**Standard tests** (`core/src/services/conversation/__tests__/log-to-notes.persona.test.ts`): 7 cases in "conversational toggle" + "CONFIG_SET_INSTRUCTION_BLOCK injection" suites.
+
+**Edge case tests** (`control-tags.config-set.test.ts`): bidirectional regex table (15 positive, 9 negative phrasings).
+
+---
+
+### REQ-CONV-009: `<config-set>` security guards — allowlist + intent gate
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+Only keys in `ALLOWED_CONFIG_KEYS` (currently `log_to_notes`) are processed; others are stripped and warned. The intent gate requires the user's actual message to match `NOTES_INTENT_REGEX` — the LLM cannot self-authorize a write by emitting a tag alongside an unrelated user message. The implementation always writes to `options.userId` (from the authenticated request), never from tag content.
+
+**Security tests** (`control-tags.config-set.test.ts`): 4 cases — non-allowlisted key rejected; intent-absent message: all tags stripped; cross-user impossible by construction (userId comes from ctx, not tag); coerce failure: no write.
+
+**Security tests** (`log-to-notes.persona.test.ts`): 3 cases — adversarial allowlist, coerce reject, no-intent gate.
+
+**Raw-overrides invariant test** (`log-to-notes.persona.test.ts`): `updateOverrides` called with ONLY `{ log_to_notes: true }` — manifest defaults not materialized.
+
+---
+
+### REQ-CONV-010: `chat.log_to_notes` system config field
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`config/pas.yaml` accepts a top-level `chat.log_to_notes` boolean. The config loader (`core/src/services/config/index.ts`) parses it from YAML (snake-case), stores it on `SystemConfig.chat.logToNotes`, and passes it to `ConversationService` as `chatLogToNotesDefault`. `config/pas.yaml.example` documents the field with a deprecation note about `defaults.fallback`.
+
+**Standard tests** (compose-runtime wiring): `chatLogToNotesDefault: config.chat?.logToNotes ?? false` is passed to `new ConversationService(...)`.
+
+**Edge case tests** (`core/src/services/config/__tests__/system-config.test.ts` — extended): `chat.log_to_notes: true` parsed to `config.chat.logToNotes === true`; missing field defaults to `false`.
+
+---
+
+### REQ-CONV-016: /ask, /edit, /notes are Router built-ins that bypass AppToggleStore
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`/ask`, `/edit`, and `/notes` are short-circuited inside `Router.handleCommand` before `lookupCommand`. They dispatch to `ConversationService.handleAsk/handleEdit/handleNotes` via `dispatchConversationCommand`, which wraps the call in `requestContext.run({ userId, householdId })`. A user who has toggled the chatbot app off can still use these commands. `/help` lists all three exactly once, filtering chatbot-manifest commands to prevent duplicates.
+
+**Standard tests** (`core/src/services/router/__tests__/conversation-builtin.test.ts`): 14 cases covering each command, `@botname` suffix, fall-through without ConversationService, toggle bypass, `/help` deduplication.
+
+**Standard tests** (`builtin-dispatch.integration.test.ts`): 3 dispatch cases — `/ask`, `/edit`, `/notes on`.
+
+**Edge case tests** (`conversation-builtin.test.ts`): 4 cases — toggle bypass (built-ins work, free-text hits fallback), `/help` with chatbot manifest WITH and WITHOUT commands block (both produce one listing each).
+
+---
+
+### REQ-CONV-019: `coerceUserConfigValue` shared coercion helper
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`core/src/services/config/coerce-user-config.ts` exports a single `coerceUserConfigValue(entry, raw)` function used by both `processConfigSetTags` and `core/src/gui/routes/config.ts`. Rejects (never clamps) out-of-range numbers; rejects non-boolean strings except `"true"/"false"/"on"/"off"/"1"/"0"` (case-insensitive). GUI POST now returns HTTP 400 with per-key reason on coerce failure.
+
+**Standard tests** (`core/src/services/config/__tests__/coerce-user-config.test.ts`): 20 happy + edge cases per type (boolean, number, string); rejection-only contract.
+
+**Edge case tests** (same file): NaN, Infinity, out-of-range, out-of-enum, null, undefined.
+
+---
+
+### REQ-CONV-020: LLM error reply correctly reflects whether note was saved
+
+**Phase:** P1 Chunk C | **Status:** Implemented
+
+`appendDailyNote` is called before the LLM call. Its `{ wrote: boolean }` return value gates the suffix appended to the LLM-error message: `"Your message was saved to daily notes."` is included when `wrote=true` (user opted in and write succeeded), omitted when `wrote=false` (opted out, write failed, or config absent).
+
+**Standard tests** (`log-to-notes.persona.test.ts`): 2 cases — LLM throws + opted OUT: reply without suffix; LLM throws + opted IN: reply with "daily notes" suffix.
+
+**Edge case tests** (`daily-notes.test.ts`): storage write fails → `{ wrote: false }`, no throw.
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -6249,5 +6359,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-005 | conversation-service.test.ts, router.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-014 | compose-runtime.smoke.integration.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-015 | dispatch.integration.test.ts, conversation-scope-contract.test.ts | 3 | 1 | Implemented |
+| REQ-CONV-006 | handle-notes.test.ts, conversation-builtin.test.ts, builtin-commands.persona.test.ts | 16 | 6 | Implemented |
+| REQ-CONV-007 | daily-notes.test.ts, settings-resolver.test.ts, log-to-notes.persona.test.ts | 13 | 8 | Implemented |
+| REQ-CONV-008 | control-tags.config-set.test.ts, log-to-notes.persona.test.ts | 12 | 15 | Implemented |
+| REQ-CONV-009 | control-tags.config-set.test.ts, log-to-notes.persona.test.ts | 4 | 7 | Implemented |
+| REQ-CONV-010 | system-config.test.ts (extended) | 2 | 0 | Implemented |
+| REQ-CONV-016 | conversation-builtin.test.ts, builtin-dispatch.integration.test.ts | 17 | 4 | Implemented |
+| REQ-CONV-019 | coerce-user-config.test.ts | 20 | 12 | Implemented |
+| REQ-CONV-020 | log-to-notes.persona.test.ts, daily-notes.test.ts | 2 | 1 | Implemented |
 
-| **Totals** | **175 test files** | **1324** | **1609** | **2915 tests** |
+| **Totals** | **178 test files** | **1415** | **1656** | **3071 tests** |

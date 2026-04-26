@@ -136,6 +136,12 @@ export const PasYamlConfigSchema = z
 			})
 			.passthrough()
 			.optional(),
+		chat: z
+			.object({
+				log_to_notes: z.boolean().optional(),
+			})
+			.passthrough()
+			.optional(),
 	})
 	.passthrough();
 

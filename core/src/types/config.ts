@@ -190,6 +190,15 @@ export interface SystemConfig {
 	 * Set by the transitional config loader; cleared after household migration completes.
 	 */
 	migrationNeeded?: boolean;
+
+	/**
+	 * Conversation-level settings. Per-user overrides via /notes or GUI always win;
+	 * this is the operator-level system default.
+	 */
+	chat?: {
+		/** System-wide default for daily-notes opt-in. Per-user override always wins. Default: false. */
+		logToNotes: boolean;
+	};
 }
 
 /** Route verification configuration. */
@@ -209,9 +218,30 @@ export interface AppConfigService {
 	get<T>(key: string): Promise<T>;
 
 	/**
-	 * Get all config values.
+	 * Get all config values merged with manifest defaults.
 	 * When userId is provided, reads that user's overrides.
 	 * When omitted, uses the current user context (set by infrastructure).
 	 */
 	getAll(userId?: string): Promise<Record<string, unknown>>;
+
+	/**
+	 * Get the raw user override document — NO manifest defaults merged.
+	 * Returns null when no override file exists for this user.
+	 * Use this (not getAll) when you need to know exactly what the user set.
+	 */
+	getOverrides(userId: string): Promise<Record<string, unknown> | null>;
+
+	/**
+	 * Replace the entire override document for a user.
+	 * Used by the GUI POST handler which writes the full form payload.
+	 */
+	setAll(userId: string, values: Record<string, unknown>): Promise<void>;
+
+	/**
+	 * Locked read-modify-write of raw overrides.
+	 * Merges `partial` into the existing raw overrides (or {} if none).
+	 * Writes only the raw override keys — never materialises manifest defaults.
+	 * Safe to call concurrently; serialised by a per-file lock.
+	 */
+	updateOverrides(userId: string, partial: Record<string, unknown>): Promise<void>;
 }

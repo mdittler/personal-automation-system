@@ -96,6 +96,9 @@ interface PasYamlConfig {
 		schedule?: string;
 		retention_count?: number;
 	};
+	chat?: {
+		log_to_notes?: boolean;
+	};
 }
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
@@ -260,6 +263,9 @@ export async function loadSystemConfig(options?: {
 			path: yamlConfig?.backup?.path ?? resolve(env.DATA_DIR, '..', 'backups'),
 			schedule: yamlConfig?.backup?.schedule ?? '0 3 * * *',
 			retentionCount: yamlConfig?.backup?.retention_count ?? 7,
+		},
+		chat: {
+			logToNotes: yamlConfig?.chat?.log_to_notes ?? false,
 		},
 	};
 

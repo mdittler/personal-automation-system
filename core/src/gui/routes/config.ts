@@ -10,6 +10,7 @@ import type { Logger } from 'pino';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
+import { coerceUserConfigValue } from '../../services/config/coerce-user-config.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
 
@@ -76,6 +77,7 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 
 		// Filter to only known keys and coerce types based on manifest definitions
 		const validated: Record<string, unknown> = {};
+		const coercionFailures: string[] = [];
 		for (const [key, rawValue] of Object.entries(body)) {
 			// Skip CSRF token field and unknown keys
 			if (key === '_csrf') continue;
@@ -84,15 +86,18 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 				continue;
 			}
 
-			const def = configDefs.find((d) => d.key === key);
-			if (def?.type === 'number') {
-				const num = Number(rawValue);
-				validated[key] = Number.isNaN(num) ? 0 : num;
-			} else if (def?.type === 'boolean') {
-				validated[key] = rawValue === 'true' || rawValue === '1' || rawValue === 'on';
+			const def = configDefs.find((d) => d.key === key)!;
+			const result = coerceUserConfigValue(def, rawValue);
+			if (!result.ok) {
+				coercionFailures.push(`${key}: ${result.reason}`);
 			} else {
-				validated[key] = String(rawValue);
+				validated[key] = result.coerced;
 			}
+		}
+
+		if (coercionFailures.length > 0) {
+			logger.warn({ appId, userId, failures: coercionFailures }, 'Config update rejected: coercion failure');
+			return reply.status(400).send(`Invalid config values: ${coercionFailures.join('; ')}`);
 		}
 
 		const appConfig = getAppConfigService(appId, configDefs);

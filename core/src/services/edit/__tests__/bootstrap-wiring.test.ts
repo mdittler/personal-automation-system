@@ -117,7 +117,9 @@ describe('EditService bootstrap wiring', () => {
 			expect(content).toContain('edit-service');
 		});
 
-		it('chatbot manifest declares /edit command', async () => {
+		it('chatbot manifest does NOT declare /edit as an app command (Chunk C: /edit is a Router built-in)', async () => {
+			// Post-Chunk-C: /edit is dispatched by the Router to ConversationService directly,
+			// not by the chatbot app module. The manifest has no commands: block.
 			const manifestPath = join(
 				__dirname,
 				'..',
@@ -130,7 +132,9 @@ describe('EditService bootstrap wiring', () => {
 				'manifest.yaml',
 			);
 			const content = await readFile(manifestPath, 'utf8');
-			expect(content).toContain('/edit');
+			// The manifest still declares edit-service as a requirement (for DI injection),
+			// but the commands block no longer lists /edit.
+			expect(content).not.toContain('commands:');
 		});
 	});
 });
