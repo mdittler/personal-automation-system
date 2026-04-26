@@ -106,9 +106,11 @@ const ALLOWED_CONFIG_KEYS: ReadonlySet<string> = new Set(['log_to_notes']);
  * First alt:  action verb → notes concept (normal order).
  * Second alt: specific notes concept → action verb (reverse order).
  * Requires specific notes terminology to avoid false-firing on "notes" the noun.
+ * "please" is intentionally absent from the action-verb group: it would match
+ * read-only requests like "please show me my daily notes".
  */
 export const NOTES_INTENT_REGEX =
-	/(?:\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not|please)\b[^.?!]{0,50}\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|log(?:ging)?\s+(?:my\s+)?(?:notes?|messages?)|saving\s+(?:my|all|everything))\b)|(?:\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|saving\s+everything)\b[^.?!]{0,50}\b(?:on|off|enable|disable|stop|start|turn)\b)/i;
+	/(?:\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not)\b[^.?!]{0,50}\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|log(?:ging)?\s+(?:my\s+)?(?:notes?|messages?)|saving\s+(?:my|all|everything))\b)|(?:\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|saving\s+everything)\b[^.?!]{0,50}\b(?:on|off|enable|disable|stop|start|turn)\b)/i;
 
 /**
  * Instruction appended to the system prompt when the user message matches
@@ -159,8 +161,8 @@ export async function processConfigSetTags(
 		allowedTags.push({ key, value });
 	}
 
-	// Strip all tags from response regardless of outcome
-	const stripped = response.replace(CONFIG_SET_TAG_REGEX, '');
+	// Strip all well-formed tags; sweep for malformed/reordered/extra-attr remnants
+	const stripped = response.replace(CONFIG_SET_TAG_REGEX, '').replace(/<config-set\b[^>]*\/?>/g, '');
 
 	// Gate: intent regex must match the actual user message
 	if (!NOTES_INTENT_REGEX.test(options.userMessage)) {
@@ -182,12 +184,15 @@ export async function processConfigSetTags(
 		}
 
 		// Write only raw override keys (never manifest defaults)
-		await options.config.updateOverrides(options.userId, { [key]: result.coerced });
-
-		if (key === 'log_to_notes') {
-			confirmations.push(
-				result.coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.',
-			);
+		try {
+			await options.config.updateOverrides(options.userId, { [key]: result.coerced });
+			if (key === 'log_to_notes') {
+				confirmations.push(
+					result.coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.',
+				);
+			}
+		} catch (err) {
+			options.logger.warn('<config-set> failed to persist %s: %s', key, err);
 		}
 	}
 

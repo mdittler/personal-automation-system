@@ -321,6 +321,112 @@ describe('GUI Routes', () => {
 		});
 	});
 
+	describe('GET /gui/apps/:appId — system-default effective value (chatbot)', () => {
+		// Verifies that when config.chat.logToNotes is true and the user has no
+		// per-user override, the GUI renders the effective value (true), not the
+		// manifest default (false).
+		let chatbotApp: Awaited<ReturnType<typeof Fastify>> | null = null;
+		let chatbotTempDir: string;
+
+		beforeEach(async () => {
+			chatbotTempDir = await mkdtemp(join(tmpdir(), 'pas-chatbot-gui-'));
+
+			const chatbotRegisteredApp: RegisteredApp = {
+				manifest: {
+					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'Test' },
+					capabilities: { messages: { intents: [] } },
+					requirements: { services: ['telegram'] },
+					user_config: [
+						{ key: 'log_to_notes', type: 'boolean', default: false, description: 'Log to notes' },
+					],
+				} as RegisteredApp['manifest'],
+				module: { init: async () => {}, handleMessage: async () => {} },
+				appDir: '/tmp/apps/chatbot',
+			};
+
+			const chatbotRegistry = {
+				getAll: () => [chatbotRegisteredApp],
+				getApp: (id: string) => (id === 'chatbot' ? chatbotRegisteredApp : undefined),
+				getLoadedAppIds: () => ['chatbot'],
+				getManifestCache: () => ({}) as ReturnType<AppRegistry['getManifestCache']>,
+			} as unknown as AppRegistry;
+
+			const chatbotConfig: SystemConfig = {
+				...createMockConfig(),
+				dataDir: chatbotTempDir,
+				chat: { logToNotes: true },
+			};
+
+			const chatbotToggle = new AppToggleStore({ dataDir: chatbotTempDir });
+
+			chatbotApp = Fastify({ logger: false });
+			await chatbotApp.register(fastifyCookie, { secret: AUTH_TOKEN });
+			const eta = new Eta();
+			await chatbotApp.register(fastifyView, {
+				engine: { eta },
+				root: viewsDir,
+				viewExt: 'eta',
+				layout: 'layout',
+			});
+
+			const cbCredService = new CredentialService({ dataDir: chatbotTempDir });
+			await cbCredService.setPassword(TEST_USER_ID, TEST_PASSWORD);
+			const cbUserManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+			const cbHouseholdService = makeHouseholdService(
+				{ [TEST_USER_ID]: 'hh-1' },
+				[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
+			);
+
+			await chatbotApp.register(
+				async (gui) => {
+					await registerAuth(gui, {
+						authToken: AUTH_TOKEN,
+						credentialService: cbCredService,
+						userManager: cbUserManager as unknown as import('../../services/user-manager/index.js').UserManager,
+						householdService: cbHouseholdService as unknown as import('../../services/household/index.js').HouseholdService,
+					});
+					await registerCsrfProtection(gui);
+					registerAppsRoutes(gui, {
+						registry: chatbotRegistry,
+						config: chatbotConfig,
+						appToggle: chatbotToggle,
+						dataDir: chatbotTempDir,
+						logger,
+					});
+				},
+				{ prefix: '/gui' },
+			);
+		});
+
+		afterEach(async () => {
+			if (chatbotApp) await chatbotApp.close();
+			await rm(chatbotTempDir, { recursive: true, force: true });
+		});
+
+		it('renders log_to_notes as true (system default) when user has no override', async () => {
+			// No per-user override file exists for user 123.
+			// config.chat.logToNotes = true → effective value should be true.
+			const loginRes = await chatbotApp!.inject({
+				method: 'POST',
+				url: '/gui/login',
+				payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+			});
+			const cookies = collectCookies(loginRes);
+
+			const res = await chatbotApp!.inject({
+				method: 'GET',
+				url: '/gui/apps/chatbot',
+				cookies,
+			});
+
+			expect(res.statusCode).toBe(200);
+			// The "true" option must be selected (system default wins over manifest default false)
+			expect(res.body).toContain('value="true" selected');
+			// The "false" option must NOT be selected
+			expect(res.body).not.toContain('value="false" selected');
+		});
+	});
+
 	describe('POST /gui/apps/:appId/toggle', () => {
 		it('toggles app state and returns updated button', async () => {
 			const res = await authenticatedPost(app, '/gui/apps/echo/toggle', {

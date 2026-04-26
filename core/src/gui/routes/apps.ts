@@ -23,6 +23,17 @@ export interface AppsOptions {
 	logger: Logger;
 }
 
+/**
+ * System-level defaults that override manifest defaults for specific app keys.
+ * Returns app-specific config values read from pas.yaml that are not per-user.
+ */
+function getSystemDefaults(appId: string, config: SystemConfig): Record<string, unknown> {
+	if (appId === 'chatbot') {
+		return { log_to_notes: config.chat?.logToNotes ?? false };
+	}
+	return {};
+}
+
 function escapeHtml(str: string): string {
 	return str
 		.replace(/&/g, '&amp;')
@@ -159,9 +170,14 @@ export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions
 
 		if (configDefs.length > 0) {
 			const appConfig = getAppConfigService(appId, configDefs);
+			const manifestDefaults = Object.fromEntries(configDefs.map((d) => [d.key, d.default]));
+			const systemDefaults = getSystemDefaults(appId, config);
 			for (const user of config.users) {
 				try {
-					const values = await appConfig.getAll(user.id);
+					// Merge manifest defaults → system defaults → user overrides so that
+					// operator-level defaults (e.g. chat.log_to_notes: true) are visible in the GUI.
+					const overrides = (await appConfig.getOverrides(user.id)) ?? {};
+					const values = { ...manifestDefaults, ...systemDefaults, ...overrides };
 					userConfigs.push({ userId: user.id, userName: user.name, values });
 				} catch {
 					userConfigs.push({ userId: user.id, userName: user.name, values: {} });

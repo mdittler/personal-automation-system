@@ -61,6 +61,11 @@ describe('NOTES_INTENT_REGEX — negative (should NOT match)', () => {
 		"what's in my grocery list?",
 		'remind me to buy milk',
 		'tell me about my food notes',
+		// "please" without an action verb must NOT match (read-only requests)
+		'please show me my daily notes',
+		'please summarize my daily notes',
+		'please show me my note log',
+		'please read my note logging',
 	])('does NOT match: %s', (phrase) => {
 		expect(NOTES_INTENT_REGEX.test(phrase)).toBe(false);
 	});
@@ -257,5 +262,70 @@ describe('processConfigSetTags — no tags', () => {
 		expect(updateOverrides).not.toHaveBeenCalled();
 		expect(result.cleanedResponse).toBe(response);
 		expect(result.confirmations).toHaveLength(0);
+	});
+});
+
+describe('processConfigSetTags — malformed tag sanitization', () => {
+	it('strips reordered-attribute tag: value before key', async () => {
+		const { config, updateOverrides } = makeConfig();
+		// Regex requires key then value; reordered tag is not parsed but must still be stripped
+		const response = 'OK! <config-set value="true" key="log_to_notes"/> Done.';
+		const result = await processConfigSetTags(response, {
+			userId: 'user1',
+			userMessage: 'turn on daily notes',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY],
+			logger: makeLogger(),
+		});
+		// Not parsed (reordered), so no write
+		expect(updateOverrides).not.toHaveBeenCalled();
+		// But must be stripped from the response
+		expect(result.cleanedResponse).not.toContain('<config-set');
+	});
+
+	it('strips tag with extra attributes', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response = 'OK! <config-set key="log_to_notes" value="true" userId="bob"/> Done.';
+		const result = await processConfigSetTags(response, {
+			userId: 'user1',
+			userMessage: 'turn on daily notes',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY],
+			logger: makeLogger(),
+		});
+		// Extra-attr form is not matched by the strict regex — no write
+		expect(updateOverrides).not.toHaveBeenCalled();
+		// But the broad sanitizer sweeps it out
+		expect(result.cleanedResponse).not.toContain('<config-set');
+	});
+});
+
+describe('processConfigSetTags — write failure resilience', () => {
+	it('returns cleaned response even when updateOverrides throws', async () => {
+		const logger = makeLogger();
+		const failingConfig: AppConfigService = {
+			get: vi.fn(),
+			getAll: vi.fn(),
+			getOverrides: vi.fn().mockResolvedValue(null),
+			setAll: vi.fn(),
+			updateOverrides: vi.fn().mockRejectedValue(new Error('disk full')),
+		} as unknown as AppConfigService;
+
+		const response = 'Here you go! <config-set key="log_to_notes" value="true"/> Saved.';
+		const result = await processConfigSetTags(response, {
+			userId: 'user1',
+			userMessage: 'turn on daily notes',
+			config: failingConfig,
+			manifest: [LOG_TO_NOTES_ENTRY],
+			logger,
+		});
+
+		// Tag is stripped from the response regardless of write failure
+		expect(result.cleanedResponse).not.toContain('<config-set');
+		expect(result.cleanedResponse).toContain('Here you go!');
+		// No confirmation emitted when write fails
+		expect(result.confirmations).toHaveLength(0);
+		// Write failure is logged as a warning
+		expect(logger.warn).toHaveBeenCalled();
 	});
 });
