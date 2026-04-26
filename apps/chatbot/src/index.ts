@@ -59,16 +59,14 @@ function makeDeps() {
 		logger: services.logger,
 		timezone: services.timezone,
 		history,
-		...(services.systemInfo !== undefined ? { systemInfo: services.systemInfo } : {}),
-		...(services.appMetadata !== undefined ? { appMetadata: services.appMetadata } : {}),
-		...(services.appKnowledge !== undefined ? { appKnowledge: services.appKnowledge } : {}),
-		...(services.modelJournal !== undefined ? { modelJournal: services.modelJournal } : {}),
-		...(services.contextStore !== undefined ? { contextStore: services.contextStore } : {}),
-		...(services.config !== undefined ? { config: services.config } : {}),
-		...(services.dataQuery !== undefined ? { dataQuery: services.dataQuery } : {}),
-		...(services.interactionContext !== undefined
-			? { interactionContext: services.interactionContext }
-			: {}),
+		systemInfo: services.systemInfo,
+		appMetadata: services.appMetadata,
+		appKnowledge: services.appKnowledge,
+		modelJournal: services.modelJournal,
+		contextStore: services.contextStore,
+		config: services.config,
+		dataQuery: services.dataQuery,
+		interactionContext: services.interactionContext,
 	};
 }
 
@@ -90,7 +88,7 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	// bare command name. See AppModule.handleCommand documentation.
 	if (command === 'edit') {
 		await handleEdit(args, ctx, {
-			...(services.editService !== undefined ? { editService: services.editService } : {}),
+			editService: services.editService,
 			telegram: services.telegram,
 			logger: services.logger,
 			pendingEdits,
@@ -114,7 +112,7 @@ export async function buildSystemPrompt(
 	modelSlug?: string,
 	userCtx?: string,
 ): Promise<string> {
-	return coreBuildSystemPrompt(contextEntries, turns, makePromptDeps(), modelSlug, userCtx);
+	return coreBuildSystemPrompt(contextEntries, turns, makeDeps(), modelSlug, userCtx);
 }
 
 export async function buildAppAwareSystemPrompt(
@@ -131,39 +129,22 @@ export async function buildAppAwareSystemPrompt(
 		userId,
 		contextEntries,
 		turns,
-		makePromptDeps(),
+		makeDeps(),
 		modelSlug,
 		userCtx,
 		dataContext,
 	);
 }
 
-function makePromptDeps() {
-	return {
-		llm: services.llm,
-		...(services.systemInfo !== undefined ? { systemInfo: services.systemInfo } : {}),
-		...(services.appMetadata !== undefined ? { appMetadata: services.appMetadata } : {}),
-		...(services.appKnowledge !== undefined ? { appKnowledge: services.appKnowledge } : {}),
-		...(services.modelJournal !== undefined ? { modelJournal: services.modelJournal } : {}),
-		data: services.data,
-		logger: services.logger,
-	};
-}
-
 export async function buildUserContext(
 	ctx: MessageContext,
 	svc: CoreServices,
 ): Promise<string> {
-	return coreBuildUserContext(ctx, {
-		...(svc?.appMetadata !== undefined ? { appMetadata: svc.appMetadata } : {}),
-		...(svc?.logger !== undefined ? { logger: svc.logger } : {}),
-	});
+	return coreBuildUserContext(ctx, svc);
 }
 
 export function isPasRelevant(text: string): boolean {
-	return coreIsPasRelevant(text, {
-		...(services?.appMetadata !== undefined ? { appMetadata: services.appMetadata } : {}),
-	});
+	return coreIsPasRelevant(text, services);
 }
 
 export async function classifyPASMessage(
@@ -171,15 +152,7 @@ export async function classifyPASMessage(
 	svc: CoreServices,
 	recentContext?: string,
 ): Promise<{ pasRelated: boolean; dataQueryCandidate?: boolean }> {
-	return coreClassifyPASMessage(
-		text,
-		{
-			llm: svc.llm,
-			...(svc.appMetadata !== undefined ? { appMetadata: svc.appMetadata } : {}),
-			logger: svc.logger,
-		},
-		recentContext,
-	);
+	return coreClassifyPASMessage(text, svc, recentContext);
 }
 
 export async function processModelSwitchTags(
@@ -187,11 +160,8 @@ export async function processModelSwitchTags(
 	options?: { userId?: string; userMessage?: string },
 ): Promise<{ cleanedResponse: string; confirmations: string[] }> {
 	return coreProcessModelSwitchTags(response, {
-		...(options?.userId !== undefined ? { userId: options.userId } : {}),
-		...(options?.userMessage !== undefined ? { userMessage: options.userMessage } : {}),
-		deps: {
-			...(services?.systemInfo !== undefined ? { systemInfo: services.systemInfo } : {}),
-			...(services?.logger !== undefined ? { logger: services.logger } : {}),
-		},
+		userId: options?.userId,
+		userMessage: options?.userMessage,
+		deps: services,
 	});
 }

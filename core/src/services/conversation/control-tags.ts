@@ -12,7 +12,7 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import { coerceUserConfigValue } from '../config/coerce-user-config.js';
 import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
 
-const normalizeResponse = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
+export const normalizeResponse = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
 
 /** Regex to match model switch tags in LLM responses. */
 export const SWITCH_MODEL_TAG_REGEX =

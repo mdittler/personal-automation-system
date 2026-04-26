@@ -30,6 +30,7 @@ import { gatherContext } from './app-data.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
+	normalizeResponse,
 	processConfigSetTags,
 	processModelSwitchTags,
 } from './control-tags.js';
@@ -91,54 +92,41 @@ export async function handleAsk(
 		return;
 	}
 
-	// Append to daily notes (opt-in)
-	const { wrote: noteWrote } = await appendDailyNote(ctx, {
-		data: deps.data,
-		logger: deps.logger,
-		timezone: deps.timezone,
-		config: deps.config,
-		systemDefault: deps.chatLogToNotesDefault ?? false,
-	});
-
-	// Load conversation context
 	const store = deps.data.forUser(ctx.userId);
-	const turns = await deps.history.load(store);
-	const contextEntries = await gatherContext(question, ctx.userId, {
-		...(deps.contextStore !== undefined ? { contextStore: deps.contextStore } : {}),
-		logger: deps.logger,
-	});
-
-	// Determine model identity for journal
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
-
-	// Build app-aware prompt (always app-aware for /ask, no classification needed)
-	const userCtx = await buildUserContext(ctx, {
-		...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-		logger: deps.logger,
-	});
-
-	// D2b/D2c: call DataQueryService when classifier detects a data query.
+	// D2c: interaction context is synchronous; compute before fan-out
 	const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 	const recentContextSummary = formatInteractionContextSummary(recentEntries);
 	const recentFilePaths = extractRecentFilePaths(recentEntries);
 
+	const [{ wrote: noteWrote }, turns, contextEntries, userCtx] = await Promise.all([
+		appendDailyNote(ctx, {
+			data: deps.data,
+			logger: deps.logger,
+			timezone: deps.timezone,
+			config: deps.config,
+			systemDefault: deps.chatLogToNotesDefault ?? false,
+		}),
+		deps.history.load(store),
+		gatherContext(question, ctx.userId, deps),
+		buildUserContext(ctx, deps),
+	]);
+
+	// D2b/D2c: call DataQueryService when classifier detects a data query.
 	let askDataContext = '';
 	const askClassification = await classifyPASMessage(
 		question,
-		{
-			llm: deps.llm,
-			...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-			logger: deps.logger,
-		},
+		deps,
 		recentContextSummary || undefined,
 	);
 	if (askClassification.dataQueryCandidate && deps.dataQuery) {
 		try {
-			const result =
-				recentFilePaths.length > 0
-					? await deps.dataQuery.query(question, ctx.userId, { recentFilePaths })
-					: await deps.dataQuery.query(question, ctx.userId);
+			const result = await deps.dataQuery.query(
+				question,
+				ctx.userId,
+				recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+			);
 			if (!result.empty) {
 				askDataContext = formatDataQueryContext(result);
 			}
@@ -152,26 +140,16 @@ export async function handleAsk(
 		ctx.userId,
 		contextEntries,
 		turns,
-		{
-			llm: deps.llm,
-			...(deps.systemInfo !== undefined ? { systemInfo: deps.systemInfo } : {}),
-			...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-			...(deps.appKnowledge !== undefined ? { appKnowledge: deps.appKnowledge } : {}),
-			...(deps.modelJournal !== undefined ? { modelJournal: deps.modelJournal } : {}),
-			data: deps.data,
-			logger: deps.logger,
-		},
+		deps,
 		modelSlug,
 		userCtx,
 		askDataContext,
 	);
 
-	// Append <config-set> instruction post-prompt-build when question has notes intent
 	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 
-	// Call LLM
 	let response: string;
 	try {
 		response = await deps.llm.complete(sanitizeInput(question), {
@@ -188,25 +166,19 @@ export async function handleAsk(
 		return;
 	}
 
-	// Extract journal entries and clean response
 	const { cleanedResponse: afterJournal, entries: journalEntries } =
 		extractJournalEntries(response);
 	if (deps.modelJournal) {
 		await writeJournalEntries(deps.modelJournal, modelSlug, journalEntries, deps.logger);
 	}
 
-	// Process model switch tags (admin-only, requires explicit intent)
 	const { cleanedResponse: afterModelSwitch, confirmations: switchConfirmations } =
 		await processModelSwitchTags(afterJournal, {
 			userId: ctx.userId,
 			userMessage: question,
-			deps: {
-				...(deps.systemInfo !== undefined ? { systemInfo: deps.systemInfo } : {}),
-				logger: deps.logger,
-			},
+			deps,
 		});
 
-	// Process <config-set> tags (user-facing config writes, allowlisted + intent-gated)
 	let finalResponse = afterModelSwitch;
 	const allConfirmations = [...switchConfirmations];
 	if (deps.config) {
@@ -223,15 +195,12 @@ export async function handleAsk(
 	}
 
 	const responseWithConfirmations =
-		allConfirmations.length > 0 ? `${finalResponse}\n\n${allConfirmations.join('\n')}` : finalResponse;
+		allConfirmations.length > 0
+			? normalizeResponse(`${finalResponse}\n\n${allConfirmations.join('\n')}`)
+			: normalizeResponse(finalResponse);
 
-	// Send response, splitting if over Telegram message limit
-	await sendSplitResponse(ctx.userId, responseWithConfirmations, {
-		telegram: deps.telegram,
-		logger: deps.logger,
-	});
+	await sendSplitResponse(ctx.userId, responseWithConfirmations, deps);
 
-	// Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
 	try {
 		await deps.history.append(

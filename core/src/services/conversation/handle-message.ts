@@ -1,18 +1,12 @@
 /**
  * Generic chatbot handleMessage implementation.
  *
- * Steps:
- *   1. Append the message to today's daily note (preserves pre-chatbot fallback).
- *   2. Load conversation history.
- *   3. Gather context-store entries.
- *   4. If auto_detect_pas is on, run the LLM classifier and choose between the
- *      app-aware prompt and the basic prompt; otherwise always use basic.
- *   5. Call the LLM at standard tier; classify any error to a user-friendly
- *      message.
- *   6. Strip <model-journal> tags, persist their content, and strip any
- *      <switch-model> tags WITHOUT executing them (model switching is
- *      admin-only and requires the explicit /ask path).
- *   7. Send the cleaned response (split for Telegram), then save history.
+ * Fan-out: daily note append, history load, context gather, auto-detect
+ * setting, and user context all run in parallel before classification.
+ * If auto_detect_pas is on, the LLM classifier chooses between the
+ * app-aware prompt and the basic prompt. Otherwise the basic prompt is
+ * always used. Model-switch tags are stripped (not executed) — admin
+ * model switching requires the explicit /ask path.
  */
 
 import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
@@ -41,6 +35,7 @@ import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
 	SWITCH_MODEL_TAG_REGEX,
+	normalizeResponse,
 	processConfigSetTags,
 } from './control-tags.js';
 import { appendDailyNote } from './daily-notes.js';
@@ -75,49 +70,25 @@ export interface HandleMessageDeps {
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
-	// 1. Append to daily notes (opt-in per user)
-	const { wrote: noteWrote } = await appendDailyNote(ctx, {
-		data: deps.data,
-		logger: deps.logger,
-		timezone: deps.timezone,
-		config: deps.config,
-		systemDefault: deps.chatLogToNotesDefault ?? false,
-	});
-
-	// 2. Load conversation history
 	const store = deps.data.forUser(ctx.userId);
-	const turns = await deps.history.load(store);
-
-	// 3. Gather relevant context from ContextStore
-	const contextEntries = await gatherContext(ctx.text, ctx.userId, {
-		...(deps.contextStore !== undefined ? { contextStore: deps.contextStore } : {}),
-		logger: deps.logger,
-	});
-
-	// 4. Determine model identity for journal
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
 
-	// 5. Auto-detect PAS classification + system prompt selection
+	const [{ wrote: noteWrote }, turns, contextEntries, autoDetect, userCtx] = await Promise.all([
+		appendDailyNote(ctx, {
+			data: deps.data,
+			logger: deps.logger,
+			timezone: deps.timezone,
+			config: deps.config,
+			systemDefault: deps.chatLogToNotesDefault ?? false,
+		}),
+		deps.history.load(store),
+		gatherContext(ctx.text, ctx.userId, deps),
+		getAutoDetectSetting(ctx.userId, deps),
+		buildUserContext(ctx, deps),
+	]);
+
 	let systemPrompt: string;
-	const autoDetect = await getAutoDetectSetting(ctx.userId, {
-		...(deps.config !== undefined ? { config: deps.config } : {}),
-	});
-	const userCtx = await buildUserContext(ctx, {
-		...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-		logger: deps.logger,
-	});
-
-	const promptDeps = {
-		llm: deps.llm,
-		...(deps.systemInfo !== undefined ? { systemInfo: deps.systemInfo } : {}),
-		...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-		...(deps.appKnowledge !== undefined ? { appKnowledge: deps.appKnowledge } : {}),
-		...(deps.modelJournal !== undefined ? { modelJournal: deps.modelJournal } : {}),
-		data: deps.data,
-		logger: deps.logger,
-	};
-
 	if (autoDetect) {
 		// D2c: get recent interaction context for classifier + dataQuery hints
 		const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
@@ -126,11 +97,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 
 		const classification = await classifyPASMessage(
 			ctx.text,
-			{
-				llm: deps.llm,
-				...(deps.appMetadata !== undefined ? { appMetadata: deps.appMetadata } : {}),
-				logger: deps.logger,
-			},
+			deps,
 			recentContextSummary || undefined,
 		);
 		if (classification.pasRelated) {
@@ -138,10 +105,11 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			let dataContext = '';
 			if (classification.dataQueryCandidate && deps.dataQuery) {
 				try {
-					const result =
-						recentFilePaths.length > 0
-							? await deps.dataQuery.query(ctx.text, ctx.userId, { recentFilePaths })
-							: await deps.dataQuery.query(ctx.text, ctx.userId);
+					const result = await deps.dataQuery.query(
+						ctx.text,
+						ctx.userId,
+						recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+					);
 					if (!result.empty) {
 						dataContext = formatDataQueryContext(result);
 					}
@@ -154,24 +122,22 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				ctx.userId,
 				contextEntries,
 				turns,
-				promptDeps,
+				deps,
 				modelSlug,
 				userCtx,
 				dataContext,
 			);
 		} else {
-			systemPrompt = await buildSystemPrompt(contextEntries, turns, promptDeps, modelSlug, userCtx);
+			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt(contextEntries, turns, promptDeps, modelSlug, userCtx);
+		systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
 	}
 
-	// Append <config-set> instruction post-prompt-build when the user message has notes intent
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 
-	// 6. Call LLM
 	let response: string;
 	try {
 		response = await deps.llm.complete(sanitizeInput(ctx.text), {
@@ -188,17 +154,15 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		return;
 	}
 
-	// 7. Extract journal entries and clean response
 	const { cleanedResponse: afterJournal, entries: journalEntries } =
 		extractJournalEntries(response);
 	if (deps.modelJournal) {
 		await writeJournalEntries(deps.modelJournal, modelSlug, journalEntries, deps.logger);
 	}
 
-	// 8. Strip model-switch tags without executing — admin actions via /ask only
+	// Strip model-switch tags without executing — admin actions via /ask only
 	const afterSwitchStrip = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '');
 
-	// 9. Process <config-set> tags (user-facing config writes, allowlisted + intent-gated)
 	let finalResponse: string;
 	if (deps.config) {
 		const { cleanedResponse: afterConfigSet, confirmations } = await processConfigSetTags(
@@ -213,19 +177,14 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		);
 		finalResponse =
 			confirmations.length > 0
-				? `${afterConfigSet}\n\n${confirmations.join('\n')}`.replace(/\n{3,}/g, '\n\n').trim()
-				: afterConfigSet.replace(/\n{3,}/g, '\n\n').trim();
+				? normalizeResponse(`${afterConfigSet}\n\n${confirmations.join('\n')}`)
+				: normalizeResponse(afterConfigSet);
 	} else {
-		finalResponse = afterSwitchStrip.replace(/\n{3,}/g, '\n\n').trim();
+		finalResponse = normalizeResponse(afterSwitchStrip);
 	}
 
-	// 10. Send response, splitting if over Telegram message limit
-	await sendSplitResponse(ctx.userId, finalResponse, {
-		telegram: deps.telegram,
-		logger: deps.logger,
-	});
+	await sendSplitResponse(ctx.userId, finalResponse, deps);
 
-	// 11. Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
 	const userTurn: ConversationTurn = { role: 'user', content: ctx.text, timestamp: now };
 	const assistantTurn: ConversationTurn = {
