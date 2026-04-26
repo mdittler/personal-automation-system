@@ -134,12 +134,18 @@ describe('dispatch-site requestContext wraps', () => {
 			expect(wrappedCalls.length).toBe(totalCalls.length);
 		});
 
-		it('the verification-callback dispatch block is wrapped in requestContext.run with userId and householdId', async () => {
+		it('the verification-callback dispatch block establishes requestContext (directly or via router.dispatch*)', async () => {
 			const source = stripComments(await readBootstrapOrCompose());
 
+			// Dispatch may go through requestContext.run directly, or through router.dispatch* methods
+			// (dispatchConversation, dispatchMessage, dispatchPhoto) which all establish requestContext internally.
+			// Either pattern satisfies the context-propagation invariant.
 			const rvBranch = source.match(
 				new RegExp(
-					String.raw`resolveCallback[\s\S]{0,700}requestContext\.run\s*\(\s*` + hasBothKeys,
+					String.raw`resolveCallback[\s\S]{0,700}` +
+						String.raw`(?:requestContext\.run\s*\(\s*` +
+						hasBothKeys +
+						String.raw`|router\.dispatch(?:Conversation|Message|Photo)\s*\()`,
 				),
 			);
 			expect(rvBranch).not.toBeNull();

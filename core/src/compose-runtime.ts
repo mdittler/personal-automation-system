@@ -922,10 +922,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		);
 	}
 
-	// 9c. ConversationService — Hermes P1 Chunk B.
-	// Constructed unconditionally — free-text fallback works even if chatbotApp fails to load.
-	// The chatbotApp lookup above stays for /ask + /edit until Chunk C; only free-text dispatch
-	// leaves the app boundary in this chunk.
+	// 9c. ConversationService — constructed unconditionally so free-text fallback works even if chatbotApp fails to load.
 	const conversationDataStore = new DataStoreServiceImpl({
 		dataDir: config.dataDir,
 		appId: 'chatbot',
@@ -1126,28 +1123,24 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 					);
 
 					if (chosenAppId === 'chatbot') {
-						// dispatchConversation establishes its own requestContext.run + error isolation
 						await router.dispatchConversation(
 							entry.ctx as import('./types/telegram.js').MessageContext,
 							overrideRoute,
 						);
-					} else {
-						const rvHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
-						await requestContext.run({ userId, householdId: rvHouseholdId }, async () => {
-							if (appEntry) {
-								if (entry.isPhoto && appEntry.module.handlePhoto) {
-									await appEntry.module.handlePhoto({
-										...(entry.ctx as import('./types/telegram.js').PhotoContext),
-										route: overrideRoute,
-									});
-								} else {
-									await appEntry.module.handleMessage({
-										...(entry.ctx as import('./types/telegram.js').MessageContext),
-										route: overrideRoute,
-									});
-								}
-							}
-						});
+					} else if (appEntry) {
+						if (entry.isPhoto && appEntry.module.handlePhoto) {
+							await router.dispatchPhoto(
+								appEntry,
+								entry.ctx as import('./types/telegram.js').PhotoContext,
+								overrideRoute,
+							);
+						} else {
+							await router.dispatchMessage(
+								appEntry,
+								entry.ctx as import('./types/telegram.js').MessageContext,
+								overrideRoute,
+							);
+						}
 					}
 					return;
 				}

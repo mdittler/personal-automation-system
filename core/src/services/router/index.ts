@@ -384,21 +384,7 @@ export class Router {
 		}
 
 		// 4. Fallback → ConversationService (preferred), legacy chatbot app, or daily notes
-		if (this.conversationService) {
-			if (!(await this.isAppEnabled(enrichedCtx.userId, 'chatbot', user.enabledApps))) {
-				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
-				return;
-			}
-			await this.dispatchConversation(enrichedCtx, routeForFallback());
-		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
-			if (!(await this.isAppEnabled(enrichedCtx.userId, 'chatbot', user.enabledApps))) {
-				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
-				return;
-			}
-			await this.dispatchMessage(this.chatbotApp, enrichedCtx, routeForFallback());
-		} else {
-			await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
-		}
+		await this.sendToFallback(enrichedCtx, user.enabledApps);
 	}
 
 	/**
@@ -594,7 +580,7 @@ export class Router {
 	 * enforcement downstream can read the correct householdId even when the outer
 	 * bootstrap context was established before householdService was available.
 	 */
-	private async dispatchMessage(
+	async dispatchMessage(
 		app: RegisteredApp,
 		ctx: MessageContext,
 		route: RouteInfo,
@@ -617,7 +603,7 @@ export class Router {
 	 *
 	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
 	 */
-	private async dispatchPhoto(
+	async dispatchPhoto(
 		app: RegisteredApp,
 		ctx: PhotoContext,
 		route: RouteInfo,
@@ -1249,17 +1235,14 @@ export class Router {
 	 * routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
+		const useChat = this.conversationService || (this.fallbackMode === 'chatbot' && this.chatbotApp);
+		if (useChat && !(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
+			await this.fallback.handleUnrecognized(ctx, this.telegram);
+			return;
+		}
 		if (this.conversationService) {
-			if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
-				await this.fallback.handleUnrecognized(ctx, this.telegram);
-				return;
-			}
 			await this.dispatchConversation(ctx, routeForFallback());
 		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
-			if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
-				await this.fallback.handleUnrecognized(ctx, this.telegram);
-				return;
-			}
 			await this.dispatchMessage(this.chatbotApp, ctx, routeForFallback());
 		} else {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
