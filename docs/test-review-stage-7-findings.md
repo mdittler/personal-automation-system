@@ -1,8 +1,8 @@
 # Stage 7 Test Review Findings
 
-Date: 2026-04-23
+Date: 2026-04-25
 Stage: 7 - Food App Foundations
-Status: Completed
+Status: Remediated
 
 ## Scope
 
@@ -40,79 +40,68 @@ The strongest Stage 7 coverage today is:
 
 ## Findings
 
-### 1. The space-aware food-store contract is still unprotected, and foundational tests still encode shared-only assumptions
+### 1. The targeted space-aware photo/store contract is now protected at the right seams
 
 - Severity: high
-- Type: shared-vs-space data contract gap plus test corpus drift
+- Status: remediated
 - Code references:
-  - `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md:58-99`
-  - `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md:101-140`
-  - `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md:284-289`
-  - `apps/food/src/utils/household-guard.ts:48`
-  - `apps/food/src/handlers/photo.ts:85`
-  - `apps/food/src/handlers/photo.ts:166-167`
-  - `apps/food/src/handlers/photo.ts:222-223`
-  - `apps/food/src/handlers/photo.ts:329-330`
+  - `core/src/types/telegram.ts`
+  - `core/src/services/router/index.ts`
+  - `apps/food/src/utils/household-guard.ts`
+  - `apps/food/src/handlers/photo.ts`
 - Test references:
-  - `apps/food/src/__tests__/household-guard.test.ts:8`
-  - `apps/food/src/__tests__/household-guard.test.ts:82-112`
-  - `apps/food/src/__tests__/interaction-recording.test.ts:386-390`
-  - `apps/food/src/__tests__/interaction-recording.test.ts:463-469`
-  - `test_strategy_summary.md:191-194`
+  - `apps/food/src/__tests__/household-guard.test.ts`
+  - `apps/food/src/__tests__/photo-handler.test.ts`
+  - `apps/food/src/__tests__/interaction-recording.test.ts`
+  - `core/src/services/router/__tests__/router.test.ts`
 
-The space-aware food-data design explicitly calls for a new `resolveFoodStore()` helper, migration of interactive callers away from `requireHousehold()`, and test coverage proving receipt writes and interaction file paths switch from `users/shared/food/...` to `spaces/<spaceId>/food/...` when a space is active. That contract is still unprotected in the foundational suite.
+Phase 7 now covers the specific foundational seam the Stage 7 review called out. `PhotoContext` carries optional `spaceId` / `spaceName`, router photo dispatch now enriches that context from the active space, and the food app now resolves photo writes through `resolveFoodStore(...)` instead of assuming shared-only storage.
 
-The current codebase still exposes only `requireHousehold()` in `household-guard.ts`, and the photo flow still uses that shared-store helper while recording hard-coded shared file paths and `scope: 'shared'`. The supporting foundational tests mirror that older assumption: `household-guard.test.ts` only exercises `requireHousehold()`, and `interaction-recording.test.ts` still expects shared-only recipe and grocery paths. So the stage has decent coverage for the legacy shared-store path, but it still lacks the test seam that would catch regressions or incomplete work in the space-aware migration described by the current food data design.
+The new behavioral coverage pins both the selection logic and the resulting paths. `household-guard.test.ts` now covers shared fallback, active-space store resolution, non-member rejection, and the deliberate “shared household membership first, then space membership” guard split. `photo-handler.test.ts` proves recipe, receipt, and grocery photo flows use the active space store when present. `interaction-recording.test.ts` proves those same three flows record `spaces/<spaceId>/food/...` paths and `scope: 'space'` in active-space mode while retaining the shared fallback when no space is active.
 
-### 2. The main route-level integration tests collapse shared and user stores to the same mock, so they cannot catch scope-boundary mistakes
+### 2. The broad route-level suites no longer hide shared-vs-user boundary mistakes behind one mock store
 
 - Severity: medium
-- Type: trust-boundary blind spot in integration coverage
+- Status: remediated
 - Code references:
   - `apps/food/manifest.yaml:179-244`
 - Test references:
-  - `apps/food/src/__tests__/route-dispatch.test.ts:121-122`
-  - `apps/food/src/__tests__/shadow-primary.integration.test.ts:125-126`
-  - `apps/food/src/__tests__/shadow-primary.integration.test.ts:147-148`
-  - `apps/food/src/__tests__/shadow-primary.integration.test.ts:497-498`
+  - `apps/food/src/__tests__/route-dispatch.test.ts`
+  - `apps/food/src/__tests__/shadow-primary.integration.test.ts`
 
-The food manifest declares materially different shared and user data scopes: recipes, grocery, pantry, prices, receipts, and meal plans live in shared scopes, while preferences, nutrition, shopping sessions, health, and quick meals are user-scoped. But the biggest route-level integration suites flatten those distinctions by returning the same mock store from both `services.data.forShared(...)` and `services.data.forUser(...)`.
+The two biggest route-level integration suites now use distinct shared and user scoped stores instead of flattening both paths onto one mock. That means a regression that reads per-user nutrition data from the shared food store, or vice versa, can now fail visibly.
 
-That makes these tests useful for routing and handler invocation confidence, but weak evidence for the scope-isolation contract that matters in production. A handler can accidentally read from or write to the wrong scope and these tests still pass, because the shared and personal paths terminate in the same fake backing store. For a stage specifically about food foundations and shared plumbing, that is a real gap in trustworthiness.
+The new regressions intentionally target a real mixed-scope path rather than a fake distinction: the macro-adherence route goes through the shared household guard and then into per-user nutrition data. Both broad suites now pin that boundary by allowing only the shared `household.yaml` read from the shared store while forcing nutrition-target reads onto the user store.
 
-### 3. Manifest-to-store scope compatibility is still not protected above the local store unit level
+### 3. Food manifest/runtime storage compatibility is now protected above the local unit-test level
 
 - Severity: medium
-- Type: cross-layer contract coverage gap
+- Status: remediated
 - Code references:
   - `apps/food/manifest.yaml:179-244`
+  - `core/src/services/data-store/paths.ts`
 - Test references:
-  - `apps/food/src/routing/__tests__/shadow-taxonomy.test.ts:22-24`
-  - `apps/food/src/__tests__/grocery-store.test.ts:304-344`
-  - `apps/food/src/__tests__/recipe-store.test.ts:164`
-  - `apps/food/src/__tests__/recipe-store.test.ts:502-594`
-  - `test_strategy_summary.md:185-206`
+  - `apps/food/src/__tests__/manifest-runtime-contract.test.ts`
 
-The local store tests are pretty good at pinning direct file paths and serialization details: grocery tests prove reads and writes go to `grocery/active.yaml`, and recipe tests cover `recipes/<id>.yaml` plus frontmatter and `entity_keys` enrichment. That is valuable coverage.
+Stage 7 now has the higher-level manifest/runtime contract test it was missing. The new food-specific contract suite validates `apps/food/manifest.yaml`, asserts `warnScopePathPrefix()` emits no warnings, proves representative shared and user paths are accepted, and proves legacy app-prefixed paths, traversal paths, and cross-scope misuse are rejected by real `DataStoreServiceImpl` enforcement.
 
-But the stage still lacks a higher-level contract test proving those store paths remain compatible with the app manifest's declared shared/user scopes and the runtime scope-enforcement model. `shadow-taxonomy.test.ts` reads the manifest, but only to check message-intent labels, not the data-scope declarations that matter for actual storage behavior. `test_strategy_summary.md` already flags missing manifest/data-scope contract tests, and the current Stage 7 suite does not close that gap for the food app.
+That gives the food app a much stronger cross-layer safety net than the previous state, where recipe and grocery unit tests pinned local file paths but nothing verified those paths still matched the manifest’s declared scopes.
 
-## Transitional Or Lower-Trust Coverage To Treat Carefully
+## Residual Limitations
 
-- `apps/food/src/routing/__tests__/shadow-classifier.test.ts` is useful for parser hardening and prompt-shape drift, but much of it is tightly coupled to exact prompt text, delimiter counts, and response formatting details. It is lower-trust evidence for user-visible routing behavior than the parity and dispatch tests.
-- `apps/food/src/__tests__/route-dispatch.test.ts` and `shadow-primary.integration.test.ts` are broad and valuable, but they should be read as routing-flow coverage, not as strong evidence of storage-scope correctness, because shared and user stores are frequently collapsed into one mock.
-- `apps/food/src/__tests__/household-guard.test.ts` is still worth keeping, but it now documents only the legacy shared-store household guard. It should not be treated as evidence that the newer space-aware store-resolution path is covered.
+- The separate PAS-wide `forShared(scope)` selector bug remains open in `docs/open-items.md`. The new food manifest/runtime contract test explicitly documents that limitation and only pins app-relative shared-scope compatibility, not selector-specific semantics.
+- Pantry-photo space-awareness is still intentionally deferred. Phase 7 only migrated recipe, receipt, and grocery photo writes.
+- This phase improves the targeted photo write path, not the entire food active-space model. Non-photo shared-data message/callback flows and cross-scope read/write reconciliation remain deferred to the broader active-space food migration.
 
-## Follow-Up Tasks Opened By Stage 7
+## Follow-Up Tasks Closed By Stage 7
 
-- Add `resolveFoodStore()` coverage in `apps/food/src/__tests__/household-guard.test.ts`, including shared fallback and space-scoped store selection when `spaceId` is present.
-- Add foundational photo/interaction-recording tests proving receipt, recipe, and grocery interaction file paths become `spaces/<spaceId>/food/...` when a space is active.
-- Split shared and user scoped stores in the route-level integration suites so incorrect scope usage can fail visibly.
-- Add food-manifest/runtime compatibility tests that tie `apps/food/manifest.yaml` shared/user scopes to the real store helpers and reject scope drift at the app-contract level.
-- Keep using the current pantry/grocery/recipe/unit tests as the low-level base, but layer contract tests above them instead of replacing them.
+- `resolveFoodStore()` now exists and is covered in `apps/food/src/__tests__/household-guard.test.ts`.
+- Recipe, receipt, and grocery photo writes plus interaction records now have active-space regressions proving `spaces/<spaceId>/food/...` paths.
+- `route-dispatch.test.ts` and `shadow-primary.integration.test.ts` now use distinct shared and user stores so scope mistakes can fail.
+- Food manifest/runtime compatibility is now pinned by `apps/food/src/__tests__/manifest-runtime-contract.test.ts`.
 
 ## Stage 7 Exit Decision
 
-Stage 7 is complete.
+Stage 7 remediation is complete.
 
-The strongest coverage in this stage is around routing taxonomy/parity, ingredient and pantry normalization, store serialization/frontmatter behavior, and concurrency protection for shared food files. The main remaining weaknesses are the unprotected space-aware store contract, the scope-collapsing route integration tests, and the missing manifest-to-runtime data-scope compatibility checks above the local store level.
+The original three Stage 7 review gaps are now closed in code, tests, and traceability docs. Verification for this remediation is: targeted Phase 7 suites passed, `pnpm build` passed, and a full `pnpm test` rerun was blocked by an unrelated timeout in `core/src/services/reports/__tests__/report-service.test.ts` while concurrent Hermes work was in flight. That full-suite timeout was not treated as a Phase 7 remediation target in this pass.

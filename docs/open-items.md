@@ -9,9 +9,8 @@ User manual actions are tracked separately in `user_actions.md`.
 
 These are greenlit but not yet planned. Each needs a spec/plan before coding.
 
-- **D5c** — Per-household LLM cost caps + rate limits + ops dashboard + 40-user load test. All chunks (0–E) complete ✓. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`.
-- **LLM Enhancement #2** — Replace Food's regex router with a fast structured classifier. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
-- **LLM Enhancements #3–#7** — Ambiguous extraction via LLM, DataQuery keyword gate removal, chatbot system-data categorization, knowledge reranker, photo caption confidence routing. Same plan.
+- **LLM Enhancement #3** — Entity/slot extraction: grocery items, quantities, stores, days, portions via `llm.extractStructured`. Extends Enhancement #2's classifier-only approach to structured extraction across Food handlers. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
+- **LLM Enhancements #4–#7** — DataQuery keyword gate removal, chatbot system-data categorization, knowledge reranker, photo caption confidence routing. Same plan.
 - **Phase H12c** — Alcohol + Meal Quality Signals. Deferred pending H12a stabilization.
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until a concrete use case requires it.
 
@@ -33,6 +32,14 @@ Confirmed gaps that need to be addressed; timing depends on which phase picks th
 - **D5a §4 — Collaboration space UX** — `kind: 'collaboration'` is fully modeled but no production code creates one. Add `SpaceService.createCollaboration()`, admin command `/collab create`, GUI screen. Do NOT weaken isolation tests. Target: post-D5c.
 - **One-off task user scope** — `OneOffTask` has no `user_scope` field; all tasks run as `userScope: 'system'`. Apps needing per-user one-off tasks need the schema extended + bootstrap wiring.
 - **Per-space scheduled jobs** — Space-scoped apps have no way to register scheduled jobs that run per-space. Needs scheduler support. (From `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md`.)
+- **Review Phase 7 residual — broader active-space food migration** — Phase 7 only made recipe/receipt/grocery photo writes and interaction records space-aware. Follow `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md` to extend active-space behavior to pantry photos, callback-space plumbing, the major shared-data interactive message/callback flows in `apps/food/src/index.ts`, and cross-scope read/write reconciliation. Keep scheduled jobs shared-only until per-space scheduler support exists. This follow-up should add higher-level regressions proving those flows write to `spaces/<spaceId>/food/...` when a space is active and still fall back to shared when none is active. Depends in part on the separate `forShared(scope)` selector bug above.
+- **Route-first allowlist: 'save a recipe'** — Add `'user wants to save a recipe'` back to Food's `ROUTE_HANDLERS` once `handleEditRecipe` is declared as a manifest intent. Currently omitted because phrases like "edit the lasagna recipe" misclassify as save-intent; the overlap disappears once both intents are manifest-declared with distinct descriptions. (Enhancement #2 A.1)
+- **Route-first allowlist: 'search for a recipe'** — Add `'user wants to search for a recipe'` back to `ROUTE_HANDLERS` once `handleRecipePhotoRetrieval` is declared as a manifest intent. Same root cause as above. (Enhancement #2 A.1)
+- **Route-first allowlist expansion (A.2)** — Cover additional manifest intents (pantry, grocery, leftovers, nutrition) after auditing each for regex-branch collision. Needs design decisions on ambiguous multi-sub-intent cases first. (Enhancement #2 A.2)
+- **Per-handler `is*Intent` classifiers** — `apps/food/src/handlers/{budget,hosting,cultural-calendar-handler,health,nutrition,family}.ts` + `apps/food/src/services/price-store.ts` still use local regex predicates. Most will be bypassed automatically as their manifest intents enter the allowlist; the remainder serve non-manifest sub-intents and stay as fallback.
+- **Chatbot `MODEL_SWITCH_INTENT_REGEX` route-first conversion** — `apps/chatbot/src/index.ts:81`. Apply the same route-first pattern used in Enhancement #2 Food handlers: prefer `ctx.route` intent metadata when available, fall back to the existing regex. Straightforward follow-up.
+- **Enhancement #2 production flip** — Change `routing_primary: shadow` in `config/pas.yaml` once `pnpm analyze-shadow-log` shows ≥95% agreement over ≥1 week of real usage. No code change needed; this is an operational config decision.
+- **D2a non-target food write sites** — FileIndex enrichment was intentionally scoped to the primary food stores. The following are indexed by path/title only and will not surface well in NL queries: freezer, leftovers, waste log, budget history, quick meals, guests, family profiles, ingredient cache. Enrich in a follow-up phase if D2b NL querying reveals gaps. (See `docs/superpowers/specs/2026-04-13-d2a-file-index-foundation-design.md` line 163)
 
 ---
 
@@ -45,21 +52,23 @@ Known issues or cleanup items that should be addressed in a near-term session.
 - **Stage 3 review follow-up — downstream user cleanup policy** — Decide whether `UserMutationService.removeUser()` should also scrub downstream shared state such as space memberships, active-space records, and household admin references. The smaller rollback/sync fixes from Stage 3 are complete; this broader cross-service cleanup question remains open.
 - **Finding 21 — broader Telegram Markdown normalization** — Inline handler messages, budget reporter, household, hosting planner, and cook-mode all send dynamic content without escaping. Phase F9 deferred these to Finding 21. (See `docs/superpowers/specs/2026-04-11-f9-telegram-markdown-escaping-design.md` line 69.)
 - **Provider integration tests** — `GoogleProvider`, `OpenAICompatibleProvider`, and `OllamaProvider` lack dedicated integration tests (REQ-LLM-021). Blocked on API keys being available. Once keys exist, add tests alongside `AnthropicProvider`'s test pattern.
-- **D5c-review F3 — bootstrap pricing not wired into guards** — `bootstrap.ts:208,493` constructs `LLMGuard` and `SystemLLMGuard` without `priceLookup` or resolved `tier`. Both guards fall back to `DEFAULT_LLM_SAFEGUARDS.defaultReservationUsd` (a flat default). Reservations are therefore flat rather than proportional to model pricing. Fix: inject a `PriceLookup` adapter (from `ModelCatalog` pricing) and the resolved tier at bootstrap. Add an integration test asserting reservation size scales with model/tier. Deferred because the flat default is functional and the fix requires `ModelCatalog` pricing integration work.
 - **D5c-review — `revokeLastCheckCommit()` not request-specific under concurrency** — `HouseholdLLMLimiter.revokeLastCheckCommit()` calls `rl.revokeLastCommit(householdId!)` which pops the *last* timestamp. Under concurrent callers at the same `await` point (currently not possible since `reserveEstimated` is sync), rollback could revoke the wrong slot. Low risk today; fix if `reserveEstimated` is ever made async. Consider returning a per-commit handle from `check()` instead of popping last.
 - **D5c Chunk E — rewire `multi-household-isolation.integration.test.ts` to composeRuntime.** The existing 717-line integration test hand-wires ~11 services at the data-layer slice with no LLM/Router path. Rewiring to `composeRuntime()` would drag it through the full service graph with no current motivation. Defer until a future food-app phase expands the test's scope to require LLM.
 - **D5c Chunk E — `composeRuntime({ config })` configPath footgun.** When `config` is overridden but `configPath` is not, `UserMutationService` defaults to the real `config/pas.yaml` and will write-back on invite redemption or user mutation. Current test callers (smoke + load-test) always pass `seed.configPath`, so no one is burned today. Future fix: either require `configPath` when `config` is provided, or derive a temp path automatically. See comment at `compose-runtime.ts` line 182.
-- **D5c Chunk E — chatbot `natural-language.test.ts` assertion brittleness.** Several tests assert on exact prompt substrings and internal call structure. Small prompt-copy refactors could create noisy failures. Future improvement: extract `'PAS-aware path chosen'` / `'basic prompt chosen'` helper assertions so the suite stays expressive without being brittle.
+- **Stage 6 residual — CLI direct-run heuristic** — `core/src/cli/install-app.ts` and `uninstall-app.ts` still decide whether to auto-run by checking whether `process.argv[1]` contains the script name. The runner-level tests now cover command behavior directly, but the entrypoint heuristic itself remains string-based. Tighten this only if a future packaging/runtime environment makes the current check unreliable.
 
 ---
 
 ## Food App Enhancements
 
-Feature work identified in H6 spec (`docs/superpowers/specs/2026-04-02-food-h6-design.md`) but deferred.
+Feature work identified in phase specs but deferred.
 
-- **Waste reporting** — `/waste` command with monthly summary of wasted items and estimated cost.
-- **Meal plan awareness** — Suggest meals based on leftovers and freezer inventory.
-- **Nutrition tracking for waste** — Attribute nutritional/cost loss to wasted food entries.
+- **Waste reporting** — `/waste` command with monthly summary of wasted items and estimated cost. (H6 spec)
+- **Meal plan awareness** — Suggest meals based on leftovers and freezer inventory. (H6 spec)
+- **Nutrition tracking for waste** — Attribute nutritional/cost loss to wasted food entries. (H6 spec)
+- **H5b — Cook mode: timer integration** — Extract timer durations from recipe steps, surface "Set timer" Telegram buttons, wire into one-off scheduler, send notification callback on expiry. (Deferred from H5a)
+- **H5b — Cook mode: TTS / Chromecast output** — Hands-free cooking via audio output: device selection, non-blocking per-step TTS, `tts_device_name` + `auto_advance_timer` + `cook_mode_timeout_hours` config fields. Voice input for step advancement is out of scope until a voice-input service exists. (Deferred from H5a)
+- **H5b — Cook mode: contextual food questions** — While a cook session is active, inject user dietary preferences, allergies, family profile, and active recipe context into the chatbot prompt so in-cooking questions ("can I substitute X?") are context-aware. (Deferred from H5a)
 
 ---
 
@@ -75,6 +84,9 @@ Ideas that are not yet approved. Each has a stated trigger condition.
 - **Smart freeze suitability** — Warn when foods that don't freeze well are being frozen. (H6 spec.)
 - **Batch expiry estimation** — Estimate multiple pantry items in one LLM call instead of per-item. (H6 spec.)
 - **Agentic loops** — 6 agent proposals (Routing-Learning, Data Steward, Receipt/OCR QA, Household Planning, Ops, App Onboarding). See `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
+- **Hermes: tool registry with AST-gated discovery** — Auto-discover tools via AST analysis so runtime registration matches declared exports. Trigger: PAS gains a plug-in tool system. (See `docs/hermes-agent-adoption-review.md`)
+- **Hermes: channel adapter ABC + PLATFORM_HINTS** — Clean abstraction for multi-channel messaging (max length, markdown support, reaction support). Trigger: a second messaging channel is added beyond Telegram. (See `docs/hermes-agent-adoption-review.md`)
+- **Hermes: secret redaction with import-time flag snapshot** — Scrub known secret-shaped strings from any string sent externally or logged. Trigger: conversation transcripts ever leave the local machine. (See `docs/hermes-agent-adoption-review.md`)
 - **Shadow-primary persona sweep (collapsed-bucket overlap)** — Before flipping `routing_primary: shadow` in production, run targeted integration tests for the high-risk many-to-one bucket overlap phrases: freezer-vs-pantry (`add soup to the freezer` vs `add soup to the pantry`), leftover-view-vs-add (`show me my leftovers` vs `just finished the leftover chili`), grocery-generate-vs-view, edit-vs-save recipe, recipe-photo-vs-search, meal-plan generate-vs-view-vs-swap. Each phrase pair verifies the correct sub-dispatch closure fires. NOT one test per FOOD_PERSONAS persona — target the overlap boundaries only. Trigger: ≥95% telemetry agreement reached and production flip is being prepared.
 
 ---
@@ -85,21 +97,5 @@ Documented decisions to live with known imperfections.
 
 - **D40** — `getActiveSpace()` fire-and-forget persist. Acceptable: self-healing on next request.
 - **D42** — Conversation history anti-instruction framing removed. Accepted: continuity > theoretical injection risk.
+- **Callback space semantics — originating scope** — Inline keyboard callbacks resolve space context at tap-time, not button-generation-time. Encoding the originating scope into every callback data string is a large change with low practical impact (buttons are tapped promptly). Accepted as designed.
 
----
-
-## LLM Enhancement #2 — Chunk A follow-up (deferred from 2026-04-22)
-
-The following items are out of scope for Chunk A but must be addressed in future sessions:
-
-| Chunk | Scope | Why deferred |
-|---|---|---|
-| A.1 — Allowlist: 'save a recipe' | Add `'user wants to save a recipe'` back to ROUTE_HANDLERS once `handleEditRecipe` is declared as a manifest intent. Currently removed because phrases like "edit the lasagna recipe" classify as save-intent, causing misrouting. The overlap vanishes once both recipe-save and recipe-edit are manifest-declared with distinct intents. | Overlaps with `handleEditRecipe` — violates strict 1:1 mapping criterion. |
-| A.1 — Allowlist: 'search for a recipe' | Add `'user wants to search for a recipe'` back to ROUTE_HANDLERS once `handleRecipePhotoRetrieval` is declared as a manifest intent. Currently removed because phrases like "show me the recipe photo for X" classify as search-intent. | Overlaps with `handleRecipePhotoRetrieval` — violates strict 1:1 mapping criterion. |
-| A.2 — Expand allowlist | Cover more manifest intents after auditing each for regex-branch collision. Likely adds pantry/grocery/leftovers/nutrition after manifest expansion or disambiguation. | Needs design decisions on ambiguous multi-sub-intent cases first. |
-| B — Food-local fast-tier shadow classifier | `apps/food/src/routing/shadow-classifier.ts` — returns {action, confidence} over Food's internal action taxonomy. Runs in parallel with regex cascade; log-only. | **Complete (2026-04-22).** |
-| C — Shadow integration | Wire `FoodShadowClassifier` + `FoodShadowLogger` into `handleMessage`; `computeVerdict`; `shadow_sample_rate` config; skipped-* gates for all early-exit paths. | **Complete (2026-04-22).** |
-| D — Switchover | Promote shadow classifier to primary once `shadow-classifier-log.md` shows ≥95% agreement over ≥1 week of real usage. After switchover, remove regex cascade or demote to fallback. | **Complete (2026-04-23).** Shadow-primary machinery (`routing_primary` flag, `SHADOW_HANDLERS` table, `shadow_min_confidence` threshold, result reuse) + telemetry CLI (`pnpm analyze-shadow-log`) shipped. Production flip is a one-line config decision gated on ≥95% telemetry. Regex cascade remains as fallback. |
-| Per-handler `is*Intent` classifiers | `apps/food/src/handlers/{budget,hosting,cultural-calendar-handler,health,nutrition,family}.ts` + `apps/food/src/services/price-store.ts`. | Many bypassed automatically when their manifest intent enters the allowlist. Remainder serve non-manifest sub-intents — stay as fallback. |
-| Chatbot `MODEL_SWITCH_INTENT_REGEX` | `apps/chatbot/src/index.ts:78`. Same route-first pattern applied to chatbot. | Same approach, different app — straightforward follow-up. |
-| Entity/slot extraction | Grocery items, quantities, stores, days, portions via `llm.extractStructured`. | User said classification only this session. |

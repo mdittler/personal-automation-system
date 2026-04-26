@@ -117,14 +117,16 @@ function makeRoute(intent: string, overrides: Partial<RouteInfo> = {}): RouteInf
 describe('shadow-primary router integration (Chunk D)', () => {
     let services: ReturnType<typeof createMockCoreServices>;
     let store: ScopedDataStore;
+    let userStore: ScopedDataStore;
     let captureLogger: CaptureLogger;
 
     beforeEach(async () => {
         store = createMockScopedStore();
+        userStore = createMockScopedStore();
         services = createMockCoreServices();
 
         vi.mocked(services.data.forShared).mockReturnValue(store as any);
-        vi.mocked(services.data.forUser).mockReturnValue(store as any);
+        vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
 
         // Default: no household (tests that need one override this)
         vi.mocked(store.read).mockResolvedValue('');
@@ -146,7 +148,7 @@ describe('shadow-primary router integration (Chunk D)', () => {
 
         // Re-install after clearAllMocks
         vi.mocked(services.data.forShared).mockReturnValue(store as any);
-        vi.mocked(services.data.forUser).mockReturnValue(store as any);
+        vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
         vi.mocked(store.read).mockResolvedValue('');
         vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
         vi.mocked(services.llm.classify).mockResolvedValue({ category: 'none', confidence: 0.1 });
@@ -207,6 +209,35 @@ describe('shadow-primary router integration (Chunk D)', () => {
         expect(e.regexWinner).toBe('(shadow-dispatched)');
         expect(e.verdict).toBe('shadow-dispatched');
         expect(e.shadowSuppressedByThreshold).toBeUndefined();
+    });
+
+    it('(a2) macro-adherence shadow dispatch reads targets from the user store after the shared household guard', async () => {
+        vi.mocked(store.read).mockImplementation(async (path: string) => {
+            if (path === 'household.yaml') return stringify(sampleHousehold);
+            throw new Error('adherence route must not read user nutrition data from shared household storage');
+        });
+        vi.mocked(userStore.read).mockImplementation(async (path: string) => {
+            if (path === 'nutrition/targets.yaml') return 'calories: 2000\nprotein: 150';
+            return '';
+        });
+
+        const stub = makeStubClassifier({
+            kind: 'ok',
+            action: 'user wants to see how well they are hitting their macro targets over time',
+            confidence: 0.95,
+        });
+        __setShadowDepsForTests(stub, captureLogger);
+
+        await handleMessage(createTestMessageContext({ userId: 'user1', text: 'am i hitting my targets lately?' }));
+        await __flushShadowForTests();
+
+        expect(stub.callCount).toBe(1);
+        expect(services.data.forUser).toHaveBeenCalledWith('user1');
+        expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
+
+        const e = lastEntry();
+        expect(e.regexWinner).toBe('(shadow-dispatched)');
+        expect(e.verdict).toBe('shadow-dispatched');
     });
 
     // =========================================================================
@@ -496,7 +527,7 @@ describe('shadow-primary router integration (Chunk D)', () => {
 
         // Re-install mocks after clearAllMocks
         vi.mocked(services.data.forShared).mockReturnValue(store as any);
-        vi.mocked(services.data.forUser).mockReturnValue(store as any);
+        vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
         vi.mocked(store.read).mockResolvedValue('');
         vi.mocked(services.config.get).mockImplementation(async (key: string) => {
             if (key === 'shadow_sample_rate') return 1 as never;
@@ -795,6 +826,32 @@ describe('shadow-primary router integration (Chunk D)', () => {
         expect(wasteCall, 'handleWasteIntent must have sent waste log confirmation').toBeDefined();
         const noLeftoversCall = sends.find(([, msg]) => msg.includes('🥘 You have no leftovers tracked'));
         expect(noLeftoversCall, 'handleLeftoversView must NOT fire').toBeUndefined();
+    });
+
+    it('(s4b) leftovers bucket fallback: unmatched leftover phrase routes to leftover view', async () => {
+        vi.mocked(store.read).mockImplementation(async (path: string) => {
+            if (path === 'household.yaml') return stringify(sampleHousehold);
+            return '';
+        });
+
+        const stub = makeStubClassifier({
+            kind: 'ok', action: 'user wants to log leftovers', confidence: 0.9,
+        });
+        __setShadowDepsForTests(stub, captureLogger);
+
+        await handleMessage(createTestMessageContext({ userId: 'user1', text: 'store this chili for later' }));
+        await __flushShadowForTests();
+
+        expect(stub.callCount).toBe(1);
+        const e = lastEntry();
+        expect(e.regexWinner).toBe('(shadow-dispatched)');
+        expect(e.verdict).toBe('shadow-dispatched');
+
+        const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+        const viewCall = sends.find(([, msg]) => msg.includes('🥘 You have no leftovers tracked'));
+        expect(viewCall, 'fallback should route to leftover view').toBeDefined();
+        const addPromptCall = sends.find(([, msg]) => msg.includes('What leftovers do you have'));
+        expect(addPromptCall, 'handleLeftoverAddIntent prompt must NOT fire').toBeUndefined();
     });
 
     // (s5) grocery-list bucket — grocery_generate sub-intent

@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-INFRA-001 |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-23 |
+| **Last Updated** | 2026-04-25 |
 
 ## Conventions
 
@@ -71,6 +71,7 @@ App manifests must be validated against the JSON Schema. Valid manifests (minima
 - `validate-manifest.test.ts` > valid manifests > accepts a bare minimum manifest (only app identity)
 - `validate-manifest.test.ts` > user_config constraints > accepts select type with options provided
 - `validate-manifest.test.ts` > service enum validation > accepts all valid service names
+- `bundled-manifests.test.ts` > bundled manifests > validate and avoid app-prefixed scope paths
 
 **Edge case tests:**
 - `validate-manifest.test.ts` > missing required fields > rejects manifest without app block
@@ -1348,7 +1349,7 @@ The registry must discover apps by scanning the apps directory for `manifest.yam
 **Standard tests:**
 - `loader.test.ts` > discoverApps > should find directories with manifest.yaml
 - `loader.test.ts` > loadManifest > should load and validate a valid manifest
-- `loader.test.ts` > importModule > should import a valid TypeScript app module
+- `loader.test.ts` > importModule > imports a safe package.json main entry before dev fallbacks
 - `registry.test.ts` > should load a valid app and register it
 - `registry.test.ts` > should return manifest cache with loaded manifests
 
@@ -2835,13 +2836,21 @@ The chatbot's LLM calls use `maxTokens: 2048` (raised from 1024 in Phase 16). Ap
 
 **Category:** Data Access  **Phase:** D2b  **Status:** Implemented
 
-When `classifyPASMessage()` returns `YES_DATA`, the chatbot calls `DataQueryService.query()` with the user's message and userId. The returned files are formatted via `formatDataQueryContext()` and injected into the system prompt via `sanitizeInput()`. The LLM response incorporates the data context when answering. DataQueryService is only called when the service is available and `auto_detect_pas` is enabled.
+When `classifyPASMessage()` returns `YES_DATA`, the chatbot calls `DataQueryService.query()` with the user's message and userId. When recent interaction context exists, it also forwards a deduped `recentFilePaths` hint list so follow-up questions stay anchored to the user's newest authorized files. The returned files are formatted via `formatDataQueryContext()` and injected into the system prompt via `sanitizeInput()`. The LLM response incorporates the data context when answering. DataQueryService is only called when the service is available and `auto_detect_pas` is enabled.
+
+**Standard tests:**
+- `data-query-wiring.test.ts` > handleMessage — DataQueryService wiring (D2b) > calls DataQueryService when classifyPASMessage returns dataQueryCandidate: true
+- `context-injection.test.ts` > handleMessage — context injection wiring (Phase 4b) > passes recentFilePaths to DataQueryService when entries have filePaths
 
 ### REQ-CHATBOT-017: /ask uses LLM classifier for data detection
 
 **Category:** Data Access  **Phase:** D2b  **Status:** Implemented
 
-The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMessage`) to detect data queries, replacing the previous keyword-matching gate. When the classifier returns `YES_DATA`, `/ask` calls DataQueryService and injects the data context. This ensures consistent data detection behavior across both the main message handler and the `/ask` command.
+The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMessage`) to detect data queries, replacing the previous keyword-matching gate. When the classifier returns `YES_DATA`, `/ask` calls DataQueryService and injects the data context. When recent interaction context exists, `/ask` forwards the deduped `recentFilePaths` hint list so follow-up data questions stay aligned with the user's newest authorized files. This ensures consistent data detection behavior across both the main message handler and the `/ask` command.
+
+**Standard tests:**
+- `data-query-wiring.test.ts` > /ask command — DataQueryService wiring (D2b) > calls DataQueryService for /ask when classifier returns YES_DATA
+- `context-injection.test.ts` > /ask command — context injection wiring (Phase 4b) > passes recentFilePaths to DataQueryService in /ask
 
 ### REQ-CHATBOT-018: ConversationHistory module in core
 
@@ -3005,12 +3014,26 @@ The `defaults.fallback` field in pas.yaml controls fallback behavior: `chatbot` 
 
 ### REQ-REGISTRY-004: App packaging and install CLI
 
-**Phase:** 17 | **Status:** Planned
+**Phase:** 17 | **Status:** Implemented
 
-Support `pas install <git-url>` for installing apps from git repos with manifest validation, static analysis, and compatibility checks.
+Support packaged app loading and install-time review as a real runtime contract. The loader must honor safe compiled entrypoints (`package.json.main` and `dist/index.js`) before source fallbacks, and the install flow must expose a reviewable permission plan before commit.
 
-**Standard tests:** TBD
-**Edge case tests:** TBD
+**Standard tests:**
+- `loader.test.ts` > importModule > imports a safe package.json main entry before dev fallbacks
+- `loader.test.ts` > importModule > falls back to dist/index.js when package.json main is missing
+- `loader.test.ts` > importModule > accepts package.json main entries pointing to dist/index.mjs
+- `loader.test.ts` > importModule > accepts package.json main entries pointing to dist/index.cjs
+- `registry.test.ts` > loads a compiled app through loadAll when src/index.ts is broken
+- `install-app.test.ts` > install-app CLI > prints the permission summary before commit on approval
+
+**Edge case tests:**
+- `loader.test.ts` > importModule > ignores package.json main traversal attempts and falls back safely
+- `loader.test.ts` > importModule > ignores absolute package.json main paths and falls back safely
+- `loader.test.ts` > importModule > ignores unsupported package.json main extensions and keeps the fallback chain alive
+- `loader.test.ts` > importModule > skips malformed compiled candidates and keeps dev fallbacks alive
+- `installer.test.ts` > App Installer > planInstallApp returns a prepared install without copying into apps/ or running pnpm install
+- `install-app.test.ts` > install-app CLI > prints the permission summary before prompting and cancels cleanly
+- `install-app.test.ts` > install-app CLI > prints the permission summary and skips the prompt with --yes
 
 ### REQ-DATA-004: Manifest-scoped data access enforcement
 
@@ -3155,13 +3178,14 @@ LLM calls must be subject to a household-wide rate limit (not per-app-per-househ
 
 **Phase:** D5c | **Status:** Implemented
 
-Each household must have a configurable monthly cost cap enforced via `CostTracker.getMonthlyHouseholdCost()` + outstanding reservations. Default: $20/month per household. Optional per-household override via `llm.safeguards.household_overrides.<id>.monthly_cost_cap`. When the cap is reached, further LLM calls from that household throw `LLMCostCapError('household', ...)`. Platform-attributed calls (no real household context) are exempt from the per-household cap but counted toward the global cap. System/API calls that run under a real household context are enforced.
+Each household must have a configurable monthly cost cap enforced via `CostTracker.getMonthlyHouseholdCost()` + outstanding reservations. Default: $20/month per household. Optional per-household override via `llm.safeguards.household_overrides.<id>.monthly_cost_cap`. When the cap is reached, further LLM calls from that household throw `LLMCostCapError('household', ...)`. Platform-attributed calls (no real household context) are exempt from the per-household cap but counted toward the global cap. System/API calls that run under a real household context are enforced. In the composed runtime, reservation estimates must use the live tier/model pricing selected by `ModelSelector`, not a flat bootstrap default.
 
 **Standard tests:**
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > allows when persisted + estimate < cap
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > denies when persisted + estimate >= cap (exact equality = deny)
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > household cost denied: no rate commits; no reserve; inner NOT called
 - `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > household cost denied → LLMCostCapError{scope:household}; inner NOT called
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > uses live tier pricing when reserving estimated LLM cost
 
 **Edge case tests:**
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > checkCost() > thrown error carries scope, householdId, cap
@@ -3191,7 +3215,7 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 
 **Phase:** D5c | **Status:** Implemented
 
-`CostTracker` must provide `reserveEstimated(householdId, appId, userId, estimatedCost) → reservationId` and `releaseReservation(reservationId, actualCost | null)`. `checkCostCap()` must sum persisted costs plus outstanding reservations to prevent concurrent LLM bursts from bypassing the cap. Reservations expire after 60 seconds if not released. Acceptable overshoot bound: one concurrent batch × max per-request estimate (≈ $0.20 worst case). Reservation expiry must be tested. Billing reconciliation on `record()` must replace the reservation amount with the actual cost.
+`CostTracker` must provide `reserveEstimated(householdId, appId, userId, estimatedCost) → reservationId` and `releaseReservation(reservationId, actualCost | null)`. `checkCostCap()` must sum persisted costs plus outstanding reservations to prevent concurrent LLM bursts from bypassing the cap. Reservations expire after 60 seconds if not released. Acceptable overshoot bound: one concurrent batch × max per-request estimate (≈ $0.20 worst case). Reservation expiry must be tested. Billing reconciliation on `record()` must replace the reservation amount with the actual cost. Guarded calls must estimate with the effective runtime tier for that call (`options.tier` when present, otherwise the guard default tier), and composed runtime guards must read pricing from the live `ModelSelector`.
 
 **Standard tests:**
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > delegates to CostTracker for enforced household (returns the tracker id)
@@ -3199,6 +3223,9 @@ Each household must have a configurable monthly cost cap enforced via `CostTrack
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > success path: releaseReservation called exactly once with (id, null)
 - `llm-guard.test.ts` > LLMGuard + HouseholdLLMLimiter integration > inner rejects: releaseReservation called once; original error propagates
 - `system-llm-guard.test.ts` > SystemLLMGuard + HouseholdLLMLimiter integration > success: releaseReservation called once with (id, null)
+- `llm-guard.test.ts` > complete() > uses per-call tier override for reservation estimation
+- `system-llm-guard.test.ts` > complete() > uses per-call tier override for reservation estimation
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > app-owned chatbot calls reserve priced amounts instead of the flat fallback
 
 **Edge case tests:**
 - `household-llm-limiter.test.ts` > HouseholdLLMLimiter > reserveEstimated() — side-effect only > returns PLATFORM_NOOP_RESERVATION for platform id = undefined; CostTracker untouched
@@ -3257,10 +3284,13 @@ The `/gui/llm` page must display a Live section with active household count and 
 
 **Phase:** D5c | **Status:** Implemented
 
-`composeRuntime(overrides?)` in `core/src/compose-runtime.ts` returns a `RuntimeHandle` with the full service graph, a constructed Fastify instance, and a constructed Telegraf bot — without starting Fastify, Telegraf, the scheduler, or signal handlers. Overrides allow injecting a stub provider registry, a fake telegram service, a custom dataDir, a custom configPath, and a custom config. `dispose()` delegates to `ShutdownManager.performTeardown()` for a single shared teardown path.
+`composeRuntime(overrides?)` in `core/src/compose-runtime.ts` returns a `RuntimeHandle` with the full service graph, a constructed Fastify instance, and a constructed Telegraf bot — without starting Fastify, Telegraf, the scheduler, or signal handlers. Overrides allow injecting a stub provider registry, a fake telegram service, a custom dataDir, a custom configPath, and a custom config. `dispose()` delegates to `ShutdownManager.performTeardown()` for a single shared teardown path. The composed runtime must wire live `PriceLookup` adapters into app/system/API guards and thread the shared `InteractionContextService` into both apps and `EditService`.
 
 **Standard tests:**
 - `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > constructs a fully wired runtime without starting Telegraf, Fastify, or scheduler
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > uses live tier pricing when reserving estimated LLM cost
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > app-owned chatbot calls reserve priced amounts instead of the flat fallback
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > /edit ignores unauthorized recentFilePaths from another user
 - `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > routed messages appear as exactly one new 9-col row in llm-usage.md with correct userId + householdId
 - `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > dispose() completes without throwing
 - `shutdown.test.ts` > performTeardown > runs full 8-step disposal order including server.close last
@@ -3730,11 +3760,12 @@ The compatibility checker must validate that an app's declared `pas_core_version
 
 **Phase:** 17 | **Status:** Implemented
 
-The app installer must orchestrate a complete installation pipeline: validate git URL (rejecting `file://` and shell metacharacters), clone the repository, validate the manifest against JSON Schema, check for duplicate app IDs, verify CoreServices compatibility, run static analysis, build a permission summary, copy to `apps/`, and install dependencies. Each failure mode must return a structured error with a descriptive type code and message. Failed dependency installs must clean up the target directory.
+The app installer must orchestrate a complete installation pipeline: validate git URL (rejecting `file://` and shell metacharacters), clone the repository, validate the manifest against JSON Schema, check for duplicate app IDs, verify CoreServices compatibility, run static analysis, build a permission summary, copy to `apps/`, and install dependencies. The planning phase must be able to produce a permission summary without copying into `apps/` or running `pnpm install`, and the prepared install cleanup handle must be safe to dispose more than once. Each failure mode must return a structured error with a descriptive type code and message. Failed dependency installs must clean up the target directory.
 
 **Standard tests:**
 - `installer.test.ts` > App Installer > should successfully install a valid app
 - `installer.test.ts` > App Installer > should build correct permission summary
+- `installer.test.ts` > App Installer > planInstallApp returns a prepared install without copying into apps/ or running pnpm install
 - `installer.test.ts` > App Installer > should copy app to apps/<app-id>/ directory
 - `installer.test.ts` > App Installer > should call pnpm install after copying
 
@@ -3743,8 +3774,11 @@ The app installer must orchestrate a complete installation pipeline: validate gi
 - `installer.test.ts` > App Installer > should pass when pas_core_version is satisfied
 - `installer.test.ts` > App Installer > should accept SSH git URLs
 - `installer.test.ts` > App Installer > should handle invalid YAML in manifest
+- `installer.test.ts` > App Installer > PreparedInstall.dispose() is idempotent after planning
 
 **Error handling tests:**
+- `installer.test.ts` > App Installer > returns INVALID_STATE when commit() is called after the prepared install is disposed
+- `installer.test.ts` > App Installer > should report COPY_FAILED when copying into apps/ fails
 - `installer.test.ts` > App Installer > should reject empty git URL
 - `installer.test.ts` > App Installer > should report clone failure
 - `installer.test.ts` > App Installer > should report missing manifest.yaml
@@ -3765,47 +3799,36 @@ The app installer must orchestrate a complete installation pipeline: validate gi
 
 **Phase:** 17 | **Status:** Implemented
 
-The `pnpm install-app <git-url>` CLI command must validate URL format (HTTPS and SSH), detect shell metacharacters, and support `--yes`/`-y` flags for non-interactive mode. URL validation must reject bare paths, `file://` URLs, and command injection attempts.
+The `pnpm install-app <git-url>` CLI command must show a validated permission summary before side effects, prompt for approval unless `--yes`/`-y` is present, and only then commit the install. Failures in planning or commit must be surfaced to the operator, and prepared-install cleanup must still run when commit fails.
 
 **Standard tests:**
-- `install-app.test.ts` > install-app CLI > URL validation > should accept valid HTTPS URLs
-- `install-app.test.ts` > install-app CLI > URL validation > should accept valid SSH URLs
-- `install-app.test.ts` > install-app CLI > argument parsing > should extract git URL from args
+- `install-app.test.ts` > install-app CLI > prints the permission summary before commit on approval
+- `install-app.test.ts` > install-app CLI > prints the permission summary and skips the prompt with --yes
+- `install-app.test.ts` > install-app CLI > parseYesFlag > returns true when --yes is present
+- `install-app.test.ts` > install-app CLI > parseYesFlag > returns true when -y is present
 
 **Edge case tests:**
-- `install-app.test.ts` > install-app CLI > URL validation > should reject file:// URLs
-- `install-app.test.ts` > install-app CLI > argument parsing > should detect --yes flag
-- `install-app.test.ts` > install-app CLI > argument parsing > should detect -y flag
-- `install-app.test.ts` > install-app CLI > argument parsing > should handle missing URL
-
-**Security tests:**
-- `install-app.test.ts` > install-app CLI > URL validation > should reject URLs with semicolons
-- `install-app.test.ts` > install-app CLI > URL validation > should reject URLs with pipe characters
-- `install-app.test.ts` > install-app CLI > URL validation > should reject URLs with backticks
-- `install-app.test.ts` > install-app CLI > URL validation > should reject URLs with dollar signs
-- `install-app.test.ts` > install-app CLI > URL validation > should reject bare paths
+- `install-app.test.ts` > install-app CLI > prints usage when git URL is missing
+- `install-app.test.ts` > install-app CLI > prints the permission summary before prompting and cancels cleanly
+- `install-app.test.ts` > install-app CLI > prints planner failures without prompting or committing
+- `install-app.test.ts` > install-app CLI > reports commit failures and still disposes the prepared install
+- `install-app.test.ts` > install-app CLI > still disposes the prepared install when commit throws unexpectedly
 
 ### REQ-INSTALL-005: Uninstall CLI entry point
 
 **Phase:** 17 | **Status:** Implemented
 
-The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo, chatbot) from uninstallation, verify the app directory exists, and remove the directory recursively. Invalid app IDs including path traversal attempts must be rejected.
+The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo, chatbot) from uninstallation, verify the app directory exists, remove the directory recursively, and print restart guidance after a successful uninstall. Invalid app IDs including path traversal attempts must be rejected before filesystem mutation.
 
 **Standard tests:**
-- `uninstall-app.test.ts` > uninstall-app CLI > app ID validation > should accept valid app IDs
-- `uninstall-app.test.ts` > uninstall-app CLI > protected apps > should protect built-in echo app
-- `uninstall-app.test.ts` > uninstall-app CLI > directory removal > should remove an existing app directory
+- `uninstall-app.test.ts` > uninstall-app CLI > removes the app directory and prints restart guidance on success
 
 **Edge case tests:**
-- `uninstall-app.test.ts` > uninstall-app CLI > app ID validation > should reject app IDs starting with numbers
-- `uninstall-app.test.ts` > uninstall-app CLI > app ID validation > should reject app IDs with uppercase letters
-- `uninstall-app.test.ts` > uninstall-app CLI > app ID validation > should reject empty app IDs
-- `uninstall-app.test.ts` > uninstall-app CLI > protected apps > should protect built-in chatbot app
-- `uninstall-app.test.ts` > uninstall-app CLI > protected apps > should not protect custom apps
-- `uninstall-app.test.ts` > uninstall-app CLI > directory removal > should detect non-existent app directory
-
-**Security tests:**
-- `uninstall-app.test.ts` > uninstall-app CLI > app ID validation > should reject app IDs with path traversal
+- `uninstall-app.test.ts` > uninstall-app CLI > prints usage when app ID is missing
+- `uninstall-app.test.ts` > uninstall-app CLI > rejects invalid app IDs before touching the filesystem
+- `uninstall-app.test.ts` > uninstall-app CLI > rejects protected built-in apps
+- `uninstall-app.test.ts` > uninstall-app CLI > reports a missing app
+- `uninstall-app.test.ts` > uninstall-app CLI > returns an error when removing the app directory fails
 
 ### REQ-INSTALL-006: Manifest v2 fields
 
@@ -3838,18 +3861,13 @@ The manifest schema and types must support optional v2 fields: `pas_core_version
 The system must provide a CLI command (`pnpm uninstall-app <app-id>`) that removes an installed app. The CLI must validate the app ID format, reject attempts to uninstall built-in apps (echo, chatbot), verify the app directory exists, remove the app directory recursively, and advise the user to restart PAS.
 
 **Standard tests:**
-- `uninstall-app.test.ts` > `App ID validation` > `should accept valid app IDs`
-- `uninstall-app.test.ts` > `App ID validation` > `should accept hyphenated app IDs`
-- `uninstall-app.test.ts` > `App removal` > `should remove existing app directory`
-- `uninstall-app.test.ts` > `App removal` > `should handle non-existent app`
+- `uninstall-app.test.ts` > uninstall-app CLI > removes the app directory and prints restart guidance on success
 
 **Edge case tests:**
-- `uninstall-app.test.ts` > `App ID validation` > `should reject IDs with uppercase letters`
-- `uninstall-app.test.ts` > `App ID validation` > `should reject IDs starting with numbers`
-- `uninstall-app.test.ts` > `App ID validation` > `should reject IDs with special characters`
-- `uninstall-app.test.ts` > `App ID validation` > `should reject empty ID`
-- `uninstall-app.test.ts` > `Protected apps` > `should protect echo app`
-- `uninstall-app.test.ts` > `Protected apps` > `should protect chatbot app`
+- `uninstall-app.test.ts` > uninstall-app CLI > prints usage when app ID is missing
+- `uninstall-app.test.ts` > uninstall-app CLI > rejects invalid app IDs before touching the filesystem
+- `uninstall-app.test.ts` > uninstall-app CLI > rejects protected built-in apps
+- `uninstall-app.test.ts` > uninstall-app CLI > reports a missing app
 
 ---
 
@@ -3913,6 +3931,7 @@ The notes example app demonstrates commands (/note, /notes, /summarize), intents
 - `notes.test.ts` > `should list recent notes`
 - `notes.test.ts` > `should call LLM and send summary`
 - `notes.test.ts` > `should send empty message when no notes`
+- `manifest-scope-contract.test.ts` > bundled manifest scope contract > notes accepts daily notes and rejects traversal outside its declared scope
 
 **Edge case tests:**
 - `notes.test.ts` > `should handle empty message text gracefully`
@@ -3920,6 +3939,7 @@ The notes example app demonstrates commands (/note, /notes, /summarize), intents
 - `notes.test.ts` > `should show usage when /note has no text`
 - `notes.test.ts` > `should respect notes_per_page config`
 - `notes.test.ts` > `should handle no notes gracefully` (summarize)
+- `manifest-scope-contract.test.ts` > bundled manifest scope contract > notes accepts daily notes and rejects traversal outside its declared scope
 - `notes.test.ts` > `should handle LLM failure gracefully`
 
 ---
@@ -5653,13 +5673,23 @@ FileIndexService scans `users/` and `spaces/` directories at startup, indexes `.
 
 **Category:** Data Access  **Phase:** D2b  **Status:** Implemented
 
-`DataQueryService.query(question, userId)` queries `FileIndexService` for candidate files scoped to the requesting user (personal files and files in spaces the user belongs to). It calls a fast-tier LLM to select relevant file IDs from the candidates, validates the returned IDs against the pre-authorized candidate set (preventing LLM-injected IDs), reads file content, and returns a `DataQueryResult` with the selected files and their content.
+`DataQueryService.query(question, userId, options?)` queries `FileIndexService` for candidate files scoped to the requesting user (personal files and files in spaces the user belongs to). When `options.recentFilePaths` is present, the service intersects those paths with the authorized candidate set and prepends the surviving files as priority candidates before the normal keyword pre-filter. It calls a fast-tier LLM to select relevant file IDs from the candidates, validates the returned IDs against the pre-authorized candidate set (preventing LLM-injected IDs), reads file content, and returns a `DataQueryResult` with the selected files and their content.
+
+**Standard tests:**
+- `data-query.test.ts` > query() > returns relevant files within the user's authorized scope
+- `context-hints.test.ts` > DataQueryService context hints > recent authorized files are prepended as priority candidates
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > /edit ignores unauthorized recentFilePaths from another user
 
 ### REQ-DATAQUERY-002: LLM file selection validated against pre-authorized candidate set
 
 **Category:** Security  **Phase:** D2b  **Status:** Implemented
 
-File IDs returned by the LLM file selection call are validated against the set of candidate IDs that were provided to the LLM. IDs not in the pre-authorized set are silently discarded. The fallback regex for prose responses uses `(?<![-.\d])\b\d+\b(?!\.\d)` to reject negative and float-adjacent numbers. This prevents the LLM from selecting files outside the user's authorized scope.
+File IDs returned by the LLM file selection call are validated against the set of candidate IDs that were provided to the LLM. IDs not in the pre-authorized set are silently discarded. `recentFilePaths` hints are intersected with that same authorized set before they become priority candidates, so poisoned or cross-user paths are silently dropped. The fallback regex for prose responses uses `(?<![-.\d])\b\d+\b(?!\.\d)` to reject negative and float-adjacent numbers. This prevents the LLM from selecting files outside the user's authorized scope.
+
+**Standard tests:**
+- `data-query.test.ts` > query() > ignores LLM-selected file IDs not present in the authorized candidate set
+- `context-hints.test.ts` > DataQueryService context hints > unauthorized recentFilePaths are dropped before priority selection
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > /edit ignores unauthorized recentFilePaths from another user
 
 ### REQ-DATAQUERY-003: Multi-household scope isolation
 
@@ -5743,7 +5773,7 @@ All food app write sites include `type` and `app: food` in generated frontmatter
 
 **Phase:** D2c | **Status:** Implemented
 
-Records the last 5 interactions per user with a 10-minute TTL. Each entry captures `appId`, `action`, optional `entityType`/`entityId`, canonical `filePaths`, `scope`, and arbitrary `metadata`. `record()` is synchronous and never throws. `getRecent()` returns entries newest-first, filtered by TTL. Strict userId isolation — no user can see another's entries.
+Records the last 5 interactions per user with a 10-minute TTL. Each entry captures `appId`, `action`, optional `entityType`/`entityId`, canonical `filePaths`, `scope`, and arbitrary `metadata`. `record()` is synchronous and never throws. `getRecent()` returns entries newest-first, filtered by TTL. Strict userId isolation — no user can see another's entries. Downstream callers that flatten `filePaths` must preserve that newest-first ordering so recent-context hints remain semantically correct.
 
 **Standard tests:**
 - `interaction-context.test.ts` > InteractionContextService > records entries and returns them newest-first
@@ -5751,6 +5781,7 @@ Records the last 5 interactions per user with a 10-minute TTL. Each entry captur
 - `interaction-context.test.ts` > InteractionContextService > stamps timestamp automatically on record()
 - `interaction-context.test.ts` > InteractionContextService > preserves optional fields on InteractionEntry
 - `integration.test.ts` > InteractionContextService integration > receipt → context flow: recorded entry is returned by getRecent with correct filePaths
+- `edit.test.ts` > proposeEdit: passes deduped newest-first recentFilePaths to DataQueryService
 
 **Edge case tests:**
 - `interaction-context.test.ts` > InteractionContextService > caps buffer at 5 entries, evicting oldest on 6th add
@@ -5766,7 +5797,7 @@ Records the last 5 interactions per user with a 10-minute TTL. Each entry captur
 
 **Phase:** D2c | **Status:** Implemented
 
-`InteractionContextService` is constructed once at bootstrap and conditionally injected into apps that declare `interaction-context` in their manifest. All apps receive the same singleton instance, enabling cross-app context sharing within the same process. Apps not declaring the service receive `undefined`.
+`InteractionContextService` is constructed once at bootstrap and conditionally injected into apps that declare `interaction-context` in their manifest. The same singleton is also threaded into `EditService` so `/edit` can reuse the user's recent authorized file history. All apps receive the same singleton instance, enabling cross-app context sharing within the same process. Apps not declaring the service receive `undefined`.
 
 **Standard tests:**
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > structural source scan > bootstrap.ts imports InteractionContextServiceImpl
@@ -5775,6 +5806,7 @@ Records the last 5 interactions per user with a 10-minute TTL. Each entry captur
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > app NOT declaring interaction-context receives undefined
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > injected service is functional — record() and getRecent() work
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > conditional injection logic > same singleton is injected regardless of which app requests it
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime smoke > /edit ignores unauthorized recentFilePaths from another user
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > manifest declarations > chatbot manifest declares interaction-context
 - `bootstrap-wiring.test.ts` > InteractionContextService bootstrap wiring > manifest declarations > food manifest declares interaction-context
 
@@ -5824,11 +5856,11 @@ On startup, `loadFromDisk()` is awaited before Telegram handlers register. It re
 
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-REGISTRY-004, REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
+The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|
-| REQ-MANIFEST-001 | validate-manifest.test.ts | 5 | 14 | Implemented |
+| REQ-MANIFEST-001 | validate-manifest.test.ts, bundled-manifests.test.ts | 6 | 14 | Implemented |
 | REQ-DATA-001 | scoped-store.test.ts | 8 | 6 | Implemented |
 | REQ-DATA-002 | scoped-store.test.ts | 2 | 2 | Implemented |
 | REQ-DATA-003 | change-log.test.ts | 6 | 2 | Implemented |
@@ -5877,6 +5909,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-REGISTRY-001 | loader.test.ts, registry.test.ts | 5 | 8 | Implemented |
 | REQ-REGISTRY-002 | manifest-cache.test.ts | 6 | 5 | Implemented |
 | REQ-REGISTRY-003 | registry.test.ts | 1 | 3 | Implemented |
+| REQ-REGISTRY-004 | loader.test.ts, registry.test.ts, install-app.test.ts, installer.test.ts | 6 | 7 | Implemented |
 | REQ-USER-001 | user-manager.test.ts | 5 | 5 | Implemented |
 | REQ-USER-002 | user-manager.test.ts, router.test.ts | 3 | 6 | Implemented |
 | REQ-USER-003 | user-manager.test.ts | 1 | 5 | Implemented |
@@ -5927,10 +5960,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-LLM-023 | system-llm-guard.test.ts | 6 | 8 | Implemented |
 | REQ-LLM-024 | llm-usage.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
-| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts | 9 | 12 | Implemented |
-| REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts | 8 | 8 | Implemented |
+| REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts, compose-runtime.smoke.integration.test.ts | 10 | 13 | Implemented |
+| REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts, compose-runtime.smoke.integration.test.ts | 10 | 11 | Implemented |
 | REQ-LLM-028 | message-rate-tracker.test.ts, message-rate-tracker-wiring.integration.test.ts, llm-usage.test.ts | 8 | 15 | Implemented |
-| REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 7 | 0 | Implemented |
+| REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 10 | 0 | Implemented |
 | REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
 | REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts, natural-language-route-dispatch.test.ts | 18 | 28 | Implemented |
 | REQ-LLM-032 | shadow-taxonomy.test.ts, shadow-logger.test.ts | 54 | 30 | Implemented |
@@ -5957,14 +5990,14 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-CONFIG-004 | config.test.ts | 2 | 2 | Implemented |
 | REQ-INSTALL-001 | static-analyzer.test.ts | 5 | 16 | Implemented |
 | REQ-INSTALL-002 | compatibility-checker.test.ts | 5 | 9 | Implemented |
-| REQ-INSTALL-003 | installer.test.ts | 4 | 17 | Implemented |
-| REQ-INSTALL-004 | install-app.test.ts | 3 | 9 | Implemented |
-| REQ-INSTALL-005 | uninstall-app.test.ts | 3 | 7 | Implemented |
+| REQ-INSTALL-003 | installer.test.ts | 5 | 20 | Implemented |
+| REQ-INSTALL-004 | install-app.test.ts | 4 | 5 | Implemented |
+| REQ-INSTALL-005 | uninstall-app.test.ts | 1 | 5 | Implemented |
 | REQ-INSTALL-006 | validate-manifest.test.ts | 1 | 7 | Implemented |
-| REQ-INSTALL-007 | uninstall-app.test.ts | 4 | 6 | Implemented |
+| REQ-INSTALL-007 | uninstall-app.test.ts | 1 | 4 | Implemented |
 | REQ-INSTALL-008 | installer.test.ts | 0 | 2 | Implemented |
 | REQ-SCAFFOLD-001 | scaffold-app.test.ts | 11 | 10 | Implemented |
-| REQ-EXAMPLE-001 | notes.test.ts | 7 | 7 | Implemented |
+| REQ-EXAMPLE-001 | notes.test.ts, manifest-scope-contract.test.ts | 8 | 8 | Implemented |
 | REQ-DOC-001 | — | — | — | Implemented |
 | REQ-DOC-002 | — | — | — | Implemented |
 | REQ-ERROR-001 | llm-errors.test.ts | 13 | 5 | Implemented |
@@ -6044,16 +6077,16 @@ The matrix includes only implemented requirements. Planned requirements (REQ-REG
 | REQ-FILEINDEX-003 | file-index.test.ts | 1 | 0 | Implemented |
 | REQ-FILEINDEX-004 | entry-parser.test.ts | 9 | 13 | Implemented |
 | REQ-FMATTER-005 | recipe-store.test.ts, health-store.test.ts, cultural-calendar.test.ts, price-store.test.ts, grocery-store.test.ts, meal-plan-store.test.ts, macro-tracker.test.ts, pantry-store.test.ts | 21 | 1 | Implemented |
-| REQ-DATAQUERY-001 | data-query.test.ts, data-query-wiring.test.ts | 12 | 8 | Implemented |
-| REQ-DATAQUERY-002 | data-query.test.ts | 6 | 4 | Implemented |
+| REQ-DATAQUERY-001 | data-query.test.ts, context-hints.test.ts, data-query-wiring.test.ts, compose-runtime.smoke.integration.test.ts | 14 | 10 | Implemented |
+| REQ-DATAQUERY-002 | data-query.test.ts, context-hints.test.ts, compose-runtime.smoke.integration.test.ts | 8 | 6 | Implemented |
 | REQ-DATAQUERY-003 | data-query.test.ts | 3 | 2 | Implemented |
 | REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
-| REQ-CHATBOT-016 | data-query-wiring.test.ts | 8 | 6 | Implemented |
-| REQ-CHATBOT-017 | data-query-wiring.test.ts | 3 | 3 | Implemented |
+| REQ-CHATBOT-016 | data-query-wiring.test.ts, context-injection.test.ts | 8 | 6 | Implemented |
+| REQ-CHATBOT-017 | data-query-wiring.test.ts, context-injection.test.ts | 3 | 3 | Implemented |
 | REQ-CHATBOT-018 | conversation-history.test.ts (core) | 10 | 8 | Implemented |
 | REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 34 | 9 | Implemented |
-| REQ-IC-001 | interaction-context.test.ts, integration.test.ts | 5 | 6 | Implemented |
-| REQ-IC-002 | bootstrap-wiring.test.ts | 8 | 0 | Implemented |
+| REQ-IC-001 | interaction-context.test.ts, integration.test.ts, edit.test.ts | 6 | 7 | Implemented |
+| REQ-IC-002 | bootstrap-wiring.test.ts, compose-runtime.smoke.integration.test.ts | 9 | 0 | Implemented |
 | REQ-IC-003 | persistence.test.ts | 5 | 4 | Implemented |
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 

@@ -31,7 +31,7 @@ const echoManifest = {
 		data: {
 			user_scopes: [
 				{
-					path: 'echo/log.md',
+					path: 'log.md',
 					access: 'read-write',
 					description: 'Message echo log',
 				},
@@ -115,18 +115,18 @@ const fullManifest = {
 		],
 		data: {
 			user_scopes: [
-				{ path: 'grocery/list.md', access: 'read-write', description: 'Active grocery list' },
-				{ path: 'grocery/archive.md', access: 'read-write', description: 'Archived lists' },
-				{ path: 'grocery/recipes/', access: 'read-write', description: 'Saved recipes' },
+				{ path: 'list.md', access: 'read-write', description: 'Active grocery list' },
+				{ path: 'archive.md', access: 'read-write', description: 'Archived lists' },
+				{ path: 'recipes/', access: 'read-write', description: 'Saved recipes' },
 				{
-					path: 'grocery/meal-plans/',
+					path: 'meal-plans/',
 					access: 'read-write',
 					description: 'Generated meal plans',
 				},
 			],
 			shared_scopes: [
 				{
-					path: 'grocery/shared-list.md',
+					path: 'shared-list.md',
 					access: 'read-write',
 					description: 'Shared grocery list',
 				},

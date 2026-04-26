@@ -6,6 +6,7 @@ import {
 	generateJoinCode,
 	loadHousehold,
 	requireHousehold,
+	resolveFoodStore,
 	saveHousehold,
 } from '../utils/household-guard.js';
 
@@ -111,6 +112,74 @@ describe('Household Guard', () => {
 			sharedStore.read.mockResolvedValue('');
 			const result = await requireHousehold(services, 'user1');
 			expect(result).toBeNull();
+		});
+	});
+
+	describe('resolveFoodStore', () => {
+		let services: CoreServices;
+		let sharedStore: ReturnType<typeof createMockScopedStore>;
+		let spaceStore: ReturnType<typeof createMockScopedStore>;
+
+		beforeEach(() => {
+			sharedStore = createMockScopedStore();
+			spaceStore = createMockScopedStore();
+			services = createMockCoreServices();
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+			vi.mocked(services.data.forSpace).mockReturnValue(spaceStore as any);
+		});
+
+		it('returns the shared store when no active space exists', async () => {
+			sharedStore.read.mockResolvedValue(
+				'id: abc\nname: Test\ncreatedBy: user1\nmembers:\n  - user1\njoinCode: ABCDEF\ncreatedAt: "2026-01-01"',
+			);
+
+			const result = await resolveFoodStore(services, 'user1');
+
+			expect(result).toEqual({
+				household: expect.objectContaining({ id: 'abc', name: 'Test' }),
+				store: sharedStore,
+				scope: 'shared',
+			});
+			expect(services.data.forSpace).not.toHaveBeenCalled();
+		});
+
+		it('returns the space store when an active space exists', async () => {
+			sharedStore.read.mockResolvedValue(
+				'id: abc\nname: Test\ncreatedBy: user1\nmembers:\n  - user1\njoinCode: ABCDEF\ncreatedAt: "2026-01-01"',
+			);
+
+			const result = await resolveFoodStore(services, 'user1', 'space-1');
+
+			expect(services.data.forShared).toHaveBeenCalledWith('shared');
+			expect(services.data.forSpace).toHaveBeenCalledWith('space-1', 'user1');
+			expect(result).toEqual({
+				household: expect.objectContaining({ id: 'abc', name: 'Test' }),
+				store: spaceStore,
+				scope: 'space',
+				spaceId: 'space-1',
+			});
+		});
+
+		it('returns null for non-member even when a space is requested', async () => {
+			sharedStore.read.mockResolvedValue(
+				'id: abc\nname: Test\ncreatedBy: user1\nmembers:\n  - user2\njoinCode: ABCDEF\ncreatedAt: "2026-01-01"',
+			);
+
+			const result = await resolveFoodStore(services, 'user1', 'space-1');
+
+			expect(result).toBeNull();
+			expect(services.data.forSpace).not.toHaveBeenCalled();
+		});
+
+		it('always checks household membership from shared household.yaml before resolving a space', async () => {
+			sharedStore.read.mockResolvedValue(
+				'id: abc\nname: Test\ncreatedBy: user1\nmembers:\n  - user1\njoinCode: ABCDEF\ncreatedAt: "2026-01-01"',
+			);
+
+			await resolveFoodStore(services, 'user1', 'space-1');
+
+			expect(sharedStore.read).toHaveBeenCalledWith('household.yaml');
+			expect(services.data.forSpace).toHaveBeenCalledWith('space-1', 'user1');
 		});
 	});
 

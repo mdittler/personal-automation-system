@@ -9,6 +9,7 @@ import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '.
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { FallbackHandler } from '../fallback.js';
 import { buildUserOverrideRouteInfo, Router } from '../index.js';
+import type { SpaceService } from '../../spaces/index.js';
 
 /**
  * Assert that a dispatch mock was called with a context whose `route` field
@@ -140,7 +141,11 @@ describe('Router', () => {
 		users: SystemConfig['users'],
 		apps: Array<{ manifest: AppManifest; module: AppModule }>,
 		overrideLlm?: LLMService,
-		options?: { chatbotApp?: RegisteredApp; fallbackMode?: 'chatbot' | 'notes' },
+		options?: {
+			chatbotApp?: RegisteredApp;
+			fallbackMode?: 'chatbot' | 'notes';
+			spaceService?: SpaceService;
+		},
 	): Router {
 		const config = createMockConfig(users, options?.fallbackMode ?? 'chatbot');
 		const cache = new ManifestCache();
@@ -173,6 +178,7 @@ describe('Router', () => {
 			confidenceThreshold: 0.4,
 			chatbotApp: options?.chatbotApp,
 			fallbackMode: options?.fallbackMode,
+			spaceService: options?.spaceService,
 		});
 		router.buildRoutingTables();
 		return router;
@@ -529,6 +535,60 @@ describe('Router', () => {
 			await router.routePhoto(createPhotoCtx());
 
 			expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('No apps'));
+		});
+
+		it('attaches active space info to photo contexts before dispatch', async () => {
+			const users = [
+				{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+			];
+			const classifyLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
+			const spaceService = {
+				getActiveSpace: vi.fn().mockReturnValue('family-space'),
+				getSpace: vi.fn().mockReturnValue({
+					id: 'family-space',
+					name: 'Family Space',
+					kind: 'household',
+					householdId: 'hh-1',
+				}),
+			} as unknown as SpaceService;
+			const router = buildRouter(
+				users,
+				[{ manifest: groceryManifest, module: groceryModule }],
+				classifyLlm,
+				{ spaceService },
+			);
+
+			await router.routePhoto(createPhotoCtx('grocery receipt'));
+
+			expect(groceryModule.handlePhoto).toHaveBeenCalledWith(
+				expect.objectContaining({
+					spaceId: 'family-space',
+					spaceName: 'Family Space',
+				}),
+			);
+		});
+
+		it('leaves photo contexts without space info when no active space exists', async () => {
+			const users = [
+				{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+			];
+			const classifyLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
+			const spaceService = {
+				getActiveSpace: vi.fn().mockReturnValue(null),
+				getSpace: vi.fn(),
+			} as unknown as SpaceService;
+			const router = buildRouter(
+				users,
+				[{ manifest: groceryManifest, module: groceryModule }],
+				classifyLlm,
+				{ spaceService },
+			);
+
+			await router.routePhoto(createPhotoCtx('grocery receipt'));
+
+			const dispatchedCtx = vi.mocked(groceryModule.handlePhoto).mock.calls[0]?.[0];
+			expect(dispatchedCtx?.spaceId).toBeUndefined();
+			expect(dispatchedCtx?.spaceName).toBeUndefined();
 		});
 	});
 

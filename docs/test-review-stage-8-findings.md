@@ -2,7 +2,22 @@
 
 Date: 2026-04-23
 Stage: 8 - Food App User Workflows and Feature Coverage
-Status: Completed
+Status: Remediated on 2026-04-25
+
+## Remediation Outcome
+
+Phase 8 remediation is complete and verified.
+
+- Finding 1 closed: leftover suggestion workflows now have deterministic helper coverage, on-demand routing coverage, and scheduled leftover-check coverage through `apps/food/src/__tests__/services/leftover-suggestions.test.ts`, `apps/food/src/__tests__/leftover-suggestions.integration.test.ts`, and `apps/food/src/__tests__/handlers/leftover-handler.test.ts`.
+- Finding 2 closed: recipe photo retrieval now has end-to-end workflow coverage for empty state, direct photo send, multi-photo numbered selection, missing-photo branches, and numeric-selection regressions in `apps/food/src/__tests__/recipe-photo-retrieval.integration.test.ts`.
+- Finding 3 closed for the approved Phase 8 scope: representative multi-write failure semantics are now covered in `apps/food/src/__tests__/food-durability.integration.test.ts`, `apps/food/src/__tests__/handlers/leftover-handler.test.ts`, `apps/food/src/__tests__/handlers/perishable-handler.test.ts`, and `apps/food/src/__tests__/handlers/freezer-handler.test.ts`.
+
+## Verification Evidence
+
+- Targeted Food workflow suites passed on 2026-04-25, including leftover suggestion, photo retrieval, shadow taxonomy, and representative durability suites.
+- Existing app-level regression suites passed on 2026-04-25: `app.test.ts`, `route-dispatch.test.ts`, `shadow-primary.integration.test.ts`, and `shadow-integration.test.ts`.
+- `pnpm build` passed on 2026-04-25.
+- `pnpm test` passed on 2026-04-25 with `7743` tests passed and `10` skipped.
 
 ## Scope
 
@@ -108,6 +123,6 @@ But the broader app-level durability contract is still open. The URS still lists
 
 ## Stage 8 Exit Decision
 
-Stage 8 is complete.
+Stage 8 is complete and remediated.
 
-The strongest coverage in this stage is around broad natural-language routing, photo happy paths plus several negative cases, meal-plan/voting/rating flows, cook mode, nutrition integrations, and family/hosting workflows. The main remaining weaknesses are the still-uncovered leftover-suggestion workflow, the shallow recipe-photo-retrieval coverage, and the unfinished app-level durability contract for multi-write user flows.
+The original review findings remain useful historical context, but the approved Phase 8 gaps are now closed with verified runtime changes, focused workflow tests, and updated URS traceability.

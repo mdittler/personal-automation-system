@@ -6,13 +6,30 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
-import { installApp } from '../services/app-installer/index.js';
-import type { InstallResult, PermissionSummary } from '../services/app-installer/index.js';
+import {
+	planInstallApp,
+	type InstallError,
+	type PermissionSummary,
+	type PlanInstallResult,
+} from '../services/app-installer/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export interface InstallAppCliDeps {
+	getCoreVersion?: () => string;
+	getAppsDir?: () => string;
+	planInstall?: (options: {
+		gitUrl: string;
+		appsDir: string;
+		coreVersion: string;
+	}) => Promise<PlanInstallResult>;
+	prompt?: (question: string) => Promise<string>;
+	stdout?: (message: string) => void;
+	stderr?: (message: string) => void;
+}
 
 function getCoreVersion(): string {
 	const pkgPath = join(__dirname, '..', '..', 'package.json');
@@ -24,8 +41,27 @@ function getAppsDir(): string {
 	return resolve(join(__dirname, '..', '..', '..', 'apps'));
 }
 
-function formatPermissions(summary: PermissionSummary): string {
-	const lines: string[] = ['', 'Permission Summary:'];
+function createPrompt(): (question: string) => Promise<string> {
+	return async (question: string) => {
+		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		try {
+			return await rl.question(question);
+		} finally {
+			rl.close();
+		}
+	};
+}
+
+function defaultStdout(message: string): void {
+	console.log(message);
+}
+
+function defaultStderr(message: string): void {
+	console.error(message);
+}
+
+function formatPermissions(summary: PermissionSummary): string[] {
+	const lines: string[] = ['Permission Summary:'];
 
 	if (summary.services.length > 0) {
 		lines.push(`  Services: ${summary.services.join(', ')}`);
@@ -54,15 +90,16 @@ function formatPermissions(summary: PermissionSummary): string {
 		}
 	}
 
-	return lines.join('\n');
+	return lines;
 }
 
-function formatErrors(result: InstallResult, appName?: string): string {
+function formatErrors(errors: InstallError[], appName?: string): string[] {
 	const lines: string[] = [];
 	const label = appName ? `"${appName}"` : 'app';
-	lines.push(`\nERROR: ${label} failed validation:\n`);
+	lines.push(`ERROR: ${label} failed validation:`);
+	lines.push('');
 
-	for (const err of result.errors) {
+	for (const err of errors) {
 		lines.push(`  [${err.type}] ${err.message}`);
 		if (err.details) {
 			for (const detail of err.details.split('\n')) {
@@ -71,8 +108,9 @@ function formatErrors(result: InstallResult, appName?: string): string {
 		}
 	}
 
-	lines.push('\nInstall cancelled. Fix the issues above and try again.');
-	return lines.join('\n');
+	lines.push('');
+	lines.push('Install cancelled. Fix the issues above and try again.');
+	return lines;
 }
 
 /**
@@ -82,62 +120,88 @@ export function parseYesFlag(args: string[]): boolean {
 	return args.includes('--yes') || args.includes('-y');
 }
 
-async function main() {
-	const args = process.argv.slice(2);
-	const gitUrl = args.find((a) => !a.startsWith('-'));
+export async function runInstallAppCli(
+	args: string[],
+	deps: InstallAppCliDeps = {},
+): Promise<number> {
+	const stdout = deps.stdout ?? defaultStdout;
+	const stderr = deps.stderr ?? defaultStderr;
+	const gitUrl = args.find((arg) => !arg.startsWith('-'));
 
 	if (!gitUrl) {
-		console.error('Usage: pnpm install-app <git-url> [--yes]');
-		console.error('');
-		console.error('Options:');
-		console.error('  --yes, -y    Skip confirmation prompt');
-		process.exit(1);
+		stderr('Usage: pnpm install-app <git-url> [--yes]');
+		stderr('');
+		stderr('Options:');
+		stderr('  --yes, -y    Skip confirmation prompt');
+		return 1;
 	}
 
 	const skipConfirm = parseYesFlag(args);
-	const coreVersion = getCoreVersion();
-	const appsDir = getAppsDir();
+	const getCoreVersionValue = deps.getCoreVersion ?? getCoreVersion;
+	const getAppsDirValue = deps.getAppsDir ?? getAppsDir;
+	const planInstall = deps.planInstall ?? planInstallApp;
+	const prompt = deps.prompt ?? createPrompt();
+	const coreVersion = getCoreVersionValue();
+	const appsDir = getAppsDirValue();
 
-	console.log(`About to install app from: ${gitUrl}`);
-	console.log(`CoreServices version: ${coreVersion}`);
-	console.log('');
-	console.log('The app will be cloned, validated, and its dependencies installed.');
-	console.log('PAS will need to be restarted to load the new app.');
-	console.log('');
+	stdout(`About to install app from: ${gitUrl}`);
+	stdout(`CoreServices version: ${coreVersion}`);
+	stdout('');
+	stdout('The app will be cloned, validated, and its dependencies installed.');
+	stdout('PAS will need to be restarted to load the new app.');
+	stdout('');
 
-	if (!skipConfirm) {
-		const rl = createInterface({ input: process.stdin, output: process.stdout });
-		let answer = '';
-		try {
-			answer = await rl.question('Proceed with installation? [y/N] ');
-		} finally {
-			rl.close();
+	const planned = await planInstall({
+		gitUrl,
+		appsDir,
+		coreVersion,
+	});
+
+	if (!planned.success || !planned.preparedInstall) {
+		for (const line of formatErrors(planned.errors, planned.appId)) {
+			stderr(line);
 		}
-		if (answer.trim().toLowerCase() !== 'y') {
-			console.log('Installation cancelled.');
-			process.exit(0);
+		return 1;
+	}
+
+	const prepared = planned.preparedInstall;
+	try {
+		for (const line of formatPermissions(prepared.permissionSummary)) {
+			stdout(line);
 		}
+		stdout('');
+
+		if (!skipConfirm) {
+			const answer = await prompt('Proceed with installation? [y/N] ');
+			if (answer.trim().toLowerCase() !== 'y') {
+				stdout('Installation cancelled.');
+				return 0;
+			}
+		}
+
+		const result = await prepared.commit();
+		if (!result.success) {
+			for (const line of formatErrors(result.errors, result.appId ?? prepared.appId)) {
+				stderr(line);
+			}
+			return 1;
+		}
+
+		stdout(`App "${prepared.appId}" installed successfully.`);
+		stdout('Restart PAS to load the new app.');
+		return 0;
+	} catch (err) {
+		stderr(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+		return 1;
+	} finally {
+		await prepared.dispose();
 	}
-
-	console.log(`Installing app from ${gitUrl}...`);
-	console.log('');
-
-	const result = await installApp({ gitUrl, appsDir, coreVersion });
-
-	if (!result.success) {
-		console.error(formatErrors(result));
-		process.exit(1);
-	}
-
-	if (result.permissionSummary) {
-		console.log(formatPermissions(result.permissionSummary));
-	}
-
-	console.log(`\nApp "${result.appId}" installed successfully.`);
-	console.log('Restart PAS to load the new app.');
 }
 
-// Only run when executed directly (not imported for testing)
+async function main(): Promise<void> {
+	process.exitCode = await runInstallAppCli(process.argv.slice(2));
+}
+
 const isDirectRun = process.argv[1]?.includes('install-app');
 if (isDirectRun) {
 	main().catch((err) => {

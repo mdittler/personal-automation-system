@@ -399,16 +399,21 @@ export class Router {
 			return;
 		}
 
+		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
+
 		// 3. Classify photo
 		const match = await this.photoClassifier.classify(
-			ctx.caption,
+			enrichedCtx.caption,
 			this.photoIntentTable,
 			this.confidenceThreshold,
 		);
 
 		if (match) {
-			if (!(await this.isAppEnabled(ctx.userId, match.appId, user.enabledApps))) {
-				await this.trySend(ctx.userId, `You don't have access to the ${match.appId} app.`);
+			if (!(await this.isAppEnabled(enrichedCtx.userId, match.appId, user.enabledApps))) {
+				await this.trySend(
+					enrichedCtx.userId,
+					`You don't have access to the ${match.appId} app.`,
+				);
 				return;
 			}
 
@@ -419,9 +424,12 @@ export class Router {
 				match.confidence < this.verificationUpperBound
 			) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
-				const resolvedApps = await this.resolveEnabledApps(ctx.userId, user.enabledApps);
+				const resolvedApps = await this.resolveEnabledApps(
+					enrichedCtx.userId,
+					user.enabledApps,
+				);
 				const result = await this.routeVerifier.verify(
-					ctx,
+					enrichedCtx,
 					{
 						appId: match.appId,
 						intent: match.photoType,
@@ -433,13 +441,20 @@ export class Router {
 				if (result.action === 'held') return;
 				if (result.action !== 'route') return;
 				const verifiedAppId = result.appId;
-				if (!(await this.isAppEnabled(ctx.userId, verifiedAppId, user.enabledApps))) {
-					await this.trySend(ctx.userId, `You don't have access to the ${verifiedAppId} app.`);
+				if (!(await this.isAppEnabled(enrichedCtx.userId, verifiedAppId, user.enabledApps))) {
+					await this.trySend(
+						enrichedCtx.userId,
+						`You don't have access to the ${verifiedAppId} app.`,
+					);
 					return;
 				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp?.module.handlePhoto) {
-					await this.dispatchPhoto(verifiedApp, ctx, routeFromVerifyAction(result, 'photo-intent'));
+					await this.dispatchPhoto(
+						verifiedApp,
+						enrichedCtx,
+						routeFromVerifyAction(result, 'photo-intent'),
+					);
 					return;
 				}
 			}
@@ -448,7 +463,7 @@ export class Router {
 			if (app?.module.handlePhoto) {
 				await this.dispatchPhoto(
 					app,
-					ctx,
+					enrichedCtx,
 					routeFromClassifier(
 						match.appId,
 						match.photoType,
@@ -643,6 +658,19 @@ export class Router {
 
 	/** Enrich message context with active space info if the user is in a space. */
 	private enrichWithActiveSpace(ctx: MessageContext): MessageContext {
+		if (!this.spaceService) return ctx;
+
+		const activeSpaceId = this.spaceService.getActiveSpace(ctx.userId);
+		if (!activeSpaceId) return ctx;
+
+		const space = this.spaceService.getSpace(activeSpaceId);
+		if (!space) return ctx;
+
+		return { ...ctx, spaceId: activeSpaceId, spaceName: space.name };
+	}
+
+	/** Enrich photo context with active space info if the user is in space mode. */
+	private enrichPhotoWithActiveSpace(ctx: PhotoContext): PhotoContext {
 		if (!this.spaceService) return ctx;
 
 		const activeSpaceId = this.spaceService.getActiveSpace(ctx.userId);

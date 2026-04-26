@@ -115,13 +115,13 @@ export class LLMGuard implements LLMService {
 	}
 
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
-		return this.guarded('complete', prompt, options?.maxTokens, () =>
+		return this.guarded('complete', prompt, options?.maxTokens, options?.tier ?? this.tier, () =>
 			this.inner.complete(prompt, { ...options, _appId: this.appId }),
 		);
 	}
 
 	async classify(text: string, categories: string[]): Promise<ClassifyResult> {
-		return this.guarded('classify', text, undefined, () => {
+		return this.guarded('classify', text, undefined, 'fast', () => {
 			const client = {
 				complete: (p: string, opts?: LLMCompletionOptions) => this.completeRaw(p, opts),
 			};
@@ -130,7 +130,7 @@ export class LLMGuard implements LLMService {
 	}
 
 	async extractStructured<T>(text: string, schema: object): Promise<T> {
-		return this.guarded('extractStructured', text, undefined, () => {
+		return this.guarded('extractStructured', text, undefined, 'fast', () => {
 			const client = {
 				complete: (p: string, opts?: LLMCompletionOptions) => this.completeRaw(p, opts),
 			};
@@ -150,11 +150,12 @@ export class LLMGuard implements LLMService {
 		method: GuardMethod,
 		prompt: string,
 		maxOutputTokens: number | undefined,
+		tier: ModelTier,
 		run: () => Promise<T>,
 	): Promise<T> {
 		const hhId = getCurrentHouseholdId();
 		const estCost = estimateGuardCost(
-			{ method, tier: this.tier, prompt, maxOutputTokens },
+			{ method, tier, prompt, maxOutputTokens },
 			this.priceLookup,
 			this.logger,
 		);

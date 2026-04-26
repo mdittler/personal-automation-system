@@ -292,4 +292,31 @@ describe('AppRegistry', () => {
 		);
 		expect(duplicateError).toBeDefined();
 	});
+
+	it('loads a compiled app through loadAll when src/index.ts is broken', async () => {
+		const appDir = join(tempDir, 'compiled-echo');
+		await mkdir(join(appDir, 'dist'), { recursive: true });
+		await mkdir(join(appDir, 'src'), { recursive: true });
+		await writeFile(join(appDir, 'manifest.yaml'), validManifestYaml);
+		await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'dist/index.js' }));
+		await writeFile(
+			join(appDir, 'dist', 'index.js'),
+			`
+			export default {
+				async init() {},
+				async handleMessage() {},
+			};
+		`,
+		);
+		await writeFile(join(appDir, 'src', 'index.ts'), 'this is not valid ts');
+
+		const registry = new AppRegistry({ appsDir: tempDir, config, logger });
+		const serviceFactory = createMockServiceFactory();
+
+		await registry.loadAll(serviceFactory);
+
+		expect(registry.getLoadedAppIds()).toContain('echo');
+		expect(registry.getApp('echo')).toBeDefined();
+		expect(serviceFactory).toHaveBeenCalledOnce();
+	});
 });

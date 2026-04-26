@@ -17,45 +17,80 @@ const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 /** Built-in apps that cannot be uninstalled. */
 const PROTECTED_APPS = new Set(['echo', 'chatbot']);
 
+export interface UninstallAppCliDeps {
+	getAppsDir?: () => string;
+	statPath?: typeof stat;
+	removeDir?: typeof rm;
+	stdout?: (message: string) => void;
+	stderr?: (message: string) => void;
+}
+
 function getAppsDir(): string {
 	return resolve(join(__dirname, '..', '..', '..', 'apps'));
 }
 
-async function main() {
-	const args = process.argv.slice(2);
+function defaultStdout(message: string): void {
+	console.log(message);
+}
+
+function defaultStderr(message: string): void {
+	console.error(message);
+}
+
+export async function runUninstallAppCli(
+	args: string[],
+	deps: UninstallAppCliDeps = {},
+): Promise<number> {
+	const stdout = deps.stdout ?? defaultStdout;
+	const stderr = deps.stderr ?? defaultStderr;
+	const appsDir = (deps.getAppsDir ?? getAppsDir)();
+	const statPath = deps.statPath ?? stat;
+	const removeDir = deps.removeDir ?? rm;
 	const appId = args[0];
 
 	if (!appId) {
-		console.error('Usage: pnpm uninstall-app <app-id>');
-		process.exit(1);
+		stderr('Usage: pnpm uninstall-app <app-id>');
+		return 1;
 	}
 
 	if (!APP_ID_PATTERN.test(appId)) {
-		console.error(`Invalid app ID "${appId}". Must be lowercase letters, numbers, and hyphens.`);
-		process.exit(1);
+		stderr(`Invalid app ID "${appId}". Must be lowercase letters, numbers, and hyphens.`);
+		return 1;
 	}
 
 	if (PROTECTED_APPS.has(appId)) {
-		console.error(`Cannot uninstall built-in app "${appId}".`);
-		process.exit(1);
+		stderr(`Cannot uninstall built-in app "${appId}".`);
+		return 1;
 	}
 
-	const appsDir = getAppsDir();
 	const appDir = join(appsDir, appId);
+	try {
+		await statPath(appDir);
+	} catch {
+		stderr(`App "${appId}" is not installed (${appDir} does not exist).`);
+		return 1;
+	}
 
 	try {
-		await stat(appDir);
-	} catch {
-		console.error(`App "${appId}" is not installed (${appDir} does not exist).`);
-		process.exit(1);
+		await removeDir(appDir, { recursive: true, force: true });
+	} catch (err) {
+		stderr(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+		return 1;
 	}
 
-	await rm(appDir, { recursive: true, force: true });
-	console.log(`App "${appId}" has been uninstalled.`);
-	console.log('Restart PAS to apply the change.');
+	stdout(`App "${appId}" has been uninstalled.`);
+	stdout('Restart PAS to apply the change.');
+	return 0;
 }
 
-main().catch((err) => {
-	console.error('Unexpected error:', err);
-	process.exit(1);
-});
+async function main(): Promise<void> {
+	process.exitCode = await runUninstallAppCli(process.argv.slice(2));
+}
+
+const isDirectRun = process.argv[1]?.includes('uninstall-app');
+if (isDirectRun) {
+	main().catch((err) => {
+		console.error('Unexpected error:', err);
+		process.exit(1);
+	});
+}

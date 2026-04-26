@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installApp } from '../index.js';
+import { installApp, planInstallApp } from '../index.js';
 
 // Mock child_process.execFile
 vi.mock('node:child_process', () => ({
@@ -49,7 +49,7 @@ requirements:
     - data-store
   data:
     user_scopes:
-      - path: "test/data.md"
+      - path: "data.md"
         access: read-write
         description: "Test data"
 `;
@@ -132,9 +132,71 @@ describe('App Installer', () => {
 
 		expect(result.permissionSummary).toMatchObject({
 			services: ['telegram', 'data-store'],
-			dataScopes: [{ path: 'test/data.md', access: 'read-write' }],
+			dataScopes: [{ path: 'data.md', access: 'read-write' }],
 			externalApis: [],
 		});
+	});
+
+	it('planInstallApp returns a prepared install without copying into apps/ or running pnpm install', async () => {
+		const result = await planInstallApp({
+			gitUrl: 'https://github.com/user/test-app.git',
+			appsDir,
+			coreVersion: '0.1.0',
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.preparedInstall).toBeDefined();
+		expect(result.permissionSummary).toMatchObject({
+			services: ['telegram', 'data-store'],
+			dataScopes: [{ path: 'data.md', access: 'read-write' }],
+		});
+
+		const appDir = join(appsDir, 'test-app');
+		const appExists = await stat(appDir).then(
+			() => true,
+			() => false,
+		);
+		expect(appExists).toBe(false);
+
+		const pnpmCalls = mockExecFile.mock.calls.filter(
+			(call) => call[0] === 'pnpm' && (call[1] as string[])[0] === 'install',
+		);
+		expect(pnpmCalls).toHaveLength(0);
+
+		await result.preparedInstall?.dispose();
+	});
+
+	it('PreparedInstall.dispose() is idempotent after planning', async () => {
+		const result = await planInstallApp({
+			gitUrl: 'https://github.com/user/test-app.git',
+			appsDir,
+			coreVersion: '0.1.0',
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.preparedInstall).toBeDefined();
+		const prepared = result.preparedInstall!;
+
+		await expect(prepared.dispose()).resolves.toBeUndefined();
+		await expect(prepared.dispose()).resolves.toBeUndefined();
+	});
+
+	it('returns INVALID_STATE when commit() is called after the prepared install is disposed', async () => {
+		const result = await planInstallApp({
+			gitUrl: 'https://github.com/user/test-app.git',
+			appsDir,
+			coreVersion: '0.1.0',
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.preparedInstall).toBeDefined();
+		const prepared = result.preparedInstall!;
+
+		await prepared.dispose();
+
+		const commitResult = await prepared.commit();
+		expect(commitResult.success).toBe(false);
+		expect(commitResult.errors[0].type).toBe('INVALID_STATE');
 	});
 
 	it('should copy app to apps/<app-id>/ directory', async () => {
@@ -545,6 +607,21 @@ describe('App Installer', () => {
 			() => false,
 		);
 		expect(targetExists).toBe(false);
+	});
+
+	it('should report COPY_FAILED when copying into apps/ fails', async () => {
+		const blockedAppsDir = join(tempBase, 'blocked-apps');
+		await writeFile(blockedAppsDir, 'not a directory');
+
+		const result = await installApp({
+			gitUrl: 'https://github.com/user/test-app.git',
+			appsDir: blockedAppsDir,
+			coreVersion: '0.1.0',
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0].type).toBe('COPY_FAILED');
+		expect(result.errors[0].message).toContain('Failed to copy app');
 	});
 
 	// --- Security ---

@@ -41,6 +41,13 @@ export async function saveHousehold(store: ScopedDataStore, household: Household
 	await store.write(HOUSEHOLD_PATH, fm + stringify(household));
 }
 
+export interface ResolvedFoodStore {
+	household: Household;
+	store: ScopedDataStore;
+	scope: 'shared' | 'space';
+	spaceId?: string;
+}
+
 /**
  * Check if a user is a member of the household.
  * Returns the household and shared store if the user is a member, null otherwise.
@@ -54,6 +61,39 @@ export async function requireHousehold(
 	if (!household) return null;
 	if (!household.members.includes(userId)) return null;
 	return { household, sharedStore };
+}
+
+/**
+ * Resolve the store for interactive food writes.
+ *
+ * Household membership is always checked against shared `household.yaml`.
+ * Space membership is a separate guard enforced by `forSpace()` when a space
+ * is active; both checks are intentional and must remain independent.
+ */
+export async function resolveFoodStore(
+	services: CoreServices,
+	userId: string,
+	spaceId?: string,
+): Promise<ResolvedFoodStore | null> {
+	const sharedStore = services.data.forShared('shared');
+	const household = await loadHousehold(sharedStore);
+	if (!household) return null;
+	if (!household.members.includes(userId)) return null;
+
+	if (spaceId) {
+		return {
+			household,
+			store: services.data.forSpace(spaceId, userId),
+			scope: 'space',
+			spaceId,
+		};
+	}
+
+	return {
+		household,
+		store: sharedStore,
+		scope: 'shared',
+	};
 }
 
 /** Generate a 6-character join code. */

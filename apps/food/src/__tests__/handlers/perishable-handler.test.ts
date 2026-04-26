@@ -179,6 +179,30 @@ describe('handlePerishableCallback', () => {
 			expect(freezerWrite![1]).toContain('Salmon');
 			expect(freezerWrite![1]).toContain('Chicken');
 		});
+
+		it('withholds the freeze confirmation when the freezer write fails', async () => {
+			const pantryItems = [makePantryItem({ name: 'Broccoli', quantity: '1 head', expiryEstimate: '2026-04-03' })];
+			const store = mockStore({
+				'pantry.yaml': pantryYaml(pantryItems),
+				'freezer.yaml': null,
+			});
+			store.write.mockImplementation(async (path: string, content: string) => {
+				if (path === 'freezer.yaml') {
+					throw new Error('freezer write failed');
+				}
+				return undefined;
+			});
+
+			await expect(
+				handlePerishableCallback(services, 'freeze:0', 'user1', 100, 200, store as never),
+			).rejects.toThrow('freezer write failed');
+
+			expect(services.telegram.editMessage).not.toHaveBeenCalledWith(
+				100,
+				200,
+				expect.stringContaining('🧊 Moved to freezer'),
+			);
+		});
 	});
 
 	describe('ok action', () => {

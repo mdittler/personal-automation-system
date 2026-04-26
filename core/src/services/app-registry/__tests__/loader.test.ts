@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
@@ -45,6 +45,32 @@ app:
   # missing required fields
 `;
 
+async function writeRuntimeModule(path: string, marker: string): Promise<void> {
+	await writeFile(
+		path,
+		`
+			export default {
+				runtimeMarker: ${JSON.stringify(marker)},
+				async init() {},
+				async handleMessage() {},
+			};
+		`,
+	);
+}
+
+async function writeCommonJsRuntimeModule(path: string, marker: string): Promise<void> {
+	await writeFile(
+		path,
+		`
+			module.exports = {
+				runtimeMarker: ${JSON.stringify(marker)},
+				async init() {},
+				async handleMessage() {},
+			};
+		`,
+	);
+}
+
 describe('AppLoader', () => {
 	let tempDir: string;
 	let logger: Logger;
@@ -60,18 +86,13 @@ describe('AppLoader', () => {
 
 	describe('discoverApps', () => {
 		it('should find directories with manifest.yaml', async () => {
-			// Create two valid apps
 			const app1Dir = join(tempDir, 'app1');
 			const app2Dir = join(tempDir, 'app2');
 			await mkdir(app1Dir, { recursive: true });
 			await mkdir(app2Dir, { recursive: true });
 			await writeFile(join(app1Dir, 'manifest.yaml'), validManifestYaml);
 			await writeFile(join(app2Dir, 'manifest.yaml'), validManifestYaml);
-
-			// Create a dir without manifest (should be skipped)
 			await mkdir(join(tempDir, 'no-manifest'), { recursive: true });
-
-			// Create a file (not a dir, should be skipped)
 			await writeFile(join(tempDir, 'not-a-dir.txt'), 'hello');
 
 			const loader = new AppLoader({ appsDir: tempDir, logger });
@@ -139,32 +160,115 @@ describe('AppLoader', () => {
 	});
 
 	describe('importModule', () => {
-		it('should import a valid TypeScript app module', async () => {
-			const appDir = join(tempDir, 'ts-app');
-			await mkdir(appDir, { recursive: true });
-
-			// Write a minimal app module
-			const moduleCode = `
-				export default {
-					async init(services) {},
-					async handleMessage(ctx) {},
-				};
-			`;
-			await writeFile(join(appDir, 'index.ts'), moduleCode);
+		it('imports a safe package.json main entry before dev fallbacks', async () => {
+			const appDir = join(tempDir, 'main-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await mkdir(join(appDir, 'src'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'dist/runtime.js' }));
+			await writeRuntimeModule(join(appDir, 'dist', 'runtime.js'), 'package-main');
+			await writeFile(join(appDir, 'src', 'index.ts'), 'this is not valid ts');
 
 			const loader = new AppLoader({ appsDir: tempDir, logger });
 			const module = await loader.importModule(appDir);
 
-			// In a test environment with tsx, this should work
-			// But if it fails to import, it should return null gracefully
-			// We just verify no errors are thrown
-			if (module !== null) {
-				expect(typeof module.init).toBe('function');
-				expect(typeof module.handleMessage).toBe('function');
-			}
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('package-main');
 		});
 
-		it('should return null when no module file exists', async () => {
+		it('falls back to dist/index.js when package.json main is missing', async () => {
+			const appDir = join(tempDir, 'dist-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeRuntimeModule(join(appDir, 'dist', 'index.js'), 'dist-index');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-index');
+		});
+
+		it('accepts package.json main entries pointing to dist/index.mjs', async () => {
+			const appDir = join(tempDir, 'mjs-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'dist/index.mjs' }));
+			await writeRuntimeModule(join(appDir, 'dist', 'index.mjs'), 'dist-mjs');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-mjs');
+		});
+
+		it('accepts package.json main entries pointing to dist/index.cjs', async () => {
+			const appDir = join(tempDir, 'cjs-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'dist/index.cjs' }));
+			await writeCommonJsRuntimeModule(join(appDir, 'dist', 'index.cjs'), 'dist-cjs');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-cjs');
+		});
+
+		it('ignores package.json main traversal attempts and falls back safely', async () => {
+			const appDir = join(tempDir, 'traversal-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: '../../etc/passwd' }));
+			await writeRuntimeModule(join(appDir, 'dist', 'index.js'), 'dist-fallback');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-fallback');
+			expect(logger.debug).toHaveBeenCalled();
+		});
+
+		it('ignores absolute package.json main paths and falls back safely', async () => {
+			const appDir = join(tempDir, 'absolute-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'C:/absolute/path.js' }));
+			await writeRuntimeModule(join(appDir, 'dist', 'index.js'), 'dist-fallback');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-fallback');
+		});
+
+		it('ignores unsupported package.json main extensions and keeps the fallback chain alive', async () => {
+			const appDir = join(tempDir, 'bad-ext-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'dist/index.ts' }));
+			await writeRuntimeModule(join(appDir, 'dist', 'index.js'), 'dist-fallback');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dist-fallback');
+		});
+
+		it('skips malformed compiled candidates and keeps dev fallbacks alive', async () => {
+			const appDir = join(tempDir, 'malformed-dist-app');
+			await mkdir(join(appDir, 'dist'), { recursive: true });
+			await mkdir(join(appDir, 'src'), { recursive: true });
+			await writeFile(join(appDir, 'dist', 'index.js'), 'export default { runtimeMarker: "broken-dist" };');
+			await writeRuntimeModule(join(appDir, 'src', 'index.ts'), 'dev-fallback');
+
+			const loader = new AppLoader({ appsDir: tempDir, logger });
+			const module = await loader.importModule(appDir);
+
+			expect(module).not.toBeNull();
+			expect((module as Record<string, unknown>).runtimeMarker).toBe('dev-fallback');
+			expect(logger.warn).toHaveBeenCalled();
+		});
+
+		it('returns null when no module file exists', async () => {
 			const appDir = join(tempDir, 'empty-app');
 			await mkdir(appDir, { recursive: true });
 
