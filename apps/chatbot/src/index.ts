@@ -76,6 +76,11 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	return coreHandleMessage(ctx, makeDeps());
 };
 
+/**
+ * @deprecated The Router no longer dispatches /ask or /edit through this path
+ * (they are Router built-ins since Chunk C). This export is kept only for the
+ * existing test suite; it will be removed in Chunk D when apps/chatbot/ is deleted.
+ */
 export const handleCommand: AppModule['handleCommand'] = async (
 	command: string,
 	args: string[],

@@ -1,79 +1,118 @@
 /**
- * Regression: chatbot.handleCommand command-name contract.
+ * Router command-name contract: /ask and /edit dispatched to ConversationService.
  *
- * The router strips the leading slash before dispatch (see
- * core/src/services/router/index.ts:511). The chatbot shim therefore
- * compares against `'edit'` and `'ask'` — not `'/edit'` / `'/ask'`.
+ * The chatbot shim no longer exports handleCommand — /ask and /edit are Router
+ * built-ins. This test pins the convention that the Router's built-in dispatch
+ * reaches ConversationService.handleAsk / handleEdit (with no leading slash) so
+ * a future regression would be caught immediately.
  *
- * These tests pin that convention so a future regression to slash-prefixed
- * comparisons would be caught immediately.
+ * Previously tested via chatbot.handleCommand; now tested via Router dispatch.
  */
-import type { CoreServices, EditService } from '@pas/core/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-	createMockCoreServices,
-	createMockScopedStore,
-} from '../../../../core/src/testing/mock-services.js';
+import { describe, expect, it, vi } from 'vitest';
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
-import * as chatbot from '../index.js';
 
-function makeEditService(): EditService {
-	return {
-		proposeEdit: vi
-			.fn()
-			.mockResolvedValue({ kind: 'error', action: 'no_match', message: 'no match' }),
-		confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
-	};
-}
+describe('Router command-name contract: built-ins reach ConversationService', () => {
+	function makeConvService() {
+		return {
+			handleMessage: vi.fn().mockResolvedValue(undefined),
+			handleAsk: vi.fn().mockResolvedValue(undefined),
+			handleEdit: vi.fn().mockResolvedValue(undefined),
+			handleNotes: vi.fn().mockResolvedValue(undefined),
+		};
+	}
 
-describe('handleCommand command-name contract (no leading slash)', () => {
-	let services: CoreServices;
+	it("Router dispatches '/ask ...' to conversationService.handleAsk with args array (no leading slash in args)", async () => {
+		const conv = makeConvService();
 
-	beforeEach(async () => {
-		services = createMockCoreServices();
-		// Always make a writable store available
-		vi.mocked(services.data.forUser).mockReturnValue(createMockScopedStore());
-		vi.mocked(services.llm.complete).mockResolvedValue('Hi.');
-		await chatbot.init(services);
+		// Import and build the Router inline to keep this test self-contained
+		const { Router } = await import('@pas/core/services/router');
+		const { ManifestCache } = await import('@pas/core/services/app-registry');
+
+		const cache = new ManifestCache();
+		// Chatbot manifest with NO commands (post-Chunk-C state)
+		cache.add(
+			{
+				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
+				capabilities: { messages: {} },
+			},
+			'/apps/chatbot',
+		);
+
+		const registry = {
+			getApp: vi.fn().mockReturnValue(undefined),
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => ['chatbot'],
+		};
+		const telegram = { send: vi.fn().mockResolvedValue(undefined), sendPhoto: vi.fn(), sendOptions: vi.fn() };
+		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() };
+
+		const router = new Router({
+			registry: registry as any,
+			llm: { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as any,
+			telegram: telegram as any,
+			fallback: { handleUnrecognized: vi.fn() } as any,
+			config: {
+				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC', fallback: 'chatbot',
+				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
+				gui: { authToken: '' }, cloudflare: {},
+				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
+			} as any,
+			logger: logger as any,
+			conversationService: conv as any,
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage(createTestMessageContext({ userId: 'user1', text: '/ask what is pas?' }));
+
+		expect(conv.handleAsk).toHaveBeenCalledOnce();
+		const [args] = conv.handleAsk.mock.calls[0]!;
+		// args is an array of tokens — not the raw string with a slash
+		expect(args).toEqual(['what', 'is', 'pas?']);
 	});
 
-	it("routes to /ask handler when command is 'ask' (no slash)", async () => {
-		const ctx = createTestMessageContext({ text: '/ask what is pas?' });
-		await chatbot.handleCommand?.('ask', ['what', 'is', 'pas?'], ctx);
-		// /ask with args calls the LLM (standard tier)
-		expect(services.llm.complete).toHaveBeenCalled();
-	});
+	it("Router dispatches '/edit ...' to conversationService.handleEdit with args array (no leading slash in args)", async () => {
+		const conv = makeConvService();
 
-	it("routes to /edit handler when command is 'edit' (no slash)", async () => {
-		const editService = makeEditService();
-		const editServices = createMockCoreServices();
-		Object.assign(editServices, { editService });
-		await chatbot.init(editServices);
+		const { Router } = await import('@pas/core/services/router');
+		const { ManifestCache } = await import('@pas/core/services/app-registry');
 
-		const ctx = createTestMessageContext({ text: '/edit fix something' });
-		await chatbot.handleCommand?.('edit', ['fix', 'something'], ctx);
+		const cache = new ManifestCache();
+		cache.add(
+			{
+				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
+				capabilities: { messages: {} },
+			},
+			'/apps/chatbot',
+		);
 
-		expect(editService.proposeEdit).toHaveBeenCalledWith('fix something', expect.any(String));
-	});
+		const registry = {
+			getApp: vi.fn().mockReturnValue(undefined),
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => ['chatbot'],
+		};
+		const telegram = { send: vi.fn().mockResolvedValue(undefined), sendPhoto: vi.fn(), sendOptions: vi.fn() };
+		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() };
 
-	it("does NOT route to /ask handler when command is '/ask' (legacy slash form)", async () => {
-		const ctx = createTestMessageContext({ text: '/ask what is pas?' });
-		await chatbot.handleCommand?.('/ask', ['what', 'is', 'pas?'], ctx);
-		// Legacy slash form must be silently ignored — no LLM call, no telegram send
-		expect(services.llm.complete).not.toHaveBeenCalled();
-		expect(services.telegram.send).not.toHaveBeenCalled();
-	});
+		const router = new Router({
+			registry: registry as any,
+			llm: { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as any,
+			telegram: telegram as any,
+			fallback: { handleUnrecognized: vi.fn() } as any,
+			config: {
+				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC', fallback: 'chatbot',
+				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
+				gui: { authToken: '' }, cloudflare: {},
+				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
+			} as any,
+			logger: logger as any,
+			conversationService: conv as any,
+		});
+		router.buildRoutingTables();
 
-	it("does NOT route to /edit handler when command is '/edit' (legacy slash form)", async () => {
-		const editService = makeEditService();
-		const editServices = createMockCoreServices();
-		Object.assign(editServices, { editService });
-		await chatbot.init(editServices);
+		await router.routeMessage(createTestMessageContext({ userId: 'user1', text: '/edit fix something' }));
 
-		const ctx = createTestMessageContext({ text: '/edit something' });
-		await chatbot.handleCommand?.('/edit', ['something'], ctx);
-
-		// proposeEdit must not be called for the legacy slash form
-		expect(editService.proposeEdit).not.toHaveBeenCalled();
+		expect(conv.handleEdit).toHaveBeenCalledOnce();
+		const [args] = conv.handleEdit.mock.calls[0]!;
+		expect(args).toEqual(['fix', 'something']);
 	});
 });

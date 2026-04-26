@@ -66,7 +66,8 @@ describe('Chatbot App', () => {
 			);
 		});
 
-		it('appends message to daily notes', async () => {
+		it('appends message to daily notes (when log_to_notes is enabled)', async () => {
+			vi.mocked(services.config.getOverrides).mockResolvedValue({ log_to_notes: true });
 			const store = createMockScopedStore();
 			vi.mocked(services.data.forUser).mockReturnValue(store);
 			const ctx = createTestMessageContext({
@@ -180,7 +181,8 @@ describe('Chatbot App', () => {
 
 		// -- Error handling --
 
-		it('gracefully degrades to notes acknowledgment on LLM failure', async () => {
+		it('gracefully degrades to notes acknowledgment on LLM failure (log_to_notes enabled)', async () => {
+			vi.mocked(services.config.getOverrides).mockResolvedValue({ log_to_notes: true });
 			vi.mocked(services.llm.complete).mockRejectedValue(new Error('Rate limit'));
 			const ctx = createTestMessageContext({ text: 'hello' });
 
@@ -191,7 +193,20 @@ describe('Chatbot App', () => {
 			expect(sentMessage).toContain('try again later');
 		});
 
-		it('shows billing-specific error when API credits exhausted', async () => {
+		it('gracefully degrades on LLM failure without notes copy when log_to_notes is off', async () => {
+			// Default config: log_to_notes is off → no notes written → no "saved to daily notes" message
+			vi.mocked(services.llm.complete).mockRejectedValue(new Error('Rate limit'));
+			const ctx = createTestMessageContext({ text: 'hello' });
+
+			await chatbot.handleMessage(ctx);
+
+			const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
+			expect(sentMessage).not.toContain('saved to daily notes');
+			expect(sentMessage).toContain('try again later');
+		});
+
+		it('shows billing-specific error when API credits exhausted (log_to_notes enabled)', async () => {
+			vi.mocked(services.config.getOverrides).mockResolvedValue({ log_to_notes: true });
 			const billingError = Object.assign(new Error('Your credit balance is too low'), {
 				status: 400,
 			});
@@ -515,7 +530,8 @@ describe('Chatbot App', () => {
 			expect(store.write).toHaveBeenCalledWith('history.json', expect.stringContaining('/ask'));
 		});
 
-		it('appends to daily notes on /ask', async () => {
+		it('appends to daily notes on /ask (when log_to_notes is enabled)', async () => {
+			vi.mocked(services.config.getOverrides).mockResolvedValue({ log_to_notes: true });
 			vi.mocked(services.llm.complete).mockResolvedValue('Response');
 			const store = createMockScopedStore();
 			vi.mocked(services.data.forUser).mockReturnValue(store);
