@@ -101,6 +101,12 @@ import type { DataQueryOptions } from './types/data-query.js';
 import type { ManifestDataScope } from './types/manifest.js';
 import type { TelegramService } from './types/telegram.js';
 import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
+import {
+	CONVERSATION_DATA_SCOPES,
+	CONVERSATION_LLM_SAFEGUARDS,
+	CONVERSATION_USER_CONFIG,
+	ConversationService,
+} from './services/conversation/index.js';
 
 export interface RuntimeOverrides {
 	dataDir?: string;
@@ -892,6 +898,79 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		);
 	}
 
+	// 9c. ConversationService — Hermes P1 Chunk B.
+	// Mirrors the per-app LLMGuard + DataStoreServiceImpl pattern used above,
+	// but constructed at the framework level (not from a manifest). The chatbotApp
+	// lookup above stays for /ask + /edit until Chunk C; only free-text dispatch
+	// leaves the app boundary in this chunk.
+	let conversationService: ConversationService | undefined;
+	if (chatbotApp) {
+		const conversationLLMGuard = new LLMGuard({
+			inner: llm,
+			appId: 'chatbot',
+			costTracker,
+			config: {
+				maxRequests: CONVERSATION_LLM_SAFEGUARDS.rate_limit.max_requests,
+				windowSeconds: CONVERSATION_LLM_SAFEGUARDS.rate_limit.window_seconds,
+				monthlyCostCap: CONVERSATION_LLM_SAFEGUARDS.monthly_cost_cap,
+				globalMonthlyCostCap,
+			},
+			logger: createChildLogger(logger, { service: 'llm-guard:conversation' }),
+			householdLimiter,
+			priceLookup: guardPriceLookup,
+			tier: CONVERSATION_LLM_SAFEGUARDS.tier,
+		});
+		llmGuards.push(conversationLLMGuard);
+
+		const conversationDataStore = new DataStoreServiceImpl({
+			dataDir: config.dataDir,
+			appId: 'chatbot',
+			userScopes: CONVERSATION_DATA_SCOPES,
+			sharedScopes: [],
+			changeLog,
+			spaceService,
+			eventBus,
+			householdService,
+		});
+
+		const conversationAppConfig = new AppConfigServiceImpl({
+			dataDir: config.dataDir,
+			appId: 'chatbot',
+			defaults: CONVERSATION_USER_CONFIG,
+		});
+
+		conversationService = new ConversationService({
+			llm: conversationLLMGuard,
+			telegram: telegramService,
+			data: conversationDataStore,
+			logger: createChildLogger(logger, { service: 'conversation' }),
+			timezone: config.timezone,
+			systemInfo: systemInfoService,
+			appMetadata: appMetadata,
+			appKnowledge: appKnowledge,
+			modelJournal: modelJournal,
+			contextStore: contextStore,
+			config: conversationAppConfig,
+			dataQuery: dataQueryServiceImpl
+				? {
+						query: (q: string, uid: string, opts?: DataQueryOptions) =>
+							dataQueryServiceImpl!.query(q, uid, opts),
+					}
+				: undefined,
+			interactionContext: interactionContextService,
+		});
+		logger.info('ConversationService: initialized');
+	}
+
+	// 9d. Legacy `defaults.fallback` deprecation warning (REQ-CONV-014).
+	if (config._legacyKeys?.defaultsFallback) {
+		logger.warn(
+			'pas.yaml `defaults.fallback` is deprecated and will be removed in a future release. ' +
+				'Free-text routing now prefers ConversationService directly; the YAML setting still controls ' +
+				'the legacy chatbot/notes fallback path for back-compat. See docs/open-items.md.',
+		);
+	}
+
 	// 9b. Route verification (optional)
 	let routeVerifier: RouteVerifier | undefined;
 	const verificationConfig = config.routing?.verification;
@@ -924,6 +1003,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		fallback,
 		chatbotApp: chatbotApp ?? undefined,
 		fallbackMode,
+		conversationService,
 		config,
 		appToggle,
 		spaceService,
@@ -1042,7 +1122,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 					const rvHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
 					await requestContext.run({ userId, householdId: rvHouseholdId }, async () => {
-						if (chosenAppId === 'chatbot' && chatbotApp) {
+						if (chosenAppId === 'chatbot' && conversationService) {
+							await conversationService.handleMessage({
+								...(entry.ctx as import('./types/telegram.js').MessageContext),
+								route: overrideRoute,
+							});
+						} else if (chosenAppId === 'chatbot' && chatbotApp) {
 							await chatbotApp.module.handleMessage({
 								...(entry.ctx as import('./types/telegram.js').MessageContext),
 								route: overrideRoute,

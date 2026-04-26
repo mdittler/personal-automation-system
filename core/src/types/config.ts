@@ -139,8 +139,22 @@ export interface SystemConfig {
 		tunnelToken?: string;
 	};
 
-	/** Fallback mode: 'chatbot' uses AI chatbot, 'notes' appends to daily notes. Default: 'chatbot'. */
+	/**
+	 * @deprecated Removed in Hermes P1 Chunk D. The 'chatbot' | 'notes' routing mode
+	 * is preserved for back-compat in Chunks B–C; free-text routing prefers
+	 * ConversationService when wired, and falls back to the legacy chatbotApp branch
+	 * otherwise. See REQ-CONV-014.
+	 */
 	fallback: 'chatbot' | 'notes';
+
+	/**
+	 * Internal: signals that legacy keys were explicitly present in pas.yaml so
+	 * compose-runtime can emit deprecation warnings. Populated by loadSystemConfig.
+	 * Not part of the public config schema; tests should not rely on this field.
+	 */
+	_legacyKeys?: {
+		defaultsFallback?: boolean;
+	};
 
 	/** Outbound webhooks for event delivery to external services. */
 	webhooks: WebhookDefinition[];

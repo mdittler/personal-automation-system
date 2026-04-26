@@ -267,6 +267,10 @@ export async function loadSystemConfig(options?: {
 		config.migrationNeeded = true;
 	}
 
+	config._legacyKeys = {
+		defaultsFallback: yamlConfig?.defaults?.fallback !== undefined,
+	};
+
 	return config;
 }
 
