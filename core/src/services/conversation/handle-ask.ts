@@ -167,7 +167,7 @@ export async function handleAsk(
 	);
 
 	// Append <config-set> instruction post-prompt-build when question has notes intent
-	if (NOTES_INTENT_REGEX.test(question) && deps.config) {
+	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 

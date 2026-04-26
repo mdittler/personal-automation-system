@@ -11,8 +11,8 @@ export type CoerceResult =
 	| { ok: true; coerced: unknown }
 	| { ok: false; reason: string };
 
-const BOOLEAN_TRUTHY = new Set(['true', '1', 'on']);
-const BOOLEAN_FALSY = new Set(['false', '0', 'off']);
+export const BOOLEAN_TRUTHY = new Set(['true', '1', 'on']);
+export const BOOLEAN_FALSY = new Set(['false', '0', 'off']);
 
 export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): CoerceResult {
 	if (raw === null || raw === undefined) {

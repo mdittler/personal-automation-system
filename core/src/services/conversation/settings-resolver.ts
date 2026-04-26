@@ -8,9 +8,7 @@
 
 import type { Logger } from 'pino';
 import type { AppConfigService } from '../../types/config.js';
-
-const TRUTHY = new Set(['true', '1', 'on']);
-const FALSY = new Set(['false', '0', 'off']);
+import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
 
 export async function resolveUserBool(
 	config: AppConfigService,
@@ -29,8 +27,8 @@ export async function resolveUserBool(
 		if (typeof raw === 'boolean') return raw;
 		if (typeof raw === 'string') {
 			const lower = raw.toLowerCase();
-			if (TRUTHY.has(lower)) return true;
-			if (FALSY.has(lower)) return false;
+			if (BOOLEAN_TRUTHY.has(lower)) return true;
+			if (BOOLEAN_FALSY.has(lower)) return false;
 		}
 
 		// Unrecognised value — fail closed
