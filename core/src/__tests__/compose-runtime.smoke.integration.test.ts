@@ -156,7 +156,7 @@ describe('composeRuntime smoke', () => {
 			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
 		await requestContext.run({ userId, householdId }, () =>
 			chatbotEntry!.module.handleCommand!(
-				'/ask',
+				'ask',
 				['what', 'apps', 'do', 'I', 'have?'],
 				{
 					userId,
@@ -207,7 +207,7 @@ describe('composeRuntime smoke', () => {
 
 		await requestContext.run({ userId: userA, householdId: userAHouseholdId }, () =>
 			chatbotEntry!.module.handleCommand!(
-				'/edit',
+				'edit',
 				['change', 'zxq', 'secret', 'marker'],
 				{
 					userId: userA,
