@@ -369,8 +369,9 @@ Substring addressing (structure #16) may be used for agent-internal operations o
 ### P8: Auto-reset + compression + lineage
 
 - Enable idle/daily auto-reset if users request it. Start conservative: `idle_minutes: 1440` (24h — Hermes's default).
-- Pre-reset memory-save turn (Hermes `gateway/run.py:902`): agent saves important memories before session ends.
-- Active-work protection: sessions with running background processes are never auto-reset.
+- **Pre-compaction flush (generalized):** before any lossy summarization or compression — idle reset, manual `/compress`, or future automatic compaction — give the model one constrained pass to promote durable preferences and facts to ContextStore. Hermes's `gateway/run.py:902` applies this only before reset; the stronger principle is: never summarize away something the user told you without first offering it to durable memory. Active-work protection: sessions with running background processes are never auto-reset.
+- **Compaction order:** reversible trimming first (slide window, drop old tool outputs, projection to summaries), destructive summarization last. If PAS eventually has agent tool usage, tool outputs get a bounded summary in the prompt and the full result in a sidecar transcript — the prompt sees budgeted text, audit logs keep everything.
+- **Post-compaction telemetry:** the useful quality signal is "did the conversation stay useful after compaction?" Track retrieval hits, compaction events, follow-up failures, and user resets per session. A high reset rate immediately after compaction is the clearest signal the summary discarded something the user expected to be remembered.
 - Port context compressor: structured summary prefix, tool-result deduplication, JSON-preserving argument truncation.
 - Parent-session lineage writes: `parent_session_id` already in schema; behavior activates here.
 - Numbered title lineage: "my project" → "my project #2" → "my project #3".
@@ -427,6 +428,10 @@ Hermes supports Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, 
 ### 7. The run_agent.py megafile pattern
 
 Hermes's `run_agent.py` is a large orchestration file that does everything. PAS's current `apps/chatbot/src/index.ts` has the same shape and is one of the reasons the architecture is hard to evolve. The move to core is specifically to break this pattern, not replicate it.
+
+### 8. Exposing memory as a general LLM-visible tool early
+
+Memory access — read, write, search — should live behind audited services: `ConversationRetrievalService`, `ContextStore`, transcript search, and fenced prompt assembly. A general `memory_search` or `session_search` tool visible to the LLM adds a privilege surface before retrieval quality is proven and before the security boundary (what the model can instruct the system to read) is well-tested. Ship the audited services first; if tool-based access proves necessary later, add it with scoped, logged calls behind an explicit allowlist.
 
 ---
 

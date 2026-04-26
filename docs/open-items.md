@@ -62,6 +62,7 @@ Known issues or cleanup items that should be addressed in a near-term session.
 - **Hermes P1 Chunk D: SystemConfig cleanup** — Drop `fallback: 'chatbot' | 'notes'` and `_legacyKeys` from `SystemConfig` in `core/src/types/config.ts`; remove the `_legacyKeys.defaultsFallback` population in `core/src/services/config/index.ts`; remove the deprecation warning from `compose-runtime.ts`. Only safe once Chunk D deletes the `fallbackMode` Router field that reads this config key.
 - **Hermes P1 Chunk D: Router cleanup** — Remove `chatbotApp`/`fallbackMode` from `RouterOptions` and all legacy fallback branches in `routeMessage`, `sendToFallback`, and the photo-callback path. Also clean up the legacy-branch tests in `router.test.ts` (currently kept as back-compat invariants for Chunks B–C).
 - **Hermes P1 Chunk D: SystemInfoService** — Drop `fallbackMode` from the GUI surface (`/gui/llm` template and `core/src/services/system-info/index.ts`). Gated on Router cleanup completing first.
+- **Hermes P1 Chunk A: simplify pass pending** — Chunk B and C have been simplified; Chunk A has not yet received a `/simplify` pass. Run `git diff <chunk-a-start>^..<chunk-a-end>` to scope the diff, then run the three-agent simplify review (reuse, quality, efficiency).
 
 ---
 
