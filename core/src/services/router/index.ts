@@ -523,6 +523,23 @@ export class Router {
 			return;
 		}
 
+		// Built-in conversation commands — short-circuit before lookupCommand so they
+		// work even if the chatbot app has no /ask, /edit, or /notes in its manifest.
+		if (this.conversationService) {
+			if (parsed.command === '/ask') {
+				await this.dispatchConversationCommand('ask', parsed.args, ctx);
+				return;
+			}
+			if (parsed.command === '/edit') {
+				await this.dispatchConversationCommand('edit', parsed.args, ctx);
+				return;
+			}
+			if (parsed.command === '/notes') {
+				await this.dispatchConversationCommand('notes', parsed.args, ctx);
+				return;
+			}
+		}
+
 		const result = lookupCommand(parsed, this.commandMap);
 		if (!result) {
 			await this.trySend(
@@ -637,6 +654,35 @@ export class Router {
 		}
 	}
 
+	/**
+	 * Dispatch a built-in conversation command (/ask, /edit, /notes) to
+	 * ConversationService. Mirrors dispatchConversation in structure: establishes
+	 * requestContext, attaches route metadata, isolates errors.
+	 *
+	 * These commands bypass AppToggleStore — a user who disabled the chatbot app
+	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
+	 */
+	private async dispatchConversationCommand(
+		name: 'ask' | 'edit' | 'notes',
+		args: string[],
+		ctx: MessageContext,
+	): Promise<void> {
+		if (!this.conversationService) return;
+		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		const route = routeForCommand('chatbot', name);
+		const enrichedCtx: MessageContext = { ...ctx, route };
+		try {
+			await requestContext.run({ userId: ctx.userId, householdId }, async () => {
+				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
+				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
+				else await this.conversationService!.handleNotes(args, enrichedCtx);
+			});
+		} catch (error) {
+			this.logger.error({ command: name, error }, 'ConversationService command handler failed');
+			await this.trySend(ctx.userId, 'Something went wrong. Please try again later.');
+		}
+	}
+
 	/** Generate and send the /help message. */
 	private async sendHelp(userId: string, enabledApps: string[]): Promise<void> {
 		const lines: string[] = ['*Available Commands*\n'];
@@ -661,11 +707,25 @@ export class Router {
 			}
 		}
 
-		// Group commands by app
+		// Built-in conversation commands (always listed when ConversationService is wired;
+		// they bypass AppToggleStore so they appear regardless of chatbot toggle state).
+		if (this.conversationService) {
+			lines.push('*Conversation*');
+			lines.push('  /ask <question> — Ask about apps, costs, or system status');
+			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
+			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
+			lines.push('');
+		}
+
+		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes entries
+		// if conversationService is wired (they're now built-ins, not app commands).
+		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes']);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {
 			if (!(await this.isAppEnabled(userId, entry.appId, enabledApps))) continue;
+			// Skip chatbot-manifest entries for commands that are now Router built-ins
+			if (this.conversationService && entry.appId === 'chatbot' && BUILTIN_COMMAND_NAMES.has(entry.command.name)) continue;
 
 			const app = this.registry.getApp(entry.appId);
 			if (!app) continue;
@@ -686,7 +746,7 @@ export class Router {
 			lines.push('');
 		}
 
-		if (appCommands.size === 0) {
+		if (appCommands.size === 0 && !this.conversationService && !this.spaceService && !this.inviteService) {
 			lines.push('No commands available.');
 		}
 
