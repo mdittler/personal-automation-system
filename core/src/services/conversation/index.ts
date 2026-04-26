@@ -76,3 +76,6 @@ export type {
 	ConversationLLMSafeguards,
 	ConversationDataScope,
 } from './manifest.js';
+
+export { ConversationService } from './conversation-service.js';
+export type { ConversationServiceDeps } from './conversation-service.js';

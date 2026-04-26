@@ -259,6 +259,13 @@ describe('composeRuntime smoke', () => {
 		expect(cols[8]).toBe(expectedHh); // household column (index 8)
 	});
 
+	// Hermes P1 Chunk B: ConversationService is wired into the Router
+	it('Chunk B: ConversationService is wired into the Router', () => {
+		const router = runtime.services.router as any;
+		expect(router.conversationService).toBeDefined();
+		expect(router.conversationService.constructor.name).toBe('ConversationService');
+	});
+
 	it('dispose() completes without throwing', async () => {
 		await expect(runtime.dispose()).resolves.not.toThrow();
 	});

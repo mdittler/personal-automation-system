@@ -145,6 +145,7 @@ describe('Router', () => {
 			chatbotApp?: RegisteredApp;
 			fallbackMode?: 'chatbot' | 'notes';
 			spaceService?: SpaceService;
+			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
 		},
 	): Router {
 		const config = createMockConfig(users, options?.fallbackMode ?? 'chatbot');
@@ -179,6 +180,7 @@ describe('Router', () => {
 			chatbotApp: options?.chatbotApp,
 			fallbackMode: options?.fallbackMode,
 			spaceService: options?.spaceService,
+			conversationService: options?.conversationService as any,
 		});
 		router.buildRoutingTables();
 		return router;
@@ -821,5 +823,133 @@ describe('buildUserOverrideRouteInfo', () => {
 		expect(r1.source).toBe('user-override');
 		expect(r2.confidence).toBe(1.0);
 		expect(r2.source).toBe('user-override');
+	});
+});
+
+describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', () => {
+	const users = [
+		{
+			id: 'user1',
+			name: 'Test',
+			isAdmin: true,
+			enabledApps: ['*'] as string[],
+			sharedScopes: [] as string[],
+		},
+	];
+
+	let telegram: TelegramService;
+	let llm: LLMService;
+	let fallback: FallbackHandler;
+	let logger: Logger;
+	let chatbotModule: AppModule;
+	let chatbotApp: RegisteredApp;
+
+	function buildRouter(
+		routerUsers: typeof users,
+		overrideLlm?: LLMService,
+		options?: {
+			chatbotApp?: RegisteredApp;
+			fallbackMode?: 'chatbot' | 'notes';
+			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
+		},
+	): Router {
+		const config = createMockConfig(routerUsers, options?.fallbackMode ?? 'chatbot');
+		const cache = new ManifestCache();
+		const registry = {
+			getApp: () => undefined,
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => [],
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: overrideLlm ?? llm,
+			telegram,
+			fallback,
+			config,
+			logger,
+			confidenceThreshold: 0.4,
+			chatbotApp: options?.chatbotApp,
+			fallbackMode: options?.fallbackMode,
+			conversationService: options?.conversationService as any,
+		});
+		router.buildRoutingTables();
+		return router;
+	}
+
+	beforeEach(() => {
+		telegram = createMockTelegram();
+		llm = createMockLLM({ category: 'unknown', confidence: 0.1 });
+		fallback = createMockFallback();
+		logger = createMockLogger();
+		chatbotModule = createMockModule();
+		chatbotApp = {
+			manifest: {
+				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
+				capabilities: { messages: { intents: [] } },
+			},
+			module: chatbotModule,
+			appDir: '/apps/chatbot',
+		};
+	});
+
+	it('when conversationService is wired, free-text fallback calls it (not chatbotApp)', async () => {
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const router = buildRouter(users, undefined, {
+			chatbotApp,
+			fallbackMode: 'chatbot',
+			conversationService,
+		});
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
+		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
+	});
+
+	it('when conversationService is absent, falls back to legacy chatbotApp branch', async () => {
+		const router = buildRouter(users, undefined, { chatbotApp, fallbackMode: 'chatbot' });
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(chatbotModule.handleMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it('per-user chatbot disable: routes to FallbackHandler regardless of conversationService presence', async () => {
+		const restrictedUsers = [
+			{
+				id: 'user1',
+				name: 'Test',
+				isAdmin: false,
+				enabledApps: ['echo'] as string[],
+				sharedScopes: [] as string[],
+			},
+		];
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const router = buildRouter(restrictedUsers, undefined, {
+			chatbotApp,
+			fallbackMode: 'chatbot',
+			conversationService,
+		});
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(conversationService.handleMessage).not.toHaveBeenCalled();
+		expect(fallback.handleUnrecognized).toHaveBeenCalled();
+	});
+
+	it('error in ConversationService.handleMessage is isolated and produces a friendly reply', async () => {
+		const conversationService = {
+			handleMessage: vi.fn().mockRejectedValue(new Error('boom')),
+		};
+		const router = buildRouter(users, undefined, {
+			chatbotApp,
+			fallbackMode: 'chatbot',
+			conversationService,
+		});
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
 	});
 });

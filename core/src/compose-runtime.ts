@@ -101,6 +101,12 @@ import type { DataQueryOptions } from './types/data-query.js';
 import type { ManifestDataScope } from './types/manifest.js';
 import type { TelegramService } from './types/telegram.js';
 import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
+import {
+	CONVERSATION_DATA_SCOPES,
+	CONVERSATION_LLM_SAFEGUARDS,
+	CONVERSATION_USER_CONFIG,
+	ConversationService,
+} from './services/conversation/index.js';
 
 export interface RuntimeOverrides {
 	dataDir?: string;
@@ -616,6 +622,25 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	});
 	await interactionContextService.loadFromDisk();
 
+	// Shared LLM guard for all chatbot/conversation paths — one guard = one shared
+	// rate-limiter so /ask, /edit, and free-text all share the 60-req/hr cap.
+	const conversationLLMGuard = new LLMGuard({
+		inner: llm,
+		appId: 'chatbot',
+		costTracker,
+		config: {
+			maxRequests: CONVERSATION_LLM_SAFEGUARDS.rate_limit.max_requests,
+			windowSeconds: CONVERSATION_LLM_SAFEGUARDS.rate_limit.window_seconds,
+			monthlyCostCap: CONVERSATION_LLM_SAFEGUARDS.monthly_cost_cap,
+			globalMonthlyCostCap,
+		},
+		logger: createChildLogger(logger, { service: 'llm-guard:chatbot' }),
+		householdLimiter,
+		priceLookup: guardPriceLookup,
+		tier: CONVERSATION_LLM_SAFEGUARDS.tier,
+	});
+	llmGuards.push(conversationLLMGuard);
+
 	// Service factory: creates scoped CoreServices per app
 	const serviceFactory: ServiceFactory = (manifest, _appDir) => {
 		const declaredServices = new Set(manifest.requirements?.services ?? []);
@@ -647,24 +672,29 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 		let appLlm: LLMGuard | undefined;
 		if (needsLlm) {
-			const manifestLlm = manifest.requirements?.llm;
-			const guard = new LLMGuard({
-				inner: llm,
-				appId,
-				costTracker,
-				config: {
-					maxRequests: manifestLlm?.rate_limit?.max_requests ?? defaultMaxRequests,
-					windowSeconds: manifestLlm?.rate_limit?.window_seconds ?? defaultWindowSeconds,
-					monthlyCostCap: manifestLlm?.monthly_cost_cap ?? defaultMonthlyCostCap,
-					globalMonthlyCostCap,
-				},
-				logger: appLogger,
-				householdLimiter,
-				priceLookup: guardPriceLookup,
-				tier: manifestLlm?.tier ?? 'fast',
-			});
-			llmGuards.push(guard);
-			appLlm = guard;
+			if (appId === 'chatbot') {
+				// Reuse the shared guard so /ask, /edit, and free-text share one rate-limiter
+				appLlm = conversationLLMGuard;
+			} else {
+				const manifestLlm = manifest.requirements?.llm;
+				const guard = new LLMGuard({
+					inner: llm,
+					appId,
+					costTracker,
+					config: {
+						maxRequests: manifestLlm?.rate_limit?.max_requests ?? defaultMaxRequests,
+						windowSeconds: manifestLlm?.rate_limit?.window_seconds ?? defaultWindowSeconds,
+						monthlyCostCap: manifestLlm?.monthly_cost_cap ?? defaultMonthlyCostCap,
+						globalMonthlyCostCap,
+					},
+					logger: appLogger,
+					householdLimiter,
+					priceLookup: guardPriceLookup,
+					tier: manifestLlm?.tier ?? 'fast',
+				});
+				llmGuards.push(guard);
+				appLlm = guard;
+			}
 		}
 
 		// Build secrets from manifest external_apis declarations
@@ -892,6 +922,58 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		);
 	}
 
+	// 9c. ConversationService — Hermes P1 Chunk B.
+	// Constructed unconditionally — free-text fallback works even if chatbotApp fails to load.
+	// The chatbotApp lookup above stays for /ask + /edit until Chunk C; only free-text dispatch
+	// leaves the app boundary in this chunk.
+	const conversationDataStore = new DataStoreServiceImpl({
+		dataDir: config.dataDir,
+		appId: 'chatbot',
+		userScopes: CONVERSATION_DATA_SCOPES,
+		sharedScopes: [],
+		changeLog,
+		spaceService,
+		eventBus,
+		householdService,
+	});
+
+	const conversationAppConfig = new AppConfigServiceImpl({
+		dataDir: config.dataDir,
+		appId: 'chatbot',
+		defaults: CONVERSATION_USER_CONFIG,
+	});
+
+	const conversationService = new ConversationService({
+		llm: conversationLLMGuard,
+		telegram: telegramService,
+		data: conversationDataStore,
+		logger: createChildLogger(logger, { service: 'conversation' }),
+		timezone: config.timezone,
+		systemInfo: systemInfoService,
+		appMetadata: appMetadata,
+		appKnowledge: appKnowledge,
+		modelJournal: modelJournal,
+		contextStore: contextStore,
+		config: conversationAppConfig,
+		dataQuery: dataQueryServiceImpl
+			? {
+					query: (q: string, uid: string, opts?: DataQueryOptions) =>
+						dataQueryServiceImpl!.query(q, uid, opts),
+				}
+			: undefined,
+		interactionContext: interactionContextService,
+	});
+	logger.info('ConversationService: initialized');
+
+	// 9d. Legacy `defaults.fallback` deprecation warning (REQ-CONV-014).
+	if (config._legacyKeys?.defaultsFallback) {
+		logger.warn(
+			'pas.yaml `defaults.fallback` is deprecated and will be removed in a future release. ' +
+				'Free-text routing now prefers ConversationService directly; the YAML setting still controls ' +
+				'the legacy chatbot/notes fallback path for back-compat. See docs/open-items.md.',
+		);
+	}
+
 	// 9b. Route verification (optional)
 	let routeVerifier: RouteVerifier | undefined;
 	const verificationConfig = config.routing?.verification;
@@ -924,6 +1006,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		fallback,
 		chatbotApp: chatbotApp ?? undefined,
 		fallbackMode,
+		conversationService,
 		config,
 		appToggle,
 		spaceService,
@@ -1040,27 +1123,30 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 						entry.verifierSuggestedIntent,
 					);
 
-					const rvHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
-					await requestContext.run({ userId, householdId: rvHouseholdId }, async () => {
-						if (chosenAppId === 'chatbot' && chatbotApp) {
-							await chatbotApp.module.handleMessage({
-								...(entry.ctx as import('./types/telegram.js').MessageContext),
-								route: overrideRoute,
-							});
-						} else if (appEntry) {
-							if (entry.isPhoto && appEntry.module.handlePhoto) {
-								await appEntry.module.handlePhoto({
-									...(entry.ctx as import('./types/telegram.js').PhotoContext),
-									route: overrideRoute,
-								});
-							} else {
-								await appEntry.module.handleMessage({
-									...(entry.ctx as import('./types/telegram.js').MessageContext),
-									route: overrideRoute,
-								});
+					if (chosenAppId === 'chatbot') {
+						// dispatchConversation establishes its own requestContext.run + error isolation
+						await router.dispatchConversation(
+							entry.ctx as import('./types/telegram.js').MessageContext,
+							overrideRoute,
+						);
+					} else {
+						const rvHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
+						await requestContext.run({ userId, householdId: rvHouseholdId }, async () => {
+							if (appEntry) {
+								if (entry.isPhoto && appEntry.module.handlePhoto) {
+									await appEntry.module.handlePhoto({
+										...(entry.ctx as import('./types/telegram.js').PhotoContext),
+										route: overrideRoute,
+									});
+								} else {
+									await appEntry.module.handleMessage({
+										...(entry.ctx as import('./types/telegram.js').MessageContext),
+										route: overrideRoute,
+									});
+								}
 							}
-						}
-					});
+						});
+					}
 					return;
 				}
 

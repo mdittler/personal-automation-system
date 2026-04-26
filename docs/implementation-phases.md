@@ -2571,6 +2571,47 @@ Chunks A and B shipped route-first dispatch and the shadow classifier infrastruc
 
 ---
 
+## Phase Hermes P1 Chunk B: Wire ConversationService into Router
+
+**Branch:** `hermes-p1-chunk-b` | **Status:** Complete | **Tests added:** ~15
+
+### Goal
+
+Replace the router's "dispatch to chatbot app" fallback with a direct call to a new `ConversationService` class in core. Preserves per-user disable via `AppToggleStore`, household-aware data paths via `DataStoreServiceImpl`, and the route-verifier `rv:<pendingId>:<chosenAppId>` callback. Additive-only — `chatbotApp`/`fallbackMode` are preserved for Chunks B–C back-compat; removal is Chunk D.
+
+### Key files
+
+- **Created:** `core/src/services/conversation/conversation-service.ts` — `ConversationService` class; owns `ConversationHistory({ maxTurns: 20 })`; `ConversationServiceDeps = Omit<HandleMessageDeps, 'history'>`
+- **Created:** `core/src/services/conversation/__tests__/conversation-service.test.ts` — 4 unit tests (ALS delegation, stable history, LLMRateLimitError surface, concurrency)
+- **Created:** `core/src/services/conversation/__tests__/dispatch.integration.test.ts` — 3 integration tests (telegram send fires, household-aware history path, per-user disable gate)
+- **Created:** `core/src/services/data-store/__tests__/conversation-scope-contract.test.ts` — 1 contract test (CONVERSATION_DATA_SCOPES accepted/traversal rejected)
+- **Modified:** `core/src/services/conversation/index.ts` — exports for ConversationService + ConversationServiceDeps
+- **Modified:** `core/src/services/router/index.ts` — `conversationService?` option + field + `dispatchConversation()` helper; fallback branches prefer conversationService when wired
+- **Modified:** `core/src/services/router/__tests__/router.test.ts` — 4 new cases (preferred, fallback, disable, error isolation)
+- **Modified:** `core/src/services/router/__tests__/router-verification.test.ts` — 1 new case (verifier picks chatbot → conversationService, testing-standards rule #2)
+- **Modified:** `core/src/types/config.ts` — `@deprecated` on `fallback`; new `_legacyKeys?` field
+- **Modified:** `core/src/services/config/index.ts` — populates `_legacyKeys.defaultsFallback`
+- **Modified:** `core/src/compose-runtime.ts` — constructs ConversationService with dedicated LLMGuard + DataStore + AppConfigService; passes to Router; rv:chatbot callback prefers conversationService; deprecation warning on `_legacyKeys.defaultsFallback`
+- **Modified:** `core/src/__tests__/compose-runtime.smoke.integration.test.ts` — 1 new case (ConversationService wired into Router)
+- **Modified:** `docs/urs.md` — REQ-CONV-003/004/005/014/015 + traceability matrix
+- **Modified:** `docs/open-items.md` — Chunk D entries (chatbot deletion, SystemConfig cleanup, Router cleanup, SystemInfoService cleanup)
+
+### Verification
+
+- `pnpm -r test` — all tests green, zero failures
+- `pnpm -r build` — clean
+- All 80 chatbot app tests still pass (shim unchanged)
+- Notes-mode back-compat tests still pass (router-spaces.test.ts, context-promotion.test.ts)
+
+### Consequences
+
+- Free-text fallback dispatch no longer routes through the chatbot app module; it calls `ConversationService.handleMessage` directly via `Router.dispatchConversation`.
+- The chatbot app remains loaded for `/ask` and `/edit` commands; full removal is Chunk D.
+- A dedicated `LLMGuard` (60 req/hr, $15/mo cap) wraps ConversationService — rate limit errors surface as friendly replies.
+- Conversation history writes to `data/households/<hh>/users/<userId>/chatbot/history.json` when household service is wired (always in production).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

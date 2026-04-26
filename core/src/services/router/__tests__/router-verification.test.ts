@@ -711,3 +711,120 @@ describe('Router — grey-zone verification', () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Hermes P1 Chunk B — verifier picks 'chatbot' with conversationService wired
+// Testing-standards rule #2: post-routing authorization must apply to new target.
+// ---------------------------------------------------------------------------
+
+describe('Router — verifier selects chatbot with conversationService wired (Chunk B)', () => {
+	const testUser = {
+		id: 'user1',
+		name: 'Test',
+		isAdmin: true,
+		enabledApps: ['*'] as string[],
+		sharedScopes: [] as string[],
+	};
+
+	it('dispatches to conversationService (not chatbotApp) when verifier picks chatbot', async () => {
+		const echoModule = createMockModule();
+		const echoManifest: AppManifest = {
+			app: { id: 'echo', name: 'Echo', version: '1.0.0', description: '', author: '' },
+			capabilities: { messages: { intents: ['echo'] } },
+		};
+		const chatbotModule = createMockModule();
+		const chatbotApp: RegisteredApp = {
+			manifest: {
+				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
+				capabilities: { messages: { intents: [] } },
+			},
+			module: chatbotModule,
+			appDir: '/apps/chatbot',
+		};
+
+		// Verifier overrides to chatbot — testing-standards rule #2: new target is authorized
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'chatbot',
+			intent: 'chatbot',
+		});
+		// Grey-zone confidence so verifier is invoked
+		const greyLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(echoManifest, '/apps/echo');
+
+		const registry = {
+			getApp: (id: string) => {
+				if (id === 'echo') return { manifest: echoManifest, module: echoModule, appDir: '/apps/echo' } as RegisteredApp;
+				if (id === 'chatbot') return chatbotApp;
+				return undefined;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => ['echo', 'chatbot'],
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: greyLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			chatbotApp,
+			fallbackMode: 'chatbot',
+			conversationService: conversationService as any,
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage({ userId: 'user1', text: 'hello', timestamp: new Date(), chatId: 1, messageId: 1 });
+
+		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
+		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
+	});
+});
+
+describe('Router.dispatchConversation — public error isolation (rv:chatbot regression)', () => {
+	it('error in ConversationService.handleMessage is caught and produces a friendly reply', async () => {
+		const telegramMock = createMockTelegram();
+		const conversationService = {
+			handleMessage: vi.fn().mockRejectedValue(new Error('chatbot explosion')),
+		};
+		const testUser = {
+			id: 'user1',
+			name: 'Test',
+			isAdmin: true,
+			enabledApps: ['*'] as string[],
+			sharedScopes: [] as string[],
+		};
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		const registry = {
+			getApp: (_id: string) => undefined,
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => [] as string[],
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: createMockLLM({ category: 'none', confidence: 1.0 }),
+			telegram: telegramMock,
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			conversationService: conversationService as any,
+		});
+
+		const ctx = { userId: 'user1', text: 'boom', timestamp: new Date(), chatId: 1, messageId: 1 };
+		const route = { appId: 'chatbot', intent: 'chatbot', confidence: 1.0, source: 'manual' as const };
+
+		await router.dispatchConversation(ctx, route as any);
+
+		// Handler error was isolated — send called with friendly message, no throw
+		expect(telegramMock.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
+	});
+});
