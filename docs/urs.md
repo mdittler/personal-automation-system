@@ -3181,11 +3181,13 @@ Only keys in `ALLOWED_CONFIG_KEYS` (currently `log_to_notes`) are processed; oth
 
 **Phase:** P1 Chunk C | **Status:** Implemented
 
-`core/src/services/config/coerce-user-config.ts` exports a single `coerceUserConfigValue(entry, raw)` function used by both `processConfigSetTags` and `core/src/gui/routes/config.ts`. Rejects (never clamps) out-of-range numbers; rejects non-boolean strings except `"true"/"false"/"on"/"off"/"1"/"0"` (case-insensitive). GUI POST now returns HTTP 400 with per-key reason on coerce failure.
+`core/src/services/config/coerce-user-config.ts` exports a single `coerceUserConfigValue(entry, raw)` function used by both `processConfigSetTags` and `core/src/gui/routes/config.ts`. Rejects (never clamps). For numbers, rejects non-finite values (`NaN`, `Infinity`, non-numeric strings) but does **not** enforce numeric range — `ManifestUserConfigEntry` has no `min`/`max` fields, so range validation is not implemented in this phase. Rejects non-boolean strings except `"true"/"false"/"on"/"off"/"1"/"0"` (case-insensitive). GUI POST now returns HTTP 400 with per-key reason on coerce failure.
+
+**Note:** Numeric range enforcement is deferred until `ManifestUserConfigEntry` gains `min`/`max` fields. Current guarantee: numbers must be finite.
 
 **Standard tests** (`core/src/services/config/__tests__/coerce-user-config.test.ts`): 20 happy + edge cases per type (boolean, number, string); rejection-only contract.
 
-**Edge case tests** (same file): NaN, Infinity, out-of-range, out-of-enum, null, undefined.
+**Edge case tests** (same file): NaN, Infinity, non-numeric strings, out-of-enum, null, undefined.
 
 ---
 

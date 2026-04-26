@@ -567,6 +567,42 @@ describe('loadSystemConfig', () => {
 		expect(config.fallback).toBe('chatbot');
 	});
 
+	it('parses chat.log_to_notes: true from pas.yaml', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(yamlPath, stringify({ chat: { log_to_notes: true } }), 'utf-8');
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.chat?.logToNotes).toBe(true);
+	});
+
+	it('defaults chat.logToNotes to false when chat section is absent', async () => {
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, requiredEnvVars);
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+		});
+
+		expect(config.chat?.logToNotes).toBe(false);
+	});
+
+	it('defaults chat.logToNotes to false when log_to_notes is omitted from chat section', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(yamlPath, stringify({ chat: {} }), 'utf-8');
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.chat?.logToNotes).toBe(false);
+	});
+
 	it('applies CLAUDE_MODEL env override to anthropic provider defaultModel', async () => {
 		const envPath = join(tempDir, '.env');
 		await writeEnvFile(envPath, {

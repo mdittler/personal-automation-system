@@ -219,13 +219,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		finalResponse = afterSwitchStrip.replace(/\n{3,}/g, '\n\n').trim();
 	}
 
-	// 9. Send response, splitting if over Telegram message limit
+	// 10. Send response, splitting if over Telegram message limit
 	await sendSplitResponse(ctx.userId, finalResponse, {
 		telegram: deps.telegram,
 		logger: deps.logger,
 	});
 
-	// 10. Save conversation history (with cleaned response)
+	// 11. Save conversation history (with cleaned response)
 	const now = ctx.timestamp.toISOString();
 	const userTurn: ConversationTurn = { role: 'user', content: ctx.text, timestamp: now };
 	const assistantTurn: ConversationTurn = {
