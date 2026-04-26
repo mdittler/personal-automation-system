@@ -42,8 +42,11 @@ NORM_PATH="${FILE_PATH//\\/\/}"
 # Only gate on production source directories (match with or without leading slash)
 [[ "$NORM_PATH" =~ (^|/)(core/src|apps)/ ]] || exit 0
 
-# Check current branch
-BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+# Check the branch that owns the file being edited.
+# When editing a file inside a .worktrees/ subdirectory, git -C resolves to
+# the worktree's branch rather than the main repo's branch.
+FILE_DIR=$(dirname "$FILE_PATH")
+BRANCH=$(git -C "$FILE_DIR" branch --show-current 2>/dev/null || git branch --show-current 2>/dev/null || echo "")
 
 # If branch is undetermined (detached HEAD in worktree), allow
 [ -z "$BRANCH" ] && exit 0

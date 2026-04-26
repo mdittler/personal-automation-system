@@ -167,7 +167,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	}
 
 	// Append <config-set> instruction post-prompt-build when the user message has notes intent
-	if (NOTES_INTENT_REGEX.test(ctx.text) && deps.config) {
+	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 

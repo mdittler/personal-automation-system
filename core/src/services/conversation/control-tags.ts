@@ -12,6 +12,8 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import { coerceUserConfigValue } from '../config/coerce-user-config.js';
 import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
 
+const normalizeResponse = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
+
 /** Regex to match model switch tags in LLM responses. */
 export const SWITCH_MODEL_TAG_REGEX =
 	/<switch-model\s+tier="([^"]+)"\s+provider="([^"]+)"\s+model="([^"]+)"\s*\/>/g;
@@ -36,7 +38,7 @@ export async function processModelSwitchTags(
 
 	if (!hasTags) {
 		return {
-			cleanedResponse: response.replace(/\n{3,}/g, '\n\n').trim(),
+			cleanedResponse: normalizeResponse(response),
 			confirmations,
 		};
 	}
@@ -44,27 +46,24 @@ export async function processModelSwitchTags(
 	const { systemInfo } = options.deps;
 
 	if (!systemInfo) {
-		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
-			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+			cleanedResponse: normalizeResponse(response.replace(SWITCH_MODEL_TAG_REGEX, '')),
 			confirmations,
 		};
 	}
 
 	// Guard: require admin (only when tags are present)
 	if (!options.userId || !systemInfo.isUserAdmin(options.userId)) {
-		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
-			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+			cleanedResponse: normalizeResponse(response.replace(SWITCH_MODEL_TAG_REGEX, '')),
 			confirmations,
 		};
 	}
 
 	// Guard: require explicit model-switch intent in the user message (only when tags present)
 	if (!options.userMessage || !MODEL_SWITCH_INTENT_REGEX.test(options.userMessage)) {
-		const cleaned = response.replace(SWITCH_MODEL_TAG_REGEX, '');
 		return {
-			cleanedResponse: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+			cleanedResponse: normalizeResponse(response.replace(SWITCH_MODEL_TAG_REGEX, '')),
 			confirmations,
 		};
 	}
@@ -88,7 +87,7 @@ export async function processModelSwitchTags(
 	}
 
 	return {
-		cleanedResponse: cleanedResponse.replace(/\n{3,}/g, '\n\n').trim(),
+		cleanedResponse: normalizeResponse(cleanedResponse),
 		confirmations,
 	};
 }
@@ -150,9 +149,7 @@ export async function processConfigSetTags(
 
 	// Collect all tags, validating the allowlist
 	const allowedTags: Array<{ key: string; value: string }> = [];
-	const tagRegex = new RegExp(CONFIG_SET_TAG_REGEX.source, 'g');
-	let match: RegExpExecArray | null;
-	while ((match = tagRegex.exec(response)) !== null) {
+	for (const match of response.matchAll(CONFIG_SET_TAG_REGEX)) {
 		const key = match[1] ?? '';
 		const value = match[2] ?? '';
 		if (!ALLOWED_CONFIG_KEYS.has(key)) {
@@ -163,11 +160,11 @@ export async function processConfigSetTags(
 	}
 
 	// Strip all tags from response regardless of outcome
-	let cleanedResponse = response.replace(new RegExp(CONFIG_SET_TAG_REGEX.source, 'g'), '');
+	const stripped = response.replace(CONFIG_SET_TAG_REGEX, '');
 
 	// Gate: intent regex must match the actual user message
 	if (!NOTES_INTENT_REGEX.test(options.userMessage)) {
-		return { cleanedResponse: cleanedResponse.replace(/\n{3,}/g, '\n\n').trim(), confirmations };
+		return { cleanedResponse: normalizeResponse(stripped), confirmations };
 	}
 
 	// Process surviving tags
@@ -194,5 +191,5 @@ export async function processConfigSetTags(
 		}
 	}
 
-	return { cleanedResponse: cleanedResponse.replace(/\n{3,}/g, '\n\n').trim(), confirmations };
+	return { cleanedResponse: normalizeResponse(stripped), confirmations };
 }
