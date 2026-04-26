@@ -787,3 +787,44 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
 	});
 });
+
+describe('Router.dispatchConversation — public error isolation (rv:chatbot regression)', () => {
+	it('error in ConversationService.handleMessage is caught and produces a friendly reply', async () => {
+		const telegramMock = createMockTelegram();
+		const conversationService = {
+			handleMessage: vi.fn().mockRejectedValue(new Error('chatbot explosion')),
+		};
+		const testUser = {
+			id: 'user1',
+			name: 'Test',
+			isAdmin: true,
+			enabledApps: ['*'] as string[],
+			sharedScopes: [] as string[],
+		};
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		const registry = {
+			getApp: (_id: string) => undefined,
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => [] as string[],
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: createMockLLM({ category: 'none', confidence: 1.0 }),
+			telegram: telegramMock,
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			conversationService: conversationService as any,
+		});
+
+		const ctx = { userId: 'user1', text: 'boom', timestamp: new Date(), chatId: 1, messageId: 1 };
+		const route = { appId: 'chatbot', intent: 'chatbot', confidence: 1.0, source: 'manual' as const };
+
+		await router.dispatchConversation(ctx, route as any);
+
+		// Handler error was isolated — send called with friendly message, no throw
+		expect(telegramMock.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
+	});
+});

@@ -85,8 +85,26 @@ describe('ConversationService', () => {
 		expect((deps.telegram as any).send).toHaveBeenCalledWith('user-0', expect.any(String));
 	});
 
-	it('two simultaneous handleMessage calls for the same user serialize via writeQueue (rule #6)', async () => {
+	it('two simultaneous handleMessage calls serialize writes — final history has all 4 turns (rule #6)', async () => {
 		const deps = mockDeps();
+
+		// In-memory store with slow writes to force overlap between the two calls.
+		// Without writeQueue serialization the second doAppend would read an empty
+		// history and overwrite the first pair, leaving only 2 turns.
+		const memStore = new Map<string, string>();
+		const delayingUserStore = {
+			read: vi.fn(async (key: string) => memStore.get(key) ?? null),
+			write: vi.fn(async (key: string, value: string) => {
+				await new Promise<void>((r) => setTimeout(r, 5));
+				memStore.set(key, value);
+			}),
+			append: vi.fn().mockResolvedValue(undefined),
+			exists: vi.fn().mockResolvedValue(false),
+			list: vi.fn().mockResolvedValue([]),
+			delete: vi.fn().mockResolvedValue(undefined),
+		};
+		(deps.data as any).forUser = vi.fn().mockReturnValue(delayingUserStore);
+
 		const svc = new ConversationService(deps);
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await Promise.all([
@@ -94,6 +112,16 @@ describe('ConversationService', () => {
 				svc.handleMessage(chatbotMessage('user-0', 2)),
 			]);
 		});
-		expect((deps.llm as any).complete).toHaveBeenCalledTimes(2);
+
+		const raw = memStore.get('history.json');
+		expect(raw).toBeTruthy();
+		const turns = JSON.parse(raw!);
+		expect(Array.isArray(turns)).toBe(true);
+		// Both user+assistant pairs must be present — not just the last one
+		expect(turns.length).toBe(4);
+		const userTurns = turns.filter((t: { role: string }) => t.role === 'user');
+		const assistantTurns = turns.filter((t: { role: string }) => t.role === 'assistant');
+		expect(userTurns.length).toBe(2);
+		expect(assistantTurns.length).toBe(2);
 	});
 });

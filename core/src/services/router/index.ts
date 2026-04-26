@@ -619,10 +619,10 @@ export class Router {
 	/**
 	 * Dispatch a free-text message to ConversationService, with the same request-context
 	 * + error-isolation guarantees as dispatchMessage. Used for the chatbot fallback path
-	 * once Hermes P1 Chunk B is wired. The legacy chatbotApp branch stays for
-	 * compatibility — this helper is only used when `conversationService` is set.
+	 * (free-text and rv:chatbot route-verifier callback). Public so compose-runtime can
+	 * call it directly for the rv:chatbot path with full error isolation.
 	 */
-	private async dispatchConversation(ctx: MessageContext, route: RouteInfo): Promise<void> {
+	async dispatchConversation(ctx: MessageContext, route: RouteInfo): Promise<void> {
 		if (!this.conversationService) {
 			throw new Error('dispatchConversation called without conversationService');
 		}
