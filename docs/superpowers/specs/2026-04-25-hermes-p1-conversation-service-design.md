@@ -1,7 +1,7 @@
 # Hermes P1 — Conversation Service Design
 
 **Date:** 2026-04-25  
-**Status:** Approved — implementation in progress (Chunk A started)  
+**Status:** Approved — Chunks A and B complete; Chunks C/D pending  
 **Plan:** `C:\Users\matth\.claude\plans\i-d-like-to-start-keen-liskov.md`
 
 ## Problem Statement

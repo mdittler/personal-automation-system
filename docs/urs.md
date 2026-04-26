@@ -2546,6 +2546,8 @@ The chatbot maintains per-user conversation history as JSON via ScopedDataStore.
 - `conversation-history.test.ts` > append > works with empty store (first conversation)
 - `conversation-history.test.ts` > append > works with malformed existing data
 
+**Note (Chunk B):** The free-text dispatch path that invokes conversation history now routes through `ConversationService` in core rather than the chatbot app shim. The history management behavior is unchanged. See REQ-CONV-003.
+
 ### REQ-CHATBOT-002: Context-aware responses with prompt sanitization
 
 **Phase:** 16 | **Status:** Implemented
@@ -2565,6 +2567,8 @@ The chatbot searches ContextStore for relevant user preferences/facts and includ
 - `chatbot.test.ts` > sanitizeInput > truncates text exceeding maxLength
 - `chatbot.test.ts` > sanitizeInput > preserves text at exactly maxLength
 - `chatbot.test.ts` > sanitizeInput > passes through normal text
+
+**Note (Chunk B):** Context-aware prompt assembly now executes inside `ConversationService` in core rather than the chatbot app shim. The sanitization and context behavior is unchanged. See REQ-CONV-003.
 
 ### REQ-CHATBOT-003: Daily notes side effect
 
@@ -3018,6 +3022,72 @@ The `pendingEdits: Map<string, EditProposal>` singleton is exported from `core/s
 - `routes to /edit handler when command is 'edit' (no slash)`
 - `does NOT route to /ask handler when command is '/ask' (legacy slash form)`
 - `does NOT route to /edit handler when command is '/edit' (legacy slash form)`
+
+---
+
+### REQ-CONV-003: ConversationService class orchestrates free-text dispatch
+
+**Phase:** P1 Chunk B | **Status:** Implemented
+
+`ConversationService` lives in `core/src/services/conversation/conversation-service.ts`. `ConversationServiceDeps = Omit<HandleMessageDeps, 'history'>`. The class owns one `ConversationHistory({ maxTurns: 20 })` instance for the lifetime of the process; writes serialize via the existing `writeQueue` so concurrent calls do not corrupt `history.json`.
+
+**Standard tests** (`core/src/services/conversation/__tests__/conversation-service.test.ts`): 4 cases:
+- `handleMessage delegates to core helper inside the caller-established requestContext`
+- `owns one ConversationHistory across calls (state preserved)`
+- `LLMRateLimitError surfaces as friendly user reply (testing-standards rule #1)`
+- `two simultaneous handleMessage calls for the same user serialize via writeQueue (rule #6)`
+
+---
+
+### REQ-CONV-004: Router prefers ConversationService over chatbotApp via dispatchConversation
+
+**Phase:** P1 Chunk B | **Status:** Implemented
+
+`Router.dispatchConversation(ctx, route)` mirrors `dispatchMessage`: wraps the call in `requestContext.run({ userId, householdId })` and catches handler errors with the standard friendly reply. When `conversationService` is wired, the free-text fallback branch and the `rv:chatbot` route-verifier callback both prefer it over the legacy `chatbotApp` dispatch. The `chatbotApp`/`fallbackMode` fields remain in `RouterOptions` for back-compat with Chunks B–C (notes-mode tests, chatbot app tests). Removal happens in Chunk D.
+
+**Standard tests** (`core/src/services/router/__tests__/router.test.ts`, `core/src/services/router/__tests__/router-verification.test.ts`): 5 new cases:
+- `when conversationService is wired, free-text fallback calls it (not chatbotApp)`
+- `when conversationService is absent, falls back to legacy chatbotApp branch`
+- `per-user chatbot disable: routes to FallbackHandler regardless of conversationService presence`
+- `error in ConversationService.handleMessage is isolated and produces a friendly reply`
+- `dispatches to conversationService (not chatbotApp) when verifier picks chatbot` (testing-standards rule #2)
+
+---
+
+### REQ-CONV-005: requestContext established by Router at every ConversationService boundary
+
+**Phase:** P1 Chunk B | **Status:** Implemented
+
+The Router establishes the ALS boundary, not ConversationService. `dispatchConversation` and the rv:chatbot callback both wrap calls in `requestContext.run({ userId, householdId, sessionId: undefined })`. The `sessionId` field exists from P0; P3 will populate it. ConversationService itself is a pure inner function that does not establish its own ALS boundary.
+
+**Coverage**: ALS context verified in `conversation-service.test.ts` (userId present inside send call); error isolation in `router.test.ts` (dispatchConversation catches and isolates).
+
+---
+
+### REQ-CONV-014: ConversationService LLM access wrapped by dedicated LLMGuard
+
+**Phase:** P1 Chunk B | **Status:** Implemented
+
+`compose-runtime.ts` constructs an `LLMGuard` for ConversationService keyed by `appId='chatbot'`, configured from `CONVERSATION_LLM_SAFEGUARDS` (60 req/3600s rate limit, $15/month cap), sharing the global `costTracker`, `householdLimiter`, and `priceLookup` with all other guards. The guard is pushed onto `llmGuards` so dispose runs on shutdown. Rate-limit and cost-cap exhaustion produce `LLMRateLimitError` / `LLMCostCapError`, surfaced as friendly replies via `classifyLLMError`. **Legacy `pas.yaml` `defaults.fallback` key produces a warn-level deprecation log at startup** via the new `_legacyKeys` config metadata.
+
+**Standard tests** (`core/src/__tests__/compose-runtime.smoke.integration.test.ts`): 1 new case:
+- `Chunk B: ConversationService is wired into the Router`
+
+---
+
+### REQ-CONV-015: Conversation data persists at household-aware scoped paths
+
+**Phase:** P1 Chunk B | **Status:** Implemented
+
+ConversationService is constructed with a `DataStoreServiceImpl` keyed by `appId='chatbot'` and `userScopes: CONVERSATION_DATA_SCOPES`. Path resolution is delegated to `DataStoreServiceImpl.forUser()`: when `HouseholdService` is wired (always in production), files land at `data/households/<hh>/users/<id>/chatbot/...`; legacy non-household installs land at `data/users/<id>/chatbot/...`. Pre-Chunk-B `history.json` files at either path continue to load identically because the underlying scope and writer are unchanged.
+
+**Standard tests** (`core/src/services/conversation/__tests__/dispatch.integration.test.ts`): 3 cases:
+- `free-text message → Router → ConversationService → telegram.send fires`
+- `history.json lands at household-aware scoped path (REQ-CONV-015)`
+- `per-user disable: when "chatbot" toggled off, ConversationService is not called`
+
+**Contract tests** (`core/src/services/data-store/__tests__/conversation-scope-contract.test.ts`): 1 case:
+- `accepts history.json and daily-notes/<date>.md; rejects traversal`
 
 ---
 
@@ -6174,4 +6244,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-IC-003 | persistence.test.ts | 5 | 4 | Implemented |
 | REQ-IC-004 | bootstrap-wiring.test.ts, persistence.test.ts | 3 | 6 | Implemented |
 
-| **Totals** | **170 test files** | **1310** | **1607** | **2900 tests** |
+| REQ-CONV-003 | conversation-service.test.ts | 4 | 0 | Implemented |
+| REQ-CONV-004 | router.test.ts, router-verification.test.ts | 5 | 0 | Implemented |
+| REQ-CONV-005 | conversation-service.test.ts, router.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-014 | compose-runtime.smoke.integration.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-015 | dispatch.integration.test.ts, conversation-scope-contract.test.ts | 3 | 1 | Implemented |
+
+| **Totals** | **175 test files** | **1324** | **1609** | **2915 tests** |
