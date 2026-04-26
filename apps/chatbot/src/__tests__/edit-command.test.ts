@@ -1,5 +1,10 @@
 /**
- * Tests for the /edit command in the chatbot app.
+ * Tests for the /edit command handler (core implementation).
+ *
+ * The chatbot shim no longer exports handleCommand — /edit is now a Router
+ * built-in that delegates to ConversationService.handleEdit → coreHandleEdit.
+ * These tests import the core handler directly to keep coverage of the handler's
+ * full logic (proposeEdit, confirmEdit, diff preview, pendingEdits map cleanup).
  *
  * Covers:
  * - No args → help message
@@ -10,11 +15,12 @@
  * - editService undefined → "not available"
  */
 
-import type { CoreServices, MessageContext, EditProposal, EditService } from '@pas/core/types';
+import type { EditProposal, EditService } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockCoreServices } from '../../../../core/src/testing/mock-services.js';
+import { handleEdit } from '@pas/core/services/conversation';
+import { pendingEdits } from '@pas/core/services/conversation';
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
-import * as chatbot from '../index.js';
+import type { MessageContext } from '@pas/core/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,6 +37,7 @@ function makeEditService(overrides?: Partial<EditService>): EditService {
 function makeProposal(overrides?: Partial<EditProposal>): EditProposal {
 	return {
 		kind: 'proposal',
+		proposalId: 'prop-test',
 		filePath: 'users/test-user/food/prices/costco.md',
 		absolutePath: '/data/users/test-user/food/prices/costco.md',
 		appId: 'food',
@@ -46,69 +53,65 @@ function makeProposal(overrides?: Partial<EditProposal>): EditProposal {
 	};
 }
 
-function makeServicesWithEdit(editService?: EditService): CoreServices {
-	const services = createMockCoreServices({
-		interactionContext: {},
-	});
-	return { ...services, editService };
+function makeTelegram() {
+	return {
+		send: vi.fn().mockResolvedValue(undefined),
+		sendOptions: vi.fn().mockResolvedValue('Cancel'),
+		sendPhoto: vi.fn(),
+		sendWithButtons: vi.fn(),
+		editMessage: vi.fn(),
+	};
+}
+
+function makeLogger() {
+	return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any;
 }
 
 function makeCtx(text: string): MessageContext {
 	return createTestMessageContext({ text });
 }
 
+function makeDeps(editService?: EditService) {
+	return {
+		editService,
+		telegram: makeTelegram(),
+		logger: makeLogger(),
+		pendingEdits,
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('/edit command', () => {
-	beforeEach(async () => {
+describe('/edit command (core handler)', () => {
+	beforeEach(() => {
 		vi.clearAllMocks();
+		pendingEdits.clear();
 	});
 
 	describe('editService unavailable', () => {
 		it('sends "not available" when editService is undefined', async () => {
-			const services = makeServicesWithEdit(undefined);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('not available'),
-			);
+			const deps = makeDeps(undefined);
+			await handleEdit([], makeCtx('/edit fix something'), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('not available'));
 		});
 	});
 
 	describe('no args', () => {
 		it('sends usage help when /edit called with no description', async () => {
 			const editService = makeEditService();
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit');
-			await chatbot.handleCommand('edit', [], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('Usage:'),
-			);
+			const deps = makeDeps(editService);
+			await handleEdit([], makeCtx('/edit'), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('Usage:'));
 			expect(editService.proposeEdit).not.toHaveBeenCalled();
 		});
 
 		it('sends usage help when /edit args are only whitespace', async () => {
 			const editService = makeEditService();
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit   ');
-			await chatbot.handleCommand('edit', ['  '], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('Usage:'),
-			);
+			const deps = makeDeps(editService);
+			await handleEdit(['  '], makeCtx('/edit   '), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('Usage:'));
 		});
 	});
 
@@ -117,83 +120,52 @@ describe('/edit command', () => {
 			const editService = makeEditService({
 				proposeEdit: vi.fn().mockResolvedValue({ kind: 'error', action: 'no_match', message: 'No match' }),
 			});
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('edit', ['fix something'], ctx);
-
+			const deps = makeDeps(editService);
+			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
 			expect(editService.proposeEdit).toHaveBeenCalledWith('fix something', 'test-user');
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('No matching files'),
-			);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('No matching files'));
 		});
 
 		it('sends ambiguous error as user-friendly message', async () => {
 			const editService = makeEditService({
 				proposeEdit: vi.fn().mockResolvedValue({ kind: 'error', action: 'ambiguous', message: 'Multiple files match' }),
 			});
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('edit', ['fix something'], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('more specific'),
-			);
+			const deps = makeDeps(editService);
+			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('more specific'));
 		});
 
 		it('sends access_denied error as user-friendly message', async () => {
 			const editService = makeEditService({
 				proposeEdit: vi.fn().mockResolvedValue({ kind: 'error', action: 'access_denied', message: 'Read-only' }),
 			});
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('edit', ['fix something'], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('cannot be edited'),
-			);
+			const deps = makeDeps(editService);
+			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('cannot be edited'));
 		});
 
 		it('sends generation_failed message verbatim', async () => {
 			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue({
-					kind: 'error',
-					action: 'generation_failed',
-					message: 'LLM output too large.',
-				}),
+				proposeEdit: vi.fn().mockResolvedValue({ kind: 'error', action: 'generation_failed', message: 'LLM output too large.' }),
 			});
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
-
-			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('edit', ['fix something'], ctx);
-
-			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'LLM output too large.');
+			const deps = makeDeps(editService);
+			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', 'LLM output too large.');
 		});
 	});
 
 	describe('valid proposal — Confirm flow', () => {
 		it('calls sendOptions with Confirm/Cancel when proposal is valid', async () => {
 			const proposal = makeProposal();
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');
+			deps.telegram.send = vi.fn().mockResolvedValue(undefined);
+			vi.mocked(editService.confirmEdit).mockResolvedValue({ ok: true });
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
+			expect(deps.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
 				expect.stringContaining('Edit preview'),
 				['Confirm', 'Cancel'],
@@ -206,12 +178,10 @@ describe('/edit command', () => {
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
 				confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
 			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
 			expect(editService.confirmEdit).toHaveBeenCalledWith(proposal);
 		});
@@ -222,17 +192,12 @@ describe('/edit command', () => {
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
 				confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
 			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('Applied'),
-			);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('Applied'));
 		});
 
 		it('sends failure reason when confirmEdit returns ok: false', async () => {
@@ -241,17 +206,12 @@ describe('/edit command', () => {
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
 				confirmEdit: vi.fn().mockResolvedValue({ ok: false, reason: 'File was modified since the proposal was generated.' }),
 			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('File was modified'),
-			);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('File was modified'));
 		});
 	});
 
@@ -262,49 +222,35 @@ describe('/edit command', () => {
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
 				confirmEdit: vi.fn(),
 			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Cancel');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
 			expect(editService.confirmEdit).not.toHaveBeenCalled();
 		});
 
 		it('sends cancelled message when user selects Cancel', async () => {
 			const proposal = makeProposal();
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Cancel');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				expect.stringContaining('cancelled'),
-			);
+			expect(deps.telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('cancelled'));
 		});
 	});
 
 	describe('diff preview formatting', () => {
 		it('includes file path in preview message', async () => {
 			const proposal = makeProposal();
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
+			expect(deps.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
 				expect.stringContaining('costco.md'),
 				['Confirm', 'Cancel'],
@@ -313,17 +259,12 @@ describe('/edit command', () => {
 
 		it('shows "no diff available" when diff is empty', async () => {
 			const proposal = makeProposal({ diff: '' });
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
 
-			const ctx = makeCtx('/edit fix something');
-			await chatbot.handleCommand('edit', ['fix something'], ctx);
+			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
 
-			expect(services.telegram.sendOptions).toHaveBeenCalledWith(
+			expect(deps.telegram.sendOptions).toHaveBeenCalledWith(
 				'test-user',
 				expect.stringContaining('no diff available'),
 				['Confirm', 'Cancel'],
@@ -334,65 +275,42 @@ describe('/edit command', () => {
 	describe('description extraction', () => {
 		it('passes args joined as description to proposeEdit', async () => {
 			const editService = makeEditService();
-			const services = makeServicesWithEdit(editService);
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix', 'orange', 'price', 'to', '$4.99'], ctx);
+			await handleEdit(['fix', 'orange', 'price', 'to', '$4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(editService.proposeEdit).toHaveBeenCalledWith(
-				'fix orange price to $4.99',
-				'test-user',
-			);
+			expect(editService.proposeEdit).toHaveBeenCalledWith('fix orange price to $4.99', 'test-user');
 		});
 	});
 
 	describe('pendingEdits map cleanup', () => {
 		it('removes the pending edit from the map when sendOptions throws (timeout/exception)', async () => {
 			const proposal = makeProposal();
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			// Simulate sendOptions throwing (e.g. 5-minute TTL expired)
-			vi.mocked(services.telegram.sendOptions).mockRejectedValue(new Error('Timeout'));
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockRejectedValue(new Error('Timeout'));
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			// The map must be empty — the finally block must have cleaned it up
-			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
+			expect(pendingEdits.has('test-user')).toBe(false);
 		});
 
 		it('stale call finally block does NOT delete a newer proposal from the map (Bug 1 fix)', async () => {
-			// Scenario: user runs /edit A, then /edit B before confirming A.
-			// When A's sendOptions resolves (Confirm), B's proposal is already in the map.
-			// The supersession guard in A fires (A's proposalId !== B's proposalId).
-			// A's finally block must NOT delete B's proposal — it belongs to a different active call.
-
 			const proposalA = makeProposal({ proposalId: 'id-A', description: 'edit A' });
 			const proposalB = makeProposal({ proposalId: 'id-B', description: 'edit B' });
 
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposalA),
-			});
-			const services = makeServicesWithEdit(editService);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposalA) });
+			const deps = makeDeps(editService);
 
-			// When sendOptions resolves with Confirm, simulate call B having already
-			// overwritten the map with a newer proposal before this Confirm arrives.
-			vi.mocked(services.telegram.sendOptions).mockImplementation(async () => {
-				chatbot.pendingEdits.set('test-user', proposalB);
+			deps.telegram.sendOptions = vi.fn().mockImplementation(async () => {
+				pendingEdits.set('test-user', proposalB);
 				return 'Confirm';
 			});
 
-			await chatbot.init(services);
+			await handleEdit(['edit A'], makeCtx('/edit edit A'), deps);
 
-			const ctx = makeCtx('/edit edit A');
-			await chatbot.handleCommand('edit', ['edit A'], ctx);
-
-			// Proposal B must still be in the map (not deleted by A's finally block)
-			expect(chatbot.pendingEdits.get('test-user')).toBe(proposalB);
+			// B must still be in the map (A's finally block should not delete B's slot)
+			expect(pendingEdits.get('test-user')).toBe(proposalB);
 		});
 
 		it('removes the pending edit from the map after a successful Confirm', async () => {
@@ -401,29 +319,23 @@ describe('/edit command', () => {
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
 				confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
 			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Confirm');
-			await chatbot.init(services);
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
+			expect(pendingEdits.has('test-user')).toBe(false);
 		});
 
 		it('removes the pending edit from the map after Cancel', async () => {
 			const proposal = makeProposal();
-			const editService = makeEditService({
-				proposeEdit: vi.fn().mockResolvedValue(proposal),
-			});
-			const services = makeServicesWithEdit(editService);
-			vi.mocked(services.telegram.sendOptions).mockResolvedValue('Cancel');
-			await chatbot.init(services);
+			const editService = makeEditService({ proposeEdit: vi.fn().mockResolvedValue(proposal) });
+			const deps = makeDeps(editService);
+			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Cancel');
 
-			const ctx = makeCtx('/edit fix orange price to $4.99');
-			await chatbot.handleCommand('edit', ['fix orange price to $4.99'], ctx);
+			await handleEdit(['fix orange price to $4.99'], makeCtx('/edit fix orange price to $4.99'), deps);
 
-			expect(chatbot.pendingEdits.has('test-user')).toBe(false);
+			expect(pendingEdits.has('test-user')).toBe(false);
 		});
 	});
 });

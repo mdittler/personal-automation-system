@@ -686,6 +686,31 @@ describe('GUI Routes', () => {
 
 			expect(res.statusCode).toBe(302);
 		});
+
+		it('returns 400 when a value fails coercion (coerce-user-config reject path)', async () => {
+			configApp = await buildConfigApp();
+
+			// 'banana' is not a valid number — coerceUserConfigValue rejects it
+			const res = await configPost(configApp, '/gui/config/myapp/123', {
+				age: 'banana',
+			});
+
+			expect(res.statusCode).toBe(400);
+			// Response body should name the failed key
+			expect(res.body).toContain('age');
+		});
+
+		it('returns 400 when a boolean value fails coercion', async () => {
+			configApp = await buildConfigApp();
+
+			// 'maybe' is not a valid boolean
+			const res = await configPost(configApp, '/gui/config/myapp/123', {
+				enabled: 'maybe',
+			});
+
+			expect(res.statusCode).toBe(400);
+			expect(res.body).toContain('enabled');
+		});
 	});
 
 	describe('GET /gui/llm', () => {

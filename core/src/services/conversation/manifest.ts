@@ -22,6 +22,12 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		description:
 			'Automatically detect PAS-related questions and include app info in responses (uses LLM classification; disable to use basic conversational mode)',
 	},
+	{
+		key: 'log_to_notes',
+		type: 'boolean',
+		default: false,
+		description: 'Append every message to a daily-notes file (per-user opt-in, default OFF)',
+	},
 ];
 
 export interface ConversationLLMSafeguards {
