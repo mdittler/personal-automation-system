@@ -37,6 +37,7 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import type { ConversationService } from '../conversation/conversation-service.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -145,6 +146,13 @@ export interface RouterOptions {
 	chatbotApp?: RegisteredApp;
 	/** Fallback mode: 'chatbot' dispatches to chatbot app, 'notes' uses FallbackHandler. Default: 'chatbot'. */
 	fallbackMode?: 'chatbot' | 'notes';
+	/**
+	 * ConversationService for free-text fallback. When provided, the router calls
+	 * this directly via `dispatchConversation()` instead of going through
+	 * `chatbotApp`. The chatbotApp/fallbackMode fields stay during Chunks B–C
+	 * for back-compat; both are removed in Chunk D.
+	 */
+	conversationService?: ConversationService;
 	/** Space service for /space command + active space injection. */
 	spaceService?: SpaceService;
 	/** User manager for /space invite by name. */
@@ -177,6 +185,7 @@ export class Router {
 	private readonly appToggle?: AppToggleStore;
 	private readonly chatbotApp?: RegisteredApp;
 	private readonly fallbackMode: 'chatbot' | 'notes';
+	private readonly conversationService?: ConversationService;
 	private readonly spaceService?: SpaceService;
 	private readonly userManager?: UserManager;
 	private readonly routeVerifier?: RouteVerifier;
@@ -201,6 +210,7 @@ export class Router {
 		this.appToggle = options.appToggle;
 		this.chatbotApp = options.chatbotApp;
 		this.fallbackMode = options.fallbackMode ?? 'chatbot';
+		this.conversationService = options.conversationService;
 		this.spaceService = options.spaceService;
 		this.userManager = options.userManager;
 		this.routeVerifier = options.routeVerifier;
@@ -334,6 +344,11 @@ export class Router {
 					);
 					return;
 				}
+				// When verifier picks 'chatbot' and conversationService is wired, prefer it (rule #2).
+				if (verifiedAppId === 'chatbot' && this.conversationService) {
+					await this.dispatchConversation(enrichedCtx, routeFromVerifyAction(result, 'intent'));
+					return;
+				}
 				const verifiedApp = this.registry.getApp(verifiedAppId);
 				if (verifiedApp) {
 					await this.dispatchMessage(
@@ -368,8 +383,14 @@ export class Router {
 			return;
 		}
 
-		// 4. Fallback → chatbot or daily notes
-		if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
+		// 4. Fallback → ConversationService (preferred), legacy chatbot app, or daily notes
+		if (this.conversationService) {
+			if (!(await this.isAppEnabled(enrichedCtx.userId, 'chatbot', user.enabledApps))) {
+				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
+				return;
+			}
+			await this.dispatchConversation(enrichedCtx, routeForFallback());
+		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
 			if (!(await this.isAppEnabled(enrichedCtx.userId, 'chatbot', user.enabledApps))) {
 				await this.fallback.handleUnrecognized(enrichedCtx, this.telegram);
 				return;
@@ -592,6 +613,27 @@ export class Router {
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App photo handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong processing your photo.');
+		}
+	}
+
+	/**
+	 * Dispatch a free-text message to ConversationService, with the same request-context
+	 * + error-isolation guarantees as dispatchMessage. Used for the chatbot fallback path
+	 * once Hermes P1 Chunk B is wired. The legacy chatbotApp branch stays for
+	 * compatibility — this helper is only used when `conversationService` is set.
+	 */
+	private async dispatchConversation(ctx: MessageContext, route: RouteInfo): Promise<void> {
+		if (!this.conversationService) {
+			throw new Error('dispatchConversation called without conversationService');
+		}
+		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		try {
+			await requestContext.run({ userId: ctx.userId, householdId }, () =>
+				this.conversationService!.handleMessage({ ...ctx, route }),
+			);
+		} catch (error) {
+			this.logger.error({ error }, 'ConversationService handler failed');
+			await this.trySend(ctx.userId, 'Something went wrong. Please try again later.');
 		}
 	}
 
@@ -1142,11 +1184,18 @@ export class Router {
 	}
 
 	/**
-	 * Send message to the configured fallback handler (chatbot or notes).
-	 * Extracted to avoid code duplication between routeMessage and tryContextPromotion.
+	 * Send message to the configured fallback handler (ConversationService preferred,
+	 * then chatbot app, then notes). Extracted to avoid code duplication between
+	 * routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
-		if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
+		if (this.conversationService) {
+			if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
+				await this.fallback.handleUnrecognized(ctx, this.telegram);
+				return;
+			}
+			await this.dispatchConversation(ctx, routeForFallback());
+		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
 			if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
 				await this.fallback.handleUnrecognized(ctx, this.telegram);
 				return;

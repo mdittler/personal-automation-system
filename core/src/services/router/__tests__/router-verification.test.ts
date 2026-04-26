@@ -711,3 +711,79 @@ describe('Router — grey-zone verification', () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Hermes P1 Chunk B — verifier picks 'chatbot' with conversationService wired
+// Testing-standards rule #2: post-routing authorization must apply to new target.
+// ---------------------------------------------------------------------------
+
+describe('Router — verifier selects chatbot with conversationService wired (Chunk B)', () => {
+	const testUser = {
+		id: 'user1',
+		name: 'Test',
+		isAdmin: true,
+		enabledApps: ['*'] as string[],
+		sharedScopes: [] as string[],
+	};
+
+	it('dispatches to conversationService (not chatbotApp) when verifier picks chatbot', async () => {
+		const echoModule = createMockModule();
+		const echoManifest: AppManifest = {
+			app: { id: 'echo', name: 'Echo', version: '1.0.0', description: '', author: '' },
+			capabilities: { messages: { intents: ['echo'] } },
+		};
+		const chatbotModule = createMockModule();
+		const chatbotApp: RegisteredApp = {
+			manifest: {
+				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
+				capabilities: { messages: { intents: [] } },
+			},
+			module: chatbotModule,
+			appDir: '/apps/chatbot',
+		};
+
+		// Verifier overrides to chatbot — testing-standards rule #2: new target is authorized
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'chatbot',
+			intent: 'chatbot',
+		});
+		// Grey-zone confidence so verifier is invoked
+		const greyLlm = createMockLLM({ category: 'echo', confidence: 0.55 });
+
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(echoManifest, '/apps/echo');
+
+		const registry = {
+			getApp: (id: string) => {
+				if (id === 'echo') return { manifest: echoManifest, module: echoModule, appDir: '/apps/echo' } as RegisteredApp;
+				if (id === 'chatbot') return chatbotApp;
+				return undefined;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => ['echo', 'chatbot'],
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: greyLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			chatbotApp,
+			fallbackMode: 'chatbot',
+			conversationService: conversationService as any,
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage({ userId: 'user1', text: 'hello', timestamp: new Date(), chatId: 1, messageId: 1 });
+
+		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
+		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
+	});
+});
