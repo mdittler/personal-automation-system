@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../../types/auth-actor.js';
 import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
 import { requestContext } from '../../context/request-context.js';
+import type { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
 import { SystemLLMGuard } from '../system-llm-guard.js';
 import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
@@ -66,6 +67,30 @@ describe('SystemLLMGuard', () => {
 				...opts,
 				_appId: 'system',
 			});
+		});
+
+		it('uses per-call tier override for reservation estimation', async () => {
+			const hhLimiter = createMockHouseholdLimiter();
+			guard = new SystemLLMGuard({
+				inner,
+				costTracker,
+				globalMonthlyCostCap: 50.0,
+				logger,
+				householdLimiter: hhLimiter,
+				tier: 'fast',
+				priceLookup: {
+					priceFor: (tier) =>
+						tier === 'standard'
+							? { inputUsdPer1k: 10, outputUsdPer1k: 10 }
+							: { inputUsdPer1k: 1, outputUsdPer1k: 1 },
+				},
+			});
+
+			await requestContext.run({ userId: 'u1', householdId: 'h1' }, () =>
+				guard.complete('x'.repeat(4000), { tier: 'standard', maxTokens: 1000 }),
+			);
+
+			expect(hhLimiter.reserveEstimated).toHaveBeenCalledWith('h1', 'system', 'u1', 20);
 		});
 
 		it('throws LLMCostCapError when global cap exceeded', async () => {

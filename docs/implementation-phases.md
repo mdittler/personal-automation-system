@@ -4,7 +4,7 @@
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
 | **Status** | Phases 0–28, D1–D4 complete (except 27A-Vaults, 27B, 27C planned) |
-| **Last Updated** | 2026-04-14 |
+| **Last Updated** | 2026-04-25 |
 
 ---
 
@@ -1119,7 +1119,7 @@ requirements:
     - data-store
   data:
     user_scopes:
-      - path: "echo/log.md"
+      - path: "log.md"
         access: read-write
         description: "Message echo log"
 ```
@@ -2292,6 +2292,170 @@ With the FileIndexService providing a metadata index of all user data files (D2a
 
 ---
 
+## Review Phase 5 Remediation
+
+**Date:** 2026-04-24  **Status:** Complete  **Part of:** Staged test/spec coverage review
+
+### Motivation
+
+The Stage 5 review found two real runtime gaps and two test-quality gaps:
+
+- `/edit` was not using recent interaction context during file discovery, even though `DataQueryService` already supported `recentFilePaths`.
+- Guard reservation sizing supported model-aware pricing internally, but `composeRuntime()` was not wiring live pricing/tier inputs into the app, system, or API guards.
+- The strongest evidence for some D2c wiring was still source-scan based instead of behavior-level composed-runtime coverage.
+- Several chatbot prompt tests were still overly coupled to exact prompt copy.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| EditService wiring | `EditServiceImpl` now accepts the shared `InteractionContextService`, flattens `getRecent(userId)` file paths in newest-first order, dedupes by first occurrence, and forwards `recentFilePaths` into `DataQueryService.query(...)` when available. |
+| Guard pricing | `composeRuntime()` now injects a live `PriceLookup` that reads the current `ModelSelector` tier assignment on every call, converts model pricing from per-million to per-1k, and treats Ollama as zero-cost. |
+| Guard tier estimation | `LLMGuard` and `SystemLLMGuard` now estimate `complete()` reservations with the effective per-call tier (`options.tier` when present, otherwise the guard default); `classify()` and `extractStructured()` remain fast-tier estimates. |
+| Behavioral coverage | `compose-runtime.smoke.integration.test.ts` now proves live fast-vs-standard reservation sizing, proves app-owned chatbot calls reserve priced amounts rather than the flat fallback, and proves `/edit` cannot be steered into another user's file via poisoned recent-context hints. |
+| Prompt-test hardening | Shared semantic helpers now live at `apps/chatbot/src/__tests__/helpers/prompt-assertions.ts`, and the high-churn PAS/basic/system-data prompt assertions now use those helpers across the main chatbot suites. |
+| Docs / traceability | Stage 5 findings, open items, URS traceability, and the UAT checklist were updated to reflect the remediation and the new runtime evidence. |
+
+### Files Touched
+
+- **Modified:** `core/src/services/edit/index.ts`
+- **Modified:** `core/src/services/llm/llm-guard.ts`
+- **Modified:** `core/src/services/llm/system-llm-guard.ts`
+- **Modified:** `core/src/compose-runtime.ts`
+- **Modified:** `core/src/services/edit/__tests__/edit.test.ts`
+- **Modified:** `core/src/services/llm/__tests__/llm-guard.test.ts`
+- **Modified:** `core/src/services/llm/__tests__/system-llm-guard.test.ts`
+- **Modified:** `core/src/__tests__/compose-runtime.smoke.integration.test.ts`
+- **New:** `apps/chatbot/src/__tests__/helpers/prompt-assertions.ts`
+- **Modified:** `apps/chatbot/src/__tests__/chatbot.test.ts`
+- **Modified:** `apps/chatbot/src/__tests__/natural-language.test.ts`
+- **Modified:** `apps/chatbot/src/__tests__/user-persona.test.ts`
+- **Modified:** `docs/test-review-stage-5-findings.md`
+- **Modified:** `docs/open-items.md`
+- **Modified:** `docs/urs.md`
+- **Modified:** `docs/uat-checklist.md`
+- **Modified:** `docs/implementation-phases.md`
+
+### Verification
+
+- Targeted Stage 5 suites: `pnpm test core/src/services/edit/__tests__/edit.test.ts core/src/services/llm/__tests__/llm-guard.test.ts core/src/services/llm/__tests__/system-llm-guard.test.ts core/src/__tests__/compose-runtime.smoke.integration.test.ts apps/chatbot/src/__tests__/chatbot.test.ts apps/chatbot/src/__tests__/natural-language.test.ts apps/chatbot/src/__tests__/user-persona.test.ts`
+- Full `pnpm test` passed: 314 files, 7694 passed, 10 skipped
+- `pnpm build` passed cleanly
+
+---
+---
+
+## Review Phase 6 Remediation
+
+**Date:** 2026-04-25  **Status:** Complete  **Part of:** Staged test/spec coverage review
+
+### Motivation
+
+The Stage 6 review found three contract gaps still open in the current tree:
+
+- packaged apps could declare compiled entrypoints, but the loader still preferred source-only fallback paths
+- `install-app` still coupled permission review to the commit path instead of exposing a true review-then-commit boundary
+- schema fixtures, bundled manifests, and runtime scope enforcement were no longer pinned together by a shared contract test
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| Loader/runtime packaging | `AppLoader.importModule()` now resolves safe local `package.json.main`, then `dist/index.js`, before the existing source fallbacks. Unsafe `main` values (absolute paths, traversal attempts, unsupported extensions, missing targets) are ignored non-fatally with debug logging. |
+| Compiled-app coverage | `loader.test.ts` now covers safe `main`, `dist/index.js`, traversal/absolute-path `main`, and unsupported-extension fallback. `registry.test.ts` now loads a full compiled fixture where `src/index.ts` is intentionally broken but `dist/index.js` still loads through `loadAll()`. |
+| Installer planning boundary | `planInstallApp()` now performs clone, validation, compatibility checks, static analysis, and permission-summary generation without copying into `apps/` or running `pnpm install`. It returns a `PreparedInstall` with `commit()` and idempotent `dispose()`. The legacy `installApp()` wrapper now does `plan -> commit -> dispose` internally. |
+| CLI runners | `install-app.ts` and `uninstall-app.ts` now expose runner-style entrypoints so tests can assert real command behavior. `install-app` now prints the permission summary before prompting, cancels cleanly without commit, and still supports `--yes`. `uninstall-app` now verifies runner-level success, failure, and restart guidance. |
+| Manifest/scope contract | `validate-manifest.test.ts` fixtures now use app-root-relative paths. New bundled-manifest and runtime-scope contract tests verify first-party manifests validate cleanly, emit no scope-prefix warnings, and enforce accept/reject scope behavior for echo, notes, and chatbot. |
+| Bundled manifest cleanup | `apps/food/manifest.yaml` now uses `options` instead of the invalid `enum` field for the `routing_primary` `user_config` entry, so the bundled-manifest sweep passes against the live schema. |
+| Docs / traceability | Stage 6 findings, URS traceability, codebase review findings, and the UAT checklist were updated to reflect the remediation and the new behavioral evidence. |
+
+### Files Touched
+
+- **Modified:** `core/src/services/app-registry/loader.ts`
+- **Modified:** `core/src/services/app-registry/__tests__/loader.test.ts`
+- **Modified:** `core/src/services/app-registry/__tests__/registry.test.ts`
+- **Modified:** `core/src/services/app-installer/index.ts`
+- **Modified:** `core/src/services/app-installer/__tests__/installer.test.ts`
+- **Modified:** `core/src/cli/install-app.ts`
+- **Modified:** `core/src/cli/uninstall-app.ts`
+- **Modified:** `core/src/cli/__tests__/install-app.test.ts`
+- **Modified:** `core/src/cli/__tests__/uninstall-app.test.ts`
+- **Modified:** `core/src/schemas/__tests__/validate-manifest.test.ts`
+- **New:** `core/src/schemas/__tests__/bundled-manifests.test.ts`
+- **New:** `core/src/services/data-store/__tests__/manifest-scope-contract.test.ts`
+- **Modified:** `apps/food/manifest.yaml`
+- **Modified:** `docs/test-review-stage-6-findings.md`
+- **Modified:** `docs/urs.md`
+- **Modified:** `docs/codebase-review-findings.md`
+- **Modified:** `docs/implementation-phases.md`
+- **Modified:** `docs/uat-checklist.md`
+
+### Verification
+
+- Targeted Stage 6 suites passed for loader/registry, installer, install/uninstall runners, manifest validation, bundled-manifest sweep, and runtime scope contracts
+- Full `pnpm test` passed
+- `pnpm build` passed cleanly
+
+---
+---
+
+## Review Phase 7 Remediation
+
+**Date:** 2026-04-25  **Status:** Complete  **Part of:** Staged test/spec coverage review
+
+### Motivation
+
+The Stage 7 review found three remaining food-foundation gaps:
+
+- the targeted space-aware food photo/store seam was still implemented and tested as shared-only
+- the broad route-level integration suites collapsed shared and user stores onto the same mock, hiding scope-boundary mistakes
+- the food app still lacked a manifest/runtime contract test proving shared and user scope declarations matched real store enforcement
+
+This remediation was deliberately kept narrow. It closes the Stage 7 review findings without attempting the broader active-space food migration for pantry photos, callback-space plumbing, or non-photo shared-data flows.
+
+### Changes
+
+| Area | Change |
+|------|--------|
+| Photo context + router | `PhotoContext` now carries optional `spaceId` / `spaceName`, and router photo dispatch now enriches those fields from the caller's active space before handing the request to apps. |
+| Food store resolution | `apps/food/src/utils/household-guard.ts` now exposes `resolveFoodStore(...)`, which checks food-household membership from shared `household.yaml` first and then resolves either the shared store or the active-space store. |
+| Photo writes + interaction records | The food photo handler now routes recipe, receipt, and grocery photo writes plus interaction records through the resolved store, producing `users/shared/food/...` paths in shared mode and `spaces/<spaceId>/food/...` paths in active-space mode. |
+| Test hardening | `route-dispatch.test.ts` and `shadow-primary.integration.test.ts` now use distinct shared and user stores, with regressions that fail if nutrition-target reads cross the scope boundary. |
+| Manifest/runtime contract | New `manifest-runtime-contract.test.ts` validates `apps/food/manifest.yaml`, asserts zero `warnScopePathPrefix()` warnings, and proves representative accept/reject path behavior with real `DataStoreServiceImpl` enforcement. |
+| Deferred scope | Pantry-photo space-awareness, callback-space plumbing, non-photo shared-data active-space migration, and cross-scope read reconciliation were explicitly deferred and documented as follow-up work rather than being partially folded into this review pass. |
+
+### Files Touched
+
+- **Modified:** `core/src/types/telegram.ts`
+- **Modified:** `core/src/services/router/index.ts`
+- **Modified:** `core/src/services/router/__tests__/router.test.ts`
+- **Modified:** `apps/food/src/utils/household-guard.ts`
+- **Modified:** `apps/food/src/handlers/photo.ts`
+- **Modified:** `apps/food/src/__tests__/household-guard.test.ts`
+- **Modified:** `apps/food/src/__tests__/photo-handler.test.ts`
+- **Modified:** `apps/food/src/__tests__/interaction-recording.test.ts`
+- **Modified:** `apps/food/src/__tests__/route-dispatch.test.ts`
+- **Modified:** `apps/food/src/__tests__/shadow-primary.integration.test.ts`
+- **New:** `apps/food/src/__tests__/manifest-runtime-contract.test.ts`
+- **Modified:** `docs/test-review-stage-7-findings.md`
+- **Modified:** `apps/food/docs/urs.md`
+- **Modified:** `docs/implementation-phases.md`
+- **Modified:** `docs/uat-checklist.md`
+- **Modified:** `docs/open-items.md`
+
+### Verification
+
+- Targeted Phase 7 suites passed: 7 files, 162 tests
+- Full `pnpm test` hit an unrelated timeout in `core/src/services/reports/__tests__/report-service.test.ts` during concurrent Hermes work and was left out of scope for this remediation
+- `pnpm build` passed cleanly
+
+### Consequences
+
+- Food photo flows now have a protected active-space write seam without claiming a full food-app active-space migration.
+- The review docs now explicitly distinguish what Phase 7 fixed from what remains deferred, reducing the chance of treating pantry photos or callback/message shared-data flows as already migrated.
+- The lingering `forShared(scope)` selector limitation remains separately tracked in `docs/open-items.md` and is called out by the new manifest/runtime contract test rather than being silently masked.
+
+---
 ---
 
 ## Phase LLM Enhancement #2 Chunk B: Food Shadow Classifier

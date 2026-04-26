@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-food |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-09 |
+| **Last Updated** | 2026-04-25 |
 
 ## Conventions
 
@@ -99,6 +99,8 @@ When a user sends a photo of a recipe (cookbook page, handwritten card, screensh
 - `photo-parsers.test.ts` > Recipe Photo Parser > includes caption context when provided
 - `photo-parsers.test.ts` > Recipe Photo Parser > sanitizes caption before including in prompt
 - `photo-handler.test.ts` > error handling > sends friendly error on LLM failure
+- `photo-handler.test.ts` > recipe photo — storage > uses the active space store for recipe photos when a space is active
+- `interaction-recording.test.ts` > interaction recording — recipe_saved > records a space-scoped recipe path when a space is active
 
 **Fixes:**
 - 2026-04-07: Caption text now sanitized via `sanitizeInput()` before interpolation into LLM prompt (prompt injection fix)
@@ -166,15 +168,23 @@ Users can search recipes by free text (title, ingredients, cuisine), tags, cuisi
 If a recipe was saved from a photo, the user can request the original photo and receive it via Telegram. When no specific recipe is named, shows a numbered selection list of recipes with photos.
 
 **Standard tests:**
-- `natural-language.test.ts` > H8 > detects recipe photo intent (5 variants)
+- `recipe-photo-retrieval.integration.test.ts` > returns the empty-state message when no recipes with photos exist
+- `recipe-photo-retrieval.integration.test.ts` > sends the only available recipe photo directly
+- `recipe-photo-retrieval.integration.test.ts` > uses pendingPhotoSelection for numeric replies in the multi-photo flow
 - `photo-store.test.ts` > loadPhoto > loads base64 and returns Buffer
 
 **Edge case tests:**
+- `recipe-photo-retrieval.integration.test.ts` > keeps pending photo selection ahead of generic recipe selection on out-of-range replies
+- `recipe-photo-retrieval.integration.test.ts` > returns the existing no-source-photo message for a queried recipe
+- `recipe-photo-retrieval.integration.test.ts` > returns the missing-photo message when the stored file is gone
+- `recipe-photo-retrieval.integration.test.ts` > returns the existing not-found message for unmatched recipe photo queries
+- `recipe-photo-retrieval.integration.test.ts` > falls back to generic recipe selection after pending photo state expires
 - `natural-language.test.ts` > H8 > does NOT match non-photo-retrieval (5 variants)
 - `photo-store.test.ts` > loadPhoto > returns null for missing file
 
 **Fixes:**
 - 2026-04-07: Empty query now shows numbered selection list of recipes with photos instead of returning confusing empty-string match error
+- 2026-04-25: Added dedicated pending photo selection state so multi-photo replies send the chosen photo without stealing generic recipe browsing
 
 ---
 
@@ -509,6 +519,8 @@ Extract ingredients from a photo of a recipe via LLM vision and generate a groce
 **Edge case tests:**
 - `photo-parsers.test.ts` > Grocery Photo Parser > includes caption context when provided
 - `photo-parsers.test.ts` > Grocery Photo Parser > returns empty items on parse failure
+- `photo-handler.test.ts` > uses the active space store for grocery-photo writes when a space is active
+- `interaction-recording.test.ts` > interaction recording — grocery_updated > records a space-scoped grocery path when a space is active
 
 **Fixes:**
 - 2026-04-07: Caption now passed through to grocery photo parser for LLM context (sanitized)
@@ -525,11 +537,13 @@ All household members share one grocery list via shared data store. Inline keybo
 - `grocery-store.test.ts` > loadGroceryList > parses valid YAML
 - `grocery-store.test.ts` > saveGroceryList > writes with correct path and frontmatter
 - `app.test.ts` > handleCommand — /grocery > sends buttons when list has items
+- `manifest-runtime-contract.test.ts` > accepts representative shared and user paths under the current manifest contract
 
 **Edge case tests:**
 - `grocery-store.test.ts` > loadGroceryList > returns null for empty store
 - `grocery-store.test.ts` > loadGroceryList > returns null on malformed YAML
 - `app.test.ts` > handleCommand — /grocery > requires household
+- `manifest-runtime-contract.test.ts` > rejects legacy app-prefixed, traversal, and cross-scope misuse paths
 
 **Fixes:** None
 
@@ -900,17 +914,27 @@ Log leftovers via `/leftovers` command, natural language ("we have leftover chil
 
 ### REQ-WASTE-002: Leftover meal suggestions
 
-**Origin:** LW-2 | **Status:** Planned
+**Origin:** LW-2 | **Status:** Implemented
 
 Proactively suggest meals that use tracked leftovers. Suggestions sent as scheduled nudges or on-demand.
 
 **Standard tests:**
-- TBD
+- `leftover-suggestions.integration.test.ts` > returns numbered suggestions and reuses numeric recipe selection for details
+- `leftover-suggestions.integration.test.ts` > keeps the shadow-primary leftover handler aligned with suggestion routing
+- `leftover-handler.test.ts` > appends leftover recipe ideas when expiring items have shared recipe matches
 
 **Edge case tests:**
-- TBD
+- `services/leftover-suggestions.test.ts` > collects distinct active leftover tokens and drops generic words
+- `services/leftover-suggestions.test.ts` > sorts by score descending then title ascending and ignores archived recipes
+- `services/leftover-suggestions.test.ts` > matches ingredient canonicalName when present
+- `leftover-suggestions.integration.test.ts` > returns the explicit no-match fallback for on-demand suggestions
+- `leftover-suggestions.integration.test.ts` > keeps leftover view phrases on the leftover list path
+- `leftover-suggestions.integration.test.ts` > keeps leftover add phrases on the add path
+- `leftover-handler.test.ts` > omits the suggestion block when expiring leftovers have no recipe matches
+- `leftover-handler.test.ts` > still sends the normal alert when recipe suggestion generation fails
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-25: Added deterministic shared-store leftover suggestions for both on-demand prompts and scheduled leftover checks
 
 ---
 
@@ -1512,6 +1536,8 @@ User sends photo of grocery receipt. LLM vision extracts total and key line item
 - `photo-parsers.test.ts` > Receipt Parser > includes caption context when provided
 - `photo-parsers.test.ts` > Receipt Parser > throws when total is missing
 - `photo-parsers.test.ts` > Receipt Parser > defaults missing subtotal and tax to null
+- `photo-handler.test.ts` > receipt photo — storage > uses the active space store for receipt photos when a space is active
+- `interaction-recording.test.ts` > interaction recording — receipt_captured > records a space-scoped receipt path when a space is active
 
 **Fixes:**
 - 2026-04-07: Caption now passed through to receipt parser for LLM context (sanitized)
@@ -1937,6 +1963,8 @@ Users can create a household and link other users via code or command. Linked us
 - `household-guard.test.ts` > `requireHousehold` > returns household and store for member
 - `household-guard.test.ts` > `requireHousehold` > returns null for non-member
 - `household-guard.test.ts` > `requireHousehold` > returns null when no household exists
+- `household-guard.test.ts` > `resolveFoodStore` > returns null for non-member even when a space is requested
+- `household-guard.test.ts` > `resolveFoodStore` > always checks household membership from shared household.yaml before resolving a space
 - `household-guard.test.ts` > `generateJoinCode` > generates 6-character code
 - `household-guard.test.ts` > `generateJoinCode` > matches join code pattern
 - `household-guard.test.ts` > `generateJoinCode` > does not contain ambiguous chars
@@ -1988,17 +2016,21 @@ If LLM unavailable, serve data retrieval from stored files. Use `classifyLLMErro
 
 ### REQ-NFR-003: Data durability
 
-**Origin:** NF-3 | **Status:** Planned
+**Origin:** NF-3 | **Status:** Implemented
 
 All writes use scoped data store atomic operations. No data lost on crash.
 
 **Standard tests:**
-- TBD
+- `food-durability.integration.test.ts` > keeps the waste-log entry but withholds success UI when pantry cleanup fails
+- `photo-handler.test.ts` > preserves malformed grocery recipe payloads without partial success artifacts
 
 **Edge case tests:**
-- TBD
+- `leftover-handler.test.ts` > withholds the frozen confirmation when the freezer write fails
+- `perishable-handler.test.ts` > withholds the freeze confirmation when the freezer write fails
+- `freezer-handler.test.ts` > withholds the toss confirmation when waste logging fails
 
-**Fixes:** None
+**Fixes:**
+- 2026-04-25: Added representative multi-write failure-path coverage so success UI is only emitted after all required writes succeed
 
 ---
 
@@ -2258,6 +2290,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 - `household-guard.test.ts` > `loadHousehold` > loads valid YAML household
 - `household-guard.test.ts` > `saveHousehold` > writes YAML with frontmatter
 - `household-guard.test.ts` > `requireHousehold` > returns household and store for member
+- `household-guard.test.ts` > `resolveFoodStore` > returns the shared store when no active space exists
 - `household-guard.test.ts` > `generateJoinCode` > generates 6-character code
 
 **Edge case tests:**
@@ -2266,6 +2299,9 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 - `household-guard.test.ts` > `loadHousehold` > handles YAML with frontmatter
 - `household-guard.test.ts` > `requireHousehold` > returns null for non-member
 - `household-guard.test.ts` > `requireHousehold` > returns null when no household exists
+- `household-guard.test.ts` > `resolveFoodStore` > returns the space store when an active space exists
+- `household-guard.test.ts` > `resolveFoodStore` > returns null for non-member even when a space is requested
+- `household-guard.test.ts` > `resolveFoodStore` > always checks household membership from shared household.yaml before resolving a space
 - `household-guard.test.ts` > `generateJoinCode` > matches join code pattern
 - `household-guard.test.ts` > `generateJoinCode` > does not contain ambiguous chars
 
@@ -2278,10 +2314,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | Requirement ID | Test File | Standard Count | Edge Count | Status |
 |----------------|-----------|----------------|------------|--------|
 | REQ-RECIPE-001 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 5 | 16 | Implemented |
-| REQ-RECIPE-002 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 5 | Implemented |
+| REQ-RECIPE-002 | photo-parsers.test.ts, photo-handler.test.ts, interaction-recording.test.ts | 4 | 7 | Implemented |
 | REQ-RECIPE-003 | rating-handler.test.ts | 1 | 2 | Implemented |
 | REQ-RECIPE-004 | recipe-store.test.ts, app.test.ts | 8 | 15 | Implemented |
-| REQ-RECIPE-005 | natural-language.test.ts, photo-store.test.ts | 7 | 6 | Implemented |
+| REQ-RECIPE-005 | recipe-photo-retrieval.integration.test.ts, natural-language.test.ts, photo-store.test.ts | 4 | 7 | Implemented |
 | REQ-RECIPE-006 | recipe-parser.test.ts, recipe-store.test.ts, app.test.ts | 4 | 8 | Implemented |
 | REQ-MEAL-001 | meal-planner.test.ts, meal-plan-store.test.ts, app.test.ts | 6 | 6 | Implemented |
 | REQ-MEAL-002 | meal-planner.test.ts, app.test.ts | 4 | 3 | Implemented |
@@ -2294,8 +2330,8 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-GROCERY-001 | grocery-generator.test.ts, app.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-002 | grocery-generator.test.ts | 2 | 2 | Implemented |
 | REQ-GROCERY-003 | item-parser.test.ts, app.test.ts | 5 | 5 | Implemented |
-| REQ-GROCERY-004 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 2 | Implemented |
-| REQ-GROCERY-005 | grocery-store.test.ts, app.test.ts | 3 | 3 | Implemented |
+| REQ-GROCERY-004 | photo-parsers.test.ts, photo-handler.test.ts, interaction-recording.test.ts | 4 | 4 | Implemented |
+| REQ-GROCERY-005 | grocery-store.test.ts, app.test.ts, manifest-runtime-contract.test.ts | 4 | 4 | Implemented |
 | REQ-GROCERY-006 | grocery-store.test.ts, grocery-dedup.test.ts | 4 | 6 | Implemented |
 | REQ-GROCERY-007 | grocery-store.test.ts, app.test.ts | 6 | 3 | Implemented |
 | REQ-GROCERY-008 | grocery-store.test.ts, app.test.ts, telegram-buttons.test.ts | 6 | 14 | Implemented |
@@ -2308,7 +2344,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-PANTRY-004 | perishable-handler.test.ts, pantry-store.test.ts | 7 | 9 | Implemented |
 | REQ-PANTRY-005 | freezer-store.test.ts, freezer-handler.test.ts, natural-language.test.ts | 12 | 7 | Implemented |
 | REQ-WASTE-001 | leftover-store.test.ts, leftover-handler.test.ts, natural-language.test.ts | 13 | 9 | Implemented |
-| REQ-WASTE-002 | TBD | 0 | 0 | Planned |
+| REQ-WASTE-002 | leftover-suggestions.integration.test.ts, handlers/leftover-handler.test.ts, services/leftover-suggestions.test.ts | 3 | 8 | Implemented |
 | REQ-WASTE-003 | leftover-handler.test.ts | 4 | 3 | Implemented |
 | REQ-WASTE-004 | waste-store.test.ts, natural-language.test.ts | 6 | 4 | Implemented |
 | REQ-FAMILY-001 | kid-adapter.test.ts, family-handler.test.ts | 5 | 9 | Implemented |
@@ -2328,7 +2364,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SOCIAL-001 | hosting-planner.test.ts, hosting-handler.test.ts, natural-language.test.ts | 16 | 8 | Implemented |
 | REQ-SOCIAL-002 | guest-profiles.test.ts, hosting-handler.test.ts, natural-language.test.ts, guest-add-flow.test.ts | 47 | 7 | Implemented |
 | REQ-SOCIAL-003 | guest-profiles.test.ts, hosting-handler.test.ts | 5 | 3 | Implemented |
-| REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts | 4 | 3 | Implemented |
+| REQ-COST-001 | photo-parsers.test.ts, photo-handler.test.ts, interaction-recording.test.ts | 4 | 5 | Implemented |
 | REQ-COST-002 | cost-estimator.test.ts, natural-language.test.ts | 3 | 5 | Implemented |
 | REQ-COST-003 | budget-reporter.test.ts, budget-handler.test.ts, natural-language.test.ts | 11 | 7 | Implemented |
 | REQ-COST-004 | budget-reporter.test.ts, natural-language.test.ts | 5 | 4 | Implemented |
@@ -2343,10 +2379,10 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-HEALTH-002 | events-subscribers.test.ts, events-emitters.test.ts | 4 | 1 | Implemented |
 | REQ-CULTURE-001 | cuisine-tracker.test.ts, natural-language.test.ts | 6 | 13 | Implemented |
 | REQ-CULTURE-002 | cultural-calendar.test.ts, handlers/cultural-calendar-handler.test.ts, natural-language-h12b-persona.test.ts | 14 | 13 | Implemented |
-| REQ-HOUSEHOLD-001 | household.test.ts, household-guard.test.ts, app.test.ts | 7 | 31 | Implemented |
+| REQ-HOUSEHOLD-001 | household.test.ts, household-guard.test.ts, app.test.ts | 7 | 33 | Implemented |
 | REQ-NFR-001 | app.test.ts | 1 | 0 | Implemented |
 | REQ-NFR-002 | app.test.ts | 2 | 1 | Implemented |
-| REQ-NFR-003 | TBD | 0 | 0 | Planned |
+| REQ-NFR-003 | food-durability.integration.test.ts, photo-handler.test.ts, handlers/leftover-handler.test.ts, handlers/perishable-handler.test.ts, handlers/freezer-handler.test.ts | 2 | 3 | Implemented |
 | REQ-NFR-004 | recipe-parser.test.ts, app.test.ts | 3 | 0 | Implemented |
 | REQ-NFR-005 | health-correlator.test.ts, events-subscribers.test.ts | 2 | 1 | Implemented |
 | REQ-NFR-006 | voting-handler.test.ts, rating-handler.test.ts, app.test.ts | 1 | 3 | Implemented |
@@ -2357,7 +2393,7 @@ Load/save household YAML with frontmatter support, membership checks, and join c
 | REQ-SEC-002 | recipe-store.test.ts | 2 | 5 | Implemented |
 | REQ-UX-001 | app.test.ts | 1 | 5 | Implemented |
 | REQ-UTIL-001 | date-utils.test.ts | 4 | 4 | Implemented |
-| REQ-UTIL-002 | household-guard.test.ts | 4 | 7 | Implemented |
+| REQ-UTIL-002 | household-guard.test.ts | 5 | 10 | Implemented |
 | **Totals** | **76+ test files** | **540+** | **430+** | **970+ tests** |
 
 ---

@@ -20,6 +20,7 @@ import {
 	createMockScopedStore,
 } from '../../../../core/src/testing/mock-services.js';
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
 import * as chatbot from '../index.js';
 import { classifyPASMessage } from '../index.js';
 
@@ -144,7 +145,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
 			'You have Food and Notes installed.',
@@ -160,7 +161,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 	});
 
 	it('user asks what they ate last week', async () => {
@@ -172,7 +173,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 	});
 
 	it('user asks how much they are spending on AI', async () => {
@@ -184,7 +185,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 	});
 
 	it('user wants to switch to a smarter AI model', async () => {
@@ -196,7 +197,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 	});
 
 	it('user asks about their notes from yesterday', async () => {
@@ -208,7 +209,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(mainPrompt);
 	});
 });
 
@@ -235,8 +236,7 @@ describe('casual / general messages route to basic prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('helpful, friendly AI assistant');
-		expect(mainPrompt).not.toContain('PAS (Personal Automation System) assistant');
+		expectBasicPrompt(mainPrompt);
 	});
 
 	it('user asks what the weather is like', async () => {
@@ -248,7 +248,7 @@ describe('casual / general messages route to basic prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('helpful, friendly AI assistant');
+		expectBasicPrompt(mainPrompt);
 	});
 
 	it('user asks a math question', async () => {
@@ -260,7 +260,7 @@ describe('casual / general messages route to basic prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('helpful, friendly AI assistant');
+		expectBasicPrompt(mainPrompt);
 	});
 
 	it('user sends a casual greeting', async () => {
@@ -272,7 +272,7 @@ describe('casual / general messages route to basic prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('helpful, friendly AI assistant');
+		expectBasicPrompt(mainPrompt);
 	});
 
 	it('user asks for a translation', async () => {
@@ -284,7 +284,7 @@ describe('casual / general messages route to basic prompt', () => {
 		await chatbot.handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-		expect(mainPrompt).toContain('helpful, friendly AI assistant');
+		expectBasicPrompt(mainPrompt);
 	});
 });
 
@@ -443,7 +443,7 @@ describe('/ask command with natural language questions', () => {
 		expect(services.llm.complete).toHaveBeenCalledTimes(2);
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
 		const prompt = standardCall?.[1]?.systemPrompt ?? '';
-		expect(prompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(prompt);
 		// And household context is included
 		expect(prompt).toContain('My Household');
 	});
@@ -459,7 +459,7 @@ describe('/ask command with natural language questions', () => {
 		// /ask now runs classifier (fast tier) then main response (standard tier)
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
 		const prompt = standardCall?.[1]?.systemPrompt ?? '';
-		expect(prompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(prompt);
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
 			"You've spent $1.20 this month.",

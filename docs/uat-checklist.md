@@ -469,6 +469,31 @@ Verifies that natural language data queries route correctly to DataQueryService 
 | 23.11 | Ask "what LLM models are available?" | System prompt DOES contain model tier information (AI keyword not suppressed) | |
 | 23.12 | Create a markdown file with triple-backtick content, index it, ask about it | Response does not contain raw triple backticks (sanitized by sanitizeInput) | |
 | 23.13 | Ask a data question when DataQueryService is disabled (no `data-query` in manifest) | Chatbot responds normally without crashing | |
+| 23.14 | Interact with a specific file (for example, open or answer a question about a notes or food file), then immediately send `/edit` describing a follow-up change to that same file | `/edit` finds the intended file without needing the full pathname because recent interaction context was forwarded as `recentFilePaths` | |
+| 23.15 | Repeat 23.14 with two recent interactions that touched the same file plus one older file | `/edit` still targets the newest relevant file first; duplicate recent paths do not create duplicate candidate hints | |
+| 23.16 | Seed a recent interaction entry pointing at another user's file (test fixture / integration-only setup), then run `/edit` as the current user | `/edit` does not expose, preview, or modify the other user's file; the poisoned recent-path hint is ignored after scope filtering | |
+
+Pricing-reservation behavior is internal. The Stage 5 completion gate relies on automated integration coverage for live model/tier reservation sizing, so no separate manual pricing UAT step is required here.
+
+---
+
+## 24. App Install / Uninstall CLI (Review Phase 6)
+
+These checks were added with the Stage 6 remediation and are intentionally kept separate from the historical summary totals below.
+
+- [ ] Run `pnpm install-app <git-url>` without `--yes` and confirm the permission summary is printed before the approval prompt appears.
+- [ ] Cancel that prompt and confirm no success message appears and the `apps/` directory remains unchanged.
+- [ ] Run `pnpm install-app <git-url> --yes` and confirm the permission summary still appears, no prompt is shown, and the success line appears only after the install commit completes.
+- [ ] Run `pnpm uninstall-app <app-id>` and confirm the command prints both the uninstall success line and the `Restart PAS` guidance after removal.
+
+---
+
+## 25. Food Active-Space Photo Routing (Review Phase 7)
+
+- [ ] Enter an active space, send a recipe photo, and confirm the saved recipe/photo artifacts land under `data/spaces/<spaceId>/food/` rather than `data/users/shared/food/`.
+- [ ] Stay in that active space, send a receipt photo, and confirm the saved receipt artifact lands under `data/spaces/<spaceId>/food/receipts/`.
+- [ ] Exit the active space, send a grocery photo, and confirm the grocery write still lands under `data/users/shared/food/grocery/active.yaml`.
+- [ ] Verify pantry-photo behavior is unchanged in this phase: a pantry photo outside the broader migration still follows the legacy shared-only path.
 
 ---
 
@@ -497,8 +522,8 @@ Verifies that natural language data queries route correctly to DataQueryService 
 | 20. Obsidian Frontmatter | 16 | 12 | 0 | 4 | 20.13-20.16 skipped (Obsidian not tested) |
 | 21. n8n Execution APIs | 13 | 13 | 0 | 0 |
 | 22. File Index Service | 7 | | | D2a infra — run `pnpm test` to verify |
-| 23. DataQueryService & NL Queries | 13 | | | D2b — NL data access |
-| **Total** | **176** | **113** | **0** | **19** |
+| 23. DataQueryService & NL Queries | 16 | | | D2b — NL data access |
+| **Total** | **179** | **113** | **0** | **19** |
 
 ## Issues Found
 

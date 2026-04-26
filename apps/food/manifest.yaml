@@ -360,10 +360,10 @@ user_config:
     default: 1
     description: "Fraction of text messages to send to the shadow LLM classifier (0 = off, 1 = all). Used for telemetry before classifier switchover."
   - key: routing_primary
-    type: string
+    type: select
     default: regex
     description: "Primary routing strategy: 'regex' (Chunk C behavior) or 'shadow' (LLM-classified dispatch). Flip to 'shadow' only after the shadow-classifier log shows ≥95% agreement. Setting 'shadow' with shadow_sample_rate<1 produces inconsistent routing — a warning is logged at init."
-    enum: [regex, shadow]
+    options: [regex, shadow]
   - key: shadow_min_confidence
     type: number
     default: 0.7

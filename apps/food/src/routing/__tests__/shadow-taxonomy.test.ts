@@ -79,6 +79,7 @@ describe('REGEX_TO_MANIFEST_MAP', () => {
         ['pantry_view',            'user wants to check or update the pantry'],
         ['waste_log',              'user wants to log leftovers'],
         ['leftover_add',           'user wants to log leftovers'],
+        ['leftover_suggest',       'user wants to log leftovers'],
         ['leftover_view',          'user wants to log leftovers'],
         ['freezer_add',            'user wants to check or update the pantry'],
         ['freezer_view',           'user wants to check or update the pantry'],

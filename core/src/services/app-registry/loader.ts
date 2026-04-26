@@ -6,8 +6,8 @@
  * Invalid manifests or failing imports are logged and skipped (URS-NF-014).
  */
 
-import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Logger } from 'pino';
 import { validateManifest } from '../../schemas/validate-manifest.js';
@@ -28,6 +28,10 @@ export interface AppLoaderOptions {
 	logger: Logger;
 }
 
+interface PackageJsonData {
+	main?: string;
+}
+
 export class AppLoader {
 	private readonly appsDir: string;
 	private readonly logger: Logger;
@@ -35,6 +39,69 @@ export class AppLoader {
 	constructor(options: AppLoaderOptions) {
 		this.appsDir = options.appsDir;
 		this.logger = options.logger;
+	}
+
+	private async getModuleCandidates(appDir: string): Promise<string[]> {
+		const candidates: string[] = [];
+		const seen = new Set<string>();
+
+		const addCandidate = (candidate: string): void => {
+			if (seen.has(candidate)) return;
+			seen.add(candidate);
+			candidates.push(candidate);
+		};
+
+		const packageJsonPath = join(appDir, 'package.json');
+		try {
+			const packageJsonRaw = await readFile(packageJsonPath, 'utf-8');
+			const packageJson = JSON.parse(packageJsonRaw) as PackageJsonData;
+			const main = packageJson.main;
+
+			if (typeof main === 'string' && main.length > 0) {
+				if (this.isSafeRuntimeEntry(appDir, main)) {
+					addCandidate(main);
+				} else {
+					this.logger.debug(
+						{ appDir, main },
+						'Ignoring unsupported package.json main entry while resolving app module',
+					);
+				}
+			}
+		} catch (error) {
+			// Missing or invalid package.json is non-fatal — fall through to standard candidates.
+			this.logger.debug(
+				{ appDir, packageJsonPath, error },
+				'Unable to use package.json main entry while resolving app module',
+			);
+		}
+
+		addCandidate('dist/index.js');
+		addCandidate('index.js');
+		addCandidate('index.ts');
+		addCandidate('src/index.js');
+		addCandidate('src/index.ts');
+
+		return candidates;
+	}
+
+	private isSafeRuntimeEntry(appDir: string, candidate: string): boolean {
+		if (!candidate || candidate.includes('\0') || isAbsolute(candidate)) {
+			return false;
+		}
+
+		const extension = extname(candidate);
+		if (!['.js', '.mjs', '.cjs'].includes(extension)) {
+			return false;
+		}
+
+		const resolvedAppDir = resolve(appDir);
+		const resolvedCandidate = resolve(resolvedAppDir, candidate);
+		const rel = relative(resolvedAppDir, resolvedCandidate);
+		if (rel.startsWith('..') || rel.startsWith('/') || rel.startsWith('\\')) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -116,12 +183,11 @@ export class AppLoader {
 
 	/**
 	 * Dynamically import the app module from an app directory.
-	 * Tries the compiled .js first, then falls back to .ts for dev mode.
+	 * Prefers safe compiled runtime entries, then falls back to .ts for dev mode.
 	 * Returns null if the import fails.
 	 */
 	async importModule(appDir: string): Promise<AppModule | null> {
-		// Try possible entry points in order: root first, then src/ subdirectory
-		const candidates = ['index.js', 'index.ts', 'src/index.js', 'src/index.ts'];
+		const candidates = await this.getModuleCandidates(appDir);
 
 		for (const candidate of candidates) {
 			const modulePath = join(appDir, candidate);
@@ -137,11 +203,11 @@ export class AppLoader {
 				const appModule = (imported.default ?? imported) as AppModule;
 
 				if (typeof appModule.init !== 'function' || typeof appModule.handleMessage !== 'function') {
-					this.logger.error(
+					this.logger.warn(
 						{ appDir, entry: candidate },
-						'App module missing required init() or handleMessage() — skipping',
+						'App module candidate missing required init() or handleMessage(); trying next candidate',
 					);
-					return null;
+					continue;
 				}
 
 				this.logger.debug({ appDir, entry: candidate }, 'Imported app module');

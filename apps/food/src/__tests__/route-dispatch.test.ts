@@ -107,7 +107,8 @@ const sampleRecipe: Recipe = {
 
 describe('route-dispatch integration', () => {
 	let services: ReturnType<typeof createMockCoreServices>;
-	let store: ScopedDataStore;
+	let sharedStore: ScopedDataStore;
+	let userStore: ScopedDataStore;
 
 	afterEach(() => {
 		// Reset targets-flow pending state between tests
@@ -115,14 +116,15 @@ describe('route-dispatch integration', () => {
 	});
 
 	beforeEach(async () => {
-		store = createMockScopedStore();
+		sharedStore = createMockScopedStore();
+		userStore = createMockScopedStore();
 		services = createMockCoreServices();
 
-		vi.mocked(services.data.forShared).mockReturnValue(store as any);
-		vi.mocked(services.data.forUser).mockReturnValue(store as any);
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+		vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
 
 		// Default: household exists so handlers that require one proceed normally
-		vi.mocked(store.read).mockImplementation(async (path: string) => {
+		vi.mocked(sharedStore.read).mockImplementation(async (path: string) => {
 			if (path === 'household.yaml') return stringify(sampleHousehold);
 			return '';
 		});
@@ -136,7 +138,9 @@ describe('route-dispatch integration', () => {
 		vi.clearAllMocks();
 
 		// Re-install mocks after clearAllMocks (init side-effects are already done)
-		vi.mocked(store.read).mockImplementation(async (path: string) => {
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+		vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
+		vi.mocked(sharedStore.read).mockImplementation(async (path: string) => {
 			if (path === 'household.yaml') return stringify(sampleHousehold);
 			return '';
 		});
@@ -210,6 +214,27 @@ describe('route-dispatch integration', () => {
 			await handleMessage(ctx);
 
 			// beginTargetsFlow sends the first step via sendWithButtons (not send)
+			expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
+		});
+
+		it('macro adherence route reads nutrition targets from the user store after the shared household guard', async () => {
+			vi.mocked(sharedStore.read).mockImplementation(async (path: string) => {
+				if (path === 'household.yaml') return stringify(sampleHousehold);
+				throw new Error('adherence route must not read user nutrition data from shared household storage');
+			});
+			vi.mocked(userStore.read).mockImplementation(async (path: string) => {
+				if (path === 'nutrition/targets.yaml') return 'calories: 2000\nprotein: 150';
+				return '';
+			});
+			const ctx = createTestMessageContext({
+				userId: 'user1',
+				text: 'am i doing ok with nutrition',
+				route: makeRoute('user wants to see how well they are hitting their macro targets over time'),
+			});
+
+			await handleMessage(ctx);
+
+			expect(services.data.forUser).toHaveBeenCalledWith('user1');
 			expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
 		});
 
@@ -382,7 +407,7 @@ describe('route-dispatch integration', () => {
 				route: makeRoute('user wants to search for a recipe', { confidence: 0.95 }),
 			});
 			// Restore store.list so loadAllRecipes works without an error (returns empty list)
-			vi.mocked(store.list).mockResolvedValue([]);
+			vi.mocked(sharedStore.list).mockResolvedValue([]);
 
 			await handleMessage(ctx);
 
@@ -405,7 +430,7 @@ describe('route-dispatch integration', () => {
 				route: makeRoute('user wants to save a recipe', { confidence: 0.95 }),
 			});
 			// Restore store.list so loadAllRecipes works without an error (returns empty list)
-			vi.mocked(store.list).mockResolvedValue([]);
+			vi.mocked(sharedStore.list).mockResolvedValue([]);
 
 			await handleMessage(ctx);
 
@@ -740,7 +765,7 @@ describe('route-dispatch integration', () => {
 	describe('Group 5: household-missing path for household-gated allowlist intents', () => {
 		it('household-gated allowlist intent claims message and sends error when no household', async () => {
 			// Override store to return NO household
-			vi.mocked(store.read).mockImplementation(async (_path: string) => '');
+			vi.mocked(sharedStore.read).mockImplementation(async (_path: string) => '');
 
 			// "user wants to see food spending" is allowlisted and household-gated
 			const ctx = createTestMessageContext({

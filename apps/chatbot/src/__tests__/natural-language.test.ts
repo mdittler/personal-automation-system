@@ -25,6 +25,7 @@ import {
 	createMockScopedStore,
 } from '../../../../core/src/testing/mock-services.js';
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
 import * as chatbot from '../index.js';
 import { classifyPASMessage, MODEL_SWITCH_INTENT_REGEX } from '../index.js';
 
@@ -90,7 +91,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it('/ask "how do i add a new app" → PAS-aware prompt', async () => {
@@ -102,7 +103,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it("/ask \"what's my monthly cost\" → response delivered", async () => {
@@ -180,7 +181,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it("/ask \"what's the difference between fast and standard tier\" → prompt references models", async () => {
@@ -198,7 +199,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it('/ask "show me scheduled jobs" → PAS-aware prompt', async () => {
@@ -210,7 +211,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it('/ask "how do I set up an alert" → response delivered', async () => {
@@ -237,7 +238,7 @@ describe('/ask command — natural language questions', () => {
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		);
-		expect(standardCall?.[1]?.systemPrompt).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
 	it('/ask "can you show me my recent data" → response delivered', async () => {
@@ -617,8 +618,7 @@ describe('messages for other apps — no PAS-aware prompt when classifier return
 				(c) => c[1]?.tier === 'standard',
 			);
 			const prompt = standardCall?.[1]?.systemPrompt ?? '';
-			expect(prompt).toContain('helpful, friendly AI assistant');
-			expect(prompt).not.toContain('PAS (Personal Automation System) assistant');
+			expectBasicPrompt(prompt);
 		},
 	);
 });
@@ -687,7 +687,7 @@ describe('conversation continuity — multi-turn scenarios', () => {
 		const prompt1 = vi.mocked(services.llm.complete).mock.calls.find(
 			(c) => c[1]?.tier === 'standard',
 		)?.[1]?.systemPrompt ?? '';
-		expect(prompt1).toContain('PAS (Personal Automation System) assistant');
+		expectPasAwarePrompt(prompt1);
 
 		vi.mocked(services.llm.complete).mockClear();
 
@@ -700,8 +700,7 @@ describe('conversation continuity — multi-turn scenarios', () => {
 			(c) => c[1]?.tier === 'standard',
 		)?.[1]?.systemPrompt ?? '';
 		// Prompt mode switched back to basic for the casual message
-		expect(prompt2).toContain('helpful, friendly AI assistant');
-		expect(prompt2).not.toContain('PAS (Personal Automation System) assistant');
+		expectBasicPrompt(prompt2);
 	});
 });
 

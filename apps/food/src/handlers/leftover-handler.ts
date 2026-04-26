@@ -16,6 +16,8 @@ import {
 	getActiveLeftovers,
 	withLeftoverLock,
 } from '../services/leftover-store.js';
+import { findLeftoverRecipeSuggestions } from '../services/leftover-suggestions.js';
+import { loadAllRecipes } from '../services/recipe-store.js';
 import { appendWaste, appendWasteUnsafe } from '../services/waste-store.js';
 import type { FreezerItem, Leftover, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
@@ -269,6 +271,23 @@ export async function handleLeftoverCheckJob(
 		lines.push('⏰ *Expiring tomorrow:*');
 		for (const { item } of expiringTomorrow) {
 			lines.push(`• ${item.name} — ${item.quantity}`);
+		}
+	}
+
+	const suggestionLeftovers = [...expiringToday, ...expiringTomorrow].map(({ item }) => item);
+	if (suggestionLeftovers.length) {
+		try {
+			const recipes = await loadAllRecipes(sharedStore);
+			const suggestions = findLeftoverRecipeSuggestions(suggestionLeftovers, recipes);
+			if (suggestions.length) {
+				if (lines.at(-1) !== '') lines.push('');
+				lines.push('💡 *Ideas for these leftovers:*');
+				for (const suggestion of suggestions) {
+					lines.push(`• ${suggestion.recipe.title}`);
+				}
+			}
+		} catch (err) {
+			services.logger.warn('Leftover suggestion generation failed: %s', err);
 		}
 	}
 

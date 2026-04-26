@@ -1102,41 +1102,19 @@ Phase 7 test evidence:
 ### Finding 36: Production app loading skips compiled app entrypoints
 
 - Status: fixed
-- **Status:** Fixed — `.js`-first candidate ordering in `AppLoader.importModule()` means compiled output (`dist/index.js`) is tried before source paths, so production Docker builds load chatbot and food correctly.
+- **Status:** Fixed — Review Phase 6 remediation now resolves a safe local `package.json.main`, then `dist/index.js`, before falling back to source entries.
 - Severity: high
 - Classification: production packaging / module resolution
-- Location: `core/src/services/app-registry/loader.ts:107-143`
-- Related paths: `Dockerfile:51-80`, `apps/chatbot/src/index.ts:25`, `apps/food/src/index.ts:25-114`, `apps/chatbot/dist/index.js`, `apps/food/dist/index.js`
+- Location: `core/src/services/app-registry/loader.ts`
+- Related paths: `core/src/services/app-registry/__tests__/loader.test.ts`, `core/src/services/app-registry/__tests__/registry.test.ts`, `apps/chatbot/package.json`, `apps/food/package.json`
 
-`AppLoader.importModule()` only tries `index.js`, `index.ts`, `src/index.js`, and `src/index.ts`. It never tries the compiled app entrypoint at `dist/index.js`, even though every bundled app package declares `"main": "dist/index.js"` and the Docker runtime starts compiled core with `node core/dist/bootstrap.js` after `pnpm build`.
+This finding was valid when originally recorded: the loader could miss compiled bundles even when packaged apps declared `"main": "dist/index.js"`. That gap is now closed. The loader keeps resolution inside the app directory, ignores unsafe `main` values such as traversal attempts and absolute paths, and treats TypeScript source as development fallback only.
 
-Concrete failure path:
+Current verification:
 
-1. The Docker build compiles app TypeScript to `apps/<app>/dist/index.js` and copies the app directories into the runtime image.
-2. Production starts `node core/dist/bootstrap.js`.
-3. The app loader checks the source entrypoints before any compiled app entrypoint and reaches `src/index.ts`.
-4. Native Node can load very simple `.ts` files, but it does not remap source imports that use compiled `.js` specifiers back to `.ts` files. Chatbot imports `./conversation-history.js`, and food imports many `./handlers/*.js` modules from `src/index.ts`.
-5. Chatbot and food are skipped with "No valid app module found" even though their compiled `dist/index.js` files exist.
-
-Direct smoke evidence from Node v22.18.0 in this workspace:
-
-- `AppLoader.importModule('apps/echo')` loaded.
-- `AppLoader.importModule('apps/notes')` loaded.
-- `AppLoader.importModule('apps/chatbot')` returned null.
-- `AppLoader.importModule('apps/food')` returned null.
-
-Correction notes:
-
-- Add `dist/index.js` to the candidate list, preferably before TypeScript source paths when `NODE_ENV=production` or when a compiled file exists.
-- Consider honoring each app package's `main` field if present, with a safe allowlist that keeps resolution inside the app directory.
-- Keep source `.ts` loading as the development fallback for `tsx watch`.
-- Add a production-mode loader test with both `src/index.ts` and `dist/index.js` present, where source imports would fail but compiled output loads.
-
-Suggested tests:
-
-- Add an `AppLoader.importModule()` test that creates `dist/index.js` and `src/index.ts`, asserts the compiled module is chosen in production-like conditions, and verifies the module initializes.
-- Add a startup-style registry test that built chatbot/food-like source imports do not prevent loading when `dist/index.js` exists.
-- Add a Docker/runtime smoke test or script that starts compiled core and asserts all bundled app IDs are loaded.
+- `loader.test.ts` now proves safe `package.json.main` resolution, `dist/index.js` fallback, and non-fatal handling for traversal, absolute-path, and unsupported-extension `main` values.
+- `registry.test.ts` now proves `loadAll()` can initialize a compiled app fixture even when `src/index.ts` is intentionally broken.
+- The production/package contract is now aligned with the actual packaged apps that declare compiled entrypoints.
 
 ### Finding 37: `condition-eval` manifests do not receive the condition evaluator service
 
@@ -1170,33 +1148,19 @@ Suggested tests:
 ### Finding 38: Install permission review and `--yes` are not connected to installer side effects
 
 - Status: fixed
-- **Status:** Fixed — confirmation prompt added before `installApp()` call; `--yes`/`-y` skips it. The installer now shows the permission summary first and only proceeds on explicit confirmation.
+- **Status:** Fixed — Review Phase 6 remediation split installation into planning and commit phases, so the permission summary is now available before side effects and the CLI gates commit behind approval unless `--yes` is present.
 - Severity: medium
 - Classification: installation flow / consent boundary
-- Location: `core/src/cli/install-app.ts:82-106`
-- Related paths: `core/src/services/app-installer/index.ts:306-346`, `docs/urs.md:2904-2915`, `docs/app-sharing-vision.md:67`, `docs/app-sharing-vision.md:195`
+- Location: `core/src/cli/install-app.ts`, `core/src/services/app-installer/index.ts`
+- Related paths: `core/src/cli/__tests__/install-app.test.ts`, `core/src/cli/__tests__/uninstall-app.test.ts`, `core/src/services/app-installer/__tests__/installer.test.ts`
 
-The install CLI advertises `--yes, -y` as "Skip confirmation prompt", and the app-sharing docs describe a review-permissions-then-install flow. The actual CLI only extracts the first non-flag argument as the git URL, never reads `--yes` or `-y`, never prompts, and calls `installApp()` immediately. `installApp()` builds the permission summary, copies the app into `apps/<app-id>/`, runs `pnpm install`, and only then returns the summary that the CLI prints.
+This finding was also valid when first captured: the CLI could reach copy/install work before the operator had reviewed a validated permission plan. That boundary is now explicit in the runtime design. `planInstallApp()` performs clone, validation, compatibility, static analysis, and permission-summary generation without copying into `apps/` or running `pnpm install`, and returns a `PreparedInstall` handle whose `commit()` performs the side-effecting phase.
 
-Concrete failure path:
+Current verification:
 
-1. A user runs `pnpm install-app https://github.com/some/app.git` without `--yes`.
-2. The CLI calls `installApp()` with no confirmation or review step.
-3. The app is copied into the workspace and dependency installation runs.
-4. Only after those side effects succeed does the CLI print the permission summary.
-
-Correction notes:
-
-- Split the installer into a validation/planning phase and a commit phase, or add a `dryRun`/`validateOnly` mode that returns the permission summary before copy/install.
-- Prompt for confirmation after validation and before side effects unless `--yes` or `-y` is present.
-- Make the CLI tests spawn or invoke the actual argument parser/main flow instead of only checking that an array contains `--yes`.
-- Consider inspecting package lifecycle scripts or running dependency installation with the intended script policy as part of the install trust boundary.
-
-Suggested tests:
-
-- Add a CLI test where `--yes` is absent and assert the install commit does not run until the confirmation path approves it.
-- Add a CLI test where `--yes` is present and assert the commit phase runs without prompting.
-- Add an installer service test that permission summary generation can complete without copying into `apps/` or running `pnpm install`.
+- `install-app.test.ts` now proves the summary is printed before prompting, cancellation avoids commit, `--yes` skips the prompt while still printing the summary, and commit failures still dispose the prepared install.
+- `installer.test.ts` now proves `planInstallApp()` has no copy/dependency-install side effects and that `PreparedInstall.dispose()` is idempotent.
+- `uninstall-app.test.ts` now covers the runner-level uninstall flow, including restart guidance after success.
 
 ### Finding 39: The documented `register-app` command points to a missing file
 

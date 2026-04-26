@@ -164,6 +164,29 @@ describe('freezer-handler', () => {
 				expect(msg).toContain('Tossed');
 			});
 
+			it('withholds the toss confirmation when waste logging fails', async () => {
+				const items = [makeFreezerItem({ name: 'Beef Stew' })];
+				const store = mockStore({
+					'freezer.yaml': makeFreezerYaml(items),
+					'waste-log.yaml': makeWasteYaml(),
+				}) as unknown as ScopedDataStore;
+				vi.mocked(store.write).mockImplementation(async (path: string, content: string) => {
+					if (path === 'waste-log.yaml') {
+						throw new Error('waste append failed');
+					}
+				});
+
+				await expect(
+					handleFreezerCallback(services, 'toss:0', 'user1', 100, 200, store),
+				).rejects.toThrow('waste append failed');
+
+				expect(services.telegram.editMessage).not.toHaveBeenCalledWith(
+					100,
+					200,
+					expect.stringContaining('🗑 Tossed'),
+				);
+			});
+
 			it('logs waste entry with reason=discarded and source=freezer', async () => {
 				const items = [makeFreezerItem({ name: 'Old Turkey', quantity: '3 lbs' })];
 				const store = mockStore({

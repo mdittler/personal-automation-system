@@ -1,8 +1,8 @@
 # Stage 6 Test Review Findings
 
-Date: 2026-04-23
+Date: 2026-04-25
 Stage: 6 - Platform Packaging, Registry, CLI, and Test Infrastructure
-Status: Completed
+Status: Remediated
 
 ## Scope
 
@@ -64,80 +64,61 @@ The strongest Stage 6 coverage today is:
 
 ## Findings
 
-### 1. Compiled app loading is still unprotected, and the current loader still does not try `dist/index.js`
+### 1. Compiled app loading is now pinned against packaged runtime behavior
 
 - Severity: high
-- Type: production packaging/runtime mismatch plus missing regression coverage
+- Status: remediated
 - Code references:
-  - `core/src/services/app-registry/loader.ts:117-125`
-  - `apps/echo/package.json:1-8`
-  - `apps/notes/package.json:1-8`
-  - `docs/codebase-review-findings.md:1102-1139`
-- Test references:
-  - `core/src/services/app-registry/__tests__/loader.test.ts:141-169`
-  - `core/src/testing/__tests__/e2e-echo.test.ts:95-109`
-  - `test_strategy_summary.md:321-324`
+  - `core/src/services/app-registry/loader.ts`
+  - `core/src/services/app-registry/__tests__/loader.test.ts`
+  - `core/src/services/app-registry/__tests__/registry.test.ts`
 
-`AppLoader.importModule()` still comments that it "tries the compiled .js first," but the actual candidate list is only `index.js`, `index.ts`, `src/index.js`, and `src/index.ts`. It never tries `dist/index.js`, even though the packaged example apps still declare `"main": "dist/index.js"`. That leaves the same production seam identified in `docs/codebase-review-findings.md` effectively open in the current source tree, despite that finding being marked fixed there.
+`AppLoader.importModule()` now resolves module entrypoints in the production-safe order this stage needed: safe local `package.json.main`, then `dist/index.js`, then the development fallbacks (`index.js`, `index.ts`, `src/index.js`, `src/index.ts`). Invalid `main` values such as absolute paths, traversal attempts, and unsupported extensions are logged at debug level and ignored without breaking the fallback chain.
 
-The Stage 6 tests do not pin this. `loader.test.ts` only exercises a tiny inline `index.ts` module and the missing-module case. The strongest end-to-end check in this stage, `e2e-echo.test.ts`, points the registry at the live `apps/` tree but still relies on the current source layout instead of a compiled-package scenario. So the stage has good development-mode confidence, but still lacks the regression test that would catch a compiled-runtime packaging failure before deployment.
+The new regression coverage proves both the direct loader contract and the startup-style registry path. `loader.test.ts` now covers safe `main`, `dist/index.js`, traversal, absolute paths, and unsupported extensions. `registry.test.ts` now loads a full temp app fixture with a working compiled module plus a deliberately broken `src/index.ts`, proving `loadAll()` still succeeds through the compiled runtime path.
 
-### 2. The install CLI still lacks a true review-then-commit flow, and the tests only cover helper parsing
+### 2. The install CLI now enforces a real review-then-commit boundary
 
 - Severity: medium
-- Type: consent-boundary/runtime-flow gap plus shallow CLI coverage
+- Status: remediated
 - Code references:
-  - `core/src/cli/install-app.ts:85-137`
-  - `core/src/services/app-installer/index.ts:267-300`
-  - `docs/codebase-review-findings.md:1173-1199`
-  - `test_strategy_summary.md:323-324`
-- Test references:
-  - `core/src/cli/__tests__/install-app.test.ts:4-85`
-  - `core/src/services/app-installer/__tests__/installer.test.ts:100-243`
+  - `core/src/services/app-installer/index.ts`
+  - `core/src/cli/install-app.ts`
+  - `core/src/cli/uninstall-app.ts`
 
-The install CLI is better than the earlier broken version because `--yes` is now parsed and a confirmation prompt exists. But it still prompts before any validated permission summary exists, then calls `installApp()`, and only prints `result.permissionSummary` after clone/validation/copy/dependency-install side effects have already succeeded. The installer service likewise has no validation-only or planning mode; once you ask it for a permission summary, you are already on the commit path.
+The installer is now split into a no-side-effects planning phase and a commit phase. `planInstallApp()` performs clone, validation, compatibility checks, static analysis, and permission-summary generation without copying into `apps/` or running `pnpm install`. It returns a `PreparedInstall` handle with `commit()` and idempotent `dispose()`. The legacy `installApp()` wrapper remains available, but now does `plan -> commit -> dispose` internally.
 
-That means the user-visible review-permissions-then-install flow is still not protected as a real contract. The current CLI tests make that easy to miss because they only assert regexes, array parsing, and `parseYesFlag()`. The service tests are strong for installer safety once installation is underway, but they do not prove that the actual `install-app` command gates those side effects behind a reviewed permission plan.
+The CLI coverage is now behavioral rather than helper-only. `install-app.test.ts` proves the validated permission summary is printed before approval, canceling does not commit, `--yes` skips the prompt but still shows the summary, planner failures stop before commit, and commit failures still dispose the prepared install. `uninstall-app.test.ts` now exercises the actual runner-style flow, including restart guidance after a successful uninstall.
 
-### 3. Manifest-scope compatibility is still not protected end to end, and the schema fixtures still encode the older app-prefixed path convention
+### 3. Manifest-scope compatibility is now protected end to end
 
 - Severity: medium
-- Type: schema/example/runtime contract drift
+- Status: remediated
 - Code references:
-  - `core/src/schemas/__tests__/validate-manifest.test.ts:8-41`
-  - `core/src/schemas/__tests__/validate-manifest.test.ts:116-120`
-  - `core/src/services/data-store/paths.ts:231-240`
-  - `apps/echo/manifest.yaml:19-27`
-  - `apps/notes/manifest.yaml:28-37`
-  - `apps/echo/src/index.ts:21-27`
-  - `apps/notes/src/index.ts:10-16`
-  - `docs/codebase-review-findings.md:233-253`
-- Test references:
-  - `core/src/schemas/__tests__/validate-manifest.test.ts:8-41`
-  - `core/src/testing/__tests__/e2e-echo.test.ts:100-109`
-  - `test_strategy_summary.md:191-195`
+  - `core/src/schemas/__tests__/validate-manifest.test.ts`
+  - `core/src/schemas/__tests__/bundled-manifests.test.ts`
+  - `core/src/services/data-store/__tests__/manifest-scope-contract.test.ts`
+  - `apps/food/manifest.yaml`
 
-The runtime now treats manifest data scopes as app-root-relative and even includes `warnScopePathPrefix()` to flag `<appId>/...` paths as suspicious. The bundled example manifests and runtime code reflect that contract: echo declares `log.md` and writes `log.md`, while notes declares `daily-notes/` and writes `daily-notes/<date>.md`. But the canonical schema test fixture still uses app-prefixed paths like `echo/log.md` and `grocery/list.md`, which teaches and preserves the older convention inside the validation suite itself.
+The schema fixtures now use app-root-relative examples (`log.md`, `list.md`, `recipes/`, `shared-list.md`, `meal-plans/`) instead of the older app-prefixed convention. A new bundled-manifest contract test validates every first-party manifest under `apps/*/manifest.yaml` and asserts `warnScopePathPrefix()` returns no warnings. The runtime scope contract is now pinned with real `DataStoreServiceImpl` enforcement for echo, notes, and chatbot, including both accept and reject cases.
 
-The missing protection is the contract test that ties all of this together. Stage 6 still has no bundled-manifest compatibility regression that proves the example manifests, schema fixtures, and enforced runtime scopes agree with each other. So even though the live example apps have moved to the correct convention, the test corpus still contains outdated "valid" examples that could reintroduce scope-path drift without failing the stage.
+This pass also flushed out a live bundled-manifest bug while adding the contract test: `apps/food/manifest.yaml` still used `enum` for a `select`-style `user_config` field. That manifest now uses the schema-correct `options` property, so the full bundled-manifest sweep passes.
 
-## Transitional Or Lower-Trust Coverage To Treat Carefully
+## Residual Risks
 
-- `core/src/cli/__tests__/install-app.test.ts:4-85` and `core/src/cli/__tests__/uninstall-app.test.ts:17-69` are helper-level CLI tests. They are useful for regex and constant drift, but they are weak evidence of the actual command-entry behavior because they do not invoke the real `main()` flow.
-- `core/src/services/app-registry/__tests__/loader.test.ts:141-169` only proves tiny inline `index.ts` modules can import in the test environment. It does not exercise realistic compiled app layouts, `.js`-specifier source imports, or `dist/index.js` preference.
-- `apps/echo/src/__tests__/echo.test.ts` and `apps/notes/__tests__/notes.test.ts` are good example-app behavior tests, but they rely on `createMockCoreServices()` and mocked scoped stores. They do not prove manifest-scope enforcement or compiled-package loading. `core/src/testing/__tests__/e2e-echo.test.ts` is stronger, but it only covers echo and only in the source-loaded path.
-- `scripts/__tests__/load-test.test.ts` is useful for quantile math and cap-hit log parsing, but it is not a smoke test of the actual `load-test` script wiring or CLI invocation.
+- `core/src/testing/__tests__/e2e-echo.test.ts` is still valuable, but it remains a source-tree integration test rather than a compiled-runtime smoke test across all bundled apps.
+- The CLI runner tests assert command behavior directly without spawning a separate process, which is strong enough for the Stage 6 consent boundary but still lighter than a full child-process smoke invocation.
 
-## Follow-Up Tasks Opened By Stage 6
+## Follow-Up Tasks Closed By Stage 6
 
-- Fix `AppLoader.importModule()` to consider `dist/index.js` (or a safely resolved package `main`) before source fallbacks in production-like conditions, and add loader/registry smoke coverage for compiled bundles.
-- Split the installer into validation/permission-plan and commit phases, or add a `dryRun`/`validateOnly` mode, then add command-level `install-app` tests proving no side effects occur before explicit approval unless `--yes` is present.
-- Add bundled-manifest/runtime contract tests for echo, notes, chatbot, and other packaged apps so scope-path semantics are checked against real manifests and real store enforcement.
-- Replace the outdated app-prefixed scope fixtures in `validate-manifest.test.ts` with app-root-relative examples, or add an explicit warning/lint assertion that documents the prefixed form as transitional and discouraged.
-- Consider broadening `uninstall-app` coverage from regex-only tests to real entrypoint-level behavior checks in the same style the install CLI still needs.
+- `AppLoader.importModule()` now prefers safe packaged runtime entries before source fallbacks, with direct loader and registry smoke coverage.
+- The installer now supports review-first planning, and the `install-app` command is tested as a no-side-effects-until-approval flow.
+- Bundled manifest validation and runtime scope contracts now agree on app-root-relative path semantics.
+- The outdated app-prefixed schema fixtures have been replaced.
+- `uninstall-app` now has runner-level behavioral coverage rather than regex-only helper checks.
 
 ## Stage 6 Exit Decision
 
-Stage 6 is complete.
+Stage 6 remediation is complete.
 
-The strongest coverage in this stage is around installer safety checks, manifest cache and metadata behavior, scaffolding, root script existence, and the basic example-app behavior model. The main remaining weaknesses are the still-unpinned compiled-app loading path, the missing validation-before-commit install flow, and the lingering contract drift between schema fixtures and runtime data-scope semantics.
+The original three Stage 6 review gaps are now closed in code, tests, and traceability docs. Verification for this remediation is: targeted Stage 6 suites passed, full `pnpm test` passed, and `pnpm build` passed.

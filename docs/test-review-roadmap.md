@@ -282,7 +282,7 @@ Every stage uses the same checklist. Record the answers for the current stage be
 
 ### Stage 8 — Food App User Workflows and Feature Coverage
 
-**Status:** Completed
+**Status:** Completed and remediated
 
 **Findings:** `docs/test-review-stage-8-findings.md`
 

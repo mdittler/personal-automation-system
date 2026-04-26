@@ -19,6 +19,7 @@ import type { AppLogger } from '../../../types/app-module.js';
 import { EditLog, EditServiceImpl } from '../index.js';
 import { requestContext } from '../../context/request-context.js';
 import { HouseholdBoundaryError } from '../../household/index.js';
+import type { InteractionContextService, InteractionEntry } from '../../interaction-context/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +68,16 @@ function makeEditLog(): EditLog {
   return {
     append: vi.fn().mockResolvedValue(undefined),
   } as unknown as EditLog;
+}
+
+function makeInteractionContext(entries: InteractionEntry[]): InteractionContextService {
+  return {
+    record: vi.fn(),
+    getRecent: vi.fn().mockReturnValue(entries),
+    loadFromDisk: vi.fn().mockResolvedValue(undefined),
+    flush: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 /** Build a minimal AppRegistry with one app that has write access to a scope. */
@@ -198,6 +209,54 @@ describe('EditServiceImpl', () => {
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
     expect(result.action).toBe('no_match');
+  });
+
+  it('proposeEdit: passes deduped newest-first recentFilePaths to DataQueryService', async () => {
+    const interactionContext = makeInteractionContext([
+      {
+        appId: 'notes',
+        action: 'open-file',
+        filePaths: [
+          'users/matt/notes/recent.md',
+          'users/matt/notes/shared.md',
+        ],
+        scope: 'user',
+        timestamp: Date.now(),
+      },
+      {
+        appId: 'notes',
+        action: 'open-file',
+        filePaths: [
+          'users/matt/notes/shared.md',
+          'users/matt/notes/older.md',
+        ],
+        scope: 'user',
+        timestamp: Date.now() - 1_000,
+      },
+    ]);
+    const dq = makeDataQueryService([]);
+
+    const svc = new EditServiceImpl({
+      dataQueryService: dq,
+      appRegistry: makeAppRegistry({ appId: 'food', scopePath: 'recipes/', access: 'read-write' }),
+      llm: makeLLM(''),
+      changeLog: makeChangeLog(),
+      eventBus: makeEventBus(),
+      dataDir,
+      logger: makeLogger(),
+      editLog: makeEditLog(),
+      interactionContext,
+    });
+
+    await svc.proposeEdit('find my recent note', 'matt');
+
+    expect(dq.query).toHaveBeenCalledWith('find my recent note', 'matt', {
+      recentFilePaths: [
+        'users/matt/notes/recent.md',
+        'users/matt/notes/shared.md',
+        'users/matt/notes/older.md',
+      ],
+    });
   });
 
   // -------------------------------------------------------------------------

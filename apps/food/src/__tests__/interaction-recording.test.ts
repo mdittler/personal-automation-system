@@ -80,6 +80,9 @@ describe('interaction recording — receipt_captured', () => {
 		const sharedStore = createMockScopedStore({
 			'household.yaml': makeHouseholdYaml(),
 		});
+		const spaceStore = createMockScopedStore({
+			'household.yaml': makeHouseholdYaml(),
+		});
 		const services = {
 			llm: {
 				complete: vi.fn().mockResolvedValue(validReceiptJson),
@@ -95,15 +98,16 @@ describe('interaction recording — receipt_captured', () => {
 			},
 			data: {
 				forShared: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
 			interactionContext,
 		} as unknown as CoreServices;
-		return { services, sharedStore };
+		return { services, sharedStore, spaceStore };
 	}
 
-	function createPhotoCtx(caption?: string): PhotoContext {
+	function createPhotoCtx(caption?: string, overrides: Partial<PhotoContext> = {}): PhotoContext {
 		return {
 			userId: 'user1',
 			photo: testPhoto,
@@ -112,6 +116,7 @@ describe('interaction recording — receipt_captured', () => {
 			timestamp: new Date(),
 			chatId: 123,
 			messageId: 456,
+			...overrides,
 		};
 	}
 
@@ -131,6 +136,23 @@ describe('interaction recording — receipt_captured', () => {
 			entityType: 'receipt',
 			scope: 'shared',
 		});
+	});
+
+	it('records a space-scoped receipt path when a space is active', async () => {
+		const interactionContext = makeInteractionContext();
+		const { services } = createReceiptServices(interactionContext);
+		const ctx = createPhotoCtx('grocery receipt', {
+			spaceId: 'family-space',
+			spaceName: 'Family Space',
+		});
+
+		await handlePhoto(services, ctx);
+
+		const call = vi.mocked(interactionContext.record).mock.calls[0];
+		expect(call?.[1]).toMatchObject({
+			scope: 'space',
+		});
+		expect(call?.[1].filePaths?.[0]).toMatch(/^spaces\/family-space\/food\/receipts\/.+\.yaml$/);
 	});
 
 	it('does not throw when interactionContext is undefined', async () => {
@@ -334,6 +356,9 @@ describe('interaction recording — recipe_saved via photo', () => {
 		const sharedStore = createMockScopedStore({
 			'household.yaml': makeHouseholdYaml(),
 		});
+		const spaceStore = createMockScopedStore({
+			'household.yaml': makeHouseholdYaml(),
+		});
 		const services = {
 			llm: {
 				complete: vi.fn().mockResolvedValue(validRecipeJson),
@@ -349,15 +374,16 @@ describe('interaction recording — recipe_saved via photo', () => {
 			},
 			data: {
 				forShared: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
 			interactionContext,
 		} as unknown as CoreServices;
-		return { services, sharedStore };
+		return { services, sharedStore, spaceStore };
 	}
 
-	function createPhotoCtx(caption?: string): PhotoContext {
+	function createPhotoCtx(caption?: string, overrides: Partial<PhotoContext> = {}): PhotoContext {
 		return {
 			userId: 'user1',
 			photo: testPhoto,
@@ -366,6 +392,7 @@ describe('interaction recording — recipe_saved via photo', () => {
 			timestamp: new Date(),
 			chatId: 123,
 			messageId: 456,
+			...overrides,
 		};
 	}
 
@@ -388,6 +415,23 @@ describe('interaction recording — recipe_saved via photo', () => {
 		// entityId and filePaths should be populated with the saved recipe ID (data-root-relative)
 		expect(call[1].entityId).toBeTruthy();
 		expect(call[1].filePaths?.[0]).toMatch(/^users\/shared\/food\/recipes\/.+\.yaml$/);
+	});
+
+	it('records a space-scoped recipe path when a space is active', async () => {
+		const interactionContext = makeInteractionContext();
+		const { services } = createRecipePhotoServices(interactionContext);
+		const ctx = createPhotoCtx('save this recipe', {
+			spaceId: 'family-space',
+			spaceName: 'Family Space',
+		});
+
+		await handlePhoto(services, ctx);
+
+		const call = vi.mocked(interactionContext.record).mock.calls[0];
+		expect(call?.[1]).toMatchObject({
+			scope: 'space',
+		});
+		expect(call?.[1].filePaths?.[0]).toMatch(/^spaces\/family-space\/food\/recipes\/.+\.yaml$/);
 	});
 
 	it('does not throw when interactionContext is undefined', async () => {
@@ -415,6 +459,9 @@ describe('interaction recording — grocery_updated via photo', () => {
 		const sharedStore = createMockScopedStore({
 			'household.yaml': makeHouseholdYaml(),
 		});
+		const spaceStore = createMockScopedStore({
+			'household.yaml': makeHouseholdYaml(),
+		});
 		const services = {
 			llm: {
 				complete: vi.fn().mockResolvedValue(validGroceryJson),
@@ -430,15 +477,16 @@ describe('interaction recording — grocery_updated via photo', () => {
 			},
 			data: {
 				forShared: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
 			interactionContext,
 		} as unknown as CoreServices;
-		return { services, sharedStore };
+		return { services, sharedStore, spaceStore };
 	}
 
-	function createPhotoCtx(caption?: string): PhotoContext {
+	function createPhotoCtx(caption?: string, overrides: Partial<PhotoContext> = {}): PhotoContext {
 		return {
 			userId: 'user1',
 			photo: testPhoto,
@@ -447,6 +495,7 @@ describe('interaction recording — grocery_updated via photo', () => {
 			timestamp: new Date(),
 			chatId: 123,
 			messageId: 456,
+			...overrides,
 		};
 	}
 
@@ -467,6 +516,25 @@ describe('interaction recording — grocery_updated via photo', () => {
 			filePaths: ['users/shared/food/grocery/active.yaml'],
 			scope: 'shared',
 		});
+	});
+
+	it('records a space-scoped grocery path when a space is active', async () => {
+		const interactionContext = makeInteractionContext();
+		const { services } = createGroceryPhotoServices(interactionContext);
+		const ctx = createPhotoCtx('add to grocery list', {
+			spaceId: 'family-space',
+			spaceName: 'Family Space',
+		});
+
+		await handlePhoto(services, ctx);
+
+		const call = vi.mocked(interactionContext.record).mock.calls[0];
+		expect(call?.[1]).toEqual(
+			expect.objectContaining({
+				scope: 'space',
+				filePaths: ['spaces/family-space/food/grocery/active.yaml'],
+			}),
+		);
 	});
 
 	it('does not throw when interactionContext is undefined', async () => {

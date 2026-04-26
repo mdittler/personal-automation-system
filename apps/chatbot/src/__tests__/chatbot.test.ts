@@ -5,6 +5,12 @@ import {
 	createMockScopedStore,
 } from '../../../../core/src/testing/mock-services.js';
 import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import {
+	expectBasicPrompt,
+	expectPasAwarePrompt,
+	expectPromptIncludesSystemData,
+	expectPromptOmitsSystemData,
+} from './helpers/prompt-assertions.js';
 import * as chatbot from '../index.js';
 import {
 	MODEL_SWITCH_INTENT_REGEX,
@@ -334,7 +340,7 @@ describe('Chatbot App', () => {
 
 		it('includes base personality without context or history', async () => {
 			const prompt = await buildSystemPrompt([], [], MODEL_SLUG);
-			expect(prompt).toContain('helpful, friendly AI assistant');
+			expectBasicPrompt(prompt);
 			expect(prompt).not.toContain('preferences and context');
 			expect(prompt).not.toContain('Previous conversation');
 		});
@@ -700,8 +706,7 @@ describe('Chatbot App', () => {
 			// auto_detect off → only one LLM call (the main response, no classifier)
 			expect(services.llm.complete).toHaveBeenCalledTimes(1);
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-			expect(prompt).toContain('helpful, friendly AI assistant');
-			expect(prompt).not.toContain('PAS (Personal Automation System) assistant');
+			expectBasicPrompt(prompt);
 		});
 
 		it('uses app-aware prompt when auto-detect is on and LLM classifier returns PAS-relevant', async () => {
@@ -721,7 +726,7 @@ describe('Chatbot App', () => {
 			expect(classifierCall[1]?.tier).toBe('fast');
 
 			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-			expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+			expectPasAwarePrompt(mainPrompt);
 		});
 
 		it('uses regular prompt when auto-detect is on and LLM classifier returns not PAS-relevant', async () => {
@@ -737,7 +742,7 @@ describe('Chatbot App', () => {
 			// call[0] = classifier, call[1] = main response
 			expect(services.llm.complete).toHaveBeenCalledTimes(2);
 			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-			expect(mainPrompt).toContain('helpful, friendly AI assistant');
+			expectBasicPrompt(mainPrompt);
 		});
 
 		it('handles auto-detect config value as string "true"', async () => {
@@ -751,7 +756,7 @@ describe('Chatbot App', () => {
 			await chatbot.handleMessage(ctx);
 
 			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-			expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+			expectPasAwarePrompt(mainPrompt);
 		});
 
 		it('defaults to false when config.getAll throws (no classifier call, basic prompt)', async () => {
@@ -763,7 +768,7 @@ describe('Chatbot App', () => {
 			// auto_detect defaults to false on error → only one LLM call (no classifier)
 			expect(services.llm.complete).toHaveBeenCalledTimes(1);
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-			expect(prompt).toContain('helpful, friendly AI assistant');
+			expectBasicPrompt(prompt);
 		});
 
 		it('uses app-aware prompt (fail-open) when classifier LLM call throws', async () => {
@@ -780,7 +785,7 @@ describe('Chatbot App', () => {
 			// Classifier fails → fail-open → app-aware prompt for main call
 			expect(services.llm.complete).toHaveBeenCalledTimes(2);
 			const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
-			expect(mainPrompt).toContain('PAS (Personal Automation System) assistant');
+			expectPasAwarePrompt(mainPrompt);
 		});
 
 		it('includes user household context in basic system prompt', async () => {
@@ -1520,7 +1525,7 @@ describe('Chatbot App', () => {
 				'test-slug',
 			);
 
-			expect(prompt).toContain('Live system data');
+			expectPromptIncludesSystemData(prompt);
 			// Non-admin (default mock) sees model name only — no provider prefix
 			expect(prompt).toContain('standard: claude-sonnet-4-20250514');
 			expect(prompt).not.toContain('standard: anthropic/claude-sonnet');
@@ -1554,7 +1559,7 @@ describe('Chatbot App', () => {
 				'test-slug',
 			);
 
-			expect(prompt).not.toContain('Live system data');
+			expectPromptOmitsSystemData(prompt);
 		});
 
 		it('sanitizes system data in prompt', async () => {

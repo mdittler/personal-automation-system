@@ -24,7 +24,10 @@ import { addItems, loadGroceryList, saveGroceryList, createEmptyList, withGrocer
 import { isoNow } from '../utils/date.js';
 import type { Receipt } from '../types.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
-import { requireHousehold } from '../utils/household-guard.js';
+import {
+	resolveFoodStore,
+	type ResolvedFoodStore,
+} from '../utils/household-guard.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
@@ -74,6 +77,13 @@ async function classifyByVision(
 	return VALID_PHOTO_TYPES.has(normalized as PhotoType) ? (normalized as PhotoType) : null;
 }
 
+function buildScopedFoodPath(resolved: ResolvedFoodStore, relativePath: string): string {
+	if (resolved.scope === 'space') {
+		return `spaces/${resolved.spaceId}/food/${relativePath}`;
+	}
+	return `users/shared/food/${relativePath}`;
+}
+
 // ─── Main handler ───────────────────────────────────────────────
 
 export async function handlePhoto(
@@ -82,8 +92,8 @@ export async function handlePhoto(
 ): Promise<void> {
 	try {
 		// F15: require household membership before any LLM call or store write
-		const hh = await requireHousehold(services, ctx.userId);
-		if (!hh) {
+		const resolved = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
+		if (!resolved) {
 			await services.telegram.send(
 				ctx.userId,
 				'You need to set up or join a household before using photo features. ' +
@@ -113,20 +123,19 @@ export async function handlePhoto(
 			return;
 		}
 
-		const sharedStore = hh.sharedStore;
-
 		switch (photoType) {
 			case 'recipe':
-				await handleRecipePhoto(services, ctx, sharedStore);
+				await handleRecipePhoto(services, ctx, resolved);
 				break;
 			case 'receipt':
-				await handleReceiptPhoto(services, ctx, sharedStore);
+				await handleReceiptPhoto(services, ctx, resolved);
 				break;
 			case 'pantry':
-				await handlePantryPhoto(services, ctx, sharedStore);
+				// Review Phase 7 intentionally leaves pantry photos shared-only.
+				await handlePantryPhoto(services, ctx, services.data.forShared('shared'));
 				break;
 			case 'grocery':
-				await handleGroceryPhoto(services, ctx, sharedStore);
+				await handleGroceryPhoto(services, ctx, resolved);
 				break;
 		}
 	} catch (err) {
@@ -143,8 +152,9 @@ export async function handlePhoto(
 async function handleRecipePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-	store: ReturnType<CoreServices['data']['forShared']>,
+	resolved: ResolvedFoodStore,
 ): Promise<void> {
+	const store = resolved.store;
 	const parsed = await parseRecipeFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	// Save photo
@@ -163,8 +173,8 @@ async function handleRecipePhoto(
 		action: 'recipe_saved',
 		entityType: 'recipe',
 		entityId: recipe.id,
-		filePaths: [`users/shared/food/recipes/${recipe.id}.yaml`],
-		scope: 'shared',
+		filePaths: [buildScopedFoodPath(resolved, `recipes/${recipe.id}.yaml`)],
+		scope: resolved.scope,
 	});
 
 	await services.telegram.send(
@@ -181,8 +191,9 @@ async function handleRecipePhoto(
 async function handleReceiptPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-	store: ReturnType<CoreServices['data']['forShared']>,
+	resolved: ResolvedFoodStore,
 ): Promise<void> {
+	const store = resolved.store;
 	const parsed = await parseReceiptFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	// Save photo
@@ -219,8 +230,8 @@ async function handleReceiptPhoto(
 		action: 'receipt_captured',
 		entityType: 'receipt',
 		entityId: id,
-		filePaths: [`users/shared/food/receipts/${id}.yaml`],
-		scope: 'shared',
+		filePaths: [buildScopedFoodPath(resolved, `receipts/${id}.yaml`)],
+		scope: resolved.scope,
 	});
 
 	// H10: Auto-update price store from receipt
@@ -283,8 +294,9 @@ async function handlePantryPhoto(
 async function handleGroceryPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-	store: ReturnType<CoreServices['data']['forShared']>,
+	resolved: ResolvedFoodStore,
 ): Promise<void> {
+	const store = resolved.store;
 	const result = await parseGroceryFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	if (result.items.length === 0) {
@@ -326,8 +338,8 @@ async function handleGroceryPhoto(
 		appId: 'food',
 		action: 'grocery_updated',
 		entityType: 'grocery-list',
-		filePaths: ['users/shared/food/grocery/active.yaml'],
-		scope: 'shared',
+		filePaths: [buildScopedFoodPath(resolved, 'grocery/active.yaml')],
+		scope: resolved.scope,
 	});
 
 	const itemNames = result.items.map((i) => {

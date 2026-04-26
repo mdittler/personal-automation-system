@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import cron from 'node-cron';
@@ -21,6 +21,8 @@ import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { chatbotMessage } from '../testing/fixtures/messages.js';
 import { requestContext } from '../services/context/request-context.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
+import { approximateTokens } from '../services/llm/estimate-guard-cost.js';
+import { getModelPricing } from '../services/llm/model-pricing.js';
 
 describe('composeRuntime smoke', () => {
 	let tempDir: string;
@@ -95,6 +97,135 @@ describe('composeRuntime smoke', () => {
 
 		runtime.services.scheduler.cron.unregister(jobKey);
 		createTaskSpy.mockRestore();
+	});
+
+	it('uses live tier pricing when reserving estimated LLM cost', async () => {
+		await runtime.services.modelSelector.setFastRef({ provider: 'stub', model: 'gpt-4.1-mini' });
+		await runtime.services.modelSelector.setStandardRef({ provider: 'stub', model: 'gpt-4.1' });
+
+		const costTracker = runtime.services.costTracker as CostTracker;
+		const reserveSpy = vi.spyOn(costTracker, 'reserveEstimated');
+		reserveSpy.mockClear();
+
+		const userId = 'user-0';
+		const householdId =
+			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
+		const prompt = 'x'.repeat(4000);
+		const promptTokens = approximateTokens(prompt);
+		const outputTokens = 1000;
+		const fastPricing = getModelPricing('gpt-4.1-mini');
+		const standardPricing = getModelPricing('gpt-4.1');
+		expect(fastPricing).toBeTruthy();
+		expect(standardPricing).toBeTruthy();
+		const expectedFast =
+			((promptTokens * fastPricing!.input) + (outputTokens * fastPricing!.output)) / 1_000_000;
+		const expectedStandard =
+			((promptTokens * standardPricing!.input) + (outputTokens * standardPricing!.output)) /
+			1_000_000;
+
+		await requestContext.run({ userId, householdId }, () =>
+			runtime.services.systemLlm.complete(prompt, { tier: 'fast', maxTokens: 1000 }),
+		);
+		await requestContext.run({ userId, householdId }, () =>
+			runtime.services.systemLlm.complete(prompt, { tier: 'standard', maxTokens: 1000 }),
+		);
+
+		expect(reserveSpy).toHaveBeenCalledTimes(2);
+		const fastAmount = reserveSpy.mock.calls[0]?.[3];
+		const standardAmount = reserveSpy.mock.calls[1]?.[3];
+		// Estimate uses prompt tokens from approximateTokens(prompt) plus maxTokens as
+		// the output upper bound, priced from the live model table for the active tier.
+		expect(fastAmount).toBeCloseTo(expectedFast, 6);
+		expect(standardAmount).toBeCloseTo(expectedStandard, 6);
+		expect((fastAmount as number) < (standardAmount as number)).toBe(true);
+	});
+
+	it('app-owned chatbot calls reserve priced amounts instead of the flat fallback', async () => {
+		await runtime.services.modelSelector.setFastRef({ provider: 'stub', model: 'gpt-4.1-mini' });
+		await runtime.services.modelSelector.setStandardRef({ provider: 'stub', model: 'gpt-4.1' });
+
+		const costTracker = runtime.services.costTracker as CostTracker;
+		const reserveSpy = vi.spyOn(costTracker, 'reserveEstimated');
+		reserveSpy.mockClear();
+
+		const chatbotEntry = runtime.services.registry.getApp('chatbot');
+		expect(chatbotEntry?.module.handleCommand).toBeDefined();
+
+		const userId = 'user-0';
+		const householdId =
+			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
+		await requestContext.run({ userId, householdId }, () =>
+			chatbotEntry!.module.handleCommand!(
+				'ask',
+				['what', 'apps', 'do', 'I', 'have?'],
+				{
+					userId,
+					text: '/ask what apps do I have?',
+					chatId: 2001,
+					messageId: 2001,
+					timestamp: new Date(),
+				},
+			),
+		);
+
+		const defaultReservation = runtime.services.safeguardsConfig.defaultReservationUsd ?? 0.01;
+		const chatbotReservations = reserveSpy.mock.calls.filter(([, appId]) => appId === 'chatbot');
+		expect(chatbotReservations.length).toBeGreaterThan(0);
+		expect(
+			chatbotReservations.some(([, , , estimate]) => {
+				const usd = estimate as number;
+				return usd > 0 && usd < defaultReservation;
+			}),
+		).toBe(true);
+	});
+
+	it('/edit ignores unauthorized recentFilePaths from another user', async () => {
+		const userA = 'user-0';
+		const userB = 'user-1';
+		const userAHouseholdId =
+			(runtime.services.householdService as any).getHouseholdForUser(userA) ?? undefined;
+		const userBRelativePath = `users/${userB}/notes/daily-notes/2026-04-24.md`;
+		const userBAbsolutePath = join(tempDir, 'data', userBRelativePath);
+		await mkdir(join(tempDir, 'data', 'users', userB, 'notes', 'daily-notes'), {
+			recursive: true,
+		});
+		await writeFile(userBAbsolutePath, 'zxq secret marker\n', 'utf-8');
+		await runtime.services.fileIndex.rebuild();
+
+		runtime.services.interactionContext.record(userA, {
+			appId: 'notes',
+			action: 'view-note',
+			filePaths: [userBRelativePath],
+			scope: 'user',
+		});
+
+		const telegram = runtime.services.telegram as ReturnType<typeof fakeTelegramService>;
+		telegram.sent.length = 0;
+
+		const chatbotEntry = runtime.services.registry.getApp('chatbot');
+		expect(chatbotEntry?.module.handleCommand).toBeDefined();
+
+		await requestContext.run({ userId: userA, householdId: userAHouseholdId }, () =>
+			chatbotEntry!.module.handleCommand!(
+				'edit',
+				['change', 'zxq', 'secret', 'marker'],
+				{
+					userId: userA,
+					text: '/edit change zxq secret marker',
+					chatId: 3001,
+					messageId: 3001,
+					timestamp: new Date(),
+				},
+			),
+		);
+
+		expect(await readFile(userBAbsolutePath, 'utf-8')).toBe('zxq secret marker\n');
+		expect(
+			telegram.sent.some(
+				(message) =>
+					message.userId === userA && message.text.includes('No matching files found'),
+			),
+		).toBe(true);
 	});
 
 	it('routed messages appear as exactly one new 9-col row in llm-usage.md with correct userId + householdId', async () => {

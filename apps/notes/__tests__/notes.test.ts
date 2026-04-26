@@ -94,7 +94,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/note', ['Meeting', 'at', '3pm'], ctx);
+				await notes.handleCommand!('note', ['Meeting', 'at', '3pm'], ctx);
 
 				expect(store.append).toHaveBeenCalledWith(
 					expect.stringMatching(/^daily-notes\/\d{4}-\d{2}-\d{2}\.md$/),
@@ -107,7 +107,7 @@ describe('Notes App', () => {
 			it('should show usage when /note has no text', async () => {
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/note', [], ctx);
+				await notes.handleCommand!('note', [], ctx);
 
 				expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Usage: /note <text>');
 			});
@@ -122,7 +122,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/notes', [], ctx);
+				await notes.handleCommand!('notes', [], ctx);
 
 				const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
 				expect(sentMessage).toContain('First note');
@@ -138,7 +138,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/notes', [], ctx);
+				await notes.handleCommand!('notes', [], ctx);
 
 				expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'No notes today.');
 			});
@@ -156,7 +156,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/notes', [], ctx);
+				await notes.handleCommand!('notes', [], ctx);
 
 				const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
 				expect(sentMessage).toContain('5/15');
@@ -177,7 +177,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/summarize', [], ctx);
+				await notes.handleCommand!('summarize', [], ctx);
 
 				expect(services.llm.complete).toHaveBeenCalledWith(
 					expect.stringContaining('Summarize'),
@@ -197,7 +197,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/summarize', [], ctx);
+				await notes.handleCommand!('summarize', [], ctx);
 
 				expect(services.llm.complete).not.toHaveBeenCalled();
 				expect(services.telegram.send).toHaveBeenCalledWith(
@@ -215,7 +215,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/summarize', [], ctx);
+				await notes.handleCommand!('summarize', [], ctx);
 
 				expect(services.telegram.send).toHaveBeenCalledWith(
 					'test-user',
@@ -235,7 +235,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('/summarize', [], ctx);
+				await notes.handleCommand!('summarize', [], ctx);
 
 				const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
 				expect(sentMessage).toContain('credits are too low');

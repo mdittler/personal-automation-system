@@ -13,7 +13,7 @@ import {
 	handleLeftoverCallback,
 	handleLeftoverCheckJob,
 } from '../../handlers/leftover-handler.js';
-import type { Household, Leftover } from '../../types.js';
+import type { Household, Leftover, Recipe } from '../../types.js';
 
 // ─── Mock store factory ───────────────────────────────────────────
 
@@ -53,6 +53,27 @@ function makeLeftover(overrides: Partial<Leftover> = {}): Leftover {
 		storedDate: '2026-04-01',
 		expiryEstimate: '2026-04-05',
 		status: 'active',
+		...overrides,
+	};
+}
+
+function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
+	return {
+		id: 'recipe-1',
+		title: 'Chili Bake',
+		source: 'family',
+		ingredients: [{ name: 'chili', quantity: 1, unit: 'cup' }],
+		instructions: ['Heat', 'Serve'],
+		servings: 4,
+		prepTime: 10,
+		cookTime: 15,
+		tags: [],
+		ratings: [],
+		history: [],
+		allergens: [],
+		status: 'confirmed',
+		createdAt: '2026-04-01T00:00:00.000Z',
+		updatedAt: '2026-04-01T00:00:00.000Z',
 		...overrides,
 	};
 }
@@ -153,6 +174,25 @@ describe('handleLeftoverCallback — freeze', () => {
 			12345,
 			99,
 			expect.stringContaining('🧊 Frozen: Pasta'),
+		);
+	});
+
+	it('withholds the frozen confirmation when the freezer write fails', async () => {
+		store.write.mockImplementation(async (path: string, content: string) => {
+			if (path === 'freezer.yaml') {
+				throw new Error('freezer write failed');
+			}
+			return undefined;
+		});
+
+		await expect(
+			handleLeftoverCallback(services, 'freeze:0', 'user1', 12345, 99, store as any),
+		).rejects.toThrow('freezer write failed');
+
+		expect(services.telegram.editMessage).not.toHaveBeenCalledWith(
+			12345,
+			99,
+			expect.stringContaining('🧊 Frozen'),
 		);
 	});
 });
@@ -522,6 +562,77 @@ describe('handleLeftoverCheckJob', () => {
 		expect(userIds).toContain('user1');
 		expect(userIds).toContain('user2');
 		expect(userIds).toContain('user3');
+	});
+
+	it('appends leftover recipe ideas when expiring items have shared recipe matches', async () => {
+		const household = makeHousehold({ members: ['user1'] });
+		const expiringToday = makeLeftover({ name: 'leftover chili', expiryEstimate: '2026-04-02', status: 'active' });
+		sharedStore = mockStore({
+			'household.yaml': stringify(household),
+			'leftovers.yaml': stringify({ items: [expiringToday] }),
+			'recipes/chili-bake.yaml': stringify(makeRecipe({ id: 'chili-bake', title: 'Chili Bake' })),
+		});
+		sharedStore.list.mockImplementation(async (path: string) => path === 'recipes' ? ['chili-bake.yaml'] : []);
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+		await handleLeftoverCheckJob(services, '2026-04-02');
+
+		expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('💡 *Ideas for these leftovers:*'),
+			expect.any(Array),
+		);
+		expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('Chili Bake'),
+			expect.any(Array),
+		);
+	});
+
+	it('omits the suggestion block when expiring leftovers have no recipe matches', async () => {
+		const household = makeHousehold({ members: ['user1'] });
+		const expiringToday = makeLeftover({ name: 'leftover curry', expiryEstimate: '2026-04-02', status: 'active' });
+		sharedStore = mockStore({
+			'household.yaml': stringify(household),
+			'leftovers.yaml': stringify({ items: [expiringToday] }),
+			'recipes/pancakes.yaml': stringify(makeRecipe({
+				id: 'pancakes',
+				title: 'Weekend Pancakes',
+				ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
+			})),
+		});
+		sharedStore.list.mockImplementation(async (path: string) => path === 'recipes' ? ['pancakes.yaml'] : []);
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+		await handleLeftoverCheckJob(services, '2026-04-02');
+
+		const [, message] = vi.mocked(services.telegram.sendWithButtons).mock.calls[0]!;
+		expect(String(message)).toContain('leftover curry');
+		expect(String(message)).not.toContain('💡 *Ideas for these leftovers:*');
+	});
+
+	it('still sends the normal alert when recipe suggestion generation fails', async () => {
+		const household = makeHousehold({ members: ['user1'] });
+		const expiringToday = makeLeftover({ name: 'leftover chili', expiryEstimate: '2026-04-02', status: 'active' });
+		sharedStore = mockStore({
+			'household.yaml': stringify(household),
+			'leftovers.yaml': stringify({ items: [expiringToday] }),
+		});
+		sharedStore.list.mockImplementation(async (path: string) => {
+			if (path === 'recipes') throw new Error('recipe list failed');
+			return [];
+		});
+		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+		await handleLeftoverCheckJob(services, '2026-04-02');
+
+		expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('leftover chili'),
+			expect.any(Array),
+		);
+		const [, message] = vi.mocked(services.telegram.sendWithButtons).mock.calls[0]!;
+		expect(String(message)).not.toContain('💡 *Ideas for these leftovers:*');
 	});
 });
 

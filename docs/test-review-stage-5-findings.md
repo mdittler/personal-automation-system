@@ -1,8 +1,8 @@
 # Stage 5 Test Review Findings
 
-Date: 2026-04-23
+Date: 2026-04-24
 Stage: 5 - Core LLM, Routing, Query, and Edit Flows
-Status: Completed
+Status: Remediated
 
 ## Scope
 
@@ -35,7 +35,7 @@ Key URS areas for this stage:
 - `REQ-ROUTE-001`, `REQ-ROUTE-002`, `REQ-ROUTE-004`, `REQ-ROUTE-005`, `REQ-ROUTE-006`, `REQ-ROUTE-007`
 - `REQ-CHATBOT-001`, `REQ-CHATBOT-002`, `REQ-CHATBOT-004`, `REQ-CHATBOT-005`, `REQ-CHATBOT-007`, `REQ-CHATBOT-008`, `REQ-CHATBOT-009`, `REQ-CHATBOT-012`, `REQ-CHATBOT-013`, `REQ-CHATBOT-016`, `REQ-CHATBOT-017`
 - `REQ-DATAQUERY-001`, `REQ-DATAQUERY-002`, `REQ-DATAQUERY-003`, `REQ-DATAQUERY-004`
-- `REQ-IC-001`
+- `REQ-IC-001`, `REQ-IC-002`
 
 ## High-Value Tests Worth Keeping Trust In
 
@@ -113,15 +113,19 @@ The test shape does not protect this seam. The strongest household-governance in
 - The prompt-heavy chatbot suites contain a lot of literal copy assertions, especially `apps/chatbot/src/__tests__/chatbot.test.ts:338-370`, `:747-769`, and `:1643-1663`, plus `apps/chatbot/src/__tests__/natural-language.test.ts:84-105` and `apps/chatbot/src/__tests__/user-persona.test.ts:146-175`. Some of these are valuable for security framing, but many are guarding branding or prose rather than the higher-level behavior. They are likely to create noisy failures during harmless prompt wording changes.
 - `core/src/services/router/__tests__/realistic-verification.test.ts` remains valuable as a prompt-shaping smoke test, but many of its assertions are necessarily prompt-text-oriented, so it should not be treated as the sole evidence for routing correctness when a smaller behavior-level test could exist.
 
-## Follow-Up Tasks Opened By Stage 5
+## Stage 5 Remediation Completed (2026-04-24)
 
-- Thread `InteractionContextService` into `EditService`, pass authorized `recentFilePaths` into `DataQueryService.query(...)`, and add an end-to-end `/edit` regression that proves recent interaction history biases file discovery without bypassing auth.
-- Wire a `PriceLookup` adapter and resolved tier into the app, system, and API guard construction in `composeRuntime()`, then add a runtime-level integration test asserting reservation size changes with model/tier instead of always using the flat default.
-- Replace or supplement the edit/interaction-context source-scan wiring tests with at least one behavior-level `composeRuntime` test that proves the actual injected services collaborate the way the D2c spec expects.
-- Refactor the most copy-coupled chatbot prompt tests behind semantic helpers so security/data-shaping guarantees stay protected without pinning every branded phrase.
+- `EditServiceImpl` now receives the shared `InteractionContextService`, flattens `getRecent(userId)` file paths in newest-first order, dedupes by first occurrence, and forwards authorized `recentFilePaths` hints to `DataQueryService.query(...)`.
+- `composeRuntime()` now injects a live `PriceLookup` into app, system, and API guards. The lookup reads the active tier assignment from `ModelSelector` on every call, converts per-million model pricing to the guard's per-1k format, and returns zero-cost pricing for Ollama-backed tiers.
+- `LLMGuard` and `SystemLLMGuard` now estimate `complete()` reservations with `options.tier` when present, falling back to the guard default tier only when omitted. `classify()` and `extractStructured()` remain fast-tier estimates.
+- Behavioral coverage now exists at the right seams:
+  - `core/src/services/edit/__tests__/edit.test.ts` asserts the exact deduped `recentFilePaths` handoff.
+  - `core/src/__tests__/compose-runtime.smoke.integration.test.ts` proves fast-vs-standard reservation sizing in the composed runtime, proves app-owned chatbot calls reserve priced amounts rather than the flat fallback, and proves a poisoned cross-user recent-path hint cannot steer `/edit` into another user's file.
+  - `core/src/services/llm/__tests__/llm-guard.test.ts` and `system-llm-guard.test.ts` pin the per-call tier override behavior directly.
+- The most copy-coupled chatbot prompt tests now share semantic helpers from `apps/chatbot/src/__tests__/helpers/prompt-assertions.ts`, reducing brittleness while preserving exact assertions for security-sensitive prompt/data shaping.
 
 ## Stage 5 Exit Decision
 
 Stage 5 is complete.
 
-The strongest coverage in this stage is around router verification, data-query trust boundaries, interaction-context persistence, edit confirm safety, and component-level LLM guard logic. The main remaining weaknesses are the missing context-aware `/edit` integration and the still-unpinned production seam between model pricing and guard reservation sizing, with a secondary cleanup opportunity around structural source-scan tests and prompt-copy-heavy chatbot assertions.
+The strongest coverage in this stage is around router verification, data-query trust boundaries, interaction-context persistence, context-aware `/edit`, composed-runtime guard pricing, edit confirm safety, and component-level LLM guard logic. The original Stage 5 follow-ups are now closed.

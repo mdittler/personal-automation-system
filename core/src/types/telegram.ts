@@ -111,6 +111,10 @@ export interface PhotoContext {
 	chatId: number;
 	/** Telegram message ID. */
 	messageId: number;
+	/** Active space ID (set by router when user is in space mode). */
+	spaceId?: string;
+	/** Active space display name (for labels in responses). */
+	spaceName?: string;
 	/** Route metadata populated by the core router. Absent in direct-constructed test contexts. */
 	route?: RouteInfo;
 }

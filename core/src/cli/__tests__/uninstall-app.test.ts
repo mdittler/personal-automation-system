@@ -1,86 +1,90 @@
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { runUninstallAppCli } from '../uninstall-app.js';
+
+function createCliDeps() {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+
+	return {
+		stdout,
+		stderr,
+		deps: {
+			getAppsDir: () => '/tmp/apps',
+			statPath: vi.fn(),
+			removeDir: vi.fn(),
+			stdout: (message: string) => stdout.push(message),
+			stderr: (message: string) => stderr.push(message),
+		},
+	};
+}
 
 describe('uninstall-app CLI', () => {
-	let tempDir: string;
+	it('prints usage when app ID is missing', async () => {
+		const { deps, stderr } = createCliDeps();
 
-	beforeEach(async () => {
-		tempDir = await mkdtemp(join(tmpdir(), 'pas-uninstall-test-'));
+		const exitCode = await runUninstallAppCli([], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('Usage: pnpm uninstall-app');
 	});
 
-	afterEach(async () => {
-		await rm(tempDir, { recursive: true, force: true });
+	it('rejects invalid app IDs before touching the filesystem', async () => {
+		const { deps, stderr } = createCliDeps();
+
+		const exitCode = await runUninstallAppCli(['../evil'], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('Invalid app ID');
+		expect(deps.statPath).not.toHaveBeenCalled();
+		expect(deps.removeDir).not.toHaveBeenCalled();
 	});
 
-	// Test the validation logic and filesystem operations
+	it('rejects protected built-in apps', async () => {
+		const { deps, stderr } = createCliDeps();
 
-	const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
-	const PROTECTED_APPS = new Set(['echo', 'chatbot']);
+		const exitCode = await runUninstallAppCli(['echo'], deps);
 
-	describe('app ID validation', () => {
-		it('should accept valid app IDs', () => {
-			expect(APP_ID_PATTERN.test('my-app')).toBe(true);
-			expect(APP_ID_PATTERN.test('weather')).toBe(true);
-			expect(APP_ID_PATTERN.test('app123')).toBe(true);
-		});
-
-		it('should reject app IDs starting with numbers', () => {
-			expect(APP_ID_PATTERN.test('123app')).toBe(false);
-		});
-
-		it('should reject app IDs with uppercase letters', () => {
-			expect(APP_ID_PATTERN.test('MyApp')).toBe(false);
-		});
-
-		it('should reject app IDs with path traversal', () => {
-			expect(APP_ID_PATTERN.test('../evil')).toBe(false);
-			expect(APP_ID_PATTERN.test('app/../../etc')).toBe(false);
-		});
-
-		it('should reject empty app IDs', () => {
-			expect(APP_ID_PATTERN.test('')).toBe(false);
-		});
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('Cannot uninstall built-in app "echo".');
+		expect(deps.statPath).not.toHaveBeenCalled();
 	});
 
-	describe('protected apps', () => {
-		it('should protect built-in echo app', () => {
-			expect(PROTECTED_APPS.has('echo')).toBe(true);
-		});
+	it('reports a missing app', async () => {
+		const { deps, stderr } = createCliDeps();
+		deps.statPath = vi.fn().mockRejectedValue(new Error('missing'));
 
-		it('should protect built-in chatbot app', () => {
-			expect(PROTECTED_APPS.has('chatbot')).toBe(true);
-		});
+		const exitCode = await runUninstallAppCli(['weather'], deps);
 
-		it('should not protect custom apps', () => {
-			expect(PROTECTED_APPS.has('my-custom-app')).toBe(false);
-		});
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('App "weather" is not installed');
+		expect(deps.removeDir).not.toHaveBeenCalled();
 	});
 
-	describe('directory removal', () => {
-		it('should remove an existing app directory', async () => {
-			const appDir = join(tempDir, 'test-app');
-			await mkdir(appDir, { recursive: true });
-			await writeFile(join(appDir, 'manifest.yaml'), 'app: test');
+	it('removes the app directory and prints restart guidance on success', async () => {
+		const { deps, stdout } = createCliDeps();
+		deps.statPath = vi.fn().mockResolvedValue({ isDirectory: () => true });
+		deps.removeDir = vi.fn().mockResolvedValue(undefined);
 
-			await rm(appDir, { recursive: true, force: true });
+		const exitCode = await runUninstallAppCli(['weather'], deps);
 
-			const exists = await stat(appDir).then(
-				() => true,
-				() => false,
-			);
-			expect(exists).toBe(false);
+		expect(exitCode).toBe(0);
+		expect(deps.removeDir).toHaveBeenCalledWith(join('/tmp/apps', 'weather'), {
+			recursive: true,
+			force: true,
 		});
+		expect(stdout[0]).toBe('App "weather" has been uninstalled.');
+		expect(stdout[1]).toBe('Restart PAS to apply the change.');
+	});
 
-		it('should detect non-existent app directory', async () => {
-			const appDir = join(tempDir, 'nonexistent');
-			const exists = await stat(appDir).then(
-				() => true,
-				() => false,
-			);
-			expect(exists).toBe(false);
-		});
+	it('returns an error when removing the app directory fails', async () => {
+		const { deps, stderr } = createCliDeps();
+		deps.statPath = vi.fn().mockResolvedValue({ isDirectory: () => true });
+		deps.removeDir = vi.fn().mockRejectedValue(new Error('permission denied'));
+
+		const exitCode = await runUninstallAppCli(['weather'], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('Unexpected error: permission denied');
 	});
 });

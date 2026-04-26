@@ -42,6 +42,7 @@ function createMockServices(
 		initialData['household.yaml'] = makeHouseholdYaml(householdMembers);
 	}
 	const sharedStore = createMockStore(initialData);
+	const spaceStore = createMockStore(initialData);
 	return {
 		services: {
 			llm: {
@@ -56,15 +57,17 @@ function createMockServices(
 			},
 			data: {
 				forShared: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 		} as unknown as CoreServices,
 		sharedStore,
+		spaceStore,
 	};
 }
 
-function createPhotoCtx(caption?: string): PhotoContext {
+function createPhotoCtx(caption?: string, overrides: Partial<PhotoContext> = {}): PhotoContext {
 	return {
 		userId: 'user-1',
 		photo: testPhoto,
@@ -73,6 +76,7 @@ function createPhotoCtx(caption?: string): PhotoContext {
 		timestamp: new Date(),
 		chatId: 123,
 		messageId: 456,
+		...overrides,
 	};
 }
 
@@ -195,6 +199,30 @@ describe('Photo Handler', () => {
 				expect.any(String),
 			);
 		});
+
+		it('uses the active space store for recipe photos when a space is active', async () => {
+			const { services, sharedStore, spaceStore } = createMockServices(validRecipeJson);
+			const ctx = createPhotoCtx('save recipe', {
+				spaceId: 'family-space',
+				spaceName: 'Family Space',
+			});
+
+			await handlePhoto(services, ctx);
+
+			expect(services.data.forSpace).toHaveBeenCalledWith('family-space', 'user-1');
+			expect(spaceStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('photos/recipe-'),
+				expect.any(String),
+			);
+			expect(spaceStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('recipes/'),
+				expect.any(String),
+			);
+			expect(sharedStore.write).not.toHaveBeenCalledWith(
+				expect.stringContaining('recipes/'),
+				expect.any(String),
+			);
+		});
 	});
 
 	describe('receipt photo — storage', () => {
@@ -205,6 +233,26 @@ describe('Photo Handler', () => {
 			await handlePhoto(services, ctx);
 
 			expect(sharedStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('receipts/'),
+				expect.any(String),
+			);
+		});
+
+		it('uses the active space store for receipt photos when a space is active', async () => {
+			const { services, sharedStore, spaceStore } = createMockServices(validReceiptJson);
+			const ctx = createPhotoCtx('receipt', {
+				spaceId: 'family-space',
+				spaceName: 'Family Space',
+			});
+
+			await handlePhoto(services, ctx);
+
+			expect(services.data.forSpace).toHaveBeenCalledWith('family-space', 'user-1');
+			expect(spaceStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('receipts/'),
+				expect.any(String),
+			);
+			expect(sharedStore.write).not.toHaveBeenCalledWith(
 				expect.stringContaining('receipts/'),
 				expect.any(String),
 			);
@@ -419,6 +467,28 @@ describe('Photo Handler', () => {
 			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as string[][];
 			expect(writeCalls.some(([path]) => (path as string).includes('grocery'))).toBe(true);
 			expect(writeCalls.some(([path]) => (path as string).includes('recipes/'))).toBe(true);
+		});
+
+		it('uses the active space store for grocery-photo writes when a space is active', async () => {
+			const { services, sharedStore, spaceStore } = createMockServices(validGroceryJson);
+
+			await handlePhoto(
+				services,
+				createPhotoCtx('add to grocery list', {
+					spaceId: 'family-space',
+					spaceName: 'Family Space',
+				}),
+			);
+
+			expect(services.data.forSpace).toHaveBeenCalledWith('family-space', 'user-1');
+			expect(spaceStore.write).toHaveBeenCalledWith(
+				expect.stringContaining('grocery'),
+				expect.any(String),
+			);
+			expect(sharedStore.write).not.toHaveBeenCalledWith(
+				expect.stringContaining('grocery'),
+				expect.any(String),
+			);
 		});
 
 		it('saves grocery items only when isRecipe is false', async () => {

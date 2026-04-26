@@ -107,6 +107,7 @@ export const REGEX_TO_MANIFEST_MAP: Record<string, FoodShadowLabel> = {
     what_can_i_make:        'user wants to know what they can make with what they have',
     meal_swap:              'user wants to plan meals for the week',
     leftover_add:           'user wants to log leftovers',
+    leftover_suggest:       'user wants to log leftovers',
     leftover_view:          'user wants to log leftovers',
     freezer_add:            'user wants to check or update the pantry',
     freezer_view:           'user wants to check or update the pantry',

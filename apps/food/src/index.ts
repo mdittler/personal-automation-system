@@ -180,6 +180,7 @@ import {
 	withLeftoverLock,
 } from './services/leftover-store.js';
 import { autoLogFromCookedMeal } from './services/macro-tracker.js';
+import { findLeftoverRecipeSuggestions } from './services/leftover-suggestions.js';
 import {
 	archivePlan,
 	buildPlanButtons,
@@ -240,6 +241,7 @@ const warnedShadowConfigs = new Set<string>();
 
 /** Per-user cache of last search results for number selection. */
 const lastSearchResults = new Map<string, Recipe[]>();
+const pendingPhotoSelection = new Map<string, { recipes: Recipe[]; expiresAt: number }>();
 
 /** Send a recipe, appending per-child approval buttons when children exist. */
 async function sendRecipeWithApproval(userId: string, recipe: Recipe, text: string): Promise<void> {
@@ -423,10 +425,12 @@ export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageConte
 	'user wants to log leftovers':
 		(ctx) => {
 			const lower = ctx.text.toLowerCase();
-			// Match regex cascade order: view → waste → add
+			// Match regex cascade order: add → suggest → view → waste
+			if (isLeftoverAddIntent(lower)) return handleLeftoverAddIntent(ctx.text, ctx);
+			if (isLeftoverSuggestionIntent(lower)) return handleLeftoverSuggestions(ctx);
 			if (isLeftoverViewIntent(lower)) return handleLeftoversView(ctx);
 			if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
-			return handleLeftoverAddIntent(ctx.text, ctx);
+			return handleLeftoversView(ctx);
 		},
 	'user wants to plan for hosting guests':
 		async (ctx) => {
@@ -535,6 +539,27 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	// Check for number selection from previous search results
 	const num = Number.parseInt(text, 10);
 	if (!Number.isNaN(num) && /^\d+$/.test(text)) {
+		const pendingPhotos = getPendingPhotoSelection(ctx.userId);
+		if (pendingPhotos) {
+			if (num >= 1 && num <= pendingPhotos.length) {
+				const selected = pendingPhotos[num - 1];
+				if (selected) {
+					clearPendingPhotoSelection(ctx.userId);
+					await sendRecipePhoto(ctx.userId, selected);
+				}
+			} else {
+				await services.telegram.send(
+					ctx.userId,
+					`Please reply with a number between 1 and ${pendingPhotos.length} to choose a recipe photo.`,
+				);
+			}
+			void finalizeShadow(
+				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'photo-select' }),
+				ctx, 'pending_flow_consumed', undefined, services.logger,
+			);
+			return;
+		}
+
 		const cached = lastSearchResults.get(ctx.userId);
 		if (cached && num >= 1 && num <= cached.length) {
 			const selected = cached[num - 1];
@@ -706,17 +731,17 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		return;
 	}
 
-	// Recipe search intent
-	if (isSearchRecipeIntent(lower)) {
-		regexWinner = 'search_recipe';
-		await handleSearchRecipe(text, ctx);
-		return;
-	}
-
 	// H8: Recipe photo retrieval intent
 	if (isRecipePhotoIntent(lower)) {
 		regexWinner = 'recipe_photo';
 		await handleRecipePhotoRetrieval(text, ctx);
+		return;
+	}
+
+	// Recipe search intent
+	if (isSearchRecipeIntent(lower)) {
+		regexWinner = 'search_recipe';
+		await handleSearchRecipe(text, ctx);
 		return;
 	}
 
@@ -766,6 +791,12 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (isLeftoverAddIntent(lower)) {
 		regexWinner = 'leftover_add';
 		await handleLeftoverAddIntent(text, ctx);
+		return;
+	}
+
+	if (isLeftoverSuggestionIntent(lower)) {
+		regexWinner = 'leftover_suggest';
+		await handleLeftoverSuggestions(ctx);
 		return;
 	}
 
@@ -1914,6 +1945,28 @@ function getPendingPantryItems(userId: string): GroceryItem[] | undefined {
 	return entry.items;
 }
 
+function setPendingPhotoSelection(userId: string, recipes: Recipe[]): void {
+	pendingPhotoSelection.set(userId, { recipes, expiresAt: Date.now() + PENDING_TTL_MS });
+	if (pendingPhotoSelection.size > 100) {
+		const oldest = pendingPhotoSelection.keys().next().value;
+		if (oldest) pendingPhotoSelection.delete(oldest);
+	}
+}
+
+function getPendingPhotoSelection(userId: string): Recipe[] | undefined {
+	const entry = pendingPhotoSelection.get(userId);
+	if (!entry) return undefined;
+	if (Date.now() > entry.expiresAt) {
+		pendingPhotoSelection.delete(userId);
+		return undefined;
+	}
+	return entry.recipes;
+}
+
+function clearPendingPhotoSelection(userId: string): void {
+	pendingPhotoSelection.delete(userId);
+}
+
 // ─── H6: Pending leftover/freezer add state ────────────────────
 const pendingLeftoverAdd = new Map<string, { fromRecipe?: string; expiresAt: number }>();
 const pendingFreezerAdd = new Map<string, { expiresAt: number }>();
@@ -2097,6 +2150,7 @@ async function handleRecipesCommand(args: string[], ctx: MessageContext): Promis
 					relevance: r.status === 'draft' ? 'draft' : 'confirmed',
 				}));
 			// Cache for number selection
+			clearPendingPhotoSelection(ctx.userId);
 			lastSearchResults.set(
 				ctx.userId,
 				results.map((r) => r.recipe),
@@ -2108,6 +2162,7 @@ async function handleRecipesCommand(args: string[], ctx: MessageContext): Promis
 
 		// Search
 		const results = searchRecipes(recipes, { text: query });
+		clearPendingPhotoSelection(ctx.userId);
 		lastSearchResults.set(
 			ctx.userId,
 			results.map((r) => r.recipe),
@@ -2269,6 +2324,7 @@ async function handleSearchRecipe(text: string, ctx: MessageContext): Promise<vo
 		}
 
 		// Cache for number selection
+		clearPendingPhotoSelection(ctx.userId);
 		lastSearchResults.set(
 			ctx.userId,
 			results.map((r) => r.recipe),
@@ -2284,6 +2340,44 @@ async function handleSearchRecipe(text: string, ctx: MessageContext): Promise<vo
 	}
 }
 
+async function sendRecipePhoto(
+	userId: string,
+	recipe: Recipe,
+	sharedStore?: ScopedDataStore,
+): Promise<void> {
+	const store = sharedStore ?? (await requireHousehold(services, userId))?.sharedStore;
+	if (!store) {
+		await services.telegram.send(
+			userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	if (!recipe.sourcePhoto) {
+		await services.telegram.send(
+			userId,
+			`"${escapeMarkdown(recipe.title)}" wasn't saved from a photo, so there's no original photo to show.`,
+		);
+		return;
+	}
+
+	try {
+		const photo = await loadPhoto(store, recipe.sourcePhoto);
+		if (!photo) {
+			await services.telegram.send(
+				userId,
+				`The photo for "${escapeMarkdown(recipe.title)}" could not be found. It may have been removed.`,
+			);
+			return;
+		}
+		await services.telegram.sendPhoto(userId, photo, `Original photo: ${recipe.title}`);
+	} catch (err) {
+		await services.telegram.send(userId, 'Something went wrong retrieving the recipe photo.');
+		services.logger.error('Recipe photo retrieval failed: %s', err);
+	}
+}
+
 // H8: Recipe photo retrieval (REQ-RECIPE-005)
 async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
@@ -2296,6 +2390,7 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 	}
 
 	// Strip common phrases to get the recipe name
+	clearPendingPhotoSelection(ctx.userId);
 	const query = text
 		.replace(/\b(show|see|view|get|send)\b.*\b(photo|picture|image)\b\s*(of|for)?\s*/i, '')
 		.replace(/\b(original|source)\s+(photo|picture|image)\b\s*(of|for)?\s*/i, '')
@@ -2313,22 +2408,10 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 				return;
 			}
 			if (photoRecipes.length === 1) {
-				const photo = await loadPhoto(hh.sharedStore, photoRecipes[0]!.sourcePhoto!);
-				if (photo) {
-					await services.telegram.sendPhoto(
-						ctx.userId,
-						photo,
-						`Original photo: ${photoRecipes[0]!.title}`,
-					);
-				} else {
-					await services.telegram.send(
-						ctx.userId,
-						`The photo for "${photoRecipes[0]!.title}" could not be found.`,
-					);
-				}
+				await sendRecipePhoto(ctx.userId, photoRecipes[0]!, hh.sharedStore);
 				return;
 			}
-			lastSearchResults.set(ctx.userId, photoRecipes);
+			setPendingPhotoSelection(ctx.userId, photoRecipes);
 			const list = photoRecipes.map((r, i) => `${i + 1}. ${r.title}`).join('\n');
 			await services.telegram.send(
 				ctx.userId,
@@ -2344,24 +2427,7 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 			return;
 		}
 
-		if (!recipe.sourcePhoto) {
-			await services.telegram.send(
-				ctx.userId,
-				`"${escapeMarkdown(recipe.title)}" wasn't saved from a photo, so there's no original photo to show.`,
-			);
-			return;
-		}
-
-		const photo = await loadPhoto(hh.sharedStore, recipe.sourcePhoto);
-		if (!photo) {
-			await services.telegram.send(
-				ctx.userId,
-				`The photo for "${escapeMarkdown(recipe.title)}" could not be found. It may have been removed.`,
-			);
-			return;
-		}
-
-		await services.telegram.sendPhoto(ctx.userId, photo, `Original photo: ${recipe.title}`);
+		await sendRecipePhoto(ctx.userId, recipe, hh.sharedStore);
 	} catch (err) {
 		await services.telegram.send(ctx.userId, 'Something went wrong retrieving the recipe photo.');
 		services.logger.error('Recipe photo retrieval failed: %s', err);
@@ -3624,6 +3690,14 @@ function isLeftoverViewIntent(lower: string): boolean {
 	);
 }
 
+function isLeftoverSuggestionIntent(lower: string): boolean {
+	return (
+		/\bwhat\s+should\s+i\s+do\s+with\s+leftovers?\b/i.test(lower) ||
+		/\bhow\s+can\s+(i|we)\s+use\s+(these\s+|the\s+)?leftovers?\b/i.test(lower) ||
+		/\bideas?\s+for\s+leftovers?\b/i.test(lower)
+	);
+}
+
 function isFreezerAddIntent(lower: string): boolean {
 	return (
 		/\b(add|put|store|move)\b.*\b(to|in)\s+(the\s+)?freezer\b/i.test(lower) ||
@@ -3667,6 +3741,59 @@ async function handleLeftoversView(ctx: MessageContext): Promise<void> {
 		formatLeftoverList(items, todayDate(services.timezone)),
 		buildLeftoverButtons(items),
 	);
+}
+
+async function handleLeftoverSuggestions(ctx: MessageContext): Promise<void> {
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return;
+	}
+
+	clearPendingPhotoSelection(ctx.userId);
+	const items = await loadLeftovers(hh.sharedStore);
+	const active = items.filter((leftover) => leftover.status === 'active');
+	if (!active.length) {
+		lastSearchResults.delete(ctx.userId);
+		await services.telegram.send(ctx.userId, '🥘 You have no leftovers tracked right now.');
+		return;
+	}
+
+	try {
+		const recipes = await loadAllRecipes(hh.sharedStore);
+		const suggestions = findLeftoverRecipeSuggestions(active, recipes);
+		if (!suggestions.length) {
+			lastSearchResults.delete(ctx.userId);
+			await services.telegram.send(
+				ctx.userId,
+				"I couldn't find any saved recipes that match your current leftovers yet.",
+			);
+			return;
+		}
+
+		lastSearchResults.set(
+			ctx.userId,
+			suggestions.map((suggestion) => suggestion.recipe),
+		);
+		const results = suggestions.map((suggestion) => ({
+			recipe: suggestion.recipe,
+			relevance: `matches leftovers: ${suggestion.matchedTokens.join(', ')}`,
+		}));
+		await services.telegram.send(
+			ctx.userId,
+			`Here are a few ideas for your leftovers:\n\n${formatSearchResults(results)}`,
+		);
+	} catch (err) {
+		lastSearchResults.delete(ctx.userId);
+		await services.telegram.send(
+			ctx.userId,
+			'Something went wrong looking for leftover ideas. Please try again.',
+		);
+		services.logger.error('Leftover suggestion lookup failed: %s', err);
+	}
 }
 
 /** Estimate fridge shelf life via LLM, defaulting to 3 days on failure. */
@@ -3957,6 +4084,13 @@ export function __setPendingFreezerAddForTests(userId: string): void {
 export function __clearPendingLeftoverFreezerForTests(): void {
 	pendingLeftoverAdd.clear();
 	pendingFreezerAdd.clear();
+	pendingPhotoSelection.clear();
+}
+
+/** Test-only — clears cached recipe and recipe-photo selections. */
+export function __clearRecipeSelectionStateForTests(): void {
+	lastSearchResults.clear();
+	pendingPhotoSelection.clear();
 }
 
 /** Test-only — resets the once-per-process shadow config warning tracker. */

@@ -1,8 +1,8 @@
 /**
  * App installer for PAS.
  *
- * Orchestrates the full installation pipeline: clone, validate manifest,
- * check compatibility, run static analysis, copy to apps/, install deps.
+ * Supports both a review-first planning phase and the legacy one-shot
+ * installApp() wrapper used by existing callers.
  */
 
 import { execFile as execFileCb } from 'node:child_process';
@@ -35,8 +35,10 @@ export interface InstallError {
 		| 'INVALID_MANIFEST'
 		| 'ALREADY_INSTALLED'
 		| 'CLONE_FAILED'
+		| 'COPY_FAILED'
 		| 'INSTALL_DEPS_FAILED'
 		| 'INVALID_GIT_URL'
+		| 'INVALID_STATE'
 		| 'SYMLINK_FOUND';
 	message: string;
 	details?: string;
@@ -56,6 +58,25 @@ export interface InstallResult {
 	permissionSummary?: PermissionSummary;
 }
 
+export interface PreparedInstall {
+	appId: string;
+	permissionSummary: PermissionSummary;
+	commit(): Promise<InstallResult>;
+	/**
+	 * Best-effort temp cleanup. Safe to call more than once, but callers must not
+	 * run dispose() concurrently with commit().
+	 */
+	dispose(): Promise<void>;
+}
+
+export interface PlanInstallResult {
+	success: boolean;
+	errors: InstallError[];
+	appId?: string;
+	permissionSummary?: PermissionSummary;
+	preparedInstall?: PreparedInstall;
+}
+
 /**
  * Regex for valid git URLs:
  *   https://... or git@...:...
@@ -71,6 +92,16 @@ const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /** App IDs reserved by the infrastructure (conflict with data paths or system concepts). */
 const RESERVED_IDS = new Set(['shared', 'system', 'core', 'pas', 'internal']);
+
+const MAX_MANIFEST_SIZE = 1024 * 1024; // 1MB
+
+interface PreparedPlanData {
+	tempDir: string;
+	appId: string;
+	targetDir: string;
+	permissionSummary: PermissionSummary;
+	appsDir: string;
+}
 
 /**
  * Validate a git URL for safety.
@@ -146,31 +177,239 @@ async function findSymlinks(dir: string, baseDir: string): Promise<string | null
 	return null;
 }
 
-/**
- * Install a PAS app from a git URL.
- *
- * Pipeline:
- * 1. Validate git URL
- * 2. Clone to temp directory
- * 3. Read and validate manifest
- * 4. Check if already installed
- * 5. Check CoreServices version compatibility
- * 6. Run static analysis for banned imports
- * 7. Build permission summary
- * 8. Copy to apps/<app-id>/
- * 9. Install dependencies
- */
-export async function installApp(options: InstallOptions): Promise<InstallResult> {
-	const { gitUrl, appsDir, coreVersion } = options;
-	const errors: InstallError[] = [];
+async function cloneRepository(gitUrl: string, tempDir: string): Promise<InstallError | null> {
+	try {
+		await execFile('git', ['clone', '--depth', '1', gitUrl, tempDir], { timeout: 60_000 });
+		return null;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { type: 'CLONE_FAILED', message: 'Git clone failed.', details: message };
+	}
+}
 
-	// 1. Validate git URL
-	const urlError = validateGitUrl(gitUrl);
+async function validatePreparedInstall(
+	options: InstallOptions,
+	tempDir: string,
+): Promise<PreparedPlanData | InstallError[]> {
+	const symlinkPath = await findSymlinks(tempDir, tempDir);
+	if (symlinkPath) {
+		return [
+			{
+				type: 'SYMLINK_FOUND',
+				message: `Repository contains a symbolic link: "${symlinkPath}". Symlinks are not allowed for security reasons.`,
+			},
+		];
+	}
+
+	const manifestPath = join(tempDir, 'manifest.yaml');
+
+	let manifestSize: number;
+	try {
+		const manifestStat = await stat(manifestPath);
+		manifestSize = manifestStat.size;
+	} catch {
+		return [
+			{
+				type: 'INVALID_MANIFEST',
+				message: 'No manifest.yaml found in repository root.',
+			},
+		];
+	}
+
+	if (manifestSize > MAX_MANIFEST_SIZE) {
+		return [
+			{
+				type: 'INVALID_MANIFEST',
+				message: `manifest.yaml is too large (${manifestSize} bytes, max ${MAX_MANIFEST_SIZE}).`,
+			},
+		];
+	}
+
+	const manifestRaw = await readFile(manifestPath, 'utf-8');
+
+	let manifestData: unknown;
+	try {
+		manifestData = parseYaml<unknown>(manifestRaw);
+	} catch {
+		return [{ type: 'INVALID_MANIFEST', message: 'manifest.yaml contains invalid YAML.' }];
+	}
+
+	const validation = validateManifest(manifestData);
+	if (!validation.valid) {
+		return [
+			{
+				type: 'INVALID_MANIFEST',
+				message: 'Manifest validation failed.',
+				details: validation.errors.join('\n'),
+			},
+		];
+	}
+
+	const manifest = validation.manifest;
+	const appId = manifest.app.id;
+
+	if (!APP_ID_PATTERN.test(appId)) {
+		return [{ type: 'INVALID_MANIFEST', message: `Invalid app ID "${appId}".` }];
+	}
+
+	if (RESERVED_IDS.has(appId)) {
+		return [
+			{
+				type: 'INVALID_MANIFEST',
+				message: `App ID "${appId}" is reserved by the infrastructure.`,
+			},
+		];
+	}
+
+	const targetDir = join(options.appsDir, appId);
+	try {
+		await stat(targetDir);
+		return [
+			{
+				type: 'ALREADY_INSTALLED',
+				message: `App "${appId}" is already installed at ${targetDir}. Use \`pnpm uninstall-app ${appId}\` first, then reinstall.`,
+			},
+		];
+	} catch {
+		// Directory doesn't exist — good, we can proceed
+	}
+
+	const pasVersion = manifest.app.pas_core_version;
+	if (pasVersion) {
+		const compat = checkCompatibility(pasVersion, options.coreVersion);
+		if (!compat.compatible) {
+			return [
+				{
+					type: 'INCOMPATIBLE',
+					message: compat.message ?? 'Incompatible CoreServices version.',
+				},
+			];
+		}
+	}
+
+	const analysis = await analyzeApp(tempDir);
+	if (analysis.violations.length > 0) {
+		return analysis.violations.map((violation) => ({
+			type: 'BANNED_IMPORT' as const,
+			message: `${violation.file}:${violation.line} imports '${violation.importName}' directly.`,
+			details: violation.reason,
+		}));
+	}
+
+	return {
+		tempDir,
+		appId,
+		targetDir,
+		permissionSummary: buildPermissionSummary(manifest),
+		appsDir: options.appsDir,
+	};
+}
+
+function createPreparedInstall(plan: PreparedPlanData): PreparedInstall {
+	let disposed = false;
+	let commitPromise: Promise<InstallResult> | null = null;
+
+	const dispose = async (): Promise<void> => {
+		if (disposed) return;
+		disposed = true;
+		try {
+			await rm(plan.tempDir, { recursive: true, force: true });
+		} catch {
+			// Best effort cleanup — callers should not fail if temp cleanup races or is redundant.
+		}
+	};
+
+	const commit = async (): Promise<InstallResult> => {
+		if (commitPromise) {
+			return commitPromise;
+		}
+
+		commitPromise = (async () => {
+			if (disposed) {
+				return {
+					success: false,
+					appId: plan.appId,
+					errors: [
+						{
+							type: 'INVALID_STATE',
+							message: `Installation plan for "${plan.appId}" has already been disposed.`,
+						},
+					],
+					permissionSummary: plan.permissionSummary,
+				};
+			}
+
+			try {
+				await cp(plan.tempDir, plan.targetDir, { recursive: true });
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					success: false,
+					appId: plan.appId,
+					errors: [
+						{
+							type: 'COPY_FAILED',
+							message: 'Failed to copy app to apps/ directory.',
+							details: message,
+						},
+					],
+					permissionSummary: plan.permissionSummary,
+				};
+			}
+
+			try {
+				const workspaceRoot = join(plan.appsDir, '..');
+				await execFile('pnpm', ['install'], { cwd: workspaceRoot, timeout: 120_000 });
+			} catch (err) {
+				try {
+					await rm(plan.targetDir, { recursive: true, force: true });
+				} catch {
+					// Best effort cleanup of partial install
+				}
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					success: false,
+					appId: plan.appId,
+					errors: [
+						{
+							type: 'INSTALL_DEPS_FAILED',
+							message: 'Failed to install dependencies.',
+							details: message,
+						},
+					],
+					permissionSummary: plan.permissionSummary,
+				};
+			}
+
+			return {
+				success: true,
+				appId: plan.appId,
+				errors: [],
+				permissionSummary: plan.permissionSummary,
+			};
+		})();
+
+		return commitPromise;
+	};
+
+	return {
+		appId: plan.appId,
+		permissionSummary: plan.permissionSummary,
+		commit,
+		dispose,
+	};
+}
+
+/**
+ * Clone and validate an app installation without mutating apps/ or running pnpm install.
+ * The returned PreparedInstall must be disposed by the caller.
+ */
+export async function planInstallApp(options: InstallOptions): Promise<PlanInstallResult> {
+	const urlError = validateGitUrl(options.gitUrl);
 	if (urlError) {
 		return { success: false, errors: [urlError] };
 	}
 
-	// 2. Clone to temp directory
 	let tempDir: string;
 	try {
 		tempDir = await mkdtemp(join(tmpdir(), 'pas-install-'));
@@ -183,174 +422,55 @@ export async function installApp(options: InstallOptions): Promise<InstallResult
 		};
 	}
 
+	let prepared: PreparedInstall | null = null;
 	try {
-		try {
-			await execFile('git', ['clone', '--depth', '1', gitUrl, tempDir], { timeout: 60_000 });
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			errors.push({ type: 'CLONE_FAILED', message: 'Git clone failed.', details: message });
-			return { success: false, errors };
+		const cloneError = await cloneRepository(options.gitUrl, tempDir);
+		if (cloneError) {
+			return { success: false, errors: [cloneError] };
 		}
 
-		// 2b. Scan for symlinks (prevents symlink escape attacks)
-		const symlinkPath = await findSymlinks(tempDir, tempDir);
-		if (symlinkPath) {
-			errors.push({
-				type: 'SYMLINK_FOUND',
-				message: `Repository contains a symbolic link: "${symlinkPath}". Symlinks are not allowed for security reasons.`,
-			});
-			return { success: false, errors };
+		const validated = await validatePreparedInstall(options, tempDir);
+		if (Array.isArray(validated)) {
+			return { success: false, errors: validated };
 		}
 
-		// 3. Read and validate manifest
-		const manifestPath = join(tempDir, 'manifest.yaml');
-		const MAX_MANIFEST_SIZE = 1024 * 1024; // 1MB
-
-		// Check manifest exists and size before reading (D29: YAML bomb protection)
-		let manifestSize: number;
-		try {
-			const manifestStat = await stat(manifestPath);
-			manifestSize = manifestStat.size;
-		} catch {
-			errors.push({
-				type: 'INVALID_MANIFEST',
-				message: 'No manifest.yaml found in repository root.',
-			});
-			return { success: false, errors };
-		}
-
-		if (manifestSize > MAX_MANIFEST_SIZE) {
-			errors.push({
-				type: 'INVALID_MANIFEST',
-				message: `manifest.yaml is too large (${manifestSize} bytes, max ${MAX_MANIFEST_SIZE}).`,
-			});
-			return { success: false, errors };
-		}
-
-		const manifestRaw = await readFile(manifestPath, 'utf-8');
-
-		let manifestData: unknown;
-		try {
-			manifestData = parseYaml<unknown>(manifestRaw);
-		} catch {
-			errors.push({ type: 'INVALID_MANIFEST', message: 'manifest.yaml contains invalid YAML.' });
-			return { success: false, errors };
-		}
-
-		const validation = validateManifest(manifestData);
-		if (!validation.valid) {
-			errors.push({
-				type: 'INVALID_MANIFEST',
-				message: 'Manifest validation failed.',
-				details: validation.errors.join('\n'),
-			});
-			return { success: false, errors };
-		}
-
-		const manifest = validation.manifest;
-		const appId = manifest.app.id;
-
-		// Validate app ID (defense-in-depth — schema already enforces this)
-		if (!APP_ID_PATTERN.test(appId)) {
-			errors.push({ type: 'INVALID_MANIFEST', message: `Invalid app ID "${appId}".` });
-			return { success: false, errors };
-		}
-
-		if (RESERVED_IDS.has(appId)) {
-			errors.push({
-				type: 'INVALID_MANIFEST',
-				message: `App ID "${appId}" is reserved by the infrastructure.`,
-			});
-			return { success: false, errors };
-		}
-
-		// 4. Check if already installed
-		const targetDir = join(appsDir, appId);
-		try {
-			await stat(targetDir);
-			errors.push({
-				type: 'ALREADY_INSTALLED',
-				message: `App "${appId}" is already installed at ${targetDir}. Use \`pnpm uninstall-app ${appId}\` first, then reinstall.`,
-			});
-			return { success: false, errors };
-		} catch {
-			// Directory doesn't exist — good, we can proceed
-		}
-
-		// 5. Check compatibility
-		const pasVersion = manifest.app.pas_core_version;
-		if (pasVersion) {
-			const compat = checkCompatibility(pasVersion, coreVersion);
-			if (!compat.compatible) {
-				errors.push({
-					type: 'INCOMPATIBLE',
-					message: compat.message ?? 'Incompatible CoreServices version.',
-				});
-				return { success: false, errors };
-			}
-		}
-
-		// 6. Static analysis
-		const analysis = await analyzeApp(tempDir);
-		if (analysis.violations.length > 0) {
-			for (const v of analysis.violations) {
-				errors.push({
-					type: 'BANNED_IMPORT',
-					message: `${v.file}:${v.line} imports '${v.importName}' directly.`,
-					details: v.reason,
-				});
-			}
-			return { success: false, errors };
-		}
-
-		// 7. Build permission summary
-		const permissionSummary = buildPermissionSummary(manifest);
-
-		// 8. Copy to apps/<app-id>/
-		try {
-			await cp(tempDir, targetDir, { recursive: true });
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			errors.push({
-				type: 'CLONE_FAILED',
-				message: 'Failed to copy app to apps/ directory.',
-				details: message,
-			});
-			return { success: false, errors };
-		}
-
-		// 9. Install dependencies (from workspace root, pnpm will pick up the new package)
-		try {
-			const workspaceRoot = join(appsDir, '..');
-			await execFile('pnpm', ['install'], { cwd: workspaceRoot, timeout: 120_000 });
-		} catch (err) {
-			// Clean up the target directory since deps failed
-			try {
-				await rm(targetDir, { recursive: true, force: true });
-			} catch {
-				// Best effort cleanup
-			}
-			const message = err instanceof Error ? err.message : String(err);
-			errors.push({
-				type: 'INSTALL_DEPS_FAILED',
-				message: 'Failed to install dependencies.',
-				details: message,
-			});
-			return { success: false, errors };
-		}
-
+		prepared = createPreparedInstall(validated);
 		return {
 			success: true,
-			appId,
+			appId: prepared.appId,
 			errors: [],
-			permissionSummary,
+			permissionSummary: prepared.permissionSummary,
+			preparedInstall: prepared,
 		};
 	} finally {
-		// Clean up temp directory
-		try {
-			await rm(tempDir, { recursive: true, force: true });
-		} catch {
-			// Best effort cleanup
+		if (!prepared) {
+			try {
+				await rm(tempDir, { recursive: true, force: true });
+			} catch {
+				// Best effort cleanup when planning does not succeed.
+			}
 		}
+	}
+}
+
+/**
+ * Backward-compatible one-shot installer wrapper.
+ * Plans, commits, and always disposes the prepared install handle.
+ */
+export async function installApp(options: InstallOptions): Promise<InstallResult> {
+	const planned = await planInstallApp(options);
+	if (!planned.success || !planned.preparedInstall) {
+		return {
+			success: false,
+			appId: planned.appId,
+			errors: planned.errors,
+			permissionSummary: planned.permissionSummary,
+		};
+	}
+
+	try {
+		return await planned.preparedInstall.commit();
+	} finally {
+		await planned.preparedInstall.dispose();
 	}
 }

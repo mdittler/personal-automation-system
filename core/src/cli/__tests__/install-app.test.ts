@@ -1,66 +1,68 @@
-import { describe, expect, it } from 'vitest';
-import { parseYesFlag } from '../install-app.js';
+import { describe, expect, it, vi } from 'vitest';
+import type {
+	InstallError,
+	InstallResult,
+	PermissionSummary,
+	PlanInstallResult,
+	PreparedInstall,
+} from '../../services/app-installer/index.js';
+import { parseYesFlag, runInstallAppCli } from '../install-app.js';
 
-// We test the formatting and validation logic that install-app.ts uses,
-// rather than spawning the CLI process (which would require git)
+function createPermissionSummary(): PermissionSummary {
+	return {
+		services: ['telegram', 'data-store'],
+		dataScopes: [{ path: 'log.md', access: 'read-write' }],
+		externalApis: [],
+	};
+}
+
+function createPreparedInstall(
+	overrides?: Partial<PreparedInstall>,
+): PreparedInstall & {
+	commitMock: ReturnType<typeof vi.fn>;
+	disposeMock: ReturnType<typeof vi.fn>;
+} {
+	const commitMock = vi.fn<PreparedInstall['commit']>().mockResolvedValue({
+		success: true,
+		appId: 'test-app',
+		errors: [],
+		permissionSummary: createPermissionSummary(),
+	} satisfies InstallResult);
+	const disposeMock = vi.fn<PreparedInstall['dispose']>().mockResolvedValue(undefined);
+
+	return {
+		appId: 'test-app',
+		permissionSummary: createPermissionSummary(),
+		commit: commitMock,
+		dispose: disposeMock,
+		...overrides,
+		commitMock,
+		disposeMock,
+	};
+}
+
+function createCliDeps(overrides?: {
+	planInstall?: () => Promise<PlanInstallResult>;
+	prompt?: (question: string) => Promise<string>;
+}) {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+
+	return {
+		stdout,
+		stderr,
+		deps: {
+			getCoreVersion: () => '0.1.0',
+			getAppsDir: () => '/tmp/apps',
+			planInstall: overrides?.planInstall,
+			prompt: overrides?.prompt,
+			stdout: (message: string) => stdout.push(message),
+			stderr: (message: string) => stderr.push(message),
+		},
+	};
+}
 
 describe('install-app CLI', () => {
-	// Test the URL validation patterns used by the installer
-	const GIT_URL_PATTERN = /^(https?:\/\/[^\s]+|git@[^\s]+:\S+)$/;
-	const SHELL_METACHAR_PATTERN = /[;&|`$(){}!<>]/;
-
-	describe('URL validation', () => {
-		it('should accept valid HTTPS URLs', () => {
-			expect(GIT_URL_PATTERN.test('https://github.com/user/repo.git')).toBe(true);
-			expect(SHELL_METACHAR_PATTERN.test('https://github.com/user/repo.git')).toBe(false);
-		});
-
-		it('should accept valid SSH URLs', () => {
-			expect(GIT_URL_PATTERN.test('git@github.com:user/repo.git')).toBe(true);
-			expect(SHELL_METACHAR_PATTERN.test('git@github.com:user/repo.git')).toBe(false);
-		});
-
-		it('should reject file:// URLs', () => {
-			const url = 'file:///tmp/evil-repo';
-			expect(url.startsWith('file://')).toBe(true);
-		});
-
-		it('should reject URLs with semicolons', () => {
-			expect(SHELL_METACHAR_PATTERN.test('https://evil.com/repo; rm -rf /')).toBe(true);
-		});
-
-		it('should reject URLs with pipe characters', () => {
-			expect(SHELL_METACHAR_PATTERN.test('https://evil.com/repo | curl evil')).toBe(true);
-		});
-
-		it('should reject URLs with backticks', () => {
-			expect(SHELL_METACHAR_PATTERN.test('https://evil.com/`whoami`.git')).toBe(true);
-		});
-
-		it('should reject URLs with dollar signs', () => {
-			expect(SHELL_METACHAR_PATTERN.test('https://evil.com/$HOME.git')).toBe(true);
-		});
-
-		it('should reject bare paths', () => {
-			expect(GIT_URL_PATTERN.test('/tmp/local-repo')).toBe(false);
-			expect(GIT_URL_PATTERN.test('../relative-repo')).toBe(false);
-		});
-	});
-
-	describe('argument parsing', () => {
-		it('should extract git URL from args', () => {
-			const args = ['https://github.com/user/repo.git', '--yes'];
-			const gitUrl = args.find((a) => !a.startsWith('-'));
-			expect(gitUrl).toBe('https://github.com/user/repo.git');
-		});
-
-		it('should handle missing URL', () => {
-			const args = ['--yes'];
-			const gitUrl = args.find((a) => !a.startsWith('-'));
-			expect(gitUrl).toBeUndefined();
-		});
-	});
-
 	describe('parseYesFlag', () => {
 		it('returns true when --yes is present', () => {
 			expect(parseYesFlag(['https://github.com/user/repo.git', '--yes'])).toBe(true);
@@ -73,13 +75,169 @@ describe('install-app CLI', () => {
 		it('returns false when neither flag is present', () => {
 			expect(parseYesFlag(['https://github.com/user/repo.git'])).toBe(false);
 		});
+	});
 
-		it('returns false for empty args', () => {
-			expect(parseYesFlag([])).toBe(false);
+	it('prints usage when git URL is missing', async () => {
+		const { deps, stderr } = createCliDeps();
+
+		const exitCode = await runInstallAppCli([], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr[0]).toContain('Usage: pnpm install-app');
+	});
+
+	it('prints the permission summary before prompting and cancels cleanly', async () => {
+		const prepared = createPreparedInstall();
+		const prompt = vi.fn().mockResolvedValue('n');
+		const { deps, stdout } = createCliDeps({
+			planInstall: async () => ({
+				success: true,
+				appId: prepared.appId,
+				errors: [],
+				permissionSummary: prepared.permissionSummary,
+				preparedInstall: prepared,
+			}),
+			prompt,
 		});
 
-		it('is not confused by other flags', () => {
-			expect(parseYesFlag(['--verbose', '--dry-run'])).toBe(false);
+		const exitCode = await runInstallAppCli(['https://github.com/user/repo.git'], deps);
+
+		expect(exitCode).toBe(0);
+		expect(prompt).toHaveBeenCalledOnce();
+		expect(prepared.commitMock).not.toHaveBeenCalled();
+		expect(prepared.disposeMock).toHaveBeenCalledOnce();
+		expect(stdout).toContain('Permission Summary:');
+		expect(stdout.at(-1)).toBe('Installation cancelled.');
+	});
+
+	it('prints the permission summary before commit on approval', async () => {
+		const order: string[] = [];
+		const prepared = createPreparedInstall({
+			commit: vi.fn(async () => {
+				order.push('commit');
+				return {
+					success: true,
+					appId: 'test-app',
+					errors: [],
+					permissionSummary: createPermissionSummary(),
+				};
+			}),
 		});
+		const prompt = vi.fn(async () => 'y');
+		const { deps } = createCliDeps({
+			planInstall: async () => ({
+				success: true,
+				appId: prepared.appId,
+				errors: [],
+				permissionSummary: prepared.permissionSummary,
+				preparedInstall: prepared,
+			}),
+			prompt,
+		});
+		deps.stdout = (message: string) => order.push(`out:${message}`);
+
+		const exitCode = await runInstallAppCli(['https://github.com/user/repo.git'], deps);
+
+		expect(exitCode).toBe(0);
+		expect(prompt).toHaveBeenCalledOnce();
+		expect(order.indexOf('out:Permission Summary:')).toBeGreaterThan(-1);
+		expect(order.indexOf('out:Permission Summary:')).toBeLessThan(order.indexOf('commit'));
+		expect(prepared.disposeMock).toHaveBeenCalledOnce();
+	});
+
+	it('prints the permission summary and skips the prompt with --yes', async () => {
+		const prepared = createPreparedInstall();
+		const prompt = vi.fn();
+		const { deps, stdout } = createCliDeps({
+			planInstall: async () => ({
+				success: true,
+				appId: prepared.appId,
+				errors: [],
+				permissionSummary: prepared.permissionSummary,
+				preparedInstall: prepared,
+			}),
+			prompt,
+		});
+
+		const exitCode = await runInstallAppCli(
+			['https://github.com/user/repo.git', '--yes'],
+			deps,
+		);
+
+		expect(exitCode).toBe(0);
+		expect(prompt).not.toHaveBeenCalled();
+		expect(prepared.commitMock).toHaveBeenCalledOnce();
+		expect(stdout).toContain('Permission Summary:');
+	});
+
+	it('prints planner failures without prompting or committing', async () => {
+		const prompt = vi.fn();
+		const plannerErrors: InstallError[] = [
+			{ type: 'INVALID_GIT_URL', message: 'Git URL contains invalid characters.' },
+		];
+		const { deps, stderr } = createCliDeps({
+			planInstall: async () => ({
+				success: false,
+				errors: plannerErrors,
+			}),
+			prompt,
+		});
+
+		const exitCode = await runInstallAppCli(['https://bad.example/repo.git'], deps);
+
+		expect(exitCode).toBe(1);
+		expect(prompt).not.toHaveBeenCalled();
+		expect(stderr.join('\n')).toContain('[INVALID_GIT_URL] Git URL contains invalid characters.');
+	});
+
+	it('reports commit failures and still disposes the prepared install', async () => {
+		const prepared = createPreparedInstall({
+			commit: vi.fn(async () => ({
+				success: false,
+				appId: 'test-app',
+				errors: [{ type: 'INSTALL_DEPS_FAILED', message: 'Failed to install dependencies.' }],
+				permissionSummary: createPermissionSummary(),
+			})),
+		});
+		const { deps, stderr } = createCliDeps({
+			planInstall: async () => ({
+				success: true,
+				appId: prepared.appId,
+				errors: [],
+				permissionSummary: prepared.permissionSummary,
+				preparedInstall: prepared,
+			}),
+			prompt: async () => 'y',
+		});
+
+		const exitCode = await runInstallAppCli(['https://github.com/user/repo.git'], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr.join('\n')).toContain('[INSTALL_DEPS_FAILED] Failed to install dependencies.');
+		expect(prepared.disposeMock).toHaveBeenCalledOnce();
+	});
+
+	it('still disposes the prepared install when commit throws unexpectedly', async () => {
+		const prepared = createPreparedInstall({
+			commit: vi.fn(async () => {
+				throw new Error('commit boom');
+			}),
+		});
+		const { deps, stderr } = createCliDeps({
+			planInstall: async () => ({
+				success: true,
+				appId: prepared.appId,
+				errors: [],
+				permissionSummary: prepared.permissionSummary,
+				preparedInstall: prepared,
+			}),
+			prompt: async () => 'y',
+		});
+
+		const exitCode = await runInstallAppCli(['https://github.com/user/repo.git'], deps);
+
+		expect(exitCode).toBe(1);
+		expect(stderr.at(-1)).toContain('Unexpected error: commit boom');
+		expect(prepared.disposeMock).toHaveBeenCalledOnce();
 	});
 });

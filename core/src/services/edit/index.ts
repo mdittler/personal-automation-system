@@ -29,6 +29,7 @@ import { sanitizeInput } from '../llm/prompt-templates.js';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import { HouseholdBoundaryError } from '../household/index.js';
+import type { InteractionContextService } from '../interaction-context/index.js';
 import { EditLog } from './edit-log.js';
 
 export { EditLog } from './edit-log.js';
@@ -100,6 +101,7 @@ export interface EditServiceOptions {
   dataDir: string;
   logger: AppLogger;
   editLog: EditLog;
+  interactionContext?: InteractionContextService;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +117,7 @@ export class EditServiceImpl implements EditService {
   private readonly dataDir: string;
   private readonly logger: AppLogger;
   private readonly editLog: EditLog;
+  private readonly interactionContext?: InteractionContextService;
 
   /** Lazily cached realpath of dataDir. */
   private realDataDir: string | undefined;
@@ -128,6 +131,7 @@ export class EditServiceImpl implements EditService {
     this.dataDir = opts.dataDir;
     this.logger = opts.logger;
     this.editLog = opts.editLog;
+    this.interactionContext = opts.interactionContext;
   }
 
   private async getRealDataDir(): Promise<string> {
@@ -143,7 +147,11 @@ export class EditServiceImpl implements EditService {
 
   async proposeEdit(description: string, userId: string): Promise<ProposeEditResult> {
     // Step 1: File discovery via DataQuery
-    const queryResult = await this.dataQueryService.query(description, userId);
+    const recentFilePaths = this.getRecentFilePaths(userId);
+    const queryResult =
+      recentFilePaths.length > 0
+        ? await this.dataQueryService.query(description, userId, { recentFilePaths })
+        : await this.dataQueryService.query(description, userId);
 
     if (queryResult.empty || queryResult.files.length === 0) {
       return { kind: 'error', action: 'no_match', message: 'No matching files found.' };
@@ -564,5 +572,26 @@ export class EditServiceImpl implements EditService {
     }
 
     return null;
+  }
+
+  private getRecentFilePaths(userId: string): string[] {
+    if (!this.interactionContext) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const recentFilePaths: string[] = [];
+
+    for (const entry of this.interactionContext.getRecent(userId)) {
+      // Preserve newest-first ordering from getRecent(); first occurrence wins.
+      for (const path of entry.filePaths ?? []) {
+        if (!seen.has(path)) {
+          seen.add(path);
+          recentFilePaths.push(path);
+        }
+      }
+    }
+
+    return recentFilePaths;
   }
 }

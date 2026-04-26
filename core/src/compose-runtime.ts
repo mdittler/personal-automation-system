@@ -60,6 +60,7 @@ import { HouseholdLLMLimiter } from './services/llm/household-llm-limiter.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
 import { ModelCatalog } from './services/llm/model-catalog.js';
+import { DEFAULT_REMOTE_PRICING, getModelPricing } from './services/llm/model-pricing.js';
 import { ModelSelector } from './services/llm/model-selector.js';
 import { createProvider } from './services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from './services/llm/providers/provider-registry.js';
@@ -99,6 +100,7 @@ import type { DataChangedPayload } from './types/data-events.js';
 import type { DataQueryOptions } from './types/data-query.js';
 import type { ManifestDataScope } from './types/manifest.js';
 import type { TelegramService } from './types/telegram.js';
+import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
 
 export interface RuntimeOverrides {
 	dataDir?: string;
@@ -316,6 +318,30 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'llm' }),
 	});
 
+	const guardPriceLookup: PriceLookup = {
+		priceFor: (tier) => {
+			const ref = modelSelector.getTierRef(tier);
+			if (!ref) {
+				return undefined;
+			}
+
+			const providerType = providerRegistry.get(ref.provider)?.providerType;
+			if (providerType === 'ollama') {
+				return { inputUsdPer1k: 0, outputUsdPer1k: 0 };
+			}
+
+			const pricing = getModelPricing(ref.model) ?? (providerType ? DEFAULT_REMOTE_PRICING : null);
+			if (!pricing) {
+				return undefined;
+			}
+
+			return {
+				inputUsdPer1k: pricing.input / 1000,
+				outputUsdPer1k: pricing.output / 1000,
+			};
+		},
+	};
+
 	// Load monthly cost cache for LLMGuard enforcement
 	await costTracker.loadMonthlyCache();
 
@@ -335,6 +361,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			safeguardsConfig.globalMonthlyCostCap ?? DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
 		logger: createChildLogger(logger, { service: 'system-llm-guard' }),
 		householdLimiter,
+		priceLookup: guardPriceLookup,
+		tier: 'fast',
 	});
 
 	// API-level LLM guard — same global cap but attributes costs to 'api' (F14 fix)
@@ -346,6 +374,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'api-llm-guard' }),
 		attributionId: 'api',
 		householdLimiter,
+		priceLookup: guardPriceLookup,
+		tier: 'fast',
 	});
 
 	// 4. Scheduler
@@ -630,6 +660,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 				},
 				logger: appLogger,
 				householdLimiter,
+				priceLookup: guardPriceLookup,
+				tier: manifestLlm?.tier ?? 'fast',
 			});
 			llmGuards.push(guard);
 			appLlm = guard;
@@ -836,6 +868,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'edit-service' }),
 		editLog: new EditLog(join(config.dataDir, 'system', 'edit-log.jsonl')),
+		interactionContext: interactionContextService,
 	});
 	logger.info('EditService: initialized');
 

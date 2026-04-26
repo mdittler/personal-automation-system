@@ -85,6 +85,31 @@ describe('LLMGuard', () => {
 			});
 		});
 
+		it('uses per-call tier override for reservation estimation', async () => {
+			const hhLimiter = createMockHouseholdLimiter();
+			guard = new LLMGuard({
+				inner,
+				appId: 'test-app',
+				costTracker,
+				config: defaultConfig,
+				logger,
+				householdLimiter: hhLimiter,
+				tier: 'fast',
+				priceLookup: {
+					priceFor: (tier) =>
+						tier === 'standard'
+							? { inputUsdPer1k: 10, outputUsdPer1k: 10 }
+							: { inputUsdPer1k: 1, outputUsdPer1k: 1 },
+				},
+			});
+
+			await requestContext.run({ userId: 'u1', householdId: 'h1' }, () =>
+				guard.complete('x'.repeat(4000), { tier: 'standard', maxTokens: 1000 }),
+			);
+
+			expect(hhLimiter.reserveEstimated).toHaveBeenCalledWith('h1', 'test-app', 'u1', 20);
+		});
+
 		it('throws LLMRateLimitError when rate limit exceeded', async () => {
 			// Exhaust rate limit
 			for (let i = 0; i < defaultConfig.maxRequests; i++) {
