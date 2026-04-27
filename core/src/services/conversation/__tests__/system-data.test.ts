@@ -24,6 +24,7 @@ describe('categorizeQuestion', () => {
 	it('detects scheduling questions', () => {
 		expect(categorizeQuestion('what cron jobs are running?')).toContain('scheduling');
 		expect(categorizeQuestion('what is scheduled?')).toContain('scheduling');
+		expect(categorizeQuestion('what automated tasks are running').has('scheduling')).toBe(true);
 	});
 
 	it('detects system questions', () => {

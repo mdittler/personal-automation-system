@@ -20,6 +20,10 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ConversationHistory } from '../conversation-history/index.js';
+import type {
+	ConversationContextSnapshot,
+	ConversationRetrievalService,
+} from '../conversation-retrieval/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -35,12 +39,12 @@ import {
 	processModelSwitchTags,
 } from './control-tags.js';
 import { appendDailyNote } from './daily-notes.js';
-import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import {
 	extractRecentFilePaths,
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
+import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
 import { sendSplitResponse } from './telegram-format.js';
@@ -63,6 +67,8 @@ export interface HandleAskDeps {
 	interactionContext?: InteractionContextService;
 	/** System-level default for daily-notes opt-in. Defaults to false if absent. */
 	chatLogToNotesDefault?: boolean;
+	/** ConversationRetrievalService — stored here, wired into handlers in Chunk D. */
+	conversationRetrieval?: ConversationRetrievalService;
 }
 
 export async function handleAsk(
@@ -113,38 +119,68 @@ export async function handleAsk(
 		buildUserContext(ctx, deps),
 	]);
 
-	// D2b/D2c: call DataQueryService when classifier detects a data query.
-	let askDataContext = '';
+	// D2b/D2c / Chunk D: call DataQueryService or ConversationRetrievalService.
 	const askClassification = await classifyPASMessage(
 		question,
 		deps,
 		recentContextSummary || undefined,
 	);
-	if (askClassification.dataQueryCandidate && deps.dataQuery) {
-		try {
-			const result = await deps.dataQuery.query(
-				question,
-				ctx.userId,
-				recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
-			);
-			if (!result.empty) {
-				askDataContext = formatDataQueryContext(result);
-			}
-		} catch (error) {
-			deps.logger.warn('DataQueryService call failed in /ask: %s', error);
-		}
-	}
 
-	let systemPrompt = await buildAppAwareSystemPrompt(
-		question,
-		ctx.userId,
-		contextEntries,
-		turns,
-		deps,
-		modelSlug,
-		userCtx,
-		askDataContext,
-	);
+	let systemPrompt: string;
+	if (deps.conversationRetrieval) {
+		// Chunk D: use ConversationRetrievalService.buildContextSnapshot (mode: 'ask')
+		let snapshot: ConversationContextSnapshot | null = null;
+		try {
+			snapshot = await deps.conversationRetrieval.buildContextSnapshot({
+				question,
+				mode: 'ask',
+				dataQueryCandidate: askClassification.dataQueryCandidate ?? false,
+				recentFilePaths,
+			});
+		} catch (error) {
+			deps.logger.warn(
+				'ConversationRetrievalService.buildContextSnapshot failed in /ask: %s',
+				error,
+			);
+		}
+		systemPrompt = await buildAppAwareSystemPrompt(
+			question,
+			ctx.userId,
+			contextEntries,
+			turns,
+			deps,
+			modelSlug,
+			userCtx,
+			snapshot,
+		);
+	} else {
+		// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
+		let askDataContext = '';
+		if (askClassification.dataQueryCandidate && deps.dataQuery) {
+			try {
+				const result = await deps.dataQuery.query(
+					question,
+					ctx.userId,
+					recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+				);
+				if (!result.empty) {
+					askDataContext = formatDataQueryContext(result);
+				}
+			} catch (error) {
+				deps.logger.warn('DataQueryService call failed in /ask: %s', error);
+			}
+		}
+		systemPrompt = await buildAppAwareSystemPrompt(
+			question,
+			ctx.userId,
+			contextEntries,
+			turns,
+			deps,
+			modelSlug,
+			userCtx,
+			askDataContext,
+		);
+	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;

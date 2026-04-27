@@ -4,7 +4,7 @@
 |---|---|
 | **Purpose** | Detailed phase-by-phase implementation guide for the PAS infrastructure |
 | **Status** | Phases 0–28, D1–D4 complete (except 27A-Vaults, 27B, 27C planned) |
-| **Last Updated** | 2026-04-25 |
+| **Last Updated** | 2026-04-27 |
 
 ---
 
@@ -65,7 +65,9 @@
 | D5a | Per-Household Data Boundary Hardening | **Complete** | ~20 | EditService household guard, resolveScopedDataDir path containment, DataStore + Scheduler scope enforcement, household-aware ContextStore/FallbackHandler/VaultService, API + GUI data-browser household filtering, multi-household isolation tests |
 | D5b | Per-Household GUI + REST API Auth | **Complete** | ~22 | CredentialService (scrypt, sessionVersion), AuthenticatedActor shape, per-user GUI login + cookie, ApiKeyService + API Bearer auth, GUI admin gating + household route filtering, API resource-kind gates, credential/API key UI, Telegram first-run wizard |
 | D6 | InteractionContextService Disk Persistence | **Complete** | ~6 | Disk persistence for InteractionContextService, bootstrap wiring, drain-flush guarantee, load validation + sort-on-load |
-| D5c | Per-Household LLM Governance + Ops + Load Test | **Planned** | TBD | Household cost ledger (9th column), shared household rate limiter, per-household cost caps + reservations, ops dashboard, 40-user load test with bootstrap composeRuntime refactor. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md` |
+| D5c | Per-Household LLM Governance + Ops + Load Test | **Complete** | ~40 | Household cost ledger (9th column), shared household rate limiter, per-household cost caps + reservations, ops dashboard, 40-user load test with bootstrap composeRuntime refactor. Plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md` |
+| Hermes P1 | ConversationService — core service extraction | **Complete** | ~80 | Extracted chatbot into `core/src/services/conversation/`; retired apps/chatbot; ConversationService first-class in bootstrap. Chunks A–D.4. Spec: `docs/superpowers/specs/2026-04-25-hermes-p1-conversation-service-design.md` |
+| Hermes P2 | ConversationRetrievalService — broad data visibility | **Complete** | ~30 | Source Policy allowlist, ConversationRetrievalService skeleton + DI wiring, scoped ReportService/AlertService APIs, compose all readers + buildContextSnapshot, handler wiring + persona tests, URS finalization. Chunks A–E. Spec: `docs/superpowers/specs/2026-04-27-hermes-p2-conversation-retrieval-design.md` |
 
 ### Dependency Graph
 

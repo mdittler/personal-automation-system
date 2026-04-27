@@ -145,6 +145,18 @@ export class ReportService {
 		}
 	}
 
+	/**
+	 * Return all reports where `userId` is directly in the delivery list.
+	 *
+	 * Visibility is restricted to direct delivery membership so that one
+	 * household member cannot read another member's full report definitions
+	 * (which contain sections, actions, and schedule details).
+	 */
+	async listForUser(userId: string): Promise<ReportDefinition[]> {
+		const all = await this.listReports();
+		return all.filter((report) => report.delivery.includes(userId));
+	}
+
 	async getReport(id: string): Promise<ReportDefinition | null> {
 		if (!REPORT_ID_PATTERN.test(id)) return null;
 		const filePath = join(this.reportsDir, `${id}.yaml`);

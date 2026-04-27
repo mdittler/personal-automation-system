@@ -183,6 +183,11 @@ export class AlertService {
 		}
 	}
 
+	async listForUser(userId: string): Promise<AlertDefinition[]> {
+		const all = await this.listAlerts();
+		return all.filter((alert) => alert.delivery.includes(userId));
+	}
+
 	async getAlert(id: string): Promise<AlertDefinition | null> {
 		if (!ALERT_ID_PATTERN.test(id)) return null;
 		const filePath = join(this.alertsDir, `${id}.yaml`);
