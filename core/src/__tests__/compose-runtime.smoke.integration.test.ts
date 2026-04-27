@@ -18,7 +18,7 @@ import { composeRuntime } from '../compose-runtime.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
 import { createStubProviderRegistry, StubProvider } from '../testing/fixtures/stub-llm-provider.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
-import { chatbotMessage } from '../testing/fixtures/messages.js';
+import { chatbotMessage, askMessage } from '../testing/fixtures/messages.js';
 import { requestContext } from '../services/context/request-context.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
 import { approximateTokens } from '../services/llm/estimate-guard-cost.js';
@@ -140,7 +140,10 @@ describe('composeRuntime smoke', () => {
 		expect((fastAmount as number) < (standardAmount as number)).toBe(true);
 	});
 
-	it('app-owned chatbot calls reserve priced amounts instead of the flat fallback', async () => {
+	it('chatbot /ask route calls reserve priced amounts instead of the flat fallback', async () => {
+		// apps/chatbot/ was deleted in Hermes P1 Chunk D.3. /ask is now handled by
+		// ConversationService.handleAsk via the Router command dispatch — route via
+		// router.routeMessage so the same LLM-guard cost-reservation path is exercised.
 		await runtime.services.modelSelector.setFastRef({ provider: 'stub', model: 'gpt-4.1-mini' });
 		await runtime.services.modelSelector.setStandardRef({ provider: 'stub', model: 'gpt-4.1' });
 
@@ -148,24 +151,12 @@ describe('composeRuntime smoke', () => {
 		const reserveSpy = vi.spyOn(costTracker, 'reserveEstimated');
 		reserveSpy.mockClear();
 
-		const chatbotEntry = runtime.services.registry.getApp('chatbot');
-		expect(chatbotEntry?.module.handleCommand).toBeDefined();
-
 		const userId = 'user-0';
 		const householdId =
 			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
+		const router = runtime.services.router as any;
 		await requestContext.run({ userId, householdId }, () =>
-			chatbotEntry!.module.handleCommand!(
-				'ask',
-				['what', 'apps', 'do', 'I', 'have?'],
-				{
-					userId,
-					text: '/ask what apps do I have?',
-					chatId: 2001,
-					messageId: 2001,
-					timestamp: new Date(),
-				},
-			),
+			router.routeMessage(askMessage(userId, 2001)),
 		);
 
 		const defaultReservation = runtime.services.safeguardsConfig.defaultReservationUsd ?? 0.01;
@@ -180,6 +171,8 @@ describe('composeRuntime smoke', () => {
 	});
 
 	it('/edit ignores unauthorized recentFilePaths from another user', async () => {
+		// apps/chatbot/ was deleted in Hermes P1 Chunk D.3. /edit is now handled by
+		// EditService via the Router command dispatch — route via router.routeMessage.
 		const userA = 'user-0';
 		const userB = 'user-1';
 		const userAHouseholdId =
@@ -202,21 +195,15 @@ describe('composeRuntime smoke', () => {
 		const telegram = runtime.services.telegram as ReturnType<typeof fakeTelegramService>;
 		telegram.sent.length = 0;
 
-		const chatbotEntry = runtime.services.registry.getApp('chatbot');
-		expect(chatbotEntry?.module.handleCommand).toBeDefined();
-
+		const router = runtime.services.router as any;
 		await requestContext.run({ userId: userA, householdId: userAHouseholdId }, () =>
-			chatbotEntry!.module.handleCommand!(
-				'edit',
-				['change', 'zxq', 'secret', 'marker'],
-				{
-					userId: userA,
-					text: '/edit change zxq secret marker',
-					chatId: 3001,
-					messageId: 3001,
-					timestamp: new Date(),
-				},
-			),
+			router.routeMessage({
+				userId: userA,
+				text: '/edit change zxq secret marker',
+				chatId: 3001,
+				messageId: 3001,
+				timestamp: new Date(),
+			}),
 		);
 
 		expect(await readFile(userBAbsolutePath, 'utf-8')).toBe('zxq secret marker\n');

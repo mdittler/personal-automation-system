@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { EditService } from '../index.js';
 import { EditServiceImpl } from '../index.js';
+import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -100,41 +101,21 @@ describe('EditService bootstrap wiring', () => {
 	});
 
 	describe('manifest declarations', () => {
-		it('chatbot manifest declares edit-service', async () => {
-			// __tests__ -> edit -> services -> src -> core -> d2c (root)
-			const manifestPath = join(
-				__dirname,
-				'..',
-				'..',
-				'..',
-				'..',
-				'..',
-				'apps',
-				'chatbot',
-				'manifest.yaml',
-			);
-			const content = await readFile(manifestPath, 'utf8');
-			expect(content).toContain('edit-service');
+		it('chatbot virtual manifest declares edit-service', () => {
+			// apps/chatbot/ was deleted in Hermes P1 Chunk D.3.
+			// The chatbot app now lives as a virtual registry entry built from
+			// buildVirtualChatbotApp() — assert against the in-memory manifest.
+			const { manifest } = buildVirtualChatbotApp();
+			const services = manifest.requirements?.services ?? [];
+			expect(services).toContain('edit-service');
 		});
 
-		it('chatbot manifest does NOT declare /edit as an app command (Chunk C: /edit is a Router built-in)', async () => {
+		it('chatbot virtual manifest does NOT declare /edit as a capability (Chunk C: /edit is a Router built-in)', () => {
 			// Post-Chunk-C: /edit is dispatched by the Router to ConversationService directly,
-			// not by the chatbot app module. The manifest has no commands: block.
-			const manifestPath = join(
-				__dirname,
-				'..',
-				'..',
-				'..',
-				'..',
-				'..',
-				'apps',
-				'chatbot',
-				'manifest.yaml',
-			);
-			const content = await readFile(manifestPath, 'utf8');
-			// The manifest still declares edit-service as a requirement (for DI injection),
-			// but the commands block no longer lists /edit.
-			expect(content).not.toContain('commands:');
+			// not by the chatbot app module. The virtual manifest has no commands capability.
+			const { manifest } = buildVirtualChatbotApp();
+			// The virtual manifest has no commands: block — only an intents: [] placeholder.
+			expect((manifest.capabilities as any).commands).toBeUndefined();
 		});
 	});
 });

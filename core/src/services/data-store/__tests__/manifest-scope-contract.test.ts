@@ -8,6 +8,7 @@ import type { AppManifest } from '../../../types/manifest.js';
 import { readYamlFile } from '../../../utils/yaml.js';
 import { ChangeLog } from '../change-log.js';
 import { DataStoreServiceImpl } from '../index.js';
+import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appsDir = join(__dirname, '..', '..', '..', '..', '..', 'apps');
@@ -66,7 +67,8 @@ describe('bundled manifest scope contract', () => {
 	});
 
 	it('chatbot accepts history.json and daily notes and rejects unrelated app paths', async () => {
-		const manifest = await loadBundledManifest('chatbot');
+		// apps/chatbot/ was deleted in Hermes P1 Chunk D.3 — use the in-memory virtual manifest.
+		const { manifest } = buildVirtualChatbotApp();
 		const store = createStoreService(dataDir, manifest).forUser('user-1');
 
 		await expect(store.write('history.json', '{"messages":[]}')).resolves.toBeUndefined();
