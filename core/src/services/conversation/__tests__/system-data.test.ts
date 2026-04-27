@@ -50,21 +50,27 @@ describe('gatherSystemData', () => {
 	});
 
 	it('gathers LLM data for llm category', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
 			{ tier: 'standard', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
 			{ tier: 'fast', provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
 		]);
 		vi.mocked(systemInfo.getProviders).mockReturnValue([{ id: 'anthropic', type: 'anthropic' }]);
 
-		const data = await gatherSystemData(systemInfo, new Set(['llm']), 'what model?', undefined, true);
+		const data = await gatherSystemData(
+			systemInfo,
+			new Set(['llm']),
+			'what model?',
+			undefined,
+			true,
+		);
 		expect(data).toContain('standard: anthropic/claude-sonnet');
 		expect(data).toContain('fast: anthropic/claude-haiku');
 		expect(data).toContain('Configured providers');
 	});
 
 	it('gathers cost data for costs category', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockReturnValue({
 			month: '2026-03',
 			monthlyTotal: 5.1234,
@@ -87,7 +93,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('marks the current user in per-user cost breakdown', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockReturnValue({
 			month: '2026-03',
 			monthlyTotal: 10.0,
@@ -109,7 +115,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('gathers scheduling data', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getScheduledJobs).mockReturnValue([
 			{ key: 'system:daily-diff', appId: 'system', cron: '0 2 * * *', description: 'Daily diff' },
 		]);
@@ -126,7 +132,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('gathers system status data', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getSystemStatus).mockReturnValue({
 			uptimeSeconds: 3661,
 			appCount: 3,
@@ -141,20 +147,14 @@ describe('gatherSystemData', () => {
 			globalMonthlyCostCap: 50,
 		});
 
-		const data = await gatherSystemData(
-			systemInfo,
-			new Set(['system']),
-			'status',
-			undefined,
-			true,
-		);
+		const data = await gatherSystemData(systemInfo, new Set(['system']), 'status', undefined, true);
 		expect(data).toContain('1h');
 		expect(data).toContain('Apps loaded: 3');
 		expect(data).toContain('Rate limit: 60');
 	});
 
 	it('includes available models when switching', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
 		vi.mocked(systemInfo.getProviders).mockReturnValue([]);
 		vi.mocked(systemInfo.getAvailableModels).mockResolvedValue([
@@ -173,7 +173,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('non-admin: excludes other users costs', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockReturnValue({
 			month: '2026-04',
 			monthlyTotal: 12.0,
@@ -194,7 +194,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('non-admin: excludes cron job details', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getScheduledJobs).mockReturnValue([
 			{ key: 'system:daily-diff', appId: 'system', cron: '0 2 * * *', description: 'Daily diff' },
 		]);
@@ -211,7 +211,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('non-admin: excludes safeguard config and provider details', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
 			{ tier: 'fast', provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
 		]);
@@ -248,7 +248,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('admin: shows full system data', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
 			{ tier: 'standard', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
 		]);
@@ -290,7 +290,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('non-admin: shows own cost total', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockReturnValue({
 			month: '2026-04',
 			monthlyTotal: 12.0,
@@ -299,13 +299,7 @@ describe('gatherSystemData', () => {
 		});
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([]);
 
-		const data = await gatherSystemData(
-			systemInfo,
-			new Set(['costs']),
-			'my costs',
-			'user1',
-			false,
-		);
+		const data = await gatherSystemData(systemInfo, new Set(['costs']), 'my costs', 'user1', false);
 		// Total is shown to everyone
 		expect(data).toContain('$12.0000');
 		// Own entry shown
@@ -313,7 +307,7 @@ describe('gatherSystemData', () => {
 	});
 
 	it('non-admin with undefined userId shows only total cost', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockReturnValue({
 			month: '2026-04',
 			monthlyTotal: 5.5,
@@ -356,7 +350,7 @@ describe('gatherSystemData error isolation', () => {
 	});
 
 	it('returns partial data when getCostSummary throws', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getCostSummary).mockImplementation(() => {
 			throw new Error('cost error');
 		});
@@ -377,7 +371,7 @@ describe('gatherSystemData error isolation', () => {
 	});
 
 	it('returns partial data when getScheduledJobs throws', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getScheduledJobs).mockImplementation(() => {
 			throw new Error('scheduler error');
 		});
@@ -406,7 +400,7 @@ describe('gatherSystemData error isolation', () => {
 	});
 
 	it('returns partial data when getSystemStatus throws', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getSystemStatus).mockImplementation(() => {
 			throw new Error('status error');
 		});
@@ -426,7 +420,7 @@ describe('gatherSystemData error isolation', () => {
 	});
 
 	it('returns partial data when getTierAssignments throws', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockImplementation(() => {
 			throw new Error('tier error');
 		});
@@ -448,7 +442,7 @@ describe('gatherSystemData error isolation', () => {
 	});
 
 	it('gathers all four categories simultaneously', async () => {
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([
 			{ tier: 'standard', provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
 		]);
@@ -478,12 +472,7 @@ describe('gatherSystemData error isolation', () => {
 
 		const data = await gatherSystemData(
 			systemInfo,
-			new Set<'llm' | 'costs' | 'scheduling' | 'system'>([
-				'llm',
-				'costs',
-				'scheduling',
-				'system',
-			]),
+			new Set<'llm' | 'costs' | 'scheduling' | 'system'>(['llm', 'costs', 'scheduling', 'system']),
 			'everything',
 			undefined,
 			true,
@@ -559,7 +548,13 @@ describe('data category — app-aware prompt integration', () => {
 			},
 		]);
 
-		const prompt = await buildAppAwareSystemPrompt('what data do I have?', 'user1', [], [], makeDeps());
+		const prompt = await buildAppAwareSystemPrompt(
+			'what data do I have?',
+			'user1',
+			[],
+			[],
+			makeDeps(),
+		);
 		expect(prompt).toContain('daily-notes/2026-03-19.md');
 		expect(prompt).toContain('Installed apps that may have data');
 		expect(prompt).toContain('Notes (notes)');
@@ -604,7 +599,7 @@ describe('data category — app-aware prompt integration', () => {
 describe('gatherSystemData state transition', () => {
 	it('reflects updated tier assignments after model switch', async () => {
 		const services = createMockCoreServices();
-		const systemInfo = services.systemInfo!;
+		const systemInfo = services.systemInfo;
 
 		// Before switch
 		vi.mocked(systemInfo.getTierAssignments).mockReturnValue([

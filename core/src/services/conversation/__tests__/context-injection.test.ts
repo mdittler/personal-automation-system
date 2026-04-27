@@ -11,24 +11,22 @@
  * - /ask command same treatment: summary to classifier, recentFilePaths to dataQuery
  */
 
-import type { CoreServices, DataQueryResult } from '@pas/core/types';
+import type { CoreServices, DataQueryResult, InteractionContextService } from '@pas/core/types';
 import type { InteractionEntry } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import {
 	classifyPASMessage,
 	extractRecentFilePaths,
 	formatInteractionContextSummary,
 } from '../index.js';
-import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helper: build InteractionEntry fixtures
 // ---------------------------------------------------------------------------
 
-function makeEntry(
-	partial: Partial<InteractionEntry> & { timestamp?: number },
-): InteractionEntry {
+function makeEntry(partial: Partial<InteractionEntry> & { timestamp?: number }): InteractionEntry {
 	return {
 		appId: 'food',
 		action: 'receipt_captured',
@@ -178,7 +176,11 @@ describe('classifyPASMessage — context injection (Phase 4b)', () => {
 	it('includes recent context summary in system prompt when recentContext is provided', async () => {
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES_DATA');
 
-		await classifyPASMessage('what did that cost?', services, 'receipt_captured (food app, 2 min ago)');
+		await classifyPASMessage(
+			'what did that cost?',
+			services,
+			'receipt_captured (food app, 2 min ago)',
+		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
 		const systemPrompt = callArgs[1]?.systemPrompt ?? '';
@@ -240,6 +242,7 @@ describe('classifyPASMessage — context injection (Phase 4b)', () => {
 
 describe('handleMessage — context injection wiring (Phase 4b)', () => {
 	let services: CoreServices;
+	let interactionContext: InteractionContextService;
 
 	const recentEntries: InteractionEntry[] = [
 		{
@@ -261,6 +264,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 			},
 		});
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
+		interactionContext = services.interactionContext as InteractionContextService;
 	});
 
 	it('passes recent context summary to classifyPASMessage (system prompt includes it)', async () => {
@@ -296,7 +300,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 
 	it('does NOT pass recentFilePaths when no interaction context entries', async () => {
 		// Override to return empty
-		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
+		vi.mocked(interactionContext.getRecent).mockReturnValue([]);
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
@@ -313,7 +317,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 	});
 
 	it('does NOT include "Recent user actions" in classifier prompt when getRecent returns empty', async () => {
-		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
+		vi.mocked(interactionContext.getRecent).mockReturnValue([]);
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier
@@ -353,7 +357,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 			filePaths: ['receipts/test.yaml'],
 			timestamp: Date.now() - 60000,
 		};
-		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([maliciousEntry]);
+		vi.mocked(interactionContext.getRecent).mockReturnValue([maliciousEntry]);
 		vi.mocked(services.llm.complete).mockResolvedValue('YES');
 
 		await makeConversationService(services).handleMessage(makeMessageCtx('what did that cost?'));
@@ -372,6 +376,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 
 describe('/ask command — context injection wiring (Phase 4b)', () => {
 	let services: CoreServices;
+	let interactionContext: InteractionContextService;
 
 	const recentEntries: InteractionEntry[] = [
 		{
@@ -392,6 +397,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 				getRecent: vi.fn().mockReturnValue(recentEntries),
 			},
 		});
+		interactionContext = services.interactionContext as InteractionContextService;
 	});
 
 	it('passes recent context summary to classifyPASMessage in /ask (system prompt includes it)', async () => {
@@ -427,7 +433,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 	});
 
 	it('does NOT pass recentFilePaths in /ask when no interaction context', async () => {
-		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
+		vi.mocked(interactionContext.getRecent).mockReturnValue([]);
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA')

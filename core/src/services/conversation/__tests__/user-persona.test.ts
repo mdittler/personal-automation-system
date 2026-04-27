@@ -15,14 +15,11 @@
 
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-	createMockCoreServices,
-	createMockScopedStore,
-} from '../../../testing/mock-services.js';
-import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
-import { classifyPASMessage } from '../index.js';
 import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
+import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import { classifyPASMessage } from '../index.js';
+import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,7 +63,7 @@ describe('classifier prompt content', () => {
 	});
 
 	it('classifier prompt describes PAS domains so real LLM can classify food questions', async () => {
-		await classifyPASMessage("what did I have for dinner last Tuesday?", services);
+		await classifyPASMessage('what did I have for dinner last Tuesday?', services);
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		// Prompt must describe the food/grocery/health domain
@@ -76,14 +73,14 @@ describe('classifier prompt content', () => {
 	});
 
 	it('classifier prompt describes scheduling so it can classify reminder questions', async () => {
-		await classifyPASMessage("can you remind me to take my medication at 8pm?", services);
+		await classifyPASMessage('can you remind me to take my medication at 8pm?', services);
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		expect(systemPrompt).toContain('scheduling');
 	});
 
 	it('classifier prompt describes system status so it can classify cost/model questions', async () => {
-		await classifyPASMessage("how much am I spending on AI this month?", services);
+		await classifyPASMessage('how much am I spending on AI this month?', services);
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		expect(systemPrompt).toContain('model');
@@ -105,7 +102,7 @@ describe('classifier prompt content', () => {
 			},
 		]);
 
-		await classifyPASMessage("how do I add a recipe?", services);
+		await classifyPASMessage('how do I add a recipe?', services);
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		expect(systemPrompt).toContain('Food');
@@ -435,7 +432,9 @@ describe('/ask command with natural language questions', () => {
 
 		// /ask now runs classifier first (fast tier), then main response (standard tier)
 		expect(services.llm.complete).toHaveBeenCalledTimes(2);
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		const prompt = standardCall?.[1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(prompt);
 		// And household context is included
@@ -448,10 +447,15 @@ describe('/ask command with natural language questions', () => {
 			.mockResolvedValueOnce("You've spent $1.20 this month."); // main LLM
 		const ctx = createTestMessageContext({ text: '/ask how much have I spent this month?' });
 
-		await makeConversationService(services).handleAsk(['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
+		await makeConversationService(services).handleAsk(
+			['how', 'much', 'have', 'I', 'spent', 'this', 'month?'],
+			ctx,
+		);
 
 		// /ask now runs classifier (fast tier) then main response (standard tier)
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		const prompt = standardCall?.[1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(prompt);
 		expect(services.telegram.send).toHaveBeenCalledWith(
