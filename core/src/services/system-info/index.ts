@@ -44,7 +44,6 @@ export interface SystemInfoServiceOptions {
 	appRegistry: AppRegistry;
 	safeguards: LLMSafeguardsConfig;
 	timezone: string;
-	fallbackMode: string;
 	logger: Logger;
 }
 
@@ -58,7 +57,6 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 	private readonly appRegistry: AppRegistry;
 	private readonly safeguards: LLMSafeguardsConfig;
 	private readonly timezone: string;
-	private readonly fallbackMode: string;
 	private readonly logger: Logger;
 
 	constructor(options: SystemInfoServiceOptions) {
@@ -71,7 +69,6 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 		this.appRegistry = options.appRegistry;
 		this.safeguards = options.safeguards;
 		this.timezone = options.timezone;
-		this.fallbackMode = options.fallbackMode;
 		this.logger = options.logger;
 	}
 
@@ -155,7 +152,6 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 			userCount: this.userManager.getAllUsers().length,
 			cronJobCount: this.cronManager.getRegisteredJobs().length,
 			timezone: this.timezone,
-			fallbackMode: this.fallbackMode,
 		};
 	}
 

@@ -57,14 +57,12 @@ function createMockLLM(classifyResult?: ClassifyResult): LLMService {
 
 function createMockConfig(
 	users: SystemConfig['users'] = [],
-	fallback: 'chatbot' | 'notes' = 'chatbot',
 ): SystemConfig {
 	return {
 		port: 3000,
 		dataDir: '/tmp/data',
 		logLevel: 'info',
 		timezone: 'UTC',
-		fallback,
 		telegram: { botToken: 'test' },
 		ollama: { url: 'http://localhost:11434', model: 'test' },
 		claude: { apiKey: 'test', model: 'test' },
@@ -709,10 +707,9 @@ describe('Free-text fallback — ConversationService dispatch', () => {
 		overrideLlm?: LLMService,
 		options?: {
 			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
-			fallbackMode?: 'chatbot' | 'notes';
 		},
 	): Router {
-		const config = createMockConfig(routerUsers, options?.fallbackMode ?? 'chatbot');
+		const config = createMockConfig(routerUsers);
 		const cache = new ManifestCache();
 		const registry = {
 			getApp: () => undefined,
@@ -783,13 +780,5 @@ describe('Free-text fallback — ConversationService dispatch', () => {
 		);
 	});
 
-	it("fallback: 'notes' routes to FallbackHandler even when conversationService is present", async () => {
-		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
-		const router = buildRouter(users, undefined, { conversationService, fallbackMode: 'notes' });
-
-		await router.routeMessage(createTextCtx('hello'));
-
-		expect(conversationService.handleMessage).not.toHaveBeenCalled();
-		expect(fallback.handleUnrecognized).toHaveBeenCalled();
-	});
 });
+

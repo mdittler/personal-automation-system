@@ -52,7 +52,7 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			telegram: telegram as any,
 			fallback: { handleUnrecognized: vi.fn() } as any,
 			config: {
-				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC', fallback: 'chatbot',
+				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
 				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
 				gui: { authToken: '' }, cloudflare: {},
 				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
@@ -99,7 +99,7 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			telegram: telegram as any,
 			fallback: { handleUnrecognized: vi.fn() } as any,
 			config: {
-				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC', fallback: 'chatbot',
+				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
 				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
 				gui: { authToken: '' }, cloudflare: {},
 				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],

@@ -25,3 +25,8 @@ After upgrading to this version:
 
 - `/ask`, `/edit`, `/notes` are now Router built-ins — they work even if the user has the
   chatbot app toggled OFF. No configuration change is required.
+
+**As of D.4** the loader silently ignores `defaults.fallback` — no error, no startup warning.
+Earlier (D.3 and prior) any leftover key produced a `pas.yaml defaults.fallback is deprecated…`
+warn-level log at startup; that warning is now removed. Any remaining `fallback:` line in
+`defaults:` can be safely deleted from `config/pas.yaml`.

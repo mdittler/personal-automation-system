@@ -2488,37 +2488,9 @@ Cost accumulation must round to 6 decimal places before summing to prevent float
 
 ### REQ-ROUTE-005: Chatbot fallback (conversational AI)
 
-**Phase:** 16 | **Status:** Implemented
+**Phase:** 16 | **Status:** Superseded by Hermes P1 D.3/D.4
 
-When no app matches a message, route to a built-in chatbot app that uses LLMService (standard tier) + ContextStore for personalized conversational AI responses. Configurable via `defaults.fallback` in pas.yaml (`chatbot` or `notes`). Daily notes append preserved as side effect. Graceful degradation to notes acknowledgment when LLM fails.
-
-**Standard tests:**
-- `router.test.ts` > routeMessage — chatbot fallback > dispatches to chatbot app when fallback mode is chatbot
-- `router.test.ts` > routeMessage — chatbot fallback > uses FallbackHandler when fallback mode is notes
-- `router.test.ts` > routeMessage — chatbot fallback > defaults to chatbot mode when fallbackMode not specified
-- `chatbot.test.ts` > handleMessage > sends LLM response to user
-- `chatbot.test.ts` > handleMessage > calls LLM with standard tier
-- `chatbot.test.ts` > handleMessage > includes context store results in system prompt
-- `chatbot.test.ts` > handleMessage > includes conversation history in system prompt
-
-**Fixes:**
-- D20 (2026-03): Chatbot fallback dispatch bypassed `isAppEnabled()` — disabled chatbot still received messages. Fixed by adding `isAppEnabled()` check in router fallback branch.
-
-**Edge case tests:**
-- `router.test.ts` > routeMessage — chatbot fallback > falls back to notes handler when chatbot mode but no chatbot app
-- `router.test.ts` > routeMessage — chatbot fallback > does NOT dispatch to disabled chatbot app — falls back to notes handler
-- `router.test.ts` > routeMessage — chatbot fallback > catches chatbot app errors and sends error message
-- `chatbot.test.ts` > handleMessage > handles empty message text
-- `chatbot.test.ts` > handleMessage > handles no context store entries
-- `chatbot.test.ts` > handleMessage > handles empty conversation history (first message)
-- `chatbot.test.ts` > handleMessage > limits context entries to 3
-- `chatbot.test.ts` > handleMessage > gracefully degrades to notes acknowledgment on LLM failure
-- `chatbot.test.ts` > handleMessage > still works when context store throws
-- `chatbot.test.ts` > handleMessage > still sends response when history save fails
-- `chatbot.test.ts` > handleMessage > still sends response when daily note append fails
-- `chatbot.test.ts` > handleMessage > sanitizes triple backticks in user message before LLM
-- `chatbot.test.ts` > handleMessage > sanitizes context entries in system prompt (D9)
-- `chatbot.test.ts` > handleMessage > sanitizes conversation history in system prompt
+The original configurable `chatbot|notes` fallback is superseded by the Hermes P1 refactor. Free-text routing now unconditionally reaches `ConversationService` (the core service that replaced the chatbot app). See REQ-CONV-003, REQ-CONV-004, and REQ-CONV-021 for the current implementation. The test files referenced below no longer exist; surviving coverage lives in `conversation-service.test.ts` and `router.test.ts`.
 
 ### REQ-CHATBOT-001: Conversation history management
 
@@ -3155,7 +3127,7 @@ Only keys in `ALLOWED_CONFIG_KEYS` (currently `log_to_notes`) are processed; oth
 
 **Phase:** P1 Chunk C | **Status:** Implemented
 
-`config/pas.yaml` accepts a top-level `chat.log_to_notes` boolean. The config loader (`core/src/services/config/index.ts`) parses it from YAML (snake-case), stores it on `SystemConfig.chat.logToNotes`, and passes it to `ConversationService` as `chatLogToNotesDefault`. `config/pas.yaml.example` documents the field with a deprecation note about `defaults.fallback`.
+`config/pas.yaml` accepts a top-level `chat.log_to_notes` boolean. The config loader (`core/src/services/config/index.ts`) parses it from YAML (snake-case), stores it on `SystemConfig.chat.logToNotes`, and passes it to `ConversationService` as `chatLogToNotesDefault`. `config/pas.yaml.example` documents the field.
 
 **Standard tests** (compose-runtime wiring): `chatLogToNotesDefault: config.chat?.logToNotes ?? false` is passed to `new ConversationService(...)`.
 
@@ -3234,13 +3206,13 @@ A virtual `'chatbot'` registry entry (added in Chunk D.1 via `AppRegistry.regist
 
 ---
 
-### REQ-CONV-021: chatbotApp/fallbackMode fields removed from RouterOptions
+### REQ-CONV-021: Legacy fallback surface removed from core
 
-**Phase:** Hermes P1 Chunk D | **Status:** Implemented
+**Phase:** Hermes P1 Chunk D.4 | **Status:** Implemented
 
-`chatbotApp` and `fallbackMode` fields are removed from `RouterOptions`. `sendToFallback()` is simplified: when `config.fallback === 'notes'` or no `ConversationService` is present the message routes to `FallbackHandler`; otherwise it routes to `ConversationService`. The legacy `chatbotApp` dispatch branch is deleted. `SystemConfig.fallback` is preserved to honour existing `fallback: notes` deployments; full removal of `fallback`/`_legacyKeys` from `SystemConfig` is deferred to Chunk D.4.
+Fully complete in D.4. `SystemConfig.fallback`, `SystemConfig._legacyKeys`, `SystemInfoServiceImpl.fallbackMode`, the `defaults.fallback` zod schema entry, the legacy `defaults.fallback` startup deprecation warning, the router's `config.fallback === 'notes'` branch in `sendToFallback()`, and the `/ask` `Fallback mode:` system-data line are removed. Operators may safely delete `defaults.fallback` from `pas.yaml`; leftover keys are silently ignored.
 
-**Standard tests** (`core/src/services/router/__tests__/router.test.ts`): legacy fallback-branch tests removed; tests verify ConversationService is used for `fallback: chatbot` and that `fallback: notes` still routes to `FallbackHandler`.
+**Standard tests:** Legacy fallback-branch tests removed (D.3); surviving router and conversation tests verify ConversationService is the unconditional free-text target.
 
 ---
 
@@ -3307,17 +3279,9 @@ The AppKnowledgeBase indexes app documentation (`help.md`, `docs/*.md`) and infr
 
 ### REQ-CONFIG-004: Fallback mode configuration
 
-**Phase:** 16 | **Status:** Implemented
+**Phase:** 16 | **Status:** Removed (Hermes P1 D.4)
 
-The `defaults.fallback` field in pas.yaml controls fallback behavior: `chatbot` (default) routes unmatched messages to the chatbot app, `notes` uses the legacy daily notes handler. Invalid or missing values default to `chatbot`.
-
-**Standard tests:**
-- `config.test.ts` > loadSystemConfig > parses fallback: chatbot from pas.yaml defaults
-- `config.test.ts` > loadSystemConfig > parses fallback: notes from pas.yaml defaults
-
-**Edge case tests:**
-- `config.test.ts` > loadSystemConfig > defaults fallback to chatbot when not specified
-- `config.test.ts` > loadSystemConfig > defaults fallback to chatbot for invalid values
+`SystemConfig.fallback` and `SystemConfig._legacyKeys` are removed. The `defaults.fallback` zod schema entry is deleted; leftover keys in operator `pas.yaml` files are silently ignored. See REQ-CONV-021 for the complete removal record. The four config tests that validated this field are deleted.
 
 ### REQ-REGISTRY-004: App packaging and install CLI
 
@@ -6282,7 +6246,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
 | REQ-SERVER-003 | server.test.ts | 2 | 2 | Implemented |
-| REQ-ROUTE-005 | router.test.ts, chatbot.test.ts | 7 | 14 | Implemented |
+| REQ-ROUTE-005 | (superseded — see REQ-CONV-021) | 0 | 0 | Superseded |
 | REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 26 | Implemented |
 | REQ-ROUTE-007 | router.test.ts, router-verification.test.ts, context-promotion.test.ts | 12 | 3 | Implemented |
 | REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
@@ -6294,7 +6258,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CHATBOT-007 | chatbot.test.ts | 5 | 0 | Implemented |
 | REQ-APPMETA-001 | app-metadata.test.ts | 8 | 9 | Implemented |
 | REQ-APPKNOW-001 | app-knowledge.test.ts | 9 | 9 | Implemented |
-| REQ-CONFIG-004 | config.test.ts | 2 | 2 | Implemented |
+| REQ-CONFIG-004 | (removed — see REQ-CONV-021) | 0 | 0 | Removed |
 | REQ-INSTALL-001 | static-analyzer.test.ts | 5 | 16 | Implemented |
 | REQ-INSTALL-002 | compatibility-checker.test.ts | 5 | 9 | Implemented |
 | REQ-INSTALL-003 | installer.test.ts | 5 | 20 | Implemented |
@@ -6413,6 +6377,6 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-011 | uninstall-app.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-012 | (verified by absence of apps/chatbot/) | 0 | 0 | Implemented |
 | REQ-CONV-013 | virtual-app-tripwire.integration.test.ts, chatbot-virtual-config.integration.test.ts | 5 | 0 | Implemented |
-| REQ-CONV-021 | router.test.ts | 0 | 0 | Implemented |
+| REQ-CONV-021 | router.test.ts, conversation-service.test.ts | 0 | 0 | Implemented |
 
 | **Totals** | **178 test files** | **1415** | **1656** | **3071 tests** |

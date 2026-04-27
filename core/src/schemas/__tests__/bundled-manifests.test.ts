@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -10,10 +10,25 @@ import { validateManifest } from '../validate-manifest.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appsDir = join(__dirname, '..', '..', '..', '..', 'apps');
 
+async function hasManifest(appDir: string): Promise<boolean> {
+	try {
+		await access(join(appDir, 'manifest.yaml'));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 describe('bundled manifests', () => {
 	it('validate and avoid app-prefixed scope paths', async () => {
 		const entries = await readdir(appsDir, { withFileTypes: true });
-		const appDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+		const allDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+		const appDirs: string[] = [];
+		for (const name of allDirs) {
+			if (await hasManifest(join(appsDir, name))) {
+				appDirs.push(name);
+			}
+		}
 
 		expect(appDirs.length).toBeGreaterThan(0);
 

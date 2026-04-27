@@ -2589,9 +2589,9 @@ Replace the router's "dispatch to chatbot app" fallback with a direct call to a 
 - **Modified:** `core/src/services/router/index.ts` — `conversationService?` option + field + `dispatchConversation()` helper; fallback branches prefer conversationService when wired
 - **Modified:** `core/src/services/router/__tests__/router.test.ts` — 4 new cases (preferred, fallback, disable, error isolation)
 - **Modified:** `core/src/services/router/__tests__/router-verification.test.ts` — 1 new case (verifier picks chatbot → conversationService, testing-standards rule #2)
-- **Modified:** `core/src/types/config.ts` — `@deprecated` on `fallback`; new `_legacyKeys?` field
-- **Modified:** `core/src/services/config/index.ts` — populates `_legacyKeys.defaultsFallback`
-- **Modified:** `core/src/compose-runtime.ts` — constructs ConversationService with dedicated LLMGuard + DataStore + AppConfigService; passes to Router; rv:chatbot callback prefers conversationService; deprecation warning on `_legacyKeys.defaultsFallback`
+- **Modified:** `core/src/types/config.ts` — `@deprecated` on `fallback`; new `_legacyKeys?` field (Removed in D.4)
+- **Modified:** `core/src/services/config/index.ts` — populates `_legacyKeys.defaultsFallback` (Removed in D.4)
+- **Modified:** `core/src/compose-runtime.ts` — constructs ConversationService with dedicated LLMGuard + DataStore + AppConfigService; passes to Router; rv:chatbot callback prefers conversationService; deprecation warning on `_legacyKeys.defaultsFallback` (Removed in D.4)
 - **Modified:** `core/src/__tests__/compose-runtime.smoke.integration.test.ts` — 1 new case (ConversationService wired into Router)
 - **Modified:** `docs/urs.md` — REQ-CONV-003/004/005/014/015 + traceability matrix
 - **Modified:** `docs/open-items.md` — Chunk D entries (chatbot deletion, SystemConfig cleanup, Router cleanup, SystemInfoService cleanup)
@@ -2609,6 +2609,106 @@ Replace the router's "dispatch to chatbot app" fallback with a direct call to a 
 - The chatbot app remains loaded for `/ask` and `/edit` commands; full removal is Chunk D.
 - A dedicated `LLMGuard` (60 req/hr, $15/mo cap) wraps ConversationService — rate limit errors surface as friendly replies.
 - Conversation history writes to `data/households/<hh>/users/<userId>/chatbot/history.json` when household service is wired (always in production).
+
+---
+
+## Phase Hermes P1 Chunk C: ConversationService — Daily Notes, AppConfig, Cleanup
+
+**Branch:** `hermes-p1-chunk-c` | **Status:** Complete | **Tests added:** ~20
+
+### Goal
+
+Wire daily-notes opt-in, AppConfigService, and model-journal tag extraction into `ConversationService`. Retire the `chatbot` keyword from the app system prompt. Add per-user `log_to_notes` override resolution. REQ-CONV-014 (daily-notes) and REQ-CONV-010 (`chat.log_to_notes` config field) implemented here.
+
+### Key files
+
+- **Modified:** `core/src/services/conversation/conversation-service.ts` — `appendDailyNote`, `resolveUserBool`, `chatLogToNotesDefault` wired
+- **Modified:** `core/src/services/conversation/__tests__/daily-notes.test.ts` — 4 cases
+- **Modified:** `core/src/services/conversation/__tests__/system-data.test.ts` — system-data emission tests
+- **Modified:** `docs/urs.md` — REQ-CONV-014, REQ-CONV-010 entries
+
+---
+
+## Phase Hermes P1 Chunk D.1: Virtual Chatbot Registry Entry
+
+**Branch:** `hermes-p1-chunk-d1` | **Status:** Complete | **Tests added:** 5
+
+### Goal
+
+Register a virtual `'chatbot'` app entry in `AppRegistry` so app-aware code (toggle store, GUI config) can treat ConversationService as a first-class app without loading a real app module (REQ-CONV-013).
+
+### Key files
+
+- **Modified:** `core/src/services/app-registry/index.ts` — `registerVirtual()` + `buildVirtualChatbotApp()`; `VIRTUAL_CHATBOT_PATH` constant exported
+- **Modified:** `core/src/compose-runtime.ts` — `registerVirtual()` called immediately after `loadAll()`
+- **Modified:** `core/src/services/conversation/__tests__/virtual-app-tripwire.integration.test.ts` — 5 new tests
+- **Modified:** `docs/urs.md` — REQ-CONV-013
+
+---
+
+## Phase Hermes P1 Chunk D.2: Test Migration
+
+**Branch:** `hermes-p1-chunk-d2` | **Status:** Complete | **Tests added:** 0 (migration only — ~5,455 LOC moved)
+
+### Goal
+
+Migrate all 12 chatbot test files from `apps/chatbot/src/__tests__/` to `core/src/services/conversation/__tests__/`. No new coverage; test infrastructure aligned with core.
+
+### Key files
+
+- **Deleted:** all 12 test files under `apps/chatbot/src/__tests__/`
+- **Created:** 8 split target files in `core/src/services/conversation/__tests__/` (conversation-service, prompt-builder, handle-ask, auto-detect, pas-classifier, control-tags, model-journal, system-data)
+
+---
+
+## Phase Hermes P1 Chunk D.3: Delete Chatbot App Source
+
+**Branch:** `hermes-p1-chunk-d3` | **Status:** Complete | **Tests added:** 5
+
+### Goal
+
+Delete `apps/chatbot/src/` source files. Remove `chatbotApp` and `fallbackMode` from `RouterOptions` and the `Router` class. Remove `'chatbot'` from `PROTECTED_APPS`. Rewrite `manifest-parity.test.ts` as a full virtual-manifest contract test.
+
+### Key files
+
+- **Deleted:** all source files under `apps/chatbot/src/`
+- **Modified:** `core/src/services/router/index.ts` — `chatbotApp`/`fallbackMode` removed; `sendToFallback` simplified (config.fallback branch deferred to D.4)
+- **Modified:** `core/src/schemas/__tests__/manifest-parity.test.ts` — rewritten as virtual-manifest contract test
+- **Modified:** `docs/urs.md` — REQ-CONV-011/012/013/021, REQ-INSTALL-007
+
+---
+
+## Phase Hermes P1 Chunk D.4: Final Legacy Fallback Cleanup
+
+**Branch:** `hermes-p1-chunk-d4` | **Status:** Complete | **Tests added:** 0 (deletions only)
+
+### Goal
+
+Remove the last legacy fallback surface: `SystemConfig.fallback`, `SystemConfig._legacyKeys`, `SystemInfoService.fallbackMode`, the `defaults.fallback` config parser and zod schema entry, the startup deprecation warning, the `Fallback mode:` line in conversation system-data, and the router's `config.fallback === 'notes'` branch. **Hermes P1 is complete.**
+
+### Key files (source)
+
+- **Modified:** `core/src/types/config.ts` — deleted `fallback` and `_legacyKeys` fields
+- **Modified:** `core/src/types/system-info.ts` — deleted `fallbackMode` from `SystemStatusInfo`
+- **Modified:** `core/src/services/system-info/index.ts` — removed `fallbackMode` option/field/constructor/return
+- **Modified:** `core/src/services/conversation/system-data.ts` — removed `'fallback'` keyword + `Fallback mode:` line
+- **Modified:** `core/src/services/router/index.ts` — removed `config.fallback === 'notes'` branch from `sendToFallback()`
+- **Modified:** `core/src/compose-runtime.ts` — removed `fallbackMode` arg + deprecation warning block
+- **Modified:** `core/src/services/config/index.ts` — removed `fallback` field + `_legacyKeys` assignment
+- **Modified:** `core/src/services/config/pas-yaml-schema.ts` — removed `fallback` from `defaults` schema
+
+### Verification
+
+- `pnpm -r build` — clean
+- `pnpm -r test` — 4284 tests, 0 failures
+
+---
+
+## Hermes P1: Status Complete
+
+**Hermes P1 (Chunks A → B → C → D.1 → D.2 → D.3 → D.4) is complete as of 2026-04-27.**
+
+ConversationService is now a first-class core service. The chatbot app source is deleted. All legacy `fallback`/`_legacyKeys` surface is removed. Phases P2–P5 (ConversationRetrievalService, session persistence, memory snapshot, FTS5 search) remain deferred per `docs/open-items.md`.
 
 ---
 

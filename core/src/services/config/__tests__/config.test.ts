@@ -517,56 +517,6 @@ describe('loadSystemConfig', () => {
 		);
 	});
 
-	// --- Fallback config tests ---
-
-	it('parses fallback: chatbot from pas.yaml defaults', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(yamlPath, stringify({ defaults: { fallback: 'chatbot' } }), 'utf-8');
-
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
-
-		expect(config.fallback).toBe('chatbot');
-	});
-
-	it('parses fallback: notes from pas.yaml defaults', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(yamlPath, stringify({ defaults: { fallback: 'notes' } }), 'utf-8');
-
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
-
-		expect(config.fallback).toBe('notes');
-	});
-
-	it('defaults fallback to chatbot when not specified', async () => {
-		const envPath = join(tempDir, '.env');
-		await writeEnvFile(envPath, requiredEnvVars);
-
-		const config = await loadSystemConfig({
-			envPath,
-			configPath: join(tempDir, 'nonexistent.yaml'),
-		});
-
-		expect(config.fallback).toBe('chatbot');
-	});
-
-	it('defaults fallback to chatbot for invalid values', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(yamlPath, stringify({ defaults: { fallback: 'invalid' } }), 'utf-8');
-
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
-
-		expect(config.fallback).toBe('chatbot');
-	});
-
 	it('parses chat.log_to_notes: true from pas.yaml', async () => {
 		const envPath = join(tempDir, '.env');
 		const yamlPath = join(tempDir, 'pas.yaml');

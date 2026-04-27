@@ -139,7 +139,7 @@ describe('gatherSystemData', () => {
 			userCount: 1,
 			cronJobCount: 2,
 			timezone: 'America/New_York',
-			fallbackMode: 'chatbot',
+
 		});
 		vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
 			rateLimit: { maxRequests: 60, windowSeconds: 3600 },
@@ -222,7 +222,7 @@ describe('gatherSystemData', () => {
 			userCount: 2,
 			cronJobCount: 2,
 			timezone: 'UTC',
-			fallbackMode: 'chatbot',
+
 		});
 		vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
 			rateLimit: { maxRequests: 60, windowSeconds: 3600 },
@@ -268,7 +268,7 @@ describe('gatherSystemData', () => {
 			userCount: 2,
 			cronJobCount: 1,
 			timezone: 'UTC',
-			fallbackMode: 'chatbot',
+
 		});
 		vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
 			rateLimit: { maxRequests: 60, windowSeconds: 3600 },
@@ -381,7 +381,7 @@ describe('gatherSystemData error isolation', () => {
 			userCount: 1,
 			cronJobCount: 0,
 			timezone: 'UTC',
-			fallbackMode: 'chatbot',
+
 		});
 		vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
 			rateLimit: { maxRequests: 60, windowSeconds: 3600 },
@@ -462,7 +462,7 @@ describe('gatherSystemData error isolation', () => {
 			userCount: 1,
 			cronJobCount: 1,
 			timezone: 'UTC',
-			fallbackMode: 'chatbot',
+
 		});
 		vi.mocked(systemInfo.getSafeguardDefaults).mockReturnValue({
 			rateLimit: { maxRequests: 60, windowSeconds: 3600 },

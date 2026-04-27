@@ -103,7 +103,6 @@ export const PasYamlConfigSchema = z
 			.object({
 				log_level: z.string().optional(),
 				timezone: z.string().optional(),
-				fallback: z.string().optional(),
 			})
 			.passthrough()
 			.optional(),

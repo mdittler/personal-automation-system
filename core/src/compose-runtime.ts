@@ -588,7 +588,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		appRegistry: registry,
 		safeguards: safeguardsConfig,
 		timezone: config.timezone,
-		fallbackMode: config.fallback ?? 'chatbot',
 		logger: createChildLogger(logger, { service: 'system-info' }),
 	});
 
@@ -962,15 +961,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
 	});
 	logger.info('ConversationService: initialized');
-
-	// 9d. Legacy `defaults.fallback` deprecation warning (REQ-CONV-014).
-	if (config._legacyKeys?.defaultsFallback) {
-		logger.warn(
-			'pas.yaml `defaults.fallback` is deprecated and will be removed in a future release. ' +
-				'Free-text routing now prefers ConversationService directly; the YAML setting still controls ' +
-				'the legacy chatbot/notes fallback path for back-compat. See docs/open-items.md.',
-		);
-	}
 
 	// 9b. Route verification (optional)
 	let routeVerifier: RouteVerifier | undefined;

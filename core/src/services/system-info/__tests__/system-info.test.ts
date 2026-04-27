@@ -97,7 +97,6 @@ function createMockDeps(overrides?: Record<string, unknown>) {
 		appRegistry,
 		safeguards,
 		timezone: 'America/New_York',
-		fallbackMode: 'chatbot',
 		logger: logger as unknown as Logger,
 		...overrides,
 	};
@@ -243,7 +242,6 @@ describe('SystemInfoServiceImpl', () => {
 			expect(status.userCount).toBe(1);
 			expect(status.cronJobCount).toBe(1);
 			expect(status.timezone).toBe('America/New_York');
-			expect(status.fallbackMode).toBe('chatbot');
 			expect(status.uptimeSeconds).toBeGreaterThanOrEqual(0);
 		});
 	});

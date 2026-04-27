@@ -89,7 +89,6 @@ function createMockConfig(users: SystemConfig['users'] = []): SystemConfig {
 		dataDir: '/tmp/data',
 		logLevel: 'info',
 		timezone: 'UTC',
-		fallback: 'chatbot',
 		telegram: { botToken: 'test' },
 		claude: { apiKey: 'test', model: 'test' },
 		gui: { authToken: 'test' },

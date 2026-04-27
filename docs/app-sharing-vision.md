@@ -172,14 +172,14 @@ When no app matches:
 
 ### Design Constraints
 - The chatbot IS an app — follows `AppModule` interface, has a `manifest.yaml`, gets `CoreServices` via `init()`
-- Always enabled (cannot be toggled off, but `pas.yaml` can switch fallback mode: `chatbot | notes`)
+- Always enabled (cannot be toggled off; free-text routing always reaches ConversationService)
 - Subject to the same LLM cost safeguards as any other app (Phase 13 rate limits + cost caps)
 - Does not have special privileges — same `CoreServices` access as any app
 
 ### Cost Management
 - Chatbot uses the `standard` LLM tier by default
 - Per-app cost cap in `LLMGuard` prevents runaway spending
-- Users can switch fallback to `notes` mode if they want zero-cost fallback
+
 
 ---
 

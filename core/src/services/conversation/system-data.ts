@@ -59,7 +59,6 @@ export const CATEGORY_KEYWORDS: Record<QuestionCategory, string[]> = {
 		'how many apps',
 		'how many users',
 		'timezone',
-		'fallback',
 	],
 	data: [
 		'what did i',
@@ -344,7 +343,6 @@ export async function gatherSystemData(
 			if (isAdmin) {
 				sections.push(`  Users: ${status.userCount}`);
 				sections.push(`  Cron jobs: ${status.cronJobCount}`);
-				sections.push(`  Fallback mode: ${status.fallbackMode}`);
 
 				const safeguards = systemInfo.getSafeguardDefaults();
 				sections.push('LLM safeguard defaults:');
