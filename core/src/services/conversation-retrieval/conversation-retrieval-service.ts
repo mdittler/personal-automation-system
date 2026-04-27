@@ -1,25 +1,26 @@
 /**
- * ConversationRetrievalService skeleton.
+ * ConversationRetrievalService — composes all data readers.
  *
- * Chunk A: service is fully wired via DI but all methods throw 'not implemented'
- * until Chunk C composes the real readers. The requestContext guard on every
- * method ensures the service is only called within a properly-scoped request
- * (userId must be set in AsyncLocalStorage before any real data access).
- *
- * Chunk C fills in all method bodies.
+ * Chunk A: skeleton — all methods throw 'not implemented'.
+ * Chunk C: fills in all method bodies, adds ConversationSystemInfoReader,
+ *          chooseSources(), and full ConversationContextSnapshot.
  * Chunk D wires the service into handleMessage / handleAsk.
  */
 
-import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
-import type { AppMetadataService } from '../../types/app-metadata.js';
+import type { AlertDefinition } from '../../types/alert.js';
+import type { AppKnowledgeBaseService, KnowledgeEntry } from '../../types/app-knowledge.js';
+import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
-import type { ContextStoreService } from '../../types/context-store.js';
+import type { ContextEntry, ContextStoreService } from '../../types/context-store.js';
 import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
+import type { ReportDefinition } from '../../types/report.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import { getCurrentUserId } from '../context/request-context.js';
-import type { InteractionContextService } from '../interaction-context/index.js';
+import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
+import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
+import { chooseSources } from './source-selection.js';
 
 // ─── Error types ──────────────────────────────────────────────────────────────
 
@@ -49,31 +50,65 @@ export interface ContextSnapshotOptions {
 	characterBudget?: number;
 }
 
+/**
+ * Character budget defaults (approximate prompt-injection limits).
+ * Total budget across all categories; each category slice is capped
+ * proportionally by DEFAULT_CATEGORY_BUDGET_CHARS.
+ */
+const DEFAULT_TOTAL_BUDGET_CHARS = 24_000;
+const DEFAULT_CATEGORY_BUDGET_CHARS = 6_000;
+
 export interface ConversationContextSnapshot {
+	/** Context store entries for the current user. */
+	contextStore?: ContextEntry[];
+	/** Recent interaction entries for the current user (newest-first). */
+	interactionContext?: InteractionEntry[];
+	/** Apps enabled for the current user. */
+	enabledApps?: AppInfo[];
+	/** App knowledge search results. */
+	appKnowledge?: KnowledgeEntry[];
+	/** Formatted system data block (admin-gated by category). */
+	systemDataBlock?: string;
+	/** Data query result (user-accessible files). */
+	dataQueryResult?: DataQueryResult;
+	/** Reports scoped to the current user. */
+	reports?: ReportDefinition[];
+	/** Alerts scoped to the current user. */
+	alerts?: AlertDefinition[];
 	/** Categories that failed to load (partial-failure tolerance). */
 	failures: AllowedSourceCategory[];
-	// Additional fields added in Chunk C (data, appInfo, contextEntries, …).
 }
 
 export interface ConversationRetrievalService {
 	/** Query user-accessible data files using natural language. */
 	searchData(args: { question: string; recentFilePaths?: string[] }): Promise<DataQueryResult>;
 	/** List all context store entries for the current user. */
-	listContextEntries(): Promise<unknown[]>; // full types added in Chunk C
+	listContextEntries(): Promise<ContextEntry[]>;
 	/** Get recent interaction entries for the current user. */
-	getRecentInteractions(): Promise<unknown[]>; // full types added in Chunk C
+	getRecentInteractions(): Promise<InteractionEntry[]>;
 	/** Get apps enabled for the current user. */
-	getEnabledApps(): Promise<unknown[]>; // full types added in Chunk C
+	getEnabledApps(): Promise<AppInfo[]>;
 	/** Search app documentation/knowledge base. */
-	searchAppKnowledge(query: string): Promise<unknown[]>; // full types added in Chunk C
+	searchAppKnowledge(query: string): Promise<KnowledgeEntry[]>;
 	/** Build system data block (admin-gated). */
 	buildSystemDataBlock(args: { question: string; isAdmin: boolean }): Promise<string>;
 	/** List reports scoped to the current user (Chunk B scoped API). */
-	listScopedReports(): Promise<unknown[]>; // full types added in Chunk C
+	listScopedReports(): Promise<ReportDefinition[]>;
 	/** List alerts scoped to the current user (Chunk B scoped API). */
-	listScopedAlerts(): Promise<unknown[]>; // full types added in Chunk C
+	listScopedAlerts(): Promise<AlertDefinition[]>;
 	/** Compose a full context snapshot for LLM injection. */
 	buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot>;
+}
+
+// ─── Structural service interfaces ───────────────────────────────────────────
+// Use structural interfaces (not class imports) to keep coupling loose.
+
+export interface ReportServiceForRetrieval {
+	listForUser(userId: string): Promise<ReportDefinition[]>;
+}
+
+export interface AlertServiceForRetrieval {
+	listForUser(userId: string): Promise<AlertDefinition[]>;
 }
 
 // ─── Deps ─────────────────────────────────────────────────────────────────────
@@ -85,8 +120,9 @@ export interface ConversationRetrievalDeps {
 	appMetadata?: AppMetadataService;
 	appKnowledge?: AppKnowledgeBaseService;
 	systemInfo?: SystemInfoService;
+	reportService?: ReportServiceForRetrieval;
+	alertService?: AlertServiceForRetrieval;
 	logger?: AppLogger;
-	// ReportService / AlertService deps added in Chunk B
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
@@ -110,51 +146,308 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		return userId;
 	}
 
-	async searchData(_args: {
+	async searchData(args: {
 		question: string;
 		recentFilePaths?: string[];
 	}): Promise<DataQueryResult> {
-		this.assertRequestContext('searchData');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+		const userId = this.assertRequestContext('searchData');
+		if (!this.deps.dataQuery) {
+			throw new Error('ConversationRetrievalService.searchData: DataQueryService not wired');
+		}
+		const opts = args.recentFilePaths?.length
+			? { recentFilePaths: args.recentFilePaths }
+			: undefined;
+		return this.deps.dataQuery.query(args.question, userId, opts);
 	}
 
-	async listContextEntries(): Promise<unknown[]> {
-		this.assertRequestContext('listContextEntries');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+	async listContextEntries(): Promise<ContextEntry[]> {
+		const userId = this.assertRequestContext('listContextEntries');
+		if (!this.deps.contextStore) {
+			throw new Error(
+				'ConversationRetrievalService.listContextEntries: ContextStoreService not wired',
+			);
+		}
+		return this.deps.contextStore.listForUser(userId);
 	}
 
-	async getRecentInteractions(): Promise<unknown[]> {
-		this.assertRequestContext('getRecentInteractions');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+	async getRecentInteractions(): Promise<InteractionEntry[]> {
+		const userId = this.assertRequestContext('getRecentInteractions');
+		if (!this.deps.interactionContext) {
+			throw new Error(
+				'ConversationRetrievalService.getRecentInteractions: InteractionContextService not wired',
+			);
+		}
+		return this.deps.interactionContext.getRecent(userId);
 	}
 
-	async getEnabledApps(): Promise<unknown[]> {
-		this.assertRequestContext('getEnabledApps');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+	async getEnabledApps(): Promise<AppInfo[]> {
+		const userId = this.assertRequestContext('getEnabledApps');
+		if (!this.deps.appMetadata) {
+			throw new Error('ConversationRetrievalService.getEnabledApps: AppMetadataService not wired');
+		}
+		return this.deps.appMetadata.getEnabledApps(userId);
 	}
 
-	async searchAppKnowledge(_query: string): Promise<unknown[]> {
-		this.assertRequestContext('searchAppKnowledge');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+	async searchAppKnowledge(query: string): Promise<KnowledgeEntry[]> {
+		const userId = this.assertRequestContext('searchAppKnowledge');
+		if (!this.deps.appKnowledge) {
+			throw new Error(
+				'ConversationRetrievalService.searchAppKnowledge: AppKnowledgeBaseService not wired',
+			);
+		}
+		return this.deps.appKnowledge.search(query, userId);
 	}
 
-	async buildSystemDataBlock(_args: { question: string; isAdmin: boolean }): Promise<string> {
+	async buildSystemDataBlock(args: { question: string; isAdmin: boolean }): Promise<string> {
 		this.assertRequestContext('buildSystemDataBlock');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+		if (!this.deps.systemInfo) {
+			throw new Error(
+				'ConversationRetrievalService.buildSystemDataBlock: SystemInfoService not wired',
+			);
+		}
+		const reader = new ConversationSystemInfoReader(this.deps.systemInfo, this.deps.logger);
+		return reader.buildSystemDataBlock(args);
 	}
 
-	async listScopedReports(): Promise<unknown[]> {
-		this.assertRequestContext('listScopedReports');
-		throw new Error('not implemented yet — blocked on Chunk B scoped APIs');
+	async listScopedReports(): Promise<ReportDefinition[]> {
+		const userId = this.assertRequestContext('listScopedReports');
+		if (!this.deps.reportService) {
+			throw new Error('ConversationRetrievalService.listScopedReports: ReportService not wired');
+		}
+		return this.deps.reportService.listForUser(userId);
 	}
 
-	async listScopedAlerts(): Promise<unknown[]> {
-		this.assertRequestContext('listScopedAlerts');
-		throw new Error('not implemented yet — blocked on Chunk B scoped APIs');
+	async listScopedAlerts(): Promise<AlertDefinition[]> {
+		const userId = this.assertRequestContext('listScopedAlerts');
+		if (!this.deps.alertService) {
+			throw new Error('ConversationRetrievalService.listScopedAlerts: AlertService not wired');
+		}
+		return this.deps.alertService.listForUser(userId);
 	}
 
-	async buildContextSnapshot(_opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot> {
-		this.assertRequestContext('buildContextSnapshot');
-		throw new Error('not implemented yet — blocked on Chunk B/C');
+	async buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot> {
+		const userId = this.assertRequestContext('buildContextSnapshot');
+		const snapshot: ConversationContextSnapshot = { failures: [] };
+
+		const selected = chooseSources(opts);
+		const totalBudget = opts.characterBudget ?? DEFAULT_TOTAL_BUDGET_CHARS;
+
+		// Fan out to all selected readers in parallel — partial fill on failure
+		const tasks: Array<{
+			category: AllowedSourceCategory;
+			promise: Promise<unknown>;
+		}> = [];
+
+		if (selected.has('context-store') && this.deps.contextStore) {
+			tasks.push({
+				category: 'context-store',
+				promise: this.deps.contextStore.listForUser(userId),
+			});
+		} else if (selected.has('context-store')) {
+			snapshot.failures.push('context-store');
+		}
+
+		if (selected.has('interaction-context') && this.deps.interactionContext) {
+			tasks.push({
+				category: 'interaction-context',
+				promise: Promise.resolve(this.deps.interactionContext.getRecent(userId)),
+			});
+		} else if (selected.has('interaction-context')) {
+			snapshot.failures.push('interaction-context');
+		}
+
+		if (selected.has('app-metadata') && this.deps.appMetadata) {
+			tasks.push({
+				category: 'app-metadata',
+				promise: this.deps.appMetadata.getEnabledApps(userId),
+			});
+		} else if (selected.has('app-metadata')) {
+			snapshot.failures.push('app-metadata');
+		}
+
+		if (selected.has('app-knowledge') && this.deps.appKnowledge) {
+			tasks.push({
+				category: 'app-knowledge',
+				promise: this.deps.appKnowledge.search(opts.question, userId),
+			});
+		} else if (selected.has('app-knowledge')) {
+			snapshot.failures.push('app-knowledge');
+		}
+
+		if (selected.has('system-info') && this.deps.systemInfo) {
+			const reader = new ConversationSystemInfoReader(this.deps.systemInfo, this.deps.logger);
+			tasks.push({
+				category: 'system-info',
+				promise: reader.buildSystemDataBlock({
+					question: opts.question,
+					isAdmin: opts.isAdmin,
+				}),
+			});
+		} else if (selected.has('system-info')) {
+			snapshot.failures.push('system-info');
+		}
+
+		// Data query covers all four DataQuery scope categories
+		const dataQueryCategories: AllowedSourceCategory[] = [
+			'user-app-data',
+			'household-shared-data',
+			'space-data',
+			'collaboration-data',
+		];
+		const anyDataQuerySelected = dataQueryCategories.some((c) => selected.has(c));
+		if (anyDataQuerySelected && this.deps.dataQuery) {
+			const recentFilePaths = opts.recentFilePaths.length ? opts.recentFilePaths : undefined;
+			tasks.push({
+				category: 'user-app-data', // representative category for settlement tracking
+				promise: this.deps.dataQuery.query(
+					opts.question,
+					userId,
+					recentFilePaths ? { recentFilePaths } : undefined,
+				),
+			});
+		} else if (anyDataQuerySelected) {
+			for (const cat of dataQueryCategories) {
+				if (selected.has(cat)) snapshot.failures.push(cat);
+			}
+		}
+
+		if (selected.has('reports') && this.deps.reportService) {
+			tasks.push({
+				category: 'reports',
+				promise: this.deps.reportService.listForUser(userId),
+			});
+		} else if (selected.has('reports')) {
+			snapshot.failures.push('reports');
+		}
+
+		if (selected.has('alerts') && this.deps.alertService) {
+			tasks.push({
+				category: 'alerts',
+				promise: this.deps.alertService.listForUser(userId),
+			});
+		} else if (selected.has('alerts')) {
+			snapshot.failures.push('alerts');
+		}
+
+		// Await all tasks with partial-failure tolerance
+		const settled = await Promise.allSettled(tasks.map((t) => t.promise));
+
+		let charsUsed = 0;
+
+		for (const [i, task] of tasks.entries()) {
+			const result = settled[i];
+			if (!result) continue;
+
+			if (result.status === 'rejected') {
+				snapshot.failures.push(task.category);
+				if (task.category === 'user-app-data') {
+					// Also mark the other DataQuery scope categories as failed
+					for (const cat of [
+						'household-shared-data',
+						'space-data',
+						'collaboration-data',
+					] as AllowedSourceCategory[]) {
+						if (selected.has(cat)) snapshot.failures.push(cat);
+					}
+				}
+				this.deps.logger?.warn(
+					`ConversationRetrievalService: reader failed for category=${task.category}`,
+					result.reason,
+				);
+				continue;
+			}
+
+			const value = result.value;
+
+			// Enforce character budget (simple per-category cap)
+			const catBudget = Math.min(DEFAULT_CATEGORY_BUDGET_CHARS, totalBudget - charsUsed);
+			if (catBudget <= 0) {
+				// Budget exhausted — skip remaining categories
+				snapshot.failures.push(task.category);
+				continue;
+			}
+
+			switch (task.category) {
+				case 'context-store': {
+					const entries = value as ContextEntry[];
+					const truncated = truncateArray(
+						entries,
+						catBudget,
+						(e) => e.content.length + e.key.length,
+					);
+					snapshot.contextStore = truncated;
+					charsUsed += entries.reduce((sum, e) => sum + e.content.length + e.key.length, 0);
+					break;
+				}
+				case 'interaction-context': {
+					const entries = value as InteractionEntry[];
+					const truncated = truncateArray(entries, catBudget, (e) => JSON.stringify(e).length);
+					snapshot.interactionContext = truncated;
+					charsUsed += truncated.reduce((sum, e) => sum + JSON.stringify(e).length, 0);
+					break;
+				}
+				case 'app-metadata': {
+					const apps = value as AppInfo[];
+					snapshot.enabledApps = apps;
+					charsUsed += apps.reduce((sum, a) => sum + a.name.length + a.description.length, 0);
+					break;
+				}
+				case 'app-knowledge': {
+					const entries = value as KnowledgeEntry[];
+					const truncated = truncateArray(entries, catBudget, (e) => e.content.length);
+					snapshot.appKnowledge = truncated;
+					charsUsed += truncated.reduce((sum, e) => sum + e.content.length, 0);
+					break;
+				}
+				case 'system-info': {
+					const block = value as string;
+					snapshot.systemDataBlock = block.length > catBudget ? block.slice(0, catBudget) : block;
+					charsUsed += snapshot.systemDataBlock.length;
+					break;
+				}
+				case 'user-app-data': {
+					// DataQueryResult covers all four DataQuery scope categories
+					snapshot.dataQueryResult = value as DataQueryResult;
+					const resultStr = JSON.stringify(snapshot.dataQueryResult);
+					charsUsed += Math.min(resultStr.length, catBudget);
+					break;
+				}
+				case 'reports': {
+					const reports = value as ReportDefinition[];
+					snapshot.reports = reports;
+					charsUsed += reports.reduce((sum, r) => sum + r.name.length, 0);
+					break;
+				}
+				case 'alerts': {
+					const alerts = value as AlertDefinition[];
+					snapshot.alerts = alerts;
+					charsUsed += alerts.reduce((sum, a) => sum + a.name.length, 0);
+					break;
+				}
+				default:
+					// Unknown category — skip
+					break;
+			}
+		}
+
+		return snapshot;
 	}
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Truncate an array of items to fit within a character budget.
+ * Items are included from the front until the budget is exhausted.
+ */
+function truncateArray<T>(items: T[], budget: number, sizeOf: (item: T) => number): T[] {
+	let used = 0;
+	const result: T[] = [];
+	for (const item of items) {
+		const size = sizeOf(item);
+		if (used + size > budget) break;
+		result.push(item);
+		used += size;
+	}
+	return result;
 }

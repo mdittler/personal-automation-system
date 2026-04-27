@@ -621,4 +621,21 @@ describe('ReportService — listForUser', () => {
 		expect(result).toHaveLength(1);
 		expect(result[0]?.id).toBe('r1');
 	});
+
+	it('caller with no household (getHouseholdForUser returns null) still sees own delivery-list reports but not others', async () => {
+		// householdService is wired but returns null for caller (u1 is not in any household)
+		const householdService = makeHouseholdService({ u1: null, u2: 'hh2' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2']),
+			householdService,
+		});
+		// r1: u1 is directly in delivery — should be visible
+		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['u1'] }));
+		// r2: only u2 in delivery (hh2) — u1 has no household, cannot match via household path
+		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('r1');
+	});
 });

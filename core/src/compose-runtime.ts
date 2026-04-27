@@ -900,7 +900,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const dataQueryAdapter = dataQueryServiceImpl
 		? {
 				query: (q: string, uid: string, opts?: DataQueryOptions) =>
-					dataQueryServiceImpl!.query(q, uid, opts),
+					dataQueryServiceImpl.query(q, uid, opts),
 			}
 		: undefined;
 
@@ -937,6 +937,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		appMetadata,
 		appKnowledge,
 		systemInfo: systemInfoService,
+		reportService,
+		alertService,
 		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
 	});
 	logger.info('ConversationRetrievalService: initialized');

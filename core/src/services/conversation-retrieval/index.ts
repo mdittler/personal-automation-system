@@ -8,3 +8,5 @@
 
 export * from './source-policy.js';
 export * from './conversation-retrieval-service.js';
+export * from './conversation-system-info-reader.js';
+export * from './source-selection.js';

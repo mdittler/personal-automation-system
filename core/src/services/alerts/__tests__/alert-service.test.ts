@@ -1309,4 +1309,21 @@ describe('AlertService — listForUser', () => {
 		expect(result).toHaveLength(1);
 		expect(result[0]?.id).toBe('a1');
 	});
+
+	it('caller with no household (getHouseholdForUser returns null) still sees own delivery-list alerts but not others', async () => {
+		// householdService is wired but returns null for caller (u1 is not in any household)
+		const householdService = makeHouseholdSvc({ u1: null, u2: 'hh2' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2']),
+			householdService,
+		});
+		// a1: u1 is directly in delivery — should be visible
+		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
+		// a2: only u2 in delivery (hh2) — u1 has no household, cannot match via household path
+		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('a1');
+	});
 });
