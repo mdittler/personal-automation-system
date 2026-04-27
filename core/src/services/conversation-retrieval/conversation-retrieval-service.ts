@@ -253,6 +253,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		if (selected.has('interaction-context') && this.deps.interactionContext) {
 			tasks.push({
 				category: 'interaction-context',
+				// sync method, wrapped for uniform Promise.allSettled handling
 				promise: Promise.resolve(this.deps.interactionContext.getRecent(userId)),
 			});
 		} else if (selected.has('interaction-context')) {
@@ -390,8 +391,11 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'app-metadata': {
 					const apps = value as AppInfo[];
-					snapshot.enabledApps = apps;
-					charsUsed += apps.reduce((sum, a) => sum + a.name.length + a.description.length, 0);
+					// Pre-compute sizes once to avoid double-stringify in truncateArray + sum
+					const sizeMap = new Map<AppInfo, number>(apps.map((a) => [a, JSON.stringify(a).length]));
+					const truncated = truncateArray(apps, catBudget, (a) => sizeMap.get(a) ?? 0);
+					snapshot.enabledApps = truncated;
+					charsUsed += truncated.reduce((sum, a) => sum + (sizeMap.get(a) ?? 0), 0);
 					break;
 				}
 				case 'app-knowledge': {
@@ -416,14 +420,22 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'reports': {
 					const reports = value as ReportDefinition[];
-					snapshot.reports = reports;
-					charsUsed += reports.reduce((sum, r) => sum + r.name.length, 0);
+					const reportSizeMap = new Map<ReportDefinition, number>(
+						reports.map((r) => [r, JSON.stringify(r).length]),
+					);
+					const truncated = truncateArray(reports, catBudget, (r) => reportSizeMap.get(r) ?? 0);
+					snapshot.reports = truncated;
+					charsUsed += truncated.reduce((sum, r) => sum + (reportSizeMap.get(r) ?? 0), 0);
 					break;
 				}
 				case 'alerts': {
 					const alerts = value as AlertDefinition[];
-					snapshot.alerts = alerts;
-					charsUsed += alerts.reduce((sum, a) => sum + a.name.length, 0);
+					const alertSizeMap = new Map<AlertDefinition, number>(
+						alerts.map((a) => [a, JSON.stringify(a).length]),
+					);
+					const truncated = truncateArray(alerts, catBudget, (a) => alertSizeMap.get(a) ?? 0);
+					snapshot.alerts = truncated;
+					charsUsed += truncated.reduce((sum, a) => sum + (alertSizeMap.get(a) ?? 0), 0);
 					break;
 				}
 				default:

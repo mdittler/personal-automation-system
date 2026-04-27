@@ -683,8 +683,10 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		expect(deps.appKnowledge.search).toHaveBeenCalled();
 		expect(deps.reportService.listForUser).toHaveBeenCalled();
 		expect(deps.alertService.listForUser).toHaveBeenCalled();
-		// system-info is selected but gatherSystemData returns empty for 'hello' — still called
-		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled(); // question has no system keywords
+		// In ask mode, system-info is selected even for questions without system keywords.
+		// buildSystemDataBlock IS called, but gatherSystemData returns '' for 'hello'
+		// (no matching categories), so getSystemStatus is never invoked.
+		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled(); // no system keywords → no system category
 	});
 
 	it('one category throws: failures includes that category; others still present', async () => {
