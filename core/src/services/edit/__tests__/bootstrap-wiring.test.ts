@@ -10,9 +10,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import type { EditService } from '../index.js';
-import { EditServiceImpl } from '../index.js';
 import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
+import type { EditService } from '../index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,9 +58,7 @@ describe('EditService bootstrap wiring', () => {
 
 		it('bootstrap.ts conditionally injects editService via declaredServices.has', async () => {
 			const source = stripComments(await readBootstrap());
-			expect(source).toMatch(
-				/declaredServices\.has\s*\(\s*['"]edit-service['"]\s*\)/,
-			);
+			expect(source).toMatch(/declaredServices\.has\s*\(\s*['"]edit-service['"]\s*\)/);
 			expect(source).toMatch(/\beditService\s*:/);
 		});
 

@@ -25,6 +25,7 @@ import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import type { ConversationService } from '../conversation/conversation-service.js';
 import type { HouseholdService } from '../household/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import type { InviteService } from '../invite/index.js';
@@ -37,7 +38,6 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import type { ConversationService } from '../conversation/conversation-service.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -407,10 +407,7 @@ export class Router {
 
 		if (match) {
 			if (!(await this.isAppEnabled(enrichedCtx.userId, match.appId, user.enabledApps))) {
-				await this.trySend(
-					enrichedCtx.userId,
-					`You don't have access to the ${match.appId} app.`,
-				);
+				await this.trySend(enrichedCtx.userId, `You don't have access to the ${match.appId} app.`);
 				return;
 			}
 
@@ -421,10 +418,7 @@ export class Router {
 				match.confidence < this.verificationUpperBound
 			) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
-				const resolvedApps = await this.resolveEnabledApps(
-					enrichedCtx.userId,
-					user.enabledApps,
-				);
+				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(
 					enrichedCtx,
 					{
@@ -570,11 +564,7 @@ export class Router {
 	 * enforcement downstream can read the correct householdId even when the outer
 	 * bootstrap context was established before householdService was available.
 	 */
-	async dispatchMessage(
-		app: RegisteredApp,
-		ctx: MessageContext,
-		route: RouteInfo,
-	): Promise<void> {
+	async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -593,11 +583,7 @@ export class Router {
 	 *
 	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
 	 */
-	async dispatchPhoto(
-		app: RegisteredApp,
-		ctx: PhotoContext,
-		route: RouteInfo,
-	): Promise<void> {
+	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -701,7 +687,12 @@ export class Router {
 		for (const [, entry] of this.commandMap) {
 			if (!(await this.isAppEnabled(userId, entry.appId, enabledApps))) continue;
 			// Skip chatbot-manifest entries for commands that are now Router built-ins
-			if (this.conversationService && entry.appId === 'chatbot' && BUILTIN_COMMAND_NAMES.has(entry.command.name)) continue;
+			if (
+				this.conversationService &&
+				entry.appId === 'chatbot' &&
+				BUILTIN_COMMAND_NAMES.has(entry.command.name)
+			)
+				continue;
 
 			const app = this.registry.getApp(entry.appId);
 			if (!app) continue;
@@ -722,7 +713,12 @@ export class Router {
 			lines.push('');
 		}
 
-		if (appCommands.size === 0 && !this.conversationService && !this.spaceService && !this.inviteService) {
+		if (
+			appCommands.size === 0 &&
+			!this.conversationService &&
+			!this.spaceService &&
+			!this.inviteService
+		) {
 			lines.push('No commands available.');
 		}
 
@@ -1162,8 +1158,10 @@ export class Router {
 			// Build a human-readable recent interactions string for the verifier prompt.
 			// Strip newlines and control characters from app-supplied fields to prevent
 			// prompt injection via entityType or other user-controlled values.
-			const sanitizeEntryField = (v: string): string =>
-				v.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+			const sanitizeEntryField = (v: string): string => {
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
+				return v.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+			};
 			const recentInteractions = recentEntries
 				.map(
 					(e) =>
@@ -1224,7 +1222,7 @@ export class Router {
 	 * duplication between routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
-		if (!this.conversationService) {
+		if (!this.conversationService || this.config.fallback === 'notes') {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 			return;
 		}

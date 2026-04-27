@@ -3238,9 +3238,9 @@ A virtual `'chatbot'` registry entry (added in Chunk D.1 via `AppRegistry.regist
 
 **Phase:** Hermes P1 Chunk D | **Status:** Implemented
 
-`chatbotApp` and `fallbackMode` fields are removed from `RouterOptions`. `sendToFallback()` is simplified to always use `ConversationService` when present; the legacy chatbot-app dispatch branch and notes-mode branch are deleted. The `fallback` field is removed from `SystemConfig` in `core/src/types/config.ts` along with `_legacyKeys` metadata and the startup deprecation warning.
+`chatbotApp` and `fallbackMode` fields are removed from `RouterOptions`. `sendToFallback()` is simplified: when `config.fallback === 'notes'` or no `ConversationService` is present the message routes to `FallbackHandler`; otherwise it routes to `ConversationService`. The legacy `chatbotApp` dispatch branch is deleted. `SystemConfig.fallback` is preserved to honour existing `fallback: notes` deployments; full removal of `fallback`/`_legacyKeys` from `SystemConfig` is deferred to Chunk D.4.
 
-**Standard tests** (`core/src/services/router/__tests__/router.test.ts`): legacy fallback-branch tests removed; remaining tests verify ConversationService is the sole fallback path.
+**Standard tests** (`core/src/services/router/__tests__/router.test.ts`): legacy fallback-branch tests removed; tests verify ConversationService is used for `fallback: chatbot` and that `fallback: notes` still routes to `FallbackHandler`.
 
 ---
 

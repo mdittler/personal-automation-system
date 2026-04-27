@@ -5,11 +5,16 @@ import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
+import type {
+	MessageContext,
+	PhotoContext,
+	RouteInfo,
+	TelegramService,
+} from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
-import type { FallbackHandler } from '../fallback.js';
-import { buildUserOverrideRouteInfo, Router } from '../index.js';
 import type { SpaceService } from '../../spaces/index.js';
+import type { FallbackHandler } from '../fallback.js';
+import { Router, buildUserOverrideRouteInfo } from '../index.js';
 
 /**
  * Assert that a dispatch mock was called with a context whose `route` field
@@ -542,12 +547,28 @@ describe('Router', () => {
 			const photoApp2Module = createMockModule();
 
 			const photoManifest1: AppManifest = {
-				app: { id: 'photo1', name: 'Photo1', version: '1.0.0', description: 'Photo app 1', author: 'Test' },
-				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['receipt'] } },
+				app: {
+					id: 'photo1',
+					name: 'Photo1',
+					version: '1.0.0',
+					description: 'Photo app 1',
+					author: 'Test',
+				},
+				capabilities: {
+					messages: { intents: [], accepts_photos: true, photo_intents: ['receipt'] },
+				},
 			};
 			const photoManifest2: AppManifest = {
-				app: { id: 'photo2', name: 'Photo2', version: '1.0.0', description: 'Photo app 2', author: 'Test' },
-				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['landscape'] } },
+				app: {
+					id: 'photo2',
+					name: 'Photo2',
+					version: '1.0.0',
+					description: 'Photo app 2',
+					author: 'Test',
+				},
+				capabilities: {
+					messages: { intents: [], accepts_photos: true, photo_intents: ['landscape'] },
+				},
 			};
 
 			const apps = [
@@ -558,7 +579,8 @@ describe('Router', () => {
 			cache.add(photoManifest1, '/apps/photo1');
 			cache.add(photoManifest2, '/apps/photo2');
 			const registry = {
-				getApp: (id: string) => apps.find((a) => a.manifest.app.id === id) as RegisteredApp | undefined,
+				getApp: (id: string) =>
+					apps.find((a) => a.manifest.app.id === id) as RegisteredApp | undefined,
 				getManifestCache: () => cache,
 				getAll: () => apps,
 				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
@@ -687,9 +709,10 @@ describe('Free-text fallback — ConversationService dispatch', () => {
 		overrideLlm?: LLMService,
 		options?: {
 			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
+			fallbackMode?: 'chatbot' | 'notes';
 		},
 	): Router {
-		const config = createMockConfig(routerUsers);
+		const config = createMockConfig(routerUsers, options?.fallbackMode ?? 'chatbot');
 		const cache = new ManifestCache();
 		const registry = {
 			getApp: () => undefined,
@@ -754,6 +777,19 @@ describe('Free-text fallback — ConversationService dispatch', () => {
 
 		await router.routeMessage(createTextCtx('hello'));
 
-		expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
+		expect(telegram.send).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('Something went wrong'),
+		);
+	});
+
+	it("fallback: 'notes' routes to FallbackHandler even when conversationService is present", async () => {
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const router = buildRouter(users, undefined, { conversationService, fallbackMode: 'notes' });
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(conversationService.handleMessage).not.toHaveBeenCalled();
+		expect(fallback.handleUnrecognized).toHaveBeenCalled();
 	});
 });

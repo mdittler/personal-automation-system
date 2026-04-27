@@ -12,7 +12,12 @@ import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
+import type {
+	MessageContext,
+	PhotoContext,
+	RouteInfo,
+	TelegramService,
+} from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { AppToggleStore } from '../../app-toggle/index.js';
 import type { FallbackHandler } from '../fallback.js';
@@ -430,10 +435,18 @@ describe('Router — grey-zone verification', () => {
 				getApp: (id: string) => {
 					const app = apps.find((a) => a.manifest.app.id === id);
 					if (!app) return undefined;
-					return { manifest: app.manifest, module: app.module, appDir: `/apps/${id}` } as RegisteredApp;
+					return {
+						manifest: app.manifest,
+						module: app.module,
+						appDir: `/apps/${id}`,
+					} as RegisteredApp;
 				},
 				getAll: () =>
-					apps.map((a) => ({ manifest: a.manifest, module: a.module, appDir: `/apps/${a.manifest.app.id}` })),
+					apps.map((a) => ({
+						manifest: a.manifest,
+						module: a.module,
+						appDir: `/apps/${a.manifest.app.id}`,
+					})),
 				getManifestCache: () => cache,
 				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
 			} as unknown as AppRegistry;
@@ -749,7 +762,12 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 
 		const registry = {
 			getApp: (id: string) => {
-				if (id === 'echo') return { manifest: echoManifest, module: echoModule, appDir: '/apps/echo' } as RegisteredApp;
+				if (id === 'echo')
+					return {
+						manifest: echoManifest,
+						module: echoModule,
+						appDir: '/apps/echo',
+					} as RegisteredApp;
 				return undefined;
 			},
 			getManifestCache: () => cache,
@@ -769,7 +787,13 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 		});
 		router.buildRoutingTables();
 
-		await router.routeMessage({ userId: 'user1', text: 'hello', timestamp: new Date(), chatId: 1, messageId: 1 });
+		await router.routeMessage({
+			userId: 'user1',
+			text: 'hello',
+			timestamp: new Date(),
+			chatId: 1,
+			messageId: 1,
+		});
 
 		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
 	});
@@ -807,11 +831,19 @@ describe('Router.dispatchConversation — public error isolation (rv:chatbot reg
 		});
 
 		const ctx = { userId: 'user1', text: 'boom', timestamp: new Date(), chatId: 1, messageId: 1 };
-		const route = { appId: 'chatbot', intent: 'chatbot', confidence: 1.0, source: 'manual' as const };
+		const route = {
+			appId: 'chatbot',
+			intent: 'chatbot',
+			confidence: 1.0,
+			source: 'manual' as const,
+		};
 
 		await router.dispatchConversation(ctx, route as any);
 
 		// Handler error was isolated — send called with friendly message, no throw
-		expect(telegramMock.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
+		expect(telegramMock.send).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('Something went wrong'),
+		);
 	});
 });

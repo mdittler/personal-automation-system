@@ -19,7 +19,10 @@ import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
-import type { InteractionContextService, InteractionEntry } from '../../interaction-context/index.js';
+import type {
+	InteractionContextService,
+	InteractionEntry,
+} from '../../interaction-context/index.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 import type { RouteVerifier, VerifyAction } from '../route-verifier.js';
@@ -143,7 +146,13 @@ function createMockInteractionContext(entries: InteractionEntry[]): InteractionC
 // ---------------------------------------------------------------------------
 
 const foodManifest: AppManifest = {
-	app: { id: 'food', name: 'Food', version: '1.0.0', description: 'Food management', author: 'Test' },
+	app: {
+		id: 'food',
+		name: 'Food',
+		version: '1.0.0',
+		description: 'Food management',
+		author: 'Test',
+	},
 	capabilities: {
 		messages: {
 			intents: ['log meal', 'grocery list', 'recipe'],
@@ -332,7 +341,9 @@ describe('Router context-aware promotion (Task 5a)', () => {
 		router.buildRoutingTables();
 
 		// Should not throw
-		await expect(router.routeMessage(createTextCtx('show me that recipe'))).resolves.toBeUndefined();
+		await expect(
+			router.routeMessage(createTextCtx('show me that recipe')),
+		).resolves.toBeUndefined();
 
 		expect(foodModule.handleMessage).not.toHaveBeenCalled();
 		expect(fallback.handleUnrecognized).toHaveBeenCalledOnce();
@@ -363,8 +374,8 @@ describe('Router context-aware promotion (Task 5a)', () => {
 	it('TC5: low-confidence match + context for DIFFERENT appId → chatbot (context-mismatch path)', async () => {
 		// Normal classify returns below-threshold (→ null), low-conf path returns food
 		const llm = createMockLLMWithLowConfidence(
-			{ category: 'log meal', confidence: 0.1 },   // normal: below threshold → null
-			{ category: 'log meal', confidence: 0.25 },  // low-conf: food
+			{ category: 'log meal', confidence: 0.1 }, // normal: below threshold → null
+			{ category: 'log meal', confidence: 0.25 }, // low-conf: food
 		);
 
 		// Context is for 'notes', not 'food' — mismatch should prevent verifier call

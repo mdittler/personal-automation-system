@@ -8,21 +8,21 @@
  * Once Task 4 lands, all assertions here should pass without modification.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import cron from 'node-cron';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { composeRuntime } from '../compose-runtime.js';
-import { seedUsers } from '../testing/fixtures/seed-users.js';
-import { createStubProviderRegistry, StubProvider } from '../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
-import { chatbotMessage, askMessage } from '../testing/fixtures/messages.js';
 import { requestContext } from '../services/context/request-context.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
 import { approximateTokens } from '../services/llm/estimate-guard-cost.js';
 import { getModelPricing } from '../services/llm/model-pricing.js';
+import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
+import { askMessage, chatbotMessage } from '../testing/fixtures/messages.js';
+import { seedUsers } from '../testing/fixtures/seed-users.js';
+import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
 
 describe('composeRuntime smoke', () => {
 	let tempDir: string;
@@ -92,7 +92,10 @@ describe('composeRuntime smoke', () => {
 			await cronCallback?.();
 		}
 
-		const persisted = await readFile(join(tempDir, 'data', 'system', 'disabled-jobs.yaml'), 'utf-8');
+		const persisted = await readFile(
+			join(tempDir, 'data', 'system', 'disabled-jobs.yaml'),
+			'utf-8',
+		);
 		expect(persisted).toContain(jobKey);
 
 		runtime.services.scheduler.cron.unregister(jobKey);
@@ -118,10 +121,9 @@ describe('composeRuntime smoke', () => {
 		expect(fastPricing).toBeTruthy();
 		expect(standardPricing).toBeTruthy();
 		const expectedFast =
-			((promptTokens * fastPricing!.input) + (outputTokens * fastPricing!.output)) / 1_000_000;
+			(promptTokens * fastPricing!.input + outputTokens * fastPricing!.output) / 1_000_000;
 		const expectedStandard =
-			((promptTokens * standardPricing!.input) + (outputTokens * standardPricing!.output)) /
-			1_000_000;
+			(promptTokens * standardPricing!.input + outputTokens * standardPricing!.output) / 1_000_000;
 
 		await requestContext.run({ userId, householdId }, () =>
 			runtime.services.systemLlm.complete(prompt, { tier: 'fast', maxTokens: 1000 }),
@@ -204,8 +206,7 @@ describe('composeRuntime smoke', () => {
 		expect(await readFile(userBAbsolutePath, 'utf-8')).toBe('zxq secret marker\n');
 		expect(
 			telegram.sent.some(
-				(message) =>
-					message.userId === userA && message.text.includes('No matching files found'),
+				(message) => message.userId === userA && message.text.includes('No matching files found'),
 			),
 		).toBe(true);
 	});
@@ -236,8 +237,11 @@ describe('composeRuntime smoke', () => {
 		// Parse the last row positionally (9 columns):
 		// | ts | provider | model | in | out | cost | app | user | household |
 		const lastRow = afterLines[afterLines.length - 1];
-		const cols = lastRow.split('|').slice(1, -1).map((c) => c.trim());
-		expect(cols[7]).toBe(userId);    // user column (index 7)
+		const cols = lastRow
+			.split('|')
+			.slice(1, -1)
+			.map((c) => c.trim());
+		expect(cols[7]).toBe(userId); // user column (index 7)
 		expect(cols[8]).toBe(expectedHh); // household column (index 8)
 	});
 
