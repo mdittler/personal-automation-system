@@ -1164,3 +1164,149 @@ describe('AlertService — household scope authorization', () => {
 		expect(telegram.send).not.toHaveBeenCalled();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// listForUser — scoped read API (Chunk B)
+// ---------------------------------------------------------------------------
+
+describe('AlertService — listForUser', () => {
+	function makeHouseholdSvc(map: Record<string, string | null>) {
+		return { getHouseholdForUser: (uid: string): string | null => map[uid] ?? null };
+	}
+
+	it('user in delivery list sees exactly that alert', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
+		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('a1');
+	});
+
+	it('user in multi-recipient delivery list sees the alert', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'shared', name: 'Shared', delivery: ['u1', 'u2'] }),
+		);
+
+		const r1 = await service.listForUser('u1');
+		expect(r1).toHaveLength(1);
+		expect(r1[0]?.id).toBe('shared');
+
+		const r2 = await service.listForUser('u2');
+		expect(r2).toHaveLength(1);
+		expect(r2[0]?.id).toBe('shared');
+	});
+
+	it('user with household-shared alert sees it when householdService is wired', async () => {
+		// u1 and u2 are both in hh1; alert delivers to u2 only
+		const householdService = makeHouseholdSvc({ u1: 'hh1', u2: 'hh1' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2']),
+			householdService,
+		});
+		await service.saveAlert(makeValidAlertDef({ id: 'hh-alert', name: 'HH Alert', delivery: ['u2'] }));
+
+		// u1 is in hh1, alert's delivery u2 is also in hh1 → u1 sees it
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('hh-alert');
+	});
+
+	it('user with no relevant alerts sees empty array', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(0);
+	});
+
+	it('malformed YAML alert is skipped (consistent with listAlerts)', async () => {
+		const { service } = makeService();
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'valid', name: 'Valid', delivery: ['123456789'] }),
+		);
+		// Write an invalid YAML file directly
+		const { writeFile: wf } = await import('node:fs/promises');
+		const { join: pathJoin } = await import('node:path');
+		await wf(pathJoin(tempDir, 'system', 'alerts', 'bad.yaml'), ': invalid: yaml: [\n', 'utf-8');
+
+		const result = await service.listForUser('123456789');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('valid');
+	});
+
+	it('cross-user: listForUser(u1) does not include u2 alert', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(makeValidAlertDef({ id: 'u2-alert', name: 'U2 Alert', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(0);
+	});
+
+	it('cross-household: user in HH1 does not see HH2 alert', async () => {
+		// u1 in hh1; u3 in hh2; alert delivers to u3 (hh2)
+		const householdService = makeHouseholdSvc({ u1: 'hh1', u2: 'hh1', u3: 'hh2' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2', 'u3']),
+			householdService,
+		});
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'hh2-alert', name: 'HH2 Alert', delivery: ['u3'] }),
+		);
+
+		// u1 is in hh1, alert's household is hh2 → u1 must NOT see it
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(0);
+	});
+
+	it('calls listAlerts() exactly once internally (spy-based)', async () => {
+		const { service } = makeService();
+		await service.saveAlert(makeValidAlertDef({ delivery: ['123456789'] }));
+
+		const spy = vi.spyOn(service, 'listAlerts');
+		await service.listForUser('123456789');
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('two simultaneous listForUser calls for different users return independent results', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
+		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
+
+		const [r1, r2] = await Promise.all([
+			service.listForUser('u1'),
+			service.listForUser('u2'),
+		]);
+
+		expect(r1.map((a) => a.id)).toEqual(['a1']);
+		expect(r2.map((a) => a.id)).toEqual(['a2']);
+	});
+
+	it('sort order matches listAlerts() output order (alphabetical by name)', async () => {
+		const { service } = makeService();
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'z-alert', name: 'Zebra', delivery: ['123456789'] }),
+		);
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'a-alert', name: 'Aardvark', delivery: ['123456789'] }),
+		);
+
+		const all = await service.listAlerts();
+		const forUser = await service.listForUser('123456789');
+
+		// All alerts belong to this user; listForUser order should match listAlerts order
+		expect(forUser.map((a) => a.id)).toEqual(all.map((a) => a.id));
+	});
+
+	it('without householdService, falls back to delivery-membership filtering only', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
+		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('a1');
+	});
+});

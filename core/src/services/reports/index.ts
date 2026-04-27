@@ -145,6 +145,50 @@ export class ReportService {
 		}
 	}
 
+	/**
+	 * Return all reports visible to `userId`.
+	 *
+	 * A report is visible if the user is in its `delivery` list, OR (when
+	 * `householdService` is wired) the user shares the same household as at
+	 * least one delivery recipient.
+	 *
+	 * Cross-household safety: household membership is derived from the
+	 * delivery list, not from the user ID string alone. A user in household A
+	 * will NOT see a report whose entire delivery list belongs to household B,
+	 * even if the user ID string appears elsewhere in the system.
+	 *
+	 * Falls back to delivery-membership filtering only when
+	 * `householdService` is not wired (no `householdId` field on
+	 * `ReportDefinition` exists; delivery list is the sole ownership signal).
+	 */
+	async listForUser(userId: string): Promise<ReportDefinition[]> {
+		const all = await this.listReports();
+
+		// Resolve caller's household once (null if householdService not wired)
+		const callerHousehold = this.householdService?.getHouseholdForUser(userId) ?? null;
+
+		return all.filter((report) => {
+			// Fast path: user is directly in the delivery list
+			if (report.delivery.includes(userId)) return true;
+
+			// Household path: only available when householdService is wired AND
+			// we could resolve the caller's household
+			if (this.householdService && callerHousehold !== null) {
+				// A report belongs to household H if at least one delivery recipient
+				// is a member of H. Cross-household safety: if the report's
+				// recipients are in a *different* household, it must not be visible.
+				for (const recipientId of report.delivery) {
+					const recipientHousehold = this.householdService.getHouseholdForUser(recipientId);
+					if (recipientHousehold !== null && recipientHousehold === callerHousehold) {
+						return true;
+					}
+				}
+			}
+
+			return false;
+		});
+	}
+
 	async getReport(id: string): Promise<ReportDefinition | null> {
 		if (!REPORT_ID_PATTERN.test(id)) return null;
 		const filePath = join(this.reportsDir, `${id}.yaml`);

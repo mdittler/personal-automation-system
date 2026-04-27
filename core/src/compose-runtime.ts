@@ -896,6 +896,14 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	});
 	logger.info('DataQueryService: initialized');
 
+	// Shared adapter — avoids duplicating the null-guard wrapper at each call site.
+	const dataQueryAdapter = dataQueryServiceImpl
+		? {
+				query: (q: string, uid: string, opts?: DataQueryOptions) =>
+					dataQueryServiceImpl!.query(q, uid, opts),
+			}
+		: undefined;
+
 	// D2c: EditService
 	editServiceImpl = new EditServiceImpl({
 		dataQueryService: dataQueryServiceImpl,
@@ -923,12 +931,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
 	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
-		dataQuery: dataQueryServiceImpl
-			? {
-					query: (q: string, uid: string, opts?: DataQueryOptions) =>
-						dataQueryServiceImpl!.query(q, uid, opts),
-				}
-			: undefined,
+		dataQuery: dataQueryAdapter,
 		contextStore,
 		interactionContext: interactionContextService,
 		appMetadata,
@@ -968,12 +971,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		modelJournal: modelJournal,
 		contextStore: contextStore,
 		config: conversationAppConfig,
-		dataQuery: dataQueryServiceImpl
-			? {
-					query: (q: string, uid: string, opts?: DataQueryOptions) =>
-						dataQueryServiceImpl!.query(q, uid, opts),
-				}
-			: undefined,
+		dataQuery: dataQueryAdapter,
 		interactionContext: interactionContextService,
 		editService: editServiceImpl ?? undefined,
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,

@@ -473,3 +473,152 @@ describe('ReportService — cron lifecycle', () => {
 		expect(jobs).not.toContain('reports:report-b');
 	});
 });
+
+// ─── Helper for listForUser tests ─────────────────────────────────────────────
+
+function makeHouseholdService(map: Record<string, string | null>) {
+	return {
+		getHouseholdForUser(userId: string): string | null {
+			return userId in map ? (map[userId] ?? null) : null;
+		},
+	};
+}
+
+describe('ReportService — listForUser', () => {
+	it('user with one owned (delivery) report sees exactly that report', async () => {
+		const { service } = makeService();
+		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['123456789'] }));
+		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['999999999'] }));
+
+		const result = await service.listForUser('123456789');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('r1');
+	});
+
+	it('user in delivery list sees the report', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['111', '222']) });
+		await service.saveReport(makeValidReport({ id: 'shared', name: 'Shared', delivery: ['111', '222'] }));
+
+		const resultFor111 = await service.listForUser('111');
+		expect(resultFor111).toHaveLength(1);
+		expect(resultFor111[0]?.id).toBe('shared');
+
+		const resultFor222 = await service.listForUser('222');
+		expect(resultFor222).toHaveLength(1);
+		expect(resultFor222[0]?.id).toBe('shared');
+	});
+
+	it('user with household-shared report sees it when householdService is wired', async () => {
+		// u1 and u2 are both in hh1; report delivers to u2 only, but u1 is in same household
+		const householdService = makeHouseholdService({ u1: 'hh1', u2: 'hh1' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2']),
+			householdService,
+		});
+		await service.saveReport(
+			makeValidReport({ id: 'hh-report', name: 'HH Report', delivery: ['u2'] }),
+		);
+
+		// u1 is in hh1, report's delivery u2 is also in hh1 → u1 sees it
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('hh-report');
+	});
+
+	it('user with no relevant reports sees empty array', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['111', '222']) });
+		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['222'] }));
+
+		const result = await service.listForUser('111');
+		expect(result).toHaveLength(0);
+	});
+
+	it('malformed YAML report is skipped (consistent with listReports)', async () => {
+		const { service } = makeService();
+		// Save a valid report first
+		await service.saveReport(makeValidReport({ id: 'valid', name: 'Valid', delivery: ['123456789'] }));
+		// Write an invalid YAML file directly
+		const { writeFile } = await import('node:fs/promises');
+		const { join: pathJoin } = await import('node:path');
+		await writeFile(
+			pathJoin(tempDir, 'system', 'reports', 'bad.yaml'),
+			': invalid: yaml: [\n',
+			'utf-8',
+		);
+
+		// Should not throw; malformed file is skipped
+		const result = await service.listForUser('123456789');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('valid');
+	});
+
+	it('cross-user: listForUser(userA) does not include userB owned report', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveReport(makeValidReport({ id: 'u2-report', name: 'U2 Report', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(0);
+	});
+
+	it('cross-household: user in HH1 does not see HH2 report even if same userId string appears in both', async () => {
+		// u1 is in hh1; u3 is in hh2; report delivers to u3 only (hh2)
+		// Even if we searched for "u1", it should not match hh2 reports
+		const householdService = makeHouseholdService({ u1: 'hh1', u2: 'hh1', u3: 'hh2' });
+		const { service } = makeService({
+			userManager: makeUserManager(['u1', 'u2', 'u3']),
+			householdService,
+		});
+		// hh2 report delivers to u3
+		await service.saveReport(makeValidReport({ id: 'hh2-report', name: 'HH2 Report', delivery: ['u3'] }));
+
+		// u1 is in hh1, report's household is hh2 → u1 must NOT see it
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(0);
+	});
+
+	it('calls listReports() exactly once internally (spy-based)', async () => {
+		const { service } = makeService();
+		await service.saveReport(makeValidReport({ delivery: ['123456789'] }));
+
+		const spy = vi.spyOn(service, 'listReports');
+		await service.listForUser('123456789');
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('two simultaneous listForUser calls for different users return independent results', async () => {
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['u1'] }));
+		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['u2'] }));
+
+		const [result1, result2] = await Promise.all([
+			service.listForUser('u1'),
+			service.listForUser('u2'),
+		]);
+
+		expect(result1.map((r) => r.id)).toEqual(['r1']);
+		expect(result2.map((r) => r.id)).toEqual(['r2']);
+	});
+
+	it('sort order matches listReports() output order (alphabetical by name)', async () => {
+		const { service } = makeService();
+		await service.saveReport(makeValidReport({ id: 'z-report', name: 'Zebra', delivery: ['123456789'] }));
+		await service.saveReport(makeValidReport({ id: 'a-report', name: 'Aardvark', delivery: ['123456789'] }));
+
+		const all = await service.listReports();
+		const forUser = await service.listForUser('123456789');
+
+		// All reports belong to this user; listForUser order should match listReports order
+		expect(forUser.map((r) => r.id)).toEqual(all.map((r) => r.id));
+	});
+
+	it('without householdService, falls back to delivery-membership filtering only', async () => {
+		// No householdService wired — should only filter by delivery list
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
+		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['u1'] }));
+		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['u2'] }));
+
+		const result = await service.listForUser('u1');
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe('r1');
+	});
+});

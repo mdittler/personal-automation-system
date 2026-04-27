@@ -209,4 +209,6 @@ export const METHOD_SOURCE_CATEGORIES = {
 	buildSystemDataBlock: ['system-info'],
 	listScopedReports: ['reports'],
 	listScopedAlerts: ['alerts'],
+	// buildContextSnapshot orchestrates the above methods rather than reading any category directly
+	// so it has no SOURCE_POLICY mapping entry
 } as const satisfies Record<string, readonly AllowedSourceCategory[]>;
