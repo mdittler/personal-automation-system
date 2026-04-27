@@ -41,7 +41,6 @@ function makeConfig(tmpDir: string): SystemConfig {
 		gui: { authToken: 'test-gui-token' },
 		api: { token: 'test-api-token' },
 		cloudflare: {},
-		fallback: 'chatbot',
 		webhooks: [],
 		n8n: { dispatchUrl: '' },
 		users: [

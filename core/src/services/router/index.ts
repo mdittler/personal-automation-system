@@ -6,7 +6,7 @@
  *   1. Explicit /command → exact match against registered commands
  *   2. Photo messages → classify type, match photo_intents
  *   3. Free text → LLM classification against all apps' intents
- *   4. Fallback → chatbot (default) or daily notes (configurable)
+ *   4. Fallback → ConversationService when wired, else FallbackHandler (per-user disable via AppToggleStore preserved)
  */
 
 import type { Logger } from 'pino';
@@ -64,7 +64,7 @@ function routeForCommand(appId: string, commandName: string): RouteInfo {
 	};
 }
 
-/** RouteInfo for the chatbot/notes fallback branch. */
+/** RouteInfo for the ConversationService fallback branch. */
 function routeForFallback(): RouteInfo {
 	return {
 		appId: 'chatbot',
@@ -1222,7 +1222,7 @@ export class Router {
 	 * duplication between routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
-		if (!this.conversationService || this.config.fallback === 'notes') {
+		if (!this.conversationService) {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 			return;
 		}

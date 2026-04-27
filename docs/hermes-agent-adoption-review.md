@@ -12,6 +12,8 @@ Hermes commit inspected: `b866381` (feat(state): auto-prune old sessions + VACUU
 Local clone: `.worktrees/hermes-agent-review/`
 Upstream: `https://github.com/nousresearch/hermes-agent`
 
+**Status: P1 complete — last sub-chunk D.4 merged 2026-04-27.**
+
 ---
 
 ## Executive Summary
@@ -251,13 +253,13 @@ P0 work (no behavioral change):
 - Create `core/src/services/prompt-assembly/` — extract shared pieces of prompt construction (system prompt parts, fencing, sanitization, model-journal injection) from `apps/chatbot/src/index.ts`.
 - Extend `request-context.ts` to carry `sessionId?: string` (the existing ALS; not a new one).
 
-P1 work (chatbot app removed):
-- New `core/src/services/conversation/` exporting `ConversationService.handleMessage(ctx, message)`.
-- Router fallback replaces `dispatchMessage(this.chatbotApp, ctx, routeForFallback())` with `conversationService.handle(...)`.
-- `compose-runtime.ts` no longer looks up `'chatbot'` app.
-- Config: `fallback: 'chatbot'|'notes'` collapses; replace with `chat.log_to_notes: bool` (default `false`).
-- Remove `'chatbot'` from `PROTECTED_APPS`.
-- Data migration: existing `history.json` read-compatible; new writes in session-store layout from P3.
+P1 work (chatbot app removed) — **✅ Done (D.1–D.4, merged 2026-04-27):**
+- ✅ New `core/src/services/conversation/` exporting `ConversationService.handleMessage(ctx, message)`.
+- ✅ Router fallback replaces `dispatchMessage(this.chatbotApp, ctx, routeForFallback())` with `conversationService.handle(...)`.
+- ✅ `compose-runtime.ts` no longer looks up `'chatbot'` app.
+- ✅ Config: `fallback: 'chatbot'|'notes'` field removed; `chat.log_to_notes: bool` (default `false`) is the successor.
+- ✅ Remove `'chatbot'` from `PROTECTED_APPS`.
+- Data migration: existing `history.json` read-compatible; new writes in session-store layout from P3 (deferred to P3).
 
 ### 2. ConversationRetrievalService + Source Policy enforcement (P2)
 

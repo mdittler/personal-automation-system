@@ -207,7 +207,6 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 				userCount: 0,
 				cronJobCount: 0,
 				timezone: 'UTC',
-				fallbackMode: 'chatbot',
 			}),
 			getSafeguardDefaults: vi.fn().mockReturnValue({
 				rateLimit: { maxRequests: 60, windowSeconds: 3600 },

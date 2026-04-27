@@ -45,7 +45,6 @@ function createMockConfig(users: SystemConfig['users'] = []): SystemConfig {
 		dataDir: '/tmp/data',
 		logLevel: 'info',
 		timezone: 'UTC',
-		fallback: 'chatbot',
 		telegram: { botToken: 'test' },
 		ollama: { url: 'http://localhost:11434', model: 'test' },
 		claude: { apiKey: 'test', model: 'test' },

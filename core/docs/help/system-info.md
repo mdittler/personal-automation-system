@@ -54,7 +54,6 @@ You can ask about general system health:
 - System uptime
 - Number of loaded apps and registered users
 - Configured timezone
-- Fallback mode (chatbot or notes)
 - LLM safeguard defaults (rate limits, cost caps)
 
 Example questions:

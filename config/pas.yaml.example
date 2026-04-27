@@ -22,7 +22,6 @@ users:
 
 # Chat/conversation settings
 # Per-user override via /notes or GUI always wins.
-# After upgrade you may delete the `defaults.fallback` line; daily-notes is now per-user opt-in.
 chat:
   log_to_notes: false   # System-wide default: append messages to daily-notes files (default OFF)
 
@@ -30,7 +29,7 @@ chat:
 defaults:
   log_level: info
   timezone: America/New_York   # IANA timezone (e.g., Europe/London, Asia/Tokyo)
-  fallback: chatbot            # DEPRECATED — ignored by ConversationService; kept for back-compat only
+
 
 # LLM safeguards (optional — uncomment to customize)
 # llm:

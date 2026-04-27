@@ -101,7 +101,6 @@ export async function seedUsers(opts: SeedOptions): Promise<SeedResult> {
 		gui: { authToken: 'stub-gui-token' },
 		api: { token: 'stub-api-token' },
 		cloudflare: {},
-		fallback: 'chatbot',
 		webhooks: [],
 		n8n: { dispatchUrl: '' },
 		users: registeredUsers,

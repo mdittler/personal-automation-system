@@ -49,7 +49,6 @@ export interface SystemStatusInfo {
 	userCount: number;
 	cronJobCount: number;
 	timezone: string;
-	fallbackMode: string;
 }
 
 /** Safeguard configuration defaults. */

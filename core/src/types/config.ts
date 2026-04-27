@@ -139,21 +139,6 @@ export interface SystemConfig {
 		tunnelToken?: string;
 	};
 
-	/**
-	 * Fallback routing mode. 'chatbot' routes unmatched messages to ConversationService.
-	 * 'notes' routes to the notes handler. See REQ-CONV-014.
-	 */
-	fallback: 'chatbot' | 'notes';
-
-	/**
-	 * Internal: signals that legacy keys were explicitly present in pas.yaml so
-	 * compose-runtime can emit deprecation warnings. Populated by loadSystemConfig.
-	 * Not part of the public config schema; tests should not rely on this field.
-	 */
-	_legacyKeys?: {
-		defaultsFallback?: boolean;
-	};
-
 	/** Outbound webhooks for event delivery to external services. */
 	webhooks: WebhookDefinition[];
 

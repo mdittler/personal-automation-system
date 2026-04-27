@@ -77,7 +77,6 @@ interface PasYamlConfig {
 	defaults?: {
 		log_level?: string;
 		timezone?: string;
-		fallback?: string;
 	};
 	llm?: YamlLLMConfig;
 	webhooks?: YamlWebhookConfig[];
@@ -227,7 +226,6 @@ export async function loadSystemConfig(options?: {
 		dataDir: resolve(env.DATA_DIR),
 		logLevel: yamlConfig?.defaults?.log_level ?? env.LOG_LEVEL,
 		timezone: yamlConfig?.defaults?.timezone ?? 'UTC',
-		fallback: yamlConfig?.defaults?.fallback === 'notes' ? 'notes' : 'chatbot',
 		telegram: {
 			botToken: env.TELEGRAM_BOT_TOKEN,
 		},
@@ -272,10 +270,6 @@ export async function loadSystemConfig(options?: {
 	if (migrationNeeded) {
 		config.migrationNeeded = true;
 	}
-
-	config._legacyKeys = {
-		defaultsFallback: yamlConfig?.defaults?.fallback !== undefined,
-	};
 
 	return config;
 }
