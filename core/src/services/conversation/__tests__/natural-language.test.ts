@@ -20,14 +20,11 @@
 
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, test, vi } from 'vitest';
-import {
-	createMockCoreServices,
-	createMockScopedStore,
-} from '../../../testing/mock-services.js';
-import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
-import { classifyPASMessage, MODEL_SWITCH_INTENT_REGEX } from '../index.js';
 import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
+import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import { MODEL_SWITCH_INTENT_REGEX, classifyPASMessage } from '../index.js';
+import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
 
 // ---------------------------------------------------------------------------
 // Shared setup helpers
@@ -87,9 +84,9 @@ describe('/ask command — natural language questions', () => {
 
 		await makeConversationService(services).handleAsk(args, ctx);
 
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		);
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
@@ -97,15 +94,18 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Use the /install command to add a new app.');
 		const ctx = createTestMessageContext({ text: '/ask how do i add a new app' });
 
-		await makeConversationService(services).handleAsk(['how', 'do', 'i', 'add', 'a', 'new', 'app'], ctx);
-
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
+		await makeConversationService(services).handleAsk(
+			['how', 'do', 'i', 'add', 'a', 'new', 'app'],
+			ctx,
 		);
+
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
-	it("/ask \"what's my monthly cost\" → response delivered", async () => {
+	it('/ask "what\'s my monthly cost" → response delivered', async () => {
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier
 			.mockResolvedValueOnce("You've spent $3.21 this month.");
@@ -137,11 +137,14 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'I am using claude-sonnet-4-6.');
 		const ctx = createTestMessageContext({ text: '/ask what model are you using' });
 
-		await makeConversationService(services).handleAsk(['what', 'model', 'are', 'you', 'using'], ctx);
-
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
+		await makeConversationService(services).handleAsk(
+			['what', 'model', 'are', 'you', 'using'],
+			ctx,
 		);
+
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expect(standardCall).toBeDefined();
 	});
 
@@ -149,15 +152,18 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Switching to claude-haiku.');
 		const ctx = createTestMessageContext({ text: '/ask switch to a faster model' });
 
-		await makeConversationService(services).handleAsk(['switch', 'to', 'a', 'faster', 'model'], ctx);
-
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
+		await makeConversationService(services).handleAsk(
+			['switch', 'to', 'a', 'faster', 'model'],
+			ctx,
 		);
+
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expect(standardCall).toBeDefined();
 	});
 
-	it("/ask \"what's my rate limit\" → response delivered", async () => {
+	it('/ask "what\'s my rate limit" → response delivered', async () => {
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES')
 			.mockResolvedValueOnce('Your rate limit is 60 requests per hour.');
@@ -172,18 +178,21 @@ describe('/ask command — natural language questions', () => {
 	});
 
 	it('/ask "how does routing work" → PAS-aware prompt', async () => {
-		mockLLMResponse(services, 'Routing checks commands first, then photo classification, then free text.');
+		mockLLMResponse(
+			services,
+			'Routing checks commands first, then photo classification, then free text.',
+		);
 		const ctx = createTestMessageContext({ text: '/ask how does routing work' });
 
 		await makeConversationService(services).handleAsk(['how', 'does', 'routing', 'work'], ctx);
 
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		);
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
-	it("/ask \"what's the difference between fast and standard tier\" → prompt references models", async () => {
+	it('/ask "what\'s the difference between fast and standard tier" → prompt references models', async () => {
 		mockLLMResponse(services, 'Fast tier uses claude-haiku, standard uses claude-sonnet.');
 		const ctx = createTestMessageContext({
 			text: "/ask what's the difference between fast and standard tier",
@@ -194,9 +203,9 @@ describe('/ask command — natural language questions', () => {
 			ctx,
 		);
 
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		);
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
@@ -206,9 +215,9 @@ describe('/ask command — natural language questions', () => {
 
 		await makeConversationService(services).handleAsk(['show', 'me', 'scheduled', 'jobs'], ctx);
 
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		);
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
@@ -216,7 +225,10 @@ describe('/ask command — natural language questions', () => {
 		mockLLMResponse(services, 'Go to the alerts section in the GUI to set up an alert.');
 		const ctx = createTestMessageContext({ text: '/ask how do I set up an alert' });
 
-		await makeConversationService(services).handleAsk(['how', 'do', 'I', 'set', 'up', 'an', 'alert'], ctx);
+		await makeConversationService(services).handleAsk(
+			['how', 'do', 'I', 'set', 'up', 'an', 'alert'],
+			ctx,
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			expect.any(String),
@@ -231,11 +243,14 @@ describe('/ask command — natural language questions', () => {
 		);
 		const ctx = createTestMessageContext({ text: '/ask what is the context store' });
 
-		await makeConversationService(services).handleAsk(['what', 'is', 'the', 'context', 'store'], ctx);
-
-		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
+		await makeConversationService(services).handleAsk(
+			['what', 'is', 'the', 'context', 'store'],
+			ctx,
 		);
+
+		const standardCall = vi
+			.mocked(services.llm.complete)
+			.mock.calls.find((c) => c[1]?.tier === 'standard');
 		expectPasAwarePrompt(standardCall?.[1]?.systemPrompt ?? '');
 	});
 
@@ -256,7 +271,7 @@ describe('/ask command — natural language questions', () => {
 		);
 	});
 
-	it("/ask \"what's your uptime\" → response delivered", async () => {
+	it('/ask "what\'s your uptime" → response delivered', async () => {
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES')
 			.mockResolvedValueOnce('System has been running for 4h 22m.');
@@ -303,46 +318,64 @@ describe('/ask command — natural language questions', () => {
 // ---------------------------------------------------------------------------
 
 describe('/edit command — natural language edit descriptions', () => {
-	let services: CoreServices;
-
-	beforeEach(async () => {
-		services = createMockCoreServices();
-	});
-
 	const editCases: [string, string[]][] = [
-		['add a note that I went for a run this morning', ['add', 'a', 'note', 'that', 'I', 'went', 'for', 'a', 'run', 'this', 'morning']],
-		['update my grocery list to remove eggs', ['update', 'my', 'grocery', 'list', 'to', 'remove', 'eggs']],
-		['mark the pasta recipe as a favorite', ['mark', 'the', 'pasta', 'recipe', 'as', 'a', 'favorite']],
+		[
+			'add a note that I went for a run this morning',
+			['add', 'a', 'note', 'that', 'I', 'went', 'for', 'a', 'run', 'this', 'morning'],
+		],
+		[
+			'update my grocery list to remove eggs',
+			['update', 'my', 'grocery', 'list', 'to', 'remove', 'eggs'],
+		],
+		[
+			'mark the pasta recipe as a favorite',
+			['mark', 'the', 'pasta', 'recipe', 'as', 'a', 'favorite'],
+		],
 		['add milk to my pantry', ['add', 'milk', 'to', 'my', 'pantry']],
-		['change my daily goal to 8000 steps', ['change', 'my', 'daily', 'goal', 'to', '8000', 'steps']],
-		['remove the chicken dish from my meal plan', ['remove', 'the', 'chicken', 'dish', 'from', 'my', 'meal', 'plan']],
-		['update the price of apples to 2.99', ['update', 'the', 'price', 'of', 'apples', 'to', '2.99']],
-		['add a note: bought new running shoes today', ['add', 'a', 'note:', 'bought', 'new', 'running', 'shoes', 'today']],
-		['change the expiry date on milk to next Tuesday', ['change', 'the', 'expiry', 'date', 'on', 'milk', 'to', 'next', 'Tuesday']],
+		[
+			'change my daily goal to 8000 steps',
+			['change', 'my', 'daily', 'goal', 'to', '8000', 'steps'],
+		],
+		[
+			'remove the chicken dish from my meal plan',
+			['remove', 'the', 'chicken', 'dish', 'from', 'my', 'meal', 'plan'],
+		],
+		[
+			'update the price of apples to 2.99',
+			['update', 'the', 'price', 'of', 'apples', 'to', '2.99'],
+		],
+		[
+			'add a note: bought new running shoes today',
+			['add', 'a', 'note:', 'bought', 'new', 'running', 'shoes', 'today'],
+		],
+		[
+			'change the expiry date on milk to next Tuesday',
+			['change', 'the', 'expiry', 'date', 'on', 'milk', 'to', 'next', 'Tuesday'],
+		],
 		['delete the old bread recipe', ['delete', 'the', 'old', 'bread', 'recipe']],
 	];
 
-	it.each(editCases)('/edit "%s" → routes to editService.proposeEdit', async (description, args) => {
-		const mockEditService = {
-			proposeEdit: vi.fn().mockResolvedValue({
-				kind: 'error',
-				action: 'no_match',
-				message: 'No matching files found.',
-			}),
-			confirmEdit: vi.fn(),
-		};
-		// Inject edit service via services override
-		const editServices = createMockCoreServices();
-		Object.assign(editServices, { editService: mockEditService });
+	it.each(editCases)(
+		'/edit "%s" → routes to editService.proposeEdit',
+		async (description, args) => {
+			const mockEditService = {
+				proposeEdit: vi.fn().mockResolvedValue({
+					kind: 'error',
+					action: 'no_match',
+					message: 'No matching files found.',
+				}),
+				confirmEdit: vi.fn(),
+			};
+			// Inject edit service via services override
+			const editServices = createMockCoreServices();
+			Object.assign(editServices, { editService: mockEditService });
 
-		const ctx = createTestMessageContext({ text: `/edit ${description}` });
-		await makeConversationService(editServices).handleEdit(args, ctx);
+			const ctx = createTestMessageContext({ text: `/edit ${description}` });
+			await makeConversationService(editServices).handleEdit(args, ctx);
 
-		expect(mockEditService.proposeEdit).toHaveBeenCalledWith(
-			description,
-			expect.any(String),
-		);
-	});
+			expect(mockEditService.proposeEdit).toHaveBeenCalledWith(description, expect.any(String));
+		},
+	);
 
 	it('/edit with no args → shows usage instructions', async () => {
 		const mockEditService = {
@@ -596,15 +629,15 @@ describe('messages for other apps — no PAS-aware prompt when classifier return
 			await makeConversationService(services).handleMessage(ctx);
 
 			// Classifier was called
-			const fastCall = vi.mocked(services.llm.complete).mock.calls.find(
-				(c) => c[1]?.tier === 'fast',
-			);
+			const fastCall = vi
+				.mocked(services.llm.complete)
+				.mock.calls.find((c) => c[1]?.tier === 'fast');
 			expect(fastCall).toBeDefined();
 
 			// Main LLM call should use basic (non-PAS) prompt
-			const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-				(c) => c[1]?.tier === 'standard',
-			);
+			const standardCall = vi
+				.mocked(services.llm.complete)
+				.mock.calls.find((c) => c[1]?.tier === 'standard');
 			const prompt = standardCall?.[1]?.systemPrompt ?? '';
 			expectBasicPrompt(prompt);
 		},
@@ -671,21 +704,25 @@ describe('conversation continuity — multi-turn scenarios', () => {
 		const ctx1 = createTestMessageContext({ text: 'what model are you using?' });
 		await makeConversationService(services).handleMessage(ctx1);
 
-		const prompt1 = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		)?.[1]?.systemPrompt ?? '';
+		const prompt1 =
+			vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard')?.[1]
+				?.systemPrompt ?? '';
 		expectPasAwarePrompt(prompt1);
 
 		vi.mocked(services.llm.complete).mockClear();
 
 		// Turn 2: casual question — classifier returns NO
-		mockClassifierThenResponse(services, 'NO', 'Why did the chicken cross the road? To get to the other side!');
+		mockClassifierThenResponse(
+			services,
+			'NO',
+			'Why did the chicken cross the road? To get to the other side!',
+		);
 		const ctx2 = createTestMessageContext({ text: 'tell me a chicken joke' });
 		await makeConversationService(services).handleMessage(ctx2);
 
-		const prompt2 = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'standard',
-		)?.[1]?.systemPrompt ?? '';
+		const prompt2 =
+			vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard')?.[1]
+				?.systemPrompt ?? '';
 		// Prompt mode switched back to basic for the casual message
 		expectBasicPrompt(prompt2);
 	});
@@ -743,7 +780,10 @@ describe('edge cases', () => {
 
 		await makeConversationService(services).handleMessage(ctx);
 
-		expect(services.telegram.send).toHaveBeenCalledWith(expect.any(String), 'That is a nice emoji!');
+		expect(services.telegram.send).toHaveBeenCalledWith(
+			expect.any(String),
+			'That is a nice emoji!',
+		);
 	});
 
 	it('numbers-and-punctuation-only message → handled gracefully', async () => {
@@ -777,9 +817,7 @@ describe('edge cases', () => {
 		await makeConversationService(services).handleMessage(ctx);
 
 		// When auto_detect_pas is OFF, no classifier call (fast tier) should be made
-		const fastCall = vi.mocked(services.llm.complete).mock.calls.find(
-			(c) => c[1]?.tier === 'fast',
-		);
+		const fastCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'fast');
 		expect(fastCall).toBeUndefined();
 	});
 });

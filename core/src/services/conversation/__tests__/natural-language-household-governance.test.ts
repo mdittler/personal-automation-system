@@ -14,13 +14,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-	createMockCoreServices,
-} from '../../../testing/mock-services.js';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { requestContext } from '../../context/request-context.js';
 import { LLMCostCapError, LLMRateLimitError } from '../../llm/errors.js';
-import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Personas
@@ -71,7 +69,9 @@ async function sendMessage(
 	text: string,
 ) {
 	const ctx = createTestMessageContext({ userId, text });
-	await requestContext.run({ userId, householdId }, () => makeConversationService(services).handleMessage(ctx));
+	await requestContext.run({ userId, householdId }, () =>
+		makeConversationService(services).handleMessage(ctx),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +95,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				'Sure, happy to help with your grocery list!',
 			);
 
-			await sendMessage(services, MATT.userId, MATT.householdId, 'hey can you help me with my grocery list?');
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				'hey can you help me with my grocery list?',
+			);
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				MATT.userId,
@@ -131,7 +136,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				makeHouseholdRateLimitError(MATT.householdId),
 			);
 
-			await sendMessage(services, MATT.userId, MATT.householdId, 'remind me what we were talking about');
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				'remind me what we were talking about',
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).not.toMatch(/service will resume next month/i);
@@ -148,7 +158,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				makeHouseholdCostCapError(MATT.householdId),
 			);
 
-			await sendMessage(services, MATT.userId, MATT.householdId, "i wanna know what's in our pantry");
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				"i wanna know what's in our pantry",
+			);
 
 			expect(services.telegram.send).toHaveBeenCalled();
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
@@ -160,7 +175,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				makeHouseholdCostCapError(MATT.householdId),
 			);
 
-			await sendMessage(services, MATT.userId, MATT.householdId, 'can you write a shopping list for dinner tonight?');
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				'can you write a shopping list for dinner tonight?',
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).toMatch(/month|budget|limit/i);
@@ -171,7 +191,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				makeHouseholdCostCapError(NINA.householdId),
 			);
 
-			await sendMessage(services, NINA.userId, NINA.householdId, 'honey what were we supposed to pick up from the store?');
+			await sendMessage(
+				services,
+				NINA.userId,
+				NINA.householdId,
+				'honey what were we supposed to pick up from the store?',
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).toContain('household');
@@ -182,7 +207,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 				'Here is a great pasta recipe for tonight!',
 			);
 
-			await sendMessage(services, ALICE.userId, ALICE.householdId, "what's a good recipe for pasta tonight?");
+			await sendMessage(
+				services,
+				ALICE.userId,
+				ALICE.householdId,
+				"what's a good recipe for pasta tonight?",
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).toContain('pasta');
@@ -199,7 +229,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 		it('reservation-exceeded → "try again" copy (not "monthly limit reached")', async () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(makeReservationExceededError());
 
-			await sendMessage(services, MATT.userId, MATT.householdId, 'what should we have for dinner tonight?');
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				'what should we have for dinner tonight?',
+			);
 
 			expect(services.telegram.send).toHaveBeenCalled();
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
@@ -210,7 +245,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 		it('reservation-exceeded does NOT mention household — it is a transient retry signal', async () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(makeReservationExceededError());
 
-			await sendMessage(services, MATT.userId, MATT.householdId, 'can you remind me to call the dentist?');
+			await sendMessage(
+				services,
+				MATT.userId,
+				MATT.householdId,
+				'can you remind me to call the dentist?',
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).not.toMatch(/household|budget|monthly/i);
@@ -219,7 +259,12 @@ describe('Chatbot — Household Governance Persona Tests', () => {
 		it("Nina's reservation-exceeded also gets the retry-later copy", async () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(makeReservationExceededError());
 
-			await sendMessage(services, NINA.userId, NINA.householdId, 'is there anything left in the fridge?');
+			await sendMessage(
+				services,
+				NINA.userId,
+				NINA.householdId,
+				'is there anything left in the fridge?',
+			);
 
 			const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 			expect(sentText).toMatch(/try again/i);

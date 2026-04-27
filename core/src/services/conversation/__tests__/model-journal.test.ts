@@ -3,11 +3,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import { requestContext } from '../../context/request-context.js';
-import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 const MODEL_SLUG = 'anthropic-mock-model';
 
