@@ -23,7 +23,10 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ConversationHistory, ConversationTurn } from '../conversation-history/index.js';
-import type { ConversationRetrievalService } from '../conversation-retrieval/index.js';
+import type {
+	ConversationContextSnapshot,
+	ConversationRetrievalService,
+} from '../conversation-retrieval/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -104,32 +107,59 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			recentContextSummary || undefined,
 		);
 		if (classification.pasRelated) {
-			// D2b: call DataQueryService when message is a data query candidate
-			let dataContext = '';
-			if (classification.dataQueryCandidate && deps.dataQuery) {
+			// Chunk D: use ConversationRetrievalService.buildContextSnapshot when available.
+			// Falls back to legacy direct DataQueryService call when service is absent.
+			if (deps.conversationRetrieval) {
+				let snapshot: ConversationContextSnapshot | null = null;
 				try {
-					const result = await deps.dataQuery.query(
-						ctx.text,
-						ctx.userId,
-						recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
-					);
-					if (!result.empty) {
-						dataContext = formatDataQueryContext(result);
-					}
+					snapshot = await deps.conversationRetrieval.buildContextSnapshot({
+						question: ctx.text,
+						mode: 'free-text',
+						dataQueryCandidate: classification.dataQueryCandidate ?? false,
+						recentFilePaths,
+						isAdmin: false, // handleMessage is user-facing, never admin
+					});
 				} catch (error) {
-					deps.logger.warn('DataQueryService call failed: %s', error);
+					deps.logger.warn('ConversationRetrievalService.buildContextSnapshot failed: %s', error);
 				}
+				systemPrompt = await buildAppAwareSystemPrompt(
+					ctx.text,
+					ctx.userId,
+					contextEntries,
+					turns,
+					deps,
+					modelSlug,
+					userCtx,
+					snapshot,
+				);
+			} else {
+				// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
+				let dataContext = '';
+				if (classification.dataQueryCandidate && deps.dataQuery) {
+					try {
+						const result = await deps.dataQuery.query(
+							ctx.text,
+							ctx.userId,
+							recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+						);
+						if (!result.empty) {
+							dataContext = formatDataQueryContext(result);
+						}
+					} catch (error) {
+						deps.logger.warn('DataQueryService call failed: %s', error);
+					}
+				}
+				systemPrompt = await buildAppAwareSystemPrompt(
+					ctx.text,
+					ctx.userId,
+					contextEntries,
+					turns,
+					deps,
+					modelSlug,
+					userCtx,
+					dataContext,
+				);
 			}
-			systemPrompt = await buildAppAwareSystemPrompt(
-				ctx.text,
-				ctx.userId,
-				contextEntries,
-				turns,
-				deps,
-				modelSlug,
-				userCtx,
-				dataContext,
-			);
 		} else {
 			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
 		}

@@ -20,7 +20,10 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ConversationHistory } from '../conversation-history/index.js';
-import type { ConversationRetrievalService } from '../conversation-retrieval/index.js';
+import type {
+	ConversationContextSnapshot,
+	ConversationRetrievalService,
+} from '../conversation-retrieval/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -116,38 +119,69 @@ export async function handleAsk(
 		buildUserContext(ctx, deps),
 	]);
 
-	// D2b/D2c: call DataQueryService when classifier detects a data query.
-	let askDataContext = '';
+	// D2b/D2c / Chunk D: call DataQueryService or ConversationRetrievalService.
 	const askClassification = await classifyPASMessage(
 		question,
 		deps,
 		recentContextSummary || undefined,
 	);
-	if (askClassification.dataQueryCandidate && deps.dataQuery) {
-		try {
-			const result = await deps.dataQuery.query(
-				question,
-				ctx.userId,
-				recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
-			);
-			if (!result.empty) {
-				askDataContext = formatDataQueryContext(result);
-			}
-		} catch (error) {
-			deps.logger.warn('DataQueryService call failed in /ask: %s', error);
-		}
-	}
 
-	let systemPrompt = await buildAppAwareSystemPrompt(
-		question,
-		ctx.userId,
-		contextEntries,
-		turns,
-		deps,
-		modelSlug,
-		userCtx,
-		askDataContext,
-	);
+	let systemPrompt: string;
+	if (deps.conversationRetrieval) {
+		// Chunk D: use ConversationRetrievalService.buildContextSnapshot (mode: 'ask')
+		let snapshot: ConversationContextSnapshot | null = null;
+		try {
+			snapshot = await deps.conversationRetrieval.buildContextSnapshot({
+				question,
+				mode: 'ask',
+				dataQueryCandidate: askClassification.dataQueryCandidate ?? false,
+				recentFilePaths,
+				isAdmin: deps.systemInfo?.isUserAdmin(ctx.userId) ?? false,
+			});
+		} catch (error) {
+			deps.logger.warn(
+				'ConversationRetrievalService.buildContextSnapshot failed in /ask: %s',
+				error,
+			);
+		}
+		systemPrompt = await buildAppAwareSystemPrompt(
+			question,
+			ctx.userId,
+			contextEntries,
+			turns,
+			deps,
+			modelSlug,
+			userCtx,
+			snapshot,
+		);
+	} else {
+		// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
+		let askDataContext = '';
+		if (askClassification.dataQueryCandidate && deps.dataQuery) {
+			try {
+				const result = await deps.dataQuery.query(
+					question,
+					ctx.userId,
+					recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+				);
+				if (!result.empty) {
+					askDataContext = formatDataQueryContext(result);
+				}
+			} catch (error) {
+				deps.logger.warn('DataQueryService call failed in /ask: %s', error);
+			}
+		}
+		systemPrompt = await buildAppAwareSystemPrompt(
+			question,
+			ctx.userId,
+			contextEntries,
+			turns,
+			deps,
+			modelSlug,
+			userCtx,
+			askDataContext,
+		);
+	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
