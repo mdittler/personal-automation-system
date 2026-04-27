@@ -2527,20 +2527,22 @@ The chatbot maintains per-user conversation history as JSON via ScopedDataStore.
 The chatbot searches ContextStore for relevant user preferences/facts and includes them in the LLM system prompt. All user-generated content (messages, context entries, conversation history) is sanitized via `sanitizeInput()` before inclusion in prompts — triple backticks neutralized, anti-instruction framing applied. Addresses deferred issue D9.
 
 **Standard tests:**
-- `chatbot.test.ts` > buildSystemPrompt > includes context section when entries present
-- `chatbot.test.ts` > buildSystemPrompt > includes conversation history when turns present
-- `chatbot.test.ts` > buildSystemPrompt > includes anti-instruction framing for context
-- `chatbot.test.ts` > buildSystemPrompt > includes anti-instruction framing for conversation history
+- `prompt-builder.test.ts` > buildSystemPrompt > includes context section when entries present
+- `prompt-builder.test.ts` > buildSystemPrompt > includes conversation history when turns present
+- `prompt-builder.test.ts` > buildSystemPrompt > includes anti-instruction framing for context
+- `prompt-builder.test.ts` > buildSystemPrompt > includes anti-instruction framing for conversation history
 
 **Edge case tests:**
-- `chatbot.test.ts` > buildSystemPrompt > includes base personality without context or history
-- `chatbot.test.ts` > sanitizeInput > neutralizes triple backticks
-- `chatbot.test.ts` > sanitizeInput > neutralizes long backtick sequences
-- `chatbot.test.ts` > sanitizeInput > truncates text exceeding maxLength
-- `chatbot.test.ts` > sanitizeInput > preserves text at exactly maxLength
-- `chatbot.test.ts` > sanitizeInput > passes through normal text
+- `prompt-builder.test.ts` > buildSystemPrompt > includes base personality without context or history
+- `conversation-service.test.ts` > sanitizeInput > neutralizes triple backticks
+- `conversation-service.test.ts` > sanitizeInput > neutralizes long backtick sequences
+- `conversation-service.test.ts` > sanitizeInput > truncates text exceeding maxLength
+- `conversation-service.test.ts` > sanitizeInput > preserves text at exactly maxLength
+- `conversation-service.test.ts` > sanitizeInput > passes through normal text
 
 **Note (Chunk B):** Context-aware prompt assembly now executes inside `ConversationService` in core rather than the chatbot app shim. The sanitization and context behavior is unchanged. See REQ-CONV-003.
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/prompt-builder.test.ts` (buildSystemPrompt) and `core/src/services/conversation/__tests__/conversation-service.test.ts` (sanitizeInput).
 
 ### REQ-CHATBOT-003: Daily notes side effect
 
@@ -2549,10 +2551,12 @@ The chatbot searches ContextStore for relevant user preferences/facts and includ
 The chatbot preserves the pre-existing fallback behavior of appending messages to daily notes files. All messages are logged to `chatbot/daily-notes/YYYY-MM-DD.md` before the LLM call, regardless of whether the LLM succeeds.
 
 **Standard tests:**
-- `chatbot.test.ts` > handleMessage > appends message to daily notes
+- `conversation-service.test.ts` > handleMessage > appends message to daily notes
 
 **Edge case tests:**
-- `chatbot.test.ts` > handleMessage > still sends response when daily note append fails
+- `conversation-service.test.ts` > handleMessage > still sends response when daily note append fails
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/conversation-service.test.ts`.
 
 ### REQ-CHATBOT-004: /ask command for PAS-specific help
 
@@ -2561,21 +2565,23 @@ The chatbot preserves the pre-existing fallback behavior of appending messages t
 The chatbot `/ask` command provides PAS-specific help using app metadata and infrastructure documentation. With no arguments, it sends a static intro (no LLM cost). With a question, it builds an app-aware system prompt including enabled apps, knowledge base results, context entries, and conversation history. The response is sent to the user and conversation history is saved.
 
 **Standard tests:**
-- `chatbot.test.ts` > handleCommand /ask > sends static intro when no args provided
-- `chatbot.test.ts` > handleCommand /ask > calls LLM with app-aware prompt when question provided
-- `chatbot.test.ts` > handleCommand /ask > saves conversation history after /ask response
-- `chatbot.test.ts` > handleCommand /ask > appends to daily notes on /ask
+- `handle-ask.test.ts` > handleCommand /ask > sends static intro when no args provided
+- `handle-ask.test.ts` > handleCommand /ask > calls LLM with app-aware prompt when question provided
+- `handle-ask.test.ts` > handleCommand /ask > saves conversation history after /ask response
+- `handle-ask.test.ts` > handleCommand /ask > appends to daily notes on /ask
 
 **Edge case tests:**
-- `chatbot.test.ts` > handleCommand /ask > sends intro for empty string args
-- `chatbot.test.ts` > handleCommand /ask > works when appMetadata returns empty list
-- `chatbot.test.ts` > handleCommand /ask > sends error message when LLM fails on /ask
-- `chatbot.test.ts` > handleCommand /ask > handles appMetadata.getEnabledApps throwing gracefully
-- `chatbot.test.ts` > handleCommand /ask > handles appKnowledge.search throwing gracefully
+- `handle-ask.test.ts` > handleCommand /ask > sends intro for empty string args
+- `handle-ask.test.ts` > handleCommand /ask > works when appMetadata returns empty list
+- `handle-ask.test.ts` > handleCommand /ask > sends error message when LLM fails on /ask
+- `handle-ask.test.ts` > handleCommand /ask > handles appMetadata.getEnabledApps throwing gracefully
+- `handle-ask.test.ts` > handleCommand /ask > handles appKnowledge.search throwing gracefully
 
 **Security tests:**
-- `chatbot.test.ts` > handleCommand /ask > sanitizes app metadata in the prompt
-- `chatbot.test.ts` > handleCommand /ask > includes anti-instruction framing in app-aware prompt
+- `handle-ask.test.ts` > handleCommand /ask > sanitizes app metadata in the prompt
+- `handle-ask.test.ts` > handleCommand /ask > includes anti-instruction framing in app-aware prompt
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/handle-ask.test.ts`.
 
 ### REQ-CHATBOT-005: Auto-detect PAS-relevant questions
 
@@ -2584,14 +2590,16 @@ The chatbot `/ask` command provides PAS-specific help using app metadata and inf
 When the per-user `auto_detect_pas` config is enabled, the chatbot uses an LLM classifier (`classifyPASMessage()`) to detect PAS-related messages and automatically uses the app-aware system prompt instead of the generic one. Classification uses a compact fast-tier LLM call (no large metadata). Fails open (defaults to app-aware context) on LLM error. Default changed from `false` → `true` in D1.
 
 **Standard tests:**
-- `chatbot.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is off (default)
-- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt when auto-detect is on and LLM classifier returns PAS-relevant
-- `chatbot.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is on and LLM classifier returns not PAS-relevant
+- `auto-detect.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is off (default)
+- `auto-detect.test.ts` > auto-detect PAS questions > uses app-aware prompt when auto-detect is on and LLM classifier returns PAS-relevant
+- `auto-detect.test.ts` > auto-detect PAS questions > uses regular prompt when auto-detect is on and LLM classifier returns not PAS-relevant
 
 **Edge case tests:**
-- `chatbot.test.ts` > auto-detect PAS questions > handles auto-detect config value as string "true"
-- `chatbot.test.ts` > auto-detect PAS questions > defaults to false when config.getAll throws (no classifier call, basic prompt)
-- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
+- `auto-detect.test.ts` > auto-detect PAS questions > handles auto-detect config value as string "true"
+- `auto-detect.test.ts` > auto-detect PAS questions > defaults to false when config.getAll throws (no classifier call, basic prompt)
+- `auto-detect.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/auto-detect.test.ts`.
 
 ### REQ-CHATBOT-006: Legacy PAS relevance compatibility (`isPasRelevant`)
 
@@ -2600,16 +2608,18 @@ When the per-user `auto_detect_pas` config is enabled, the chatbot uses an LLM c
 The legacy `isPasRelevant()` helper determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost. This is not part of the preferred current product path. It remains documented only because backward-compatibility code and tests still exist until the helper is fully removed. The active PAS-aware routing contract is `classifyPASMessage()` (REQ-CHATBOT-012).
 
 **Standard tests:**
-- `chatbot.test.ts` > isPasRelevant > detects "what apps do I have"
-- `chatbot.test.ts` > isPasRelevant > detects "how do i schedule"
-- `chatbot.test.ts` > isPasRelevant > detects "what commands are available"
-- `chatbot.test.ts` > isPasRelevant > detects installed app names
-- `chatbot.test.ts` > isPasRelevant > detects command names from installed apps
+- `pas-classifier.test.ts` > isPasRelevant > detects "what apps do I have"
+- `pas-classifier.test.ts` > isPasRelevant > detects "how do i schedule"
+- `pas-classifier.test.ts` > isPasRelevant > detects "what commands are available"
+- `pas-classifier.test.ts` > isPasRelevant > detects installed app names
+- `pas-classifier.test.ts` > isPasRelevant > detects command names from installed apps
 
 **Edge case tests:**
-- `chatbot.test.ts` > isPasRelevant > returns false for general questions
-- `chatbot.test.ts` > isPasRelevant > returns false for empty text
-- `chatbot.test.ts` > isPasRelevant > is case insensitive
+- `pas-classifier.test.ts` > isPasRelevant > returns false for general questions
+- `pas-classifier.test.ts` > isPasRelevant > returns false for empty text
+- `pas-classifier.test.ts` > isPasRelevant > is case insensitive
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/pas-classifier.test.ts`.
 
 ### REQ-CHATBOT-007: App-aware system prompt construction
 
@@ -2618,11 +2628,13 @@ The legacy `isPasRelevant()` helper determines if a message is PAS-related using
 The `buildAppAwareSystemPrompt()` constructs a system prompt for PAS-specific questions including: PAS assistant personality, read-only instruction, sanitized app metadata from `AppMetadataService.getEnabledApps()`, sanitized knowledge base results from `AppKnowledgeBase.search()`, context store entries, and conversation history. All sections use anti-instruction framing.
 
 **Standard tests:**
-- `chatbot.test.ts` > buildAppAwareSystemPrompt > includes PAS assistant personality
-- `chatbot.test.ts` > buildAppAwareSystemPrompt > includes read-only instruction
-- `chatbot.test.ts` > buildAppAwareSystemPrompt > includes app metadata when apps are available
-- `chatbot.test.ts` > buildAppAwareSystemPrompt > includes knowledge base results
-- `chatbot.test.ts` > buildAppAwareSystemPrompt > includes context entries and conversation history
+- `prompt-builder.test.ts` > buildAppAwareSystemPrompt > includes PAS assistant personality
+- `prompt-builder.test.ts` > buildAppAwareSystemPrompt > includes read-only instruction
+- `prompt-builder.test.ts` > buildAppAwareSystemPrompt > includes app metadata when apps are available
+- `prompt-builder.test.ts` > buildAppAwareSystemPrompt > includes knowledge base results
+- `prompt-builder.test.ts` > buildAppAwareSystemPrompt > includes context entries and conversation history
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/prompt-builder.test.ts`.
 
 ### REQ-SYSINFO-001: System introspection service
 
@@ -2668,37 +2680,39 @@ The SystemInfoService provides read-only access to system state (models, costs, 
 The chatbot's `/ask` command detects system-related questions via keyword heuristics (no LLM cost) and gathers relevant live system data for prompt injection. Categories: llm (models/providers/tiers), costs (spending/pricing/budget), scheduling (cron/jobs), system (status/uptime). Data is capped and sanitized via `sanitizeInput()` before prompt inclusion.
 
 **Standard tests:**
-- `chatbot.test.ts` > categorizeQuestion > detects LLM/model questions
-- `chatbot.test.ts` > categorizeQuestion > detects cost questions
-- `chatbot.test.ts` > categorizeQuestion > detects scheduling questions
-- `chatbot.test.ts` > categorizeQuestion > detects system questions
-- `chatbot.test.ts` > gatherSystemData > gathers LLM data for llm category
-- `chatbot.test.ts` > gatherSystemData > gathers cost data for costs category
-- `chatbot.test.ts` > gatherSystemData > gathers scheduling data
-- `chatbot.test.ts` > gatherSystemData > gathers system status data
-- `chatbot.test.ts` > system data in /ask prompt > includes system data when question matches categories
-- `chatbot.test.ts` > system data in /ask prompt > includes switch-model instruction for model questions
+- `system-data.test.ts` > categorizeQuestion > detects LLM/model questions
+- `system-data.test.ts` > categorizeQuestion > detects cost questions
+- `system-data.test.ts` > categorizeQuestion > detects scheduling questions
+- `system-data.test.ts` > categorizeQuestion > detects system questions
+- `system-data.test.ts` > gatherSystemData > gathers LLM data for llm category
+- `system-data.test.ts` > gatherSystemData > gathers cost data for costs category
+- `system-data.test.ts` > gatherSystemData > gathers scheduling data
+- `system-data.test.ts` > gatherSystemData > gathers system status data
+- `handle-ask.test.ts` > system data in /ask prompt > includes system data when question matches categories
+- `handle-ask.test.ts` > system data in /ask prompt > includes switch-model instruction for model questions
 
 **Edge case tests:**
-- `chatbot.test.ts` > categorizeQuestion > returns multiple categories for broad questions
-- `chatbot.test.ts` > categorizeQuestion > returns empty set for unrelated questions
-- `chatbot.test.ts` > categorizeQuestion > returns empty set for empty string
-- `chatbot.test.ts` > categorizeQuestion > handles very long input without performance issues
-- `chatbot.test.ts` > gatherSystemData > includes available models when switching
-- `chatbot.test.ts` > gatherSystemData > gathers all categories simultaneously
-- `chatbot.test.ts` > system data in /ask prompt > omits system data when question is not system-related
+- `system-data.test.ts` > categorizeQuestion > returns multiple categories for broad questions
+- `system-data.test.ts` > categorizeQuestion > returns empty set for unrelated questions
+- `system-data.test.ts` > categorizeQuestion > returns empty set for empty string
+- `system-data.test.ts` > categorizeQuestion > handles very long input without performance issues
+- `system-data.test.ts` > gatherSystemData > includes available models when switching
+- `system-data.test.ts` > gatherSystemData > gathers all categories simultaneously
+- `handle-ask.test.ts` > system data in /ask prompt > omits system data when question is not system-related
 
 **Error handling tests:**
-- `chatbot.test.ts` > gatherSystemData error isolation > returns other data when getCostSummary throws
-- `chatbot.test.ts` > gatherSystemData error isolation > returns other data when getScheduledJobs throws
-- `chatbot.test.ts` > gatherSystemData error isolation > returns other data when getSystemStatus throws
-- `chatbot.test.ts` > gatherSystemData error isolation > returns other data when getTierAssignments throws
+- `system-data.test.ts` > gatherSystemData error isolation > returns partial data when getCostSummary throws
+- `system-data.test.ts` > gatherSystemData error isolation > returns partial data when getScheduledJobs throws
+- `system-data.test.ts` > gatherSystemData error isolation > returns partial data when getSystemStatus throws
+- `system-data.test.ts` > gatherSystemData error isolation > returns partial data when getTierAssignments throws
 
 **Security tests:**
-- `chatbot.test.ts` > system data in /ask prompt > sanitizes system data in prompt
+- `handle-ask.test.ts` > system data in /ask prompt > sanitizes system data in prompt
 
 **State transition tests:**
-- `chatbot.test.ts` > gatherSystemData state transition > reflects updated tier assignments after model switch
+- `system-data.test.ts` > gatherSystemData state transition > reflects updated tier assignments after model switch
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/system-data.test.ts` (categorizeQuestion, gatherSystemData) and `core/src/services/conversation/__tests__/handle-ask.test.ts` (system data in /ask prompt). Error isolation test names changed from "returns other data when" to "returns partial data when".
 
 ### REQ-CHATBOT-009: Model switching via /ask
 
@@ -2707,16 +2721,18 @@ The chatbot's `/ask` command detects system-related questions via keyword heuris
 The chatbot extracts `<switch-model>` tags from LLM responses, validates parameters, calls `SystemInfoService.setTierModel()`, strips tags from user-visible response, and appends confirmation or error messages.
 
 **Standard tests:**
-- `chatbot.test.ts` > processModelSwitchTags > extracts and processes switch-model tags
-- `chatbot.test.ts` > processModelSwitchTags > handles multiple switch tags
+- `control-tags.test.ts` > processModelSwitchTags > extracts and processes switch-model tags
+- `control-tags.test.ts` > processModelSwitchTags > handles multiple switch tags
 
 **Edge case tests:**
-- `chatbot.test.ts` > processModelSwitchTags > includes error message on switch failure
-- `chatbot.test.ts` > processModelSwitchTags > passes through response without switch tags
-- `chatbot.test.ts` > processModelSwitchTags > strips tags gracefully when systemInfo is undefined
+- `control-tags.test.ts` > processModelSwitchTags > includes error message on switch failure
+- `control-tags.test.ts` > processModelSwitchTags > passes through response without switch tags
+- `control-tags.test.ts` > processModelSwitchTags > strips tags gracefully when systemInfo is undefined
 
 **Security tests:**
-- `chatbot.test.ts` > processModelSwitchTags > validates parameters when LLM echoes user switch-model tag
+- `control-tags.test.ts` > processModelSwitchTags > validates parameters when LLM echoes user switch-model tag
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/control-tags.test.ts`.
 
 ### REQ-CHATBOT-010: isPasRelevant system keyword detection
 
@@ -2725,10 +2741,12 @@ The chatbot extracts `<switch-model>` tags from LLM responses, validates paramet
 The `isPasRelevant()` function detects system-related keywords (model, cost, usage, uptime) in addition to app-related keywords, ensuring auto-detect mode routes system questions to the app-aware prompt. **Deprecated in D1** — superseded by `classifyPASMessage()` (REQ-CHATBOT-012).
 
 **Standard tests:**
-- `chatbot.test.ts` > isPasRelevant with system keywords > detects model-related questions
-- `chatbot.test.ts` > isPasRelevant with system keywords > detects cost-related questions
-- `chatbot.test.ts` > isPasRelevant with system keywords > detects usage questions
-- `chatbot.test.ts` > isPasRelevant with system keywords > detects uptime questions
+- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects model-related questions
+- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects cost-related questions
+- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects usage questions
+- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects uptime questions
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/pas-classifier.test.ts`.
 
 ### REQ-CHATBOT-012: LLM-based PAS message classification
 
@@ -2749,7 +2767,7 @@ The `classifyPASMessage()` function replaces the static `isPasRelevant()` keywor
 - `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: false for empty text without calling LLM
 - `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: false for whitespace-only text without calling LLM
 - `pas-classifier.test.ts` > classifyPASMessage > does not include large app metadata in classifier prompt
-- `chatbot.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
+- `auto-detect.test.ts` > auto-detect PAS questions > uses app-aware prompt (fail-open) when classifier LLM call throws
 
 **Error handling tests:**
 - `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: true (fail-open) when LLM throws
@@ -2770,9 +2788,11 @@ The `buildUserContext()` function builds a concise context string from `MessageC
 - `user-context.test.ts` > buildUserContext > omits space line when ctx.spaceName is absent
 - `user-context.test.ts` > buildUserContext > includes enabled app names
 - `user-context.test.ts` > buildUserContext > returns empty string when no space and no apps
-- `chatbot.test.ts` > auto-detect PAS questions > includes user household context in basic system prompt
-- `chatbot.test.ts` > auto-detect PAS questions > includes user household context in app-aware system prompt
-- `chatbot.test.ts` > handleCommand /ask > includes user household context in /ask system prompt
+- `auto-detect.test.ts` > auto-detect PAS questions > includes user household context in basic system prompt
+- `auto-detect.test.ts` > auto-detect PAS questions > includes user household context in app-aware system prompt
+- `handle-ask.test.ts` > handleCommand /ask > includes user household context in /ask system prompt
+
+**Note (Chunk D.2):** Integration tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/auto-detect.test.ts` and `handle-ask.test.ts`.
 
 **Edge case tests:**
 - `user-context.test.ts` > buildUserContext > does not include display name (not available in MessageContext)
@@ -2806,7 +2826,9 @@ The `splitTelegramMessage()` function splits long LLM responses into Telegram-sa
 The chatbot's LLM calls use `maxTokens: 2048` (raised from 1024 in Phase 16). Applied to both `handleMessage()` fallback responses and `handleCommand()` `/ask` responses. Combined with `splitTelegramMessage()`, this allows richer multi-paragraph answers without hitting Telegram's single-message limit.
 
 **Standard tests:**
-- `chatbot.test.ts` > handleMessage > calls LLM with standard tier (covers maxTokens via objectContaining check)
+- `conversation-service.test.ts` > handleMessage > calls LLM with standard tier (covers maxTokens via objectContaining check)
+
+**Note (Chunk D.2):** Test migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/conversation-service.test.ts`.
 
 ### REQ-CHATBOT-016: DataQueryService integration for YES_DATA messages
 
@@ -4269,7 +4291,7 @@ Edge:
 
 `CoreServices.timezone` property (IANA string) exposed to all apps. Notes and chatbot apps use `Intl.DateTimeFormat` with configured timezone for date formatting instead of UTC `toISOString()`. Resolves D21/D22.
 
-**Tests:** Covered by existing notes and chatbot tests (timezone test in notes.test.ts, daily notes date pattern in chatbot.test.ts)
+**Tests:** Covered by existing notes and chatbot tests (timezone test in notes.test.ts, daily notes date pattern in conversation-service.test.ts — migrated from chatbot.test.ts in Chunk D.2)
 
 ---
 
@@ -4446,36 +4468,38 @@ The ModelJournalService provides per-model persistent markdown files at `data/mo
 
 The chatbot determines the model slug from `services.llm.getModelForTier('standard')` via `slugifyModelId()` at each interaction start. Extracts `<model-journal>` tags from LLM responses, strips them before the user sees the response, and appends extracted content to the model's own journal via `ModelJournalService.append(modelSlug, content)`. Journal prompt section tells each model "This file is yours alone — no other model reads or writes to it." with model-specific path `data/model-journal/{modelSlug}.md`. Journal prompt added to both `buildSystemPrompt()` and `buildAppAwareSystemPrompt()` — includes instructions and current month's journal content (sanitized, capped at 2000 chars). Conversation history saves the cleaned response. Journal write failures do not prevent the user response from being sent.
 
-**Tests:** `apps/chatbot/src/__tests__/chatbot.test.ts`
+**Tests:** `core/src/services/conversation/__tests__/model-journal.test.ts`
 
 **Standard tests:**
-- `extractJournalEntries` > returns unchanged response when no journal tags
-- `extractJournalEntries` > extracts single journal entry and cleans response
-- `extractJournalEntries` > extracts multiple journal entries
-- `buildSystemPrompt` > includes model journal instruction section with model-specific path
-- `buildSystemPrompt` > includes journal content when journal has entries
-- `buildAppAwareSystemPrompt` > includes model journal instruction section with model-specific path
-- `model journal integration` > strips journal tags from response in handleMessage
-- `model journal integration` > writes journal entries via modelJournal.append
-- `model journal integration` > strips journal tags from /ask command response
+- `model-journal.test.ts` > extractJournalEntries > returns unchanged response when no journal tags
+- `model-journal.test.ts` > extractJournalEntries > extracts single journal entry and cleans response
+- `model-journal.test.ts` > extractJournalEntries > extracts multiple journal entries
+- `model-journal.test.ts` > buildSystemPrompt > includes model journal instruction section with model-specific path
+- `model-journal.test.ts` > buildSystemPrompt > includes journal content when journal has entries
+- `model-journal.test.ts` > buildAppAwareSystemPrompt > includes model journal instruction section with model-specific path
+- `model-journal.test.ts` > model journal integration > strips journal tags from response in handleMessage
+- `model-journal.test.ts` > model journal integration > writes journal entries via modelJournal.append
+- `model-journal.test.ts` > model journal integration > strips journal tags from /ask command response
 
 **Edge case tests:**
-- `extractJournalEntries` > handles journal tag at the beginning of response
-- `extractJournalEntries` > handles multiline journal content
-- `extractJournalEntries` > ignores empty journal tags
-- `extractJournalEntries` > ignores whitespace-only journal tags
-- `extractJournalEntries` > preserves unclosed journal tags (passes through to user)
-- `extractJournalEntries` > cleans up excess whitespace after tag removal
-- `buildSystemPrompt` > omits journal content section when journal is empty
-- `model journal integration` > does not call modelJournal.append when no journal tags
-- `model journal integration` > sends response even when journal write fails
-- `model journal integration` > saves cleaned response (without journal tags) to conversation history
-- `model journal integration` > sanitizes journal content in system prompt (anti-injection)
-- `handleMessage` > sends response normally when modelJournal service is undefined
-- `extractJournalEntries` > handles nested journal tags by matching to first closing tag
-- `buildSystemPrompt` > truncates journal content exceeding 2000 chars
-- `buildSystemPrompt` > omits journal content when modelJournal.read() throws
-- `model journal integration` > uses unknown model slug when getModelForTier is unavailable
+- `model-journal.test.ts` > extractJournalEntries > handles journal tag at the beginning of response
+- `model-journal.test.ts` > extractJournalEntries > handles multiline journal content
+- `model-journal.test.ts` > extractJournalEntries > ignores empty journal tags
+- `model-journal.test.ts` > extractJournalEntries > ignores whitespace-only journal tags
+- `model-journal.test.ts` > extractJournalEntries > preserves unclosed journal tags (passes through to user)
+- `model-journal.test.ts` > extractJournalEntries > cleans up excess whitespace after tag removal
+- `model-journal.test.ts` > buildSystemPrompt > omits journal content section when journal is empty
+- `model-journal.test.ts` > model journal integration > does not call modelJournal.append when no journal tags
+- `model-journal.test.ts` > model journal integration > sends response even when journal write fails
+- `model-journal.test.ts` > model journal integration > saves cleaned response (without journal tags) to conversation history
+- `model-journal.test.ts` > model journal integration > sanitizes journal content in system prompt (anti-injection)
+- `model-journal.test.ts` > handleMessage > sends response normally when modelJournal service is undefined
+- `model-journal.test.ts` > extractJournalEntries > handles nested journal tags by matching to first closing tag
+- `model-journal.test.ts` > buildSystemPrompt > truncates journal content exceeding 2000 chars
+- `model-journal.test.ts` > buildSystemPrompt > omits journal content when modelJournal.read() throws
+- `model-journal.test.ts` > model journal integration > uses unknown model slug when getModelForTier is unavailable
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/model-journal.test.ts`.
 
 ---
 
@@ -5813,15 +5837,17 @@ Frontmatter must support cross-app linking fields (`aliases`, `related`) for Obs
 The chatbot `/ask` command must detect data-related questions via keyword heuristics (no LLM cost) and include relevant data context in the prompt. When triggered, lists the user's daily notes and installed app capabilities. Must not attempt to read other apps' data directories (scoped data isolation).
 
 **Standard tests:**
-- `chatbot.test.ts` > categorizeQuestion — data category > detects data-related questions
-- `chatbot.test.ts` > categorizeQuestion — data category > detects food/fitness data keywords
-- `chatbot.test.ts` > data category — app-aware prompt integration > includes daily notes listing when data category is detected
-- `chatbot.test.ts` > data category — app-aware prompt integration > includes cross-app data note in overview
+- `system-data.test.ts` > categorizeQuestion — data category > detects data-related questions
+- `system-data.test.ts` > categorizeQuestion — data category > detects food/fitness data keywords
+- `handle-ask.test.ts` > data category — app-aware prompt integration > includes daily notes listing when data category is detected
+- `handle-ask.test.ts` > data category — app-aware prompt integration > includes cross-app data note in overview
 
 **Edge case tests:**
-- `chatbot.test.ts` > categorizeQuestion — data category > does not false-positive on unrelated questions
-- `chatbot.test.ts` > categorizeQuestion — data category > can combine data with other categories
-- `chatbot.test.ts` > data category — app-aware prompt integration > handles no daily notes gracefully
+- `system-data.test.ts` > categorizeQuestion — data category > does not false-positive on unrelated questions
+- `system-data.test.ts` > categorizeQuestion — data category > can combine data with other categories
+- `handle-ask.test.ts` > data category — app-aware prompt integration > handles no daily notes gracefully
+
+**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/system-data.test.ts` (categorizeQuestion) and `handle-ask.test.ts` (data category prompt integration).
 
 ### REQ-FMATTER-002: Atomic frontmatter-aware file append
 
@@ -6250,12 +6276,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 26 | Implemented |
 | REQ-ROUTE-007 | router.test.ts, router-verification.test.ts, context-promotion.test.ts | 12 | 3 | Implemented |
 | REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
-| REQ-CHATBOT-002 | chatbot.test.ts | 4 | 6 | Implemented |
-| REQ-CHATBOT-003 | chatbot.test.ts | 1 | 1 | Implemented |
-| REQ-CHATBOT-004 | chatbot.test.ts | 4 | 7 | Implemented |
-| REQ-CHATBOT-005 | chatbot.test.ts | 3 | 2 | Implemented |
-| REQ-CHATBOT-006 | chatbot.test.ts | 5 | 3 | Implemented (legacy compatibility only) |
-| REQ-CHATBOT-007 | chatbot.test.ts | 5 | 0 | Implemented |
+| REQ-CHATBOT-002 | prompt-builder.test.ts, conversation-service.test.ts | 4 | 6 | Implemented |
+| REQ-CHATBOT-003 | conversation-service.test.ts | 1 | 1 | Implemented |
+| REQ-CHATBOT-004 | handle-ask.test.ts | 4 | 7 | Implemented |
+| REQ-CHATBOT-005 | auto-detect.test.ts | 3 | 2 | Implemented |
+| REQ-CHATBOT-006 | pas-classifier.test.ts | 5 | 3 | Implemented (legacy compatibility only) |
+| REQ-CHATBOT-007 | prompt-builder.test.ts | 5 | 0 | Implemented |
 | REQ-APPMETA-001 | app-metadata.test.ts | 8 | 9 | Implemented |
 | REQ-APPKNOW-001 | app-knowledge.test.ts | 9 | 9 | Implemented |
 | REQ-CONFIG-004 | (removed — see REQ-CONV-021) | 0 | 0 | Removed |
@@ -6272,16 +6298,16 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-DOC-001 | — | — | — | Implemented |
 | REQ-DOC-002 | — | — | — | Implemented |
 | REQ-ERROR-001 | llm-errors.test.ts | 13 | 5 | Implemented |
-| REQ-TIMEZONE-001 | notes.test.ts, chatbot.test.ts | 1 | 0 | Implemented |
+| REQ-TIMEZONE-001 | notes.test.ts, conversation-service.test.ts | 1 | 0 | Implemented |
 | REQ-GUI-008 | data.test.ts, data-household.test.ts, d5b5-auth.test.ts | 24 | 19 | Implemented |
 | REQ-GUI-007 | context-routes.test.ts | 9 | 10 | Implemented |
 | REQ-JOURNAL-001 | model-journal.test.ts | 18 | 26 | Implemented |
-| REQ-JOURNAL-002 | chatbot.test.ts | 9 | 16 | Implemented |
+| REQ-JOURNAL-002 | model-journal.test.ts | 9 | 16 | Implemented |
 | REQ-JOURNAL-003 | data.test.ts | 6 | 13 | Implemented |
 | REQ-SYSINFO-001 | system-info.test.ts | 12 | 11 | Implemented |
-| REQ-CHATBOT-008 | chatbot.test.ts | 10 | 12 | Implemented |
-| REQ-CHATBOT-009 | chatbot.test.ts | 2 | 4 | Implemented |
-| REQ-CHATBOT-010 | chatbot.test.ts | 4 | 0 | Implemented |
+| REQ-CHATBOT-008 | system-data.test.ts, handle-ask.test.ts | 10 | 12 | Implemented |
+| REQ-CHATBOT-009 | control-tags.test.ts | 2 | 4 | Implemented |
+| REQ-CHATBOT-010 | pas-classifier.test.ts | 4 | 0 | Implemented |
 | REQ-SECRETS-001 | secrets.test.ts | 3 | 5 | Implemented |
 | REQ-REPORT-001 | report-validator.test.ts | 8 | 33 | Implemented |
 | REQ-REPORT-002 | section-collector.test.ts | 10 | 12 | Implemented |
@@ -6332,11 +6358,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FMATTER-003 | migrate-frontmatter.test.ts | 9 | 7 | Implemented |
 
 | REQ-FMATTER-004 | frontmatter.test.ts | 11 | 15 | Implemented |
-| REQ-CHATBOT-011 | chatbot.test.ts | 4 | 3 | Implemented |
-| REQ-CHATBOT-012 | pas-classifier.test.ts, chatbot.test.ts | 7 | 5 | Implemented |
-| REQ-CHATBOT-013 | user-context.test.ts, chatbot.test.ts | 7 | 2 | Implemented |
+| REQ-CHATBOT-011 | system-data.test.ts, handle-ask.test.ts | 4 | 3 | Implemented |
+| REQ-CHATBOT-012 | pas-classifier.test.ts, auto-detect.test.ts | 7 | 5 | Implemented |
+| REQ-CHATBOT-013 | user-context.test.ts, auto-detect.test.ts, handle-ask.test.ts | 7 | 2 | Implemented |
 | REQ-CHATBOT-014 | message-splitter.test.ts | 6 | 2 | Implemented |
-| REQ-CHATBOT-015 | chatbot.test.ts | 1 | 0 | Implemented |
+| REQ-CHATBOT-015 | conversation-service.test.ts | 1 | 0 | Implemented |
 
 | REQ-VAULT-001 | vault.test.ts | 8 | 11 | Implemented |
 | REQ-VAULT-002 | vault.test.ts | 3 | 3 | Implemented |
