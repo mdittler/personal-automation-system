@@ -111,11 +111,8 @@ describe('EditService bootstrap wiring', () => {
 		});
 
 		it('chatbot virtual manifest does NOT declare /edit as a capability (Chunk C: /edit is a Router built-in)', () => {
-			// Post-Chunk-C: /edit is dispatched by the Router to ConversationService directly,
-			// not by the chatbot app module. The virtual manifest has no commands capability.
 			const { manifest } = buildVirtualChatbotApp();
-			// The virtual manifest has no commands: block — only an intents: [] placeholder.
-			expect((manifest.capabilities as any).commands).toBeUndefined();
+			expect(manifest.capabilities?.commands).toBeUndefined();
 		});
 	});
 });

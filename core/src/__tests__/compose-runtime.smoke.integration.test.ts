@@ -141,9 +141,6 @@ describe('composeRuntime smoke', () => {
 	});
 
 	it('chatbot /ask route calls reserve priced amounts instead of the flat fallback', async () => {
-		// apps/chatbot/ was deleted in Hermes P1 Chunk D.3. /ask is now handled by
-		// ConversationService.handleAsk via the Router command dispatch — route via
-		// router.routeMessage so the same LLM-guard cost-reservation path is exercised.
 		await runtime.services.modelSelector.setFastRef({ provider: 'stub', model: 'gpt-4.1-mini' });
 		await runtime.services.modelSelector.setStandardRef({ provider: 'stub', model: 'gpt-4.1' });
 
@@ -154,7 +151,7 @@ describe('composeRuntime smoke', () => {
 		const userId = 'user-0';
 		const householdId =
 			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
-		const router = runtime.services.router as any;
+		const { router } = runtime.services;
 		await requestContext.run({ userId, householdId }, () =>
 			router.routeMessage(askMessage(userId, 2001)),
 		);
@@ -171,8 +168,6 @@ describe('composeRuntime smoke', () => {
 	});
 
 	it('/edit ignores unauthorized recentFilePaths from another user', async () => {
-		// apps/chatbot/ was deleted in Hermes P1 Chunk D.3. /edit is now handled by
-		// EditService via the Router command dispatch — route via router.routeMessage.
 		const userA = 'user-0';
 		const userB = 'user-1';
 		const userAHouseholdId =
@@ -195,9 +190,9 @@ describe('composeRuntime smoke', () => {
 		const telegram = runtime.services.telegram as ReturnType<typeof fakeTelegramService>;
 		telegram.sent.length = 0;
 
-		const router = runtime.services.router as any;
+		const { router } = runtime.services;
 		await requestContext.run({ userId: userA, householdId: userAHouseholdId }, () =>
-			router.routeMessage({
+			(router as any).routeMessage({
 				userId: userA,
 				text: '/edit change zxq secret marker',
 				chatId: 3001,
