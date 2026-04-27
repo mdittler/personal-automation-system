@@ -297,6 +297,24 @@ describe('P3 — alert/report inventory: snapshot surfaces reports and alerts', 
 		expect(prompt).toContain('Weekly Food Summary');
 		expect(prompt).toContain('configured reports');
 	});
+
+	it('"what automated tasks are running" triggers alert + report content in prompt', async () => {
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('YES')
+			.mockResolvedValueOnce('Here are your automated tasks.');
+
+		const ctx = createTestMessageContext({
+			userId: 'alice',
+			text: 'what automated tasks are running',
+		});
+		const svc = makeServiceWithRetrieval(services, retrieval);
+
+		await run('alice', () => svc.handleMessage(ctx));
+
+		const prompt = getSystemPromptFromLLMCall(services);
+		expect(prompt).toContain('Pantry Low Stock');
+		expect(prompt).toContain('Weekly Food Summary');
+	});
 });
 
 // ---------------------------------------------------------------------------

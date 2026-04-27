@@ -63,6 +63,7 @@ Known issues or cleanup items that should be addressed in a near-term session.
 - **Hermes P2 Chunk A: collaboration-data wiring** — `SOURCE_POLICY` declares the `collaboration-data` category but the underlying cross-household `SpaceService.isMember` query is not implemented. Wire in Chunk C when `buildContextSnapshot` is implemented.
 - **Hermes P2: ContextStore double-read** — `gatherContext` (app-data.ts) calls `contextStore.listForUser` independently of the snapshot path. When both paths are active in production, the same ContextStore is read twice per request (once in `gatherContext`, once in `buildContextSnapshot`). In Chunk A tests this is invisible because the mock returns `[]`. Fix in Chunk C by passing snapshot context entries into `gatherContext` so the second read is skipped.
 - **Hermes P2 Chunk A: `unknown[]` return types** — `listContextEntries`, `getRecentInteractions`, `getEnabledApps`, `searchAppKnowledge`, `listScopedReports`, `listScopedAlerts` return `Promise<unknown[]>` as placeholders. Full types are added in Chunk C when the method bodies are implemented.
+- **Snapshot interactionContext unused in prompt-builder:** `buildContextSnapshot` fetches `interactionContext` entries but `buildAppAwareSystemPrompt` doesn't render them (the interaction data from `gatherContext`/the classifier path is used instead). This creates redundant I/O. Consider either (a) removing interaction-context from the snapshot fan-out in `free-text` mode until prompt-builder consumes it, or (b) rendering it in a prompt block. Deferred post-P2.
 
 ---
 
