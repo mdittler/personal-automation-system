@@ -779,6 +779,4 @@ describe('Free-text fallback — ConversationService dispatch', () => {
 			expect.stringContaining('Something went wrong'),
 		);
 	});
-
 });
-

@@ -3040,7 +3040,7 @@ The Router establishes the ALS boundary, not ConversationService. `dispatchConve
 
 **Phase:** P1 Chunk B | **Status:** Implemented
 
-`compose-runtime.ts` constructs an `LLMGuard` for ConversationService keyed by `appId='chatbot'`, configured from `CONVERSATION_LLM_SAFEGUARDS` (60 req/3600s rate limit, $15/month cap), sharing the global `costTracker`, `householdLimiter`, and `priceLookup` with all other guards. The guard is pushed onto `llmGuards` so dispose runs on shutdown. Rate-limit and cost-cap exhaustion produce `LLMRateLimitError` / `LLMCostCapError`, surfaced as friendly replies via `classifyLLMError`. **Legacy `pas.yaml` `defaults.fallback` key produces a warn-level deprecation log at startup** via the new `_legacyKeys` config metadata.
+`compose-runtime.ts` constructs an `LLMGuard` for ConversationService keyed by `appId='chatbot'`, configured from `CONVERSATION_LLM_SAFEGUARDS` (60 req/3600s rate limit, $15/month cap), sharing the global `costTracker`, `householdLimiter`, and `priceLookup` with all other guards. The guard is pushed onto `llmGuards` so dispose runs on shutdown. Rate-limit and cost-cap exhaustion produce `LLMRateLimitError` / `LLMCostCapError`, surfaced as friendly replies via `classifyLLMError`. (The `_legacyKeys` deprecation-warning mechanism introduced here was removed in D.4; see REQ-CONV-021.)
 
 **Standard tests** (`core/src/__tests__/compose-runtime.smoke.integration.test.ts`): 1 new case:
 - `Chunk B: ConversationService is wired into the Router`
