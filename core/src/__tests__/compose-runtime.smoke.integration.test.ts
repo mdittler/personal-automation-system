@@ -8,21 +8,21 @@
  * Once Task 4 lands, all assertions here should pass without modification.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import cron from 'node-cron';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { composeRuntime } from '../compose-runtime.js';
-import { seedUsers } from '../testing/fixtures/seed-users.js';
-import { createStubProviderRegistry, StubProvider } from '../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
-import { chatbotMessage } from '../testing/fixtures/messages.js';
 import { requestContext } from '../services/context/request-context.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
 import { approximateTokens } from '../services/llm/estimate-guard-cost.js';
 import { getModelPricing } from '../services/llm/model-pricing.js';
+import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
+import { askMessage, chatbotMessage } from '../testing/fixtures/messages.js';
+import { seedUsers } from '../testing/fixtures/seed-users.js';
+import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
 
 describe('composeRuntime smoke', () => {
 	let tempDir: string;
@@ -92,7 +92,10 @@ describe('composeRuntime smoke', () => {
 			await cronCallback?.();
 		}
 
-		const persisted = await readFile(join(tempDir, 'data', 'system', 'disabled-jobs.yaml'), 'utf-8');
+		const persisted = await readFile(
+			join(tempDir, 'data', 'system', 'disabled-jobs.yaml'),
+			'utf-8',
+		);
 		expect(persisted).toContain(jobKey);
 
 		runtime.services.scheduler.cron.unregister(jobKey);
@@ -118,10 +121,9 @@ describe('composeRuntime smoke', () => {
 		expect(fastPricing).toBeTruthy();
 		expect(standardPricing).toBeTruthy();
 		const expectedFast =
-			((promptTokens * fastPricing!.input) + (outputTokens * fastPricing!.output)) / 1_000_000;
+			(promptTokens * fastPricing!.input + outputTokens * fastPricing!.output) / 1_000_000;
 		const expectedStandard =
-			((promptTokens * standardPricing!.input) + (outputTokens * standardPricing!.output)) /
-			1_000_000;
+			(promptTokens * standardPricing!.input + outputTokens * standardPricing!.output) / 1_000_000;
 
 		await requestContext.run({ userId, householdId }, () =>
 			runtime.services.systemLlm.complete(prompt, { tier: 'fast', maxTokens: 1000 }),
@@ -140,7 +142,7 @@ describe('composeRuntime smoke', () => {
 		expect((fastAmount as number) < (standardAmount as number)).toBe(true);
 	});
 
-	it('app-owned chatbot calls reserve priced amounts instead of the flat fallback', async () => {
+	it('chatbot /ask route calls reserve priced amounts instead of the flat fallback', async () => {
 		await runtime.services.modelSelector.setFastRef({ provider: 'stub', model: 'gpt-4.1-mini' });
 		await runtime.services.modelSelector.setStandardRef({ provider: 'stub', model: 'gpt-4.1' });
 
@@ -148,24 +150,12 @@ describe('composeRuntime smoke', () => {
 		const reserveSpy = vi.spyOn(costTracker, 'reserveEstimated');
 		reserveSpy.mockClear();
 
-		const chatbotEntry = runtime.services.registry.getApp('chatbot');
-		expect(chatbotEntry?.module.handleCommand).toBeDefined();
-
 		const userId = 'user-0';
 		const householdId =
 			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
+		const { router } = runtime.services;
 		await requestContext.run({ userId, householdId }, () =>
-			chatbotEntry!.module.handleCommand!(
-				'ask',
-				['what', 'apps', 'do', 'I', 'have?'],
-				{
-					userId,
-					text: '/ask what apps do I have?',
-					chatId: 2001,
-					messageId: 2001,
-					timestamp: new Date(),
-				},
-			),
+			router.routeMessage(askMessage(userId, 2001)),
 		);
 
 		const defaultReservation = runtime.services.safeguardsConfig.defaultReservationUsd ?? 0.01;
@@ -202,28 +192,21 @@ describe('composeRuntime smoke', () => {
 		const telegram = runtime.services.telegram as ReturnType<typeof fakeTelegramService>;
 		telegram.sent.length = 0;
 
-		const chatbotEntry = runtime.services.registry.getApp('chatbot');
-		expect(chatbotEntry?.module.handleCommand).toBeDefined();
-
+		const { router } = runtime.services;
 		await requestContext.run({ userId: userA, householdId: userAHouseholdId }, () =>
-			chatbotEntry!.module.handleCommand!(
-				'edit',
-				['change', 'zxq', 'secret', 'marker'],
-				{
-					userId: userA,
-					text: '/edit change zxq secret marker',
-					chatId: 3001,
-					messageId: 3001,
-					timestamp: new Date(),
-				},
-			),
+			(router as any).routeMessage({
+				userId: userA,
+				text: '/edit change zxq secret marker',
+				chatId: 3001,
+				messageId: 3001,
+				timestamp: new Date(),
+			}),
 		);
 
 		expect(await readFile(userBAbsolutePath, 'utf-8')).toBe('zxq secret marker\n');
 		expect(
 			telegram.sent.some(
-				(message) =>
-					message.userId === userA && message.text.includes('No matching files found'),
+				(message) => message.userId === userA && message.text.includes('No matching files found'),
 			),
 		).toBe(true);
 	});
@@ -254,8 +237,11 @@ describe('composeRuntime smoke', () => {
 		// Parse the last row positionally (9 columns):
 		// | ts | provider | model | in | out | cost | app | user | household |
 		const lastRow = afterLines[afterLines.length - 1];
-		const cols = lastRow.split('|').slice(1, -1).map((c) => c.trim());
-		expect(cols[7]).toBe(userId);    // user column (index 7)
+		const cols = lastRow
+			.split('|')
+			.slice(1, -1)
+			.map((c) => c.trim());
+		expect(cols[7]).toBe(userId); // user column (index 7)
 		expect(cols[8]).toBe(expectedHh); // household column (index 8)
 	});
 

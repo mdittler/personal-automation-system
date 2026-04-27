@@ -3203,6 +3203,47 @@ Only keys in `ALLOWED_CONFIG_KEYS` (currently `log_to_notes`) are processed; oth
 
 ---
 
+### REQ-CONV-011: 'chatbot' removed from PROTECTED_APPS
+
+**Phase:** Hermes P1 Chunk D | **Status:** Implemented
+
+`'chatbot'` is removed from the `PROTECTED_APPS` set in `core/src/cli/uninstall-app.ts`. Rationale: `apps/chatbot/` no longer exists; protecting a non-existent app is misleading and would produce a confusing error if a user attempted to uninstall an app with that id.
+
+**Standard tests** (`core/src/cli/__tests__/uninstall-app.test.ts`):
+- `rejects protected built-in apps` — verifies 'echo' is still protected; 'chatbot' is no longer in the protected set
+
+---
+
+### REQ-CONV-012: apps/chatbot/ directory deleted
+
+**Phase:** Hermes P1 Chunk D | **Status:** Implemented
+
+The `apps/chatbot/` directory is deleted. `AppRegistry` no longer loads a real chatbot app module. `ConversationService` in `core/src/services/conversation/` provides all conversational capabilities directly as infrastructure.
+
+**Verification:** Confirmed by absence of `apps/chatbot/` directory in the repository. All prior chatbot app tests have been migrated to `core/src/services/conversation/__tests__/` or deleted.
+
+---
+
+### REQ-CONV-013: Virtual 'chatbot' registry entry preserves GUI config GET/POST
+
+**Phase:** Hermes P1 Chunk D | **Status:** Implemented
+
+A virtual `'chatbot'` registry entry (added in Chunk D.1 via `AppRegistry.registerVirtual()` + `buildVirtualChatbotApp()`) persists GUI config GET/POST for the chatbot appId after the real app module is deleted. The virtual entry has a full manifest mirroring `CONVERSATION_USER_CONFIG` and a tripwire module that throws on any message dispatch attempt, ensuring the entry is never used as a fallback handler.
+
+**Standard tests** (`core/src/services/conversation/__tests__/virtual-app-tripwire.integration.test.ts`, `core/src/gui/__tests__/chatbot-virtual-config.integration.test.ts`): 5 cases covering virtual entry registration, GUI config GET, GUI config POST, tripwire throw on dispatch, and registry lookup.
+
+---
+
+### REQ-CONV-021: chatbotApp/fallbackMode fields removed from RouterOptions
+
+**Phase:** Hermes P1 Chunk D | **Status:** Implemented
+
+`chatbotApp` and `fallbackMode` fields are removed from `RouterOptions`. `sendToFallback()` is simplified: when `config.fallback === 'notes'` or no `ConversationService` is present the message routes to `FallbackHandler`; otherwise it routes to `ConversationService`. The legacy `chatbotApp` dispatch branch is deleted. `SystemConfig.fallback` is preserved to honour existing `fallback: notes` deployments; full removal of `fallback`/`_legacyKeys` from `SystemConfig` is deferred to Chunk D.4.
+
+**Standard tests** (`core/src/services/router/__tests__/router.test.ts`): legacy fallback-branch tests removed; tests verify ConversationService is used for `fallback: chatbot` and that `fallback: notes` still routes to `FallbackHandler`.
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -4084,7 +4125,7 @@ The `pnpm install-app <git-url>` CLI command must show a validated permission su
 
 **Phase:** 17 | **Status:** Implemented
 
-The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo, chatbot) from uninstallation, verify the app directory exists, remove the directory recursively, and print restart guidance after a successful uninstall. Invalid app IDs including path traversal attempts must be rejected before filesystem mutation.
+The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo) from uninstallation, verify the app directory exists, remove the directory recursively, and print restart guidance after a successful uninstall. Invalid app IDs including path traversal attempts must be rejected before filesystem mutation.
 
 **Standard tests:**
 - `uninstall-app.test.ts` > uninstall-app CLI > removes the app directory and prints restart guidance on success
@@ -4124,7 +4165,7 @@ The manifest schema and types must support optional v2 fields: `pas_core_version
 
 **Phase:** 17 | **Status:** Implemented
 
-The system must provide a CLI command (`pnpm uninstall-app <app-id>`) that removes an installed app. The CLI must validate the app ID format, reject attempts to uninstall built-in apps (echo, chatbot), verify the app directory exists, remove the app directory recursively, and advise the user to restart PAS.
+The system must provide a CLI command (`pnpm uninstall-app <app-id>`) that removes an installed app. The CLI must validate the app ID format, reject attempts to uninstall built-in apps (echo), verify the app directory exists, remove the app directory recursively, and advise the user to restart PAS. Note: 'chatbot' was removed from `PROTECTED_APPS` in Chunk D (see REQ-CONV-011) because `apps/chatbot/` no longer exists.
 
 **Standard tests:**
 - `uninstall-app.test.ts` > uninstall-app CLI > removes the app directory and prints restart guidance on success
@@ -6369,5 +6410,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-016 | conversation-builtin.test.ts, builtin-dispatch.integration.test.ts | 17 | 4 | Implemented |
 | REQ-CONV-019 | coerce-user-config.test.ts | 20 | 12 | Implemented |
 | REQ-CONV-020 | log-to-notes.persona.test.ts, daily-notes.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-011 | uninstall-app.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-012 | (verified by absence of apps/chatbot/) | 0 | 0 | Implemented |
+| REQ-CONV-013 | virtual-app-tripwire.integration.test.ts, chatbot-virtual-config.integration.test.ts | 5 | 0 | Implemented |
+| REQ-CONV-021 | router.test.ts | 0 | 0 | Implemented |
 
 | **Totals** | **178 test files** | **1415** | **1656** | **3071 tests** |

@@ -5,11 +5,16 @@ import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
+import type {
+	MessageContext,
+	PhotoContext,
+	RouteInfo,
+	TelegramService,
+} from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
-import type { FallbackHandler } from '../fallback.js';
-import { buildUserOverrideRouteInfo, Router } from '../index.js';
 import type { SpaceService } from '../../spaces/index.js';
+import type { FallbackHandler } from '../fallback.js';
+import { Router, buildUserOverrideRouteInfo } from '../index.js';
 
 /**
  * Assert that a dispatch mock was called with a context whose `route` field
@@ -142,13 +147,11 @@ describe('Router', () => {
 		apps: Array<{ manifest: AppManifest; module: AppModule }>,
 		overrideLlm?: LLMService,
 		options?: {
-			chatbotApp?: RegisteredApp;
-			fallbackMode?: 'chatbot' | 'notes';
 			spaceService?: SpaceService;
 			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
 		},
 	): Router {
-		const config = createMockConfig(users, options?.fallbackMode ?? 'chatbot');
+		const config = createMockConfig(users);
 		const cache = new ManifestCache();
 		for (const app of apps) {
 			cache.add(app.manifest, `/apps/${app.manifest.app.id}`);
@@ -177,8 +180,6 @@ describe('Router', () => {
 			config,
 			logger,
 			confidenceThreshold: 0.4,
-			chatbotApp: options?.chatbotApp,
-			fallbackMode: options?.fallbackMode,
 			spaceService: options?.spaceService,
 			conversationService: options?.conversationService as any,
 		});
@@ -350,154 +351,6 @@ describe('Router', () => {
 		});
 	});
 
-	describe('routeMessage — chatbot fallback', () => {
-		const users = [
-			{
-				id: 'user1',
-				name: 'Test',
-				isAdmin: true,
-				enabledApps: ['*'] as string[],
-				sharedScopes: [] as string[],
-			},
-		];
-
-		it('dispatches to chatbot app when fallback mode is chatbot', async () => {
-			const chatbotModule = createMockModule();
-			const chatbotApp: RegisteredApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-					capabilities: { messages: { intents: [] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			};
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			const router = buildRouter(users, [], lowConfLlm, { chatbotApp, fallbackMode: 'chatbot' });
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(chatbotModule.handleMessage).toHaveBeenCalled();
-			expect(fallback.handleUnrecognized).not.toHaveBeenCalled();
-		});
-
-		it('uses FallbackHandler when fallback mode is notes', async () => {
-			const chatbotModule = createMockModule();
-			const chatbotApp: RegisteredApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-					capabilities: { messages: { intents: [] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			};
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			const router = buildRouter(users, [], lowConfLlm, { chatbotApp, fallbackMode: 'notes' });
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(fallback.handleUnrecognized).toHaveBeenCalled();
-			expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
-		});
-
-		it('falls back to notes handler when chatbot mode but no chatbot app', async () => {
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			const router = buildRouter(users, [], lowConfLlm, { fallbackMode: 'chatbot' });
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(fallback.handleUnrecognized).toHaveBeenCalled();
-		});
-
-		it('defaults to chatbot mode when fallbackMode not specified', async () => {
-			const chatbotModule = createMockModule();
-			const chatbotApp: RegisteredApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-					capabilities: { messages: { intents: [] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			};
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			// fallbackMode not passed — should default to 'chatbot'
-			const config = createMockConfig(users);
-			const cache = new ManifestCache();
-			const registry = {
-				getApp: () => undefined,
-				getManifestCache: () => cache,
-				getLoadedAppIds: () => [],
-			} as unknown as AppRegistry;
-
-			const router = new Router({
-				registry,
-				llm: lowConfLlm,
-				telegram,
-				fallback,
-				config,
-				logger,
-				confidenceThreshold: 0.4,
-				chatbotApp,
-			});
-			router.buildRoutingTables();
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(chatbotModule.handleMessage).toHaveBeenCalled();
-		});
-
-		it('does NOT dispatch to disabled chatbot app — falls back to notes handler', async () => {
-			const chatbotModule = createMockModule();
-			const chatbotApp: RegisteredApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-					capabilities: { messages: { intents: [] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			};
-			// User only has 'echo' enabled — chatbot is NOT in the list
-			const restrictedUsers = [
-				{
-					id: 'user1',
-					name: 'Test',
-					isAdmin: false,
-					enabledApps: ['echo'] as string[],
-					sharedScopes: [] as string[],
-				},
-			];
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			const router = buildRouter(restrictedUsers, [], lowConfLlm, {
-				chatbotApp,
-				fallbackMode: 'chatbot',
-			});
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
-			expect(fallback.handleUnrecognized).toHaveBeenCalled();
-		});
-
-		it('catches chatbot app errors and sends error message', async () => {
-			const chatbotModule = createMockModule();
-			vi.mocked(chatbotModule.handleMessage).mockRejectedValue(new Error('chatbot crashed'));
-			const chatbotApp: RegisteredApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-					capabilities: { messages: { intents: [] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			};
-			const lowConfLlm = createMockLLM({ category: 'echo', confidence: 0.1 });
-			const router = buildRouter(users, [], lowConfLlm, { chatbotApp, fallbackMode: 'chatbot' });
-
-			await router.routeMessage(createTextCtx('random message'));
-
-			expect(logger.error).toHaveBeenCalled();
-			expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('went wrong'));
-		});
-	});
-
 	describe('routePhoto', () => {
 		it('should route photos to the matching app', async () => {
 			const users = [
@@ -645,28 +498,20 @@ describe('Router', () => {
 		});
 
 		it('chatbot fallback attaches source:fallback, verifierStatus:not-run, intent:chatbot', async () => {
-			// LLM returns low confidence → no match → falls through to chatbot
+			// LLM returns low confidence → no match → falls through to ConversationService
 			const lowConfLlm = createMockLLM({ category: 'add grocery', confidence: 0.1 });
-			const chatbotModule = createMockModule();
-			const chatbotApp = {
-				manifest: {
-					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'AI', author: 'Test' },
-					capabilities: { messages: { intents: ['chat'] } },
-				},
-				module: chatbotModule,
-				appDir: '/apps/chatbot',
-			} as unknown as RegisteredApp;
+			const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
 
 			const router = buildRouter(
 				users,
 				[{ manifest: groceryManifest, module: groceryModule }],
 				lowConfLlm,
-				{ chatbotApp, fallbackMode: 'chatbot' },
+				{ conversationService },
 			);
 
 			await router.routeMessage(createTextCtx('hello'));
 
-			expectDispatchedRoute(vi.mocked(chatbotModule.handleMessage), {
+			expectDispatchedRoute(vi.mocked(conversationService.handleMessage), {
 				appId: 'chatbot',
 				intent: 'chatbot',
 				confidence: 0,
@@ -702,12 +547,28 @@ describe('Router', () => {
 			const photoApp2Module = createMockModule();
 
 			const photoManifest1: AppManifest = {
-				app: { id: 'photo1', name: 'Photo1', version: '1.0.0', description: 'Photo app 1', author: 'Test' },
-				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['receipt'] } },
+				app: {
+					id: 'photo1',
+					name: 'Photo1',
+					version: '1.0.0',
+					description: 'Photo app 1',
+					author: 'Test',
+				},
+				capabilities: {
+					messages: { intents: [], accepts_photos: true, photo_intents: ['receipt'] },
+				},
 			};
 			const photoManifest2: AppManifest = {
-				app: { id: 'photo2', name: 'Photo2', version: '1.0.0', description: 'Photo app 2', author: 'Test' },
-				capabilities: { messages: { intents: [], accepts_photos: true, photo_intents: ['landscape'] } },
+				app: {
+					id: 'photo2',
+					name: 'Photo2',
+					version: '1.0.0',
+					description: 'Photo app 2',
+					author: 'Test',
+				},
+				capabilities: {
+					messages: { intents: [], accepts_photos: true, photo_intents: ['landscape'] },
+				},
 			};
 
 			const apps = [
@@ -718,7 +579,8 @@ describe('Router', () => {
 			cache.add(photoManifest1, '/apps/photo1');
 			cache.add(photoManifest2, '/apps/photo2');
 			const registry = {
-				getApp: (id: string) => apps.find((a) => a.manifest.app.id === id) as RegisteredApp | undefined,
+				getApp: (id: string) =>
+					apps.find((a) => a.manifest.app.id === id) as RegisteredApp | undefined,
 				getManifestCache: () => cache,
 				getAll: () => apps,
 				getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
@@ -826,7 +688,7 @@ describe('buildUserOverrideRouteInfo', () => {
 	});
 });
 
-describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', () => {
+describe('Free-text fallback — ConversationService dispatch', () => {
 	const users = [
 		{
 			id: 'user1',
@@ -841,16 +703,13 @@ describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', 
 	let llm: LLMService;
 	let fallback: FallbackHandler;
 	let logger: Logger;
-	let chatbotModule: AppModule;
-	let chatbotApp: RegisteredApp;
 
 	function buildRouter(
 		routerUsers: typeof users,
 		overrideLlm?: LLMService,
 		options?: {
-			chatbotApp?: RegisteredApp;
-			fallbackMode?: 'chatbot' | 'notes';
 			conversationService?: { handleMessage: (...args: unknown[]) => Promise<void> };
+			fallbackMode?: 'chatbot' | 'notes';
 		},
 	): Router {
 		const config = createMockConfig(routerUsers, options?.fallbackMode ?? 'chatbot');
@@ -869,8 +728,6 @@ describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', 
 			config,
 			logger,
 			confidenceThreshold: 0.4,
-			chatbotApp: options?.chatbotApp,
-			fallbackMode: options?.fallbackMode,
 			conversationService: options?.conversationService as any,
 		});
 		router.buildRoutingTables();
@@ -882,37 +739,15 @@ describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', 
 		llm = createMockLLM({ category: 'unknown', confidence: 0.1 });
 		fallback = createMockFallback();
 		logger = createMockLogger();
-		chatbotModule = createMockModule();
-		chatbotApp = {
-			manifest: {
-				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-				capabilities: { messages: { intents: [] } },
-			},
-			module: chatbotModule,
-			appDir: '/apps/chatbot',
-		};
 	});
 
-	it('when conversationService is wired, free-text fallback calls it (not chatbotApp)', async () => {
+	it('free-text fallback dispatches to ConversationService', async () => {
 		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
-		const router = buildRouter(users, undefined, {
-			chatbotApp,
-			fallbackMode: 'chatbot',
-			conversationService,
-		});
+		const router = buildRouter(users, undefined, { conversationService });
 
 		await router.routeMessage(createTextCtx('hello'));
 
 		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
-		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
-	});
-
-	it('when conversationService is absent, falls back to legacy chatbotApp branch', async () => {
-		const router = buildRouter(users, undefined, { chatbotApp, fallbackMode: 'chatbot' });
-
-		await router.routeMessage(createTextCtx('hello'));
-
-		expect(chatbotModule.handleMessage).toHaveBeenCalledTimes(1);
 	});
 
 	it('per-user chatbot disable: routes to FallbackHandler regardless of conversationService presence', async () => {
@@ -926,11 +761,7 @@ describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', 
 			},
 		];
 		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
-		const router = buildRouter(restrictedUsers, undefined, {
-			chatbotApp,
-			fallbackMode: 'chatbot',
-			conversationService,
-		});
+		const router = buildRouter(restrictedUsers, undefined, { conversationService });
 
 		await router.routeMessage(createTextCtx('hello'));
 
@@ -942,14 +773,23 @@ describe('Hermes P1 Chunk B — conversationService preferred over chatbotApp', 
 		const conversationService = {
 			handleMessage: vi.fn().mockRejectedValue(new Error('boom')),
 		};
-		const router = buildRouter(users, undefined, {
-			chatbotApp,
-			fallbackMode: 'chatbot',
-			conversationService,
-		});
+		const router = buildRouter(users, undefined, { conversationService });
 
 		await router.routeMessage(createTextCtx('hello'));
 
-		expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('Something went wrong'));
+		expect(telegram.send).toHaveBeenCalledWith(
+			'user1',
+			expect.stringContaining('Something went wrong'),
+		);
+	});
+
+	it("fallback: 'notes' routes to FallbackHandler even when conversationService is present", async () => {
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const router = buildRouter(users, undefined, { conversationService, fallbackMode: 'notes' });
+
+		await router.routeMessage(createTextCtx('hello'));
+
+		expect(conversationService.handleMessage).not.toHaveBeenCalled();
+		expect(fallback.handleUnrecognized).toHaveBeenCalled();
 	});
 });

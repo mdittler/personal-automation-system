@@ -21,6 +21,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { type InteractionContextService, InteractionContextServiceImpl } from '../index.js';
+import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -150,21 +151,13 @@ describe('InteractionContextService bootstrap wiring', () => {
 	});
 
 	describe('manifest declarations', () => {
-		it('chatbot manifest declares interaction-context', async () => {
-			// __tests__ -> interaction-context -> services -> src -> core -> d2c (root)
-			const manifestPath = join(
-				__dirname,
-				'..',
-				'..',
-				'..',
-				'..',
-				'..',
-				'apps',
-				'chatbot',
-				'manifest.yaml',
-			);
-			const content = await readFile(manifestPath, 'utf8');
-			expect(content).toContain('interaction-context');
+		it('chatbot virtual manifest declares interaction-context', () => {
+			// apps/chatbot/ was deleted in Hermes P1 Chunk D.3.
+			// The chatbot app now lives as a virtual registry entry built from
+			// buildVirtualChatbotApp() — assert against the in-memory manifest.
+			const { manifest } = buildVirtualChatbotApp();
+			const services = manifest.requirements?.services ?? [];
+			expect(services).toContain('interaction-context');
 		});
 
 		it('food manifest declares interaction-context', async () => {

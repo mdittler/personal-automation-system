@@ -140,10 +140,8 @@ export interface SystemConfig {
 	};
 
 	/**
-	 * @deprecated Removed in Hermes P1 Chunk D. The 'chatbot' | 'notes' routing mode
-	 * is preserved for back-compat in Chunks B–C; free-text routing prefers
-	 * ConversationService when wired, and falls back to the legacy chatbotApp branch
-	 * otherwise. See REQ-CONV-014.
+	 * Fallback routing mode. 'chatbot' routes unmatched messages to ConversationService.
+	 * 'notes' routes to the notes handler. See REQ-CONV-014.
 	 */
 	fallback: 'chatbot' | 'notes';
 

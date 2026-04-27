@@ -25,6 +25,7 @@ import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import type { ConversationService } from '../conversation/conversation-service.js';
 import type { HouseholdService } from '../household/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import type { InviteService } from '../invite/index.js';
@@ -37,7 +38,6 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import type { ConversationService } from '../conversation/conversation-service.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -142,15 +142,9 @@ export interface RouterOptions {
 	logger: Logger;
 	confidenceThreshold?: number;
 	appToggle?: AppToggleStore;
-	/** The chatbot app to dispatch to in chatbot fallback mode. */
-	chatbotApp?: RegisteredApp;
-	/** Fallback mode: 'chatbot' dispatches to chatbot app, 'notes' uses FallbackHandler. Default: 'chatbot'. */
-	fallbackMode?: 'chatbot' | 'notes';
 	/**
-	 * ConversationService for free-text fallback. When provided, the router calls
-	 * this directly via `dispatchConversation()` instead of going through
-	 * `chatbotApp`. The chatbotApp/fallbackMode fields stay during Chunks B–C
-	 * for back-compat; both are removed in Chunk D.
+	 * ConversationService for free-text fallback. The router calls this directly
+	 * via `dispatchConversation()` for unmatched messages.
 	 */
 	conversationService?: ConversationService;
 	/** Space service for /space command + active space injection. */
@@ -183,8 +177,6 @@ export class Router {
 	private readonly intentClassifier: IntentClassifier;
 	private readonly photoClassifier: PhotoClassifier;
 	private readonly appToggle?: AppToggleStore;
-	private readonly chatbotApp?: RegisteredApp;
-	private readonly fallbackMode: 'chatbot' | 'notes';
 	private readonly conversationService?: ConversationService;
 	private readonly spaceService?: SpaceService;
 	private readonly userManager?: UserManager;
@@ -208,8 +200,6 @@ export class Router {
 		this.logger = options.logger;
 		this.confidenceThreshold = options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
 		this.appToggle = options.appToggle;
-		this.chatbotApp = options.chatbotApp;
-		this.fallbackMode = options.fallbackMode ?? 'chatbot';
 		this.conversationService = options.conversationService;
 		this.spaceService = options.spaceService;
 		this.userManager = options.userManager;
@@ -417,10 +407,7 @@ export class Router {
 
 		if (match) {
 			if (!(await this.isAppEnabled(enrichedCtx.userId, match.appId, user.enabledApps))) {
-				await this.trySend(
-					enrichedCtx.userId,
-					`You don't have access to the ${match.appId} app.`,
-				);
+				await this.trySend(enrichedCtx.userId, `You don't have access to the ${match.appId} app.`);
 				return;
 			}
 
@@ -431,10 +418,7 @@ export class Router {
 				match.confidence < this.verificationUpperBound
 			) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
-				const resolvedApps = await this.resolveEnabledApps(
-					enrichedCtx.userId,
-					user.enabledApps,
-				);
+				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(
 					enrichedCtx,
 					{
@@ -580,11 +564,7 @@ export class Router {
 	 * enforcement downstream can read the correct householdId even when the outer
 	 * bootstrap context was established before householdService was available.
 	 */
-	async dispatchMessage(
-		app: RegisteredApp,
-		ctx: MessageContext,
-		route: RouteInfo,
-	): Promise<void> {
+	async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -603,11 +583,7 @@ export class Router {
 	 *
 	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
 	 */
-	async dispatchPhoto(
-		app: RegisteredApp,
-		ctx: PhotoContext,
-		route: RouteInfo,
-	): Promise<void> {
+	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId }, () =>
@@ -711,7 +687,12 @@ export class Router {
 		for (const [, entry] of this.commandMap) {
 			if (!(await this.isAppEnabled(userId, entry.appId, enabledApps))) continue;
 			// Skip chatbot-manifest entries for commands that are now Router built-ins
-			if (this.conversationService && entry.appId === 'chatbot' && BUILTIN_COMMAND_NAMES.has(entry.command.name)) continue;
+			if (
+				this.conversationService &&
+				entry.appId === 'chatbot' &&
+				BUILTIN_COMMAND_NAMES.has(entry.command.name)
+			)
+				continue;
 
 			const app = this.registry.getApp(entry.appId);
 			if (!app) continue;
@@ -732,7 +713,12 @@ export class Router {
 			lines.push('');
 		}
 
-		if (appCommands.size === 0 && !this.conversationService && !this.spaceService && !this.inviteService) {
+		if (
+			appCommands.size === 0 &&
+			!this.conversationService &&
+			!this.spaceService &&
+			!this.inviteService
+		) {
 			lines.push('No commands available.');
 		}
 
@@ -1172,8 +1158,10 @@ export class Router {
 			// Build a human-readable recent interactions string for the verifier prompt.
 			// Strip newlines and control characters from app-supplied fields to prevent
 			// prompt injection via entityType or other user-controlled values.
-			const sanitizeEntryField = (v: string): string =>
-				v.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+			const sanitizeEntryField = (v: string): string => {
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
+				return v.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+			};
 			const recentInteractions = recentEntries
 				.map(
 					(e) =>
@@ -1230,23 +1218,19 @@ export class Router {
 	}
 
 	/**
-	 * Send message to the configured fallback handler (ConversationService preferred,
-	 * then chatbot app, then notes). Extracted to avoid code duplication between
-	 * routeMessage and tryContextPromotion.
+	 * Send message to the configured fallback handler. Extracted to avoid code
+	 * duplication between routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
-		const useChat = this.conversationService || (this.fallbackMode === 'chatbot' && this.chatbotApp);
-		if (useChat && !(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
+		if (!this.conversationService || this.config.fallback === 'notes') {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 			return;
 		}
-		if (this.conversationService) {
-			await this.dispatchConversation(ctx, routeForFallback());
-		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
-			await this.dispatchMessage(this.chatbotApp, ctx, routeForFallback());
-		} else {
+		if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
+			return;
 		}
+		await this.dispatchConversation(ctx, routeForFallback());
 	}
 
 	/** Try to send a message, logging errors but not throwing. */

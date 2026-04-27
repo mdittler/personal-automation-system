@@ -15,7 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /** Built-in apps that cannot be uninstalled. */
-const PROTECTED_APPS = new Set(['echo', 'chatbot']);
+const PROTECTED_APPS = new Set(['echo']);
 
 export interface UninstallAppCliDeps {
 	getAppsDir?: () => string;

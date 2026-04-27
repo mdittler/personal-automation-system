@@ -1,37 +1,60 @@
-/**
- * Parity test: CONVERSATION_DATA_SCOPES in manifest.ts must mirror
- * apps/chatbot/manifest.yaml requirements.data.user_scopes exactly.
- *
- * This test catches drift before Chunk B starts loading from the constants
- * instead of parsing the YAML.
- */
-import { readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
-import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
+import { describe, expect, test } from 'vitest';
+import {
+	CONVERSATION_DATA_SCOPES,
+	CONVERSATION_LLM_SAFEGUARDS,
+	CONVERSATION_USER_CONFIG,
+} from '../manifest.js';
+import { buildVirtualChatbotApp } from '../virtual-app.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CHATBOT_MANIFEST_PATH = resolve(
-	__dirname,
-	'../../../../../apps/chatbot/manifest.yaml',
-);
+describe('Virtual chatbot manifest — full structural contract (post-Chunk-D)', () => {
+	const { manifest } = buildVirtualChatbotApp();
 
-describe('CONVERSATION_DATA_SCOPES parity with apps/chatbot/manifest.yaml', () => {
-	it('matches requirements.data.user_scopes path, access, and description exactly', async () => {
-		const raw = await readFile(CHATBOT_MANIFEST_PATH, 'utf-8');
-		const manifest = parse(raw) as {
-			requirements?: { data?: { user_scopes?: Array<{ path: string; access: string; description: string }> } };
-		};
-		const yamlScopes = manifest.requirements?.data?.user_scopes ?? [];
+	test('app metadata: id, name, version, non-empty description', () => {
+		expect(manifest.app.id).toBe('chatbot');
+		expect(manifest.app.name).toBe('Chatbot');
+		expect(manifest.app.version).toMatch(/^\d+\.\d+\.\d+$/);
+		expect(manifest.app.description.length).toBeGreaterThan(20);
+	});
 
-		expect(CONVERSATION_DATA_SCOPES).toHaveLength(yamlScopes.length);
+	test('requirements.services lists every service ConversationService consumes', () => {
+		expect(manifest.requirements.services).toEqual([
+			'telegram',
+			'data-store',
+			'llm',
+			'context-store',
+			'app-metadata',
+			'app-knowledge',
+			'model-journal',
+			'system-info',
+			'data-query',
+			'interaction-context',
+			'edit-service',
+		]);
+	});
 
-		for (let i = 0; i < yamlScopes.length; i++) {
-			expect(CONVERSATION_DATA_SCOPES[i].path).toBe(yamlScopes[i].path);
-			expect(CONVERSATION_DATA_SCOPES[i].access).toBe(yamlScopes[i].access);
-			expect(CONVERSATION_DATA_SCOPES[i].description).toBe(yamlScopes[i].description);
-		}
+	test('requirements.data.user_scopes equals CONVERSATION_DATA_SCOPES (history.json + daily-notes/, both read-write)', () => {
+		expect(manifest.requirements.data?.user_scopes).toEqual(CONVERSATION_DATA_SCOPES);
+		expect(CONVERSATION_DATA_SCOPES).toEqual([
+			{ path: 'history.json', access: 'read-write', description: expect.any(String) },
+			{ path: 'daily-notes/', access: 'read-write', description: expect.any(String) },
+		]);
+	});
+
+	test('requirements.llm matches CONVERSATION_LLM_SAFEGUARDS (tier=standard, 60/3600s, $15/mo)', () => {
+		expect(manifest.requirements.llm).toEqual(CONVERSATION_LLM_SAFEGUARDS);
+		expect(CONVERSATION_LLM_SAFEGUARDS).toEqual({
+			tier: 'standard',
+			rate_limit: { max_requests: 60, window_seconds: 3600 },
+			monthly_cost_cap: 15.0,
+		});
+	});
+
+	test('user_config exposes auto_detect_pas (default true) and log_to_notes (default false) per REQ-CONV-007', () => {
+		const autoDetect = manifest.user_config?.find((c) => c.key === 'auto_detect_pas');
+		const logToNotes = manifest.user_config?.find((c) => c.key === 'log_to_notes');
+		expect(manifest.user_config?.map((c) => c.key)).toEqual(['auto_detect_pas', 'log_to_notes']);
+		expect(autoDetect?.default).toBe(true);
+		expect(logToNotes?.default).toBe(false);
+		expect(manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
 	});
 });
