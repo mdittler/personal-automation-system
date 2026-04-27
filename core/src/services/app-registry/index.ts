@@ -118,6 +118,25 @@ export class AppRegistry {
 	}
 
 	/**
+	 * Register a virtual app — one that has no source directory and no real module
+	 * to import. Used for `chatbot` post-Hermes-P1-Chunk-D so that the GUI
+	 * (`registry.getApp('chatbot')`) and the data-store namespace contract still
+	 * resolve after `apps/chatbot/` is deleted. The supplied `module.handleMessage`
+	 * should throw — Router free-text dispatch goes through ConversationService,
+	 * never `app.module.handleMessage`, so any call here is a regression.
+	 */
+	registerVirtual(manifest: AppManifest, module: AppModule, virtualPath: string): void {
+		if (this.apps.has(manifest.app.id)) {
+			throw new Error(
+				`Duplicate app id "${manifest.app.id}" — cannot register virtual app`,
+			);
+		}
+		this.cache.add(manifest, virtualPath);
+		this.apps.set(manifest.app.id, { manifest, module, appDir: virtualPath });
+		this.logger.info({ appId: manifest.app.id, virtualPath }, 'Registered virtual app');
+	}
+
+	/**
 	 * Shut down all loaded apps gracefully.
 	 * Calls shutdown() in reverse load order. Each call is isolated.
 	 */

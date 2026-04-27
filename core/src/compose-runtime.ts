@@ -778,6 +778,17 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	await registry.loadAll(serviceFactory);
 
+	// Virtual chatbot entry (REQ-CONV-013) — after apps/chatbot/ is deleted, GUI
+	// and data-store namespace still need this id. Register here (after loadAll)
+	// so every downstream registry.getAll() consumer sees it.
+	if (!registry.getApp('chatbot')) {
+		const { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } = await import(
+			'./services/conversation/virtual-app.js'
+		);
+		const { manifest: virtualManifest, module: virtualModule } = buildVirtualChatbotApp();
+		registry.registerVirtual(virtualManifest, virtualModule, VIRTUAL_CHATBOT_PATH);
+	}
+
 	// -------------------------------------------------------------------------
 	// Phase C: App loading, late wiring, FileIndex, Router build
 	// -------------------------------------------------------------------------
