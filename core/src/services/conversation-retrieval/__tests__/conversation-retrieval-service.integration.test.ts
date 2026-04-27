@@ -135,7 +135,7 @@ describe('ConversationRetrievalServiceImpl integration — admin gate', () => {
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 
 		const result = await requestContext.run({ userId: 'alice' }, () =>
-			service.buildSystemDataBlock({ question: 'what is the system status?', isAdmin: false }),
+			service.buildSystemDataBlock({ question: 'what is the system status?' }),
 		);
 
 		// Should include basic system status visible to all users
@@ -151,7 +151,7 @@ describe('ConversationRetrievalServiceImpl integration — admin gate', () => {
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 
 		const result = await requestContext.run({ userId: 'alice' }, () =>
-			service.buildSystemDataBlock({ question: 'what are the safeguard settings?', isAdmin: true }),
+			service.buildSystemDataBlock({ question: 'what are the safeguard settings?' }),
 		);
 
 		// Admin sees safeguard config
@@ -224,7 +224,6 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 				mode: 'free-text',
 				dataQueryCandidate: true, // Request data query even though dep is missing
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 
@@ -251,7 +250,6 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 

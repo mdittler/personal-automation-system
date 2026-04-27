@@ -15,7 +15,6 @@ function makeOpts(overrides: Partial<ContextSnapshotOptions> = {}): ContextSnaps
 		mode: 'free-text',
 		dataQueryCandidate: false,
 		recentFilePaths: [],
-		isAdmin: false,
 		...overrides,
 	};
 }
@@ -115,8 +114,14 @@ describe('chooseSources — ask mode widens baseline', () => {
 		expect(selected.has('system-info')).toBe(true);
 	});
 
-	it('ask mode always includes reports and alerts', () => {
+	it('ask mode does not automatically include reports and alerts for plain questions', () => {
 		const selected = chooseSources(makeOpts({ mode: 'ask', question: 'hello' }));
+		expect(selected.has('reports')).toBe(false);
+		expect(selected.has('alerts')).toBe(false);
+	});
+
+	it('ask mode includes reports and alerts when question mentions "report"', () => {
+		const selected = chooseSources(makeOpts({ mode: 'ask', question: 'what reports do I have?' }));
 		expect(selected.has('reports')).toBe(true);
 		expect(selected.has('alerts')).toBe(true);
 	});

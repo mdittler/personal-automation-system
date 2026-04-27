@@ -11,8 +11,7 @@
  *     scheduling, system) that are not purely data-flavored.
  *   - Add the four data-query categories only when dataQueryCandidate is true
  *     (caller has already determined the question is data-flavored).
- *   - Add reports + alerts when question mentions scheduling/reports/alerts,
- *     or when mode is 'ask'.
+ *   - Add reports + alerts when question mentions scheduling/reports/alerts.
  *   - apply explicit include overrides last (force-on or force-off per category).
  */
 
@@ -60,9 +59,10 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 		selected.add('collaboration-data');
 	}
 
-	// Reports + alerts: scheduling questions, explicit keyword mention, or ask mode
+	// Reports + alerts: scheduling questions or explicit keyword mention.
+	// Not added for ask mode broadly — /ask for general questions should not
+	// expose personal automation inventory unnecessarily.
 	if (
-		opts.mode === 'ask' ||
 		categories.has('scheduling') ||
 		lower.includes('report') ||
 		lower.includes('alert')

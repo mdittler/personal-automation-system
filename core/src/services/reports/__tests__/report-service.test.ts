@@ -508,8 +508,8 @@ describe('ReportService — listForUser', () => {
 		expect(resultFor222[0]?.id).toBe('shared');
 	});
 
-	it('user with household-shared report sees it when householdService is wired', async () => {
-		// u1 and u2 are both in hh1; report delivers to u2 only, but u1 is in same household
+	it('user in same household as delivery recipient does NOT see the report (delivery-only filtering)', async () => {
+		// u1 and u2 are in the same household, but report delivers only to u2
 		const householdService = makeHouseholdService({ u1: 'hh1', u2: 'hh1' });
 		const { service } = makeService({
 			userManager: makeUserManager(['u1', 'u2']),
@@ -519,10 +519,9 @@ describe('ReportService — listForUser', () => {
 			makeValidReport({ id: 'hh-report', name: 'HH Report', delivery: ['u2'] }),
 		);
 
-		// u1 is in hh1, report's delivery u2 is also in hh1 → u1 sees it
+		// u1 is NOT in the delivery list → should NOT see the report
 		const result = await service.listForUser('u1');
-		expect(result).toHaveLength(1);
-		expect(result[0]?.id).toBe('hh-report');
+		expect(result).toHaveLength(0);
 	});
 
 	it('user with no relevant reports sees empty array', async () => {
@@ -560,18 +559,12 @@ describe('ReportService — listForUser', () => {
 		expect(result).toHaveLength(0);
 	});
 
-	it('cross-household: user in HH1 does not see HH2 report even if same userId string appears in both', async () => {
-		// u1 is in hh1; u3 is in hh2; report delivers to u3 only (hh2)
-		// Even if we searched for "u1", it should not match hh2 reports
-		const householdService = makeHouseholdService({ u1: 'hh1', u2: 'hh1', u3: 'hh2' });
-		const { service } = makeService({
-			userManager: makeUserManager(['u1', 'u2', 'u3']),
-			householdService,
-		});
-		// hh2 report delivers to u3
-		await service.saveReport(makeValidReport({ id: 'hh2-report', name: 'HH2 Report', delivery: ['u3'] }));
+	it('cross-user isolation: user does not see another user\'s report when not in their delivery list', async () => {
+		// u1 and u3 are in different households; report delivers to u3 only
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u3']) });
+		await service.saveReport(makeValidReport({ id: 'u3-report', name: 'U3 Report', delivery: ['u3'] }));
 
-		// u1 is in hh1, report's household is hh2 → u1 must NOT see it
+		// u1 is NOT in the delivery list → must NOT see the report
 		const result = await service.listForUser('u1');
 		expect(result).toHaveLength(0);
 	});
@@ -611,27 +604,9 @@ describe('ReportService — listForUser', () => {
 		expect(forUser.map((r) => r.id)).toEqual(all.map((r) => r.id));
 	});
 
-	it('without householdService, falls back to delivery-membership filtering only', async () => {
-		// No householdService wired — should only filter by delivery list
+	it('delivery-membership is the only filter: user sees their delivery reports, not others', async () => {
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
 		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['u1'] }));
-		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['u2'] }));
-
-		const result = await service.listForUser('u1');
-		expect(result).toHaveLength(1);
-		expect(result[0]?.id).toBe('r1');
-	});
-
-	it('caller with no household (getHouseholdForUser returns null) still sees own delivery-list reports but not others', async () => {
-		// householdService is wired but returns null for caller (u1 is not in any household)
-		const householdService = makeHouseholdService({ u1: null, u2: 'hh2' });
-		const { service } = makeService({
-			userManager: makeUserManager(['u1', 'u2']),
-			householdService,
-		});
-		// r1: u1 is directly in delivery — should be visible
-		await service.saveReport(makeValidReport({ id: 'r1', name: 'R1', delivery: ['u1'] }));
-		// r2: only u2 in delivery (hh2) — u1 has no household, cannot match via household path
 		await service.saveReport(makeValidReport({ id: 'r2', name: 'R2', delivery: ['u2'] }));
 
 		const result = await service.listForUser('u1');

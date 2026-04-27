@@ -30,6 +30,11 @@ function withUserId<T>(userId: string, fn: () => T): T {
 	return requestContext.run({ userId }, fn);
 }
 
+/** Run fn inside a fake requestContext with userId + householdId (required for DataQueryService). */
+function withUserAndHousehold<T>(userId: string, householdId: string, fn: () => T): T {
+	return requestContext.run({ userId, householdId }, fn);
+}
+
 /** Run fn inside a requestContext without userId (simulates system context). */
 function withNoUserId<T>(fn: () => T): T {
 	return requestContext.run({}, fn);
@@ -134,7 +139,7 @@ describe('ConversationRetrievalServiceImpl — every method returns a Promise', 
 
 	it('buildSystemDataBlock returns a Promise', () => {
 		const result = withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: 'test', isAdmin: false }),
+			service.buildSystemDataBlock({ question: 'test' }),
 		);
 		expect(result).toBeInstanceOf(Promise);
 		return result.catch(() => {});
@@ -159,7 +164,6 @@ describe('ConversationRetrievalServiceImpl — every method returns a Promise', 
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(result).toBeInstanceOf(Promise);
@@ -204,7 +208,7 @@ describe('ConversationRetrievalServiceImpl — MissingRequestContextError outsid
 
 	it('buildSystemDataBlock throws MissingRequestContextError when no userId in context', async () => {
 		await expect(
-			withNoUserId(() => service.buildSystemDataBlock({ question: 'test', isAdmin: false })),
+			withNoUserId(() => service.buildSystemDataBlock({ question: 'test' })),
 		).rejects.toThrow(MissingRequestContextError);
 	});
 
@@ -228,7 +232,6 @@ describe('ConversationRetrievalServiceImpl — MissingRequestContextError outsid
 					mode: 'free-text',
 					dataQueryCandidate: false,
 					recentFilePaths: [],
-					isAdmin: false,
 				}),
 			),
 		).rejects.toThrow(MissingRequestContextError);
@@ -272,7 +275,7 @@ describe('ConversationRetrievalServiceImpl — throws when dep not wired', () =>
 
 	it('buildSystemDataBlock throws when systemInfo not wired', async () => {
 		await expect(
-			withUserId('user1', () => service.buildSystemDataBlock({ question: 'test', isAdmin: false })),
+			withUserId('user1', () => service.buildSystemDataBlock({ question: 'test' })),
 		).rejects.toThrow(/SystemInfoService not wired/i);
 	});
 
@@ -299,19 +302,21 @@ describe('ConversationRetrievalServiceImpl — searchData', () => {
 
 	it('delegates to dataQuery.query with userId from requestContext', async () => {
 		const service = new ConversationRetrievalServiceImpl({ dataQuery: mockDataQuery });
-		await withUserId('user1', () => service.searchData({ question: 'test question' }));
+		await withUserAndHousehold('user1', 'hh1', () => service.searchData({ question: 'test question' }));
 		expect(mockDataQuery.query).toHaveBeenCalledWith('test question', 'user1', undefined);
 	});
 
 	it('returns the dataQuery result unchanged', async () => {
 		const service = new ConversationRetrievalServiceImpl({ dataQuery: mockDataQuery });
-		const result = await withUserId('user1', () => service.searchData({ question: 'q' }));
+		const result = await withUserAndHousehold('user1', 'hh1', () =>
+			service.searchData({ question: 'q' }),
+		);
 		expect(result).toBe(mockResult);
 	});
 
 	it('passes recentFilePaths as options when provided', async () => {
 		const service = new ConversationRetrievalServiceImpl({ dataQuery: mockDataQuery });
-		await withUserId('user1', () =>
+		await withUserAndHousehold('user1', 'hh1', () =>
 			service.searchData({ question: 'q', recentFilePaths: ['data/users/user1/food/r.md'] }),
 		);
 		expect(mockDataQuery.query).toHaveBeenCalledWith('q', 'user1', {
@@ -321,7 +326,9 @@ describe('ConversationRetrievalServiceImpl — searchData', () => {
 
 	it('does not pass options when recentFilePaths is empty', async () => {
 		const service = new ConversationRetrievalServiceImpl({ dataQuery: mockDataQuery });
-		await withUserId('user1', () => service.searchData({ question: 'q', recentFilePaths: [] }));
+		await withUserAndHousehold('user1', 'hh1', () =>
+			service.searchData({ question: 'q', recentFilePaths: [] }),
+		);
 		expect(mockDataQuery.query).toHaveBeenCalledWith('q', 'user1', undefined);
 	});
 });
@@ -472,7 +479,7 @@ describe('ConversationRetrievalServiceImpl — buildSystemDataBlock', () => {
 		const systemInfo = makeSystemInfo(true);
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 		const result = await withUserId('admin1', () =>
-			service.buildSystemDataBlock({ question: 'what is the system status?', isAdmin: true }),
+			service.buildSystemDataBlock({ question: 'what is the system status?' }),
 		);
 		expect(result.length).toBeGreaterThan(0);
 		expect(result).toContain('System status');
@@ -482,7 +489,7 @@ describe('ConversationRetrievalServiceImpl — buildSystemDataBlock', () => {
 		const systemInfo = makeSystemInfo(false);
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 		const result = await withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: 'what is the system status?', isAdmin: false }),
+			service.buildSystemDataBlock({ question: 'what is the system status?' }),
 		);
 		// Non-admin sees system status section
 		expect(result).toContain('System status');
@@ -494,7 +501,7 @@ describe('ConversationRetrievalServiceImpl — buildSystemDataBlock', () => {
 		const systemInfo = makeSystemInfo(false);
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 		const result = await withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: '', isAdmin: false }),
+			service.buildSystemDataBlock({ question: '' }),
 		);
 		expect(result).toBe('');
 	});
@@ -503,7 +510,7 @@ describe('ConversationRetrievalServiceImpl — buildSystemDataBlock', () => {
 		const systemInfo = makeSystemInfo(false);
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
 		const result = await withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: 'how much has the system spent?', isAdmin: false }),
+			service.buildSystemDataBlock({ question: 'how much has the system spent?' }),
 		);
 		// Non-admin doesn't see per-app breakdown header
 		expect(result).not.toContain('Per app:');
@@ -618,7 +625,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(snapshot.failures).toEqual([]);
@@ -634,13 +640,12 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 	it('dataQueryCandidate: true causes DataQueryService to be called', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
-		await withUserId('user1', () =>
+		await withUserAndHousehold('user1', 'hh1', () =>
 			service.buildContextSnapshot({
 				question: 'what are my recent groceries?',
 				mode: 'free-text',
 				dataQueryCandidate: true,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(deps.dataQuery.query).toHaveBeenCalledTimes(1);
@@ -654,13 +659,12 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 	it('recentFilePaths forwarded to DataQueryService', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
-		await withUserId('user1', () =>
+		await withUserAndHousehold('user1', 'hh1', () =>
 			service.buildContextSnapshot({
 				question: 'show me my data',
 				mode: 'free-text',
 				dataQueryCandidate: true,
 				recentFilePaths: ['data/users/user1/food/r.md'],
-				isAdmin: false,
 			}),
 		);
 		expect(deps.dataQuery.query).toHaveBeenCalledWith('show me my data', 'user1', {
@@ -668,7 +672,26 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		});
 	});
 
-	it('ask mode always includes system-info, app-knowledge, reports, alerts', async () => {
+	it('missing householdId with dataQueryCandidate: true pushes data-query categories to failures', async () => {
+		const deps = makeFullDeps();
+		const service = new ConversationRetrievalServiceImpl(deps as never);
+		// withUserId sets userId but NOT householdId — fail-closed guard triggers
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my recipes',
+				mode: 'free-text',
+				dataQueryCandidate: true,
+				recentFilePaths: [],
+			}),
+		);
+		expect(deps.dataQuery.query).not.toHaveBeenCalled();
+		const dataQueryFails = snapshot.failures.filter((f) =>
+			['user-app-data', 'household-shared-data', 'space-data', 'collaboration-data'].includes(f),
+		);
+		expect(dataQueryFails.length).toBeGreaterThan(0);
+	});
+
+	it('ask mode always includes app-knowledge and system-info, but not reports/alerts for plain questions', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
 		await withUserId('user1', () =>
@@ -677,12 +700,12 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'ask',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(deps.appKnowledge.search).toHaveBeenCalled();
-		expect(deps.reportService.listForUser).toHaveBeenCalled();
-		expect(deps.alertService.listForUser).toHaveBeenCalled();
+		// reports/alerts NOT added by ask mode alone — requires scheduling keyword or explicit mention
+		expect(deps.reportService.listForUser).not.toHaveBeenCalled();
+		expect(deps.alertService.listForUser).not.toHaveBeenCalled();
 		// In ask mode, system-info is selected even for questions without system keywords.
 		// buildSystemDataBlock IS called, but gatherSystemData returns '' for 'hello'
 		// (no matching categories), so getSystemStatus is never invoked.
@@ -699,7 +722,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(snapshot.failures).toContain('context-store');
@@ -717,7 +739,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 				include: { 'context-store': false },
 			}),
 		);
@@ -734,7 +755,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 				include: { reports: true },
 			}),
 		);
@@ -750,7 +770,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(deps.dataQuery.query).not.toHaveBeenCalled();
@@ -765,7 +784,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 		expect(Array.isArray(snapshot.failures)).toBe(true);
@@ -795,7 +813,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 					mode: 'free-text',
 					dataQueryCandidate: false,
 					recentFilePaths: [],
-					isAdmin: false,
 				}),
 			),
 			requestContext.run({ userId: 'user2' }, () =>
@@ -804,7 +821,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 					mode: 'free-text',
 					dataQueryCandidate: false,
 					recentFilePaths: [],
-					isAdmin: false,
 				}),
 			),
 		]);

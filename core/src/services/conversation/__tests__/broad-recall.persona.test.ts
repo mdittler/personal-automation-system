@@ -76,7 +76,9 @@ function getSystemPromptFromLLMCall(services: CoreServices): string {
 }
 
 function run<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-	return requestContext.run({ userId }, fn);
+	// Include householdId so ConversationRetrievalService's householdId guard passes
+	// for DataQueryService fan-out. Without it, data-query categories are pushed to failures.
+	return requestContext.run({ userId, householdId: `hh-${userId}` }, fn);
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +477,6 @@ describe('P5 — cross-user denial: user B cannot see user A data in prompt', ()
 				mode: 'free-text',
 				dataQueryCandidate: false,
 				recentFilePaths: [],
-				isAdmin: false,
 			}),
 		);
 

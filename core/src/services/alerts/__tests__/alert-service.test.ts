@@ -1199,8 +1199,8 @@ describe('AlertService — listForUser', () => {
 		expect(r2[0]?.id).toBe('shared');
 	});
 
-	it('user with household-shared alert sees it when householdService is wired', async () => {
-		// u1 and u2 are both in hh1; alert delivers to u2 only
+	it('user in same household as delivery recipient does NOT see the alert (delivery-only filtering)', async () => {
+		// u1 and u2 are in the same household, but alert delivers only to u2
 		const householdService = makeHouseholdSvc({ u1: 'hh1', u2: 'hh1' });
 		const { service } = makeService({
 			userManager: makeUserManager(['u1', 'u2']),
@@ -1208,10 +1208,9 @@ describe('AlertService — listForUser', () => {
 		});
 		await service.saveAlert(makeValidAlertDef({ id: 'hh-alert', name: 'HH Alert', delivery: ['u2'] }));
 
-		// u1 is in hh1, alert's delivery u2 is also in hh1 → u1 sees it
+		// u1 is NOT in the delivery list → should NOT see the alert
 		const result = await service.listForUser('u1');
-		expect(result).toHaveLength(1);
-		expect(result[0]?.id).toBe('hh-alert');
+		expect(result).toHaveLength(0);
 	});
 
 	it('user with no relevant alerts sees empty array', async () => {
@@ -1245,18 +1244,14 @@ describe('AlertService — listForUser', () => {
 		expect(result).toHaveLength(0);
 	});
 
-	it('cross-household: user in HH1 does not see HH2 alert', async () => {
-		// u1 in hh1; u3 in hh2; alert delivers to u3 (hh2)
-		const householdService = makeHouseholdSvc({ u1: 'hh1', u2: 'hh1', u3: 'hh2' });
-		const { service } = makeService({
-			userManager: makeUserManager(['u1', 'u2', 'u3']),
-			householdService,
-		});
+	it('cross-user isolation: user does not see another user\'s alert when not in delivery list', async () => {
+		// u1 and u3 are different users; alert delivers only to u3
+		const { service } = makeService({ userManager: makeUserManager(['u1', 'u3']) });
 		await service.saveAlert(
-			makeValidAlertDef({ id: 'hh2-alert', name: 'HH2 Alert', delivery: ['u3'] }),
+			makeValidAlertDef({ id: 'u3-alert', name: 'U3 Alert', delivery: ['u3'] }),
 		);
 
-		// u1 is in hh1, alert's household is hh2 → u1 must NOT see it
+		// u1 is NOT in the delivery list → must NOT see the alert
 		const result = await service.listForUser('u1');
 		expect(result).toHaveLength(0);
 	});
@@ -1300,26 +1295,9 @@ describe('AlertService — listForUser', () => {
 		expect(forUser.map((a) => a.id)).toEqual(all.map((a) => a.id));
 	});
 
-	it('without householdService, falls back to delivery-membership filtering only', async () => {
+	it('delivery-membership is the only filter: user sees their delivery alerts, not others', async () => {
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
 		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
-		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
-
-		const result = await service.listForUser('u1');
-		expect(result).toHaveLength(1);
-		expect(result[0]?.id).toBe('a1');
-	});
-
-	it('caller with no household (getHouseholdForUser returns null) still sees own delivery-list alerts but not others', async () => {
-		// householdService is wired but returns null for caller (u1 is not in any household)
-		const householdService = makeHouseholdSvc({ u1: null, u2: 'hh2' });
-		const { service } = makeService({
-			userManager: makeUserManager(['u1', 'u2']),
-			householdService,
-		});
-		// a1: u1 is directly in delivery — should be visible
-		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
-		// a2: only u2 in delivery (hh2) — u1 has no household, cannot match via household path
 		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
 
 		const result = await service.listForUser('u1');

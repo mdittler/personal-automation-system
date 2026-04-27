@@ -136,7 +136,6 @@ export async function handleAsk(
 				mode: 'ask',
 				dataQueryCandidate: askClassification.dataQueryCandidate ?? false,
 				recentFilePaths,
-				isAdmin: deps.systemInfo?.isUserAdmin(ctx.userId) ?? false,
 			});
 		} catch (error) {
 			deps.logger.warn(

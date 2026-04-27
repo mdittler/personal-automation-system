@@ -18,7 +18,7 @@ import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
 import type { ReportDefinition } from '../../types/report.js';
 import type { SystemInfoService } from '../../types/system-info.js';
-import { getCurrentUserId } from '../context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
@@ -47,7 +47,6 @@ export interface ContextSnapshotOptions {
 	mode: 'free-text' | 'ask';
 	dataQueryCandidate: boolean;
 	recentFilePaths: string[];
-	isAdmin: boolean;
 	include?: { [K in AllowedSourceCategory]?: boolean };
 	characterBudget?: number;
 }
@@ -92,8 +91,8 @@ export interface ConversationRetrievalService {
 	getEnabledApps(): Promise<AppInfo[]>;
 	/** Search app documentation/knowledge base. */
 	searchAppKnowledge(query: string): Promise<KnowledgeEntry[]>;
-	/** Build system data block (admin-gated). */
-	buildSystemDataBlock(args: { question: string; isAdmin: boolean }): Promise<string>;
+	/** Build system data block (admin status derived from requestContext, not caller-provided). */
+	buildSystemDataBlock(args: { question: string }): Promise<string>;
 	/** List reports scoped to the current user (Chunk B scoped API). */
 	listScopedReports(): Promise<ReportDefinition[]>;
 	/** List alerts scoped to the current user (Chunk B scoped API). */
@@ -160,6 +159,13 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		if (!this.deps.dataQuery) {
 			throw new Error('ConversationRetrievalService.searchData: DataQueryService not wired');
 		}
+		// Require householdId: DataQueryService falls back to all-shared files when absent,
+		// which can leak data across households. Fail closed to prevent the fallback.
+		if (getCurrentHouseholdId() === undefined) {
+			throw new Error(
+				'ConversationRetrievalService.searchData: householdId required in requestContext',
+			);
+		}
 		const opts = args.recentFilePaths?.length
 			? { recentFilePaths: args.recentFilePaths }
 			: undefined;
@@ -204,7 +210,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		return this.deps.appKnowledge.search(query, userId);
 	}
 
-	async buildSystemDataBlock(args: { question: string; isAdmin: boolean }): Promise<string> {
+	async buildSystemDataBlock(args: { question: string }): Promise<string> {
 		this.assertRequestContext('buildSystemDataBlock');
 		if (!this.systemInfoReader) {
 			throw new Error(
@@ -283,16 +289,16 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		if (selected.has('system-info') && this.systemInfoReader) {
 			tasks.push({
 				category: 'system-info',
-				promise: this.systemInfoReader.buildSystemDataBlock({
-					question: opts.question,
-					isAdmin: opts.isAdmin,
-				}),
+				// Admin status derived inside the reader from systemInfo.isUserAdmin(userId)
+				promise: this.systemInfoReader.buildSystemDataBlock({ question: opts.question }),
 			});
 		} else if (selected.has('system-info')) {
 			snapshot.failures.push('system-info');
 		}
 
-		// Data query covers all four DataQuery scope categories
+		// Data query covers all four DataQuery scope categories.
+		// Require householdId: DataQueryService returns all shared files when absent,
+		// which can leak data across households. Fail closed when missing.
 		const dataQueryCategories: AllowedSourceCategory[] = [
 			'user-app-data',
 			'household-shared-data',
@@ -300,19 +306,26 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			'collaboration-data',
 		];
 		const anyDataQuerySelected = dataQueryCategories.some((c) => selected.has(c));
-		if (anyDataQuerySelected && this.deps.dataQuery) {
-			const recentFilePaths = opts.recentFilePaths.length ? opts.recentFilePaths : undefined;
-			tasks.push({
-				category: 'user-app-data', // representative category for settlement tracking
-				promise: this.deps.dataQuery.query(
-					opts.question,
-					userId,
-					recentFilePaths ? { recentFilePaths } : undefined,
-				),
-			});
-		} else if (anyDataQuerySelected) {
-			for (const cat of dataQueryCategories) {
-				if (selected.has(cat)) snapshot.failures.push(cat);
+		if (anyDataQuerySelected) {
+			const householdId = getCurrentHouseholdId();
+			if (householdId === undefined) {
+				for (const cat of dataQueryCategories) {
+					if (selected.has(cat)) snapshot.failures.push(cat);
+				}
+			} else if (this.deps.dataQuery) {
+				const recentFilePaths = opts.recentFilePaths.length ? opts.recentFilePaths : undefined;
+				tasks.push({
+					category: 'user-app-data', // representative key covering all four DataQuery scope categories
+					promise: this.deps.dataQuery.query(
+						opts.question,
+						userId,
+						recentFilePaths ? { recentFilePaths } : undefined,
+					),
+				});
+			} else {
+				for (const cat of dataQueryCategories) {
+					if (selected.has(cat)) snapshot.failures.push(cat);
+				}
 			}
 		}
 
@@ -431,13 +444,19 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'user-app-data': {
 					// This task key represents all four DataQuery scope categories.
-					snapshot.dataQueryResult = value as DataQueryResult;
-					// Approximate budget accounting: sum content lengths (avoids a full JSON.stringify).
-					const contentChars = snapshot.dataQueryResult.files.reduce(
-						(sum, f) => sum + f.content.length,
-						0,
-					);
-					charsUsed += Math.min(contentChars, catBudget);
+					// Enforce catBudget by truncating file content in order — first files
+					// get their full content; later ones are truncated or dropped.
+					const result = value as DataQueryResult;
+					let remaining = catBudget;
+					const truncatedFiles: DataQueryResult['files'] = [];
+					for (const file of result.files) {
+						if (remaining <= 0) break;
+						const content = file.content.slice(0, remaining);
+						remaining -= content.length;
+						truncatedFiles.push({ ...file, content });
+					}
+					snapshot.dataQueryResult = { files: truncatedFiles, empty: truncatedFiles.length === 0 };
+					charsUsed += catBudget - remaining;
 					break;
 				}
 				case 'reports': {

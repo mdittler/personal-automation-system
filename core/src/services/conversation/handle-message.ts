@@ -117,7 +117,6 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 						mode: 'free-text',
 						dataQueryCandidate: classification.dataQueryCandidate ?? false,
 						recentFilePaths,
-						isAdmin: false, // handleMessage is user-facing, never admin
 					});
 				} catch (error) {
 					deps.logger.warn('ConversationRetrievalService.buildContextSnapshot failed: %s', error);
