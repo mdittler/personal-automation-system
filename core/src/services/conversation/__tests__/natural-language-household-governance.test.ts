@@ -20,30 +20,7 @@ import {
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { requestContext } from '../../context/request-context.js';
 import { LLMCostCapError, LLMRateLimitError } from '../../llm/errors.js';
-import { ConversationService } from '../conversation-service.js';
-import type { CoreServices } from '@pas/core/types';
-
-// ---------------------------------------------------------------------------
-// makeService helper
-// ---------------------------------------------------------------------------
-
-function makeService(services: CoreServices): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-	});
-}
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Personas
@@ -94,7 +71,7 @@ async function sendMessage(
 	text: string,
 ) {
 	const ctx = createTestMessageContext({ userId, text });
-	await requestContext.run({ userId, householdId }, () => makeService(services).handleMessage(ctx));
+	await requestContext.run({ userId, householdId }, () => makeConversationService(services).handleMessage(ctx));
 }
 
 // ---------------------------------------------------------------------------

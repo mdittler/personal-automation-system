@@ -106,12 +106,7 @@ describe('SWITCH_MODEL_TAG_REGEX', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// (only tests not already covered by the describe blocks above)
-// ---------------------------------------------------------------------------
-
-describe('processModelSwitchTags — multiple tags (migrated)', () => {
+describe('processModelSwitchTags — multiple tags', () => {
 	it('handles multiple switch tags', async () => {
 		const services = createMockCoreServices();
 		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
@@ -131,7 +126,7 @@ describe('processModelSwitchTags — multiple tags (migrated)', () => {
 	});
 });
 
-describe('processModelSwitchTags security (migrated)', () => {
+describe('processModelSwitchTags security', () => {
 	it('validates parameters even when LLM echoes user switch-model tag', async () => {
 		const services = createMockCoreServices();
 		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);

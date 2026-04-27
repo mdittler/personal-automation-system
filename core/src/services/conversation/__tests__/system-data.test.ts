@@ -1,14 +1,5 @@
 /**
  * System data helpers tests.
- *
- * Migrated from apps/chatbot/src/__tests__/chatbot.test.ts:
- *   - describe('categorizeQuestion')           ~L1139-1172
- *   - describe('gatherSystemData')             ~L1173-1432
- *   - describe('categorizeQuestion edge cases')  ~L1621-1632
- *   - describe('gatherSystemData error isolation') ~L1633-1773
- *   - describe('categorizeQuestion — data category') ~L1890-1915
- *   - describe('data category — app-aware prompt integration') ~L1916-1977
- *   - describe('gatherSystemData state transition') ~L1998-2021
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

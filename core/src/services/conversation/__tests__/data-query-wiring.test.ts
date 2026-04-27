@@ -15,29 +15,7 @@ import type { CoreServices, DataQueryResult } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { classifyPASMessage } from '../index.js';
-import { ConversationService } from '../conversation-service.js';
-
-// ---------------------------------------------------------------------------
-// makeService helper
-// ---------------------------------------------------------------------------
-
-function makeService(services: CoreServices): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-	});
-}
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 const MOCK_DATA_RESULT: DataQueryResult = {
 	files: [
@@ -152,7 +130,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your Costco prices...'); // main LLM
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.stringContaining('Costco prices'),
@@ -166,7 +144,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('YES') // classifier — PAS but not data query
 			.mockResolvedValueOnce('Here are your apps...');
 
-		await makeService(services).handleMessage(makeMessageCtx('what apps do I have?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what apps do I have?'));
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -177,7 +155,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('The answer');
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -189,7 +167,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('I can help with that.'); // main LLM — still called
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		expect(services.telegram.send).toHaveBeenCalled();
 		expect(services.logger.warn).toHaveBeenCalled();
@@ -200,7 +178,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		// The main LLM call (second call) should have data context in system prompt
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
@@ -217,7 +195,7 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('I could not find any data.');
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -248,7 +226,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await makeService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await makeConversationService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.stringContaining('Costco prices'),
@@ -263,7 +241,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('You have 3 apps installed.'); // main LLM
 
 		const ctx = makeMessageCtx('what apps do I have?');
-		await makeService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx);
+		await makeConversationService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -274,7 +252,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await makeService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await makeConversationService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -284,7 +262,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 
 	it('/ask with no args does not call DataQueryService', async () => {
 		const ctx = makeMessageCtx('');
-		await makeService(services).handleAsk([], ctx);
+		await makeConversationService(services).handleAsk([], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -324,7 +302,7 @@ describe('Security — dataContext sanitization (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Here is your data.'); // main LLM
 
-		await makeService(services).handleMessage(makeMessageCtx('show me my notes'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('show me my notes'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -364,7 +342,7 @@ describe('Prompt category suppression for data queries (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your Costco prices...'); // main LLM
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -382,7 +360,7 @@ describe('Prompt category suppression for data queries (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
-		await makeService(services).handleMessage(makeMessageCtx('how much did oranges cost?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('how much did oranges cost?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -422,7 +400,7 @@ describe('Persona — realistic data query phrasings (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Here is the answer.');
 
-		await makeService(services).handleMessage(makeMessageCtx(question));
+		await makeConversationService(services).handleMessage(makeMessageCtx(question));
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(question, 'test-user', undefined);
 	});
@@ -446,7 +424,7 @@ describe('Persona — realistic data query phrasings (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...');
 
-		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
+		await makeConversationService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');

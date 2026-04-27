@@ -4,8 +4,8 @@ import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import { ConversationHistory } from '../../conversation-history/index.js';
 import { requestContext } from '../../context/request-context.js';
-import { ConversationService } from '../conversation-service.js';
 import { handleAsk } from '../handle-ask.js';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 import {
 	expectPasAwarePrompt,
 	expectPromptIncludesSystemData,
@@ -195,29 +195,7 @@ describe('handleAsk', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// ---------------------------------------------------------------------------
-
-function makeAskService(services: CoreServices): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-	});
-}
-
-describe('handleCommand /ask (migrated)', () => {
+describe('handleCommand /ask', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
@@ -230,7 +208,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk([], ctx),
+			makeConversationService(services).handleAsk([], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
@@ -258,7 +236,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx),
+			makeConversationService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalled();
@@ -278,7 +256,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask how does routing work?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['how', 'does', 'routing', 'work?'], ctx),
+			makeConversationService(services).handleAsk(['how', 'does', 'routing', 'work?'], ctx),
 		);
 
 		expect(store.write).toHaveBeenCalledWith('history.json', expect.stringContaining('/ask'));
@@ -295,7 +273,7 @@ describe('handleCommand /ask (migrated)', () => {
 		});
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(store.append).toHaveBeenCalledWith(
@@ -309,7 +287,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['', '  '], ctx),
+			makeConversationService(services).handleAsk(['', '  '], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
@@ -325,7 +303,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['what', 'apps?'], ctx),
+			makeConversationService(services).handleAsk(['what', 'apps?'], ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalled();
@@ -337,7 +315,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
@@ -352,7 +330,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
@@ -368,7 +346,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
@@ -383,7 +361,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalled();
@@ -396,7 +374,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['test'], ctx),
+			makeConversationService(services).handleAsk(['test'], ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalled();
@@ -421,7 +399,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['what', 'apps?'], ctx),
+			makeConversationService(services).handleAsk(['what', 'apps?'], ctx),
 		);
 
 		// The first LLM call is the classifier (fast tier), find any standard-tier call
@@ -453,7 +431,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask about apps' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['about', 'apps'], ctx),
+			makeConversationService(services).handleAsk(['about', 'apps'], ctx),
 		);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
@@ -471,7 +449,7 @@ describe('handleCommand /ask (migrated)', () => {
 		});
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx),
+			makeConversationService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx),
 		);
 
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
@@ -488,7 +466,7 @@ describe('handleCommand /ask (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '/ask what apps?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(['what', 'apps?'], ctx),
+			makeConversationService(services).handleAsk(['what', 'apps?'], ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Help info.');
@@ -507,7 +485,7 @@ describe('handleCommand /ask (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: '/ask switch fast model to haiku' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAskService(services).handleAsk(
+			makeConversationService(services).handleAsk(
 				['switch', 'fast', 'model', 'to', 'haiku'],
 				ctx,
 			),
@@ -517,7 +495,7 @@ describe('handleCommand /ask (migrated)', () => {
 	});
 });
 
-describe('system data in /ask prompt (migrated)', () => {
+describe('system data in /ask prompt', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {

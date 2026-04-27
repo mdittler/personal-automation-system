@@ -119,10 +119,6 @@ describe('buildAppAwareSystemPrompt', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// ---------------------------------------------------------------------------
-
 const CHATBOT_MODEL_SLUG = 'anthropic-mock-model';
 
 function makeChatbotDeps(services: CoreServices) {
@@ -137,7 +133,7 @@ function makeChatbotDeps(services: CoreServices) {
 	};
 }
 
-describe('buildSystemPrompt (migrated from chatbot)', () => {
+describe('buildSystemPrompt', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
@@ -272,7 +268,7 @@ describe('buildSystemPrompt (migrated from chatbot)', () => {
 	});
 });
 
-describe('buildAppAwareSystemPrompt (migrated from chatbot)', () => {
+describe('buildAppAwareSystemPrompt', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {

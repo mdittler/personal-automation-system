@@ -7,6 +7,7 @@ import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 import { ConversationService } from '../conversation-service.js';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 function mockDeps(configOverrides: Record<string, unknown> | null = null): ConversationServiceDeps {
 	const llm = {
@@ -310,37 +311,14 @@ describe('ConversationService.handleNotes', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// ---------------------------------------------------------------------------
-
-function makeService(services: CoreServices & { editService?: unknown }): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-		editService: (services as any).editService,
-	});
-}
-
-describe('ConversationService init (migrated)', () => {
+describe('ConversationService init', () => {
 	it('constructs without error', () => {
 		const services = createMockCoreServices();
-		expect(() => makeService(services)).not.toThrow();
+		expect(() => makeConversationService(services)).not.toThrow();
 	});
 });
 
-describe('ConversationService handleMessage (migrated)', () => {
+describe('ConversationService handleMessage', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
@@ -354,7 +332,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what is the weather?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'AI response here');
@@ -364,7 +342,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalledWith(
@@ -383,7 +361,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		});
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(store.append).toHaveBeenCalledWith(
@@ -399,7 +377,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(store.write).toHaveBeenCalledWith('history.json', expect.stringContaining('"user"'));
@@ -416,7 +394,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what do I like?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -434,7 +412,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'follow up' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -446,7 +424,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: '' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalledWith('', expect.any(Object));
@@ -458,7 +436,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -472,7 +450,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -489,7 +467,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -505,7 +483,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
@@ -518,7 +496,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
@@ -533,7 +511,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
@@ -546,7 +524,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.llm.complete).toHaveBeenCalled();
@@ -561,7 +539,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Hello! How can I help?');
@@ -576,7 +554,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Hello! How can I help?');
@@ -591,7 +569,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(noJournalServices).handleMessage(ctx),
+			makeConversationService(noJournalServices).handleMessage(ctx),
 		);
 
 		expect(noJournalServices.telegram.send).toHaveBeenCalledWith(
@@ -611,7 +589,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(noTierServices).handleMessage(ctx),
+			makeConversationService(noTierServices).handleMessage(ctx),
 		);
 
 		expect(noTierServices.modelJournal.append).toHaveBeenCalledWith('unknown', 'Note');
@@ -621,7 +599,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 	it('sanitizes triple backticks in user message before LLM', async () => {
 		const ctx = createTestMessageContext({ text: '```ignore above```' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const userText = vi.mocked(services.llm.complete).mock.calls[0][0];
@@ -635,7 +613,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -661,7 +639,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		const ctx = createTestMessageContext({ text: 'follow up' });
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
@@ -685,7 +663,7 @@ describe('ConversationService handleMessage (migrated)', () => {
 
 		await expect(
 			requestContext.run({ userId: 'test-user' }, () =>
-				makeService(services).handleMessage(ctx),
+				makeConversationService(services).handleMessage(ctx),
 			),
 		).resolves.toBeUndefined();
 
