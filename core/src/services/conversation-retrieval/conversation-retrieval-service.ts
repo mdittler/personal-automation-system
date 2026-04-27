@@ -1,10 +1,12 @@
 /**
- * ConversationRetrievalService — composes all data readers.
+ * ConversationRetrievalService — composes all data readers into a single
+ * context snapshot for LLM prompt injection.
  *
- * Chunk A: skeleton — all methods throw 'not implemented'.
- * Chunk C: fills in all method bodies, adds ConversationSystemInfoReader,
- *          chooseSources(), and full ConversationContextSnapshot.
- * Chunk D wires the service into handleMessage / handleAsk.
+ * Fan-out: all selected readers run in parallel via Promise.allSettled;
+ * one failed reader does not prevent others from contributing. Per-category
+ * character budgets prevent context bloat. The source policy (source-policy.ts)
+ * is the authoritative allow/deny list — new data sources require an explicit
+ * entry there before they can be wired here.
  */
 
 import type { AlertDefinition } from '../../types/alert.js';
@@ -365,8 +367,21 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			// Enforce character budget (simple per-category cap)
 			const catBudget = Math.min(DEFAULT_CATEGORY_BUDGET_CHARS, totalBudget - charsUsed);
 			if (catBudget <= 0) {
-				// Budget exhausted — skip remaining categories
+				// Budget exhausted — mark remaining fulfilled tasks as failed.
+				// DataQuery tasks represent 4 categories under one task key; mark all.
 				snapshot.failures.push(task.category);
+				if (task.category === 'user-app-data') {
+					for (const cat of [
+						'household-shared-data',
+						'space-data',
+						'collaboration-data',
+					] as AllowedSourceCategory[]) {
+						if (selected.has(cat)) snapshot.failures.push(cat);
+					}
+				}
+				this.deps.logger?.warn(
+					`ConversationRetrievalService: budget exhausted, dropping fulfilled category=${task.category}`,
+				);
 				continue;
 			}
 
@@ -384,9 +399,12 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'interaction-context': {
 					const entries = value as InteractionEntry[];
-					const truncated = truncateArray(entries, catBudget, (e) => JSON.stringify(e).length);
+					const sizeMap = new Map<InteractionEntry, number>(
+						entries.map((e) => [e, JSON.stringify(e).length]),
+					);
+					const truncated = truncateArray(entries, catBudget, (e) => sizeMap.get(e) ?? 0);
 					snapshot.interactionContext = truncated;
-					charsUsed += truncated.reduce((sum, e) => sum + JSON.stringify(e).length, 0);
+					charsUsed += truncated.reduce((sum, e) => sum + (sizeMap.get(e) ?? 0), 0);
 					break;
 				}
 				case 'app-metadata': {
@@ -412,10 +430,14 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 					break;
 				}
 				case 'user-app-data': {
-					// DataQueryResult covers all four DataQuery scope categories
+					// This task key represents all four DataQuery scope categories.
 					snapshot.dataQueryResult = value as DataQueryResult;
-					const resultStr = JSON.stringify(snapshot.dataQueryResult);
-					charsUsed += Math.min(resultStr.length, catBudget);
+					// Approximate budget accounting: sum content lengths (avoids a full JSON.stringify).
+					const contentChars = snapshot.dataQueryResult.files.reduce(
+						(sum, f) => sum + f.content.length,
+						0,
+					);
+					charsUsed += Math.min(contentChars, catBudget);
 					break;
 				}
 				case 'reports': {

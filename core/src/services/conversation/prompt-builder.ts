@@ -5,20 +5,16 @@
  *   and the per-model journal section.
  * - `buildAppAwareSystemPrompt` — PAS-aware prompt for /ask and auto-detected
  *   PAS messages: includes app metadata, knowledge-base hits, live system
- *   data (LLM tiers, costs, scheduling, status), and DataQueryService
- *   results.
+ *   data (LLM tiers, costs, scheduling, status), DataQueryService results,
+ *   and (when wired) reports, alerts, and failures from a
+ *   `ConversationContextSnapshot`. The legacy `dataContext: string` parameter
+ *   is preserved for callers that have not yet wired the retrieval service.
  *
  * Each function takes its dependencies explicitly. No module-level closure.
- *
- * Chunk D: `buildAppAwareSystemPrompt` now accepts an optional
- * `ConversationContextSnapshot` from `ConversationRetrievalService`. When
- * provided, snapshot fields supplement the existing blocks (data query result,
- * context store entries from snapshot, reports, alerts, system data block).
- * The legacy `dataContext: string` path still works when snapshot is null.
  */
 
 import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
-import type { AppMetadataService } from '../../types/app-metadata.js';
+import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
 import type { DataStoreService } from '../../types/data-store.js';
 import type { LLMService } from '../../types/llm.js';
@@ -109,17 +105,11 @@ export async function buildSystemPrompt(
  * Build app-aware system prompt with metadata, knowledge, system data,
  * context, and history. Used by /ask and auto-detect mode.
  *
- * Chunk D: accepts an optional `snapshot` from `ConversationRetrievalService`.
- * When snapshot is provided, its `dataQueryResult` replaces the legacy
- * `dataContext` string path (parity-preserved via `formatDataQueryContext`).
- * Additional snapshot fields (reports, alerts, systemDataBlock) are appended
- * as new blocks after the data-files section.
- *
- * When snapshot is null/undefined and dataContext is provided, the legacy
- * string path is used unchanged (backward compatible for old callers).
- *
- * Parity guarantee: for a given DataQueryResult, the prompt produced via
- * snapshot.dataQueryResult must be byte-identical to the old dataContext path.
+ * `dataContextOrSnapshot` accepts either a `ConversationContextSnapshot`
+ * (from ConversationRetrievalService) or a legacy `string` (from a direct
+ * DataQueryService call). When a snapshot is provided, reports, alerts, and
+ * system data are included as additional blocks; the legacy string path
+ * produces identical output for a given DataQueryResult.
  */
 export async function buildAppAwareSystemPrompt(
 	question: string,
@@ -185,16 +175,14 @@ export async function buildAppAwareSystemPrompt(
 	// When snapshot provides app metadata / knowledge / system data, use those
 	// directly instead of re-fetching. Otherwise fall through to the existing
 	// direct-reader calls (backward compatible when snapshot is null).
-	let appInfosPromise: Promise<import('../../types/app-metadata.js').AppInfo[]>;
+	let appInfosPromise: Promise<AppInfo[]>;
 	let knowledgePromise: Promise<Array<{ source: string; content: string }>>;
 	let systemDataPromise: Promise<string>;
 
 	if (snapshot) {
 		appInfosPromise = Promise.resolve(snapshot.enabledApps ?? []);
-		knowledgePromise = Promise.resolve(
-			snapshot.appKnowledge?.map((e) => ({ source: e.source, content: e.content })) ?? [],
-		);
-		// snapshot.systemDataBlock already formatted; wrap in a resolved promise
+		// KnowledgeEntry satisfies { source, content } — no mapping needed
+		knowledgePromise = Promise.resolve(snapshot.appKnowledge ?? []);
 		systemDataPromise = Promise.resolve(snapshot.systemDataBlock ?? '');
 	} else {
 		appInfosPromise = getEnabledAppInfos(userId, deps);
