@@ -259,6 +259,12 @@ describe('P3 — alert/report inventory: snapshot surfaces reports and alerts', 
 			// For "show me my reports" → matches 'report' keyword.
 			// For "what automated tasks are running" → matches scheduling category.
 			expect(prompt).toContain('PAS');
+			// At least one of the seeded alert or report names must appear — this verifies
+			// that reports/alerts content was actually injected into the system prompt,
+			// not just that the generic PAS system prompt was rendered.
+			const hasAlertContent = prompt.includes('Pantry Low Stock');
+			const hasReportContent = prompt.includes('Weekly Food Summary');
+			expect(hasAlertContent || hasReportContent).toBe(true);
 		},
 	);
 

@@ -50,7 +50,7 @@ export const CATEGORY_KEYWORDS: Record<QuestionCategory, string[]> = {
 		'monthly',
 		'bill',
 	],
-	scheduling: ['schedule', 'scheduling', 'cron', 'jobs', 'scheduled', 'daily diff'],
+	scheduling: ['schedule', 'scheduling', 'cron', 'jobs', 'scheduled', 'daily diff', 'automated tasks', 'automated task'],
 	system: [
 		'uptime',
 		'status',
