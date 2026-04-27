@@ -20,6 +20,7 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ConversationHistory } from '../conversation-history/index.js';
+import type { ConversationRetrievalService } from '../conversation-retrieval/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -35,12 +36,12 @@ import {
 	processModelSwitchTags,
 } from './control-tags.js';
 import { appendDailyNote } from './daily-notes.js';
-import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import {
 	extractRecentFilePaths,
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
+import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
 import { sendSplitResponse } from './telegram-format.js';
@@ -63,6 +64,8 @@ export interface HandleAskDeps {
 	interactionContext?: InteractionContextService;
 	/** System-level default for daily-notes opt-in. Defaults to false if absent. */
 	chatLogToNotesDefault?: boolean;
+	/** ConversationRetrievalService — stored here, wired into handlers in Chunk D. */
+	conversationRetrieval?: ConversationRetrievalService;
 }
 
 export async function handleAsk(

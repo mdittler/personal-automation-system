@@ -1,9 +1,9 @@
 import type { MessageContext } from '../../types/telegram.js';
-import type { EditService } from '../edit/index.js';
 import { ConversationHistory } from '../conversation-history/index.js';
-import { handleAsk as coreHandleAsk, type HandleAskDeps } from './handle-ask.js';
+import type { EditService } from '../edit/index.js';
+import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
-import { handleMessage as coreHandleMessage, type HandleMessageDeps } from './handle-message.js';
+import { type HandleMessageDeps, handleMessage as coreHandleMessage } from './handle-message.js';
 import { handleNotes as coreHandleNotes } from './handle-notes.js';
 import { pendingEdits } from './pending-edits.js';
 
@@ -54,6 +54,9 @@ export class ConversationService {
 			...(this.deps.dataQuery !== undefined ? { dataQuery: this.deps.dataQuery } : {}),
 			...(this.deps.interactionContext !== undefined
 				? { interactionContext: this.deps.interactionContext }
+				: {}),
+			...(this.deps.conversationRetrieval !== undefined
+				? { conversationRetrieval: this.deps.conversationRetrieval }
 				: {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};

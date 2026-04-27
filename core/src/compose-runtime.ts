@@ -44,6 +44,13 @@ import { DEFAULT_LLM_SAFEGUARDS } from './services/config/defaults.js';
 import { loadSystemConfig } from './services/config/index.js';
 import { ContextStoreServiceImpl } from './services/context-store/index.js';
 import { requestContext } from './services/context/request-context.js';
+import { ConversationRetrievalServiceImpl } from './services/conversation-retrieval/index.js';
+import {
+	CONVERSATION_DATA_SCOPES,
+	CONVERSATION_LLM_SAFEGUARDS,
+	CONVERSATION_USER_CONFIG,
+	ConversationService,
+} from './services/conversation/index.js';
 import { CredentialService } from './services/credentials/index.js';
 import { DailyDiffService } from './services/daily-diff/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
@@ -56,6 +63,7 @@ import { HouseholdService } from './services/household/index.js';
 import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
 import { InviteService } from './services/invite/index.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
+import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
 import { HouseholdLLMLimiter } from './services/llm/household-llm-limiter.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
@@ -100,13 +108,6 @@ import type { DataChangedPayload } from './types/data-events.js';
 import type { DataQueryOptions } from './types/data-query.js';
 import type { ManifestDataScope } from './types/manifest.js';
 import type { TelegramService } from './types/telegram.js';
-import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
-import {
-	CONVERSATION_DATA_SCOPES,
-	CONVERSATION_LLM_SAFEGUARDS,
-	CONVERSATION_USER_CONFIG,
-	ConversationService,
-} from './services/conversation/index.js';
 
 export interface RuntimeOverrides {
 	dataDir?: string;
@@ -920,6 +921,23 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	spaceService.setVaultService(vaultService);
 	await vaultService.rebuildAll();
 
+	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
+	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
+		dataQuery: dataQueryServiceImpl
+			? {
+					query: (q: string, uid: string, opts?: DataQueryOptions) =>
+						dataQueryServiceImpl!.query(q, uid, opts),
+				}
+			: undefined,
+		contextStore,
+		interactionContext: interactionContextService,
+		appMetadata,
+		appKnowledge,
+		systemInfo: systemInfoService,
+		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
+	});
+	logger.info('ConversationRetrievalService: initialized');
+
 	// 9c. ConversationService — always present; provides free-text fallback dispatch.
 	const conversationDataStore = new DataStoreServiceImpl({
 		dataDir: config.dataDir,
@@ -959,6 +977,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		interactionContext: interactionContextService,
 		editService: editServiceImpl ?? undefined,
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
+		conversationRetrieval: conversationRetrievalService,
 	});
 	logger.info('ConversationService: initialized');
 
