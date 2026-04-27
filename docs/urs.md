@@ -4084,7 +4084,7 @@ The `pnpm install-app <git-url>` CLI command must show a validated permission su
 
 **Phase:** 17 | **Status:** Implemented
 
-The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo, chatbot) from uninstallation, verify the app directory exists, remove the directory recursively, and print restart guidance after a successful uninstall. Invalid app IDs including path traversal attempts must be rejected before filesystem mutation.
+The `pnpm uninstall-app <app-id>` CLI command must validate app ID format, protect built-in apps (echo) from uninstallation, verify the app directory exists, remove the directory recursively, and print restart guidance after a successful uninstall. Invalid app IDs including path traversal attempts must be rejected before filesystem mutation.
 
 **Standard tests:**
 - `uninstall-app.test.ts` > uninstall-app CLI > removes the app directory and prints restart guidance on success
