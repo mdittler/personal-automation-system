@@ -21,7 +21,7 @@ import { parse as parseYaml } from 'yaml';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import { AppToggleStore } from '../../services/app-toggle/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
-import { buildVirtualChatbotApp } from '../../services/conversation/virtual-app.js';
+import { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } from '../../services/conversation/virtual-app.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -68,7 +68,7 @@ describe('GUI — virtual chatbot registry entry (REQ-CONV-013)', () => {
 		tempDir = await mkdtemp(join(tmpdir(), 'pas-gui-virtual-chatbot-'));
 
 		const { manifest, module } = buildVirtualChatbotApp();
-		const virtualRegisteredApp = { manifest, module, appDir: '<virtual:chatbot>' };
+		const virtualRegisteredApp = { manifest, module, appDir: VIRTUAL_CHATBOT_PATH };
 
 		const registry = {
 			getAll: () => [virtualRegisteredApp],
@@ -173,8 +173,6 @@ describe('GUI — virtual chatbot registry entry (REQ-CONV-013)', () => {
 		// POST should redirect (302) or return 200
 		expect(postRes.statusCode).toBeLessThan(400);
 
-		// AppConfigServiceImpl writes to dataDir/system/app-config/<appId>/<userId>.yaml.
-		// registerConfigRoutes is called with dataDir: tempDir, so the path is:
 		const overridePath = join(tempDir, 'system', 'app-config', 'chatbot', `${TEST_USER_ID}.yaml`);
 		const onDisk = parseYaml(await readFile(overridePath, 'utf-8'));
 		expect(onDisk.log_to_notes).toBe(true);

@@ -6,6 +6,8 @@ import {
 	CONVERSATION_USER_CONFIG,
 } from './manifest.js';
 
+export const VIRTUAL_CHATBOT_PATH = '<virtual:chatbot>';
+
 /**
  * Build the synthetic chatbot AppManifest + AppModule pair used after
  * apps/chatbot/ is deleted (Hermes P1 Chunk D, REQ-CONV-013). The module's

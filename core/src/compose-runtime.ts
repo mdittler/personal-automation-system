@@ -778,17 +778,15 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	await registry.loadAll(serviceFactory);
 
-	// 9a-bis. Virtual chatbot registry entry (REQ-CONV-013) — synthetic registration
-	// so the schedule loop below, FileIndex appScopes, /gui/apps/chatbot, and the
-	// chatbot data-store namespace continue to resolve after apps/chatbot/ is deleted
-	// in D.3. Registered here (immediately after loadAll) so every downstream
-	// registry.getAll() consumer sees it. During D.1-D.2 the real app may also be
-	// loaded; only register the virtual entry if the real one is missing. D.3 makes
-	// this unconditional.
+	// Virtual chatbot entry (REQ-CONV-013) — after apps/chatbot/ is deleted, GUI
+	// and data-store namespace still need this id. Register here (after loadAll)
+	// so every downstream registry.getAll() consumer sees it.
 	if (!registry.getApp('chatbot')) {
-		const { buildVirtualChatbotApp } = await import('./services/conversation/virtual-app.js');
+		const { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } = await import(
+			'./services/conversation/virtual-app.js'
+		);
 		const { manifest: virtualManifest, module: virtualModule } = buildVirtualChatbotApp();
-		registry.registerVirtual(virtualManifest, virtualModule, '<virtual:chatbot>');
+		registry.registerVirtual(virtualManifest, virtualModule, VIRTUAL_CHATBOT_PATH);
 	}
 
 	// -------------------------------------------------------------------------

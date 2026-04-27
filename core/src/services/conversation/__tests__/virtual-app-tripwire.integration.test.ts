@@ -11,11 +11,8 @@ import { chatbotMessage } from '../../../testing/fixtures/messages.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 import { CONVERSATION_USER_CONFIG } from '../manifest.js';
+import { VIRTUAL_CHATBOT_PATH } from '../virtual-app.js';
 
-// ---------------------------------------------------------------------------
-// Describe A: runtime that loads real apps (chatbot app is present in D.1-D.2)
-// The virtual entry is only registered when the real app is absent.
-// ---------------------------------------------------------------------------
 describe('virtual chatbot registry entry — when real app is absent', () => {
 	let tempDir: string;
 	let runtime: Awaited<ReturnType<typeof composeRuntime>>;
@@ -47,10 +44,9 @@ describe('virtual chatbot registry entry — when real app is absent', () => {
 	});
 
 	it('registry.getApp("chatbot") resolves to a virtual entry tagged <virtual:chatbot>', () => {
-		// NOTE: RuntimeServices.registry, NOT appRegistry — see compose-runtime.ts:135.
 		const app = runtime.services.registry.getApp('chatbot');
 		expect(app).toBeDefined();
-		expect(app?.appDir).toBe('<virtual:chatbot>');
+		expect(app?.appDir).toBe(VIRTUAL_CHATBOT_PATH);
 		expect(app?.manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
 	});
 
@@ -68,7 +64,6 @@ describe('virtual chatbot registry entry — when real app is absent', () => {
 
 		const virtualApp = runtime.services.registry.getApp('chatbot')!;
 		const virtualSpy = vi.spyOn(virtualApp.module, 'handleMessage');
-		// conversationService lives inside the Router, not top-level on RuntimeServices.
 		const conversationSpy = vi.spyOn(
 			(runtime.services.router as any).conversationService,
 			'handleMessage',

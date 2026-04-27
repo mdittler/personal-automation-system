@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { AppModule } from '../../../types/app-module.js';
 import { AppRegistry } from '../index.js';
+import { VIRTUAL_CHATBOT_PATH } from '../../conversation/virtual-app.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -31,12 +32,12 @@ describe('AppRegistry.registerVirtual', () => {
 		});
 		const manifest = makeManifest('chatbot');
 
-		registry.registerVirtual(manifest, noopModule, '<virtual:chatbot>');
+		registry.registerVirtual(manifest, noopModule, VIRTUAL_CHATBOT_PATH);
 
 		const found = registry.getApp('chatbot');
 		expect(found).toBeDefined();
 		expect(found?.manifest.app.id).toBe('chatbot');
-		expect(found?.appDir).toBe('<virtual:chatbot>');
+		expect(found?.appDir).toBe(VIRTUAL_CHATBOT_PATH);
 	});
 
 	it('includes the virtual app in getAll()', () => {
@@ -45,7 +46,7 @@ describe('AppRegistry.registerVirtual', () => {
 			config: { dataDir: '/tmp', users: [] } as any,
 			logger,
 		});
-		registry.registerVirtual(makeManifest('chatbot'), noopModule, '<virtual:chatbot>');
+		registry.registerVirtual(makeManifest('chatbot'), noopModule, VIRTUAL_CHATBOT_PATH);
 		expect(registry.getAll().map((a) => a.manifest.app.id)).toContain('chatbot');
 	});
 
@@ -55,9 +56,9 @@ describe('AppRegistry.registerVirtual', () => {
 			config: { dataDir: '/tmp', users: [] } as any,
 			logger,
 		});
-		registry.registerVirtual(makeManifest('chatbot'), noopModule, '<virtual:chatbot>');
+		registry.registerVirtual(makeManifest('chatbot'), noopModule, VIRTUAL_CHATBOT_PATH);
 		expect(() =>
-			registry.registerVirtual(makeManifest('chatbot'), noopModule, '<virtual:chatbot>'),
+			registry.registerVirtual(makeManifest('chatbot'), noopModule, VIRTUAL_CHATBOT_PATH),
 		).toThrow(/duplicate/i);
 	});
 
@@ -67,7 +68,7 @@ describe('AppRegistry.registerVirtual', () => {
 			config: { dataDir: '/tmp', users: [] } as any,
 			logger,
 		});
-		registry.registerVirtual(makeManifest('chatbot'), noopModule, '<virtual:chatbot>');
+		registry.registerVirtual(makeManifest('chatbot'), noopModule, VIRTUAL_CHATBOT_PATH);
 		await expect(registry.shutdownAll()).resolves.toBeUndefined();
 	});
 });
