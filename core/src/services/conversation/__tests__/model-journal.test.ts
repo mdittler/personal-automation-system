@@ -1,8 +1,5 @@
 /**
  * Model journal integration tests.
- *
- * Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
- * (describe 'model journal integration', ~L1036-1138)
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,27 +7,9 @@ import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import { requestContext } from '../../context/request-context.js';
-import { ConversationService } from '../conversation-service.js';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 
 const MODEL_SLUG = 'anthropic-mock-model';
-
-function makeService(services: CoreServices): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-	});
-}
 
 describe('model journal integration', () => {
 	let services: CoreServices;
@@ -50,7 +29,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'hi' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Hello!');
@@ -63,7 +42,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'question' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.modelJournal.append).toHaveBeenCalledWith(MODEL_SLUG, 'Noted something');
@@ -74,7 +53,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.modelJournal.append).not.toHaveBeenCalled();
@@ -88,7 +67,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'test' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'Response.');
@@ -104,7 +83,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'question' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// History should contain the cleaned response, not the journal tag
@@ -125,7 +104,7 @@ describe('model journal integration', () => {
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];

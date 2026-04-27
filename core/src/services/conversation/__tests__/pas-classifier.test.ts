@@ -205,12 +205,7 @@ describe('classifyPASMessage', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// (only tests not already covered by the describe blocks above)
-// ---------------------------------------------------------------------------
-
-describe('isPasRelevant — additional cases (migrated)', () => {
+describe('isPasRelevant — additional cases', () => {
 	it('detects "what commands are available"', () => {
 		expect(isPasRelevant('what commands can I use?')).toBe(true);
 	});
@@ -239,7 +234,7 @@ describe('isPasRelevant — additional cases (migrated)', () => {
 	});
 });
 
-describe('isPasRelevant with system keywords (migrated)', () => {
+describe('isPasRelevant with system keywords', () => {
 	it('detects model-related questions', () => {
 		expect(isPasRelevant('what model is being used?')).toBe(true);
 	});

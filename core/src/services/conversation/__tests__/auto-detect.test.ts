@@ -3,8 +3,8 @@ import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import { requestContext } from '../../context/request-context.js';
-import { ConversationService } from '../conversation-service.js';
 import { getAutoDetectSetting } from '../auto-detect.js';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 import {
 	expectBasicPrompt,
 	expectPasAwarePrompt,
@@ -45,29 +45,7 @@ describe('getAutoDetectSetting', () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
-// ---------------------------------------------------------------------------
-
-function makeAutoDetectService(services: CoreServices): ConversationService {
-	return new ConversationService({
-		llm: services.llm,
-		telegram: services.telegram,
-		data: services.data,
-		logger: services.logger,
-		timezone: 'UTC',
-		systemInfo: services.systemInfo,
-		appMetadata: services.appMetadata,
-		appKnowledge: services.appKnowledge,
-		modelJournal: services.modelJournal,
-		contextStore: services.contextStore,
-		config: services.config,
-		dataQuery: services.dataQuery ?? undefined,
-		interactionContext: services.interactionContext ?? undefined,
-	});
-}
-
-describe('auto-detect PAS questions (migrated)', () => {
+describe('auto-detect PAS questions', () => {
 	let services: CoreServices;
 
 	beforeEach(() => {
@@ -81,7 +59,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// auto_detect off → only one LLM call (the main response, no classifier)
@@ -100,7 +78,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// call[0] = classifier (fast tier), call[1] = main response (standard tier)
@@ -121,7 +99,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'tell me a joke about cats' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// call[0] = classifier, call[1] = main response
@@ -139,7 +117,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
@@ -151,7 +129,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// auto_detect defaults to false on error → only one LLM call (no classifier)
@@ -170,7 +148,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		// Classifier fails → fail-open → app-aware prompt for main call
@@ -185,7 +163,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello', spaceName: 'Smith Household' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
@@ -204,7 +182,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		});
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
@@ -217,7 +195,7 @@ describe('auto-detect PAS questions (migrated)', () => {
 		const ctx = createTestMessageContext({ text: 'hello', spaceName: 'Hack Household' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeAutoDetectService(services).handleMessage(ctx),
+			makeConversationService(services).handleMessage(ctx),
 		);
 
 		const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
