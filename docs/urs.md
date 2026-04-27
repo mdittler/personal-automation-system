@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-INFRA-001 |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-25 |
+| **Last Updated** | 2026-04-27 |
 
 ## Conventions
 
@@ -3238,6 +3238,333 @@ Fully complete in D.4. `SystemConfig.fallback`, `SystemConfig._legacyKeys`, `Sys
 
 ---
 
+### ConversationRetrievalService (Hermes P2)
+
+---
+
+### REQ-CONV-RETRIEVAL-001: Source Policy allowlist code-locked
+
+**Phase:** Hermes P2 Chunk A | **Status:** Implemented
+
+`ALLOWED_SOURCES` is a `ReadonlySet` of exactly 11 allowed categories (including `collaboration-data`). `DENIED_SOURCES` is a `ReadonlySet` of exactly 9 denied categories. `SOURCE_POLICY` is a `ReadonlyMap` with one entry per allowed category; each entry carries `authModel`, `underlyingService`, `underlyingMethod`, and `category`. `METHOD_SOURCE_CATEGORIES` maps exactly 8 public method names to their source categories. No denied category appears in any method mapping.
+
+**Standard tests** (`source-policy.test.ts`):
+- `ALLOWED_SOURCES` > `exports exactly 11 allowed categories (including collaboration-data)`
+- `DENIED_SOURCES` > `exports exactly 9 denied categories`
+- `SOURCE_POLICY` > `has one entry for every allowed category (map size equals ALLOWED_SOURCES.size)`
+- `SOURCE_POLICY` > `has an entry for every allowed category`
+- `SOURCE_POLICY` > `each entry authModel is one of the 5 valid values`
+- `SOURCE_POLICY` > `every SourcePolicyEntry.underlyingService is a non-empty string`
+- `SOURCE_POLICY` > `every SourcePolicyEntry.underlyingMethod is a non-empty string`
+- `SOURCE_POLICY` > `every entry.category matches its map key`
+- `METHOD_SOURCE_CATEGORIES` > `covers every allowed category at least once`
+- `METHOD_SOURCE_CATEGORIES` > `has exactly the expected public method names (structural deny-by-default test)`
+
+**Edge case tests** (`source-policy.test.ts`):
+- `ALLOWED_SOURCES` > `is a ReadonlySet — .add is undefined (not a mutable Set method)`
+- `DENIED_SOURCES` > `is a ReadonlySet`
+- `ALLOWED_SOURCES and DENIED_SOURCES` > `are disjoint — no category appears in both sets`
+
+**Security tests** (`source-policy.test.ts`):
+- `METHOD_SOURCE_CATEGORIES` > `no method category list contains a DeniedSourceCategory value`
+
+---
+
+### REQ-CONV-RETRIEVAL-002: Service composition only — no auth bypass
+
+**Phase:** Hermes P2 Chunk A | **Status:** Implemented
+
+`ConversationRetrievalServiceImpl` constructs without throwing when given an empty deps object or a fully populated deps object. Every public method (`searchData`, `listContextEntries`, `getRecentInteractions`, `getEnabledApps`, `searchAppKnowledge`, `buildSystemDataBlock`, `listScopedReports`, `listScopedAlerts`, `buildContextSnapshot`) exists on the instance and is a function. Every method listed in `METHOD_SOURCE_CATEGORIES` also exists on the service, enforcing structural deny-by-default at test time. All methods return a `Promise`.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl construction` > `constructs successfully with an empty deps object`
+- `ConversationRetrievalServiceImpl construction` > `constructs successfully with all deps provided (stubs)`
+- `ConversationRetrievalServiceImpl method existence` > `searchData exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `listContextEntries exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `getRecentInteractions exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `getEnabledApps exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `searchAppKnowledge exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `buildSystemDataBlock exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `listScopedReports exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `listScopedAlerts exists and is a function`
+- `ConversationRetrievalServiceImpl method existence` > `buildContextSnapshot exists and is a function`
+- `ConversationRetrievalServiceImpl — METHOD_SOURCE_CATEGORIES contract` > (one test per method name)
+
+**Security tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `searchData throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `listContextEntries throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `getRecentInteractions throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `getEnabledApps throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `searchAppKnowledge throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `buildSystemDataBlock throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `listScopedReports throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `listScopedAlerts throws MissingRequestContextError when no userId in context`
+- `ConversationRetrievalServiceImpl — MissingRequestContextError outside context` > `buildContextSnapshot throws MissingRequestContextError when no userId in context`
+
+---
+
+### REQ-CONV-RETRIEVAL-003: Scoped report API — ReportService.listForUser
+
+**Phase:** Hermes P2 Chunk B | **Status:** Implemented
+
+`ReportService.listForUser(userId)` returns only the reports whose `delivery` list contains `userId` directly, or whose `delivery` list contains another user in the same household as `userId`. Reports from a different household are excluded even if the user's userId is somehow present. The method delegates to `listReports()` exactly once per call, returns results in the same order as `listReports()`, and handles malformed YAML files gracefully (skipping the bad file rather than throwing). Two simultaneous calls for different users return independent results.
+
+**Standard tests** (`report-service.test.ts`):
+- `ReportService — listForUser` > `user with one owned (delivery) report sees exactly that report`
+- `ReportService — listForUser` > (shared delivery across users) both users see the shared report
+- `ReportService — listForUser` > `two simultaneous listForUser calls for different users return independent results`
+- `ReportService — listForUser` > (household-shared report) delivery member sees report via household path
+
+**Security tests** (`report-service.test.ts`):
+- `ReportService — listForUser` > `cross-user: listForUser(userA) does not include userB owned report`
+- `ReportService — listForUser` > (cross-household) u1 must NOT see hh2's report
+
+---
+
+### REQ-CONV-RETRIEVAL-004: Scoped alert API — AlertService.listForUser
+
+**Phase:** Hermes P2 Chunk B | **Status:** Implemented
+
+`AlertService.listForUser(userId)` returns only alerts whose `delivery` list contains `userId` directly, or whose `delivery` list contains another user in the same household. Alerts from a different household are excluded. The method delegates to `listAlerts()` exactly once, returns results in `listAlerts()` order, and skips malformed YAML files gracefully. Two simultaneous calls for different users return independent results.
+
+**Standard tests** (`alert-service.test.ts`):
+- `AlertService — listForUser` > `delivery member sees exactly that alert`
+- `AlertService — listForUser` > (shared delivery) both users see the shared alert
+- `AlertService — listForUser` > `two simultaneous listForUser calls for different users return independent results`
+- `AlertService — listForUser` > (household-shared alert) u1 sees hh-alert via household path
+
+**Security tests** (`alert-service.test.ts`):
+- `AlertService — listForUser` > `cross-user: listForUser(u1) does not include u2 alert`
+- `AlertService — listForUser` > (cross-household) u1 must NOT see it
+
+---
+
+### REQ-CONV-RETRIEVAL-005: searchData delegates to DataQueryService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`ConversationRetrievalServiceImpl.searchData({ question, recentFilePaths? })` reads `userId` from the active `requestContext`, calls `dataQuery.query(question, userId, options?)`, and returns the `DataQueryResult` unchanged. When `recentFilePaths` is non-empty, it is forwarded as `options.recentFilePaths`; otherwise `options` is `undefined`. Throws `MissingRequestContextError` when called outside a request context. Throws a descriptive error when `dataQuery` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — searchData` > `delegates to dataQuery.query with userId from requestContext`
+- `ConversationRetrievalServiceImpl — searchData` > `returns the dataQuery result unchanged`
+- `ConversationRetrievalServiceImpl — searchData` > `passes recentFilePaths as options when provided`
+- `ConversationRetrievalServiceImpl — searchData` > `does not pass options when recentFilePaths is empty`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `searchData throws when dataQuery not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-006: listContextEntries delegates to ContextStoreService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`listContextEntries()` reads `userId` from `requestContext`, calls `contextStore.listForUser(userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `contextStore` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — listContextEntries` > `delegates to contextStore.listForUser with userId from requestContext`
+- `ConversationRetrievalServiceImpl — listContextEntries` > `returns contextStore result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `listContextEntries throws when contextStore not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-007: getRecentInteractions delegates to InteractionContextService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`getRecentInteractions()` reads `userId` from `requestContext`, calls `interactionContext.getRecent(userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `interactionContext` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — getRecentInteractions` > `delegates to interactionContext.getRecent with userId from requestContext`
+- `ConversationRetrievalServiceImpl — getRecentInteractions` > `returns interactionContext result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `getRecentInteractions throws when interactionContext not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-008: getEnabledApps delegates to AppMetadataService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`getEnabledApps()` reads `userId` from `requestContext`, calls `appMetadata.getEnabledApps(userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `appMetadata` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — getEnabledApps` > `delegates to appMetadata.getEnabledApps with userId from requestContext`
+- `ConversationRetrievalServiceImpl — getEnabledApps` > `returns appMetadata result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `getEnabledApps throws when appMetadata not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-009: searchAppKnowledge delegates to AppKnowledgeBaseService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`searchAppKnowledge(query)` reads `userId` from `requestContext`, calls `appKnowledge.search(query, userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `appKnowledge` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — searchAppKnowledge` > `delegates to appKnowledge.search with query and userId`
+- `ConversationRetrievalServiceImpl — searchAppKnowledge` > `returns appKnowledge result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `searchAppKnowledge throws when appKnowledge not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-010: buildSystemDataBlock delegates to SystemInfoService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`buildSystemDataBlock({ question, isAdmin })` reads `userId` from `requestContext` and calls the existing `gatherSystemData` logic via `SystemInfoService`. Admin users see cost breakdowns and safeguard defaults; non-admin users see basic system status only. An empty question returns an empty string. Throws `MissingRequestContextError` when no userId in context. Throws when `systemInfo` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — buildSystemDataBlock` > `admin user: system question returns non-empty block`
+- `ConversationRetrievalServiceImpl — buildSystemDataBlock` > `non-admin user: basic system info visible without admin sections`
+- `ConversationRetrievalServiceImpl — buildSystemDataBlock` > `empty question returns empty string`
+- `ConversationRetrievalServiceImpl — buildSystemDataBlock` > `admin-only cost breakdown absent in non-admin output`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `buildSystemDataBlock throws when systemInfo not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-011: listScopedReports delegates to ReportService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`listScopedReports()` reads `userId` from `requestContext`, calls `reportService.listForUser(userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `reportService` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — listScopedReports` > `delegates to reportService.listForUser with userId from requestContext`
+- `ConversationRetrievalServiceImpl — listScopedReports` > `returns reportService result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `listScopedReports throws when reportService not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-012: listScopedAlerts delegates to AlertService
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`listScopedAlerts()` reads `userId` from `requestContext`, calls `alertService.listForUser(userId)`, and returns the result unchanged. Throws `MissingRequestContextError` when no userId in context. Throws when `alertService` is not wired.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — listScopedAlerts` > `delegates to alertService.listForUser with userId from requestContext`
+- `ConversationRetrievalServiceImpl — listScopedAlerts` > `returns alertService result unchanged`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — throws when dep not wired` > `listScopedAlerts throws when alertService not wired`
+
+---
+
+### REQ-CONV-RETRIEVAL-013: chooseSources — minimal-context default and overrides
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`chooseSources(opts)` is a pure function. In `free-text` mode with `dataQueryCandidate: false` and no keywords, it always includes `context-store`, `interaction-context`, and `app-metadata` (the cheap baseline). It adds `system-info` for cost/schedule keywords, `app-knowledge` for how-to keywords, and `reports`+`alerts` for scheduling/report/alert keywords. `dataQueryCandidate: true` adds all four data-query categories (`user-app-data`, `household-shared-data`, `space-data`, `collaboration-data`); `false` suppresses them even if data keywords appear. `ask` mode always includes `app-knowledge`, `system-info`, `reports`, and `alerts`. `include` overrides apply after all defaults and keyword gates. The result never contains a `DeniedSourceCategory` value. Identical inputs produce identical output (referential purity).
+
+**Standard tests** (`source-selection.test.ts`):
+- `chooseSources — baseline` > `always includes context-store, interaction-context, app-metadata`
+- `chooseSources — baseline` > `returns same set on identical inputs (pure function)`
+- `chooseSources — system/how-to keywords` > `"cost" keyword adds system-info`
+- `chooseSources — system/how-to keywords` > `"how do i" adds app-knowledge`
+- `chooseSources — system/how-to keywords` > `"how to" adds app-knowledge`
+- `chooseSources — system/how-to keywords` > `"scheduled" keyword adds reports + alerts`
+- `chooseSources — system/how-to keywords` > `"report" in question adds reports + alerts`
+- `chooseSources — system/how-to keywords` > `"alert" in question adds reports + alerts`
+- `chooseSources — dataQueryCandidate flag` > `dataQueryCandidate: true adds all four data-query categories`
+- `chooseSources — dataQueryCandidate flag` > `dataQueryCandidate: false prevents data-query even with data keywords`
+- `chooseSources — ask mode` > `ask mode always includes app-knowledge`
+- `chooseSources — ask mode` > `ask mode always includes system-info`
+- `chooseSources — ask mode` > `ask mode always includes reports and alerts`
+- `chooseSources — ask mode` > `ask mode with dataQueryCandidate: false still excludes data-query categories`
+- `chooseSources — include overrides` > `force-off removes a normally-selected category`
+- `chooseSources — include overrides` > `force-on adds a normally-unselected category`
+- `chooseSources — include overrides` > `empty include object is a no-op`
+- `chooseSources — include overrides` > `multiple overrides applied simultaneously`
+
+**Edge case tests** (`source-selection.test.ts`):
+- `chooseSources — baseline` > `does not include data-query categories when dataQueryCandidate is false`
+- `chooseSources — baseline` > `does not include reports or alerts for plain free-text without keywords`
+
+**Security tests** (`source-selection.test.ts`):
+- `chooseSources — safety` > `plain free-text result contains no denied categories`
+- `chooseSources — safety` > `ask mode result contains no denied categories`
+- `chooseSources — safety` > `dataQueryCandidate result contains no denied categories`
+
+---
+
+### REQ-CONV-RETRIEVAL-014: buildContextSnapshot orchestration with partial-failure tolerance
+
+**Phase:** Hermes P2 Chunk C | **Status:** Implemented
+
+`buildContextSnapshot(opts)` calls `chooseSources(opts)` to determine which readers to invoke, fans out to all selected readers concurrently, and returns a `ContextSnapshot` with named fields for each result. When one reader throws, that category is recorded in `snapshot.failures` and the remaining readers' results are still returned. The snapshot always includes a `failures` array (empty on full success). When `dataQueryCandidate` is true, `DataQueryService` is called with `recentFilePaths` forwarded; when false, `DataQueryService` is never called. In `ask` mode, `appKnowledge`, `reportService`, and `alertService` are always called. The `include` override map is forwarded to `chooseSources`. Two parallel calls for different users do not cross-contaminate each other's snapshot fields.
+
+**Standard tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `free-text with no keywords: only 3 cheap readers called`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `dataQueryCandidate: true causes DataQueryService to be called`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `recentFilePaths forwarded to DataQueryService`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `ask mode always includes system-info, app-knowledge, reports, alerts`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `include override force-off removes a normally-selected category`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `include override force-on adds a normally-unselected category`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `does not call DataQueryService when dataQueryCandidate is false even with data keywords in question`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `snapshot always has a failures array (even on full success)`
+
+**Error tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `one category throws: failures includes that category; others still present`
+
+**Security tests** (`conversation-retrieval-service.test.ts`):
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `two parallel calls for different users do not cross-contaminate`
+
+---
+
+### REQ-CONV-RETRIEVAL-015: handleMessage uses ConversationRetrievalService for broad data visibility
+
+**Phase:** Hermes P2 Chunk D | **Status:** Implemented
+
+When `ConversationRetrievalService` is wired into `ConversationService`, `handleMessage` calls `buildContextSnapshot` and injects its results into the system prompt before the LLM call. Recipe data surfaces in the system prompt for recipe-recall questions (classifier `YES_DATA`). Grocery list data surfaces for grocery-state questions. Report and alert inventory data surfaces when the question contains scheduling/automation keywords. App capability descriptions surface for how-to questions. When `buildContextSnapshot` throws, the handler degrades gracefully: the LLM is still called with the plain app-aware prompt, and the user receives a response.
+
+**Standard tests** (`broad-recall.persona.test.ts`):
+- `P1 — recipe recall` > `"what's that pasta recipe I saved" → classifier YES_DATA → system prompt contains recipe data`
+- `P1 — recipe recall` > `"find my mushroom risotto" → classifier YES_DATA → system prompt contains recipe data`
+- `P1 — recipe recall` > `"remind me how I made the carbonara" → classifier YES_DATA → system prompt contains recipe data`
+- `P2 — grocery state` > `"what's on my list" → classifier YES_DATA → system prompt contains grocery list`
+- `P2 — grocery state` > `"what do I need from the store" → classifier YES_DATA → system prompt contains grocery list`
+- `P2 — grocery state` > `"did I add tomatoes" → classifier YES_DATA → system prompt contains grocery list`
+- `P3 — alert/report inventory` > `"what alerts do I have" → reports + alerts section in system prompt`
+- `P3 — alert/report inventory` > `"show me my reports" → reports section in system prompt`
+- `P3 — alert/report inventory` > `"what automated tasks are running" triggers alert + report content in prompt`
+- `P4 — app capability question` > `"what can the food app do" → classifier YES → system prompt contains food app capabilities`
+- `P4 — app capability question` > `"remind me how to add a recipe" → classifier YES → system prompt contains food app capabilities`
+- `P4 — app capability question` > `"how does grocery list work" → classifier YES → system prompt contains food app capabilities`
+- `P8 — graceful degradation` > `ConversationRetrievalService.buildContextSnapshot throws → LLM still called, response sent`
+
+**Security tests** (`broad-recall.persona.test.ts`):
+- `P5 — cross-user denial` > `user B's snapshot does NOT contain user A's context data`
+- `P5 — cross-user denial` > `user A's snapshot contains only user A's context entries, not user B's`
+
+---
+
+### REQ-CONV-RETRIEVAL-016: handleAsk uses ConversationRetrievalService with broad-visibility mode
+
+**Phase:** Hermes P2 Chunk D | **Status:** Implemented
+
+When `ConversationRetrievalService` is wired into `ConversationService`, `handleAsk` calls `buildContextSnapshot` with `mode: 'ask'`. In ask mode the snapshot always includes `app-knowledge`, `system-info`, `reports`, and `alerts`. Data-query results surface in the system prompt when the question triggers the `YES_DATA` classifier.
+
+**Standard tests** (`broad-recall.persona.test.ts`):
+- `P6 — parity` > `prompt produced via snapshot matches prompt produced via legacy string path`
+- `P7 — /ask mode` > `"/ask what did I do today" → YES_DATA → system prompt contains notes content`
+- `P7 — /ask mode` > `"/ask show my recent notes" → YES_DATA → system prompt contains notes content`
+- `P7 — /ask mode` > `"/ask what did I work on this week" → YES_DATA → system prompt contains notes content`
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -6404,5 +6731,21 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-012 | (verified by absence of apps/chatbot/) | 0 | 0 | Implemented |
 | REQ-CONV-013 | virtual-app-tripwire.integration.test.ts, chatbot-virtual-config.integration.test.ts | 5 | 0 | Implemented |
 | REQ-CONV-021 | router.test.ts, conversation-service.test.ts | 0 | 0 | Implemented |
+| REQ-CONV-RETRIEVAL-001 | source-policy.test.ts | 10 | 4 | Implemented |
+| REQ-CONV-RETRIEVAL-002 | conversation-retrieval-service.test.ts | 11 | 9 | Implemented |
+| REQ-CONV-RETRIEVAL-003 | report-service.test.ts | 4 | 2 | Implemented |
+| REQ-CONV-RETRIEVAL-004 | alert-service.test.ts | 4 | 2 | Implemented |
+| REQ-CONV-RETRIEVAL-005 | conversation-retrieval-service.test.ts | 4 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-006 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-007 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-008 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-009 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-010 | conversation-retrieval-service.test.ts | 4 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-011 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-012 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-RETRIEVAL-013 | source-selection.test.ts | 18 | 5 | Implemented |
+| REQ-CONV-RETRIEVAL-014 | conversation-retrieval-service.test.ts | 8 | 2 | Implemented |
+| REQ-CONV-RETRIEVAL-015 | broad-recall.persona.test.ts | 13 | 2 | Implemented |
+| REQ-CONV-RETRIEVAL-016 | broad-recall.persona.test.ts | 4 | 0 | Implemented |
 
-| **Totals** | **178 test files** | **1415** | **1656** | **3071 tests** |
+| **Totals** | **194 test files** | **1503** | **1699** | **3202 tests** |

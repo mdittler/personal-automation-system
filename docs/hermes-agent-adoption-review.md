@@ -12,7 +12,7 @@ Hermes commit inspected: `b866381` (feat(state): auto-prune old sessions + VACUU
 Local clone: `.worktrees/hermes-agent-review/`
 Upstream: `https://github.com/nousresearch/hermes-agent`
 
-**Status: P1 complete — last sub-chunk D.4 merged 2026-04-27.**
+**Status: P2 complete; P3 pending.**
 
 ---
 

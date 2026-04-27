@@ -1,7 +1,7 @@
 # Hermes P1 — Conversation Service Design
 
 **Date:** 2026-04-25
-**Status:** Approved — Chunks A, B, and C complete; Chunk D pending
+**Status:** Implemented (P1 complete 2026-04-27)
 
 **Simplify passes:** Chunk C simplified (2026-04-26, `simplify-chunk-c` branch); Chunk B simplified (2026-04-26, `simplify-chunk-b` branch). Chunk A not yet simplified.
 **Plan:** `C:\Users\matth\.claude\plans\i-d-like-to-start-keen-liskov.md`
