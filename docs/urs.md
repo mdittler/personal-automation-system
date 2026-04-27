@@ -3537,6 +3537,9 @@ When `ConversationRetrievalService` is wired into `ConversationService`, `handle
 - `P2 — grocery state` > `"what's on my list" → classifier YES_DATA → system prompt contains grocery list`
 - `P2 — grocery state` > `"what do I need from the store" → classifier YES_DATA → system prompt contains grocery list`
 - `P2 — grocery state` > `"did I add tomatoes" → classifier YES_DATA → system prompt contains grocery list`
+- `P3 — alert/report inventory: snapshot surfaces reports and alerts` > `"what alerts do I have" → classifier YES → system prompt contains reports + alerts`
+- `P3 — alert/report inventory: snapshot surfaces reports and alerts` > `"show me my reports" → classifier YES → system prompt contains reports + alerts`
+- `P3 — alert/report inventory: snapshot surfaces reports and alerts` > `"what automated tasks are running" → classifier YES → system prompt contains reports + alerts`
 - `P3 — alert/report inventory` > `"what alerts do I have" → reports + alerts section in system prompt`
 - `P3 — alert/report inventory` > `"show me my reports" → reports section in system prompt`
 - `P3 — alert/report inventory` > `"what automated tasks are running" triggers alert + report content in prompt`
@@ -3559,9 +3562,9 @@ When `ConversationRetrievalService` is wired into `ConversationService`, `handle
 
 **Standard tests** (`broad-recall.persona.test.ts`):
 - `P6 — parity` > `prompt produced via snapshot matches prompt produced via legacy string path`
-- `P7 — /ask mode` > `"/ask what did I do today" → YES_DATA → system prompt contains notes content`
-- `P7 — /ask mode` > `"/ask show my recent notes" → YES_DATA → system prompt contains notes content`
-- `P7 — /ask mode` > `"/ask what did I work on this week" → YES_DATA → system prompt contains notes content`
+- `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "what did I do today" → YES_DATA → system prompt contains notes content`
+- `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "show my recent notes" → YES_DATA → system prompt contains notes content`
+- `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "what did I work on this week" → YES_DATA → system prompt contains notes content`
 
 ---
 
@@ -6745,7 +6748,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-RETRIEVAL-012 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
 | REQ-CONV-RETRIEVAL-013 | source-selection.test.ts | 18 | 5 | Implemented |
 | REQ-CONV-RETRIEVAL-014 | conversation-retrieval-service.test.ts | 8 | 2 | Implemented |
-| REQ-CONV-RETRIEVAL-015 | broad-recall.persona.test.ts | 13 | 2 | Implemented |
+| REQ-CONV-RETRIEVAL-015 | broad-recall.persona.test.ts | 16 | 2 | Implemented |
 | REQ-CONV-RETRIEVAL-016 | broad-recall.persona.test.ts | 4 | 0 | Implemented |
 
-| **Totals** | **194 test files** | **1503** | **1699** | **3202 tests** |
+| **Totals** | **194 test files** | **1506** | **1699** | **3205 tests** |
