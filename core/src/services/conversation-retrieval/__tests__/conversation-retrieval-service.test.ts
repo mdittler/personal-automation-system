@@ -739,6 +739,21 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		expect(deps.reportService.listForUser).toHaveBeenCalled();
 	});
 
+	it('does not call DataQueryService when dataQueryCandidate is false even with data keywords in question', async () => {
+		const deps = makeFullDeps();
+		const service = new ConversationRetrievalServiceImpl(deps as never);
+		await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my grocery list',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				isAdmin: false,
+			}),
+		);
+		expect(deps.dataQuery.query).not.toHaveBeenCalled();
+	});
+
 	it('snapshot always has a failures array (even on full success)', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);

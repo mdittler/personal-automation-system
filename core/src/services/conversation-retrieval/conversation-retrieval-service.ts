@@ -129,9 +129,13 @@ export interface ConversationRetrievalDeps {
 
 export class ConversationRetrievalServiceImpl implements ConversationRetrievalService {
 	private readonly deps: ConversationRetrievalDeps;
+	private readonly systemInfoReader?: ConversationSystemInfoReader;
 
 	constructor(deps: ConversationRetrievalDeps) {
 		this.deps = deps;
+		if (deps.systemInfo) {
+			this.systemInfoReader = new ConversationSystemInfoReader(deps.systemInfo, deps.logger);
+		}
 	}
 
 	/**
@@ -200,13 +204,12 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 
 	async buildSystemDataBlock(args: { question: string; isAdmin: boolean }): Promise<string> {
 		this.assertRequestContext('buildSystemDataBlock');
-		if (!this.deps.systemInfo) {
+		if (!this.systemInfoReader) {
 			throw new Error(
 				'ConversationRetrievalService.buildSystemDataBlock: SystemInfoService not wired',
 			);
 		}
-		const reader = new ConversationSystemInfoReader(this.deps.systemInfo, this.deps.logger);
-		return reader.buildSystemDataBlock(args);
+		return this.systemInfoReader.buildSystemDataBlock(args);
 	}
 
 	async listScopedReports(): Promise<ReportDefinition[]> {
@@ -274,11 +277,10 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			snapshot.failures.push('app-knowledge');
 		}
 
-		if (selected.has('system-info') && this.deps.systemInfo) {
-			const reader = new ConversationSystemInfoReader(this.deps.systemInfo, this.deps.logger);
+		if (selected.has('system-info') && this.systemInfoReader) {
 			tasks.push({
 				category: 'system-info',
-				promise: reader.buildSystemDataBlock({
+				promise: this.systemInfoReader.buildSystemDataBlock({
 					question: opts.question,
 					isAdmin: opts.isAdmin,
 				}),
@@ -376,7 +378,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 						(e) => e.content.length + e.key.length,
 					);
 					snapshot.contextStore = truncated;
-					charsUsed += entries.reduce((sum, e) => sum + e.content.length + e.key.length, 0);
+					charsUsed += truncated.reduce((sum, e) => sum + e.content.length + e.key.length, 0);
 					break;
 				}
 				case 'interaction-context': {
