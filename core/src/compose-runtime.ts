@@ -778,16 +778,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	await registry.loadAll(serviceFactory);
 
-	// Virtual chatbot entry (REQ-CONV-013) — after apps/chatbot/ is deleted, GUI
-	// and data-store namespace still need this id. Register here (after loadAll)
-	// so every downstream registry.getAll() consumer sees it.
-	if (!registry.getApp('chatbot')) {
-		const { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } = await import(
-			'./services/conversation/virtual-app.js'
-		);
-		const { manifest: virtualManifest, module: virtualModule } = buildVirtualChatbotApp();
-		registry.registerVirtual(virtualManifest, virtualModule, VIRTUAL_CHATBOT_PATH);
-	}
+	// Virtual chatbot entry (REQ-CONV-013) — apps/chatbot/ no longer exists after D.3,
+	// so the registry never has a real 'chatbot' app. Always register the virtual entry.
+	const { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } = await import(
+		'./services/conversation/virtual-app.js'
+	);
+	const { manifest: virtualManifest, module: virtualModule } = buildVirtualChatbotApp();
+	registry.registerVirtual(virtualManifest, virtualModule, VIRTUAL_CHATBOT_PATH);
 
 	// -------------------------------------------------------------------------
 	// Phase C: App loading, late wiring, FileIndex, Router build
@@ -924,16 +921,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	spaceService.setVaultService(vaultService);
 	await vaultService.rebuildAll();
 
-	// 9b. Look up chatbot app for fallback dispatch
-	const chatbotApp = registry.getApp('chatbot');
-	const fallbackMode = config.fallback ?? 'chatbot';
-	if (fallbackMode === 'chatbot' && !chatbotApp) {
-		logger.warn(
-			'Fallback mode is "chatbot" but chatbot app was not loaded — falling back to notes mode',
-		);
-	}
-
-	// 9c. ConversationService — constructed unconditionally so free-text fallback works even if chatbotApp fails to load.
+	// 9c. ConversationService — always present; provides free-text fallback dispatch.
 	const conversationDataStore = new DataStoreServiceImpl({
 		dataDir: config.dataDir,
 		appId: 'chatbot',
@@ -1014,8 +1002,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		llm: systemLlm,
 		telegram: telegramService,
 		fallback,
-		chatbotApp: chatbotApp ?? undefined,
-		fallbackMode,
 		conversationService,
 		config,
 		appToggle,

@@ -142,15 +142,9 @@ export interface RouterOptions {
 	logger: Logger;
 	confidenceThreshold?: number;
 	appToggle?: AppToggleStore;
-	/** The chatbot app to dispatch to in chatbot fallback mode. */
-	chatbotApp?: RegisteredApp;
-	/** Fallback mode: 'chatbot' dispatches to chatbot app, 'notes' uses FallbackHandler. Default: 'chatbot'. */
-	fallbackMode?: 'chatbot' | 'notes';
 	/**
-	 * ConversationService for free-text fallback. When provided, the router calls
-	 * this directly via `dispatchConversation()` instead of going through
-	 * `chatbotApp`. The chatbotApp/fallbackMode fields stay during Chunks B–C
-	 * for back-compat; both are removed in Chunk D.
+	 * ConversationService for free-text fallback. The router calls this directly
+	 * via `dispatchConversation()` for unmatched messages.
 	 */
 	conversationService?: ConversationService;
 	/** Space service for /space command + active space injection. */
@@ -183,8 +177,6 @@ export class Router {
 	private readonly intentClassifier: IntentClassifier;
 	private readonly photoClassifier: PhotoClassifier;
 	private readonly appToggle?: AppToggleStore;
-	private readonly chatbotApp?: RegisteredApp;
-	private readonly fallbackMode: 'chatbot' | 'notes';
 	private readonly conversationService?: ConversationService;
 	private readonly spaceService?: SpaceService;
 	private readonly userManager?: UserManager;
@@ -208,8 +200,6 @@ export class Router {
 		this.logger = options.logger;
 		this.confidenceThreshold = options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
 		this.appToggle = options.appToggle;
-		this.chatbotApp = options.chatbotApp;
-		this.fallbackMode = options.fallbackMode ?? 'chatbot';
 		this.conversationService = options.conversationService;
 		this.spaceService = options.spaceService;
 		this.userManager = options.userManager;
@@ -1230,23 +1220,19 @@ export class Router {
 	}
 
 	/**
-	 * Send message to the configured fallback handler (ConversationService preferred,
-	 * then chatbot app, then notes). Extracted to avoid code duplication between
-	 * routeMessage and tryContextPromotion.
+	 * Send message to the configured fallback handler. Extracted to avoid code
+	 * duplication between routeMessage and tryContextPromotion.
 	 */
 	private async sendToFallback(ctx: MessageContext, enabledApps: string[]): Promise<void> {
-		const useChat = this.conversationService || (this.fallbackMode === 'chatbot' && this.chatbotApp);
-		if (useChat && !(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
+		if (!this.conversationService) {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
 			return;
 		}
-		if (this.conversationService) {
-			await this.dispatchConversation(ctx, routeForFallback());
-		} else if (this.fallbackMode === 'chatbot' && this.chatbotApp) {
-			await this.dispatchMessage(this.chatbotApp, ctx, routeForFallback());
-		} else {
+		if (!(await this.isAppEnabled(ctx.userId, 'chatbot', enabledApps))) {
 			await this.fallback.handleUnrecognized(ctx, this.telegram);
+			return;
 		}
+		await this.dispatchConversation(ctx, routeForFallback());
 	}
 
 	/** Try to send a message, logging errors but not throwing. */
