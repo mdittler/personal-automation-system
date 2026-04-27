@@ -14,12 +14,35 @@
 import type { CoreServices, DataQueryResult } from '@pas/core/types';
 import type { InteractionEntry } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockCoreServices } from '../../../../core/src/testing/mock-services.js';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
 import {
 	classifyPASMessage,
 	extractRecentFilePaths,
 	formatInteractionContextSummary,
 } from '../index.js';
+import { ConversationService } from '../conversation-service.js';
+
+// ---------------------------------------------------------------------------
+// makeService helper
+// ---------------------------------------------------------------------------
+
+function makeService(services: CoreServices): ConversationService {
+	return new ConversationService({
+		llm: services.llm,
+		telegram: services.telegram,
+		data: services.data,
+		logger: services.logger,
+		timezone: 'UTC',
+		systemInfo: services.systemInfo,
+		appMetadata: services.appMetadata,
+		appKnowledge: services.appKnowledge,
+		modelJournal: services.modelJournal,
+		contextStore: services.contextStore,
+		config: services.config,
+		dataQuery: services.dataQuery ?? undefined,
+		interactionContext: services.interactionContext ?? undefined,
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Helper: build InteractionEntry fixtures
@@ -170,10 +193,8 @@ describe('extractRecentFilePaths', () => {
 describe('classifyPASMessage — context injection (Phase 4b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices();
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('includes recent context summary in system prompt when recentContext is provided', async () => {
@@ -251,7 +272,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 		},
 	];
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
@@ -262,18 +283,14 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 			},
 		});
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('passes recent context summary to classifyPASMessage (system prompt includes it)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier call
 			.mockResolvedValueOnce('Based on your receipt...'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('what did that cost?'));
+		await makeService(services).handleMessage(makeMessageCtx('what did that cost?'));
 
 		// The classifier call (fast tier) should have the recent context in its system prompt
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
@@ -284,13 +301,11 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 	});
 
 	it('passes recentFilePaths to DataQueryService when entries have filePaths', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your receipt...');
 
-		await chatbot.handleMessage(makeMessageCtx('what did that cost?'));
+		await makeService(services).handleMessage(makeMessageCtx('what did that cost?'));
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.any(String),
@@ -305,13 +320,11 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 		// Override to return empty
 		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
 
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('I found some data...');
 
-		await chatbot.handleMessage(makeMessageCtx('what are my prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		// DataQueryService should be called, but with no third argument (or undefined recentFilePaths)
 		const calls = vi.mocked(services.dataQuery?.query as ReturnType<typeof vi.fn>).mock.calls;
@@ -324,13 +337,11 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 	it('does NOT include "Recent user actions" in classifier prompt when getRecent returns empty', async () => {
 		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
 
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier
 			.mockResolvedValueOnce('Sure, here is info.');
 
-		await chatbot.handleMessage(makeMessageCtx('what apps do I have?'));
+		await makeService(services).handleMessage(makeMessageCtx('what apps do I have?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const classifierCall = llmCalls.find((call) => call[1]?.tier === 'fast');
@@ -346,15 +357,15 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 			},
 		});
 		vi.mocked(noCtxServices.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(noCtxServices);
 
 		vi.mocked(noCtxServices.llm.complete)
 			.mockResolvedValueOnce('YES_DATA')
 			.mockResolvedValueOnce('Here is the data.');
 
 		// Should not throw
-		await expect(chatbot.handleMessage(makeMessageCtx('what are my prices?'))).resolves.not.toThrow();
+		await expect(
+			makeService(noCtxServices).handleMessage(makeMessageCtx('what are my prices?')),
+		).resolves.not.toThrow();
 	});
 
 	it('sanitizes action/appId in context summary (prompt injection defense)', async () => {
@@ -367,8 +378,7 @@ describe('handleMessage — context injection wiring (Phase 4b)', () => {
 		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([maliciousEntry]);
 		vi.mocked(services.llm.complete).mockResolvedValue('YES');
 
-		const chatbot = await import('../index.js');
-		await chatbot.handleMessage(makeMessageCtx('what did that cost?'));
+		await makeService(services).handleMessage(makeMessageCtx('what did that cost?'));
 
 		// Find the classifier call (fast tier) and check the system prompt
 		const calls = vi.mocked(services.llm.complete).mock.calls;
@@ -394,7 +404,7 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 		},
 	];
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
@@ -404,19 +414,15 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 				getRecent: vi.fn().mockReturnValue(recentEntries),
 			},
 		});
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('passes recent context summary to classifyPASMessage in /ask (system prompt includes it)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your recipe...');
 
 		const ctx = makeMessageCtx('show me that recipe');
-		await chatbot.handleCommand?.('ask', ['show', 'me', 'that', 'recipe'], ctx);
+		await makeService(services).handleAsk(['show', 'me', 'that', 'recipe'], ctx);
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const classifierCall = llmCalls.find((call) => call[1]?.tier === 'fast');
@@ -426,14 +432,12 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 	});
 
 	it('passes recentFilePaths to DataQueryService in /ask', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your recipe...');
 
 		const ctx = makeMessageCtx('show me that recipe');
-		await chatbot.handleCommand?.('ask', ['show', 'me', 'that', 'recipe'], ctx);
+		await makeService(services).handleAsk(['show', 'me', 'that', 'recipe'], ctx);
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.any(String),
@@ -447,14 +451,12 @@ describe('/ask command — context injection wiring (Phase 4b)', () => {
 	it('does NOT pass recentFilePaths in /ask when no interaction context', async () => {
 		vi.mocked(services.interactionContext!.getRecent).mockReturnValue([]);
 
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA')
 			.mockResolvedValueOnce('Here is some data.');
 
 		const ctx = makeMessageCtx('what are my prices?');
-		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'prices?'], ctx);
+		await makeService(services).handleAsk(['what', 'are', 'my', 'prices?'], ctx);
 
 		// DataQueryService should be called, but with no recentFilePaths
 		const calls = vi.mocked(services.dataQuery?.query as ReturnType<typeof vi.fn>).mock.calls;

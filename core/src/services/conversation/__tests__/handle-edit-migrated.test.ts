@@ -19,7 +19,7 @@ import type { EditProposal, EditService } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleEdit } from '@pas/core/services/conversation';
 import { pendingEdits } from '@pas/core/services/conversation';
-import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { MessageContext } from '@pas/core/types';
 
 // ---------------------------------------------------------------------------

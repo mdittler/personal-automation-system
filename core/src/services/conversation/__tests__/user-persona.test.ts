@@ -18,11 +18,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	createMockCoreServices,
 	createMockScopedStore,
-} from '../../../../core/src/testing/mock-services.js';
-import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+} from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
-import * as chatbot from '../index.js';
 import { classifyPASMessage } from '../index.js';
+import { ConversationService } from '../conversation-service.js';
+
+function makeService(services: CoreServices): ConversationService {
+    return new ConversationService({
+        llm: services.llm,
+        telegram: services.telegram,
+        data: services.data,
+        logger: services.logger,
+        timezone: 'UTC',
+        systemInfo: services.systemInfo,
+        appMetadata: services.appMetadata,
+        appKnowledge: services.appKnowledge,
+        modelJournal: services.modelJournal,
+        contextStore: services.contextStore,
+        config: services.config,
+        dataQuery: services.dataQuery ?? undefined,
+        interactionContext: services.interactionContext ?? undefined,
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,7 +80,6 @@ describe('classifier prompt content', () => {
 
 	beforeEach(async () => {
 		services = createMockCoreServices();
-		await chatbot.init(services);
 		vi.mocked(services.llm.complete).mockResolvedValue('YES');
 	});
 
@@ -133,7 +150,6 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 	beforeEach(async () => {
 		services = createMockCoreServices();
 		withAutoDetect(services);
-		await chatbot.init(services);
 	});
 
 	it('user asks what apps they have installed', async () => {
@@ -142,7 +158,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce('You have Food and Notes installed.');
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -158,7 +174,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce("Here's your current grocery list: milk, eggs, bread.");
 		const ctx = createTestMessageContext({ text: "what's on my grocery list?" });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -170,7 +186,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce('Last Tuesday you had pasta for dinner.');
 		const ctx = createTestMessageContext({ text: 'what did I eat last week?' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -182,7 +198,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce("You've spent $2.34 this month.");
 		const ctx = createTestMessageContext({ text: 'how much am I spending on AI this month?' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -194,7 +210,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce('Switched to claude-opus.');
 		const ctx = createTestMessageContext({ text: 'can you switch to a smarter model?' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -206,7 +222,7 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 			.mockResolvedValueOnce('Here are your notes from yesterday...');
 		const ctx = createTestMessageContext({ text: 'show me my notes from yesterday' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectPasAwarePrompt(mainPrompt);
@@ -224,7 +240,6 @@ describe('casual / general messages route to basic prompt', () => {
 	beforeEach(async () => {
 		services = createMockCoreServices();
 		withAutoDetect(services);
-		await chatbot.init(services);
 	});
 
 	it('user asks for a joke', async () => {
@@ -233,7 +248,7 @@ describe('casual / general messages route to basic prompt', () => {
 			.mockResolvedValueOnce('Why did the robot go on a diet? Too many bytes!');
 		const ctx = createTestMessageContext({ text: 'tell me a joke' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectBasicPrompt(mainPrompt);
@@ -245,7 +260,7 @@ describe('casual / general messages route to basic prompt', () => {
 			.mockResolvedValueOnce("I don't have live weather data, but you could check a weather app!");
 		const ctx = createTestMessageContext({ text: "what's the weather like today?" });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectBasicPrompt(mainPrompt);
@@ -257,7 +272,7 @@ describe('casual / general messages route to basic prompt', () => {
 			.mockResolvedValueOnce('15% of 340 is 51.');
 		const ctx = createTestMessageContext({ text: "what's 15% of 340?" });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectBasicPrompt(mainPrompt);
@@ -269,7 +284,7 @@ describe('casual / general messages route to basic prompt', () => {
 			.mockResolvedValueOnce('Hey! How can I help you today?');
 		const ctx = createTestMessageContext({ text: 'hey how are you doing?' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectBasicPrompt(mainPrompt);
@@ -281,7 +296,7 @@ describe('casual / general messages route to basic prompt', () => {
 			.mockResolvedValueOnce("'Hello' in Spanish is 'Hola'.");
 		const ctx = createTestMessageContext({ text: "how do you say 'hello' in Spanish?" });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expectBasicPrompt(mainPrompt);
@@ -298,7 +313,6 @@ describe('household context in chatbot responses', () => {
 	beforeEach(async () => {
 		services = createMockCoreServices();
 		withAutoDetect(services);
-		await chatbot.init(services);
 	});
 
 	it('user in a named household sees their household name in the prompt context', async () => {
@@ -310,7 +324,7 @@ describe('household context in chatbot responses', () => {
 			spaceName: 'Smith Household',
 		});
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		// The LLM should know which household it's talking to
@@ -326,7 +340,7 @@ describe('household context in chatbot responses', () => {
 			spaceName: 'Johnson Home',
 		});
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		// Even casual prompts get household context
@@ -342,7 +356,7 @@ describe('household context in chatbot responses', () => {
 			spaceName: undefined,
 		});
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
 		expect(mainPrompt).not.toContain('household');
@@ -360,7 +374,6 @@ describe('long chatbot responses are split for Telegram', () => {
 		services = createMockCoreServices();
 		withAutoDetect(services);
 		vi.mocked(services.data.forUser).mockReturnValue(createMockScopedStore());
-		await chatbot.init(services);
 	});
 
 	it('a detailed multi-section response is delivered as multiple messages', async () => {
@@ -375,7 +388,7 @@ describe('long chatbot responses are split for Telegram', () => {
 			.mockResolvedValueOnce(longResponse);
 		const ctx = createTestMessageContext({ text: 'give me a full summary of my system' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		// Should have been sent in multiple parts (long response > 3800 chars)
 		const sendCalls = vi.mocked(services.telegram.send).mock.calls;
@@ -397,7 +410,7 @@ describe('long chatbot responses are split for Telegram', () => {
 			.mockResolvedValueOnce('Sure! Here is a quick joke for you.');
 		const ctx = createTestMessageContext({ text: 'tell me a quick joke' });
 
-		await chatbot.handleMessage(ctx);
+		await makeService(services).handleMessage(ctx);
 
 		const sendCalls = vi.mocked(services.telegram.send).mock.calls;
 		expect(sendCalls.length).toBe(1);
@@ -414,13 +427,12 @@ describe('/ask command with natural language questions', () => {
 	beforeEach(async () => {
 		services = createMockCoreServices();
 		vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
-		await chatbot.init(services);
 	});
 
 	it('/ask with no question shows friendly examples a real user can follow', async () => {
 		const ctx = createTestMessageContext({ text: '/ask' });
 
-		await chatbot.handleCommand?.('ask', [], ctx);
+		await makeService(services).handleAsk([], ctx);
 
 		const [, message] = vi.mocked(services.telegram.send).mock.calls[0];
 		// Should be user-friendly (not just a bare API error)
@@ -437,7 +449,7 @@ describe('/ask command with natural language questions', () => {
 			spaceName: 'My Household',
 		});
 
-		await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+		await makeService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 		// /ask now runs classifier first (fast tier), then main response (standard tier)
 		expect(services.llm.complete).toHaveBeenCalledTimes(2);
@@ -454,7 +466,7 @@ describe('/ask command with natural language questions', () => {
 			.mockResolvedValueOnce("You've spent $1.20 this month."); // main LLM
 		const ctx = createTestMessageContext({ text: '/ask how much have I spent this month?' });
 
-		await chatbot.handleCommand?.('ask', ['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
+		await makeService(services).handleAsk(['how', 'much', 'have', 'I', 'spent', 'this', 'month?'], ctx);
 
 		// /ask now runs classifier (fast tier) then main response (standard tier)
 		const standardCall = vi.mocked(services.llm.complete).mock.calls.find((c) => c[1]?.tier === 'standard');

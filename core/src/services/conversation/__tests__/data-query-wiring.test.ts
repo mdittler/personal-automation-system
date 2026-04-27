@@ -13,8 +13,31 @@
  */
 import type { CoreServices, DataQueryResult } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockCoreServices } from '../../../../core/src/testing/mock-services.js';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { classifyPASMessage } from '../index.js';
+import { ConversationService } from '../conversation-service.js';
+
+// ---------------------------------------------------------------------------
+// makeService helper
+// ---------------------------------------------------------------------------
+
+function makeService(services: CoreServices): ConversationService {
+	return new ConversationService({
+		llm: services.llm,
+		telegram: services.telegram,
+		data: services.data,
+		logger: services.logger,
+		timezone: 'UTC',
+		systemInfo: services.systemInfo,
+		appMetadata: services.appMetadata,
+		appKnowledge: services.appKnowledge,
+		modelJournal: services.modelJournal,
+		contextStore: services.contextStore,
+		config: services.config,
+		dataQuery: services.dataQuery ?? undefined,
+		interactionContext: services.interactionContext ?? undefined,
+	});
+}
 
 const MOCK_DATA_RESULT: DataQueryResult = {
 	files: [
@@ -46,10 +69,8 @@ function makeMessageCtx(text = 'what are my Costco prices?', userId = 'test-user
 describe('classifyPASMessage — data query detection (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices();
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('returns dataQueryCandidate: true when LLM responds YES_DATA', async () => {
@@ -115,7 +136,7 @@ describe('classifyPASMessage — data query detection (D2b)', () => {
 describe('handleMessage — DataQueryService wiring (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
@@ -123,74 +144,63 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 		});
 		// Enable auto_detect_pas so the classifier runs in handleMessage
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('calls DataQueryService when classifyPASMessage returns dataQueryCandidate: true', async () => {
-		const chatbot = await import('../index.js');
-
 		// Make classifier return YES_DATA
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your Costco prices...'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.stringContaining('Costco prices'),
 			'test-user',
+			undefined,
 		);
 	});
 
 	it('does NOT call DataQueryService when classifier returns YES (not data query)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier — PAS but not data query
 			.mockResolvedValueOnce('Here are your apps...');
 
-		await chatbot.handleMessage(makeMessageCtx('what apps do I have?'));
+		await makeService(services).handleMessage(makeMessageCtx('what apps do I have?'));
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
 
 	it('does NOT call DataQueryService when auto_detect is off', async () => {
-		const chatbot = await import('../index.js');
-
 		// Disable auto_detect_pas (override the beforeEach mock)
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
 
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('The answer');
 
-		await chatbot.handleMessage(makeMessageCtx('what are my prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
 
 	it('sends a response even when DataQueryService throws', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.dataQuery?.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('query failed'));
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('I can help with that.'); // main LLM — still called
 
-		await chatbot.handleMessage(makeMessageCtx('what are my prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		expect(services.telegram.send).toHaveBeenCalled();
 		expect(services.logger.warn).toHaveBeenCalled();
 	});
 
 	it('data context appears in LLM system prompt when DataQueryService returns files', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		// The main LLM call (second call) should have data context in system prompt
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
@@ -201,15 +211,13 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 	});
 
 	it('does not add data section to prompt when DataQueryService returns empty result', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.dataQuery!.query).mockResolvedValueOnce({ files: [], empty: true });
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('I could not find any data.');
 
-		await chatbot.handleMessage(makeMessageCtx('what are my prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -226,54 +234,47 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 describe('/ask command — DataQueryService wiring (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
 			},
 		});
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('calls DataQueryService for /ask when classifier returns YES_DATA', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await makeService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		expect(services.dataQuery?.query).toHaveBeenCalledWith(
 			expect.stringContaining('Costco prices'),
 			'test-user',
+			undefined,
 		);
 	});
 
 	it('does NOT call DataQueryService for /ask when classifier returns YES (not data query)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier — PAS but not data query
 			.mockResolvedValueOnce('You have 3 apps installed.'); // main LLM
 
 		const ctx = makeMessageCtx('what apps do I have?');
-		await chatbot.handleCommand?.('ask', ['what', 'apps', 'do', 'I', 'have?'], ctx);
+		await makeService(services).handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
 
 	it('data context injected into /ask system prompt when classifier returns YES_DATA', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
 		const ctx = makeMessageCtx('what are my Costco prices?');
-		await chatbot.handleCommand?.('ask', ['what', 'are', 'my', 'Costco', 'prices?'], ctx);
+		await makeService(services).handleAsk(['what', 'are', 'my', 'Costco', 'prices?'], ctx);
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -282,10 +283,8 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 	});
 
 	it('/ask with no args does not call DataQueryService', async () => {
-		const chatbot = await import('../index.js');
-
 		const ctx = makeMessageCtx('');
-		await chatbot.handleCommand?.('ask', [], ctx);
+		await makeService(services).handleAsk([], ctx);
 
 		expect(services.dataQuery?.query).not.toHaveBeenCalled();
 	});
@@ -298,7 +297,7 @@ describe('/ask command — DataQueryService wiring (D2b)', () => {
 describe('Security — dataContext sanitization (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		// File contains triple backticks — would escape the prompt fence if not sanitized
 		const injectionResult: DataQueryResult = {
 			files: [
@@ -318,18 +317,14 @@ describe('Security — dataContext sanitization (D2b)', () => {
 			},
 		});
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('triple-backtick file content is sanitized before injection into system prompt', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Here is your data.'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('show me my notes'));
+		await makeService(services).handleMessage(makeMessageCtx('show me my notes'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -355,25 +350,21 @@ describe('Security — dataContext sanitization (D2b)', () => {
 describe('Prompt category suppression for data queries (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
 			},
 		});
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('model pricing section absent when asking about grocery prices (YES_DATA)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your Costco prices...'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('what are my Costco prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my Costco prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -387,13 +378,11 @@ describe('Prompt category suppression for data queries (D2b)', () => {
 	});
 
 	it('cost section absent when asking how much food cost (YES_DATA)', async () => {
-		const chatbot = await import('../index.js');
-
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...'); // main LLM
 
-		await chatbot.handleMessage(makeMessageCtx('how much did oranges cost?'));
+		await makeService(services).handleMessage(makeMessageCtx('how much did oranges cost?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
@@ -411,15 +400,13 @@ describe('Prompt category suppression for data queries (D2b)', () => {
 describe('Persona — realistic data query phrasings (D2b)', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices({
 			dataQuery: {
 				query: vi.fn().mockResolvedValue(MOCK_DATA_RESULT),
 			},
 		});
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: true });
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it.each([
@@ -429,21 +416,18 @@ describe('Persona — realistic data query phrasings (D2b)', () => {
 		'what did I eat last week?',
 		'compare orange prices between stores',
 	])('"%s" → YES_DATA → DataQueryService called', async (question) => {
-		const chatbot = await import('../index.js');
 		vi.mocked(services.dataQuery?.query as ReturnType<typeof vi.fn>).mockClear();
 
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Here is the answer.');
 
-		await chatbot.handleMessage(makeMessageCtx(question));
+		await makeService(services).handleMessage(makeMessageCtx(question));
 
-		expect(services.dataQuery?.query).toHaveBeenCalledWith(question, 'test-user');
+		expect(services.dataQuery?.query).toHaveBeenCalledWith(question, 'test-user', undefined);
 	});
 
 	it('adversarial stored content: triple backticks + injection phrase sanitized in prompt', async () => {
-		const chatbot = await import('../index.js');
-
 		const adversarialResult: DataQueryResult = {
 			files: [
 				{
@@ -462,7 +446,7 @@ describe('Persona — realistic data query phrasings (D2b)', () => {
 			.mockResolvedValueOnce('YES_DATA') // classifier
 			.mockResolvedValueOnce('Based on your prices...');
 
-		await chatbot.handleMessage(makeMessageCtx('what are my prices?'));
+		await makeService(services).handleMessage(makeMessageCtx('what are my prices?'));
 
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');

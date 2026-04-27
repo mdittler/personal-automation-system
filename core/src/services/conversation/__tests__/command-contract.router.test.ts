@@ -9,7 +9,7 @@
  * Previously tested via chatbot.handleCommand; now tested via Router dispatch.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
 
 describe('Router command-name contract: built-ins reach ConversationService', () => {
 	function makeConvService() {
@@ -25,8 +25,8 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 		const conv = makeConvService();
 
 		// Import and build the Router inline to keep this test self-contained
-		const { Router } = await import('@pas/core/services/router');
-		const { ManifestCache } = await import('@pas/core/services/app-registry');
+		const { Router } = await import('../../router/index.js');
+		const { ManifestCache } = await import('../../app-registry/index.js');
 
 		const cache = new ManifestCache();
 		// Chatbot manifest with NO commands (post-Chunk-C state)
@@ -73,8 +73,8 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 	it("Router dispatches '/edit ...' to conversationService.handleEdit with args array (no leading slash in args)", async () => {
 		const conv = makeConvService();
 
-		const { Router } = await import('@pas/core/services/router');
-		const { ManifestCache } = await import('@pas/core/services/app-registry');
+		const { Router } = await import('../../router/index.js');
+		const { ManifestCache } = await import('../../app-registry/index.js');
 
 		const cache = new ManifestCache();
 		cache.add(

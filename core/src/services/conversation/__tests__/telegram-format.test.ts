@@ -76,6 +76,24 @@ describe('splitTelegramMessage', () => {
 			expect(c.length).toBeGreaterThan(0);
 		}
 	});
+
+	it('does not produce empty parts when input is mostly blank lines', () => {
+		const text = `${'\n\n'.repeat(200)}Final content`;
+		const result = splitTelegramMessage(text);
+		for (const part of result) {
+			expect(part.trim()).not.toBe('');
+		}
+	});
+
+	it('preserves all content across splits', () => {
+		const lines = Array.from({ length: 200 }, (_, i) => `Line ${i}: some content here`);
+		const text = lines.join('\n');
+		const parts = splitTelegramMessage(text);
+		const rejoined = parts.join('\n');
+		for (const line of lines) {
+			expect(rejoined).toContain(line);
+		}
+	});
 });
 
 describe('stripMarkdown', () => {

@@ -7,17 +7,15 @@
 
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockCoreServices } from '../../../../core/src/testing/mock-services.js';
-import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { buildUserContext } from '../index.js';
 
 describe('buildUserContext', () => {
 	let services: CoreServices;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices();
-		const chatbot = await import('../index.js');
-		await chatbot.init(services);
 	});
 
 	it('includes space name when ctx.spaceName is provided', async () => {

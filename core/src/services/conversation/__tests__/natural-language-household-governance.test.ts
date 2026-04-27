@@ -16,11 +16,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	createMockCoreServices,
-} from '../../../../core/src/testing/mock-services.js';
-import { createTestMessageContext } from '../../../../core/src/testing/test-helpers.js';
-import { requestContext } from '../../../../core/src/services/context/request-context.js';
-import { LLMCostCapError, LLMRateLimitError } from '../../../../core/src/services/llm/errors.js';
-import * as chatbot from '../index.js';
+} from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import { requestContext } from '../../context/request-context.js';
+import { LLMCostCapError, LLMRateLimitError } from '../../llm/errors.js';
+import { ConversationService } from '../conversation-service.js';
+import type { CoreServices } from '@pas/core/types';
+
+// ---------------------------------------------------------------------------
+// makeService helper
+// ---------------------------------------------------------------------------
+
+function makeService(services: CoreServices): ConversationService {
+	return new ConversationService({
+		llm: services.llm,
+		telegram: services.telegram,
+		data: services.data,
+		logger: services.logger,
+		timezone: 'UTC',
+		systemInfo: services.systemInfo,
+		appMetadata: services.appMetadata,
+		appKnowledge: services.appKnowledge,
+		modelJournal: services.modelJournal,
+		contextStore: services.contextStore,
+		config: services.config,
+		dataQuery: services.dataQuery ?? undefined,
+		interactionContext: services.interactionContext ?? undefined,
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Personas
@@ -71,7 +94,7 @@ async function sendMessage(
 	text: string,
 ) {
 	const ctx = createTestMessageContext({ userId, text });
-	await requestContext.run({ userId, householdId }, () => chatbot.handleMessage(ctx));
+	await requestContext.run({ userId, householdId }, () => makeService(services).handleMessage(ctx));
 }
 
 // ---------------------------------------------------------------------------
@@ -81,9 +104,8 @@ async function sendMessage(
 describe('Chatbot — Household Governance Persona Tests', () => {
 	let services: ReturnType<typeof createMockCoreServices>;
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		services = createMockCoreServices();
-		await chatbot.init(services);
 	});
 
 	// ====================================================================
