@@ -199,7 +199,6 @@ function buildRouter(
 		verifier?: RouteVerifier;
 		interactionContext?: InteractionContextService;
 		fallback?: FallbackHandler;
-		chatbotApp?: RegisteredApp;
 	},
 ): Router {
 	const config = createMockConfig([testUser]);
@@ -235,10 +234,8 @@ function buildRouter(
 		fallback: options?.fallback ?? createMockFallback(),
 		config,
 		logger: createMockLogger(),
-		fallbackMode: 'notes',
 		routeVerifier: options?.verifier,
 		interactionContext: options?.interactionContext,
-		chatbotApp: options?.chatbotApp,
 	});
 }
 

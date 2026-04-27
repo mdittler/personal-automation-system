@@ -178,7 +178,6 @@ describe('Router — /space command and active space injection', () => {
 			config,
 			logger,
 			confidenceThreshold: 0.4,
-			fallbackMode: 'notes',
 			spaceService: opts.spaceService,
 			userManager: opts.userManager,
 		});

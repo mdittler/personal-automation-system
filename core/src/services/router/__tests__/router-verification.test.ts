@@ -726,20 +726,11 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 		sharedScopes: [] as string[],
 	};
 
-	it('dispatches to conversationService (not chatbotApp) when verifier picks chatbot', async () => {
+	it('verifier-picked chatbot routes to ConversationService', async () => {
 		const echoModule = createMockModule();
 		const echoManifest: AppManifest = {
 			app: { id: 'echo', name: 'Echo', version: '1.0.0', description: '', author: '' },
 			capabilities: { messages: { intents: ['echo'] } },
-		};
-		const chatbotModule = createMockModule();
-		const chatbotApp: RegisteredApp = {
-			manifest: {
-				app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: '', author: '' },
-				capabilities: { messages: { intents: [] } },
-			},
-			module: chatbotModule,
-			appDir: '/apps/chatbot',
 		};
 
 		// Verifier overrides to chatbot — testing-standards rule #2: new target is authorized
@@ -759,11 +750,10 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 		const registry = {
 			getApp: (id: string) => {
 				if (id === 'echo') return { manifest: echoManifest, module: echoModule, appDir: '/apps/echo' } as RegisteredApp;
-				if (id === 'chatbot') return chatbotApp;
 				return undefined;
 			},
 			getManifestCache: () => cache,
-			getLoadedAppIds: () => ['echo', 'chatbot'],
+			getLoadedAppIds: () => ['echo'],
 		} as unknown as AppRegistry;
 
 		const router = new Router({
@@ -775,8 +765,6 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 			logger: createMockLogger(),
 			confidenceThreshold: 0.4,
 			routeVerifier: verifier,
-			chatbotApp,
-			fallbackMode: 'chatbot',
 			conversationService: conversationService as any,
 		});
 		router.buildRoutingTables();
@@ -784,7 +772,6 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 		await router.routeMessage({ userId: 'user1', text: 'hello', timestamp: new Date(), chatId: 1, messageId: 1 });
 
 		expect(conversationService.handleMessage).toHaveBeenCalledTimes(1);
-		expect(chatbotModule.handleMessage).not.toHaveBeenCalled();
 	});
 });
 
