@@ -15,13 +15,17 @@ export const VIRTUAL_CHATBOT_PATH = '<virtual:chatbot>';
  * goes through ConversationService.handleMessage, never app.module.handleMessage.
  */
 export function buildVirtualChatbotApp(): { manifest: AppManifest; module: AppModule } {
-	const manifest: AppManifest = {
+	const manifest = {
 		app: {
 			id: 'chatbot',
 			name: 'Chatbot',
 			version: '1.3.0',
 			description:
 				'AI assistant with PAS app awareness and system introspection. Handles messages when no other app matches.',
+			author: 'PAS Team',
+			license: 'MIT',
+			category: 'utility',
+			tags: ['chatbot', 'ai', 'conversation', 'fallback', 'assistant'],
 			pas_core_version: '>=0.1.0',
 		},
 		capabilities: { messages: { intents: [] } },
@@ -47,7 +51,7 @@ export function buildVirtualChatbotApp(): { manifest: AppManifest; module: AppMo
 			},
 		},
 		user_config: CONVERSATION_USER_CONFIG,
-	} as unknown as AppManifest;
+	} satisfies AppManifest;
 
 	const module: AppModule = {
 		init: async () => {},

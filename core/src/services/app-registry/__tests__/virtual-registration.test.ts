@@ -2,8 +2,9 @@ import pino from 'pino';
 import { describe, expect, it } from 'vitest';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { AppModule } from '../../../types/app-module.js';
+import { validateManifest } from '../../../schemas/validate-manifest.js';
 import { AppRegistry } from '../index.js';
-import { VIRTUAL_CHATBOT_PATH } from '../../conversation/virtual-app.js';
+import { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } from '../../conversation/virtual-app.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -70,5 +71,13 @@ describe('AppRegistry.registerVirtual', () => {
 		});
 		registry.registerVirtual(makeManifest('chatbot'), noopModule, VIRTUAL_CHATBOT_PATH);
 		await expect(registry.shutdownAll()).resolves.toBeUndefined();
+	});
+});
+
+describe('buildVirtualChatbotApp — manifest schema validity', () => {
+	it('produces a schema-valid manifest (all required fields present)', () => {
+		const { manifest } = buildVirtualChatbotApp();
+		const result = validateManifest(manifest);
+		expect(result.valid, result.valid ? '' : JSON.stringify((result as any).errors)).toBe(true);
 	});
 });
