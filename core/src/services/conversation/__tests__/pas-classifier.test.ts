@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { classifyPASMessage, isPasRelevant } from '../pas-classifier.js';
 
@@ -202,5 +202,57 @@ describe('classifyPASMessage', () => {
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
 		const systemPrompt = callArgs?.[1]?.systemPrompt ?? '';
 		expect(systemPrompt).not.toContain('```');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
+// (only tests not already covered by the describe blocks above)
+// ---------------------------------------------------------------------------
+
+describe('isPasRelevant — additional cases (migrated)', () => {
+	it('detects "what commands are available"', () => {
+		expect(isPasRelevant('what commands can I use?')).toBe(true);
+	});
+
+	it('detects command names from installed apps', () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.appMetadata.getInstalledApps).mockReturnValue([
+			{
+				id: 'echo',
+				name: 'Echo',
+				description: 'Echo app',
+				version: '1.0.0',
+				commands: [{ name: '/echo', description: 'Echo' }],
+				intents: [],
+				hasSchedules: false,
+				hasEvents: false,
+				acceptsPhotos: false,
+			},
+		]);
+		expect(isPasRelevant('how do I use echo?', { appMetadata: services.appMetadata })).toBe(true);
+	});
+
+	it('is case insensitive', () => {
+		expect(isPasRelevant('WHAT APPS DO I HAVE')).toBe(true);
+		expect(isPasRelevant('How Does Scheduling Work?')).toBe(true);
+	});
+});
+
+describe('isPasRelevant with system keywords (migrated)', () => {
+	it('detects model-related questions', () => {
+		expect(isPasRelevant('what model is being used?')).toBe(true);
+	});
+
+	it('detects cost-related questions', () => {
+		expect(isPasRelevant('how much does it cost?')).toBe(true);
+	});
+
+	it('detects usage questions', () => {
+		expect(isPasRelevant('what is my token usage?')).toBe(true);
+	});
+
+	it('detects uptime questions', () => {
+		expect(isPasRelevant('what is the uptime?')).toBe(true);
 	});
 });

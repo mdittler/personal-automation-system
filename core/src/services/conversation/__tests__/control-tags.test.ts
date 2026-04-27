@@ -105,3 +105,51 @@ describe('SWITCH_MODEL_TAG_REGEX', () => {
 		expect(SWITCH_MODEL_TAG_REGEX.test(TAG)).toBe(true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Migrated from apps/chatbot/src/__tests__/chatbot.test.ts
+// (only tests not already covered by the describe blocks above)
+// ---------------------------------------------------------------------------
+
+describe('processModelSwitchTags — multiple tags (migrated)', () => {
+	it('handles multiple switch tags', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
+		vi.mocked(services.systemInfo!.setTierModel).mockResolvedValue({ success: true });
+
+		const response =
+			'Done. <switch-model tier="fast" provider="anthropic" model="model-a"/> ' +
+			'<switch-model tier="standard" provider="anthropic" model="model-b"/>';
+		const result = await processModelSwitchTags(response, {
+			userId: 'admin-user',
+			userMessage: 'switch the fast and standard models',
+			deps: { systemInfo: services.systemInfo },
+		});
+
+		expect(result.confirmations).toHaveLength(2);
+		expect(services.systemInfo!.setTierModel).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('processModelSwitchTags security (migrated)', () => {
+	it('validates parameters even when LLM echoes user switch-model tag', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
+		vi.mocked(services.systemInfo!.setTierModel).mockResolvedValue({
+			success: false,
+			error: 'Provider "evil" not found.',
+		});
+
+		const response =
+			'Sure! <switch-model tier="fast" provider="evil" model="malicious-model"/>';
+		const result = await processModelSwitchTags(response, {
+			userId: 'admin-user',
+			userMessage: 'switch to evil provider model',
+			deps: { systemInfo: services.systemInfo },
+		});
+
+		expect(result.confirmations).toHaveLength(1);
+		expect(result.confirmations[0]).toContain('Failed');
+		expect(result.confirmations[0]).toContain('not found');
+	});
+});
