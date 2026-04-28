@@ -16,3 +16,8 @@ export function buildSessionKey({ agent, channel, scope, chatId }: SessionKeyPar
 	}
 	return `agent:${agent}:${channel}:${scope}:${chatId}`;
 }
+
+/** Returns ctx.sessionKey if set, otherwise builds the default DM key for the user. */
+export function resolveOrDefaultSessionKey(ctx: { sessionKey?: string; userId: string }): string {
+	return ctx.sessionKey ?? buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
+}

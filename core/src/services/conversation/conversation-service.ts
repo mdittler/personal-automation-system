@@ -1,5 +1,5 @@
 import type { MessageContext } from '../../types/telegram.js';
-import { buildSessionKey } from '../conversation-session/session-key.js';
+import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import type { EditService } from '../edit/index.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
@@ -58,9 +58,7 @@ export class ConversationService {
 	}
 
 	async handleNewChat(_args: string[], ctx: MessageContext): Promise<void> {
-		const sessionKey =
-			ctx.sessionKey ??
-			buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
+		const sessionKey = resolveOrDefaultSessionKey(ctx);
 		const { endedSessionId } = await this.deps.chatSessions.endActive(
 			{ userId: ctx.userId, sessionKey },
 			'newchat',
