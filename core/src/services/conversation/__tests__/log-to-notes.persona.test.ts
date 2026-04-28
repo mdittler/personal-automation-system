@@ -20,6 +20,7 @@ import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 import { ConversationService } from '../conversation-service.js';
 import { CONFIG_SET_INSTRUCTION_BLOCK } from '../control-tags.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,6 +66,13 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		setAll: vi.fn(),
 		updateOverrides,
 	};
+	const chatSessions: ChatSessionStore = {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'test-session' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
 	const deps: ConversationServiceDeps = {
 		llm: {
 			complete,
@@ -82,6 +90,7 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		timezone: 'UTC',
 		config: config as any,
 		chatLogToNotesDefault: opts.systemDefault ?? false,
+		chatSessions,
 	};
 	return Object.assign(deps, {
 		_userStore: userStore,

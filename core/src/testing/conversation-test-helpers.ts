@@ -1,9 +1,21 @@
+import { vi } from 'vitest';
 import { ConversationService } from '../services/conversation/conversation-service.js';
+import type { ChatSessionStore } from '../services/conversation-session/chat-session-store.js';
 import type { EditService } from '../services/edit/index.js';
 import type { CoreServices } from '../types/app-module.js';
 
+function makeNullChatSessions(): ChatSessionStore {
+	return {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'test-session' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
 export function makeConversationService(
-	services: CoreServices & { editService?: EditService },
+	services: CoreServices & { editService?: EditService; chatSessions?: ChatSessionStore },
 ): ConversationService {
 	return new ConversationService({
 		llm: services.llm,
@@ -11,6 +23,7 @@ export function makeConversationService(
 		data: services.data,
 		logger: services.logger,
 		timezone: 'UTC',
+		chatSessions: services.chatSessions ?? makeNullChatSessions(),
 		systemInfo: services.systemInfo,
 		appMetadata: services.appMetadata,
 		appKnowledge: services.appKnowledge,

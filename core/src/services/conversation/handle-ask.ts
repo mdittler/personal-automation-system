@@ -19,7 +19,9 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
-import type { ConversationHistory } from '../conversation-history/index.js';
+import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
@@ -56,7 +58,7 @@ export interface HandleAskDeps {
 	data: DataStoreService;
 	logger: AppLogger;
 	timezone: string;
-	history: ConversationHistory;
+	chatSessions: ChatSessionStore;
 	systemInfo?: SystemInfoService;
 	appMetadata?: AppMetadataService;
 	appKnowledge?: AppKnowledgeBaseService;
@@ -98,9 +100,11 @@ export async function handleAsk(
 		return;
 	}
 
-	const store = deps.data.forUser(ctx.userId);
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
+	const sessionKey =
+		ctx.sessionKey ??
+		buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
 	// D2c: interaction context is synchronous; compute before fan-out
 	const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 	const recentContextSummary = formatInteractionContextSummary(recentEntries);
@@ -114,7 +118,7 @@ export async function handleAsk(
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.history.load(store),
+		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
 		gatherContext(question, ctx.userId, deps),
 		buildUserContext(ctx, deps),
 	]);
@@ -238,11 +242,23 @@ export async function handleAsk(
 	await sendSplitResponse(ctx.userId, responseWithConfirmations, deps);
 
 	const now = ctx.timestamp.toISOString();
+	const userTurn: SessionTurn = { role: 'user', content: `/ask ${question}`, timestamp: now };
+	const assistantTurn: SessionTurn = {
+		role: 'assistant',
+		content: responseWithConfirmations,
+		timestamp: now,
+	};
 	try {
-		await deps.history.append(
-			store,
-			{ role: 'user', content: `/ask ${question}`, timestamp: now },
-			{ role: 'assistant', content: responseWithConfirmations, timestamp: now },
+		await deps.chatSessions.appendExchange(
+			{
+				userId: ctx.userId,
+				sessionKey,
+				model: modelId,
+				householdId: getCurrentHouseholdId(),
+				expectedSessionId: ctx.sessionId,
+			},
+			userTurn,
+			assistantTurn,
 		);
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);

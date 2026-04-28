@@ -3,7 +3,7 @@
  * Each helper emits one fenced, anti-instruction-framed section in the exact
  * format produced today by apps/chatbot/src/index.ts.
  */
-import type { ConversationTurn } from '../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import { formatConversationHistory } from './fencing.js';
 import { sanitizeInput } from './sanitization.js';
 

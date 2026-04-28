@@ -22,7 +22,9 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
-import type { ConversationHistory, ConversationTurn } from '../conversation-history/index.js';
+import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
@@ -60,7 +62,7 @@ export interface HandleMessageDeps {
 	data: DataStoreService;
 	logger: AppLogger;
 	timezone: string;
-	history: ConversationHistory;
+	chatSessions: ChatSessionStore;
 	systemInfo?: SystemInfoService;
 	appMetadata?: AppMetadataService;
 	appKnowledge?: AppKnowledgeBaseService;
@@ -76,9 +78,11 @@ export interface HandleMessageDeps {
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
-	const store = deps.data.forUser(ctx.userId);
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
+	const sessionKey =
+		ctx.sessionKey ??
+		buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
 
 	const [{ wrote: noteWrote }, turns, contextEntries, autoDetect, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
@@ -88,7 +92,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.history.load(store),
+		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
 		gatherContext(ctx.text, ctx.userId, deps),
 		getAutoDetectSetting(ctx.userId, deps),
 		buildUserContext(ctx, deps),
@@ -218,15 +222,21 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	await sendSplitResponse(ctx.userId, finalResponse, deps);
 
 	const now = ctx.timestamp.toISOString();
-	const userTurn: ConversationTurn = { role: 'user', content: ctx.text, timestamp: now };
-	const assistantTurn: ConversationTurn = {
-		role: 'assistant',
-		content: finalResponse,
-		timestamp: now,
-	};
+	const userTurn: SessionTurn = { role: 'user', content: ctx.text, timestamp: now };
+	const assistantTurn: SessionTurn = { role: 'assistant', content: finalResponse, timestamp: now };
 
 	try {
-		await deps.history.append(store, userTurn, assistantTurn);
+		await deps.chatSessions.appendExchange(
+			{
+				userId: ctx.userId,
+				sessionKey,
+				model: modelId,
+				householdId: getCurrentHouseholdId(),
+				expectedSessionId: ctx.sessionId,
+			},
+			userTurn,
+			assistantTurn,
+		);
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);
 	}

@@ -45,6 +45,7 @@ import { loadSystemConfig } from './services/config/index.js';
 import { ContextStoreServiceImpl } from './services/context-store/index.js';
 import { requestContext } from './services/context/request-context.js';
 import { ConversationRetrievalServiceImpl } from './services/conversation-retrieval/index.js';
+import { composeChatSessionStore } from './services/conversation-session/compose.js';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
@@ -961,12 +962,18 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		defaults: CONVERSATION_USER_CONFIG,
 	});
 
+	const chatSessions = composeChatSessionStore({
+		data: conversationDataStore,
+		logger: createChildLogger(logger, { service: 'conversation-session' }),
+	});
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
 		data: conversationDataStore,
 		logger: createChildLogger(logger, { service: 'conversation' }),
 		timezone: config.timezone,
+		chatSessions,
 		systemInfo: systemInfoService,
 		appMetadata: appMetadata,
 		appKnowledge: appKnowledge,
@@ -1012,6 +1019,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		telegram: telegramService,
 		fallback,
 		conversationService,
+		chatSessions,
 		config,
 		appToggle,
 		spaceService,

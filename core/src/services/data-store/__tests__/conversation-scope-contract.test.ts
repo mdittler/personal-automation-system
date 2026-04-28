@@ -36,4 +36,23 @@ describe('CONVERSATION_DATA_SCOPES contract with DataStoreServiceImpl', () => {
 		await expect(store.write('../food/recipes/secret.md', 'nope')).rejects.toThrow();
 		await expect(store.write('../../system/config.yaml', 'nope')).rejects.toThrow();
 	});
+
+	it('accepts conversation/ paths for session transcripts and index', async () => {
+		const svc = new DataStoreServiceImpl({
+			dataDir,
+			appId: 'chatbot',
+			userScopes: CONVERSATION_DATA_SCOPES,
+			sharedScopes: [],
+			changeLog: new ChangeLog(dataDir),
+		});
+		const store = svc.forUser('user-1');
+
+		await expect(
+			store.write('conversation/active-sessions.yaml', 'sessions: {}'),
+		).resolves.toBeUndefined();
+		await expect(store.read('conversation/active-sessions.yaml')).resolves.toBe('sessions: {}');
+		await expect(
+			store.write('conversation/sessions/20260427_154500_a1b2c3d4.md', '---\nid: test\n---'),
+		).resolves.toBeUndefined();
+	});
 });

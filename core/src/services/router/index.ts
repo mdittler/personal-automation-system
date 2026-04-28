@@ -11,6 +11,8 @@
 
 import type { Logger } from 'pino';
 import { getCurrentHouseholdId, requestContext } from '../../services/context/request-context.js';
+import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
 import type {
@@ -165,6 +167,8 @@ export interface RouterOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, records a message hit per routeMessage call for ops metrics. */
 	messageRateTracker?: MessageRateTracker;
+	/** Optional — when present, binds requestContext.sessionId via peekActive before every conversation dispatch. */
+	chatSessions?: ChatSessionStore;
 }
 
 export class Router {
@@ -187,6 +191,7 @@ export class Router {
 	private readonly interactionContext?: InteractionContextService;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	private readonly messageRateTracker?: MessageRateTracker;
+	private readonly chatSessions?: ChatSessionStore;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -210,6 +215,7 @@ export class Router {
 		this.interactionContext = options.interactionContext;
 		this.householdService = options.householdService;
 		this.messageRateTracker = options.messageRateTracker;
+		this.chatSessions = options.chatSessions;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -494,7 +500,7 @@ export class Router {
 		}
 
 		// Built-in conversation commands — short-circuit before lookupCommand so they
-		// work even if the chatbot app has no /ask, /edit, or /notes in its manifest.
+		// work even if the chatbot app has no /ask, /edit, /notes, /newchat, or /reset in its manifest.
 		if (this.conversationService) {
 			if (parsed.command === '/ask') {
 				await this.dispatchConversationCommand('ask', parsed.args, ctx);
@@ -506,6 +512,10 @@ export class Router {
 			}
 			if (parsed.command === '/notes') {
 				await this.dispatchConversationCommand('notes', parsed.args, ctx);
+				return;
+			}
+			if (parsed.command === '/newchat' || parsed.command === '/reset') {
+				await this.dispatchConversationCommand('newchat', parsed.args, ctx);
 				return;
 			}
 		}
@@ -596,6 +606,18 @@ export class Router {
 	}
 
 	/**
+	 * Resolve the session key and active session id for a user's conversation dispatch.
+	 * Returns undefined for both if chatSessions is not wired.
+	 */
+	private async resolveSession(
+		userId: string,
+	): Promise<{ sessionKey: string; sessionId: string | undefined }> {
+		const sessionKey = buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: userId });
+		const sessionId = await this.chatSessions?.peekActive({ userId, sessionKey });
+		return { sessionKey, sessionId };
+	}
+
+	/**
 	 * Dispatch a free-text message to ConversationService, with the same request-context
 	 * + error-isolation guarantees as dispatchMessage. Used for the chatbot fallback path
 	 * (free-text and rv:chatbot route-verifier callback). Public so compose-runtime can
@@ -606,9 +628,11 @@ export class Router {
 			throw new Error('dispatchConversation called without conversationService');
 		}
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		const { sessionKey, sessionId } = await this.resolveSession(ctx.userId);
+		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, () =>
-				this.conversationService!.handleMessage({ ...ctx, route }),
+			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, () =>
+				this.conversationService!.handleMessage(enrichedCtx),
 			);
 		} catch (error) {
 			this.logger.error({ error }, 'ConversationService handler failed');
@@ -625,18 +649,20 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'notes',
+		name: 'ask' | 'edit' | 'notes' | 'newchat',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
 		if (!this.conversationService) return;
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		const { sessionKey, sessionId } = await this.resolveSession(ctx.userId);
 		const route = routeForCommand('chatbot', name);
-		const enrichedCtx: MessageContext = { ...ctx, route };
+		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, async () => {
+			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
+				else if (name === 'newchat') await this.conversationService!.handleNewChat(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -676,12 +702,13 @@ export class Router {
 			lines.push('  /ask <question> — Ask about apps, costs, or system status');
 			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
 			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
+			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
 			lines.push('');
 		}
 
-		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes entries
-		// if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes']);
+		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
+		// entries if conversationService is wired (they're now built-ins, not app commands).
+		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset']);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {

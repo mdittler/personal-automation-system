@@ -32,11 +32,12 @@ describe('Virtual chatbot manifest — full structural contract (post-Chunk-D)',
 		]);
 	});
 
-	test('requirements.data.user_scopes equals CONVERSATION_DATA_SCOPES (history.json + daily-notes/, both read-write)', () => {
+	test('requirements.data.user_scopes equals CONVERSATION_DATA_SCOPES (history.json + daily-notes/ + conversation/, all read-write)', () => {
 		expect(manifest.requirements.data?.user_scopes).toEqual(CONVERSATION_DATA_SCOPES);
 		expect(CONVERSATION_DATA_SCOPES).toEqual([
 			{ path: 'history.json', access: 'read-write', description: expect.any(String) },
 			{ path: 'daily-notes/', access: 'read-write', description: expect.any(String) },
+			{ path: 'conversation/', access: 'read-write', description: expect.any(String) },
 		]);
 	});
 

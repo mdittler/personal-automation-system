@@ -1,0 +1,77 @@
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { withFileLock } from '../../utils/file-mutex.js';
+import type { ScopedDataStore } from '../../types/data-store.js';
+
+const INDEX_FILE = 'conversation/active-sessions.yaml';
+
+export interface ActiveSessionEntry {
+	id: string;
+	started_at: string;
+	model: string | null;
+}
+
+type SessionMap = Record<string, ActiveSessionEntry>;
+
+function parseMap(raw: string): SessionMap {
+	if (!raw) return {};
+	try {
+		const parsed = parseYaml(raw);
+		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+			return parsed as SessionMap;
+		}
+		return {};
+	} catch {
+		return {};
+	}
+}
+
+async function readMap(store: ScopedDataStore): Promise<SessionMap> {
+	const raw = await store.read(INDEX_FILE);
+	return parseMap(raw);
+}
+
+export async function getActive(
+	store: ScopedDataStore,
+	userId: string,
+	key: string,
+): Promise<ActiveSessionEntry | undefined> {
+	const map = await readMap(store);
+	return map[key];
+}
+
+export async function setActive(
+	store: ScopedDataStore,
+	userId: string,
+	key: string,
+	entry: ActiveSessionEntry,
+): Promise<void> {
+	await withFileLock(`conversation-session-index:${userId}`, async () => {
+		const map = await readMap(store);
+		map[key] = entry;
+		await store.write(INDEX_FILE, stringifyYaml(map));
+	});
+}
+
+export async function clearActive(store: ScopedDataStore, userId: string, key: string): Promise<void> {
+	await withFileLock(`conversation-session-index:${userId}`, async () => {
+		const map = await readMap(store);
+		delete map[key];
+		await store.write(INDEX_FILE, stringifyYaml(map));
+	});
+}
+
+/**
+ * Write an active-session entry WITHOUT acquiring the file lock.
+ * Callers MUST already hold the conversation-session-index:<userId> lock.
+ * Used by DefaultChatSessionStore.mintAndRegister which runs inside the index lock.
+ */
+export async function setActiveUnlocked(
+	store: ScopedDataStore,
+	key: string,
+	entry: ActiveSessionEntry,
+): Promise<void> {
+	const raw = await store.read(INDEX_FILE);
+	const map = parseMap(raw);
+	map[key] = entry;
+	await store.write(INDEX_FILE, stringifyYaml(map));
+}

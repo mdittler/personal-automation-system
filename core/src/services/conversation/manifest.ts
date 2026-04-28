@@ -50,4 +50,5 @@ export type { ManifestDataScope as ConversationDataScope };
 export const CONVERSATION_DATA_SCOPES: ManifestDataScope[] = [
 	{ path: 'history.json', access: 'read-write', description: 'Conversation history for context continuity' },
 	{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes fallback logging' },
+	{ path: 'conversation/', access: 'read-write', description: 'Per-session transcript files and active-session index' },
 ];

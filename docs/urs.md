@@ -2494,29 +2494,19 @@ The original configurable `chatbot|notes` fallback is superseded by the Hermes P
 
 ### REQ-CHATBOT-001: Conversation history management
 
-**Phase:** 16 | **Status:** Implemented
+**Phase:** 16 | **Status:** Superseded (Hermes P3)
 
-The chatbot maintains per-user conversation history as JSON via ScopedDataStore. History is loaded before each LLM call and included in the system prompt for continuity. A sliding window (maxTurns, default 20) keeps history bounded. Malformed or missing history files are handled gracefully.
+The chatbot maintains per-user conversation history loaded before each LLM call and included in the system prompt for continuity. A sliding window (maxTurns, default 20) keeps history bounded. Malformed or missing history files are handled gracefully.
+
+**Note (Hermes P3):** The implementation was replaced by `ChatSessionStore` (see REQ-CONV-SESSION-001..014). History now loads from per-session markdown transcripts via `loadRecentTurns`; legacy `history.json` is migrated once as a `source: legacy-import` session. `conversation-history.test.ts` and the `ConversationHistory` class were deleted. Coverage is now in `chat-session-store.test.ts`.
 
 **Standard tests:**
-- `conversation-history.test.ts` > load > returns parsed turns from valid JSON
-- `conversation-history.test.ts` > load > reads from history.json
-- `conversation-history.test.ts` > append > saves user and assistant turns
-- `conversation-history.test.ts` > append > appends to existing history
-- `conversation-history.test.ts` > append > uses atomic write via store.write
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > second appendExchange reuses same session
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > loadRecentTurns returns written turns
 
 **Edge case tests:**
-- `conversation-history.test.ts` > load > returns empty array when store has no data
-- `conversation-history.test.ts` > load > truncates to maxTurns on load
-- `conversation-history.test.ts` > load > returns empty array for malformed JSON
-- `conversation-history.test.ts` > load > returns empty array when JSON is not an array
-- `conversation-history.test.ts` > load > returns empty array when JSON is a string
-- `conversation-history.test.ts` > load > clamps maxTurns of 0 to 1
-- `conversation-history.test.ts` > load > clamps negative maxTurns to 1
-- `conversation-history.test.ts` > load > handles maxTurns of 1
-- `conversation-history.test.ts` > append > truncates to maxTurns when exceeding limit
-- `conversation-history.test.ts` > append > works with empty store (first conversation)
-- `conversation-history.test.ts` > append > works with malformed existing data
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > loadRecentTurns respects maxTurns
+- `chat-session-store.test.ts` > D.7 — corruption self-heal > corrupted active-sessions.yaml mints fresh session
 
 **Note (Chunk B):** The free-text dispatch path that invokes conversation history now routes through `ConversationService` in core rather than the chatbot app shim. The history management behavior is unchanged. See REQ-CONV-003.
 
@@ -2852,29 +2842,9 @@ The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMe
 
 ### REQ-CHATBOT-018: ConversationHistory module in core
 
-**Phase:** P0 (chatbot-to-core migration) | **Status:** Implemented
+**Phase:** P0 (chatbot-to-core migration) | **Status:** Superseded (Hermes P3)
 
-`ConversationHistory` must live at `core/src/services/conversation-history/` and be importable from `@pas/core/services/conversation-history`. The class provides `load()` (reads sliding window of last N turns from `history.json`) and `append()` (atomic write with a serialized write queue to prevent concurrent corruption). `HISTORY_FILE = 'history.json'` is module-private (not exported). `ConversationHistoryOptions.maxTurns` defaults to 20. The chatbot app imports from the core subpath rather than maintaining a local copy.
-
-**Standard tests (`conversation-history.test.ts`):**
-- `load` > returns empty array if file does not exist
-- `load` > returns turns from an existing file
-- `load` > returns only the last maxTurns turns
-- `load` > returns default maxTurns (20) if not specified
-- `load` > handles malformed JSON gracefully (returns empty array)
-- `load` > handles malformed turns array gracefully
-- `load` > handles file read errors gracefully (returns empty array)
-- `load` > handles turns with missing fields
-- `load` > uses custom maxTurns when specified
-- `load` > handles empty turns array
-- `append` > creates the file if it does not exist
-- `append` > appends a new turn to existing turns
-- `append` > limits stored turns to maxTurns
-- `append` > handles concurrent appends without corruption (serialized write queue)
-- `append` > preserves existing turns when maxTurns not exceeded
-- `append` > handles very large maxTurns
-- `append` > handles empty initial file
-- `append` > creates parent directories if they do not exist
+`ConversationHistory` (flat JSON at `history.json`, sliding 20-turn window, serialized write queue) was the original implementation. It has been replaced by `ChatSessionStore` (per-session markdown transcripts, `YYYYMMDD_HHMMSS_<8hex>` ids, file-mutex concurrency) in Hermes P3. The `core/src/services/conversation-history/` directory and its tests were deleted. The `@pas/core/services/conversation-history` subpath export was removed from `core/package.json`. Existing `history.json` files are migrated as a `source: legacy-import` read-only session on first user message post-upgrade. See REQ-CONV-SESSION-001..014.
 
 ### REQ-CHATBOT-019: prompt-assembly core module
 
@@ -3565,6 +3535,222 @@ When `ConversationRetrievalService` is wired into `ConversationService`, `handle
 - `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "what did I do today" → YES_DATA → system prompt contains notes content`
 - `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "show my recent notes" → YES_DATA → system prompt contains notes content`
 - `P7 — /ask mode: snapshot wired into handleAsk` > `/ask "what did I work on this week" → YES_DATA → system prompt contains notes content`
+
+---
+
+---
+
+## Hermes P3 — Session Persistence
+
+### REQ-CONV-SESSION-001: Session identity
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Every conversation turn belongs to exactly one ChatSession identified by `YYYYMMDD_HHMMSS_<8 lowercase hex>`. The session id is minted by `mintSessionId(now, rng?)` which validates the RNG output against `^[0-9a-f]{8}$` and retries on collision.
+
+**Standard tests** (`session-id.test.ts`):
+- `session-id` > `mintSessionId` > format matches YYYYMMDD_HHMMSS_xxxxxxxx with 8 lowercase hex chars
+- `session-id` > `mintSessionId` > deterministic given fixed clock and injected RNG
+
+**Edge case tests** (`session-id.test.ts`):
+- `session-id` > `mintSessionId` > same-second consecutive ids differ in hex segment
+- `session-id` > `mintSessionId` > invalid RNG output throws
+
+---
+
+### REQ-CONV-SESSION-002: Session key format
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Session keys follow the format `agent:<agent>:<channel>:<scope>:<chatId>`. For Telegram DM messages, `chatId` is `ctx.userId`. Keys are validated by `buildSessionKey`; `:`, `..`, `/`, `\`, and empty `chatId` are rejected with `InvalidSessionKeyError`.
+
+**Standard tests** (`session-key.test.ts`):
+- `session-key` > canonical telegram dm key is agent:main:telegram:dm:<userId>
+- `session-key` > group scope shape is supported
+
+**Edge case tests** (`session-key.test.ts`):
+- `session-key` > rejects colon in chatId
+- `session-key` > rejects double-dot in chatId
+- `session-key` > rejects slash in chatId
+- `session-key` > rejects backslash in chatId
+- `session-key` > rejects empty chatId
+
+---
+
+### REQ-CONV-SESSION-003: Transcript storage path
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Each session is one markdown file under `chatbot/conversation/sessions/<sessionId>.md` written via `ScopedDataStore` under the chatbot manifest scope. The `conversation/` path is declared in `CONVERSATION_DATA_SCOPES` with `access: 'read-write'`; writes outside declared scopes throw `ScopeViolationError`.
+
+**Standard tests** (`manifest-scopes.test.ts`, `dispatch.integration.test.ts`):
+- `manifest-scopes` > CONVERSATION_DATA_SCOPES contains conversation/ entry with read-write access
+- `manifest-scopes` > write to conversation/sessions/foo.md succeeds
+- `session transcript lands at household-aware scoped path (REQ-CONV-015)`
+
+---
+
+### REQ-CONV-SESSION-004: Frontmatter schema round-trip
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Frontmatter MUST include `id`, `source`, `user_id`, `household_id`, `model`, `title`, `parent_session_id`, `started_at`, `ended_at`, `token_counts{input,output}` and round-trip via the `yaml` library. Null values, nested objects, and ISO timestamps are preserved.
+
+**Standard tests** (`transcript-codec.test.ts`):
+- `transcript-codec` > encodeNew produces frontmatter-only output
+- `transcript-codec` > one user/assistant exchange round-trips intact
+- `transcript-codec` > frontmatter with null values for nullable fields round-trips
+
+**Edge case tests** (`transcript-codec.test.ts`):
+- `transcript-codec` > frontmatter with nested token_counts object round-trips
+- `transcript-codec` > ISO timestamps with multiple colons round-trip
+- `transcript-codec` > corrupted frontmatter throws CorruptTranscriptError
+
+---
+
+### REQ-CONV-SESSION-005: /newchat and /reset end the active session
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+`/newchat`, `/reset`, `/newchat@PASBot`, and `/reset@PASBot` all call `ConversationService.handleNewChat`, which calls `chatSessions.endActive` and sends a confirmation reply. `endActive` sets `ended_at` on the transcript and clears the index entry.
+
+**Standard tests** (`conversation-builtin.test.ts`, `conversation-service-newchat.test.ts`):
+- `Router built-in conversation commands` > `/newchat dispatches to handleNewChat with empty args and command route`
+- `Router built-in conversation commands` > `/reset dispatches to handleNewChat (alias for /newchat)`
+- `Router built-in conversation commands` > `/newchat@PASBot dispatches to handleNewChat`
+- `Router built-in conversation commands` > `/reset@PASBot dispatches to handleNewChat`
+- `ConversationService — handleNewChat` > active session: sends "Started a new conversation" reply
+- `ConversationService — handleNewChat` > no active session: sends "No active conversation to reset" reply
+
+---
+
+### REQ-CONV-SESSION-006: endActive is non-destructive
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+`endActive` sets `ended_at` on the transcript and clears the active-sessions index entry. It never deletes transcript files. Calling `endActive` when no session is active returns `{ endedSessionId: null }` without error.
+
+**Standard tests** (`chat-session-store.test.ts`):
+- `D.6 — clock injection` > endActive sets ended_at using injected clock
+- `endActive — token_counts preservation` > endActive preserves existing token_counts unchanged
+
+**Edge case tests** (`chat-session-store.test.ts`):
+- `D.2 — concurrency` > parallel endActive calls leave consistent active-sessions.yaml with no active session
+- `I.4 — Multi-step` > I.4.1: /newchat clears index + sets ended_at; next message starts fresh session (persona test)
+
+---
+
+### REQ-CONV-SESSION-007: requestContext.sessionId populated for all dispatch paths
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+`requestContext.sessionId` is populated for free-text, `/ask`, `/edit`, `/notes`, `/newchat`, `/reset`, and the `rv:chatbot` callback path. `getCurrentSessionId()` returns it. `peekActive` is called before `requestContext.run(...)` for all conversation dispatch paths.
+
+**Standard tests** (`request-context-session.test.ts`, `conversation-builtin.test.ts`):
+- `requestContext — sessionId accessor` > getCurrentSessionId returns undefined outside context
+- `requestContext — sessionId accessor` > getCurrentSessionId returns bound sessionId inside context
+- `Router C2 — sessionId binding` > free-text fallback: getCurrentSessionId equals peekActive result
+- `Router C2 — sessionId binding` > /ask dispatch: getCurrentSessionId equals peekActive result
+- `Router C2 — sessionId binding` > rv:chatbot callback path: getCurrentSessionId equals peekActive result
+
+**Edge case tests** (`conversation-builtin.test.ts`):
+- `Router C2 — sessionId binding` > when chatSessions is absent: sessionId is undefined in requestContext
+
+---
+
+### REQ-CONV-SESSION-008: Legacy history.json migration
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Legacy `chatbot/history.json` is imported once as a single session with `source: legacy-import`. The source file is preserved. Migration is protected by a per-user file lock to prevent duplicate imports under concurrent requests.
+
+**Standard tests** (`chat-session-store.test.ts`):
+- `E — legacy history.json migration` > non-empty history.json with 4 valid turns creates one transcript with source: legacy-import
+- `E — legacy history.json migration` > absent/empty history.json: no migration, no file
+- `E — legacy history.json migration` > original history.json preserved on disk after migration
+
+**Edge case tests** (`chat-session-store.test.ts`):
+- `E — legacy history.json migration` > second migration call is idempotent (no duplicate)
+- `E — legacy history.json migration` > malformed JSON: no migration, no crash, warning logged
+- `E — legacy history.json migration` > concurrency: two simultaneous calls produce exactly one legacy-import file
+- `I.4 — Multi-step` > I.4.3: pre-seeded history.json imported once; new exchange lands in separate telegram session (persona test)
+
+---
+
+### REQ-CONV-SESSION-009: Concurrent appends preserve all turn pairs
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Concurrent `appendExchange` calls are serialized under `withFileLock` at the transcript level. 10 concurrent calls produce 20 user/assistant pairs with no lost or duplicated turns.
+
+**Standard tests** (`chat-session-store.test.ts`):
+- `D.1 — happy path` > first appendExchange mints session and writes both turns
+- `D.1 — happy path` > second appendExchange reuses same session and appends
+
+**Edge case tests** (`chat-session-store.test.ts`):
+- `D.2 — concurrency` > 10 concurrent appendExchange calls preserve 20 turn pairs without loss
+- `D.2 — concurrency` > race decision: expectedSessionId turns land in old session after endActive
+
+---
+
+### REQ-CONV-SESSION-010: Corrupted active-sessions.yaml self-heals
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+If `active-sessions.yaml` is corrupted, the next `appendExchange` mints a fresh session and writes a clean index file. The corrupted file state is logged but not deleted.
+
+**Edge case tests** (`chat-session-store.test.ts`):
+- `D.7 — corruption self-heal` > corrupted active-sessions.yaml: next appendExchange mints fresh session
+
+**Edge case tests** (`session-index.test.ts`):
+- `session-index` > corrupted YAML: getActive returns undefined and self-heals
+
+---
+
+### REQ-CONV-SESSION-011: Session key input validation
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Session key builder validates all inputs. `:`, `..`, `/`, `\`, and empty `chatId` are rejected with `InvalidSessionKeyError`. (See REQ-CONV-SESSION-002 for full detail.)
+
+---
+
+### REQ-CONV-SESSION-012: Per-user session scope isolation
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+Sessions are scoped per-user via the chatbot `ScopedDataStore`. One user cannot read another user's session by id. `readSession` validates the id format; passing `'../etc/passwd'` or malformed ids returns `undefined` without reading outside scope.
+
+**Security tests** (`chat-session-store.test.ts`):
+- `D.4 — security` > session id path traversal attempt returns undefined
+- `D.4 — security` > malformed session id returns undefined
+
+---
+
+### REQ-CONV-SESSION-013: peekActive is read-only; no empty transcript files
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+`peekActive` is read-only and never mints a session or writes a file. `/edit`, `/notes`, `/newchat`, and `/reset` dispatch through `dispatchConversationCommand` which calls `peekActive` (not `appendExchange`). No empty transcript files are created by these commands.
+
+**Standard tests** (`conversation-builtin.test.ts`):
+- `Router C2 — sessionId binding` > /edit with no active session: ctx.sessionId is undefined; peekActive was called
+- `Router C2 — sessionId binding` > /notes with no active session: ctx.sessionId is undefined; peekActive was called
+
+**Edge case tests** (`conversation-service-newchat.test.ts`):
+- `ConversationService — handleAsk` > no args: does not call appendExchange
+
+---
+
+### REQ-CONV-SESSION-014: In-flight reply lands in old session after /newchat
+
+**Phase:** Hermes P3 | **Status:** Implemented
+
+When a `/newchat` command arrives while an in-flight `/ask` reply is resolving, the Router has already bound `expectedSessionId` to `ctx.sessionId`. `appendExchange` targets that exact session, so the reply lands in the old session regardless of the index state. This behavior is tested directly at the `ChatSessionStore` level.
+
+**Edge case tests** (`chat-session-store.test.ts`, `chat-session-store.persona.test.ts`):
+- `D.2 — concurrency` > race decision: expectedSessionId turns land in old session after endActive
+- `I.4 — Multi-step` > I.4.2: in-flight appendExchange with expectedSessionId lands in old session after endActive
 
 ---
 
@@ -6605,7 +6791,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-005 | (superseded — see REQ-CONV-021) | 0 | 0 | Superseded |
 | REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 26 | Implemented |
 | REQ-ROUTE-007 | router.test.ts, router-verification.test.ts, context-promotion.test.ts | 12 | 3 | Implemented |
-| REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
+| REQ-CHATBOT-001 | chat-session-store.test.ts (supersedes deleted conversation-history.test.ts) | 2 | 2 | Superseded (P3) |
 | REQ-CHATBOT-002 | prompt-builder.test.ts, conversation-service.test.ts | 4 | 6 | Implemented |
 | REQ-CHATBOT-003 | conversation-service.test.ts | 1 | 1 | Implemented |
 | REQ-CHATBOT-004 | handle-ask.test.ts | 4 | 7 | Implemented |
@@ -6710,7 +6896,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
 | REQ-CHATBOT-016 | data-query-wiring.test.ts, context-injection.test.ts | 8 | 6 | Implemented |
 | REQ-CHATBOT-017 | data-query-wiring.test.ts, context-injection.test.ts | 3 | 3 | Implemented |
-| REQ-CHATBOT-018 | conversation-history.test.ts (core) | 10 | 8 | Implemented |
+| REQ-CHATBOT-018 | (deleted — superseded by REQ-CONV-SESSION-001..014) | 0 | 0 | Superseded (P3) |
 | REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 34 | 9 | Implemented |
 | REQ-IC-001 | interaction-context.test.ts, integration.test.ts, edit.test.ts | 6 | 7 | Implemented |
 | REQ-IC-002 | bootstrap-wiring.test.ts, compose-runtime.smoke.integration.test.ts | 9 | 0 | Implemented |
@@ -6750,5 +6936,19 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-RETRIEVAL-014 | conversation-retrieval-service.test.ts | 8 | 2 | Implemented |
 | REQ-CONV-RETRIEVAL-015 | broad-recall.persona.test.ts | 16 | 2 | Implemented |
 | REQ-CONV-RETRIEVAL-016 | broad-recall.persona.test.ts | 4 | 0 | Implemented |
+| REQ-CONV-SESSION-001 | session-id.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-SESSION-002 | session-key.test.ts | 2 | 5 | Implemented |
+| REQ-CONV-SESSION-003 | manifest-scopes.test.ts, dispatch.integration.test.ts | 3 | 0 | Implemented |
+| REQ-CONV-SESSION-004 | transcript-codec.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-SESSION-005 | conversation-builtin.test.ts, conversation-service-newchat.test.ts | 6 | 0 | Implemented |
+| REQ-CONV-SESSION-006 | chat-session-store.test.ts, chat-session-store.persona.test.ts | 2 | 3 | Implemented |
+| REQ-CONV-SESSION-007 | request-context-session.test.ts, conversation-builtin.test.ts | 5 | 1 | Implemented |
+| REQ-CONV-SESSION-008 | chat-session-store.test.ts, chat-session-store.persona.test.ts | 3 | 4 | Implemented |
+| REQ-CONV-SESSION-009 | chat-session-store.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-SESSION-010 | chat-session-store.test.ts, session-index.test.ts | 0 | 2 | Implemented |
+| REQ-CONV-SESSION-011 | session-key.test.ts | 0 | 5 | Implemented |
+| REQ-CONV-SESSION-012 | chat-session-store.test.ts | 0 | 2 | Implemented |
+| REQ-CONV-SESSION-013 | conversation-builtin.test.ts, conversation-service-newchat.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-SESSION-014 | chat-session-store.test.ts, chat-session-store.persona.test.ts | 0 | 2 | Implemented |
 
-| **Totals** | **194 test files** | **1506** | **1699** | **3205 tests** |
+| **Totals** | **201 test files** | **1540** | **1729** | **3269 tests** |

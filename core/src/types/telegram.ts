@@ -93,6 +93,10 @@ export interface MessageContext {
 	spaceName?: string;
 	/** Route metadata populated by the core router. Absent in direct-constructed test contexts. */
 	route?: RouteInfo;
+	/** Session key for this user+channel combination (set by Router before dispatch to conversation handlers). */
+	sessionKey?: string;
+	/** Active session id resolved by ChatSessionStore.peekActive (set by Router before dispatch). Undefined when no session active. */
+	sessionId?: string;
 }
 
 /** Context for an inbound photo message routed to an app. */

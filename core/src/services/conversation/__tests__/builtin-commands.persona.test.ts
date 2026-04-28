@@ -76,6 +76,13 @@ function makeDeps(opts: {
 			updateOverrides,
 		} as any,
 		editService: editService as any,
+		chatSessions: {
+			peekActive: vi.fn().mockResolvedValue(undefined),
+			appendExchange: vi.fn().mockResolvedValue({ sessionId: 'test-session' }),
+			loadRecentTurns: vi.fn().mockResolvedValue([]),
+			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+			readSession: vi.fn().mockResolvedValue(undefined),
+		} as any,
 	};
 	return Object.assign(deps, {
 		_updateOverrides: updateOverrides,
@@ -140,8 +147,8 @@ describe('/ask command', () => {
 		// handleMessage: response = 1 more call
 		// Total: 3
 		expect(deps._llm.complete).toHaveBeenCalledTimes(3);
-		// Second handleMessage should have loaded history from the first /ask turn
-		expect((deps.data as any).forUser).toHaveBeenCalledWith('alice');
+		// Both turns should have been saved to session store
+		expect(deps.chatSessions.appendExchange).toHaveBeenCalledTimes(2);
 	});
 });
 

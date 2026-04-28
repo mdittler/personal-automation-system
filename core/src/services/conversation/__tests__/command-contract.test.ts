@@ -9,10 +9,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import { ConversationHistory } from '../../conversation-history/index.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { handleAsk } from '../handle-ask.js';
 import { handleEdit } from '../handle-edit.js';
 import { pendingEdits } from '../pending-edits.js';
+
+function makeChatSessions(): ChatSessionStore {
+	return {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
+}
 
 describe('core conversation handlers — command contract', () => {
 	it('handleAsk takes (args, ctx, deps) — no command name parameter', async () => {
@@ -27,7 +37,7 @@ describe('core conversation handlers — command contract', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history: new ConversationHistory({ maxTurns: 20 }),
+			chatSessions: makeChatSessions(),
 			appMetadata: services.appMetadata,
 			appKnowledge: services.appKnowledge,
 			modelJournal: services.modelJournal,
@@ -71,7 +81,7 @@ describe('core conversation handlers — command contract', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history: new ConversationHistory({ maxTurns: 20 }),
+			chatSessions: makeChatSessions(),
 		});
 
 		expect(services.llm.complete).not.toHaveBeenCalled();
