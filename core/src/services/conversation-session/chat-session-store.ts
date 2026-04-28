@@ -108,6 +108,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		assistantTurn: SessionTurn,
 	): Promise<{ sessionId: string }> {
 		const store = this.deps.data.forUser(ctx.userId);
+		await this.maybeImportLegacy(store, ctx.userId, ctx.householdId ?? null);
 
 		let sessionId: string;
 		if (ctx.expectedSessionId) {
@@ -187,6 +188,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		opts?: { maxTurns?: number },
 	): Promise<SessionTurn[]> {
 		const store = this.deps.data.forUser(ctx.userId);
+		await this.maybeImportLegacy(store, ctx.userId, null);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
 		if (!entry) return [];
 		const raw = await store.read(`conversation/sessions/${entry.id}.md`);
@@ -240,5 +242,98 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		const raw = await this.deps.data.forUser(userId).read(`conversation/sessions/${sessionId}.md`);
 		if (raw === '') return undefined;
 		return decode(raw);
+	}
+
+	// Migrate legacy history.json once per user, under a per-user mutex.
+	// Idempotent: short-circuits when any existing session has source: legacy-import.
+	private async maybeImportLegacy(
+		store: ReturnType<DataStoreService['forUser']>,
+		userId: string,
+		householdId: string | null,
+	): Promise<void> {
+		await withFileLock(`legacy-migration:${userId}`, async () => {
+			// Sentinel check: scan existing sessions for any legacy-import
+			const sessionFiles = await store.list('conversation/sessions/');
+			for (const filename of sessionFiles) {
+				if (!filename.endsWith('.md')) continue;
+				const raw = await store.read(`conversation/sessions/${filename}`);
+				try {
+					const { meta } = decode(raw);
+					if (meta.source === 'legacy-import') return;
+				} catch {
+					// Corrupt — skip this file
+				}
+			}
+
+			// Read history.json
+			const historyRaw = await store.read('history.json');
+			if (!historyRaw) return;
+
+			let legacyTurns: Array<{ role: unknown; content: unknown; timestamp: unknown }>;
+			try {
+				const parsed = JSON.parse(historyRaw);
+				if (!Array.isArray(parsed) || parsed.length === 0) return;
+				legacyTurns = parsed as typeof legacyTurns;
+			} catch {
+				this.deps.logger.warn({ userId }, 'conversation-session: legacy history.json malformed JSON, skipping migration');
+				return;
+			}
+
+			const isValidIso = (v: unknown): v is string =>
+				typeof v === 'string' && !Number.isNaN(Date.parse(v));
+
+			const firstTs = isValidIso(legacyTurns[0]?.timestamp)
+				? legacyTurns[0].timestamp
+				: this.now().toISOString();
+			const lastTs = isValidIso(legacyTurns[legacyTurns.length - 1]?.timestamp)
+				? legacyTurns[legacyTurns.length - 1]!.timestamp as string
+				: this.now().toISOString();
+
+			const startDate = isValidIso(legacyTurns[0]?.timestamp)
+				? new Date(legacyTurns[0].timestamp)
+				: this.now();
+
+			// Mint session id with collision retry
+			let sessionId: string | undefined;
+			for (let attempt = 0; attempt < MAX_MINT_ATTEMPTS; attempt++) {
+				const id = this.mintId(startDate);
+				const existing = await store.read(`conversation/sessions/${id}.md`);
+				if (existing === '') {
+					sessionId = id;
+					break;
+				}
+			}
+			if (!sessionId) {
+				this.deps.logger.warn({ userId }, 'conversation-session: could not mint unique id for legacy migration');
+				return;
+			}
+
+			// Build frontmatter (source: legacy-import, ended_at set to last turn ts)
+			const meta: ChatSessionFrontmatter = {
+				id: sessionId,
+				source: 'legacy-import',
+				user_id: userId,
+				household_id: householdId,
+				model: null,
+				title: null,
+				parent_session_id: null,
+				started_at: firstTs,
+				ended_at: lastTs,
+				token_counts: { input: 0, output: 0 },
+			};
+
+			let content = encodeNew(meta);
+			for (const t of legacyTurns) {
+				const role: 'user' | 'assistant' = t.role === 'assistant' ? 'assistant' : 'user';
+				const sessionTurn: SessionTurn = {
+					role,
+					content: String(t.content ?? ''),
+					timestamp: isValidIso(t.timestamp) ? t.timestamp : this.now().toISOString(),
+				};
+				content = encodeAppend(content, sessionTurn);
+			}
+
+			await store.write(`conversation/sessions/${sessionId}.md`, content);
+		});
 	}
 }

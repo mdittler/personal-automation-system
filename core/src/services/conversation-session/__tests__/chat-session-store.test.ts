@@ -375,3 +375,176 @@ describe('expectedSessionId validation', () => {
 		).rejects.toThrow(/expected session/);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Tracer E — Legacy history.json migration
+// ---------------------------------------------------------------------------
+
+const LEGACY_TURNS = [
+	{ role: 'user', content: 'hi there', timestamp: '2026-04-26T10:00:00Z' },
+	{ role: 'assistant', content: 'hello!', timestamp: '2026-04-26T10:00:01Z' },
+	{ role: 'user', content: 'what time is it', timestamp: '2026-04-26T10:01:00Z' },
+	{ role: 'assistant', content: 'around 10am', timestamp: '2026-04-26T10:01:01Z' },
+];
+
+async function plantHistoryJson(ds: DataStoreServiceImpl, content: string) {
+	const scoped = ds.forUser(USER);
+	await scoped.write('history.json', content);
+}
+
+describe('E — Legacy history.json migration', () => {
+	it('first loadRecentTurns triggers migration: creates legacy-import session file', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(1);
+		const sessionId = sessions[0]!.replace('.md', '');
+		const decoded = await store.readSession(USER, sessionId);
+		expect(decoded?.meta.source).toBe('legacy-import');
+		expect(decoded?.turns).toHaveLength(4);
+	});
+
+	it('legacy-import session has started_at from first turn and ended_at from last turn', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		const sessionId = sessions[0]!.replace('.md', '');
+		const decoded = await store.readSession(USER, sessionId);
+		expect(decoded?.meta.started_at).toBe('2026-04-26T10:00:00Z');
+		expect(decoded?.meta.ended_at).toBe('2026-04-26T10:01:01Z');
+	});
+
+	it('history.json is preserved after migration (not deleted)', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const raw = await ds.forUser(USER).read('history.json');
+		expect(raw).not.toBe('');
+		expect(JSON.parse(raw)).toHaveLength(4);
+	});
+
+	it('active session is NOT the legacy-import session after migration', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		// No active session — legacy is read-only
+		expect(await store.peekActive(ctx)).toBeUndefined();
+		// loadRecentTurns returns [] (no active session)
+		const turns = await store.loadRecentTurns(ctx);
+		expect(turns).toEqual([]);
+	});
+
+	it('migration is idempotent: second loadRecentTurns does not create duplicate', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(1);
+	});
+
+	it('absent history.json: no migration, no session file', async () => {
+		const ds = makeDataStore();
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(0);
+	});
+
+	it('empty JSON array []: no migration, no session file', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, '[]');
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(0);
+	});
+
+	it('malformed JSON: no migration, no crash, warning is logged', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, 'not valid json {{{');
+		const logger = makeMockLogger();
+		const store = composeChatSessionStore({ data: ds, logger, clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(0);
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it('turns with invalid timestamps fall back to clock time', async () => {
+		const ds = makeDataStore();
+		const badTurns = [
+			{ role: 'user', content: 'hi', timestamp: 'not-a-date' },
+			{ role: 'assistant', content: 'hello', timestamp: 'also-bad' },
+		];
+		await plantHistoryJson(ds, JSON.stringify(badTurns));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await store.loadRecentTurns(ctx);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(1);
+		const sessionId = sessions[0]!.replace('.md', '');
+		const decoded = await store.readSession(USER, sessionId);
+		expect(decoded?.meta.source).toBe('legacy-import');
+		// Timestamps fell back to clock
+		expect(decoded?.meta.started_at).toBe(FROZEN.toISOString());
+		expect(decoded?.meta.ended_at).toBe(FROZEN.toISOString());
+	});
+
+	it('concurrency: two simultaneous loadRecentTurns produce exactly one legacy-import file', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		await Promise.all([store.loadRecentTurns(ctx), store.loadRecentTurns(ctx)]);
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(1);
+	});
+
+	it('first appendExchange also triggers migration (creates legacy-import + new telegram session)', async () => {
+		const ds = makeDataStore();
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+
+		const { sessionId } = await store.appendExchange(ctx, turn('user', 'new msg'), turn('assistant', 'new reply'));
+
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		// Two sessions: one legacy-import, one telegram
+		expect(sessions).toHaveLength(2);
+
+		const newSession = await store.readSession(USER, sessionId);
+		expect(newSession?.meta.source).toBe('telegram');
+		expect(newSession?.turns).toHaveLength(2);
+
+		// Find the legacy session
+		const legacyId = sessions.find(f => f.replace('.md', '') !== sessionId)!.replace('.md', '');
+		const legacySession = await store.readSession(USER, legacyId);
+		expect(legacySession?.meta.source).toBe('legacy-import');
+		expect(legacySession?.turns).toHaveLength(4);
+	});
+});
