@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { applyMigrations, openWithPragmas } from './schema.js';
+import { applyMigrations } from './schema.js';
 import { withSqliteRetry } from './retry.js';
 import { buildMatchClause } from './fts-query.js';
 import type { SessionRow, MessageRow, InternalSearchFilters, SearchResult, SearchHit, MatchRow } from './types.js';
@@ -37,7 +37,6 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
-    openWithPragmas(this.db);
     applyMigrations(this.db);
   }
 

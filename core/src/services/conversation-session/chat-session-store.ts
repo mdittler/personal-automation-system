@@ -238,20 +238,22 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		if (this.deps.index) {
 			const assistantTurnIndex = userTurnIndex + 1;
 			try {
-				await this.deps.index.appendMessage({
-					session_id: sessionId,
-					turn_index: userTurnIndex,
-					role: 'user',
-					content: userTurn.content,
-					timestamp: userTurn.timestamp,
-				});
-				await this.deps.index.appendMessage({
-					session_id: sessionId,
-					turn_index: assistantTurnIndex,
-					role: 'assistant',
-					content: assistantTurn.content,
-					timestamp: assistantTurn.timestamp,
-				});
+				await Promise.all([
+					this.deps.index.appendMessage({
+						session_id: sessionId,
+						turn_index: userTurnIndex,
+						role: 'user',
+						content: userTurn.content,
+						timestamp: userTurn.timestamp,
+					}),
+					this.deps.index.appendMessage({
+						session_id: sessionId,
+						turn_index: assistantTurnIndex,
+						role: 'assistant',
+						content: assistantTurn.content,
+						timestamp: assistantTurn.timestamp,
+					}),
+				]);
 			} catch (err) {
 				this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: appendMessage failed; continuing');
 			}

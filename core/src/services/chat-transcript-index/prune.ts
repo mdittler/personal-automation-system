@@ -13,9 +13,9 @@
  * user to remove any dangling entries (should be rare, but guards against inconsistency).
  */
 
-import { access, unlink, readFile, writeFile, stat, readdir } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { access, unlink, readFile, writeFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { parseYaml, toYaml } from '../../utils/yaml.js';
 import { withFileLock } from '../../utils/file-mutex.js';
 import type { ChatTranscriptIndex } from './chat-transcript-index.js';
 
@@ -147,15 +147,6 @@ function activeSessionsPath(rootDir: string): string {
 	return join(rootDir, 'conversation', 'active-sessions.yaml');
 }
 
-async function isFile(p: string): Promise<boolean> {
-	try {
-		const s = await stat(p);
-		return s.isFile();
-	} catch {
-		return false;
-	}
-}
-
 /**
  * Remove entries whose id appears in `prunedIds` from one active-sessions.yaml file.
  * Runs under a withFileLock to be safe with concurrent readers.
@@ -165,14 +156,13 @@ async function sweepActiveSessionsFile(
 	lockKey: string,
 	prunedIds: Set<string>,
 ): Promise<void> {
-	if (!(await isFile(filePath))) return;
-
 	await withFileLock(lockKey, async () => {
 		let raw: string;
 		try {
 			raw = await readFile(filePath, 'utf8');
-		} catch {
-			return;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+			throw err;
 		}
 
 		if (!raw) return;
@@ -205,7 +195,7 @@ async function sweepActiveSessionsFile(
 		}
 
 		if (changed) {
-			await writeFile(filePath, stringifyYaml(map), 'utf8');
+			await writeFile(filePath, toYaml(map), 'utf8');
 		}
 	});
 }
@@ -274,11 +264,18 @@ export async function pruneExpiredSessions(
 				continue;
 			}
 
-			// Delete the file under a lock (guards against concurrent readers)
+			// Delete the file under a lock (guards against concurrent readers).
+			// Handle ENOENT gracefully — a concurrent pruner or manual deletion may have
+			// beaten us here. Still remove the DB row so the index stays consistent.
 			await withFileLock(
 				`conversation-session-transcript:${userId}:${sessionId}`,
 				async () => {
-					await unlink(filePath);
+					try {
+						await unlink(filePath);
+					} catch (err) {
+						if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+						// Already deleted — fall through to DB cleanup below
+					}
 				},
 			);
 
