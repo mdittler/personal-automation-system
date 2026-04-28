@@ -1,5 +1,5 @@
 import type { MessageContext } from '../../types/telegram.js';
-import { ConversationHistory } from '../conversation-history/index.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { EditService } from '../edit/index.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
@@ -8,11 +8,10 @@ import { handleNotes as coreHandleNotes } from './handle-notes.js';
 import { pendingEdits } from './pending-edits.js';
 
 /**
- * DI bundle for ConversationService. Equivalent to HandleMessageDeps minus
- * `history` — the service owns the long-lived ConversationHistory instance.
- * `editService` is added here (not present on HandleMessageDeps) for /edit dispatch.
+ * DI bundle for ConversationService. Equivalent to HandleMessageDeps plus
+ * `editService` for /edit dispatch.
  */
-export type ConversationServiceDeps = Omit<HandleMessageDeps, 'history'> & {
+export type ConversationServiceDeps = HandleMessageDeps & {
 	editService?: EditService;
 };
 
@@ -22,19 +21,14 @@ export type ConversationServiceDeps = Omit<HandleMessageDeps, 'history'> & {
  * boundary; this class is the inner call (mirrors how dispatchMessage wraps
  * `app.module.handleMessage`).
  *
- * Holds one ConversationHistory({ maxTurns: 20 }) for the lifetime of the
- * process. Per-user serialized writes happen via ConversationHistory.writeQueue
- * (REQ-CHATBOT-018), so concurrent handleMessage calls do not corrupt history.
+ * Session persistence is handled by the injected ChatSessionStore (REQ-CONV-SESSION-*).
+ * Concurrent handleMessage calls are serialized by the store's per-session file mutex.
  */
 export class ConversationService {
-	private readonly history: ConversationHistory;
-
-	constructor(private readonly deps: ConversationServiceDeps) {
-		this.history = new ConversationHistory({ maxTurns: 20 });
-	}
+	constructor(private readonly deps: ConversationServiceDeps) {}
 
 	async handleMessage(ctx: MessageContext): Promise<void> {
-		return coreHandleMessage(ctx, { ...this.deps, history: this.history });
+		return coreHandleMessage(ctx, this.deps);
 	}
 
 	async handleAsk(args: string[], ctx: MessageContext): Promise<void> {
@@ -44,7 +38,7 @@ export class ConversationService {
 			data: this.deps.data,
 			logger: this.deps.logger,
 			timezone: this.deps.timezone,
-			history: this.history,
+			chatSessions: this.deps.chatSessions,
 			...(this.deps.systemInfo !== undefined ? { systemInfo: this.deps.systemInfo } : {}),
 			...(this.deps.appMetadata !== undefined ? { appMetadata: this.deps.appMetadata } : {}),
 			...(this.deps.appKnowledge !== undefined ? { appKnowledge: this.deps.appKnowledge } : {}),
@@ -61,6 +55,24 @@ export class ConversationService {
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);
+	}
+
+	async handleNewChat(_args: string[], ctx: MessageContext): Promise<void> {
+		const sessionKey =
+			ctx.sessionKey ??
+			buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
+		const { endedSessionId } = await this.deps.chatSessions.endActive(
+			{ userId: ctx.userId, sessionKey },
+			'newchat',
+		);
+		if (endedSessionId) {
+			await this.deps.telegram.send(
+				ctx.userId,
+				'Started a new conversation. Previous session saved.',
+			);
+		} else {
+			await this.deps.telegram.send(ctx.userId, 'No active conversation to reset.');
+		}
 	}
 
 	async handleEdit(args: string[], ctx: MessageContext): Promise<void> {

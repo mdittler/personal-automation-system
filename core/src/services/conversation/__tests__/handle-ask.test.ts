@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
-import { ConversationHistory } from '../../conversation-history/index.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { requestContext } from '../../context/request-context.js';
 import { handleAsk } from '../handle-ask.js';
 import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
@@ -12,11 +12,14 @@ import {
 	expectPromptOmitsSystemData,
 } from './helpers/prompt-assertions.js';
 
-function makeHistory() {
-	const history = new ConversationHistory({ maxTurns: 20 });
-	vi.spyOn(history, 'load').mockResolvedValue([]);
-	vi.spyOn(history, 'append').mockResolvedValue(undefined);
-	return history;
+function makeChatSessions(): ChatSessionStore {
+	return {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
 }
 
 function makeDeps() {
@@ -27,13 +30,13 @@ function makeDeps() {
 	return {
 		services,
 		store,
-		history: makeHistory(),
+		chatSessions: makeChatSessions(),
 	};
 }
 
 describe('handleAsk', () => {
 	it('sends a static intro and skips LLM when args is empty', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		const ctx = createTestMessageContext({ text: '/ask' });
 
 		await handleAsk([], ctx, {
@@ -42,7 +45,7 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.llm.complete).not.toHaveBeenCalled();
@@ -53,7 +56,7 @@ describe('handleAsk', () => {
 	});
 
 	it('calls the classifier at fast tier then the answer at standard tier', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		// classifyPASMessage returns the first word: NO → pasRelated: false
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('NO')          // classifier (fast tier)
@@ -67,7 +70,7 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.llm.complete).toHaveBeenCalledTimes(2);
@@ -85,7 +88,7 @@ describe('handleAsk', () => {
 	});
 
 	it('uses YES_DATA classifier token and still calls the answer at standard tier', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		// YES_DATA → pasRelated: true, dataQueryCandidate: true
 		// (no dataQuery service wired, so data context stays empty)
 		vi.mocked(services.llm.complete)
@@ -100,7 +103,7 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.llm.complete).toHaveBeenNthCalledWith(
@@ -117,7 +120,7 @@ describe('handleAsk', () => {
 	});
 
 	it('sends a friendly error message when LLM call fails', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('timeout'));
 		const ctx = createTestMessageContext({ text: '/ask what?' });
 
@@ -127,7 +130,7 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.telegram.send).toHaveBeenCalled();
@@ -136,7 +139,7 @@ describe('handleAsk', () => {
 	});
 
 	it('saves history with /ask prefix on the user turn', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('NO')   // classifier
 			.mockResolvedValueOnce('answer');
@@ -149,18 +152,18 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
-		expect(history.append).toHaveBeenCalledWith(
-			expect.anything(),
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.any(Object),
 			expect.objectContaining({ content: '/ask what is the status?' }),
 			expect.objectContaining({ role: 'assistant' }),
 		);
 	});
 
 	it('processes model-switch tags for an admin user with switch intent', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
 		vi.mocked(services.systemInfo!.setTierModel).mockResolvedValue({ success: true });
 		vi.mocked(services.llm.complete)
@@ -180,7 +183,7 @@ describe('handleAsk', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 			systemInfo: services.systemInfo,
 		});
 
@@ -249,17 +252,23 @@ describe('handleCommand /ask', () => {
 		expect(prompt).toContain('Echo');
 	});
 
-	it('saves conversation history after /ask response', async () => {
+	it('saves conversation history after /ask response via appendExchange', async () => {
 		vi.mocked(services.llm.complete).mockResolvedValue('Response');
-		const store = createMockScopedStore();
-		vi.mocked(services.data.forUser).mockReturnValue(store);
+		const chatSessions = makeChatSessions();
 		const ctx = createTestMessageContext({ text: '/ask how does routing work?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeConversationService(services).handleAsk(['how', 'does', 'routing', 'work?'], ctx),
+			makeConversationService({ ...services, chatSessions }).handleAsk(
+				['how', 'does', 'routing', 'work?'],
+				ctx,
+			),
 		);
 
-		expect(store.write).toHaveBeenCalledWith('history.json', expect.stringContaining('/ask'));
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: 'test-user' }),
+			expect.objectContaining({ role: 'user', content: expect.stringContaining('/ask') }),
+			expect.objectContaining({ role: 'assistant' }),
+		);
 	});
 
 	it('appends to daily notes on /ask (when log_to_notes is enabled)', async () => {

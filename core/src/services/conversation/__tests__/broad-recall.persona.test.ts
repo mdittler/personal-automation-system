@@ -44,6 +44,16 @@ import type { ConversationServiceDeps } from '../conversation-service.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
+function makeNullChatSessions() {
+	return {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'test-session' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
 /** Wire up ConversationService with a ConversationRetrievalService. */
 function makeServiceWithRetrieval(
 	services: CoreServices,
@@ -64,6 +74,7 @@ function makeServiceWithRetrieval(
 		dataQuery: services.dataQuery ?? undefined,
 		interactionContext: services.interactionContext ?? undefined,
 		conversationRetrieval: retrieval,
+		chatSessions: makeNullChatSessions() as any,
 	};
 	return new ConversationService(deps);
 }

@@ -55,7 +55,7 @@ describe('ConversationService production wiring (integration)', () => {
 		expect(telegram.sent.some((m: { userId: string }) => m.userId === userId)).toBe(true);
 	}, 30_000);
 
-	it('history.json lands at household-aware scoped path (REQ-CONV-015)', async () => {
+	it('session transcript lands at household-aware scoped path (REQ-CONV-015)', async () => {
 		const userId = 'user-0';
 		const hh = (runtime.services.householdService as any).getHouseholdForUser(userId) as string;
 		expect(hh).toBeTruthy();
@@ -65,14 +65,18 @@ describe('ConversationService production wiring (integration)', () => {
 			router.routeMessage(chatbotMessage(userId, 2)),
 		);
 
-		// ConversationHistory.append() returns the write task (awaited inline), so the
-		// file is guaranteed to exist by the time routeMessage resolves.
-		const historyPath = join(tempDir, 'data', 'households', hh, 'users', userId, 'chatbot', 'history.json');
-		const raw = await readFile(historyPath, 'utf-8');
-		const turns = JSON.parse(raw);
-		expect(Array.isArray(turns)).toBe(true);
-		// Two route calls above → at least user+assistant turn pair from second call
-		expect(turns.length).toBeGreaterThanOrEqual(2);
+		// ChatSessionStore.appendExchange() writes the transcript synchronously before resolving,
+		// so the file is guaranteed to exist by the time routeMessage resolves.
+		const sessionsDir = join(tempDir, 'data', 'households', hh, 'users', userId, 'chatbot', 'conversation', 'sessions');
+		const { readdir } = await import('node:fs/promises');
+		const files = await readdir(sessionsDir).catch(() => [] as string[]);
+		const mdFiles = files.filter((f) => f.endsWith('.md'));
+		expect(mdFiles.length).toBeGreaterThanOrEqual(1);
+
+		const sessionPath = join(sessionsDir, mdFiles[0]!);
+		const raw = await readFile(sessionPath, 'utf-8');
+		expect(raw).toContain('source: telegram');
+		expect(raw).toContain('user_id:');
 	}, 30_000);
 
 	it('per-user disable: when "chatbot" toggled off, ConversationService is not called', async () => {

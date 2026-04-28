@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import { ConversationHistory } from '../../conversation-history/index.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { handleMessage } from '../handle-message.js';
 
-function makeHistory() {
-	const history = new ConversationHistory({ maxTurns: 20 });
-	vi.spyOn(history, 'load').mockResolvedValue([]);
-	vi.spyOn(history, 'append').mockResolvedValue(undefined);
-	return history;
+function makeChatSessions(): ChatSessionStore {
+	return {
+		peekActive: vi.fn().mockResolvedValue(undefined),
+		appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+		loadRecentTurns: vi.fn().mockResolvedValue([]),
+		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+		readSession: vi.fn().mockResolvedValue(undefined),
+	};
 }
 
 function makeDeps() {
@@ -19,13 +22,13 @@ function makeDeps() {
 	return {
 		services,
 		store,
-		history: makeHistory(),
+		chatSessions: makeChatSessions(),
 	};
 }
 
 describe('handleMessage', () => {
 	it('sends the LLM response to the user', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		const ctx = createTestMessageContext({ text: 'Hello bot' });
 
 		await handleMessage(ctx, {
@@ -34,14 +37,14 @@ describe('handleMessage', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'The assistant response');
 	});
 
 	it('saves history after sending the response', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		const ctx = createTestMessageContext({ text: 'Remember this' });
 
 		await handleMessage(ctx, {
@@ -50,18 +53,18 @@ describe('handleMessage', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
-		expect(history.append).toHaveBeenCalledWith(
-			expect.anything(),
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.any(Object),
 			expect.objectContaining({ role: 'user', content: 'Remember this' }),
 			expect.objectContaining({ role: 'assistant', content: 'The assistant response' }),
 		);
 	});
 
 	it('sends a friendly error message when LLM call fails', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('rate limit'));
 		const ctx = createTestMessageContext({ text: 'hello' });
 
@@ -71,7 +74,7 @@ describe('handleMessage', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		expect(services.telegram.send).toHaveBeenCalled();
@@ -82,7 +85,7 @@ describe('handleMessage', () => {
 	});
 
 	it('strips switch-model tags without executing them', async () => {
-		const { services, history } = makeDeps();
+		const { services, chatSessions } = makeDeps();
 		vi.mocked(services.llm.complete).mockResolvedValue(
 			'Here is my answer <switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/> done.',
 		);
@@ -94,7 +97,7 @@ describe('handleMessage', () => {
 			data: services.data,
 			logger: services.logger,
 			timezone: 'UTC',
-			history,
+			chatSessions,
 		});
 
 		const sentText = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
@@ -103,9 +106,11 @@ describe('handleMessage', () => {
 		expect(services.systemInfo?.setTierModel).not.toHaveBeenCalled();
 	});
 
-	it('logs a warning and continues when history.append fails', async () => {
-		const { services, history } = makeDeps();
-		vi.spyOn(history, 'append').mockRejectedValue(new Error('disk full'));
+	it('logs a warning and continues when appendExchange fails', async () => {
+		const { services, chatSessions } = makeDeps();
+		(chatSessions.appendExchange as ReturnType<typeof vi.fn>).mockRejectedValue(
+			new Error('disk full'),
+		);
 		const ctx = createTestMessageContext({ text: 'hello' });
 
 		// Should not throw
@@ -116,7 +121,7 @@ describe('handleMessage', () => {
 				data: services.data,
 				logger: services.logger,
 				timezone: 'UTC',
-				history,
+				chatSessions,
 			}),
 		).resolves.toBeUndefined();
 

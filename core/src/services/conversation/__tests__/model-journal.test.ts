@@ -74,26 +74,32 @@ describe('model journal integration', () => {
 	});
 
 	it('saves cleaned response (without journal tags) to conversation history', async () => {
-		const { createMockScopedStore } = await import('../../../testing/mock-services.js');
 		vi.mocked(services.llm.complete).mockResolvedValue(
 			'Clean answer.<model-journal>Private note</model-journal>',
 		);
-		const store = createMockScopedStore();
-		vi.mocked(services.data.forUser).mockReturnValue(store);
+		const chatSessions = {
+			peekActive: vi.fn().mockResolvedValue(undefined),
+			appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+			loadRecentTurns: vi.fn().mockResolvedValue([]),
+			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+			readSession: vi.fn().mockResolvedValue(undefined),
+		};
 		const ctx = createTestMessageContext({ text: 'question' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
-			makeConversationService(services).handleMessage(ctx),
+			makeConversationService({ ...services, chatSessions } as any).handleMessage(ctx),
 		);
 
-		// History should contain the cleaned response, not the journal tag
-		expect(store.write).toHaveBeenCalledWith(
-			'history.json',
-			expect.stringContaining('Clean answer.'),
+		// appendExchange should be called with the cleaned response, not the journal tag
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.any(Object),
+			expect.objectContaining({ role: 'user' }),
+			expect.objectContaining({ content: expect.stringContaining('Clean answer.') }),
 		);
-		expect(store.write).toHaveBeenCalledWith(
-			'history.json',
-			expect.not.stringContaining('Private note'),
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.any(Object),
+			expect.any(Object),
+			expect.objectContaining({ content: expect.not.stringContaining('Private note') }),
 		);
 	});
 

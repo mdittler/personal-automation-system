@@ -650,21 +650,20 @@ describe('messages for other apps — no PAS-aware prompt when classifier return
 
 describe('conversation continuity — multi-turn scenarios', () => {
 	let services: CoreServices;
+	let chatSessionsAppend: ReturnType<typeof vi.fn>;
 
 	beforeEach(async () => {
 		services = createMockCoreServices();
 		withAutoDetect(services);
-		// Provide a real-ish scoped store that records appends
-		const scopedStore = createMockScopedStore();
-		const historyLines: string[] = [];
-		vi.mocked(scopedStore.read).mockImplementation(async (path) => {
-			if (path.includes('history')) return historyLines.join('\n');
-			return '';
-		});
-		vi.mocked(scopedStore.append).mockImplementation(async (_path, content) => {
-			historyLines.push(String(content));
-		});
-		vi.mocked(services.data.forUser).mockReturnValue(scopedStore);
+		chatSessionsAppend = vi.fn().mockResolvedValue({ sessionId: 'test-session' });
+		(services as any).chatSessions = {
+			peekActive: vi.fn().mockResolvedValue(undefined),
+			appendExchange: chatSessionsAppend,
+			loadRecentTurns: vi.fn().mockResolvedValue([]),
+			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+			readSession: vi.fn().mockResolvedValue(undefined),
+		};
+		vi.mocked(services.data.forUser).mockReturnValue(createMockScopedStore());
 	});
 
 	it('multi-turn: user asks a question then a follow-up — history is preserved across turns', async () => {
@@ -694,8 +693,8 @@ describe('conversation continuity — multi-turn scenarios', () => {
 			'The Food app can track groceries and meals.',
 		);
 
-		// History store should have had append called (conversation saved)
-		expect(services.data.forUser).toHaveBeenCalled();
+		// Session store should have had appendExchange called (conversation saved)
+		expect(chatSessionsAppend).toHaveBeenCalled();
 	});
 
 	it('multi-turn: PAS question then casual question — prompt mode switches correctly', async () => {
