@@ -44,7 +44,7 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 
 	let meta: ChatSessionFrontmatter;
 	try {
-		const parsed = parseYaml(fmMatch[1]);
+		const parsed = parseYaml(fmMatch[1]!);
 		if (!parsed || typeof parsed !== 'object') {
 			throw new Error('parsed to non-object');
 		}
@@ -68,16 +68,17 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 
 	while ((match = headerGlobalRe.exec(body)) !== null) {
 		headers.push({
-			role: match[1] as 'user' | 'assistant',
-			timestamp: match[2],
+			role: match[1]! as 'user' | 'assistant',
+			timestamp: match[2]!,
 			startIdx: match.index + match[0].length,
 		});
 	}
 
 	for (let i = 0; i < headers.length; i++) {
-		const h = headers[i];
-		const segEnd = i + 1 < headers.length ? body.lastIndexOf(`### ${headers[i + 1].role}`, headers[i + 1].startIdx - 1) : body.length;
-		const segment = body.slice(h.startIdx, segEnd);
+		const h = headers[i]!;
+		const next = headers[i + 1];
+		const segEnd = next !== undefined ? body.lastIndexOf(`### ${next.role}`, next.startIdx - 1) : body.length;
+		const segment = body.slice(h.startIdx, segEnd >= 0 ? segEnd : body.length);
 
 		// Parse fenced block: find opening fence on first non-empty line
 		const lines = segment.split('\n');
@@ -85,7 +86,7 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 		let fenceStart = -1;
 		let fenceStr = '';
 		for (let j = 0; j < lines.length; j++) {
-			const trimmed = lines[j].trim();
+			const trimmed = lines[j]!.trim();
 			if (trimmed.match(/^`{4,}$/)) {
 				fenceStart = j;
 				fenceStr = trimmed;
@@ -100,7 +101,7 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 		// Find the closing fence — same fence string on its own line AFTER the opening
 		let fenceEnd = -1;
 		for (let j = fenceStart + 1; j < lines.length; j++) {
-			if (lines[j].trim() === fenceStr) {
+			if (lines[j]!.trim() === fenceStr) {
 				fenceEnd = j;
 				break;
 			}

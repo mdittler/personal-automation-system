@@ -4,7 +4,7 @@
  * identical to pre-P0 chatbot behavior (apps/chatbot/src/index.ts:533).
  */
 import { formatRelativeTime } from '../../utils/cron-describe.js';
-import type { ConversationTurn } from '../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import { sanitizeInput } from './sanitization.js';
 
 export function formatConversationHistory(

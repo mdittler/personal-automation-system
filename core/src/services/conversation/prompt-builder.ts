@@ -20,7 +20,7 @@ import type { DataStoreService } from '../../types/data-store.js';
 import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
-import type { ConversationTurn } from '../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import type { ConversationContextSnapshot } from '../conversation-retrieval/index.js';
 import {
 	type JournalLogger,
