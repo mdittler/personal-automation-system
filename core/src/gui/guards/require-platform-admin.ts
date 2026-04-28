@@ -20,8 +20,9 @@ export async function requirePlatformAdmin(
 	reply: FastifyReply,
 ): Promise<unknown> {
 	if (!request.user?.isPlatformAdmin) {
-		return reply.status(403).viewAsync('403', {
+		const html = await reply.viewAsync('403', {
 			title: '403 Forbidden — PAS',
 		});
+		return reply.status(403).type('text/html').send(html);
 	}
 }
