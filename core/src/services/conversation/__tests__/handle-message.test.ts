@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
@@ -11,6 +12,8 @@ function makeChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -128,5 +131,170 @@ describe('handleMessage', () => {
 		expect(services.logger.warn).toHaveBeenCalled();
 		// Response was still sent before the history failure
 		expect(services.telegram.send).toHaveBeenCalled();
+	});
+});
+
+// ─── Chunk E: ensureActiveSession wiring ─────────────────────────────────────
+
+describe('handleMessage — ensureActiveSession wiring (Chunk E)', () => {
+	let services: ReturnType<typeof createMockCoreServices>;
+	let chatSessions: ChatSessionStore;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('OK');
+		chatSessions = makeChatSessions();
+	});
+
+	it('calls ensureActiveSession before LLM call', async () => {
+		const ctx = createTestMessageContext({ text: 'test' });
+		const llmCallOrder: string[] = [];
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockImplementation(() => {
+			llmCallOrder.push('ensure');
+			return Promise.resolve({ sessionId: 'sess', isNew: true, snapshot: undefined });
+		});
+		vi.mocked(services.llm.complete).mockImplementation(() => {
+			llmCallOrder.push('llm');
+			return Promise.resolve('OK');
+		});
+
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const ensureIdx = llmCallOrder.indexOf('ensure');
+		const llmIdx = llmCallOrder.indexOf('llm');
+		expect(ensureIdx).toBeGreaterThan(-1);
+		expect(llmIdx).toBeGreaterThan(ensureIdx);
+	});
+
+	it('passes snapshot to system prompt when conversationRetrieval is wired', async () => {
+		const okSnapshot: MemorySnapshot = {
+			content: 'User prefers Celsius.',
+			status: 'ok',
+			builtAt: '2026-01-01T00:00:00Z',
+			entryCount: 1,
+		};
+		const buildMemorySnapshot = vi.fn().mockResolvedValue(okSnapshot);
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: okSnapshot,
+		});
+		const retrieval = {
+			buildContextSnapshot: vi.fn().mockResolvedValue(null),
+			buildMemorySnapshot,
+			searchSessions: vi.fn(),
+		};
+
+		const ctx = createTestMessageContext({ text: 'hello' });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			conversationRetrieval: retrieval as never,
+		});
+
+		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).toContain('<memory-context label="durable-memory">');
+		expect(systemPrompt).toContain('User prefers Celsius.');
+	});
+
+	it('no durable-memory block when conversationRetrieval is absent', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: undefined,
+		});
+
+		const ctx = createTestMessageContext({ text: 'hello' });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).not.toContain('<memory-context label="durable-memory">');
+	});
+
+	it('no durable-memory block when buildMemorySnapshot returns degraded status', async () => {
+		const degradedSnapshot: MemorySnapshot = {
+			content: '',
+			status: 'degraded',
+			builtAt: '2026-01-01T00:00:00Z',
+			entryCount: 0,
+		};
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: degradedSnapshot,
+		});
+
+		const ctx = createTestMessageContext({ text: 'hello' });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).not.toContain('<memory-context label="durable-memory">');
+	});
+
+	it('ensureActiveSession is called with buildSnapshot only when conversationRetrieval is wired', async () => {
+		const retrieval = {
+			buildContextSnapshot: vi.fn().mockResolvedValue(null),
+			buildMemorySnapshot: vi.fn().mockResolvedValue({
+				content: 'x',
+				status: 'ok',
+				builtAt: '',
+				entryCount: 0,
+			}),
+			searchSessions: vi.fn(),
+		};
+
+		const ctx = createTestMessageContext({ text: 'test' });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			conversationRetrieval: retrieval as never,
+		});
+
+		const call = (chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(call?.[1]?.buildSnapshot).toBeTypeOf('function');
+	});
+
+	it('ensureActiveSession is called without buildSnapshot when conversationRetrieval is absent', async () => {
+		const ctx = createTestMessageContext({ text: 'test' });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const call = (chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(call?.[1]?.buildSnapshot).toBeUndefined();
 	});
 });

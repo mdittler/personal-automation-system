@@ -26,6 +26,8 @@ function makeChatSessions(opts: {
 		loadRecentTurns: vi.fn().mockResolvedValue(opts.loadRecentTurnsResult ?? []),
 		endActive: vi.fn().mockResolvedValue(opts.endActiveResult ?? { endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -151,14 +153,13 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 	});
 
 	it('calls appendExchange with both turns after a successful LLM response', async () => {
-		const chatSessions = makeChatSessions();
+		const chatSessions = makeChatSessions({ appendExchangeResult: { sessionId: 'ensure-session-id' } });
 		const deps = mockDeps(chatSessions);
 		(deps.llm as any).complete = vi.fn().mockResolvedValue('hi there');
 		const svc = new ConversationService(deps);
 		const ctx = {
 			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
 			sessionKey: SESSION_KEY,
-			sessionId: 'existing-session-id',
 		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
@@ -169,7 +170,8 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 			expect.objectContaining({
 				userId: 'user-0',
 				sessionKey: SESSION_KEY,
-				expectedSessionId: 'existing-session-id',
+				// P4: expectedSessionId comes from ensureActiveSession, not ctx.sessionId
+				expectedSessionId: 'ensure-session-id',
 			}),
 			expect.objectContaining({ role: 'user', content: 'hello' }),
 			expect.objectContaining({ role: 'assistant', content: 'hi there' }),
@@ -190,43 +192,44 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		expect(chatSessions.appendExchange).not.toHaveBeenCalled();
 	});
 
-	it('passes ctx.sessionId as expectedSessionId into appendExchange', async () => {
-		const chatSessions = makeChatSessions();
+	it('passes ensuredSessionId from ensureActiveSession as expectedSessionId into appendExchange', async () => {
+		const chatSessions = makeChatSessions({ appendExchangeResult: { sessionId: 'ensure-abc' } });
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
 		const ctx = {
 			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
 			sessionKey: SESSION_KEY,
-			sessionId: 'bound-session-id',
 		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
 		});
 
+		// P4: expectedSessionId is always the sessionId from ensureActiveSession
 		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
-			expect.objectContaining({ expectedSessionId: 'bound-session-id' }),
+			expect.objectContaining({ expectedSessionId: 'ensure-abc' }),
 			expect.any(Object),
 			expect.any(Object),
 		);
 	});
 
-	it('passes undefined expectedSessionId when ctx.sessionId is not set', async () => {
-		const chatSessions = makeChatSessions();
+	it('appendExchange receives the ensuredSessionId even when ctx.sessionId is absent', async () => {
+		const chatSessions = makeChatSessions({ appendExchangeResult: { sessionId: 'ensure-xyz' } });
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
 		const ctx = {
 			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
 			sessionKey: SESSION_KEY,
-			// sessionId intentionally absent
+			// No ctx.sessionId — P4 uses ensureActiveSession's sessionId regardless
 		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
 		});
 
+		// P4: race guard uses ensuredSessionId, not ctx.sessionId; never undefined
 		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
-			expect.objectContaining({ expectedSessionId: undefined }),
+			expect.objectContaining({ expectedSessionId: 'ensure-xyz' }),
 			expect.any(Object),
 			expect.any(Object),
 		);

@@ -21,6 +21,8 @@ function makeChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 }
 

@@ -32,7 +32,6 @@ import {
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
-import { gatherContext } from './app-data.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
@@ -108,7 +107,7 @@ export async function handleAsk(
 	const recentContextSummary = formatInteractionContextSummary(recentEntries);
 	const recentFilePaths = extractRecentFilePaths(recentEntries);
 
-	const [{ wrote: noteWrote }, turns, contextEntries, userCtx] = await Promise.all([
+	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, snapshot: memSnapshot }, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -117,7 +116,14 @@ export async function handleAsk(
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
 		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		gatherContext(question, ctx.userId, deps),
+		deps.chatSessions.ensureActiveSession(
+			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
+			{
+				buildSnapshot: deps.conversationRetrieval
+					? () => deps.conversationRetrieval!.buildMemorySnapshot()
+					: undefined,
+			},
+		),
 		buildUserContext(ctx, deps),
 	]);
 
@@ -148,10 +154,10 @@ export async function handleAsk(
 		systemPrompt = await buildAppAwareSystemPrompt(
 			question,
 			ctx.userId,
-			contextEntries,
+			[],
 			turns,
 			deps,
-			{ modelSlug, userCtx, dataContextOrSnapshot: snapshot },
+			{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot },
 		);
 	} else {
 		// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
@@ -173,10 +179,10 @@ export async function handleAsk(
 		systemPrompt = await buildAppAwareSystemPrompt(
 			question,
 			ctx.userId,
-			contextEntries,
+			[],
 			turns,
 			deps,
-			{ modelSlug, userCtx, dataContextOrSnapshot: askDataContext },
+			{ modelSlug, userCtx, dataContextOrSnapshot: askDataContext, memorySnapshot: memSnapshot },
 		);
 	}
 
@@ -249,7 +255,7 @@ export async function handleAsk(
 				sessionKey,
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
-				expectedSessionId: ctx.sessionId,
+				expectedSessionId: ensuredSessionId,
 			},
 			userTurn,
 			assistantTurn,

@@ -35,7 +35,6 @@ import {
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
-import { gatherContext } from './app-data.js';
 import { getAutoDetectSetting } from './auto-detect.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
@@ -82,7 +81,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
-	const [{ wrote: noteWrote }, turns, contextEntries, autoDetect, userCtx] = await Promise.all([
+	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, snapshot: memSnapshot }, autoDetect, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -91,7 +90,14 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
 		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		gatherContext(ctx.text, ctx.userId, deps),
+		deps.chatSessions.ensureActiveSession(
+			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
+			{
+				buildSnapshot: deps.conversationRetrieval
+					? () => deps.conversationRetrieval!.buildMemorySnapshot()
+					: undefined,
+			},
+		),
 		getAutoDetectSetting(ctx.userId, deps),
 		buildUserContext(ctx, deps),
 	]);
@@ -126,10 +132,10 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				systemPrompt = await buildAppAwareSystemPrompt(
 					ctx.text,
 					ctx.userId,
-					contextEntries,
+					[],
 					turns,
 					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot },
+					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot },
 				);
 			} else {
 				// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
@@ -151,17 +157,17 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				systemPrompt = await buildAppAwareSystemPrompt(
 					ctx.text,
 					ctx.userId,
-					contextEntries,
+					[],
 					turns,
 					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext },
+					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext, memorySnapshot: memSnapshot },
 				);
 			}
 		} else {
-			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, { modelSlug, userCtx });
+			systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot });
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, { modelSlug, userCtx });
+		systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot });
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
@@ -226,7 +232,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				sessionKey,
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
-				expectedSessionId: ctx.sessionId,
+				expectedSessionId: ensuredSessionId,
 			},
 			userTurn,
 			assistantTurn,
