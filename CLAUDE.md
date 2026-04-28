@@ -127,7 +127,7 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 ## Implementation Status
 
-All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement items #1 (route metadata) and #2 Chunks A–D complete. D5c Chunks 0–E complete. **Hermes P1 complete (Chunks A–D, all sub-chunks).** **Hermes P2 complete (Chunks A–E).** **Hermes P3 complete — session persistence, REQ-CONV-SESSION-001..014.** ~8310 tests / ~361 files.
+All infrastructure (phases 0–30), food app (H1–H12b), security remediation (R1–R7, CR6, CR8, CR9), and deployment readiness (D1–D6 incl. D5a, D5b) phases are complete. LLM enhancement items #1 (route metadata) and #2 Chunks A–D complete. D5c Chunks 0–E complete. **Hermes P1 complete (Chunks A–D, all sub-chunks).** **Hermes P2 complete (Chunks A–E).** **Hermes P3 complete — session persistence, REQ-CONV-SESSION-001..014.** Post-merge: simplify pass (resolveOrDefaultSessionKey, buildFrontmatter DRY, .legacy-checked sentinel, dead export removal) + Codex P2/P3 fixes (upgrade-compat scan, stale module imports). ~8315 tests / ~361 files.
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
