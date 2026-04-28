@@ -24,7 +24,7 @@
 		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+		"onlyBuiltDependencies": ["@biomejs/biome", "better-sqlite3", "esbuild"]
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",
