@@ -3930,7 +3930,7 @@ The static base prompt (Layer 1) concatenated with the frozen snapshot block (La
 
 ### REQ-CONV-SEARCH-001: Derived-index invariant
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 SQLite database (`data/system/chat-state.db`) is always a derived index. Markdown transcripts under `data/users/<userId>/chatbot/conversation/sessions/` and `data/households/<householdId>/users/<userId>/chatbot/conversation/sessions/` are canonical. Deleting `chat-state.db` and running `pnpm chat-index-rebuild` must produce a functionally equivalent index. No feature may write to SQLite without first writing (or having already written) the canonical Markdown transcript.
 
@@ -3944,7 +3944,7 @@ SQLite database (`data/system/chat-state.db`) is always a derived index. Markdow
 
 ### REQ-CONV-SEARCH-002: User-scoped auth — no caller-supplied identity
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 `searchSessions` and all public retrieval methods derive `userId` and `householdId` exclusively from `requestContext`. No caller-supplied target user ID is accepted. A missing or absent `requestContext.userId` causes a fail-closed throw (same pattern as `searchData` in ConversationRetrievalService).
 
@@ -3959,7 +3959,7 @@ SQLite database (`data/system/chat-state.db`) is always a derived index. Markdow
 
 ### REQ-CONV-SEARCH-003: Schema — sessions, messages, messages_fts with PRAGMA user_version
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 The SQLite schema consists of three tables: `sessions` (id, user_id, household_id, source, started_at, ended_at, model, title), `messages` (session_id FK, turn_index, role, content, timestamp), and `messages_fts` (FTS5 virtual table with unicode61 tokenizer). After-insert, after-delete, and after-update triggers keep `messages_fts` synchronized. Schema is versioned via `PRAGMA user_version`. `applyMigrations(db)` is idempotent; every DDL statement uses `IF NOT EXISTS`.
 
@@ -3974,7 +3974,7 @@ The SQLite schema consists of three tables: `sessions` (id, user_id, household_i
 
 ### REQ-CONV-SEARCH-004: Connection PRAGMAs
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 Every database connection must set, in order: `PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`. `foreign_keys = ON` is required for ON DELETE CASCADE to function.
 
@@ -3989,7 +3989,7 @@ Every database connection must set, in order: `PRAGMA journal_mode = WAL`, `PRAG
 
 ### REQ-CONV-SEARCH-005: Jittered SQLite retry
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 All mutating DB operations are wrapped in `withSqliteRetry(fn, opts)` with jitter in the range 20–150 ms, maximum 15 attempts. A `SQLITE_BUSY` error triggers a retry; other errors are rethrown immediately. WAL checkpoint is issued every 50 successful writes.
 
@@ -4005,7 +4005,7 @@ All mutating DB operations are wrapped in `withSqliteRetry(fn, opts)` with jitte
 
 ### REQ-CONV-SEARCH-006: Awaited best-effort indexing on transcript write
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 After each successful transcript file write in `ChatSessionStore`, the index is updated by awaiting `index.upsertSession` / `index.appendMessage` / `index.endSession`. A try/catch logs failures and allows the transcript write to succeed. This guarantees that a subsequent `searchSessions` call immediately sees the new turn (ordering is real, not eventual).
 
@@ -4019,7 +4019,7 @@ After each successful transcript file write in `ChatSessionStore`, the index is 
 
 ### REQ-CONV-SEARCH-007: close() lifecycle and Windows-safe disposal
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 `ChatTranscriptIndex.close()` gracefully closes the underlying Database. It is called from `composeRuntime().dispose()` and from test `afterEach`. On Windows, `better-sqlite3` holds a file lock; failing to call `close()` before deleting the temp directory causes EBUSY.
 
@@ -4033,7 +4033,7 @@ After each successful transcript file write in `ChatSessionStore`, the index is 
 
 ### REQ-CONV-SEARCH-008: Untrusted FTS query sanitization
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 `buildUntrustedQuery(raw)` tokenizes input, drops zero-length tokens, and returns `{ terms: string[] }`. Each term is a safe keyword; FTS5 operator characters (`"`, `*`, `(`, `)`, `:`, `^`, `NEAR`) are stripped from each token. `buildTrustedQuery(matchExpr)` passes through for internal/test callers who need phrase/boolean/prefix syntax. The `searchSessions` service method constructs its MATCH clause from the `queryTerms: string[]` parameter (already sanitized by the caller), not from raw user or LLM text.
 
@@ -4051,7 +4051,7 @@ After each successful transcript file write in `ChatSessionStore`, the index is 
 
 ### REQ-CONV-SEARCH-009: SearchHit ordering and grouping semantics
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 Results from `searchSessions` are grouped by session. Per session, the top `limitMessagesPerSession` (default 3) matches are kept, ordered by `bm25 ASC, turn_index ASC`. Sessions are then ordered by `min(bm25) ASC, sessionStartedAt DESC, sessionId ASC` (fully deterministic). The `excludeSessionIds` parameter filters sessions at the SQL level.
 
@@ -4066,7 +4066,7 @@ Results from `searchSessions` are grouped by session. Per session, the top `limi
 
 ### REQ-CONV-SEARCH-010: Active-session dedupe via excludeSessionIds
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 Auto-invocation in `handle-message` and `handle-ask` always passes the caller's currently active `sessionId` in `excludeSessionIds`. This prevents the in-flight session's own content (already in `recentTurns`) from appearing as a duplicate in the fenced recall block.
 
@@ -4080,7 +4080,7 @@ Auto-invocation in `handle-message` and `handle-ask` always passes the caller's 
 
 ### REQ-CONV-SEARCH-011: Recall pipeline independent of PAS classification
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 The recall classification and search pipeline runs in `handle-message` and `handle-ask` BEFORE the PAS classifier and BEFORE the `auto_detect_pas` gate. Both `buildSystemPrompt` (non-PAS path) and `buildAppAwareSystemPrompt` (PAS path) accept `recalledSessions?: SearchHit[]`. A fenced `<memory-context label="recalled-session">` block appears whenever hits are non-empty, regardless of which prompt builder is chosen.
 
@@ -4096,7 +4096,7 @@ The recall classification and search pipeline runs in `handle-message` and `hand
 
 ### REQ-CONV-SEARCH-012: Prune semantics — only ended sessions, canonical deletion documented
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 `auto_prune` only targets sessions where `ended_at IS NOT NULL AND ended_at < cutoff`. Active sessions (`ended_at NULL`) are never pruned. Prune permanently deletes canonical Markdown transcript files and DB rows; rebuild cannot restore pruned sessions. `active-sessions.yaml` is swept under `withFileLock` to remove dangling entries after prune.
 
@@ -4113,7 +4113,7 @@ The recall classification and search pipeline runs in `handle-message` and `hand
 
 ### REQ-CONV-SEARCH-013: Rebuild CLI parity — walks both household and legacy paths
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 `pnpm chat-index-rebuild` walks both `data/users/<userId>/chatbot/conversation/sessions/*.md` (legacy) and `data/households/<householdId>/users/<userId>/chatbot/conversation/sessions/*.md` (post-household). It decodes each file via `transcript-codec.decode`. Corrupt transcripts that throw `CorruptTranscriptError` are skipped with a log line, not thrown. Uses raw `fs/promises` path enumeration (not `DataStore.forUser`) since the CLI runs outside `requestContext`. Includes `--dry-run` flag.
 
@@ -4128,7 +4128,7 @@ The recall classification and search pipeline runs in `handle-message` and `hand
 
 ### REQ-CONV-SEARCH-014: Fenced Layer 4 injection with hostile-content sanitization
 
-**Phase:** Hermes P5 | **Status:** Planned
+**Phase:** Hermes P5 | **Status:** Implemented
 
 Search hits are formatted by `formatRecalledSessions(hits)` and wrapped via the existing `buildMemoryContextBlock` utility with `label: 'recalled-session'` and `marker: '... (recalled session truncated)'`. Content from both `role: 'user'` and `role: 'assistant'` turns is sanitized via `sanitizeContextContent` before injection. Budget: 4000 chars.
 
@@ -7349,19 +7349,19 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-MEMORY-010 | handle-message.test.ts, prompt-builder.test.ts | 2 | 1 | Implemented |
 | REQ-CONV-MEMORY-011 | prompt-builder.test.ts, handle-message.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-MEMORY-012 | prompt-builder.test.ts | 1 | 0 | Implemented |
-| REQ-CONV-SEARCH-001 | chat-transcript-index.test.ts | 1 | 1 | Planned |
-| REQ-CONV-SEARCH-002 | search-sessions.test.ts | 2 | 1 | Planned |
-| REQ-CONV-SEARCH-003 | schema.test.ts | 2 | 1 | Planned |
-| REQ-CONV-SEARCH-004 | schema.test.ts, lifecycle-windows.test.ts | 2 | 1 | Planned |
-| REQ-CONV-SEARCH-005 | retry.test.ts | 2 | 2 | Planned |
-| REQ-CONV-SEARCH-006 | chat-session-store integration | 1 | 1 | Planned |
-| REQ-CONV-SEARCH-007 | lifecycle-windows.test.ts | 1 | 1 | Planned |
-| REQ-CONV-SEARCH-008 | fts-query.test.ts | 3 | 3 | Planned |
-| REQ-CONV-SEARCH-009 | chat-transcript-index.test.ts | 2 | 1 | Planned |
-| REQ-CONV-SEARCH-010 | transcript-recall.persona.test.ts | 1 | 1 | Planned |
-| REQ-CONV-SEARCH-011 | transcript-recall.persona.test.ts | 2 | 2 | Planned |
-| REQ-CONV-SEARCH-012 | Chunk G tests | 3 | 2 | Planned |
-| REQ-CONV-SEARCH-013 | chat-index-rebuild integration | 1 | 2 | Planned |
-| REQ-CONV-SEARCH-014 | transcript-recall.persona.test.ts | 2 | 1 | Planned |
+| REQ-CONV-SEARCH-001 | chat-transcript-index.test.ts, transcript-recall.integration.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-SEARCH-002 | search-sessions.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-SEARCH-003 | schema.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-SEARCH-004 | schema.test.ts, lifecycle-windows.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-SEARCH-005 | retry.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-SEARCH-006 | chat-session-store integration | 1 | 1 | Implemented |
+| REQ-CONV-SEARCH-007 | lifecycle-windows.test.ts, transcript-recall.integration.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-SEARCH-008 | fts-query.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-SEARCH-009 | chat-transcript-index.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-SEARCH-010 | transcript-recall.persona.test.ts (S11) | 1 | 1 | Implemented |
+| REQ-CONV-SEARCH-011 | transcript-recall.persona.test.ts (S1–S6, S7–S8) | 2 | 2 | Implemented |
+| REQ-CONV-SEARCH-012 | transcript-recall.persona.test.ts (S15, S16) | 3 | 2 | Implemented |
+| REQ-CONV-SEARCH-013 | transcript-recall.integration.test.ts (T2), chat-index-rebuild integration | 1 | 2 | Implemented |
+| REQ-CONV-SEARCH-014 | transcript-recall.persona.test.ts (S13, S14), recalled-sessions.test.ts | 2 | 1 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
