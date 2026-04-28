@@ -12,9 +12,7 @@ export interface ActiveSessionEntry {
 
 type SessionMap = Record<string, ActiveSessionEntry>;
 
-async function readMap(store: ScopedDataStore): Promise<SessionMap> {
-	const raw = await store.read(INDEX_FILE);
-	// ScopedDataStore.read returns '' for missing files
+function parseMap(raw: string): SessionMap {
 	if (!raw) return {};
 	try {
 		const parsed = parseYaml(raw);
@@ -25,6 +23,11 @@ async function readMap(store: ScopedDataStore): Promise<SessionMap> {
 	} catch {
 		return {};
 	}
+}
+
+async function readMap(store: ScopedDataStore): Promise<SessionMap> {
+	const raw = await store.read(INDEX_FILE);
+	return parseMap(raw);
 }
 
 export async function getActive(
@@ -55,4 +58,20 @@ export async function clearActive(store: ScopedDataStore, userId: string, key: s
 		delete map[key];
 		await store.write(INDEX_FILE, stringifyYaml(map));
 	});
+}
+
+/**
+ * Write an active-session entry WITHOUT acquiring the file lock.
+ * Callers MUST already hold the conversation-session-index:<userId> lock.
+ * Used by DefaultChatSessionStore.mintAndRegister which runs inside the index lock.
+ */
+export async function setActiveUnlocked(
+	store: ScopedDataStore,
+	key: string,
+	entry: ActiveSessionEntry,
+): Promise<void> {
+	const raw = await store.read(INDEX_FILE);
+	const map = parseMap(raw);
+	map[key] = entry;
+	await store.write(INDEX_FILE, stringifyYaml(map));
 }
