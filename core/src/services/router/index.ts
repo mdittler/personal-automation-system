@@ -500,7 +500,7 @@ export class Router {
 		}
 
 		// Built-in conversation commands — short-circuit before lookupCommand so they
-		// work even if the chatbot app has no /ask, /edit, or /notes in its manifest.
+		// work even if the chatbot app has no /ask, /edit, /notes, /newchat, or /reset in its manifest.
 		if (this.conversationService) {
 			if (parsed.command === '/ask') {
 				await this.dispatchConversationCommand('ask', parsed.args, ctx);
@@ -512,6 +512,10 @@ export class Router {
 			}
 			if (parsed.command === '/notes') {
 				await this.dispatchConversationCommand('notes', parsed.args, ctx);
+				return;
+			}
+			if (parsed.command === '/newchat' || parsed.command === '/reset') {
+				await this.dispatchConversationCommand('newchat', parsed.args, ctx);
 				return;
 			}
 		}
@@ -645,7 +649,7 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'notes',
+		name: 'ask' | 'edit' | 'notes' | 'newchat',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
@@ -658,6 +662,7 @@ export class Router {
 			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
+				else if (name === 'newchat') await this.conversationService!.handleNewChat(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -697,12 +702,13 @@ export class Router {
 			lines.push('  /ask <question> — Ask about apps, costs, or system status');
 			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
 			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
+			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
 			lines.push('');
 		}
 
-		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes entries
-		// if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes']);
+		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
+		// entries if conversationService is wired (they're now built-ins, not app commands).
+		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset']);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {

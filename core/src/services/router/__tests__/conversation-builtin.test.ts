@@ -94,6 +94,7 @@ function makeConversationService() {
 		handleAsk: vi.fn().mockResolvedValue(undefined),
 		handleEdit: vi.fn().mockResolvedValue(undefined),
 		handleNotes: vi.fn().mockResolvedValue(undefined),
+		handleNewChat: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -271,6 +272,47 @@ describe('Router built-in conversation commands', () => {
 		// Built-in dispatch precedes toggle check — conv.handleAsk must be called
 		expect(conv.handleAsk).toHaveBeenCalledOnce();
 	});
+
+	// ---------------------------------------------------------------------------
+	// /newchat and /reset built-ins
+	// ---------------------------------------------------------------------------
+
+	it('/newchat dispatches to handleNewChat with empty args and command route', async () => {
+		const { router } = buildRouter({ conversationService: conv });
+		await router.routeMessage(msg('/newchat'));
+
+		expect(conv.handleNewChat).toHaveBeenCalledOnce();
+		const [args, ctx] = conv.handleNewChat.mock.calls[0]!;
+		expect(args).toEqual([]);
+		expect(ctx.route?.source).toBe('command');
+		expect(ctx.route?.intent).toBe('newchat');
+		expect(ctx.route?.appId).toBe('chatbot');
+		expect(ctx.route?.confidence).toBe(1.0);
+	});
+
+	it('/reset dispatches to handleNewChat (alias for /newchat)', async () => {
+		const { router } = buildRouter({ conversationService: conv });
+		await router.routeMessage(msg('/reset'));
+
+		expect(conv.handleNewChat).toHaveBeenCalledOnce();
+		const [args, ctx] = conv.handleNewChat.mock.calls[0]!;
+		expect(args).toEqual([]);
+		expect(ctx.route?.intent).toBe('newchat');
+	});
+
+	it('/newchat@PASBot dispatches to handleNewChat (Telegram @bot suffix)', async () => {
+		const { router } = buildRouter({ conversationService: conv });
+		await router.routeMessage(msg('/newchat@PASBot'));
+
+		expect(conv.handleNewChat).toHaveBeenCalledOnce();
+	});
+
+	it('/reset@PASBot dispatches to handleNewChat (Telegram @bot suffix)', async () => {
+		const { router } = buildRouter({ conversationService: conv });
+		await router.routeMessage(msg('/reset@PASBot'));
+
+		expect(conv.handleNewChat).toHaveBeenCalledOnce();
+	});
 });
 
 describe('Router /help with conversation built-ins', () => {
@@ -351,6 +393,40 @@ describe('Router /help with conversation built-ins', () => {
 		expect(helpText).toContain('*Conversation*');
 		expect(helpText).toContain('/ask');
 		expect(helpText).toContain('/notes');
+	});
+
+	it('/help contains /newchat exactly once even when chatbot manifest declares it', async () => {
+		// Manifest explicitly declares /newchat — BUILTIN_COMMAND_NAMES filter removes the duplicate
+		const manifestWithNewchat: AppManifest = {
+			app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'Chatbot', author: 'Test' },
+			capabilities: {
+				messages: {
+					commands: [
+						{ name: '/ask', description: 'Ask a question' },
+						{ name: '/edit', description: 'Edit a file' },
+						{ name: '/notes', description: 'Toggle daily notes' },
+						{ name: '/newchat', description: 'Start a new chat (manifest)' },
+						{ name: '/reset', description: 'Reset (manifest)' },
+					],
+				},
+			},
+		};
+		const { telegram, router } = buildRouter({ conversationService: conv, chatbotManifest: manifestWithNewchat });
+		await router.routeMessage(msg('/help'));
+
+		const helpText = (telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+		const newchatCount = (helpText.match(/\/newchat/g) ?? []).length;
+		expect(newchatCount).toBe(1);
+		expect(helpText).toContain('/newchat — Start a new conversation \\(alias: /reset\\)');
+	});
+
+	it('/help /newchat entry appears in Conversation section', async () => {
+		const { telegram, router } = buildRouter({ conversationService: conv });
+		await router.routeMessage(msg('/help'));
+
+		const helpText = (telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+		expect(helpText).toContain('*Conversation*');
+		expect(helpText).toContain('/newchat');
 	});
 });
 
