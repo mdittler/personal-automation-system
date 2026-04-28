@@ -1,118 +1,154 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  MigrationBackupError,
-  createMigrationBackup,
-} from '../migration-backup.js';
+import { MigrationBackupError, createMigrationBackup } from '../migration-backup.js';
 
 let tempDir: string;
 let dataDir: string;
 let destParentDir: string;
 
 beforeEach(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), 'pas-migration-backup-test-'));
-  dataDir = join(tempDir, 'data');
-  destParentDir = join(tempDir, 'parent');
-  await mkdir(dataDir, { recursive: true });
-  await mkdir(destParentDir, { recursive: true });
+	tempDir = await mkdtemp(join(tmpdir(), 'pas-migration-backup-test-'));
+	dataDir = join(tempDir, 'data');
+	destParentDir = join(tempDir, 'parent');
+	await mkdir(dataDir, { recursive: true });
+	await mkdir(destParentDir, { recursive: true });
 });
 
 afterEach(async () => {
-  await rm(tempDir, { recursive: true, force: true });
+	await rm(tempDir, { recursive: true, force: true });
 });
+
+async function pathExists(path: string): Promise<boolean> {
+	return lstat(path)
+		.then(() => true)
+		.catch(() => false);
+}
 
 // ---------------------------------------------------------------------------
 
 describe('createMigrationBackup', () => {
-  it('happy path — copies 3 files in nested dirs and returns correct BackupResult', async () => {
-    // Build a fixture with 3 files in nested directories.
-    await mkdir(join(dataDir, 'sub', 'deep'), { recursive: true });
-    await writeFile(join(dataDir, 'root.txt'), 'hello', 'utf-8');
-    await writeFile(join(dataDir, 'sub', 'middle.txt'), 'world', 'utf-8');
-    await writeFile(join(dataDir, 'sub', 'deep', 'leaf.md'), '# leaf', 'utf-8');
+	it('happy path — copies 3 files in nested dirs and returns correct BackupResult', async () => {
+		// Build a fixture with 3 files in nested directories.
+		await mkdir(join(dataDir, 'sub', 'deep'), { recursive: true });
+		await writeFile(join(dataDir, 'root.txt'), 'hello', 'utf-8');
+		await writeFile(join(dataDir, 'sub', 'middle.txt'), 'world', 'utf-8');
+		await writeFile(join(dataDir, 'sub', 'deep', 'leaf.md'), '# leaf', 'utf-8');
 
-    const srcBytes =
-      Buffer.byteLength('hello', 'utf-8') +
-      Buffer.byteLength('world', 'utf-8') +
-      Buffer.byteLength('# leaf', 'utf-8');
+		const srcBytes =
+			Buffer.byteLength('hello', 'utf-8') +
+			Buffer.byteLength('world', 'utf-8') +
+			Buffer.byteLength('# leaf', 'utf-8');
 
-    const result = await createMigrationBackup(dataDir, destParentDir);
+		const result = await createMigrationBackup(dataDir, destParentDir);
 
-    // Shape of the returned result.
-    expect(result.fileCount).toBe(3);
-    expect(result.bytes).toBe(srcBytes);
-    expect(result.path).toContain('data-backup-pre-household-migration-');
+		// Shape of the returned result.
+		expect(result.fileCount).toBe(3);
+		expect(result.bytes).toBe(srcBytes);
+		expect(result.path).toContain('data-backup-pre-household-migration-');
 
-    // Backup dir is a sibling of dataDir, i.e. its parent is destParentDir.
-    expect(result.path.startsWith(destParentDir)).toBe(true);
+		// Backup dir is a sibling of dataDir, i.e. its parent is destParentDir.
+		expect(result.path.startsWith(destParentDir)).toBe(true);
 
-    // Verify content of one file.
-    const copied = await readFile(join(result.path, 'root.txt'), 'utf-8');
-    expect(copied).toBe('hello');
-  });
+		// Verify content of one file.
+		const copied = await readFile(join(result.path, 'root.txt'), 'utf-8');
+		expect(copied).toBe('hello');
+	});
 
-  it('empty source dir — returns fileCount: 0, bytes: 0', async () => {
-    // dataDir exists but has no files.
-    const result = await createMigrationBackup(dataDir, destParentDir);
+	it('empty source dir — returns fileCount: 0, bytes: 0', async () => {
+		// dataDir exists but has no files.
+		const result = await createMigrationBackup(dataDir, destParentDir);
 
-    expect(result.fileCount).toBe(0);
-    expect(result.bytes).toBe(0);
-    expect(result.path).toContain('data-backup-pre-household-migration-');
-  });
+		expect(result.fileCount).toBe(0);
+		expect(result.bytes).toBe(0);
+		expect(result.path).toContain('data-backup-pre-household-migration-');
+	});
 
-  it('injectable _backupFn is called; mismatch causes MigrationBackupError', async () => {
-    // Source has 2 files.
-    await writeFile(join(dataDir, 'a.txt'), 'aaa', 'utf-8');
-    await writeFile(join(dataDir, 'b.txt'), 'bbb', 'utf-8');
+	it('skips derived Obsidian vault junctions while preserving Hermes SQLite data', async () => {
+		const userNote = '# Canonical chat note';
+		const chatState = 'sqlite fixture bytes';
+		const userAppDir = join(dataDir, 'users', '8187111554', 'chatbot');
+		const vaultUserDir = join(dataDir, 'vaults', '8187111554');
+		const systemDir = join(dataDir, 'system');
 
-    let fnCalled = false;
+		await mkdir(userAppDir, { recursive: true });
+		await mkdir(vaultUserDir, { recursive: true });
+		await mkdir(systemDir, { recursive: true });
+		await writeFile(join(userAppDir, 'history.md'), userNote, 'utf-8');
+		await writeFile(join(systemDir, 'chat-state.db'), chatState, 'utf-8');
+		await symlink(
+			userAppDir,
+			join(vaultUserDir, 'chatbot'),
+			process.platform === 'win32' ? 'junction' : 'dir',
+		);
 
-    // The injected function creates the dest dir but leaves it empty.
-    const _backupFn = vi.fn(async (_src: string, dest: string) => {
-      fnCalled = true;
-      await mkdir(dest, { recursive: true });
-      // Deliberately copy nothing — verification should fail.
-    });
+		const result = await createMigrationBackup(dataDir, destParentDir);
 
-    await expect(
-      createMigrationBackup(dataDir, destParentDir, { _backupFn }),
-    ).rejects.toThrow(MigrationBackupError);
+		expect(result.fileCount).toBe(2);
+		expect(result.bytes).toBe(
+			Buffer.byteLength(userNote, 'utf-8') + Buffer.byteLength(chatState, 'utf-8'),
+		);
+		await expect(
+			readFile(join(result.path, 'users', '8187111554', 'chatbot', 'history.md'), 'utf-8'),
+		).resolves.toBe(userNote);
+		await expect(readFile(join(result.path, 'system', 'chat-state.db'), 'utf-8')).resolves.toBe(
+			chatState,
+		);
+		expect(await pathExists(join(result.path, 'vaults', '8187111554', 'chatbot'))).toBe(false);
+	});
 
-    expect(fnCalled).toBe(true);
-    expect(_backupFn).toHaveBeenCalledOnce();
-  });
+	it('injectable _backupFn is called; mismatch causes MigrationBackupError', async () => {
+		// Source has 2 files.
+		await writeFile(join(dataDir, 'a.txt'), 'aaa', 'utf-8');
+		await writeFile(join(dataDir, 'b.txt'), 'bbb', 'utf-8');
 
-  it('verification fails when _backupFn does nothing (no dir created)', async () => {
-    await writeFile(join(dataDir, 'file.txt'), 'data', 'utf-8');
+		let fnCalled = false;
 
-    // Does absolutely nothing — backup dir never gets created.
-    const _backupFn = vi.fn(async () => {
-      // intentionally empty
-    });
+		// The injected function creates the dest dir but leaves it empty.
+		const _backupFn = vi.fn(async (_src: string, dest: string) => {
+			fnCalled = true;
+			await mkdir(dest, { recursive: true });
+			// Deliberately copy nothing — verification should fail.
+		});
 
-    await expect(
-      createMigrationBackup(dataDir, destParentDir, { _backupFn }),
-    ).rejects.toThrow(MigrationBackupError);
-  });
+		await expect(createMigrationBackup(dataDir, destParentDir, { _backupFn })).rejects.toThrow(
+			MigrationBackupError,
+		);
 
-  it('file count mismatch — throws MigrationBackupError with useful message', async () => {
-    await writeFile(join(dataDir, 'one.txt'), 'one', 'utf-8');
-    await writeFile(join(dataDir, 'two.txt'), 'two', 'utf-8');
-    await writeFile(join(dataDir, 'three.txt'), 'three', 'utf-8');
+		expect(fnCalled).toBe(true);
+		expect(_backupFn).toHaveBeenCalledOnce();
+	});
 
-    // Only copies 1 of the 3 source files.
-    const _backupFn = vi.fn(async (_src: string, dest: string) => {
-      await mkdir(dest, { recursive: true });
-      await writeFile(join(dest, 'one.txt'), 'one', 'utf-8');
-    });
+	it('verification fails when _backupFn does nothing (no dir created)', async () => {
+		await writeFile(join(dataDir, 'file.txt'), 'data', 'utf-8');
 
-    const error = await createMigrationBackup(dataDir, destParentDir, {
-      _backupFn,
-    }).catch((e: unknown) => e);
+		// Does absolutely nothing — backup dir never gets created.
+		const _backupFn = vi.fn(async () => {
+			// intentionally empty
+		});
 
-    expect(error).toBeInstanceOf(MigrationBackupError);
-    expect((error as MigrationBackupError).message).toMatch(/3.*1|1.*3/);
-  });
+		await expect(createMigrationBackup(dataDir, destParentDir, { _backupFn })).rejects.toThrow(
+			MigrationBackupError,
+		);
+	});
+
+	it('file count mismatch — throws MigrationBackupError with useful message', async () => {
+		await writeFile(join(dataDir, 'one.txt'), 'one', 'utf-8');
+		await writeFile(join(dataDir, 'two.txt'), 'two', 'utf-8');
+		await writeFile(join(dataDir, 'three.txt'), 'three', 'utf-8');
+
+		// Only copies 1 of the 3 source files.
+		const _backupFn = vi.fn(async (_src: string, dest: string) => {
+			await mkdir(dest, { recursive: true });
+			await writeFile(join(dest, 'one.txt'), 'one', 'utf-8');
+		});
+
+		const error = await createMigrationBackup(dataDir, destParentDir, {
+			_backupFn,
+		}).catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(MigrationBackupError);
+		expect((error as MigrationBackupError).message).toMatch(/3.*1|1.*3/);
+	});
 });

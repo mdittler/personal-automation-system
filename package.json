@@ -16,6 +16,7 @@
 		"lint:fix": "biome check --write .",
 		"test": "vitest run",
 		"test:watch": "vitest watch",
+		"auth:set-password": "tsx core/src/cli/auth-set-password.ts",
 		"scaffold-app": "tsx core/src/cli/scaffold-app.ts",
 		"install-app": "tsx core/src/cli/install-app.ts",
 		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",

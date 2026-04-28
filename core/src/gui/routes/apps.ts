@@ -46,8 +46,7 @@ function escapeHtml(str: string): string {
 export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions): void {
 	const { registry, config, appToggle, dataDir, logger } = options;
 
-	// D5b-4: platform-admin gate
-	server.addHook('preHandler', requirePlatformAdmin);
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// Cache AppConfigServiceImpl instances per appId
 	const configServiceCache = new Map<string, AppConfigServiceImpl>();
@@ -65,7 +64,7 @@ export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions
 	}
 
 	// App list
-	server.get('/apps', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/apps', platformAdminOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
 		const apps = registry.getAll();
 		const users = config.users;
 		const overrides = await appToggle.getAllOverrides();
@@ -105,7 +104,7 @@ export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions
 	server.post<{
 		Params: { appId: string };
 		Body: { userId: string; enabled: string };
-	}>('/apps/:appId/toggle', async (request, reply) => {
+	}>('/apps/:appId/toggle', platformAdminOnly, async (request, reply) => {
 		const { appId } = request.params;
 		const { userId, enabled } = request.body;
 
@@ -147,59 +146,63 @@ export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions
 	});
 
 	// App detail
-	server.get<{ Params: { appId: string } }>('/apps/:appId', async (request, reply) => {
-		const { appId } = request.params;
-		const app = registry.getApp(appId);
+	server.get<{ Params: { appId: string } }>(
+		'/apps/:appId',
+		platformAdminOnly,
+		async (request, reply) => {
+			const { appId } = request.params;
+			const app = registry.getApp(appId);
 
-		if (!app) {
-			return reply.status(404).viewAsync('app-detail', {
-				title: 'App Not Found — PAS',
-				activePage: 'apps',
-				app: null,
-				appId,
-			});
-		}
+			if (!app) {
+				return reply.status(404).viewAsync('app-detail', {
+					title: 'App Not Found — PAS',
+					activePage: 'apps',
+					app: null,
+					appId,
+				});
+			}
 
-		// Load per-user config values if app has user_config
-		const configDefs = app.manifest.user_config ?? [];
-		const userConfigs: Array<{
-			userId: string;
-			userName: string;
-			values: Record<string, unknown>;
-		}> = [];
+			// Load per-user config values if app has user_config
+			const configDefs = app.manifest.user_config ?? [];
+			const userConfigs: Array<{
+				userId: string;
+				userName: string;
+				values: Record<string, unknown>;
+			}> = [];
 
-		if (configDefs.length > 0) {
-			const appConfig = getAppConfigService(appId, configDefs);
-			const manifestDefaults = Object.fromEntries(configDefs.map((d) => [d.key, d.default]));
-			const systemDefaults = getSystemDefaults(appId, config);
-			for (const user of config.users) {
-				try {
-					// Merge manifest defaults → system defaults → user overrides so that
-					// operator-level defaults (e.g. chat.log_to_notes: true) are visible in the GUI.
-					const overrides = (await appConfig.getOverrides(user.id)) ?? {};
-					const values = { ...manifestDefaults, ...systemDefaults, ...overrides };
-					userConfigs.push({ userId: user.id, userName: user.name, values });
-				} catch {
-					userConfigs.push({ userId: user.id, userName: user.name, values: {} });
+			if (configDefs.length > 0) {
+				const appConfig = getAppConfigService(appId, configDefs);
+				const manifestDefaults = Object.fromEntries(configDefs.map((d) => [d.key, d.default]));
+				const systemDefaults = getSystemDefaults(appId, config);
+				for (const user of config.users) {
+					try {
+						// Merge manifest defaults → system defaults → user overrides so that
+						// operator-level defaults (e.g. chat.log_to_notes: true) are visible in the GUI.
+						const overrides = (await appConfig.getOverrides(user.id)) ?? {};
+						const values = { ...manifestDefaults, ...systemDefaults, ...overrides };
+						userConfigs.push({ userId: user.id, userName: user.name, values });
+					} catch {
+						userConfigs.push({ userId: user.id, userName: user.name, values: {} });
+					}
 				}
 			}
-		}
 
-		return reply.viewAsync('app-detail', {
-			title: `${app.manifest.app.name} — PAS`,
-			activePage: 'apps',
-			app: {
-				id: app.manifest.app.id,
-				name: app.manifest.app.name,
-				version: app.manifest.app.version,
-				description: app.manifest.app.description,
-				author: app.manifest.app.author,
-				capabilities: app.manifest.capabilities,
-				requirements: app.manifest.requirements,
-				userConfig: configDefs,
-			},
-			userConfigs,
-			csrfToken: (request as unknown as Record<string, unknown>).csrfToken,
-		});
-	});
+			return reply.viewAsync('app-detail', {
+				title: `${app.manifest.app.name} — PAS`,
+				activePage: 'apps',
+				app: {
+					id: app.manifest.app.id,
+					name: app.manifest.app.name,
+					version: app.manifest.app.version,
+					description: app.manifest.app.description,
+					author: app.manifest.app.author,
+					capabilities: app.manifest.capabilities,
+					requirements: app.manifest.requirements,
+					userConfig: configDefs,
+				},
+				userConfigs,
+				csrfToken: (request as unknown as Record<string, unknown>).csrfToken,
+			});
+		},
+	);
 }

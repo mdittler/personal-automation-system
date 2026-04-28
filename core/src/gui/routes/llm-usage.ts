@@ -274,11 +274,10 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 		llmSafeguards,
 	} = options;
 
-	// D5b-4: platform-admin gate
-	server.addHook('preHandler', requirePlatformAdmin);
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// Main LLM page
-	server.get('/llm', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/llm', platformAdminOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
 		const content = await llm.costTracker.readUsage();
 		const standardRef = modelSelector.getStandardRef();
 		const fastRef = modelSelector.getFastRef();
@@ -347,19 +346,23 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 	});
 
 	// htmx partial: live metrics (polled every 5s by the Live card)
-	server.get('/llm/metrics', async (_request: FastifyRequest, reply: FastifyReply) => {
-		const active = messageRateTracker?.getActiveHouseholds() ?? 0;
-		const rpm = messageRateTracker?.getMessagesPerMinute() ?? 0;
-		const html =
-			`<span id="live-active-households">${escapeHtml(String(active))}</span> active household${active !== 1 ? 's' : ''} &mdash; ` +
-			`<span id="live-rpm">${escapeHtml(String(rpm))}</span> msg/min`;
-		return reply.type('text/html').send(html);
-	});
+	server.get(
+		'/llm/metrics',
+		platformAdminOnly,
+		async (_request: FastifyRequest, reply: FastifyReply) => {
+			const active = messageRateTracker?.getActiveHouseholds() ?? 0;
+			const rpm = messageRateTracker?.getMessagesPerMinute() ?? 0;
+			const html =
+				`<span id="live-active-households">${escapeHtml(String(active))}</span> active household${active !== 1 ? 's' : ''} &mdash; ` +
+				`<span id="live-rpm">${escapeHtml(String(rpm))}</span> msg/min`;
+			return reply.type('text/html').send(html);
+		},
+	);
 
 	// Update tier assignment (new multi-provider route)
 	server.post<{
 		Body: { tier?: string; provider?: string; model?: string };
-	}>('/llm/tiers', async (request, reply) => {
+	}>('/llm/tiers', platformAdminOnly, async (request, reply) => {
 		const { tier, provider, model } = request.body;
 
 		if (!tier || typeof tier !== 'string' || !VALID_TIERS.has(tier)) {
@@ -401,7 +404,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 	// Legacy: update model selection (backward compat)
 	server.post<{
 		Body: { standardModel?: string; fastModel?: string };
-	}>('/llm/models', async (request, reply) => {
+	}>('/llm/models', platformAdminOnly, async (request, reply) => {
 		const { standardModel, fastModel } = request.body;
 
 		if (standardModel && typeof standardModel === 'string' && standardModel.trim()) {
@@ -425,111 +428,115 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 	});
 
 	// Available models (htmx partial, lazy-loaded, grouped by provider)
-	server.get('/llm/available-models', async (_request: FastifyRequest, reply: FastifyReply) => {
-		try {
-			const models = await modelCatalog.getModels();
-			const standardRef = modelSelector.getStandardRef();
-			const fastRef = modelSelector.getFastRef();
-			const reasoningRef = modelSelector.getReasoningRef();
+	server.get(
+		'/llm/available-models',
+		platformAdminOnly,
+		async (_request: FastifyRequest, reply: FastifyReply) => {
+			try {
+				const models = await modelCatalog.getModels();
+				const standardRef = modelSelector.getStandardRef();
+				const fastRef = modelSelector.getFastRef();
+				const reasoningRef = modelSelector.getReasoningRef();
 
-			// Group models by provider
-			const byProvider = new Map<string, typeof models>();
-			for (const model of models) {
-				const key = model.provider ?? 'unknown';
-				if (!byProvider.has(key)) byProvider.set(key, []);
-				byProvider.get(key)?.push(model);
-			}
-
-			// Add pricing-table models not in catalog, grouped by provider
-			const catalogModelKeys = new Set(models.map((m) => `${m.provider ?? ''}:${m.id}`));
-			for (const [modelId, pricing] of Object.entries(MODEL_PRICING)) {
-				// These have no provider info — group under "other"
-				if (!catalogModelKeys.has(`:${modelId}`) && !models.some((m) => m.id === modelId)) {
-					if (!byProvider.has('other')) byProvider.set('other', []);
-					byProvider.get('other')?.push({
-						id: modelId,
-						displayName: 'not in API',
-						createdAt: '',
-						pricing,
-						provider: 'other',
-						providerType: undefined,
-					});
+				// Group models by provider
+				const byProvider = new Map<string, typeof models>();
+				for (const model of models) {
+					const key = model.provider ?? 'unknown';
+					if (!byProvider.has(key)) byProvider.set(key, []);
+					byProvider.get(key)?.push(model);
 				}
-			}
 
-			let html = '';
+				// Add pricing-table models not in catalog, grouped by provider
+				const catalogModelKeys = new Set(models.map((m) => `${m.provider ?? ''}:${m.id}`));
+				for (const [modelId, pricing] of Object.entries(MODEL_PRICING)) {
+					// These have no provider info — group under "other"
+					if (!catalogModelKeys.has(`:${modelId}`) && !models.some((m) => m.id === modelId)) {
+						if (!byProvider.has('other')) byProvider.set('other', []);
+						byProvider.get('other')?.push({
+							id: modelId,
+							displayName: 'not in API',
+							createdAt: '',
+							pricing,
+							provider: 'other',
+							providerType: undefined,
+						});
+					}
+				}
 
-			for (const [providerId, providerModels] of byProvider) {
-				const safeProvider = escapeHtml(providerId);
-				html += `<h4>${safeProvider}</h4>`;
-				html += '<table><thead><tr>';
-				html += '<th>Model ID</th><th>Display Name</th>';
-				html += '<th>Input $/M</th><th>Output $/M</th>';
-				html += '<th>Standard</th><th>Fast</th><th>Reasoning</th>';
-				html += '</tr></thead><tbody>';
+				let html = '';
 
-				for (const model of providerModels) {
-					const safeId = escapeHtml(model.id);
-					const safeName = escapeHtml(model.displayName);
+				for (const [providerId, providerModels] of byProvider) {
+					const safeProvider = escapeHtml(providerId);
+					html += `<h4>${safeProvider}</h4>`;
+					html += '<table><thead><tr>';
+					html += '<th>Model ID</th><th>Display Name</th>';
+					html += '<th>Input $/M</th><th>Output $/M</th>';
+					html += '<th>Standard</th><th>Fast</th><th>Reasoning</th>';
+					html += '</tr></thead><tbody>';
 
-					// Show the pricing that CostTracker will actually use for this model:
-					// catalog pricing > MODEL_PRICING table > DEFAULT_REMOTE_PRICING (for non-Ollama)
-					const isOllama = model.providerType === 'ollama';
-					const knownPricing = model.pricing ?? getModelPricing(model.id);
-					let inputPrice: string;
-					let outputPrice: string;
-					if (isOllama) {
-						inputPrice = '$0.00';
-						outputPrice = '$0.00';
-					} else if (knownPricing) {
-						inputPrice = `$${knownPricing.input.toFixed(2)}`;
-						outputPrice = `$${knownPricing.output.toFixed(2)}`;
-					} else {
-						// No exact pricing — CostTracker falls back to DEFAULT_REMOTE_PRICING
-						inputPrice = `~$${DEFAULT_REMOTE_PRICING.input.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
-						outputPrice = `~$${DEFAULT_REMOTE_PRICING.output.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
+					for (const model of providerModels) {
+						const safeId = escapeHtml(model.id);
+						const safeName = escapeHtml(model.displayName);
+
+						// Show the pricing that CostTracker will actually use for this model:
+						// catalog pricing > MODEL_PRICING table > DEFAULT_REMOTE_PRICING (for non-Ollama)
+						const isOllama = model.providerType === 'ollama';
+						const knownPricing = model.pricing ?? getModelPricing(model.id);
+						let inputPrice: string;
+						let outputPrice: string;
+						if (isOllama) {
+							inputPrice = '$0.00';
+							outputPrice = '$0.00';
+						} else if (knownPricing) {
+							inputPrice = `$${knownPricing.input.toFixed(2)}`;
+							outputPrice = `$${knownPricing.output.toFixed(2)}`;
+						} else {
+							// No exact pricing — CostTracker falls back to DEFAULT_REMOTE_PRICING
+							inputPrice = `~$${DEFAULT_REMOTE_PRICING.input.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
+							outputPrice = `~$${DEFAULT_REMOTE_PRICING.output.toFixed(2)} <small title="No exact pricing — using conservative fallback estimate">(est.)</small>`;
+						}
+
+						const isStandard = isModelRefActive(model, standardRef);
+						const isFast = isModelRefActive(model, fastRef);
+						const isReasoning = reasoningRef ? isModelRefActive(model, reasoningRef) : false;
+
+						const btnStyle = 'style="padding:0.15rem 0.4rem;margin:0;font-size:0.75rem"';
+						const modelProvider = model.provider ?? providerId;
+
+						const standardBtn = isStandard
+							? '<span class="status-ok">Active</span>'
+							: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'standard', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as standard model?">Set</button>`;
+
+						const fastBtn = isFast
+							? '<span class="status-ok">Active</span>'
+							: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'fast', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as fast model?">Set</button>`;
+
+						const reasoningBtn = isReasoning
+							? '<span class="status-ok">Active</span>'
+							: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'reasoning', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as reasoning model?">Set</button>`;
+
+						html += `<tr><td><code>${safeId}</code></td><td>${safeName}</td>`;
+						html += `<td>${inputPrice}</td><td>${outputPrice}</td>`;
+						html += `<td>${standardBtn}</td><td>${fastBtn}</td><td>${reasoningBtn}</td></tr>`;
 					}
 
-					const isStandard = isModelRefActive(model, standardRef);
-					const isFast = isModelRefActive(model, fastRef);
-					const isReasoning = reasoningRef ? isModelRefActive(model, reasoningRef) : false;
-
-					const btnStyle = 'style="padding:0.15rem 0.4rem;margin:0;font-size:0.75rem"';
-					const modelProvider = model.provider ?? providerId;
-
-					const standardBtn = isStandard
-						? '<span class="status-ok">Active</span>'
-						: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'standard', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as standard model?">Set</button>`;
-
-					const fastBtn = isFast
-						? '<span class="status-ok">Active</span>'
-						: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'fast', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as fast model?">Set</button>`;
-
-					const reasoningBtn = isReasoning
-						? '<span class="status-ok">Active</span>'
-						: `<button class="outline" ${btnStyle} hx-post="/gui/llm/tiers" hx-vals='${escapeHtml(JSON.stringify({ tier: 'reasoning', provider: modelProvider, model: model.id }))}' hx-swap="none" hx-confirm="Set ${safeId} as reasoning model?">Set</button>`;
-
-					html += `<tr><td><code>${safeId}</code></td><td>${safeName}</td>`;
-					html += `<td>${inputPrice}</td><td>${outputPrice}</td>`;
-					html += `<td>${standardBtn}</td><td>${fastBtn}</td><td>${reasoningBtn}</td></tr>`;
+					html += '</tbody></table>';
 				}
 
-				html += '</tbody></table>';
-			}
+				if (byProvider.size === 0) {
+					html = '<p>No models available. Check your provider configuration and API keys.</p>';
+				}
 
-			if (byProvider.size === 0) {
-				html = '<p>No models available. Check your provider configuration and API keys.</p>';
+				return reply.type('text/html').send(html);
+			} catch (err) {
+				logger.error(
+					{ error: err instanceof Error ? err.message : String(err) },
+					'Failed to load available models',
+				);
+				return reply
+					.type('text/html')
+					.send('<p class="status-err">Failed to load available models. Check your API keys.</p>');
 			}
-
-			return reply.type('text/html').send(html);
-		} catch (err) {
-			logger.error(
-				{ error: err instanceof Error ? err.message : String(err) },
-				'Failed to load available models',
-			);
-			return reply
-				.type('text/html')
-				.send('<p class="status-err">Failed to load available models. Check your API keys.</p>');
-		}
-	});
+		},
+	);
 }

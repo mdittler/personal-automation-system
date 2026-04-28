@@ -134,13 +134,7 @@ function clearSessionCookie(reply: FastifyReply): void {
  * Must be registered as a Fastify plugin within the /gui prefix.
  */
 export async function registerAuth(server: FastifyInstance, options: AuthOptions): Promise<void> {
-	const {
-		authToken,
-		credentialService,
-		userManager,
-		householdService,
-		loginRateLimiter,
-	} = options;
+	const { authToken, credentialService, userManager, householdService, loginRateLimiter } = options;
 
 	/** Whether D5b-3 per-user auth is available (all deps present). */
 	const hasPerUserAuth = Boolean(credentialService && userManager && householdService);
@@ -226,7 +220,8 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 			const sessionVersion = await credentialService!.getSessionVersion(adminUser.id);
 			issueSessionCookie(reply, adminUser.id, sessionVersion, 'legacy-gui-token');
-			return reply.redirect('/gui/');
+			const hasPassword = await credentialService!.hasCredentials(adminUser.id);
+			return reply.redirect(hasPassword ? '/gui/' : '/gui/account');
 		}
 
 		// --- Password path ---
@@ -410,6 +405,11 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		enterRequestContext({ userId: actor.userId, householdId: actor.householdId });
 
 		// 4f. Reissue cookie with fresh issuedAt (sliding session)
-		issueSessionCookie(reply, actor.userId, currentVersion, actor.authMethod as 'gui-password' | 'legacy-gui-token');
+		issueSessionCookie(
+			reply,
+			actor.userId,
+			currentVersion,
+			actor.authMethod as 'gui-password' | 'legacy-gui-token',
+		);
 	});
 }

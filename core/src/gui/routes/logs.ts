@@ -119,11 +119,10 @@ export function registerLogsRoutes(server: FastifyInstance, options: LogsOptions
 	const { dataDir } = options;
 	const logFilePath = join(dataDir, 'system', 'logs', 'pas.log');
 
-	// D5b-4: platform-admin gate
-	server.addHook('preHandler', requirePlatformAdmin);
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// Full page
-	server.get('/logs', async (request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/logs', platformAdminOnly, async (request: FastifyRequest, reply: FastifyReply) => {
 		const query = request.query as { level?: string };
 		const level = query.level || '';
 		const { entries, available } = await readLogEntries(logFilePath, 100, level || undefined);
@@ -138,25 +137,31 @@ export function registerLogsRoutes(server: FastifyInstance, options: LogsOptions
 	});
 
 	// htmx partial — just the table body
-	server.get('/logs/entries', async (request: FastifyRequest, reply: FastifyReply) => {
-		const query = request.query as { level?: string; limit?: string };
-		const level = query.level || '';
-		const limit = Math.min(Number(query.limit) || 100, 500);
-		const { entries, available } = await readLogEntries(logFilePath, limit, level || undefined);
+	server.get(
+		'/logs/entries',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const query = request.query as { level?: string; limit?: string };
+			const level = query.level || '';
+			const limit = Math.min(Number(query.limit) || 100, 500);
+			const { entries, available } = await readLogEntries(logFilePath, limit, level || undefined);
 
-		if (!available) {
-			return reply.type('text/html').send('<tr><td colspan="5">Log file not available.</td></tr>');
-		}
+			if (!available) {
+				return reply
+					.type('text/html')
+					.send('<tr><td colspan="5">Log file not available.</td></tr>');
+			}
 
-		const rows = entries
-			.map(
-				(e) =>
-					`<tr class="${e.level >= 40 ? 'status-err' : ''}"><td><small>${escapeHtml(e.time)}</small></td><td><kbd>${escapeHtml(e.levelLabel)}</kbd></td><td>${escapeHtml(e.service || e.appId || '-')}</td><td>${escapeHtml(e.msg)}</td></tr>`,
-			)
-			.join('\n');
+			const rows = entries
+				.map(
+					(e) =>
+						`<tr class="${e.level >= 40 ? 'status-err' : ''}"><td><small>${escapeHtml(e.time)}</small></td><td><kbd>${escapeHtml(e.levelLabel)}</kbd></td><td>${escapeHtml(e.service || e.appId || '-')}</td><td>${escapeHtml(e.msg)}</td></tr>`,
+				)
+				.join('\n');
 
-		return reply.type('text/html').send(rows);
-	});
+			return reply.type('text/html').send(rows);
+		},
+	);
 }
 
 function escapeHtml(str: string): string {

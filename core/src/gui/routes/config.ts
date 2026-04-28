@@ -24,8 +24,7 @@ export interface ConfigOptions {
 export function registerConfigRoutes(server: FastifyInstance, options: ConfigOptions): void {
 	const { registry, config, dataDir, logger } = options;
 
-	// D5b-4: platform-admin gate
-	server.addHook('preHandler', requirePlatformAdmin);
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// Cache AppConfigServiceImpl instances per appId to avoid re-creation on each request
 	const configServiceCache = new Map<string, AppConfigServiceImpl>();
@@ -43,14 +42,18 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 	}
 
 	// Redirect to dashboard (config is now merged into dashboard)
-	server.get('/config', async (_request: FastifyRequest, reply: FastifyReply) => {
-		return reply.redirect('/gui/');
-	});
+	server.get(
+		'/config',
+		platformAdminOnly,
+		async (_request: FastifyRequest, reply: FastifyReply) => {
+			return reply.redirect('/gui/');
+		},
+	);
 
 	// Update per-user app config
 	server.post<{
 		Params: { appId: string; userId: string };
-	}>('/config/:appId/:userId', async (request, reply) => {
+	}>('/config/:appId/:userId', platformAdminOnly, async (request, reply) => {
 		const { appId, userId } = request.params;
 		const body = request.body as Record<string, string>;
 
@@ -96,7 +99,10 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 		}
 
 		if (coercionFailures.length > 0) {
-			logger.warn({ appId, userId, failures: coercionFailures }, 'Config update rejected: coercion failure');
+			logger.warn(
+				{ appId, userId, failures: coercionFailures },
+				'Config update rejected: coercion failure',
+			);
 			return reply.status(400).send(`Invalid config values: ${coercionFailures.join('; ')}`);
 		}
 

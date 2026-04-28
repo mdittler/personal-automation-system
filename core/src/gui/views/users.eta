@@ -63,14 +63,15 @@
               <% } %>
             </td>
             <td>
+              <a href="/gui/users/<%= user.id %>/reset-password" role="button" class="outline secondary toggle-btn">Reset Password</a>
               <% if (user.isAdmin && it.adminCount <= 1) { %>
-                <button class="outline secondary toggle-btn" style="opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>
+                <button class="outline secondary toggle-btn" style="opacity:0.4;cursor:not-allowed;margin-left:0.35rem" disabled title="Cannot remove the sole admin">Remove</button>
               <% } else { %>
                 <form hx-post="/gui/users/<%= user.id %>/remove"
                       hx-target="#user-row-<%= user.id %>"
                       hx-swap="delete"
                       hx-confirm="Remove user <%= user.name %>? This cannot be undone."
-                      style="margin:0">
+                      style="margin:0;display:inline-block;margin-left:0.35rem">
                   <button type="submit" class="outline secondary toggle-btn">Remove</button>
                 </form>
               <% } %>

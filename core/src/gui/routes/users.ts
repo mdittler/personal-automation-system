@@ -34,11 +34,10 @@ function escapeHtml(str: string): string {
 export function registerUserRoutes(server: FastifyInstance, options: UserRoutesOptions): void {
 	const { userManager, userMutationService, registry, spaceService, logger } = options;
 
-	// D5b-4: platform-admin gate — all user management routes require admin
-	server.addHook('preHandler', requirePlatformAdmin);
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// --- List all users ---
-	server.get('/users', async (_request: FastifyRequest, reply: FastifyReply) => {
+	server.get('/users', platformAdminOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
 		const users = userManager.getAllUsers();
 		const appIds = registry.getLoadedAppIds();
 		const apps = appIds.map((id) => ({
@@ -59,97 +58,109 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 	});
 
 	// --- Update user app access (htmx partial) ---
-	server.post('/users/:userId/apps', async (request: FastifyRequest, reply: FastifyReply) => {
-		const { userId } = request.params as { userId: string };
+	server.post(
+		'/users/:userId/apps',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { userId } = request.params as { userId: string };
 
-		if (!/^\d+$/.test(userId)) {
-			return reply.status(400).type('text/html').send('Invalid user ID format');
-		}
-
-		const user = userManager.getUser(userId);
-		if (!user) {
-			return reply.status(404).type('text/html').send('User not found');
-		}
-
-		const body = request.body as Record<string, string>;
-		const allAppIds = registry.getLoadedAppIds();
-		const checkedApps: string[] = [];
-
-		for (const appId of allAppIds) {
-			if (body[`app_${appId}`] === 'on') {
-				checkedApps.push(appId);
+			if (!/^\d+$/.test(userId)) {
+				return reply.status(400).type('text/html').send('Invalid user ID format');
 			}
-		}
 
-		const finalApps = checkedApps.length === allAppIds.length ? ['*'] : checkedApps;
+			const user = userManager.getUser(userId);
+			if (!user) {
+				return reply.status(404).type('text/html').send('User not found');
+			}
 
-		await userMutationService.updateUserApps(userId, finalApps);
-		logger.info({ userId, apps: finalApps }, 'User apps updated via GUI');
+			const body = request.body as Record<string, string>;
+			const allAppIds = registry.getLoadedAppIds();
+			const checkedApps: string[] = [];
 
-		// Re-fetch user after mutation
-		const updatedUser = userManager.getUser(userId);
-		if (!updatedUser) {
-			return reply.status(404).type('text/html').send('User not found');
-		}
+			for (const appId of allAppIds) {
+				if (body[`app_${appId}`] === 'on') {
+					checkedApps.push(appId);
+				}
+			}
 
-		const spaces = spaceService.listSpaces();
-		const adminCount = userManager.getAllUsers().filter((u) => u.isAdmin).length;
-		return reply
-			.type('text/html')
-			.send(buildUserRow(updatedUser, allAppIds, registry, spaces, adminCount));
-	});
+			const finalApps = checkedApps.length === allAppIds.length ? ['*'] : checkedApps;
+
+			await userMutationService.updateUserApps(userId, finalApps);
+			logger.info({ userId, apps: finalApps }, 'User apps updated via GUI');
+
+			// Re-fetch user after mutation
+			const updatedUser = userManager.getUser(userId);
+			if (!updatedUser) {
+				return reply.status(404).type('text/html').send('User not found');
+			}
+
+			const spaces = spaceService.listSpaces();
+			const adminCount = userManager.getAllUsers().filter((u) => u.isAdmin).length;
+			return reply
+				.type('text/html')
+				.send(buildUserRow(updatedUser, allAppIds, registry, spaces, adminCount));
+		},
+	);
 
 	// --- Update user shared scopes via space checkboxes (htmx partial) ---
-	server.post('/users/:userId/groups', async (request: FastifyRequest, reply: FastifyReply) => {
-		const { userId } = request.params as { userId: string };
+	server.post(
+		'/users/:userId/groups',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { userId } = request.params as { userId: string };
 
-		if (!/^\d+$/.test(userId)) {
-			return reply.status(400).type('text/html').send('Invalid user ID format');
-		}
-
-		const user = userManager.getUser(userId);
-		if (!user) {
-			return reply.status(404).type('text/html').send('User not found');
-		}
-
-		const body = request.body as Record<string, string>;
-		const allSpaces = spaceService.listSpaces();
-		const checkedScopes: string[] = [];
-
-		for (const space of allSpaces) {
-			if (body[`space_${space.id}`] === 'on') {
-				checkedScopes.push(space.id);
+			if (!/^\d+$/.test(userId)) {
+				return reply.status(400).type('text/html').send('Invalid user ID format');
 			}
-		}
 
-		await userMutationService.updateUserSharedScopes(userId, checkedScopes);
-		logger.info({ userId, scopes: checkedScopes }, 'User shared scopes updated via GUI');
+			const user = userManager.getUser(userId);
+			if (!user) {
+				return reply.status(404).type('text/html').send('User not found');
+			}
 
-		return reply.type('text/html').send(buildSpacesCell(userId, checkedScopes, allSpaces));
-	});
+			const body = request.body as Record<string, string>;
+			const allSpaces = spaceService.listSpaces();
+			const checkedScopes: string[] = [];
+
+			for (const space of allSpaces) {
+				if (body[`space_${space.id}`] === 'on') {
+					checkedScopes.push(space.id);
+				}
+			}
+
+			await userMutationService.updateUserSharedScopes(userId, checkedScopes);
+			logger.info({ userId, scopes: checkedScopes }, 'User shared scopes updated via GUI');
+
+			return reply.type('text/html').send(buildSpacesCell(userId, checkedScopes, allSpaces));
+		},
+	);
 
 	// --- Remove user (htmx partial) ---
-	server.post('/users/:userId/remove', async (request: FastifyRequest, reply: FastifyReply) => {
-		const { userId } = request.params as { userId: string };
+	server.post(
+		'/users/:userId/remove',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { userId } = request.params as { userId: string };
 
-		if (!/^\d+$/.test(userId)) {
-			return reply.status(400).type('text/html').send('Invalid user ID format');
-		}
+			if (!/^\d+$/.test(userId)) {
+				return reply.status(400).type('text/html').send('Invalid user ID format');
+			}
 
-		const result = await userMutationService.removeUser(userId);
+			const result = await userMutationService.removeUser(userId);
 
-		if (result.error) {
-			return reply
-				.status(400)
-				.type('text/html')
-				.send(`<p style="color:var(--pico-del-color)">${escapeHtml(result.error)}</p>`);
-		}
+			if (result.error) {
+				return reply
+					.status(400)
+					.type('text/html')
+					.send(`<p style="color:var(--pico-del-color)">${escapeHtml(result.error)}</p>`);
+			}
 
-		logger.info({ userId }, 'User removed via GUI');
+			logger.info({ userId }, 'User removed via GUI');
 
-		// Return empty string — htmx hx-swap="delete" removes the row
-		return reply.type('text/html').send('');
-	});
+			// Return empty string — htmx hx-swap="delete" removes the row
+			return reply.type('text/html').send('');
+		},
+	);
 }
 
 /** Build a full <tr> for a user row (htmx-replaceable). */
@@ -199,10 +210,11 @@ function buildUserRow(
 	// Remove button cell — disabled for sole admin
 	const isSoleAdmin = user.isAdmin && adminCount <= 1;
 	html += '<td>';
+	html += `<a href="/gui/users/${safeId}/reset-password" role="button" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem">Reset Password</a>`;
 	if (isSoleAdmin) {
-		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem;opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>`;
+		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0 0 0 0.35rem;font-size:0.8rem;opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>`;
 	} else {
-		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem" `;
+		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0 0 0 0.35rem;font-size:0.8rem" `;
 		html += `hx-post="/gui/users/${safeId}/remove" `;
 		html += `hx-target="#user-row-${safeId}" hx-swap="delete" `;
 		html += `hx-confirm="Remove user ${safeName}?">Remove</button>`;
@@ -214,11 +226,7 @@ function buildUserRow(
 }
 
 /** Build the spaces checkboxes cell content (htmx-replaceable). */
-function buildSpacesCell(
-	userId: string,
-	userScopes: string[],
-	spaces: SpaceDefinition[],
-): string {
+function buildSpacesCell(userId: string, userScopes: string[], spaces: SpaceDefinition[]): string {
 	const safeId = escapeHtml(userId);
 	const scopeSet = new Set(userScopes);
 

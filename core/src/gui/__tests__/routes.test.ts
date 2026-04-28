@@ -10,14 +10,17 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppRegistry, RegisteredApp } from '../../services/app-registry/index.js';
 import { AppToggleStore } from '../../services/app-toggle/index.js';
+import { CredentialService } from '../../services/credentials/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
+import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import { CronManager } from '../../services/scheduler/cron-manager.js';
-import { JobFailureNotifier } from '../../services/scheduler/job-failure-notifier.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
+import { JobFailureNotifier } from '../../services/scheduler/job-failure-notifier.js';
 import { OneOffManager } from '../../services/scheduler/oneoff-manager.js';
-import { CredentialService } from '../../services/credentials/index.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -160,27 +163,33 @@ async function buildApp(tempDir: string) {
 		getAll: () => [],
 		getProviderIds: () => [],
 		has: () => false,
-	} as unknown as import('../../services/llm/providers/provider-registry.js').ProviderRegistry;
+	} as unknown as ProviderRegistry;
 
 	// D5b-4: wire per-user auth so requirePlatformAdmin can inspect request.user
 	const credService = new CredentialService({ dataDir: tempDir });
 	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
 	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
-	const householdService = makeHouseholdService(
-		{ [TEST_USER_ID]: 'hh-1' },
-		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
-	);
+	const householdService = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+		{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+	]);
 
 	await app.register(
 		async (gui) => {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				userManager: userManager as unknown as UserManager,
+				householdService: householdService as unknown as HouseholdService,
 			});
 			await registerCsrfProtection(gui);
-			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir: tempDir, logger });
+			registerDashboardRoutes(gui, {
+				registry,
+				scheduler,
+				config,
+				modelSelector,
+				dataDir: tempDir,
+				logger,
+			});
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir: tempDir, logger });
@@ -284,6 +293,18 @@ describe('GUI Routes', () => {
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
+	describe('GET /gui/login', () => {
+		it('stays publicly reachable after admin-only route modules are registered', async () => {
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/login',
+			});
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('PAS Management');
+		});
+	});
+
 	describe('GET /gui/ (Dashboard)', () => {
 		it('returns 200 with dashboard content', async () => {
 			const res = await authenticatedGet(app, '/gui/');
@@ -371,19 +392,20 @@ describe('GUI Routes', () => {
 
 			const cbCredService = new CredentialService({ dataDir: chatbotTempDir });
 			await cbCredService.setPassword(TEST_USER_ID, TEST_PASSWORD);
-			const cbUserManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
-			const cbHouseholdService = makeHouseholdService(
-				{ [TEST_USER_ID]: 'hh-1' },
-				[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
-			);
+			const cbUserManager = makeUserManager([
+				{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true },
+			]);
+			const cbHouseholdService = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+				{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+			]);
 
 			await chatbotApp.register(
 				async (gui) => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: cbCredService,
-						userManager: cbUserManager as unknown as import('../../services/user-manager/index.js').UserManager,
-						householdService: cbHouseholdService as unknown as import('../../services/household/index.js').HouseholdService,
+						userManager: cbUserManager as unknown as UserManager,
+						householdService: cbHouseholdService as unknown as HouseholdService,
 					});
 					await registerCsrfProtection(gui);
 					registerAppsRoutes(gui, {
@@ -469,7 +491,11 @@ describe('GUI Routes', () => {
 			expect(page.body).toContain('Disabled');
 			expect(page.body).toContain('/gui/scheduler/system/daily-diff/re-enable');
 
-			const reenable = await authenticatedPost(app, '/gui/scheduler/system/daily-diff/re-enable', {});
+			const reenable = await authenticatedPost(
+				app,
+				'/gui/scheduler/system/daily-diff/re-enable',
+				{},
+			);
 			expect(reenable.statusCode).toBe(302);
 			expect(reenable.headers.location).toBe('/gui/scheduler');
 
@@ -710,26 +736,29 @@ describe('GUI Routes', () => {
 			// D5b-4: wire per-user auth
 			const cfgCredService = new CredentialService({ dataDir: configTempDir });
 			await cfgCredService.setPassword(TEST_USER_ID, TEST_PASSWORD);
-			const cfgUserManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
-			const cfgHouseholdService = makeHouseholdService(
-				{ [TEST_USER_ID]: 'hh-1' },
-				[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
-			);
+			const cfgUserManager = makeUserManager([
+				{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true },
+			]);
+			const cfgHouseholdService = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+				{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+			]);
 
 			await fastifyApp.register(
 				async (gui) => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: cfgCredService,
-						userManager: cfgUserManager as unknown as import('../../services/user-manager/index.js').UserManager,
-						householdService: cfgHouseholdService as unknown as import('../../services/household/index.js').HouseholdService,
+						userManager: cfgUserManager as unknown as UserManager,
+						householdService: cfgHouseholdService as unknown as HouseholdService,
 					});
 					await registerCsrfProtection(gui);
 					registerDashboardRoutes(gui, {
 						registry,
 						scheduler,
 						config,
-						modelSelector: { getStandardRef: () => ({ provider: 'anthropic', model: 'claude-sonnet-4-6' }) } as unknown as ModelSelector,
+						modelSelector: {
+							getStandardRef: () => ({ provider: 'anthropic', model: 'claude-sonnet-4-6' }),
+						} as unknown as ModelSelector,
 						dataDir: configTempDir,
 						logger,
 					});

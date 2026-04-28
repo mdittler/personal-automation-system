@@ -95,11 +95,32 @@ When you are in a space, supported apps read and write that space's shared data.
 
 ## Management GUI
 
-Open the GUI at `http://<your-server>:3000/gui` and sign in with the GUI auth token.
+Open the GUI at `http://<your-server>:3000/gui` and sign in with your Telegram user ID and GUI password.
+
+### First Admin Password Setup
+
+On a new or migrated single-admin install, use the `GUI_AUTH_TOKEN` from `.env` only as a bootstrap/recovery token:
+
+1. Open `http://<your-server>:3000/gui/login`.
+2. Expand **Single-admin install? Use authentication token**.
+3. Enter `GUI_AUTH_TOKEN`.
+4. PAS sends you to **Account**, where you can set your GUI password.
+5. After that, log in with your Telegram user ID and password.
+
+If a stale browser session keeps showing 403, clear site data/cookies for the PAS host and log in again.
+
+If you are locked out of the GUI, an operator with filesystem access can reset a password from the project directory:
+
+```bash
+pnpm auth:set-password --user-id <telegram-user-id>
+```
+
+The command prompts for the new password and stores only the hashed credential in `data/system/credentials.yaml`.
 
 Use it to:
 
 - View users and adjust their app access
+- Reset GUI passwords for users
 - Add or remove space access for users
 - Browse data files
 - View schedules, reports, alerts, and LLM cost tracking
@@ -140,6 +161,7 @@ In the GUI Users page, admins can:
 
 - Toggle which apps a user can access
 - Add or remove a user from existing spaces
+- Reset a user's GUI password
 - Remove users
 
 The GUI prevents removing the only admin. Keep at least one admin account with working Telegram and GUI access.

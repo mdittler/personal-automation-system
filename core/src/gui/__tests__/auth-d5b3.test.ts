@@ -30,7 +30,7 @@ import fastifyFormBody from '@fastify/formbody';
 import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getCurrentHouseholdId } from '../../services/context/request-context.js';
 import { CredentialService } from '../../services/credentials/index.js';
 import { registerAuth } from '../auth.js';
@@ -84,9 +84,7 @@ interface FixtureOptions {
 }
 
 async function buildApp(opts: FixtureOptions = {}) {
-	const users = opts.users ?? [
-		{ id: '111', name: 'Alice', isAdmin: true },
-	];
+	const users = opts.users ?? [{ id: '111', name: 'Alice', isAdmin: true }];
 	const households = opts.households ?? [{ id: 'hh-1', adminUserIds: ['111'] }];
 	const userToHousehold = opts.userToHousehold ?? { '111': 'hh-1' };
 
@@ -111,7 +109,9 @@ async function buildApp(opts: FixtureOptions = {}) {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
 				userManager: userManager as Parameters<typeof registerAuth>[1]['userManager'],
-				householdService: householdService as Parameters<typeof registerAuth>[1]['householdService'],
+				householdService: householdService as Parameters<
+					typeof registerAuth
+				>[1]['householdService'],
 			});
 
 			await registerViewLocals(gui, {
@@ -226,7 +226,7 @@ describe('D5b-3 per-user auth', () => {
 	});
 
 	// ---------- Test 4: legacy token, exactly one isAdmin user ----------
-	it('4. legacy token + exactly one isAdmin user → promoted to that admin', async () => {
+	it('4. legacy token + exactly one isAdmin user with no password → promoted and sent to account setup', async () => {
 		const app = await buildApp({ credService });
 
 		const loginRes = await app.inject({
@@ -236,7 +236,7 @@ describe('D5b-3 per-user auth', () => {
 			headers: { 'content-type': 'application/x-www-form-urlencoded' },
 		});
 		expect(loginRes.statusCode).toBe(302);
-		expect(loginRes.headers.location).toBe('/gui/');
+		expect(loginRes.headers.location).toBe('/gui/account');
 
 		const authCookie = extractAuthCookie(loginRes);
 		expect(authCookie).toBeDefined();
@@ -251,6 +251,22 @@ describe('D5b-3 per-user auth', () => {
 		const body = dashRes.json() as { user: { userId: string; isPlatformAdmin: boolean } };
 		expect(body.user.userId).toBe('111');
 		expect(body.user.isPlatformAdmin).toBe(true);
+
+		await app.close();
+	});
+
+	it('4b. legacy token + exactly one isAdmin user with password → promoted to dashboard', async () => {
+		await credService.setPassword('111', 'correct-pw');
+		const app = await buildApp({ credService });
+
+		const loginRes = await app.inject({
+			method: 'POST',
+			url: '/gui/login',
+			payload: `legacyToken=${encodeURIComponent(AUTH_TOKEN)}`,
+			headers: { 'content-type': 'application/x-www-form-urlencoded' },
+		});
+		expect(loginRes.statusCode).toBe(302);
+		expect(loginRes.headers.location).toBe('/gui/');
 
 		await app.close();
 	});
@@ -333,7 +349,7 @@ describe('D5b-3 per-user auth', () => {
 		const expiredPayload = JSON.stringify({
 			userId: '111',
 			sessionVersion: 1,
-			issuedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
+			issuedAt: Date.now() - 25 * 60 * 60 * 1000, // 25 hours ago
 			authMethod: 'gui-password',
 		});
 		// Sign it using Fastify's cookie signer (same secret)

@@ -18,9 +18,9 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 export async function requirePlatformAdmin(
 	request: FastifyRequest,
 	reply: FastifyReply,
-): Promise<void> {
+): Promise<unknown> {
 	if (!request.user?.isPlatformAdmin) {
-		await reply.status(403).viewAsync('403', {
+		return reply.status(403).viewAsync('403', {
 			title: '403 Forbidden — PAS',
 		});
 	}
