@@ -39,6 +39,7 @@ export interface SearchResult {
 
 export interface InternalSearchFilters {
   userId: string;
+  /** Stored for indexing context. Auth filtering is userId-only; household boundary is enforced at the service layer. */
   householdId: string | null;
   queryTerms: string[];            // already sanitized non-empty terms
   limitSessions?: number;          // default 5
