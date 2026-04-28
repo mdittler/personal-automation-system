@@ -69,6 +69,7 @@
 | Hermes P1 | ConversationService — core service extraction | **Complete** | ~80 | Extracted chatbot into `core/src/services/conversation/`; retired apps/chatbot; ConversationService first-class in bootstrap. Chunks A–D.4. Spec: `docs/superpowers/specs/2026-04-25-hermes-p1-conversation-service-design.md` |
 | Hermes P2 | ConversationRetrievalService — broad data visibility | **Complete** | ~30 | Source Policy allowlist, ConversationRetrievalService skeleton + DI wiring, scoped ReportService/AlertService APIs, compose all readers + buildContextSnapshot, handler wiring + persona tests, URS finalization. Chunks A–E. Spec: `docs/superpowers/specs/2026-04-27-hermes-p2-conversation-retrieval-design.md` |
 | Hermes P3 | Session persistence — manual /newchat and /reset | **Complete** | ~70 | Explicit per-session transcript files (`YYYYMMDD_HHMMSS_<8hex>.md`) under `chatbot/conversation/sessions/`. Tracers A–K: manifest scope, session-key/id/codec pure helpers, session-index with file mutex, Router peekActive + sessionId binding, ChatSessionStore appendExchange + endActive with locked race semantics, legacy history.json migration, ConversationService swap (replaces ConversationHistory), Router /newchat /reset built-ins + /help dedup, full compose-runtime wiring + conversation-history deletion, persona + production integration tests, URS REQ-CONV-SESSION-001..014. Post-merge simplify pass: `resolveOrDefaultSessionKey` helper (DRY 3-call-site fallback), `buildFrontmatter` optional `startedAt` (DRY inline object), `.legacy-checked` sentinel (O(1) re-entry guard) + upgrade-compat scan (prevent duplicate import for pre-sentinel P3 users), dead `setActive` barrel export removed, stale `conversation-history` module imports in 3 test files fixed. Plan: `docs/superpowers/plans/can-you-start-on-wondrous-bentley.md` |
+| Hermes P4 | Durable-memory snapshot + fenced recall | **Complete** | ~35 | `MemorySnapshot` frozen at session-mint via `ensureActiveSession` (before prompt assembly); persisted in session frontmatter (`memory_snapshot:` YAML, snake_case on disk / camelCase in TS). `buildMemoryContextBlock` + `sanitizeContextContent` fence utility (nested backtick collapse, role-tag neutralization). Layer 2: snapshot injected before `appendUserContextSection` inside `<memory-context label="durable-memory">` (tags outside fence). Layer 4: recalled `searchData` results wrapped in `<memory-context label="recalled-data">`. Per-turn ContextStore re-injection removed from `gatherContext`. `ensureActiveSession` replaces `ctx.sessionId` as `appendExchange` race guard. URS REQ-CONV-MEMORY-001..012. Chunks 0–F. Plan: `docs/superpowers/plans/can-you-start-on-shimmying-mountain.md`. Spec: `docs/superpowers/specs/2026-04-28-hermes-p4-memory-snapshot-design.md` |
 
 ### Dependency Graph
 
@@ -2712,6 +2713,55 @@ Remove the last legacy fallback surface: `SystemConfig.fallback`, `SystemConfig.
 **Hermes P1 (Chunks A → B → C → D.1 → D.2 → D.3 → D.4) is complete as of 2026-04-27.**
 
 ConversationService is now a first-class core service. The chatbot app source is deleted. All legacy `fallback`/`_legacyKeys` surface is removed. Phases P2–P5 (ConversationRetrievalService, session persistence, memory snapshot, FTS5 search) remain deferred per `docs/open-items.md`.
+
+---
+
+## Hermes P4: Durable-Memory Snapshot + Fenced Recall — COMPLETE
+
+**Hermes P4 (Chunks 0 → A → B → C → D → E → F) is complete as of 2026-04-28.**
+
+### What was built
+
+Two concerns addressed in one phase:
+
+**Prompt-prefix stability (Layer 2)** — every turn previously rebuilt the system prompt from scratch including live ContextStore entries, invalidating the LLM's prefix cache on every turn. P4 freezes durable ContextStore entries into a `MemorySnapshot` at session-mint time (`ensureActiveSession`), persists it in session frontmatter, and injects it as Layer 2 — between the static base prompt and per-turn user-context — via a `<memory-context label="durable-memory">` fenced block. The per-turn `gatherContext` ContextStore read is removed entirely.
+
+**Fenced recall wrapper (Layers 2 + 4)** — recalled content now lands inside a `<memory-context>` block with sanitized payload (nested backtick collapse, role-tag neutralization), framing tags outside the code fence. This signals to the LLM that the content is reference data, not a new instruction source.
+
+### Files added / modified
+
+| Path | Change |
+|------|--------|
+| `core/src/services/prompt-assembly/memory-context.ts` (new) | `buildMemoryContextBlock`, `sanitizeContextContent`, `toFrontmatter`, `parseMemorySnapshotFrontmatter` |
+| `core/src/types/conversation-session.ts` | `MemorySnapshot` interface |
+| `core/src/services/conversation-retrieval/conversation-retrieval-service.ts` | `buildMemorySnapshot()` method |
+| `core/src/services/conversation-session/chat-session-store.ts` | `ensureActiveSession`, `peekSnapshot`, `memory_snapshot` frontmatter field |
+| `core/src/services/conversation/prompt-builder.ts` | Layer 2 injection, Layer 4 fenced wrapping, options-object API, removed per-turn durable injection |
+| `core/src/services/conversation/app-data.ts` | `gatherContext` returns `[]` — ContextStore no longer read per-turn |
+| `core/src/services/conversation/handle-message.ts` | `ensureActiveSession` replaces `gatherContext`; snapshot threaded to prompt builders |
+| `core/src/services/conversation/handle-ask.ts` | Mirror of handle-message wiring |
+| `docs/urs.md` | REQ-CONV-MEMORY-001..012 + traceability matrix |
+| `docs/superpowers/specs/2026-04-28-hermes-p4-memory-snapshot-design.md` (new) | Design spec |
+| `docs/open-items.md` | P4 complete, P6 deferrals logged |
+
+### Key architectural decisions
+
+| Decision | Choice |
+|----------|--------|
+| Snapshot persistence | Session frontmatter `memory_snapshot:` (snake_case YAML; camelCase TS via mapping helpers) |
+| Snapshot input source | All `ContextStore.listForUser(userId)` entries (alphabetical sort; typed-kind filter deferred to P6) |
+| Snapshot mint timing | Inside `ensureActiveSession`, before any prompt assembly — first turn sees Layer 2 |
+| Failure mode | `status: 'degraded'` when retrieval wired and `buildMemorySnapshot` throws; no field when retrieval absent |
+| Per-turn injection | Removed — `gatherContext` returns `[]`; durable memory enters only via the frozen snapshot |
+| Layer 2 insertion | After static base prompt, before `appendUserContextSection` — maximizes prefix-cache stability |
+| Race guard | `ensuredSessionId` from `ensureActiveSession` replaces `ctx.sessionId` as `expectedSessionId` in `appendExchange` |
+| Fenced wrapper format | Tags outside code fence; sanitized payload inside — framing reads as instruction, payload reads as data |
+
+### Verification
+
+- `pnpm test` — 362 test files / 8401+ tests / 0 failures
+- Persona test: `memory-snapshot.persona.test.ts` — freeze semantic, mid-session mutation isolation, new-session snapshot rebuild (7 tests)
+- Prefix-cache stability: two consecutive turns with identical snapshot produce byte-identical Layer 2 block
 
 ---
 
