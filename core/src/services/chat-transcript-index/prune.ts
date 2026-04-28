@@ -13,10 +13,10 @@
  * user to remove any dangling entries (should be rare, but guards against inconsistency).
  */
 
-import { access, unlink, readFile, writeFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseYaml, toYaml } from '../../utils/yaml.js';
 import { withFileLock } from '../../utils/file-mutex.js';
+import { parseYaml, toYaml } from '../../utils/yaml.js';
 import type { ChatTranscriptIndex } from './chat-transcript-index.js';
 
 // ---------------------------------------------------------------------------
@@ -53,11 +53,7 @@ export interface PruneResult {
  * handled separately by `findHouseholdPath`, which scans the households
  * directory at runtime.
  */
-function candidatePaths(
-	dataDir: string,
-	userId: string,
-	sessionId: string,
-): string[] {
+function candidatePaths(dataDir: string, userId: string, sessionId: string): string[] {
 	// We don't know the householdId from the sessions row alone, so we must
 	// scan.  The DB row only has user_id; household_id may be null.
 	// We'll use fs.access to find which path actually exists.
@@ -186,8 +182,8 @@ async function sweepActiveSessionsFile(
 				entry &&
 				typeof entry === 'object' &&
 				!Array.isArray(entry) &&
-				typeof (entry as Record<string, unknown>)['id'] === 'string' &&
-				prunedIds.has((entry as Record<string, unknown>)['id'] as string)
+				typeof (entry as Record<string, unknown>).id === 'string' &&
+				prunedIds.has((entry as Record<string, unknown>).id as string)
 			) {
 				delete map[key];
 				changed = true;
@@ -227,11 +223,10 @@ export async function pruneExpiredSessions(
 	let skipped = 0;
 	let errors = 0;
 
-	// Track which session IDs were successfully pruned (for active-sessions sweep)
-	const prunedIds = new Set<string>();
+	// Track pruned session IDs per user (scoped to avoid cross-user false positives)
+	const prunedByUser = new Map<string, Set<string>>();
 
 	// Track affected users for the active-sessions sweep
-	// Map: userId -> set of base roots (could be legacy or household)
 	const affectedUsers = new Set<string>();
 
 	// 3. For each expired session: delete the transcript file and remove from DB
@@ -249,17 +244,15 @@ export async function pruneExpiredSessions(
 				if (!dryRun) {
 					await index.deleteSession(sessionId);
 				}
-				prunedIds.add(sessionId);
+				if (!prunedByUser.has(userId)) prunedByUser.set(userId, new Set());
+				prunedByUser.get(userId)!.add(sessionId);
 				affectedUsers.add(userId);
 				pruned++;
 				continue;
 			}
 
 			if (dryRun) {
-				logger?.info(
-					{ sessionId, userId, filePath },
-					'prune: [dry-run] would delete transcript',
-				);
+				logger?.info({ sessionId, userId, filePath }, 'prune: [dry-run] would delete transcript');
 				skipped++;
 				continue;
 			}
@@ -267,22 +260,20 @@ export async function pruneExpiredSessions(
 			// Delete the file under a lock (guards against concurrent readers).
 			// Handle ENOENT gracefully — a concurrent pruner or manual deletion may have
 			// beaten us here. Still remove the DB row so the index stays consistent.
-			await withFileLock(
-				`conversation-session-transcript:${userId}:${sessionId}`,
-				async () => {
-					try {
-						await unlink(filePath);
-					} catch (err) {
-						if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-						// Already deleted — fall through to DB cleanup below
-					}
-				},
-			);
+			await withFileLock(`conversation-session-transcript:${userId}:${sessionId}`, async () => {
+				try {
+					await unlink(filePath);
+				} catch (err) {
+					if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+					// Already deleted — fall through to DB cleanup below
+				}
+			});
 
 			// Remove from DB (cascades to messages + FTS rows)
 			await index.deleteSession(sessionId);
 
-			prunedIds.add(sessionId);
+			if (!prunedByUser.has(userId)) prunedByUser.set(userId, new Set());
+			prunedByUser.get(userId)!.add(sessionId);
 			affectedUsers.add(userId);
 			pruned++;
 
@@ -296,15 +287,18 @@ export async function pruneExpiredSessions(
 	// 4. Sweep active-sessions.yaml for all affected users (once per user, not per session)
 	// We need to find all possible active-sessions.yaml files for each userId.
 	// Both the legacy and household layouts may have them.
-	if (!dryRun && prunedIds.size > 0) {
+	if (!dryRun && prunedByUser.size > 0) {
 		for (const userId of affectedUsers) {
+			const userPrunedIds = prunedByUser.get(userId) ?? new Set<string>();
+			if (userPrunedIds.size === 0) continue;
+
 			// Legacy path
 			const legacyRoot = join(dataDir, 'users', userId, 'chatbot');
 			const legacyActiveSessions = activeSessionsPath(legacyRoot);
 			await sweepActiveSessionsFile(
 				legacyActiveSessions,
 				`conversation-session-index:${userId}`,
-				prunedIds,
+				userPrunedIds,
 			);
 
 			// Household paths — walk all households for this user
@@ -322,7 +316,7 @@ export async function pruneExpiredSessions(
 				await sweepActiveSessionsFile(
 					hhActiveSessions,
 					`conversation-session-index:${userId}`,
-					prunedIds,
+					userPrunedIds,
 				);
 			}
 		}

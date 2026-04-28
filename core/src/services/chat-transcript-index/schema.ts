@@ -58,23 +58,23 @@ END;
 `;
 
 export function openWithPragmas(db: Database.Database): void {
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  db.pragma('synchronous = NORMAL');
+	db.pragma('journal_mode = WAL');
+	db.pragma('foreign_keys = ON');
+	db.pragma('busy_timeout = 5000');
+	db.pragma('synchronous = NORMAL');
 }
 
 export function applyMigrations(db: Database.Database): void {
-  // Always apply connection PRAGMAs (must be outside transaction).
-  openWithPragmas(db);
-  const currentVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
-  if (currentVersion === SCHEMA_VERSION) return;
-  if (currentVersion > SCHEMA_VERSION) {
-    throw new Error(
-      `chat-transcript-index: DB schema version ${currentVersion} is newer than supported ${SCHEMA_VERSION}. Upgrade the application.`
-    );
-  }
-  // Apply DDL — IF NOT EXISTS guards make each statement idempotent
-  db.exec(DDL);
-  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+	// Always apply connection PRAGMAs (must be outside transaction).
+	openWithPragmas(db);
+	const currentVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+	if (currentVersion === SCHEMA_VERSION) return;
+	if (currentVersion > SCHEMA_VERSION) {
+		throw new Error(
+			`chat-transcript-index: DB schema version ${currentVersion} is newer than supported ${SCHEMA_VERSION}. Upgrade the application.`,
+		);
+	}
+	// Apply DDL — IF NOT EXISTS guards make each statement idempotent
+	db.exec(DDL);
+	db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }

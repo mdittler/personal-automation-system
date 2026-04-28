@@ -7,19 +7,22 @@
  * Active sessions are NEVER pruned; only ended sessions older than retentionDays.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, mkdir, writeFile, access } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { readFileSync } from 'node:fs';
+import { parsePasYamlConfig } from '../../../services/config/pas-yaml-schema.js';
+import type {
+	ChatSessionFrontmatter,
+	SessionTurn,
+} from '../../conversation-session/chat-session-store.js';
+import { encodeAppend, encodeNew } from '../../conversation-session/transcript-codec.js';
 import { ChatTranscriptIndexImpl } from '../chat-transcript-index.js';
 import { pruneExpiredSessions } from '../prune.js';
 import { rebuildIndex } from '../rebuild.js';
-import { encodeNew, encodeAppend } from '../../conversation-session/transcript-codec.js';
-import type { ChatSessionFrontmatter, SessionTurn } from '../../conversation-session/chat-session-store.js';
 import type { SessionRow } from '../types.js';
-import { parsePasYamlConfig } from '../../../services/config/pas-yaml-schema.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,7 +184,7 @@ describe('config-loader defaults', () => {
 		// Validate via Zod schema that absent sessions section gives defaults
 		const raw = parsePasYamlConfig({ chat: {} });
 		// schema passes through (sessions absent) — defaults applied at config load time
-		expect(raw.chat?.['sessions']).toBeUndefined();
+		expect(raw.chat?.sessions).toBeUndefined();
 	});
 
 	test('absent chat.sessions → loadSystemConfig materializes auto_prune=false, retention_days=90', async () => {
@@ -225,35 +228,29 @@ chat: {}
 		const raw = parsePasYamlConfig({
 			chat: { sessions: { auto_prune: true, retention_days: 30 } },
 		});
-		expect(raw.chat?.['sessions']).toMatchObject({ auto_prune: true, retention_days: 30 });
+		expect(raw.chat?.sessions).toMatchObject({ auto_prune: true, retention_days: 30 });
 	});
 
 	test('retention_days=0 fails schema validation', () => {
-		expect(() =>
-			parsePasYamlConfig({ chat: { sessions: { retention_days: 0 } } }),
-		).toThrow();
+		expect(() => parsePasYamlConfig({ chat: { sessions: { retention_days: 0 } } })).toThrow();
 	});
 
 	test('retention_days=-1 fails schema validation', () => {
-		expect(() =>
-			parsePasYamlConfig({ chat: { sessions: { retention_days: -1 } } }),
-		).toThrow();
+		expect(() => parsePasYamlConfig({ chat: { sessions: { retention_days: -1 } } })).toThrow();
 	});
 
 	test('retention_days=3651 fails schema validation', () => {
-		expect(() =>
-			parsePasYamlConfig({ chat: { sessions: { retention_days: 3651 } } }),
-		).toThrow();
+		expect(() => parsePasYamlConfig({ chat: { sessions: { retention_days: 3651 } } })).toThrow();
 	});
 
 	test('retention_days=1 passes schema', () => {
 		const raw = parsePasYamlConfig({ chat: { sessions: { retention_days: 1 } } });
-		expect(raw.chat?.['sessions']).toMatchObject({ retention_days: 1 });
+		expect(raw.chat?.sessions).toMatchObject({ retention_days: 1 });
 	});
 
 	test('retention_days=3650 passes schema', () => {
 		const raw = parsePasYamlConfig({ chat: { sessions: { retention_days: 3650 } } });
-		expect(raw.chat?.['sessions']).toMatchObject({ retention_days: 3650 });
+		expect(raw.chat?.sessions).toMatchObject({ retention_days: 3650 });
 	});
 
 	test('retention_days non-integer string fails schema', () => {
@@ -505,7 +502,7 @@ describe('active-sessions.yaml is cleaned up after prune', () => {
 		await mkdir(activeSessionsDir, { recursive: true });
 		const activeSessionsPath = join(activeSessionsDir, 'active-sessions.yaml');
 		const fakeEntry = {
-			'default': { id: sessionId, started_at: daysAgo(20), model: null },
+			default: { id: sessionId, started_at: daysAgo(20), model: null },
 		};
 		await writeFile(activeSessionsPath, stringifyYaml(fakeEntry), 'utf8');
 
@@ -522,7 +519,7 @@ describe('active-sessions.yaml is cleaned up after prune', () => {
 		// The entry with id=sessionId should be gone
 		for (const key of Object.keys(parsed ?? {})) {
 			const entry = parsed[key] as Record<string, unknown> | null;
-			expect(entry?.['id']).not.toBe(sessionId);
+			expect(entry?.id).not.toBe(sessionId);
 		}
 
 		await index.close();
@@ -586,6 +583,86 @@ describe('dry-run mode', () => {
 		// DB row still exists
 		const meta = await index.getSessionMeta('dryrun-session');
 		expect(meta).toBeDefined();
+
+		await index.close();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// User-scoped active-session sweep
+// ---------------------------------------------------------------------------
+
+describe('pruneExpiredSessions — user-scoped active-session cleanup', () => {
+	test('pruning user A sessions does not remove user B active-sessions entries', async () => {
+		const dataDir = join(tempDir, 'data');
+		const localDbPath = join(tempDir, 'prune-scoped.db');
+		const index = new ChatTranscriptIndexImpl(localDbPath);
+
+		// Seed an expired session for user A
+		await seedSession(index, dataDir, {
+			id: 'expired-alice',
+			userId: 'user-alice',
+			startedAt: daysAgo(100),
+			endedAt: daysAgo(95),
+		});
+
+		// Seed an active session for user B (should never be touched)
+		await seedSession(index, dataDir, {
+			id: 'active-bob',
+			userId: 'user-bob',
+			startedAt: daysAgo(5),
+			endedAt: null,
+		});
+
+		// Write an active-sessions.yaml for user B that references 'active-bob'
+		const bobActiveSessionsPath = join(
+			dataDir,
+			'users',
+			'user-bob',
+			'chatbot',
+			'conversation',
+			'active-sessions.yaml',
+		);
+		await mkdir(join(dataDir, 'users', 'user-bob', 'chatbot', 'conversation'), { recursive: true });
+		await writeFile(
+			bobActiveSessionsPath,
+			`default:\n  id: active-bob\n  started_at: "${daysAgo(5)}"\n`,
+			'utf8',
+		);
+
+		// Write an active-sessions.yaml for user A that references 'expired-alice'
+		const aliceActiveSessionsPath = join(
+			dataDir,
+			'users',
+			'user-alice',
+			'chatbot',
+			'conversation',
+			'active-sessions.yaml',
+		);
+		await mkdir(join(dataDir, 'users', 'user-alice', 'chatbot', 'conversation'), {
+			recursive: true,
+		});
+		await writeFile(
+			aliceActiveSessionsPath,
+			`default:\n  id: expired-alice\n  started_at: "${daysAgo(100)}"\n`,
+			'utf8',
+		);
+
+		const result = await pruneExpiredSessions(index, {
+			retentionDays: 30,
+			dataDir,
+		});
+
+		expect(result.pruned).toBe(1);
+		expect(result.errors).toBe(0);
+
+		// User A's active-sessions.yaml should have the expired entry removed
+		const aliceYaml = await readFile(aliceActiveSessionsPath, 'utf8').catch(() => '');
+		expect(aliceYaml).not.toContain('expired-alice');
+
+		// User B's active-sessions.yaml must be untouched
+		const bobYaml = await readFile(bobActiveSessionsPath, 'utf8');
+		expect(bobYaml).toContain('active-bob');
 
 		await index.close();
 	});

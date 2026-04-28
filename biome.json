@@ -48,7 +48,7 @@
 	},
 	"overrides": [
 		{
-			"include": ["core/src/cli/**", "apps/*/scripts/**"],
+			"include": ["core/src/cli/**", "apps/*/scripts/**", "scripts/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {

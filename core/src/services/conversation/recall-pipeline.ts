@@ -9,10 +9,13 @@
 
 import type { AppLogger } from '../../types/app-module.js';
 import type { LLMService } from '../../types/llm.js';
-import type { SearchHit } from '../chat-transcript-index/index.js';
 import { buildUntrustedQuery } from '../chat-transcript-index/fts-query.js';
-import { classifyRecallIntent, recallPreFilter } from '../conversation-retrieval/recall-classifier.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
 import type { ConversationRetrievalService } from '../conversation-retrieval/index.js';
+import {
+	classifyRecallIntent,
+	recallPreFilter,
+} from '../conversation-retrieval/recall-classifier.js';
 
 export interface RecallPipelineDeps {
 	llm: LLMService;

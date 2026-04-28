@@ -583,3 +583,88 @@ describe('buildAppAwareSystemPrompt', () => {
 		assertNoMemoryContextBlock(prompt, 'recalled-data');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Layer 5 prompt ordering
+// ---------------------------------------------------------------------------
+
+describe('recalled-session prompt ordering', () => {
+	const RECALL_HIT = {
+		sessionId: 'past-session-1',
+		sessionStartedAt: '2026-01-01T00:00:00Z',
+		sessionEndedAt: '2026-01-01T01:00:00Z',
+		title: 'Old chat',
+		matches: [
+			{
+				turnIndex: 0,
+				role: 'user' as const,
+				timestamp: '2026-01-01T00:01:00Z',
+				snippet: 'We talked about pasta recipes',
+				bm25: -1.5,
+			},
+		],
+	};
+
+	it('buildSystemPrompt: recalled-session block appears before conversation history', async () => {
+		const deps = makeDeps();
+		const turns: ConversationTurn[] = [
+			{ role: 'user', content: 'Hello today', timestamp: '2026-04-01T10:00:00Z' },
+		];
+		const prompt = await buildSystemPrompt([], turns, deps, {
+			recalledSessions: [RECALL_HIT],
+		});
+
+		const recallPos = prompt.indexOf('<memory-context label="recalled-session">');
+		const historyPos = prompt.indexOf('Hello today');
+
+		expect(recallPos).toBeGreaterThan(-1);
+		expect(historyPos).toBeGreaterThan(-1);
+		expect(recallPos).toBeLessThan(historyPos);
+	});
+
+	it('buildAppAwareSystemPrompt: recalled-session block appears before conversation history', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
+		vi.mocked(services.modelJournal.read).mockResolvedValue('');
+		const turns: ConversationTurn[] = [
+			{ role: 'user', content: 'Hello today', timestamp: '2026-04-01T10:00:00Z' },
+		];
+		const deps = {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			modelJournal: services.modelJournal,
+			logger: services.logger,
+		};
+		const prompt = await buildAppAwareSystemPrompt('test question', 'user1', [], turns, deps, {
+			recalledSessions: [RECALL_HIT],
+		});
+
+		const recallPos = prompt.indexOf('<memory-context label="recalled-session">');
+		const historyPos = prompt.indexOf('Hello today');
+
+		expect(recallPos).toBeGreaterThan(-1);
+		expect(historyPos).toBeGreaterThan(-1);
+		expect(recallPos).toBeLessThan(historyPos);
+	});
+
+	it('recalled-session block appears before model-journal instruction', async () => {
+		const deps = makeDeps({
+			modelJournal: {
+				read: vi.fn().mockResolvedValue(''),
+				append: vi.fn(),
+			},
+		});
+		const prompt = await buildSystemPrompt([], [], deps, {
+			modelSlug: 'test-model',
+			recalledSessions: [RECALL_HIT],
+		});
+
+		const recallPos = prompt.indexOf('<memory-context label="recalled-session">');
+		// The journal instruction always includes this phrase when modelSlug is provided
+		const journalPos = prompt.indexOf('persistent file at data/model-journal/');
+
+		expect(recallPos).toBeGreaterThan(-1);
+		expect(journalPos).toBeGreaterThan(-1);
+		expect(recallPos).toBeLessThan(journalPos);
+	});
+});

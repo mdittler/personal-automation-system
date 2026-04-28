@@ -21,8 +21,9 @@
  *   5. App metadata, knowledge, system data (app-aware path only)
  *   6. [Layer 4] Recalled data (dataContextOrSnapshot, wrapped in memory-context block)
  *   7. Snapshot-only blocks (reports, alerts, failures)
- *   8. Conversation history
- *   9. Model journal instruction
+ *   8. [Layer 5] Recalled session transcripts (FTS5, injected before conversation history)
+ *   9. Conversation history
+ *  10. Model journal instruction
  *
  * Each function takes its dependencies explicitly. No module-level closure.
  */
@@ -80,7 +81,7 @@ export interface BuildSystemPromptOptions {
 	userCtx?: string;
 	/** Frozen durable memory snapshot to inject as Layer 2. Omitted when status ≠ 'ok'. */
 	memorySnapshot?: MemorySnapshot;
-	/** Recalled session hits from FTS5 search (Layer 5). Appended after all other sections. */
+	/** Recalled session hits from FTS5 search (Layer 5). Injected before conversation history. */
 	recalledSessions?: SearchHit[];
 }
 
@@ -92,7 +93,7 @@ export interface BuildAppAwareSystemPromptOptions {
 	dataContextOrSnapshot?: string | ConversationContextSnapshot | null;
 	/** Frozen durable memory snapshot to inject as Layer 2. Omitted when status ≠ 'ok'. */
 	memorySnapshot?: MemorySnapshot;
-	/** Recalled session hits from FTS5 search (Layer 5). Appended after all other sections. */
+	/** Recalled session hits from FTS5 search (Layer 5). Injected before conversation history. */
 	recalledSessions?: SearchHit[];
 }
 
@@ -141,6 +142,14 @@ export async function buildSystemPrompt(
 	if (!snapshotOk) {
 		appendContextEntriesSection(parts, contextEntries);
 	}
+
+	// Layer 5: recalled session transcripts — injected before history so the
+	// model has full background context before reading the live conversation
+	if (recalledSessions && recalledSessions.length > 0) {
+		const recalledBlock = wrapInRecalledFence(recalledSessions);
+		if (recalledBlock) parts.push(recalledBlock);
+	}
+
 	appendConversationHistorySection(parts, turns);
 
 	if (deps.modelJournal) {
@@ -150,12 +159,6 @@ export async function buildSystemPrompt(
 			modelSlug,
 			deps.logger ?? noopLogger,
 		);
-	}
-
-	// Layer 5: recalled session transcripts from FTS5 search — appended last
-	if (recalledSessions && recalledSessions.length > 0) {
-		const recalledBlock = wrapInRecalledFence(recalledSessions);
-		if (recalledBlock) parts.push(recalledBlock);
 	}
 
 	return parts.join('\n');
@@ -377,6 +380,14 @@ export async function buildAppAwareSystemPrompt(
 	if (!snapshotOk) {
 		appendContextEntriesSection(parts, contextEntries);
 	}
+
+	// Layer 5: recalled session transcripts — injected before history so the
+	// model has full background context before reading the live conversation
+	if (recalledSessions && recalledSessions.length > 0) {
+		const recalledBlock = wrapInRecalledFence(recalledSessions);
+		if (recalledBlock) parts.push(recalledBlock);
+	}
+
 	appendConversationHistorySection(parts, turns);
 
 	if (deps.modelJournal) {
@@ -386,12 +397,6 @@ export async function buildAppAwareSystemPrompt(
 			modelSlug,
 			deps.logger ?? noopLogger,
 		);
-	}
-
-	// Layer 5: recalled session transcripts from FTS5 search — appended last
-	if (recalledSessions && recalledSessions.length > 0) {
-		const recalledBlock = wrapInRecalledFence(recalledSessions);
-		if (recalledBlock) parts.push(recalledBlock);
 	}
 
 	return parts.join('\n');
