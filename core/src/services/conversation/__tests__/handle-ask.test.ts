@@ -532,7 +532,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what model am I using?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what model am I using?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		expectPromptIncludesSystemData(prompt);
 		// Non-admin (default mock) sees model name only — no provider prefix
@@ -561,7 +561,7 @@ describe('system data in /ask prompt', () => {
 			[],
 			[],
 			deps,
-			'test-slug',
+			{ modelSlug: 'test-slug' },
 		);
 
 		expect(prompt).toContain('switch-model');
@@ -581,7 +581,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what apps do I have?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what apps do I have?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		expectPromptOmitsSystemData(prompt);
 	});
@@ -603,7 +603,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what model?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what model?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		// Triple backticks should be neutralized
 		expect(prompt).not.toContain('```ignore');

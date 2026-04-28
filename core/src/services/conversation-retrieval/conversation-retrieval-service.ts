@@ -254,8 +254,8 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			entries = await this.deps.contextStore!.listForUser(userId);
 		} catch (err) {
 			this.deps.logger?.warn(
-				{ err },
-				'buildMemorySnapshot: ContextStore read failed — returning degraded snapshot',
+				'buildMemorySnapshot: ContextStore read failed — returning degraded snapshot: %s',
+				err,
 			);
 			return { content: '', status: 'degraded', builtAt, entryCount: 0 };
 		}

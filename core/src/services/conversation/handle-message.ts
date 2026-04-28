@@ -129,9 +129,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					contextEntries,
 					turns,
 					deps,
-					modelSlug,
-					userCtx,
-					snapshot,
+					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot },
 				);
 			} else {
 				// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
@@ -156,16 +154,14 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					contextEntries,
 					turns,
 					deps,
-					modelSlug,
-					userCtx,
-					dataContext,
+					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext },
 				);
 			}
 		} else {
-			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
+			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, { modelSlug, userCtx });
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
+		systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, { modelSlug, userCtx });
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {

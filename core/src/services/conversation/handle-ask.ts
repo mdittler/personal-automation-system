@@ -151,9 +151,7 @@ export async function handleAsk(
 			contextEntries,
 			turns,
 			deps,
-			modelSlug,
-			userCtx,
-			snapshot,
+			{ modelSlug, userCtx, dataContextOrSnapshot: snapshot },
 		);
 	} else {
 		// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
@@ -178,9 +176,7 @@ export async function handleAsk(
 			contextEntries,
 			turns,
 			deps,
-			modelSlug,
-			userCtx,
-			askDataContext,
+			{ modelSlug, userCtx, dataContextOrSnapshot: askDataContext },
 		);
 	}
 

@@ -210,8 +210,8 @@ describe('handleMessage — DataQueryService wiring (D2b)', () => {
 		const llmCalls = vi.mocked(services.llm.complete).mock.calls;
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
 		const systemPrompt = mainLlmCall?.[1]?.systemPrompt ?? '';
-		// Data section should not be present when result is empty
-		expect(systemPrompt).not.toContain('Relevant data files');
+		// recalled-data block should not be present when result is empty
+		expect(systemPrompt).not.toContain('<memory-context label="recalled-data">');
 	});
 });
 
@@ -324,14 +324,14 @@ describe('Security — dataContext sanitization (D2b)', () => {
 		const mainLlmCall = llmCalls.find((call) => call[1]?.tier === 'standard');
 		const systemPrompt = mainLlmCall?.[1]?.systemPrompt ?? '';
 
-		// The data section should be present
+		// The recalled-data block should be present
 		expect(systemPrompt).toContain('Notes');
-		// Triple backticks in file content must be neutralized.
-		// Extract only the content BETWEEN the fences (not the fences themselves).
-		const dataSectionStart = systemPrompt.indexOf('Relevant data files');
-		const fenceOpenIdx = systemPrompt.indexOf('```', dataSectionStart);
-		const fenceCloseIdx = systemPrompt.lastIndexOf('```');
-		// Content between the opening and closing fences
+		// Triple backticks in file content must be neutralized by sanitizeContextContent.
+		// Extract the sanitized payload (between the inner fence markers) only.
+		const blockStart = systemPrompt.indexOf('<memory-context label="recalled-data">');
+		expect(blockStart).toBeGreaterThan(-1);
+		const fenceOpenIdx = systemPrompt.indexOf('```', blockStart);
+		const fenceCloseIdx = systemPrompt.indexOf('```', fenceOpenIdx + 3);
 		const innerContent = systemPrompt.slice(fenceOpenIdx + 3, fenceCloseIdx);
 		expect(innerContent).not.toMatch(/`{3,}/);
 	});
@@ -453,13 +453,14 @@ describe('Persona — realistic data query phrasings (D2b)', () => {
 		const mainCall = llmCalls.find((call) => call[1]?.tier === 'standard');
 		const systemPrompt = mainCall?.[1]?.systemPrompt ?? '';
 
-		// Data section is present
+		// recalled-data block is present
 		expect(systemPrompt).toContain('Prices');
-		// Triple backticks are neutralized — injection attempt defused
-		// Extract content between the section fences to avoid matching the fences themselves
-		const dataSectionStart = systemPrompt.indexOf('Relevant data files');
-		const fenceOpenIdx = systemPrompt.indexOf('```', dataSectionStart);
-		const fenceCloseIdx = systemPrompt.lastIndexOf('```');
+		// Triple backticks are neutralized by sanitizeContextContent — injection attempt defused.
+		// Extract the sanitized payload (between the inner fence markers) only.
+		const blockStart = systemPrompt.indexOf('<memory-context label="recalled-data">');
+		expect(blockStart).toBeGreaterThan(-1);
+		const fenceOpenIdx = systemPrompt.indexOf('```', blockStart);
+		const fenceCloseIdx = systemPrompt.indexOf('```', fenceOpenIdx + 3);
 		const innerContent = systemPrompt.slice(fenceOpenIdx + 3, fenceCloseIdx);
 		expect(innerContent).not.toMatch(/`{3,}/);
 	});
