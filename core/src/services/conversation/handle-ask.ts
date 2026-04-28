@@ -132,13 +132,7 @@ export async function handleAsk(
 		buildUserContext(ctx, deps),
 	]);
 
-	const askClassification = await classifyPASMessage(
-		question,
-		deps,
-		recentContextSummary || undefined,
-	);
-
-	// ── Recall pipeline (runs before prompt building) ─────────────────────────
+	// ── Recall pipeline (runs before PAS classification) ──────────────────────
 	// Gated on a FTS5 index being wired — no point classifying recall intent if there
 	// is no index to search against. hasSessionSearch() is a cheap synchronous check.
 	let recalledSessions: SearchHit[] = [];
@@ -173,6 +167,12 @@ export async function handleAsk(
 			}
 		}
 	}
+
+	const askClassification = await classifyPASMessage(
+		question,
+		deps,
+		recentContextSummary || undefined,
+	);
 
 	let systemPrompt: string;
 	if (deps.conversationRetrieval) {
