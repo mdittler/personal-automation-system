@@ -163,7 +163,7 @@ export async function handleAsk(
 					}
 				}
 			} catch (err) {
-				deps.logger.warn({ err }, 'recall pipeline failed in /ask; continuing without recall');
+				deps.logger.warn('recall pipeline failed in /ask; continuing without recall: %s', err);
 			}
 		}
 	}

@@ -139,7 +139,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					}
 				}
 			} catch (err) {
-				deps.logger.warn({ err }, 'recall pipeline failed; continuing without recall');
+				deps.logger.warn('recall pipeline failed; continuing without recall: %s', err);
 			}
 		}
 	}
