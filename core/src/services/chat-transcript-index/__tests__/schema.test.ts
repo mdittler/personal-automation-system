@@ -42,6 +42,7 @@ describe('ChatTranscriptIndex schema', () => {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name);
     expect(tables).toContain('sessions');
     expect(tables).toContain('messages');
+    expect(tables).toContain('messages_fts');
   });
 
   it('is idempotent when user_version already matches', () => {

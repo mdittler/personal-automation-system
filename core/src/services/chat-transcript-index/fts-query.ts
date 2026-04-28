@@ -1,7 +1,7 @@
 const MAX_QUERY_LENGTH = 500;
 const FTS5_OPERATORS = /["*()\:^]/g;
 // Zero-width and bidi characters
-const ZERO_WIDTH = /[​-‍﻿­‪-‮]/g;
+const ZERO_WIDTH = /[\u200b-\u200d\ufeff\u00ad\u202a-\u202e]/g;
 
 export interface UntrustedQuery {
   terms: string[];

@@ -70,7 +70,7 @@ export function applyMigrations(db: Database.Database): void {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('synchronous = NORMAL');
-  // Apply DDL in a transaction
+  // Apply DDL — IF NOT EXISTS guards make each statement idempotent
   db.exec(DDL);
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }

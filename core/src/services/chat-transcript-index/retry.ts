@@ -31,5 +31,4 @@ export async function withSqliteRetry<T>(
       await new Promise<void>((res) => setTimeout(res, delay));
     }
   }
-  throw lastErr;
 }
