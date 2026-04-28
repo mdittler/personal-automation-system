@@ -36,8 +36,8 @@ function makeMockIndex(searchResult?: SearchResult): ChatTranscriptIndex {
 		endSession: vi.fn(),
 		deleteSession: vi.fn(),
 		searchSessions: vi.fn().mockResolvedValue(searchResult ?? { hits: [] }),
-		getSessionMeta: vi.fn(),
-		listExpiredSessions: vi.fn(),
+		getSessionMeta: vi.fn().mockResolvedValue(undefined),
+		listExpiredSessions: vi.fn().mockResolvedValue([]),
 		close: vi.fn(),
 	};
 }
@@ -296,7 +296,7 @@ describe('searchSessions — household isolation (real ChatTranscriptIndexImpl)'
 			const result = await withUserAndHousehold('userC', 'hh-x', () =>
 				service.searchSessions({ queryTerms: ['pasta'], limitSessions: 10 }),
 			);
-			// Both sessions contain "pasta" variants — at least one should match
+			// At least one session contains "pasta" variants
 			expect(result.hits.length).toBeGreaterThanOrEqual(1);
 			const sessionIds = result.hits.map((h) => h.sessionId);
 			// All returned hits belong to userC's sessions

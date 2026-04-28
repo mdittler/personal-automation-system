@@ -281,6 +281,9 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 	}
 
 	async searchSessions(opts: SessionSearchOpts): Promise<SearchResult> {
+		// Throws ConversationRetrievalError (not MissingRequestContextError) so the failure carries
+		// the source-policy category 'conversation-transcripts' — prevents future refactors from
+		// silently unifying the error type.
 		const userId = getCurrentUserId();
 		const householdId = getCurrentHouseholdId() ?? null;
 		if (userId === undefined) {
