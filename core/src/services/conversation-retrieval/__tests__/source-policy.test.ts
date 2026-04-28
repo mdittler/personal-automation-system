@@ -16,7 +16,7 @@ import {
 } from '../source-policy.js';
 
 describe('ALLOWED_SOURCES', () => {
-	it('exports exactly 11 allowed categories (including collaboration-data)', () => {
+	it('exports exactly 12 allowed categories (including conversation-transcripts)', () => {
 		const expected: AllowedSourceCategory[] = [
 			'user-app-data',
 			'household-shared-data',
@@ -29,8 +29,9 @@ describe('ALLOWED_SOURCES', () => {
 			'system-info',
 			'reports',
 			'alerts',
+			'conversation-transcripts',
 		];
-		expect(ALLOWED_SOURCES.size).toBe(11);
+		expect(ALLOWED_SOURCES.size).toBe(12);
 		for (const cat of expected) {
 			expect(ALLOWED_SOURCES.has(cat)).toBe(true);
 		}
@@ -150,6 +151,7 @@ describe('METHOD_SOURCE_CATEGORIES', () => {
 			'buildSystemDataBlock',
 			'listScopedReports',
 			'listScopedAlerts',
+			'searchSessions',
 		]);
 		const actual = new Set(Object.keys(METHOD_SOURCE_CATEGORIES));
 		expect(actual).toEqual(expected);

@@ -127,6 +127,12 @@ export interface ConversationRetrievalService {
 	/** List alerts scoped to the current user (Chunk B scoped API). */
 	listScopedAlerts(): Promise<AlertDefinition[]>;
 	/**
+	 * Returns true when a FTS5 ChatTranscriptIndex is wired.
+	 * Callers use this to gate the recall LLM classifier — no index means no
+	 * recall search is possible, so the classifier call is skipped entirely.
+	 */
+	hasSessionSearch(): boolean;
+	/**
 	 * Search conversation transcripts via FTS5.
 	 * userId is always derived from requestContext — callers cannot supply it.
 	 * Throws ConversationRetrievalError if no userId is in context.
@@ -278,6 +284,10 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			throw new Error('ConversationRetrievalService.listScopedAlerts: AlertService not wired');
 		}
 		return this.deps.alertService.listForUser(userId);
+	}
+
+	hasSessionSearch(): boolean {
+		return this.deps.index !== undefined;
 	}
 
 	async searchSessions(opts: SessionSearchOpts): Promise<SearchResult> {

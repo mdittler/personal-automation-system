@@ -80,6 +80,7 @@ describe('ConversationRetrievalServiceImpl method existence', () => {
 		'buildSystemDataBlock',
 		'listScopedReports',
 		'listScopedAlerts',
+		'searchSessions',
 		'buildContextSnapshot',
 	] as const;
 

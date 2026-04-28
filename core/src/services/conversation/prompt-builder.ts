@@ -37,6 +37,7 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
 import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import type { ConversationContextSnapshot } from '../conversation-retrieval/index.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
 import {
 	type JournalLogger,
 	appendContextEntriesSection,
@@ -46,6 +47,7 @@ import {
 	buildMemoryContextBlock,
 	sanitizeInput,
 } from '../prompt-assembly/index.js';
+import { wrapInRecalledFence } from './prompt-assembly/recalled-sessions.js';
 import { formatAppMetadata, getEnabledAppInfos, searchKnowledge } from './app-data.js';
 import { formatDataQueryContext } from './data-query-context.js';
 import { categorizeQuestion, gatherSystemData } from './system-data.js';
@@ -78,6 +80,8 @@ export interface BuildSystemPromptOptions {
 	userCtx?: string;
 	/** Frozen durable memory snapshot to inject as Layer 2. Omitted when status ≠ 'ok'. */
 	memorySnapshot?: MemorySnapshot;
+	/** Recalled session hits from FTS5 search (Layer 5). Appended after all other sections. */
+	recalledSessions?: SearchHit[];
 }
 
 /** Options for `buildAppAwareSystemPrompt`. */
@@ -88,6 +92,8 @@ export interface BuildAppAwareSystemPromptOptions {
 	dataContextOrSnapshot?: string | ConversationContextSnapshot | null;
 	/** Frozen durable memory snapshot to inject as Layer 2. Omitted when status ≠ 'ok'. */
 	memorySnapshot?: MemorySnapshot;
+	/** Recalled session hits from FTS5 search (Layer 5). Appended after all other sections. */
+	recalledSessions?: SearchHit[];
 }
 
 const noopLogger: JournalLogger = { warn: () => {} };
@@ -110,7 +116,7 @@ export async function buildSystemPrompt(
 	deps: PromptBuilderDeps,
 	options?: BuildSystemPromptOptions,
 ): Promise<string> {
-	const { modelSlug, userCtx, memorySnapshot } = options ?? {};
+	const { modelSlug, userCtx, memorySnapshot, recalledSessions } = options ?? {};
 	const { standardModel, fastModel } = getModelLabels(deps);
 
 	const parts: string[] = [
@@ -146,6 +152,12 @@ export async function buildSystemPrompt(
 		);
 	}
 
+	// Layer 5: recalled session transcripts from FTS5 search — appended last
+	if (recalledSessions && recalledSessions.length > 0) {
+		const recalledBlock = wrapInRecalledFence(recalledSessions);
+		if (recalledBlock) parts.push(recalledBlock);
+	}
+
 	return parts.join('\n');
 }
 
@@ -167,7 +179,7 @@ export async function buildAppAwareSystemPrompt(
 	deps: PromptBuilderDeps,
 	options?: BuildAppAwareSystemPromptOptions,
 ): Promise<string> {
-	const { modelSlug, userCtx, dataContextOrSnapshot, memorySnapshot } = options ?? {};
+	const { modelSlug, userCtx, dataContextOrSnapshot, memorySnapshot, recalledSessions } = options ?? {};
 
 	// Normalise the overloaded dataContextOrSnapshot parameter
 	let dataContext: string | undefined;
@@ -374,6 +386,12 @@ export async function buildAppAwareSystemPrompt(
 			modelSlug,
 			deps.logger ?? noopLogger,
 		);
+	}
+
+	// Layer 5: recalled session transcripts from FTS5 search — appended last
+	if (recalledSessions && recalledSessions.length > 0) {
+		const recalledBlock = wrapInRecalledFence(recalledSessions);
+		if (recalledBlock) parts.push(recalledBlock);
 	}
 
 	return parts.join('\n');

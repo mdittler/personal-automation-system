@@ -29,6 +29,9 @@ import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
 } from '../conversation-retrieval/index.js';
+import { classifyRecallIntent, recallPreFilter } from '../conversation-retrieval/recall-classifier.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
+import { buildUntrustedQuery } from '../chat-transcript-index/fts-query.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -105,6 +108,42 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		buildUserContext(ctx, deps),
 	]);
 
+	// ── Recall pipeline (runs before PAS classification) ──────────────────────
+	// Gated on a FTS5 index being wired — no point classifying recall intent if there
+	// is no index to search against. hasSessionSearch() is a cheap synchronous check.
+	let recalledSessions: SearchHit[] = [];
+	const retrieval = deps.conversationRetrieval;
+	if (retrieval?.hasSessionSearch?.()) {
+		const recallPre = recallPreFilter(ctx.text);
+		if (!recallPre.skip) {
+			try {
+				const verdict = await classifyRecallIntent(ctx.text, {
+					llm: deps.llm,
+					logger: deps.logger,
+				});
+				if (verdict.shouldRecall && verdict.query) {
+					const queryResult = buildUntrustedQuery(verdict.query);
+					if (queryResult.terms.length > 0) {
+						// retrieval is non-null here — guarded by hasSessionSearch() above
+						const searchResult = await retrieval.searchSessions({
+							queryTerms: queryResult.terms,
+							limitSessions: 5,
+							limitMessagesPerSession: 3,
+							excludeSessionIds: ensuredSessionId ? [ensuredSessionId] : [],
+							startedAfter:
+								verdict.timeWindow === 'recent'
+									? new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+									: undefined,
+						});
+						recalledSessions = searchResult.hits;
+					}
+				}
+			} catch (err) {
+				deps.logger.warn({ err }, 'recall pipeline failed; continuing without recall');
+			}
+		}
+	}
+
 	let systemPrompt: string;
 	if (autoDetect) {
 		const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
@@ -135,7 +174,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					[],
 					turns,
 					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot },
+					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot, recalledSessions },
 				);
 			} else {
 				let dataContext = '';
@@ -159,14 +198,14 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					[],
 					turns,
 					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext, memorySnapshot: memSnapshot },
+					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext, memorySnapshot: memSnapshot, recalledSessions },
 				);
 			}
 		} else {
-			systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot });
+			systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot });
+		systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
