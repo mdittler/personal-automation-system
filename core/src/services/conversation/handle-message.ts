@@ -29,13 +29,14 @@ import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
 } from '../conversation-retrieval/index.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
+import { runRecallPipeline } from './recall-pipeline.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
-import { gatherContext } from './app-data.js';
 import { getAutoDetectSetting } from './auto-detect.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
@@ -82,7 +83,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
-	const [{ wrote: noteWrote }, turns, contextEntries, autoDetect, userCtx] = await Promise.all([
+	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot }, autoDetect, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -91,14 +92,30 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
 		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		gatherContext(ctx.text, ctx.userId, deps),
+		deps.chatSessions.ensureActiveSession(
+			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
+			{
+				buildSnapshot: deps.conversationRetrieval
+					? () => deps.conversationRetrieval!.buildMemorySnapshot()
+					: undefined,
+			},
+		).catch((err: unknown) => {
+			deps.logger.warn('ensureActiveSession failed; continuing without session persistence: %s', err);
+			return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
+		}),
 		getAutoDetectSetting(ctx.userId, deps),
 		buildUserContext(ctx, deps),
 	]);
 
+	// ── Recall pipeline (runs before PAS classification) ──────────────────────
+	const recalledSessions: SearchHit[] = await runRecallPipeline(ctx.text, ensuredSessionId, {
+		llm: deps.llm,
+		logger: deps.logger,
+		conversationRetrieval: deps.conversationRetrieval,
+	});
+
 	let systemPrompt: string;
 	if (autoDetect) {
-		// D2c: get recent interaction context for classifier + dataQuery hints
 		const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 		const recentContextSummary = formatInteractionContextSummary(recentEntries);
 		const recentFilePaths = extractRecentFilePaths(recentEntries);
@@ -109,8 +126,6 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			recentContextSummary || undefined,
 		);
 		if (classification.pasRelated) {
-			// Chunk D: use ConversationRetrievalService.buildContextSnapshot when available.
-			// Falls back to legacy direct DataQueryService call when service is absent.
 			if (deps.conversationRetrieval) {
 				let snapshot: ConversationContextSnapshot | null = null;
 				try {
@@ -126,15 +141,12 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				systemPrompt = await buildAppAwareSystemPrompt(
 					ctx.text,
 					ctx.userId,
-					contextEntries,
+					[],
 					turns,
 					deps,
-					modelSlug,
-					userCtx,
-					snapshot,
+					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot, recalledSessions },
 				);
 			} else {
-				// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
 				let dataContext = '';
 				if (classification.dataQueryCandidate && deps.dataQuery) {
 					try {
@@ -153,19 +165,17 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				systemPrompt = await buildAppAwareSystemPrompt(
 					ctx.text,
 					ctx.userId,
-					contextEntries,
+					[],
 					turns,
 					deps,
-					modelSlug,
-					userCtx,
-					dataContext,
+					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext, memorySnapshot: memSnapshot, recalledSessions },
 				);
 			}
 		} else {
-			systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
+			systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt(contextEntries, turns, deps, modelSlug, userCtx);
+		systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
@@ -181,6 +191,15 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			temperature: 0.7,
 		});
 	} catch (error) {
+		// If we minted a fresh session this turn, end it so it doesn't persist as an empty shell.
+		if (sessionIsNew && ensuredSessionId) {
+			await deps.chatSessions.endActive(
+				{ userId: ctx.userId, sessionKey },
+				'system',
+			).catch((rollbackErr: unknown) => {
+				deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
+			});
+		}
 		deps.logger.error('Chatbot LLM call failed: %s', error);
 		const { userMessage } = classifyLLMError(error);
 		const suffix = noteWrote ? '\n\nYour message was saved to daily notes.' : '';
@@ -194,7 +213,6 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		await writeJournalEntries(deps.modelJournal, modelSlug, journalEntries, deps.logger);
 	}
 
-	// Strip model-switch tags without executing — admin actions via /ask only
 	const afterSwitchStrip = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '');
 
 	let finalResponse: string;
@@ -230,7 +248,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				sessionKey,
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
-				expectedSessionId: ctx.sessionId,
+				expectedSessionId: ensuredSessionId,
 			},
 			userTurn,
 			assistantTurn,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
+import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { requestContext } from '../../context/request-context.js';
 import { handleAsk } from '../handle-ask.js';
@@ -19,6 +20,8 @@ function makeChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -504,6 +507,249 @@ describe('handleCommand /ask', () => {
 	});
 });
 
+describe('handleAsk — ensureActiveSession wiring', () => {
+	let services: ReturnType<typeof createMockCoreServices>;
+	let chatSessions: ChatSessionStore;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('OK');
+		chatSessions = makeChatSessions();
+	});
+
+	it('calls ensureActiveSession before LLM call', async () => {
+		const ctx = createTestMessageContext({ text: '/ask test' });
+		const callOrder: string[] = [];
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockImplementation(() => {
+			callOrder.push('ensure');
+			return Promise.resolve({ sessionId: 'sess', isNew: true, snapshot: undefined });
+		});
+		vi.mocked(services.llm.complete).mockImplementation(() => {
+			callOrder.push('llm');
+			return Promise.resolve('OK');
+		});
+
+		await handleAsk(['test'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const ensureIdx = callOrder.indexOf('ensure');
+		const llmIdx = callOrder.lastIndexOf('llm');
+		expect(ensureIdx).toBeGreaterThan(-1);
+		expect(llmIdx).toBeGreaterThan(ensureIdx);
+	});
+
+	it('passes snapshot to system prompt when conversationRetrieval is wired', async () => {
+		const okSnapshot: MemorySnapshot = {
+			content: 'User prefers Celsius.',
+			status: 'ok',
+			builtAt: '2026-01-01T00:00:00Z',
+			entryCount: 1,
+		};
+		const buildMemorySnapshot = vi.fn().mockResolvedValue(okSnapshot);
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: okSnapshot,
+		});
+		const retrieval = {
+			buildContextSnapshot: vi.fn().mockResolvedValue(null),
+			buildMemorySnapshot,
+			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
+		};
+
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			conversationRetrieval: retrieval as never,
+		});
+
+		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
+			(c) => c[1]?.tier === 'standard',
+		);
+		const systemPrompt = standardCall?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).toContain('<memory-context label="durable-memory">');
+		expect(systemPrompt).toContain('User prefers Celsius.');
+	});
+
+	it('no durable-memory block when conversationRetrieval is absent', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: undefined,
+		});
+
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
+			(c) => c[1]?.tier === 'standard',
+		);
+		const systemPrompt = standardCall?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).not.toContain('<memory-context label="durable-memory">');
+	});
+
+	it('no durable-memory block when snapshot is degraded', async () => {
+		const degradedSnapshot: MemorySnapshot = {
+			content: '',
+			status: 'degraded',
+			builtAt: '2026-01-01T00:00:00Z',
+			entryCount: 0,
+		};
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'sess',
+			isNew: true,
+			snapshot: degradedSnapshot,
+		});
+
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
+			(c) => c[1]?.tier === 'standard',
+		);
+		const systemPrompt = standardCall?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).not.toContain('<memory-context label="durable-memory">');
+	});
+
+	it('ensureActiveSession is called with buildSnapshot only when conversationRetrieval is wired', async () => {
+		const retrieval = {
+			buildContextSnapshot: vi.fn().mockResolvedValue(null),
+			buildMemorySnapshot: vi.fn().mockResolvedValue({
+				content: 'x',
+				status: 'ok',
+				builtAt: '',
+				entryCount: 0,
+			}),
+			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
+		};
+
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask test' });
+		await handleAsk(['test'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			conversationRetrieval: retrieval as never,
+		});
+
+		const call = (chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(call?.[1]?.buildSnapshot).toBeTypeOf('function');
+	});
+
+	it('ensureActiveSession is called without buildSnapshot when conversationRetrieval is absent', async () => {
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask test' });
+		await handleAsk(['test'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		const call = (chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(call?.[1]?.buildSnapshot).toBeUndefined();
+	});
+
+	it('still replies when ensureActiveSession throws (fail-open)', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+			new Error('session store unavailable'),
+		);
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(services.telegram.send).toHaveBeenCalled();
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('ends the session when LLM fails on a newly minted session', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'new-sess',
+			isNew: true,
+			snapshot: undefined,
+		});
+		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM failure'));
+
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(chatSessions.endActive).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: ctx.userId }),
+			'system',
+		);
+	});
+
+	it('does not call endActive on LLM failure when session was not newly minted', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'existing-sess',
+			isNew: false,
+			snapshot: undefined,
+		});
+		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM failure'));
+
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(chatSessions.endActive).not.toHaveBeenCalled();
+	});
+});
+
 describe('system data in /ask prompt', () => {
 	let services: CoreServices;
 
@@ -532,7 +778,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what model am I using?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what model am I using?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		expectPromptIncludesSystemData(prompt);
 		// Non-admin (default mock) sees model name only — no provider prefix
@@ -561,7 +807,7 @@ describe('system data in /ask prompt', () => {
 			[],
 			[],
 			deps,
-			'test-slug',
+			{ modelSlug: 'test-slug' },
 		);
 
 		expect(prompt).toContain('switch-model');
@@ -581,7 +827,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what apps do I have?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what apps do I have?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		expectPromptOmitsSystemData(prompt);
 	});
@@ -603,7 +849,7 @@ describe('system data in /ask prompt', () => {
 			data: services.data,
 			modelJournal: services.modelJournal,
 		};
-		const prompt = await buildPrompt('what model?', 'user1', [], [], deps, 'test-slug');
+		const prompt = await buildPrompt('what model?', 'user1', [], [], deps, { modelSlug: 'test-slug' });
 
 		// Triple backticks should be neutralized
 		expect(prompt).not.toContain('```ignore');

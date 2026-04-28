@@ -26,13 +26,14 @@ import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
 } from '../conversation-retrieval/index.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
+import { runRecallPipeline } from './recall-pipeline.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
-import { gatherContext } from './app-data.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
@@ -103,12 +104,11 @@ export async function handleAsk(
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
-	// D2c: interaction context is synchronous; compute before fan-out
 	const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 	const recentContextSummary = formatInteractionContextSummary(recentEntries);
 	const recentFilePaths = extractRecentFilePaths(recentEntries);
 
-	const [{ wrote: noteWrote }, turns, contextEntries, userCtx] = await Promise.all([
+	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot }, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -117,11 +117,27 @@ export async function handleAsk(
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
 		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		gatherContext(question, ctx.userId, deps),
+		deps.chatSessions.ensureActiveSession(
+			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
+			{
+				buildSnapshot: deps.conversationRetrieval
+					? () => deps.conversationRetrieval!.buildMemorySnapshot()
+					: undefined,
+			},
+		).catch((err: unknown) => {
+			deps.logger.warn('ensureActiveSession failed; continuing without session persistence: %s', err);
+			return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
+		}),
 		buildUserContext(ctx, deps),
 	]);
 
-	// D2b/D2c / Chunk D: call DataQueryService or ConversationRetrievalService.
+	// ── Recall pipeline (runs before PAS classification) ──────────────────────
+	const recalledSessions: SearchHit[] = await runRecallPipeline(question, ensuredSessionId, {
+		llm: deps.llm,
+		logger: deps.logger,
+		conversationRetrieval: deps.conversationRetrieval,
+	});
+
 	const askClassification = await classifyPASMessage(
 		question,
 		deps,
@@ -130,7 +146,6 @@ export async function handleAsk(
 
 	let systemPrompt: string;
 	if (deps.conversationRetrieval) {
-		// Chunk D: use ConversationRetrievalService.buildContextSnapshot (mode: 'ask')
 		let snapshot: ConversationContextSnapshot | null = null;
 		try {
 			snapshot = await deps.conversationRetrieval.buildContextSnapshot({
@@ -148,15 +163,12 @@ export async function handleAsk(
 		systemPrompt = await buildAppAwareSystemPrompt(
 			question,
 			ctx.userId,
-			contextEntries,
+			[],
 			turns,
 			deps,
-			modelSlug,
-			userCtx,
-			snapshot,
+			{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot, recalledSessions },
 		);
 	} else {
-		// Legacy path: direct DataQueryService call (no ConversationRetrievalService wired)
 		let askDataContext = '';
 		if (askClassification.dataQueryCandidate && deps.dataQuery) {
 			try {
@@ -175,12 +187,10 @@ export async function handleAsk(
 		systemPrompt = await buildAppAwareSystemPrompt(
 			question,
 			ctx.userId,
-			contextEntries,
+			[],
 			turns,
 			deps,
-			modelSlug,
-			userCtx,
-			askDataContext,
+			{ modelSlug, userCtx, dataContextOrSnapshot: askDataContext, memorySnapshot: memSnapshot, recalledSessions },
 		);
 	}
 
@@ -197,6 +207,14 @@ export async function handleAsk(
 			temperature: 0.7,
 		});
 	} catch (error) {
+		if (sessionIsNew && ensuredSessionId) {
+			await deps.chatSessions.endActive(
+				{ userId: ctx.userId, sessionKey },
+				'system',
+			).catch((rollbackErr: unknown) => {
+				deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
+			});
+		}
 		deps.logger.error('Chatbot /ask LLM call failed: %s', error);
 		const { userMessage } = classifyLLMError(error);
 		const suffix = noteWrote ? '\n\nYour question was saved to your daily notes.' : '';
@@ -253,7 +271,7 @@ export async function handleAsk(
 				sessionKey,
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
-				expectedSessionId: ctx.sessionId,
+				expectedSessionId: ensuredSessionId,
 			},
 			userTurn,
 			assistantTurn,

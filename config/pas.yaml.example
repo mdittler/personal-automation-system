@@ -24,6 +24,12 @@ users:
 # Per-user override via /notes or GUI always wins.
 chat:
   log_to_notes: false   # System-wide default: append messages to daily-notes files (default OFF)
+  # Transcript retention (opt-in). Default: disabled.
+  # WARNING: auto_prune: true PERMANENTLY deletes Markdown transcript files.
+  # These are canonical data — pnpm chat-index-rebuild cannot restore pruned sessions.
+  # sessions:
+  #   auto_prune: false          # Set to true to enable automatic pruning
+  #   retention_days: 90         # Keep transcripts for this many days (1–3650)
 
 # Default settings
 defaults:

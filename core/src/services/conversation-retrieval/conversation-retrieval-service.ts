@@ -18,8 +18,10 @@ import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
 import type { ReportDefinition } from '../../types/report.js';
 import type { SystemInfoService } from '../../types/system-info.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
+import type { ChatTranscriptIndex, SearchResult } from '../chat-transcript-index/index.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
 import { chooseSources } from './source-selection.js';
@@ -37,6 +39,19 @@ export class MissingRequestContextError extends Error {
 			`ConversationRetrievalService.${method}() called outside a requestContext — userId is required`,
 		);
 		this.name = 'MissingRequestContextError';
+	}
+}
+
+/**
+ * Thrown when a ConversationRetrievalService method is called without the
+ * required requestContext (e.g. userId absent for a user-scoped data source).
+ */
+export class ConversationRetrievalError extends Error {
+	readonly category: AllowedSourceCategory;
+	constructor(message: string, category: AllowedSourceCategory) {
+		super(message);
+		this.name = 'ConversationRetrievalError';
+		this.category = category;
 	}
 }
 
@@ -80,6 +95,20 @@ export interface ConversationContextSnapshot {
 	failures: AllowedSourceCategory[];
 }
 
+/**
+ * Options for searching conversation transcripts via FTS5.
+ * Note: `userId` is intentionally absent — it is always derived from
+ * requestContext. Callers cannot supply or override the userId.
+ */
+export interface SessionSearchOpts {
+	queryTerms: string[];
+	limitSessions?: number;
+	limitMessagesPerSession?: number;
+	startedAfter?: string;
+	startedBefore?: string;
+	excludeSessionIds?: string[];
+}
+
 export interface ConversationRetrievalService {
 	/** Query user-accessible data files using natural language. */
 	searchData(args: { question: string; recentFilePaths?: string[] }): Promise<DataQueryResult>;
@@ -97,8 +126,27 @@ export interface ConversationRetrievalService {
 	listScopedReports(): Promise<ReportDefinition[]>;
 	/** List alerts scoped to the current user (Chunk B scoped API). */
 	listScopedAlerts(): Promise<AlertDefinition[]>;
+	/**
+	 * Returns true when a FTS5 ChatTranscriptIndex is wired.
+	 * Callers use this to gate the recall LLM classifier — no index means no
+	 * recall search is possible, so the classifier call is skipped entirely.
+	 */
+	hasSessionSearch(): boolean;
+	/**
+	 * Search conversation transcripts via FTS5.
+	 * userId is always derived from requestContext — callers cannot supply it.
+	 * Throws ConversationRetrievalError if no userId is in context.
+	 * Returns { hits: [] } if no index is injected.
+	 */
+	searchSessions(opts: SessionSearchOpts): Promise<SearchResult>;
 	/** Compose a full context snapshot for LLM injection. */
 	buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot>;
+	/**
+	 * Build a frozen MemorySnapshot from durable ContextStore entries.
+	 * Called at session-mint time, before the first prompt is assembled.
+	 * Requires a userId in the current requestContext.
+	 */
+	buildMemorySnapshot(): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────
@@ -123,6 +171,8 @@ export interface ConversationRetrievalDeps {
 	systemInfo?: SystemInfoService;
 	reportService?: ReportServiceForRetrieval;
 	alertService?: AlertServiceForRetrieval;
+	/** Optional FTS5 transcript index (Hermes P5). Absent → searchSessions returns { hits: [] }. */
+	index?: ChatTranscriptIndex;
 	logger?: AppLogger;
 }
 
@@ -234,6 +284,85 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			throw new Error('ConversationRetrievalService.listScopedAlerts: AlertService not wired');
 		}
 		return this.deps.alertService.listForUser(userId);
+	}
+
+	hasSessionSearch(): boolean {
+		return this.deps.index !== undefined;
+	}
+
+	async searchSessions(opts: SessionSearchOpts): Promise<SearchResult> {
+		// Throws ConversationRetrievalError (not MissingRequestContextError) so the failure carries
+		// the source-policy category 'conversation-transcripts' — prevents future refactors from
+		// silently unifying the error type.
+		const userId = getCurrentUserId();
+		const householdId = getCurrentHouseholdId() ?? null;
+		if (userId === undefined) {
+			throw new ConversationRetrievalError(
+				'searchSessions requires an authenticated user in requestContext',
+				'conversation-transcripts',
+			);
+		}
+		if (!this.deps.index) {
+			return { hits: [] };
+		}
+		return this.deps.index.searchSessions({
+			userId,
+			householdId,
+			queryTerms: opts.queryTerms,
+			limitSessions: opts.limitSessions,
+			limitMessagesPerSession: opts.limitMessagesPerSession,
+			startedAfter: opts.startedAfter,
+			startedBefore: opts.startedBefore,
+			excludeSessionIds: opts.excludeSessionIds,
+		});
+	}
+
+	async buildMemorySnapshot(): Promise<MemorySnapshot> {
+		const userId = this.assertRequestContext('buildMemorySnapshot');
+		const BUDGET = 4_000;
+		const MARKER = '... (snapshot truncated at session start)';
+		const builtAt = new Date().toISOString();
+
+		let entries: ContextEntry[];
+		try {
+			entries = await this.deps.contextStore!.listForUser(userId);
+		} catch (err) {
+			this.deps.logger?.warn(
+				'buildMemorySnapshot: ContextStore read failed — returning degraded snapshot: %s',
+				err,
+			);
+			return { content: '', status: 'degraded', builtAt, entryCount: 0 };
+		}
+
+		if (entries.length === 0) {
+			return { content: '', status: 'empty', builtAt, entryCount: 0 };
+		}
+
+		const sorted = [...entries].sort((a, b) => a.key.localeCompare(b.key));
+		const BUDGET_BODY = BUDGET - MARKER.length;
+
+		let content = '';
+		let includedCount = 0;
+		let truncated = false;
+		for (const entry of sorted) {
+			const rendered = `## ${entry.key}\n${entry.content}\n\n`;
+			if (content.length + rendered.length > BUDGET_BODY) {
+				if (content.length === 0) {
+					// First entry alone exceeds budget — include a partial to avoid a marker-only result.
+					content = rendered.slice(0, BUDGET_BODY);
+					includedCount = 1;
+				}
+				truncated = true;
+				break;
+			}
+			content += rendered;
+			includedCount++;
+		}
+		if (truncated) {
+			content += MARKER;
+		}
+
+		return { content: content.trimEnd(), status: 'ok', builtAt, entryCount: includedCount };
 	}
 
 	async buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot> {

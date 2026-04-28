@@ -1,11 +1,14 @@
 import type { Logger } from 'pino';
 import type { DataStoreService } from '../../types/data-store.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
+import { parseMemorySnapshotFrontmatter, toMemorySnapshotFrontmatter } from '../prompt-assembly/memory-context.js';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { CorruptTranscriptError } from './errors.js';
 import { mintSessionId } from './session-id.js';
 import { getActive, setActiveUnlocked, clearActive } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
 import { encodeNew, encodeAppend, decode } from './transcript-codec.js';
+import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 
 export interface ChatSessionFrontmatter {
 	id: string;
@@ -18,6 +21,8 @@ export interface ChatSessionFrontmatter {
 	started_at: string;
 	ended_at: string | null;
 	token_counts: { input: number; output: number };
+	/** Durable MemorySnapshot frozen at session-mint time (P4). Snake_case on disk. */
+	memory_snapshot?: { content: string; status: 'ok' | 'empty' | 'degraded'; built_at: string; entry_count: number };
 }
 
 export interface SessionTurn {
@@ -30,6 +35,26 @@ export interface SessionTurn {
 export interface ChatSessionStore {
 	/** Read-only. Returns the active session id, or undefined if none. NEVER mints. */
 	peekActive(ctx: { userId: string; sessionKey: string }): Promise<string | undefined>;
+
+	/**
+	 * Ensure an active session exists — minting one if needed — and return the
+	 * session id and any frozen MemorySnapshot.
+	 *
+	 * Called BEFORE prompt assembly so the first turn sees Layer 2 durable memory.
+	 * On the mint path, `opts.buildSnapshot` is invoked once (try/catch → degraded).
+	 * On the peek path (existing session), the snapshot is read from frontmatter.
+	 * When `opts.buildSnapshot` is absent, no memory_snapshot field is written.
+	 */
+	ensureActiveSession(
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
+	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }>;
+
+	/**
+	 * Read-only. Returns the frozen MemorySnapshot from the active session's
+	 * frontmatter, or undefined if no active session or no snapshot field.
+	 */
+	peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined>;
 
 	/**
 	 * Atomic mint-or-reuse + write of one user/assistant exchange.
@@ -79,6 +104,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			logger: Logger;
 			clock?: () => Date;
 			rng?: () => string;
+			index?: ChatTranscriptIndex;
 		},
 	) {}
 
@@ -94,6 +120,66 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		const store = this.deps.data.forUser(userId);
 		const entry = await getActive(store, userId, sessionKey);
 		return entry?.id;
+	}
+
+	async ensureActiveSession(
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
+	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }> {
+		const store = this.deps.data.forUser(ctx.userId);
+		await this.maybeImportLegacy(store, ctx.userId, ctx.householdId ?? null);
+
+		return withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
+			const existing = await getActive(store, ctx.userId, ctx.sessionKey);
+			if (existing) {
+				// Peek path: read snapshot from frontmatter
+				const raw = await store.read(`conversation/sessions/${existing.id}.md`);
+				let snapshot: MemorySnapshot | undefined;
+				if (raw !== '') {
+					try {
+						const { meta } = decode(raw);
+						snapshot = parseMemorySnapshotFrontmatter(meta.memory_snapshot);
+					} catch {
+						// Corrupt transcript — return without snapshot
+					}
+				}
+				return { sessionId: existing.id, isNew: false, snapshot };
+			}
+
+			// Mint path: build snapshot (if callback provided), then mint session
+			let snapshot: MemorySnapshot | undefined;
+			let memorySnapshotFm: ChatSessionFrontmatter['memory_snapshot'] | undefined;
+			if (opts?.buildSnapshot) {
+				try {
+					snapshot = await opts.buildSnapshot();
+					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
+				} catch (err) {
+					this.deps.logger.warn(
+						{ err },
+						'conversation-session: buildSnapshot failed — minting with degraded snapshot',
+					);
+					snapshot = { content: '', status: 'degraded', builtAt: this.now().toISOString(), entryCount: 0 };
+					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
+				}
+			}
+
+			const sessionId = await this.mintAndRegisterWithSnapshot(store, ctx, memorySnapshotFm);
+			return { sessionId, isNew: true, snapshot };
+		});
+	}
+
+	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined> {
+		const store = this.deps.data.forUser(ctx.userId);
+		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
+		if (!entry) return undefined;
+		const raw = await store.read(`conversation/sessions/${entry.id}.md`);
+		if (raw === '') return undefined;
+		try {
+			const { meta } = decode(raw);
+			return parseMemorySnapshotFrontmatter(meta.memory_snapshot);
+		} catch {
+			return undefined;
+		}
 	}
 
 	async appendExchange(
@@ -129,13 +215,49 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		}
 
 		// Append both turns under the transcript lock.
+		let userTurnIndex = 0;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${sessionId}`, async () => {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
 			const base = raw === '' ? encodeNew(this.buildFrontmatter(ctx, sessionId)) : raw;
+			// Compute turn_index for index writes: count existing turns before appending.
+			// Only decode when the index is wired AND the file already has content.
+			if (this.deps.index && raw !== '') {
+				try {
+					const { turns } = decode(raw);
+					userTurnIndex = turns.length;
+				} catch {
+					// Corrupt — fall back to 0; INSERT OR IGNORE in appendMessage makes safe
+					userTurnIndex = 0;
+				}
+			}
 			const next = encodeAppend(encodeAppend(base, userTurn), assistantTurn);
 			await store.write(path, next);
 		});
+
+		if (this.deps.index) {
+			const assistantTurnIndex = userTurnIndex + 1;
+			try {
+				await Promise.all([
+					this.deps.index.appendMessage({
+						session_id: sessionId,
+						turn_index: userTurnIndex,
+						role: 'user',
+						content: userTurn.content,
+						timestamp: userTurn.timestamp,
+					}),
+					this.deps.index.appendMessage({
+						session_id: sessionId,
+						turn_index: assistantTurnIndex,
+						role: 'assistant',
+						content: assistantTurn.content,
+						timestamp: assistantTurn.timestamp,
+					}),
+				]);
+			} catch (err) {
+				this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: appendMessage failed; continuing');
+			}
+		}
 
 		return { sessionId };
 	}
@@ -145,15 +267,42 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		store: ReturnType<DataStoreService['forUser']>,
 		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
 	): Promise<string> {
+		return this.mintAndRegisterWithSnapshot(store, ctx, undefined);
+	}
+
+	// Must be called while the caller holds the conversation-session-index:<userId> lock.
+	private async mintAndRegisterWithSnapshot(
+		store: ReturnType<DataStoreService['forUser']>,
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		memorySnapshot: ChatSessionFrontmatter['memory_snapshot'],
+	): Promise<string> {
 		const now = this.now();
 		const startedAt = now.toISOString();
 		for (let attempt = 0; attempt < MAX_MINT_ATTEMPTS; attempt++) {
 			const id = this.mintId(now);
 			const existing = await store.read(`conversation/sessions/${id}.md`);
 			if (existing === '') {
+				const fm = this.buildFrontmatter(ctx, id, startedAt);
+				if (memorySnapshot !== undefined) fm.memory_snapshot = memorySnapshot;
 				// Write transcript skeleton BEFORE publishing to the index.
 				// Guarantees concurrent peekActive + expectedSessionId callers always find an existing file.
-				await store.write(`conversation/sessions/${id}.md`, encodeNew(this.buildFrontmatter(ctx, id, startedAt)));
+				await store.write(`conversation/sessions/${id}.md`, encodeNew(fm));
+				if (this.deps.index) {
+					try {
+						await this.deps.index.upsertSession({
+							id,
+							user_id: ctx.userId,
+							household_id: ctx.householdId ?? null,
+							source: 'telegram',
+							started_at: startedAt,
+							ended_at: null,
+							model: ctx.model ?? null,
+							title: null,
+						});
+					} catch (err) {
+						this.deps.logger.warn({ err, sessionId: id }, 'chat-transcript-index: upsertSession failed; continuing');
+					}
+				}
 				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
 				return id;
 			}
@@ -209,6 +358,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		if (!entry) return { endedSessionId: null };
 		this.deps.logger.debug({ sessionId: entry.id, reason }, 'conversation-session: ending active session');
 
+		let endedAt: string | null = null;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
 			const path = `conversation/sessions/${entry.id}.md`;
 			const raw = await store.read(path);
@@ -223,13 +373,25 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 				throw err;
 			}
-			decoded.meta.ended_at = this.now().toISOString();
+			endedAt = this.now().toISOString();
+			decoded.meta.ended_at = endedAt;
 			let next = encodeNew(decoded.meta);
 			for (const t of decoded.turns) next = encodeAppend(next, t);
 			await store.write(path, next);
 		});
 
 		await clearActive(store, ctx.userId, ctx.sessionKey);
+
+		if (this.deps.index && endedAt !== null) {
+			const endedSessionId = entry.id;
+			const endedAtStr = endedAt;
+			try {
+				await this.deps.index.endSession(endedSessionId, endedAtStr);
+			} catch (err) {
+				this.deps.logger.warn({ err, endedSessionId }, 'chat-transcript-index: endSession failed; continuing');
+			}
+		}
+
 		return { endedSessionId: entry.id };
 	}
 
@@ -350,6 +512,36 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			}
 
 			await store.write(`conversation/sessions/${sessionId}.md`, content);
+
+			if (this.deps.index) {
+				try {
+					await this.deps.index.upsertSession({
+						id: sessionId,
+						user_id: userId,
+						household_id: householdId,
+						source: 'legacy-import',
+						started_at: firstTs,
+						ended_at: lastTs,
+						model: null,
+						title: null,
+					});
+					// Index each turn so FTS search can find legacy content.
+					for (let i = 0; i < legacyTurns.length; i++) {
+						const t = legacyTurns[i]!;
+						const role: 'user' | 'assistant' = t.role === 'assistant' ? 'assistant' : 'user';
+						await this.deps.index.appendMessage({
+							session_id: sessionId,
+							turn_index: i,
+							role,
+							content: String(t.content ?? ''),
+							timestamp: isValidIso(t.timestamp) ? t.timestamp : this.now().toISOString(),
+						});
+					}
+				} catch (err) {
+					this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: upsertSession (legacy) failed; continuing');
+				}
+			}
+
 			await store.write(sentinelPath, this.now().toISOString());
 		});
 	}

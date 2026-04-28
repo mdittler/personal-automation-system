@@ -51,6 +51,8 @@ function makeNullChatSessions() {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -146,7 +148,7 @@ describe('P1 — recipe recall: snapshot.dataQueryResult surfaces user recipe da
 		const prompt = getSystemPromptFromLLMCall(services);
 		expect(prompt).toContain('Mushroom Risotto');
 		expect(prompt).toContain('arborio rice');
-		expect(prompt).toContain('Relevant data files');
+		expect(prompt).toContain('<memory-context label="recalled-data">');
 	});
 });
 
@@ -201,7 +203,7 @@ describe('P2 — grocery state: snapshot.dataQueryResult surfaces grocery list',
 			const prompt = getSystemPromptFromLLMCall(services);
 			expect(prompt).toContain('Tomatoes');
 			expect(prompt).toContain('Current Grocery List');
-			expect(prompt).toContain('Relevant data files');
+			expect(prompt).toContain('<memory-context label="recalled-data">');
 		},
 	);
 });
@@ -544,9 +546,7 @@ describe('P6 — parity: snapshot.dataQueryResult path is byte-identical to lega
 			[],
 			[],
 			deps,
-			'test-slug',
-			undefined,
-			legacyDataContext,
+			{ modelSlug: 'test-slug', dataContextOrSnapshot: legacyDataContext },
 		);
 
 		// Snapshot path: pass snapshot object with dataQueryResult
@@ -560,24 +560,19 @@ describe('P6 — parity: snapshot.dataQueryResult path is byte-identical to lega
 			[],
 			[],
 			deps,
-			'test-slug',
-			undefined,
-			snapshot,
+			{ modelSlug: 'test-slug', dataContextOrSnapshot: snapshot },
 		);
 
-		// The data-files section must be byte-identical
-		// Both prompts contain "Relevant data files" followed by the same content
+		// The recalled-data block must be byte-identical between both paths
 		expect(snapshotPrompt).toContain('Costco Prices');
 		expect(legacyPrompt).toContain('Costco Prices');
 
-		// Extract the data section from each prompt for precise comparison
+		// Extract the memory-context block from each prompt for precise comparison
 		const extractDataSection = (p: string): string => {
-			const start = p.indexOf('Relevant data files');
+			const start = p.indexOf('<memory-context label="recalled-data">');
 			if (start === -1) return '';
-			// Find end of section (next empty line after closing ```)
-			const afterHeader = p.indexOf('```', start);
-			const closeIdx = p.indexOf('```', afterHeader + 3);
-			return p.slice(start, closeIdx + 3);
+			const end = p.indexOf('</memory-context>', start) + '</memory-context>'.length;
+			return p.slice(start, end);
 		};
 
 		expect(extractDataSection(snapshotPrompt)).toBe(extractDataSection(legacyPrompt));
@@ -636,7 +631,7 @@ describe('P7 — /ask mode: snapshot wired into handleAsk', () => {
 			const prompt = getSystemPromptFromLLMCall(services);
 			expect(prompt).toContain('Daily Notes');
 			expect(prompt).toContain('pasta recipe draft');
-			expect(prompt).toContain('Relevant data files');
+			expect(prompt).toContain('<memory-context label="recalled-data">');
 		},
 	);
 });

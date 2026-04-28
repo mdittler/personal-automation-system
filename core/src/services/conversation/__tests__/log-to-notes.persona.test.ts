@@ -72,6 +72,8 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
+		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 	};
 	const deps: ConversationServiceDeps = {
 		llm: {

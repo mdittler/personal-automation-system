@@ -80,6 +80,7 @@ describe('ConversationRetrievalServiceImpl method existence', () => {
 		'buildSystemDataBlock',
 		'listScopedReports',
 		'listScopedAlerts',
+		'searchSessions',
 		'buildContextSnapshot',
 	] as const;
 
@@ -831,5 +832,128 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		// Ensure they didn't receive each other's data
 		expect(snap1.contextStore).not.toStrictEqual(user2Entries);
 		expect(snap2.contextStore).not.toStrictEqual(user1Entries);
+	});
+});
+
+// ─── buildMemorySnapshot ──────────────────────────────────────────────────────
+
+describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
+	function makeEntry(key: string, content: string): ContextEntry {
+		return { key, content, lastUpdated: new Date('2026-01-01') };
+	}
+
+	it('returns status:empty when ContextStore has no entries', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('empty');
+		expect(result.content).toBe('');
+		expect(result.entryCount).toBe(0);
+	});
+
+	it('returns status:ok with rendered content for non-empty store', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('food-prefs', 'I prefer metric units'),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('ok');
+		expect(result.content).toContain('## food-prefs');
+		expect(result.content).toContain('I prefer metric units');
+		expect(result.entryCount).toBe(1);
+	});
+
+	it('sorts entries alphabetically by key for determinism', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('zebra', 'z'),
+				makeEntry('alpha', 'a'),
+				makeEntry('middle', 'm'),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		const alphaIdx = result.content.indexOf('## alpha');
+		const middleIdx = result.content.indexOf('## middle');
+		const zebraIdx = result.content.indexOf('## zebra');
+		expect(alphaIdx).toBeLessThan(middleIdx);
+		expect(middleIdx).toBeLessThan(zebraIdx);
+	});
+
+	it('produces byte-identical output on consecutive calls with identical input', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('pref', 'Celsius'),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const a = await withUserId('u1', () => service.buildMemorySnapshot());
+		const b = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(a.content).toBe(b.content);
+	});
+
+	it('truncates content exceeding 4000 chars, appends durable marker, and stays within budget', async () => {
+		const longContent = 'x'.repeat(3000);
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('aaa', longContent),
+				makeEntry('bbb', longContent),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('ok');
+		expect(result.content).toContain('... (snapshot truncated at session start)');
+		expect(result.content.length).toBeLessThanOrEqual(4000);
+		expect(result.entryCount).toBe(1);
+	});
+
+	it('includes partial content when the first entry alone exceeds the budget', async () => {
+		const hugeContent = 'x'.repeat(5000);
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('huge', hugeContent),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('ok');
+		expect(result.content).toContain('... (snapshot truncated at session start)');
+		expect(result.content.length).toBeLessThanOrEqual(4000);
+		expect(result.content.startsWith('## huge')).toBe(true);
+		expect(result.entryCount).toBe(1);
+	});
+
+	it('returns status:degraded when ContextStore throws', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockRejectedValue(new Error('disk read failed')),
+		} as never;
+		const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore, logger });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('degraded');
+		expect(result.content).toBe('');
+		expect(result.entryCount).toBe(0);
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it('throws MissingRequestContextError when called outside requestContext', async () => {
+		const service = new ConversationRetrievalServiceImpl({});
+		await expect(withNoUserId(() => service.buildMemorySnapshot())).rejects.toBeInstanceOf(
+			MissingRequestContextError,
+		);
+	});
+
+	it('sets builtAt to an ISO 8601 timestamp', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([makeEntry('k', 'v')]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
 	});
 });

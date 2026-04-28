@@ -181,6 +181,21 @@ export interface SystemConfig {
 	chat?: {
 		/** System-wide default for daily-notes opt-in. Per-user override always wins. Default: false. */
 		logToNotes: boolean;
+		/** Transcript retention settings. */
+		sessions?: {
+			/**
+			 * When true, expired transcripts are pruned at startup (opt-in).
+			 * WARNING: auto_prune permanently deletes Markdown transcript files.
+			 * Default: false.
+			 */
+			auto_prune?: boolean;
+			/**
+			 * Number of days to retain ended session transcripts (1–3650).
+			 * Active sessions are never pruned regardless of this setting.
+			 * Default: 90.
+			 */
+			retention_days?: number;
+		};
 	};
 }
 

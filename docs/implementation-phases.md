@@ -69,6 +69,8 @@
 | Hermes P1 | ConversationService — core service extraction | **Complete** | ~80 | Extracted chatbot into `core/src/services/conversation/`; retired apps/chatbot; ConversationService first-class in bootstrap. Chunks A–D.4. Spec: `docs/superpowers/specs/2026-04-25-hermes-p1-conversation-service-design.md` |
 | Hermes P2 | ConversationRetrievalService — broad data visibility | **Complete** | ~30 | Source Policy allowlist, ConversationRetrievalService skeleton + DI wiring, scoped ReportService/AlertService APIs, compose all readers + buildContextSnapshot, handler wiring + persona tests, URS finalization. Chunks A–E. Spec: `docs/superpowers/specs/2026-04-27-hermes-p2-conversation-retrieval-design.md` |
 | Hermes P3 | Session persistence — manual /newchat and /reset | **Complete** | ~70 | Explicit per-session transcript files (`YYYYMMDD_HHMMSS_<8hex>.md`) under `chatbot/conversation/sessions/`. Tracers A–K: manifest scope, session-key/id/codec pure helpers, session-index with file mutex, Router peekActive + sessionId binding, ChatSessionStore appendExchange + endActive with locked race semantics, legacy history.json migration, ConversationService swap (replaces ConversationHistory), Router /newchat /reset built-ins + /help dedup, full compose-runtime wiring + conversation-history deletion, persona + production integration tests, URS REQ-CONV-SESSION-001..014. Post-merge simplify pass: `resolveOrDefaultSessionKey` helper (DRY 3-call-site fallback), `buildFrontmatter` optional `startedAt` (DRY inline object), `.legacy-checked` sentinel (O(1) re-entry guard) + upgrade-compat scan (prevent duplicate import for pre-sentinel P3 users), dead `setActive` barrel export removed, stale `conversation-history` module imports in 3 test files fixed. Plan: `docs/superpowers/plans/can-you-start-on-wondrous-bentley.md` |
+| Hermes P4 | Durable-memory snapshot + fenced recall | **Complete** | ~35 | `MemorySnapshot` frozen at session-mint via `ensureActiveSession` (before prompt assembly); persisted in session frontmatter (`memory_snapshot:` YAML, snake_case on disk / camelCase in TS). `buildMemoryContextBlock` + `sanitizeContextContent` fence utility (nested backtick collapse, role-tag neutralization). Layer 2: snapshot injected before `appendUserContextSection` inside `<memory-context label="durable-memory">` (tags outside fence). Layer 4: recalled `searchData` results wrapped in `<memory-context label="recalled-data">`. Per-turn ContextStore re-injection removed from `gatherContext`. `ensureActiveSession` replaces `ctx.sessionId` as `appendExchange` race guard. URS REQ-CONV-MEMORY-001..012. Chunks 0–F. Post-merge: simplify pass (byte-identical test bug, task-reference comments) + Codex corrections (`ensureActiveSession` fail-open, empty-session rollback on LLM failure, budget enforcement ≤4000 chars, `entryCount` = included count, sanitizer zero-width + case-insensitive tags). Plan: `docs/superpowers/plans/can-you-start-on-shimmying-mountain.md`. Spec: `docs/superpowers/specs/2026-04-28-hermes-p4-memory-snapshot-design.md` |
+| Hermes P5 | SQLite + FTS5 transcript search | **Complete** | ~50 | Derived `data/system/chat-state.db` (sessions + messages + messages_fts FTS5 virtual table, PRAGMA user_version migrations, WAL + jittered retry). `ChatTranscriptIndex` read/write API: `upsertSession`, `appendMessage`, `endSession`, `deleteSession`, `searchSessions`, `listExpiredSessions`, `close()`. Live indexer hook in `ChatSessionStore` (awaited best-effort). Two-stage recall pipeline: sync `recallPreFilter` + fast-tier LLM `classifyRecallIntent` → `buildUntrustedQuery` FTS5 sanitizer → `searchSessions` → Layer 5 `<memory-context label="recalled-session">` injected before conversation history. Rebuild CLI (`pnpm chat-index-rebuild`) walks both household + legacy layouts; deletes DB before re-indexing (stale-session reconciliation). Opt-in retention: `auto_prune`, `retention_days` (1–3650); prune deletes `.md` + DB rows + sweeps `active-sessions.yaml` with user-scoped `Map<userId, Set<sessionId>>`. URS REQ-CONV-SEARCH-001..014. Chunks 0–H. Post-merge: Codex corrections (stale rebuild reconciliation, path-derived ownership authority, Layer 5 ordering before history, user-scoped prune sweep, lint gate clean). Plan: `docs/superpowers/plans/can-you-start-on-greedy-sunrise.md`. Spec: `docs/superpowers/specs/2026-04-28-hermes-p5-transcript-search-design.md` |
 
 ### Dependency Graph
 
@@ -2712,6 +2714,124 @@ Remove the last legacy fallback surface: `SystemConfig.fallback`, `SystemConfig.
 **Hermes P1 (Chunks A → B → C → D.1 → D.2 → D.3 → D.4) is complete as of 2026-04-27.**
 
 ConversationService is now a first-class core service. The chatbot app source is deleted. All legacy `fallback`/`_legacyKeys` surface is removed. Phases P2–P5 (ConversationRetrievalService, session persistence, memory snapshot, FTS5 search) remain deferred per `docs/open-items.md`.
+
+---
+
+## Hermes P4: Durable-Memory Snapshot + Fenced Recall — COMPLETE
+
+**Hermes P4 (Chunks 0 → A → B → C → D → E → F) is complete as of 2026-04-28.**
+
+### What was built
+
+Two concerns addressed in one phase:
+
+**Prompt-prefix stability (Layer 2)** — every turn previously rebuilt the system prompt from scratch including live ContextStore entries, invalidating the LLM's prefix cache on every turn. P4 freezes durable ContextStore entries into a `MemorySnapshot` at session-mint time (`ensureActiveSession`), persists it in session frontmatter, and injects it as Layer 2 — between the static base prompt and per-turn user-context — via a `<memory-context label="durable-memory">` fenced block. The per-turn `gatherContext` ContextStore read is removed entirely.
+
+**Fenced recall wrapper (Layers 2 + 4)** — recalled content now lands inside a `<memory-context>` block with sanitized payload (nested backtick collapse, role-tag neutralization), framing tags outside the code fence. This signals to the LLM that the content is reference data, not a new instruction source.
+
+### Files added / modified
+
+| Path | Change |
+|------|--------|
+| `core/src/services/prompt-assembly/memory-context.ts` (new) | `buildMemoryContextBlock`, `sanitizeContextContent`, `toFrontmatter`, `parseMemorySnapshotFrontmatter` |
+| `core/src/types/conversation-session.ts` | `MemorySnapshot` interface |
+| `core/src/services/conversation-retrieval/conversation-retrieval-service.ts` | `buildMemorySnapshot()` method |
+| `core/src/services/conversation-session/chat-session-store.ts` | `ensureActiveSession`, `peekSnapshot`, `memory_snapshot` frontmatter field |
+| `core/src/services/conversation/prompt-builder.ts` | Layer 2 injection, Layer 4 fenced wrapping, options-object API, removed per-turn durable injection |
+| `core/src/services/conversation/app-data.ts` | `gatherContext` returns `[]` — ContextStore no longer read per-turn |
+| `core/src/services/conversation/handle-message.ts` | `ensureActiveSession` replaces `gatherContext`; snapshot threaded to prompt builders |
+| `core/src/services/conversation/handle-ask.ts` | Mirror of handle-message wiring |
+| `docs/urs.md` | REQ-CONV-MEMORY-001..012 + traceability matrix |
+| `docs/superpowers/specs/2026-04-28-hermes-p4-memory-snapshot-design.md` (new) | Design spec |
+| `docs/open-items.md` | P4 complete, P6 deferrals logged |
+
+### Key architectural decisions
+
+| Decision | Choice |
+|----------|--------|
+| Snapshot persistence | Session frontmatter `memory_snapshot:` (snake_case YAML; camelCase TS via mapping helpers) |
+| Snapshot input source | All `ContextStore.listForUser(userId)` entries (alphabetical sort; typed-kind filter deferred to P6) |
+| Snapshot mint timing | Inside `ensureActiveSession`, before any prompt assembly — first turn sees Layer 2 |
+| Failure mode | `status: 'degraded'` when retrieval wired and `buildMemorySnapshot` throws; no field when retrieval absent |
+| Per-turn injection | Removed — `gatherContext` returns `[]`; durable memory enters only via the frozen snapshot |
+| Layer 2 insertion | After static base prompt, before `appendUserContextSection` — maximizes prefix-cache stability |
+| Race guard | `ensuredSessionId` from `ensureActiveSession` replaces `ctx.sessionId` as `expectedSessionId` in `appendExchange` |
+| Fenced wrapper format | Tags outside code fence; sanitized payload inside — framing reads as instruction, payload reads as data |
+
+### Verification
+
+- `pnpm test` — 362 test files / 8401+ tests / 0 failures
+- Persona test: `memory-snapshot.persona.test.ts` — freeze semantic, mid-session mutation isolation, new-session snapshot rebuild (7 tests)
+- Prefix-cache stability: two consecutive turns with identical snapshot produce byte-identical Layer 2 block
+
+---
+
+## Hermes P5: SQLite + FTS5 Transcript Search — COMPLETE
+
+**Hermes P5 (Chunks 0 → A → B → C → D → E → F → G → H) is complete as of 2026-04-28.**
+
+### What was built
+
+Full-text search across chat session transcripts, auto-injected as recalled context on every conversational turn.
+
+**SQLite + FTS5 derived index** — `data/system/chat-state.db` holds three tables: `sessions` (per-session metadata), `messages` (per-turn content), and `messages_fts` (FTS5 virtual table with triggers for insert/delete/update). PRAGMA initialization (`WAL`, `foreign_keys`, `busy_timeout=5000`, `synchronous=NORMAL`) on every connection. Schema migrations via `PRAGMA user_version`. Jittered retry (`withSqliteRetry`, 15 attempts, 20–150ms backoff). WAL checkpoint every 50 writes.
+
+**Local-first invariant** — Markdown transcripts are canonical; SQLite is always derived. `pnpm chat-index-rebuild` walks both legacy (`data/users/<userId>/chatbot/…`) and household (`data/households/<hhId>/users/<userId>/chatbot/…`) layouts, decodes transcripts via `transcript-codec.decode`, and rebuilds the DB from scratch (prior DB deleted, stale sessions cannot persist).
+
+**Live indexer hook** — `ChatSessionStore.appendExchange` and `endActive` call `index.upsertSession` / `index.appendMessage` / `index.endSession` awaited best-effort inside a try/catch; transcript writes win, DB failures are logged.
+
+**Two-stage recall pipeline** — on every free-text turn and `/ask`:
+1. Sync `recallPreFilter` (no LLM call for `/commands`, greetings, short messages)
+2. Fast-tier LLM `classifyRecallIntent` → `{shouldRecall, query, timeWindow}` (output validated as untrusted; malformed → no-recall)
+3. `buildUntrustedQuery` sanitizer (operator stripping, zero-width removal, term-list output)
+4. `searchSessions({userId, householdId, queryTerms, excludeSessionIds:[activeSession], startedAfter?})`
+5. Layer 5 `<memory-context label="recalled-session">` injected before conversation history in both `buildSystemPrompt` and `buildAppAwareSystemPrompt`
+
+**Opt-in retention** — `chat.sessions.auto_prune: false` (default), `chat.sessions.retention_days: 90`. Prune deletes `.md` file (canonical), DB rows, and sweeps `active-sessions.yaml` via `Map<userId, Set<sessionId>>` (user-scoped to prevent cross-user contamination). Active sessions (no `ended_at`) are never pruned.
+
+### Files added / modified
+
+| Path | Change |
+|------|--------|
+| `core/src/services/chat-transcript-index/` (new dir) | `index.ts`, `chat-transcript-index.ts`, `schema.ts`, `retry.ts`, `fts-query.ts`, `types.ts`, `rebuild.ts`, `prune.ts` + `__tests__/` |
+| `core/src/services/conversation/recall-pipeline.ts` (new) | `recallPreFilter`, recall orchestration helper |
+| `core/src/services/conversation/prompt-assembly/recalled-sessions.ts` (new) | `formatRecalledSessions`, `wrapInRecalledFence` |
+| `core/src/services/conversation/prompt-builder.ts` | Layer 5 block before history; `recalledSessions?` option |
+| `core/src/services/conversation/handle-message.ts` | Recall pipeline before PAS classifier |
+| `core/src/services/conversation/handle-ask.ts` | Mirror of handle-message recall wiring |
+| `core/src/services/conversation-retrieval/conversation-retrieval-service.ts` | `searchSessions` method (user-scoped, no caller-supplied userId) |
+| `core/src/services/conversation-retrieval/source-policy.ts` | `conversation-transcripts` allowed category |
+| `core/src/services/conversation-session/chat-session-store.ts` | Live indexer hook (`upsertSession`, `appendMessage`, `endSession`) |
+| `core/src/services/conversation-retrieval/recall-classifier.ts` (new) | Fast-tier LLM classifier + untrusted-output coercion |
+| `core/src/runtime/compose-runtime.ts` | `ChatTranscriptIndex` instantiation + migrations + `close()` in `dispose()` |
+| `core/src/types/config.ts` | `chat.sessions.auto_prune`, `chat.sessions.retention_days` |
+| `scripts/chat-index-rebuild.ts` (new) | `pnpm chat-index-rebuild` CLI |
+| `scripts/chat-index-prune.ts` (new) | `pnpm chat-index-prune` CLI |
+| `docs/urs.md` | REQ-CONV-SEARCH-001..014 + traceability matrix |
+| `docs/superpowers/specs/2026-04-28-hermes-p5-transcript-search-design.md` (new) | Design spec |
+| `docs/open-items.md` | P5 complete, carry-forward items logged |
+
+### Key architectural decisions
+
+| Decision | Choice |
+|----------|--------|
+| Index scope | System-scoped (`data/system/chat-state.db`); `user_id`/`household_id` columns gate every query |
+| Ownership authority | Path-derived `userId`/`householdId` are authoritative; frontmatter mismatches → warn + skip |
+| Search auth | Strictly user-scoped — `searchSessions` reads userId from `requestContext`, no caller param; same-household cross-user forbidden |
+| Recall invocation | Every free-text turn + `/ask`, independent of `auto_detect_pas` |
+| Prompt layer | Layer 5 — before conversation history, after durable-memory snapshot (Layer 2) |
+| Classifier failure | Log + treat as `shouldRecall=false`; turn proceeds |
+| Prune scope | Only `ended_at IS NOT NULL AND ended_at < cutoff`; active sessions never pruned |
+| Prune canonical deletion | Deletes `.md` file; rebuild cannot restore pruned sessions |
+| Windows lifecycle | `close()` called in `dispose()` releases SQLite file lock before temp-dir cleanup |
+
+### Verification
+
+- `pnpm test` — 376 test files / 8593 tests / 0 failures
+- Persona test: `transcript-recall.persona.test.ts` — 16 scenarios (S1–S16): recall positive, no-recall, auth boundary, active-session dedupe, legacy import, hostile content sanitization, prune respects retention
+- Integration test: `transcript-recall.integration.test.ts` — 5 cases via `composeRuntime({dataDir})` (T1–T3)
+- Rebuild parity: delete DB → rebuild → search returns same hits; corrupt transcript skipped
+- Post-merge Codex corrections: stale rebuild reconciliation, path-derived ownership authority, Layer 5 ordering before history, user-scoped prune sweep, lint gate clean (0 blocking errors)
 
 ---
 

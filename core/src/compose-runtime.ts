@@ -46,6 +46,8 @@ import { ContextStoreServiceImpl } from './services/context-store/index.js';
 import { requestContext } from './services/context/request-context.js';
 import { ConversationRetrievalServiceImpl } from './services/conversation-retrieval/index.js';
 import { composeChatSessionStore } from './services/conversation-session/compose.js';
+import { createChatTranscriptIndex } from './services/chat-transcript-index/index.js';
+import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
@@ -930,6 +932,26 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	spaceService.setVaultService(vaultService);
 	await vaultService.rebuildAll();
 
+	// 9c-pre-i. Chat transcript FTS index (Hermes P5) — opened once, closed on shutdown.
+	const chatTranscriptDbPath = resolve(config.dataDir, 'system', 'chat-state.db');
+	const chatTranscriptIndex = createChatTranscriptIndex(chatTranscriptDbPath);
+	logger.info({ dbPath: chatTranscriptDbPath }, 'ChatTranscriptIndex: initialized');
+
+	// Startup prune — opt-in, runs asynchronously after full initialization.
+	if (config.chat?.sessions?.auto_prune === true) {
+		const retentionDays = config.chat.sessions.retention_days ?? 90;
+		const pruneLogger = createChildLogger(logger, { service: 'chat-prune' });
+		setImmediate(() => {
+			pruneExpiredSessions(chatTranscriptIndex, {
+				retentionDays,
+				dataDir: config.dataDir,
+				logger: pruneLogger,
+			}).catch((err: unknown) => {
+				pruneLogger.warn({ err }, 'startup prune failed');
+			});
+		});
+	}
+
 	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
 	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
 		dataQuery: dataQueryAdapter,
@@ -940,6 +962,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		systemInfo: systemInfoService,
 		reportService,
 		alertService,
+		index: chatTranscriptIndex,
 		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
 	});
 	logger.info('ConversationRetrievalService: initialized');
@@ -965,6 +988,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const chatSessions = composeChatSessionStore({
 		data: conversationDataStore,
 		logger: createChildLogger(logger, { service: 'conversation-session' }),
+		index: chatTranscriptIndex,
 	});
 
 	const conversationService = new ConversationService({
@@ -1350,6 +1374,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			() => eventBus.off('data:changed', onDataChanged),
 			// Flush interaction context to disk and drain write queue
 			() => interactionContextService.stop(),
+			// Close chat transcript FTS index (flushes WAL)
+			() => chatTranscriptIndex.close(),
 		],
 	});
 

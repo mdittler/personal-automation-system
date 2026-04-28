@@ -662,6 +662,8 @@ describe('conversation continuity — multi-turn scenarios', () => {
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 			readSession: vi.fn().mockResolvedValue(undefined),
+			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		};
 		vi.mocked(services.data.forUser).mockReturnValue(createMockScopedStore());
 	});

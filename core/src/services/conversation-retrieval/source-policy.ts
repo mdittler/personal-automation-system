@@ -28,7 +28,8 @@ export type AllowedSourceCategory =
 	| 'app-knowledge' //           AppKnowledgeBase.search
 	| 'system-info' //             ConversationSystemInfoReader (admin-gated by category, preserves gatherSystemData semantics)
 	| 'reports' //                 ReportService.listForUser   (NEW scoped API in Chunk B)
-	| 'alerts'; //                 AlertService.listForUser    (NEW scoped API in Chunk B)
+	| 'alerts' //                  AlertService.listForUser    (NEW scoped API in Chunk B)
+	| 'conversation-transcripts'; // ChatTranscriptIndex.searchSessions (Hermes P5)
 
 // ─── Denied source categories ─────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ export const ALLOWED_SOURCES: ReadonlySet<AllowedSourceCategory> = new Set([
 	'system-info',
 	'reports',
 	'alerts',
+	'conversation-transcripts',
 ] as const);
 
 export const DENIED_SOURCES: ReadonlySet<DeniedSourceCategory> = new Set([
@@ -188,6 +190,16 @@ export const SOURCE_POLICY: ReadonlyMap<AllowedSourceCategory, SourcePolicyEntry
 			notes: 'scoped API added in Chunk B',
 		},
 	],
+	[
+		'conversation-transcripts',
+		{
+			category: 'conversation-transcripts',
+			underlyingService: 'ChatTranscriptIndex',
+			underlyingMethod: 'searchSessions',
+			authModel: 'user-scoped',
+			notes: 'userId derived from requestContext; no caller-supplied identity accepted',
+		},
+	],
 ]);
 
 // ─── Method → Category mapping ────────────────────────────────────────────────
@@ -209,6 +221,7 @@ export const METHOD_SOURCE_CATEGORIES = {
 	buildSystemDataBlock: ['system-info'],
 	listScopedReports: ['reports'],
 	listScopedAlerts: ['alerts'],
+	searchSessions: ['conversation-transcripts'],
 	// buildContextSnapshot orchestrates the above methods rather than reading any category directly
 	// so it has no SOURCE_POLICY mapping entry
 } as const satisfies Record<string, readonly AllowedSourceCategory[]>;

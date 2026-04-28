@@ -21,10 +21,12 @@
 		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",
 		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts",
 		"load-test": "tsx scripts/load-test.ts",
-		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts"
+		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts",
+		"chat-index-rebuild": "tsx scripts/chat-index-rebuild.ts",
+		"chat-index-prune": "tsx scripts/chat-index-prune.ts"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+		"onlyBuiltDependencies": ["@biomejs/biome", "better-sqlite3", "esbuild"]
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",

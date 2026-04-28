@@ -97,6 +97,10 @@ interface PasYamlConfig {
 	};
 	chat?: {
 		log_to_notes?: boolean;
+		sessions?: {
+			auto_prune?: boolean;
+			retention_days?: number;
+		};
 	};
 }
 
@@ -264,6 +268,10 @@ export async function loadSystemConfig(options?: {
 		},
 		chat: {
 			logToNotes: yamlConfig?.chat?.log_to_notes ?? false,
+			sessions: {
+				auto_prune: yamlConfig?.chat?.sessions?.auto_prune ?? false,
+				retention_days: yamlConfig?.chat?.sessions?.retention_days ?? 90,
+			},
 		},
 	};
 

@@ -8,7 +8,6 @@
 import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
-import type { ContextStoreService } from '../../types/context-store.js';
 
 /** Max context entries to include in system prompt. */
 export const MAX_CONTEXT_ENTRIES = 3;
@@ -67,23 +66,16 @@ export function formatAppMetadata(apps: AppInfo[]): string {
 }
 
 /**
- * Gather all user context entries from the ContextStore.
- *
- * Context entries are small, user-curated preferences — include them all
- * so the LLM can decide relevance. Keyword search is too fragile for
- * natural-language queries (e.g., "what should I eat?" won't match "food").
+ * Placeholder for volatile per-turn context gathering.
+ * ContextStore entries are no longer fetched here — they are frozen at session
+ * start via `ChatSessionStore.ensureActiveSession` and injected as the Layer 2
+ * durable memory snapshot. This function returns an empty array so existing
+ * call sites remain valid while the wiring migrates to the snapshot path.
  */
 export async function gatherContext(
 	_text: string,
-	userId: string,
-	deps: { contextStore?: ContextStoreService; logger?: AppLogger },
+	_userId: string,
+	_deps: { logger?: AppLogger },
 ): Promise<string[]> {
-	try {
-		if (!deps.contextStore) return [];
-		const entries = await deps.contextStore.listForUser(userId);
-		return entries.slice(0, MAX_CONTEXT_ENTRIES).map((e) => e.content);
-	} catch (error) {
-		deps.logger?.warn('Failed to load context store: %s', error);
-		return [];
-	}
+	return [];
 }

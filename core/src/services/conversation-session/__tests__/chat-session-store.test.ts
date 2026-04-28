@@ -590,3 +590,165 @@ describe('E — Legacy history.json migration', () => {
 		expect(mdSessions[0]).toContain(existingId);
 	});
 });
+
+// ─── ensureActiveSession ───────────────────────────────────────────────────────
+
+describe('ChatSessionStore.ensureActiveSession', () => {
+	it('mints a new session and returns isNew:true on first call', async () => {
+		const store = makeStore();
+		const result = await store.ensureActiveSession(ctx);
+		expect(result.isNew).toBe(true);
+		expect(result.sessionId).toBeTruthy();
+		expect(result.snapshot).toBeUndefined();
+	});
+
+	it('returns isNew:false on subsequent calls for the same session', async () => {
+		const store = makeStore();
+		const first = await store.ensureActiveSession(ctx);
+		const second = await store.ensureActiveSession(ctx);
+		expect(second.isNew).toBe(false);
+		expect(second.sessionId).toBe(first.sessionId);
+	});
+
+	it('fires buildSnapshot callback exactly once on mint, not on peek', async () => {
+		const buildSnapshot = vi.fn().mockResolvedValue({
+			content: '## key\nvalue',
+			status: 'ok',
+			builtAt: new Date().toISOString(),
+			entryCount: 1,
+		});
+		const store = makeStore();
+		await store.ensureActiveSession(ctx, { buildSnapshot });
+		await store.ensureActiveSession(ctx, { buildSnapshot }); // second call: peek path
+		expect(buildSnapshot).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns snapshot from frontmatter on peek path (isNew:false)', async () => {
+		const snapshot = {
+			content: '## pref\nmetric',
+			status: 'ok' as const,
+			builtAt: new Date().toISOString(),
+			entryCount: 1,
+		};
+		const store = makeStore();
+		await store.ensureActiveSession(ctx, { buildSnapshot: vi.fn().mockResolvedValue(snapshot) });
+		const second = await store.ensureActiveSession(ctx);
+		expect(second.snapshot).toEqual(snapshot);
+	});
+
+	it('persists snapshot in session frontmatter', async () => {
+		const snapshot = {
+			content: '## k\nv',
+			status: 'ok' as const,
+			builtAt: '2026-04-28T08:00:00.000Z',
+			entryCount: 1,
+		};
+		const store = makeStore();
+		const { sessionId } = await store.ensureActiveSession(ctx, {
+			buildSnapshot: vi.fn().mockResolvedValue(snapshot),
+		});
+		const session = await store.readSession(USER, sessionId);
+		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
+		expect(fm.memory_snapshot).toBeDefined();
+		const ms = fm.memory_snapshot as { content: string; status: string; built_at: string; entry_count: number };
+		expect(ms.content).toBe(snapshot.content);
+		expect(ms.status).toBe('ok');
+		expect(ms.built_at).toBe(snapshot.builtAt);
+		expect(ms.entry_count).toBe(1);
+	});
+
+	it('snapshot field survives appendExchange (encodeAppend does not touch frontmatter)', async () => {
+		const snapshot = {
+			content: '## k\nv',
+			status: 'ok' as const,
+			builtAt: '2026-04-28T08:00:00.000Z',
+			entryCount: 1,
+		};
+		const store = makeStore();
+		const { sessionId } = await store.ensureActiveSession(ctx, {
+			buildSnapshot: vi.fn().mockResolvedValue(snapshot),
+		});
+		await store.appendExchange(
+			{ ...ctx, expectedSessionId: sessionId },
+			turn('user', 'hello'),
+			turn('assistant', 'hi'),
+		);
+		const session = await store.readSession(USER, sessionId);
+		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
+		expect(fm.memory_snapshot).toBeDefined();
+	});
+
+	it('snapshot field survives endActive rewrite', async () => {
+		const snapshot = {
+			content: '## k\nv',
+			status: 'ok' as const,
+			builtAt: '2026-04-28T08:00:00.000Z',
+			entryCount: 1,
+		};
+		const store = makeStore();
+		const { sessionId } = await store.ensureActiveSession(ctx, {
+			buildSnapshot: vi.fn().mockResolvedValue(snapshot),
+		});
+		await store.endActive(ctx, 'newchat');
+		const session = await store.readSession(USER, sessionId);
+		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
+		expect(fm.memory_snapshot).toBeDefined();
+	});
+
+	it('no memory_snapshot field when buildSnapshot callback is absent', async () => {
+		const store = makeStore();
+		const { sessionId } = await store.ensureActiveSession(ctx); // no callback
+		const session = await store.readSession(USER, sessionId);
+		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
+		expect(fm.memory_snapshot).toBeUndefined();
+	});
+
+	it('mints with status:degraded when buildSnapshot throws', async () => {
+		const buildSnapshot = vi.fn().mockRejectedValue(new Error('store down'));
+		const store = makeStore();
+		const { sessionId, snapshot } = await store.ensureActiveSession(ctx, { buildSnapshot });
+		expect(sessionId).toBeTruthy();
+		expect(snapshot?.status).toBe('degraded');
+		const session = await store.readSession(USER, sessionId);
+		expect(session).toBeDefined();
+		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
+		// degraded snapshot IS persisted (service was wired but failed)
+		expect(fm.memory_snapshot).toBeDefined();
+	});
+
+	it('session minted before P4 (no memory_snapshot field) decodes snapshot as undefined', async () => {
+		// Simulate a pre-P4 session by writing a transcript without memory_snapshot in frontmatter
+		const store = makeStore();
+		// First ensure an active session exists (minted without snapshot)
+		const { sessionId } = await store.ensureActiveSession(ctx);
+		// peekSnapshot should return undefined since no snapshot field was written
+		const snap = await store.peekSnapshot(ctx);
+		expect(snap).toBeUndefined();
+	});
+});
+
+describe('ChatSessionStore.peekSnapshot', () => {
+	it('returns undefined when no active session', async () => {
+		const store = makeStore();
+		expect(await store.peekSnapshot(ctx)).toBeUndefined();
+	});
+
+	it('returns undefined when active session has no snapshot field', async () => {
+		const store = makeStore();
+		await store.ensureActiveSession(ctx); // no callback → no snapshot
+		expect(await store.peekSnapshot(ctx)).toBeUndefined();
+	});
+
+	it('returns the snapshot when present', async () => {
+		const snapshot = {
+			content: '## x\ny',
+			status: 'ok' as const,
+			builtAt: '2026-04-28T08:00:00.000Z',
+			entryCount: 1,
+		};
+		const store = makeStore();
+		await store.ensureActiveSession(ctx, { buildSnapshot: vi.fn().mockResolvedValue(snapshot) });
+		const result = await store.peekSnapshot(ctx);
+		expect(result).toEqual(snapshot);
+	});
+});

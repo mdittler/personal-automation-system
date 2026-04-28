@@ -138,6 +138,18 @@ export const PasYamlConfigSchema = z
 		chat: z
 			.object({
 				log_to_notes: z.boolean().optional(),
+				sessions: z
+					.object({
+						auto_prune: z.boolean().optional(),
+						retention_days: z
+							.number()
+							.int('retention_days must be an integer')
+							.min(1, 'retention_days must be at least 1')
+							.max(3650, 'retention_days must be at most 3650')
+							.optional(),
+					})
+					.passthrough()
+					.optional(),
 			})
 			.passthrough()
 			.optional(),
