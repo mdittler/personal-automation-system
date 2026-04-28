@@ -118,7 +118,7 @@ export async function handleAsk(
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey }, { maxTurns: 20 }),
+		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
 		gatherContext(question, ctx.userId, deps),
 		buildUserContext(ctx, deps),
 	]);

@@ -92,7 +92,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey }, { maxTurns: 20 }),
+		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
 		gatherContext(ctx.text, ctx.userId, deps),
 		getAutoDetectSetting(ctx.userId, deps),
 		buildUserContext(ctx, deps),

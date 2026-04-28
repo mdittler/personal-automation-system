@@ -2494,29 +2494,19 @@ The original configurable `chatbot|notes` fallback is superseded by the Hermes P
 
 ### REQ-CHATBOT-001: Conversation history management
 
-**Phase:** 16 | **Status:** Implemented
+**Phase:** 16 | **Status:** Superseded (Hermes P3)
 
-The chatbot maintains per-user conversation history as JSON via ScopedDataStore. History is loaded before each LLM call and included in the system prompt for continuity. A sliding window (maxTurns, default 20) keeps history bounded. Malformed or missing history files are handled gracefully.
+The chatbot maintains per-user conversation history loaded before each LLM call and included in the system prompt for continuity. A sliding window (maxTurns, default 20) keeps history bounded. Malformed or missing history files are handled gracefully.
+
+**Note (Hermes P3):** The implementation was replaced by `ChatSessionStore` (see REQ-CONV-SESSION-001..014). History now loads from per-session markdown transcripts via `loadRecentTurns`; legacy `history.json` is migrated once as a `source: legacy-import` session. `conversation-history.test.ts` and the `ConversationHistory` class were deleted. Coverage is now in `chat-session-store.test.ts`.
 
 **Standard tests:**
-- `conversation-history.test.ts` > load > returns parsed turns from valid JSON
-- `conversation-history.test.ts` > load > reads from history.json
-- `conversation-history.test.ts` > append > saves user and assistant turns
-- `conversation-history.test.ts` > append > appends to existing history
-- `conversation-history.test.ts` > append > uses atomic write via store.write
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > second appendExchange reuses same session
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > loadRecentTurns returns written turns
 
 **Edge case tests:**
-- `conversation-history.test.ts` > load > returns empty array when store has no data
-- `conversation-history.test.ts` > load > truncates to maxTurns on load
-- `conversation-history.test.ts` > load > returns empty array for malformed JSON
-- `conversation-history.test.ts` > load > returns empty array when JSON is not an array
-- `conversation-history.test.ts` > load > returns empty array when JSON is a string
-- `conversation-history.test.ts` > load > clamps maxTurns of 0 to 1
-- `conversation-history.test.ts` > load > clamps negative maxTurns to 1
-- `conversation-history.test.ts` > load > handles maxTurns of 1
-- `conversation-history.test.ts` > append > truncates to maxTurns when exceeding limit
-- `conversation-history.test.ts` > append > works with empty store (first conversation)
-- `conversation-history.test.ts` > append > works with malformed existing data
+- `chat-session-store.test.ts` > D.1 — appendExchange happy path > loadRecentTurns respects maxTurns
+- `chat-session-store.test.ts` > D.7 — corruption self-heal > corrupted active-sessions.yaml mints fresh session
 
 **Note (Chunk B):** The free-text dispatch path that invokes conversation history now routes through `ConversationService` in core rather than the chatbot app shim. The history management behavior is unchanged. See REQ-CONV-003.
 
@@ -2852,29 +2842,9 @@ The `/ask` command uses `classifyPASMessage()` (same LLM classifier as `handleMe
 
 ### REQ-CHATBOT-018: ConversationHistory module in core
 
-**Phase:** P0 (chatbot-to-core migration) | **Status:** Implemented
+**Phase:** P0 (chatbot-to-core migration) | **Status:** Superseded (Hermes P3)
 
-`ConversationHistory` must live at `core/src/services/conversation-history/` and be importable from `@pas/core/services/conversation-history`. The class provides `load()` (reads sliding window of last N turns from `history.json`) and `append()` (atomic write with a serialized write queue to prevent concurrent corruption). `HISTORY_FILE = 'history.json'` is module-private (not exported). `ConversationHistoryOptions.maxTurns` defaults to 20. The chatbot app imports from the core subpath rather than maintaining a local copy.
-
-**Standard tests (`conversation-history.test.ts`):**
-- `load` > returns empty array if file does not exist
-- `load` > returns turns from an existing file
-- `load` > returns only the last maxTurns turns
-- `load` > returns default maxTurns (20) if not specified
-- `load` > handles malformed JSON gracefully (returns empty array)
-- `load` > handles malformed turns array gracefully
-- `load` > handles file read errors gracefully (returns empty array)
-- `load` > handles turns with missing fields
-- `load` > uses custom maxTurns when specified
-- `load` > handles empty turns array
-- `append` > creates the file if it does not exist
-- `append` > appends a new turn to existing turns
-- `append` > limits stored turns to maxTurns
-- `append` > handles concurrent appends without corruption (serialized write queue)
-- `append` > preserves existing turns when maxTurns not exceeded
-- `append` > handles very large maxTurns
-- `append` > handles empty initial file
-- `append` > creates parent directories if they do not exist
+`ConversationHistory` (flat JSON at `history.json`, sliding 20-turn window, serialized write queue) was the original implementation. It has been replaced by `ChatSessionStore` (per-session markdown transcripts, `YYYYMMDD_HHMMSS_<8hex>` ids, file-mutex concurrency) in Hermes P3. The `core/src/services/conversation-history/` directory and its tests were deleted. The `@pas/core/services/conversation-history` subpath export was removed from `core/package.json`. Existing `history.json` files are migrated as a `source: legacy-import` read-only session on first user message post-upgrade. See REQ-CONV-SESSION-001..014.
 
 ### REQ-CHATBOT-019: prompt-assembly core module
 
@@ -6821,7 +6791,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-005 | (superseded — see REQ-CONV-021) | 0 | 0 | Superseded |
 | REQ-ROUTE-006 | route-verifier.test.ts, router-verification.test.ts, prompt-templates.test.ts, pending-verification-store.test.ts, verification-logger.test.ts, config.test.ts | 22 | 26 | Implemented |
 | REQ-ROUTE-007 | router.test.ts, router-verification.test.ts, context-promotion.test.ts | 12 | 3 | Implemented |
-| REQ-CHATBOT-001 | conversation-history.test.ts | 5 | 11 | Implemented |
+| REQ-CHATBOT-001 | chat-session-store.test.ts (supersedes deleted conversation-history.test.ts) | 2 | 2 | Superseded (P3) |
 | REQ-CHATBOT-002 | prompt-builder.test.ts, conversation-service.test.ts | 4 | 6 | Implemented |
 | REQ-CHATBOT-003 | conversation-service.test.ts | 1 | 1 | Implemented |
 | REQ-CHATBOT-004 | handle-ask.test.ts | 4 | 7 | Implemented |
@@ -6926,7 +6896,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-DATAQUERY-004 | data-query.test.ts | 3 | 2 | Implemented |
 | REQ-CHATBOT-016 | data-query-wiring.test.ts, context-injection.test.ts | 8 | 6 | Implemented |
 | REQ-CHATBOT-017 | data-query-wiring.test.ts, context-injection.test.ts | 3 | 3 | Implemented |
-| REQ-CHATBOT-018 | conversation-history.test.ts (core) | 10 | 8 | Implemented |
+| REQ-CHATBOT-018 | (deleted — superseded by REQ-CONV-SESSION-001..014) | 0 | 0 | Superseded (P3) |
 | REQ-CHATBOT-019 | sanitization.test.ts, fencing.test.ts, model-journal.test.ts, system-prompt.test.ts (core) | 34 | 9 | Implemented |
 | REQ-IC-001 | interaction-context.test.ts, integration.test.ts, edit.test.ts | 6 | 7 | Implemented |
 | REQ-IC-002 | bootstrap-wiring.test.ts, compose-runtime.smoke.integration.test.ts | 9 | 0 | Implemented |

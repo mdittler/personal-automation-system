@@ -53,66 +53,68 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 		throw new CorruptTranscriptError(`Failed to parse frontmatter: ${String(e)}`);
 	}
 
-	// Everything after the closing '---\n'
+	// Parse turns sequentially: find header → find opening fence → consume until closing fence.
+	// Content inside fences is never scanned for headers, so transcript-looking lines in
+	// user/assistant messages cannot corrupt the parse.
 	const body = raw.slice(fmMatch[0].length);
+	const lines = body.split('\n');
 	const turns: SessionTurn[] = [];
 
-	// Split on turn headers; each header is "### role — timestamp"
-	const headerGlobalRe = new RegExp(
-		`### (user|assistant) ${EM_DASH} (\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z)`,
-		'gm',
+	const headerRe = new RegExp(
+		`^### (user|assistant) ${EM_DASH} (\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z)$`,
 	);
+	const fenceRe = /^`{4,}$/;
 
-	let match: RegExpExecArray | null;
-	const headers: Array<{ role: 'user' | 'assistant'; timestamp: string; startIdx: number }> = [];
+	let i = 0;
+	while (i < lines.length) {
+		const line = lines[i]!;
+		const headerMatch = line.match(headerRe);
+		if (!headerMatch) {
+			i++;
+			continue;
+		}
 
-	while ((match = headerGlobalRe.exec(body)) !== null) {
-		headers.push({
-			role: match[1]! as 'user' | 'assistant',
-			timestamp: match[2]!,
-			startIdx: match.index + match[0].length,
-		});
-	}
+		const role = headerMatch[1]! as 'user' | 'assistant';
+		const timestamp = headerMatch[2]!;
+		i++;
 
-	for (let i = 0; i < headers.length; i++) {
-		const h = headers[i]!;
-		const next = headers[i + 1];
-		const segEnd = next !== undefined ? body.lastIndexOf(`### ${next.role}`, next.startIdx - 1) : body.length;
-		const segment = body.slice(h.startIdx, segEnd >= 0 ? segEnd : body.length);
-
-		// Parse fenced block: find opening fence on first non-empty line
-		const lines = segment.split('\n');
-		// lines[0] is empty (immediately after header), lines[1] is the fence
-		let fenceStart = -1;
+		// Find opening fence: first non-empty line after the header must be a fence.
 		let fenceStr = '';
-		for (let j = 0; j < lines.length; j++) {
-			const trimmed = lines[j]!.trim();
-			if (trimmed.match(/^`{4,}$/)) {
-				fenceStart = j;
-				fenceStr = trimmed;
+		while (i < lines.length) {
+			const l = lines[i]!.trim();
+			if (l === '') {
+				i++;
+				continue;
+			}
+			if (fenceRe.test(l)) {
+				fenceStr = l;
+				i++;
 				break;
 			}
+			throw new CorruptTranscriptError(`Turn at ${timestamp} has no opening fence`);
+		}
+		if (!fenceStr) {
+			throw new CorruptTranscriptError(`Turn at ${timestamp} has no opening fence`);
 		}
 
-		if (fenceStart === -1) {
-			throw new CorruptTranscriptError(`Turn at ${h.timestamp} has no opening fence`);
-		}
-
-		// Find the closing fence — same fence string on its own line AFTER the opening
-		let fenceEnd = -1;
-		for (let j = fenceStart + 1; j < lines.length; j++) {
-			if (lines[j]!.trim() === fenceStr) {
-				fenceEnd = j;
+		// Collect content lines until the matching closing fence.
+		// Lines are treated as opaque — no header scanning inside the fence.
+		const contentLines: string[] = [];
+		let foundClosing = false;
+		while (i < lines.length) {
+			const l = lines[i]!;
+			i++;
+			if (l.trim() === fenceStr) {
+				foundClosing = true;
 				break;
 			}
+			contentLines.push(l);
+		}
+		if (!foundClosing) {
+			throw new CorruptTranscriptError(`Turn at ${timestamp} has no closing fence`);
 		}
 
-		if (fenceEnd === -1) {
-			throw new CorruptTranscriptError(`Turn at ${h.timestamp} has no closing fence`);
-		}
-
-		const content = lines.slice(fenceStart + 1, fenceEnd).join('\n');
-		turns.push({ role: h.role, timestamp: h.timestamp, content });
+		turns.push({ role, timestamp, content: contentLines.join('\n') });
 	}
 
 	return { meta, turns };

@@ -52,7 +52,7 @@ export interface ChatSessionStore {
 
 	/** Read-only. Returns up to opts.maxTurns from the active session, or [] if none. */
 	loadRecentTurns(
-		ctx: { userId: string; sessionKey: string },
+		ctx: { userId: string; sessionKey: string; householdId?: string | null },
 		opts?: { maxTurns?: number },
 	): Promise<SessionTurn[]>;
 
@@ -146,16 +146,28 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
 	): Promise<string> {
 		const now = this.now();
+		const startedAt = now.toISOString();
 		for (let attempt = 0; attempt < MAX_MINT_ATTEMPTS; attempt++) {
 			const id = this.mintId(now);
 			const existing = await store.read(`conversation/sessions/${id}.md`);
 			if (existing === '') {
-				const entry: ActiveSessionEntry = {
+				// Write the transcript skeleton BEFORE publishing to the index.
+				// This guarantees that any concurrent caller which peekActive()s the id
+				// and passes it as expectedSessionId will always find an existing file.
+				const fm: ChatSessionFrontmatter = {
 					id,
-					started_at: now.toISOString(),
+					source: 'telegram',
+					user_id: ctx.userId,
+					household_id: ctx.householdId ?? null,
 					model: ctx.model ?? null,
+					title: null,
+					parent_session_id: null,
+					started_at: startedAt,
+					ended_at: null,
+					token_counts: { input: 0, output: 0 },
 				};
-				await setActiveUnlocked(store, ctx.sessionKey, entry);
+				await store.write(`conversation/sessions/${id}.md`, encodeNew(fm));
+				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
 				return id;
 			}
 			this.deps.logger.warn({ id, attempt }, 'conversation-session: id collision, retrying');
@@ -184,11 +196,11 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	}
 
 	async loadRecentTurns(
-		ctx: { userId: string; sessionKey: string },
+		ctx: { userId: string; sessionKey: string; householdId?: string | null },
 		opts?: { maxTurns?: number },
 	): Promise<SessionTurn[]> {
 		const store = this.deps.data.forUser(ctx.userId);
-		await this.maybeImportLegacy(store, ctx.userId, null);
+		await this.maybeImportLegacy(store, ctx.userId, ctx.householdId ?? null);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
 		if (!entry) return [];
 		const raw = await store.read(`conversation/sessions/${entry.id}.md`);

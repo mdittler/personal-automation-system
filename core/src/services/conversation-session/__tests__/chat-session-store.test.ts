@@ -291,7 +291,10 @@ describe('D.6 — clock injection', () => {
 		let callCount = 0;
 		const dynamicClock = () => {
 			callCount++;
-			return callCount <= 2 ? FROZEN : endTime; // first calls for minting/frontmatter, end call
+			// mintAndRegister consumes 1 clock call (for the id + skeleton started_at).
+			// appendExchange no longer calls buildFrontmatter (the skeleton is pre-written).
+			// endActive's this.now() is therefore the 2nd clock call.
+			return callCount <= 1 ? FROZEN : endTime;
 		};
 
 		const store = makeStore({ clock: dynamicClock });
