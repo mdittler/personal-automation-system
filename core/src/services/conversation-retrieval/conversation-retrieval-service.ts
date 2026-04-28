@@ -18,6 +18,7 @@ import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
 import type { ReportDefinition } from '../../types/report.js';
 import type { SystemInfoService } from '../../types/system-info.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
@@ -99,6 +100,12 @@ export interface ConversationRetrievalService {
 	listScopedAlerts(): Promise<AlertDefinition[]>;
 	/** Compose a full context snapshot for LLM injection. */
 	buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot>;
+	/**
+	 * Build a frozen MemorySnapshot from durable ContextStore entries.
+	 * Called at session-mint time, before the first prompt is assembled.
+	 * Requires a userId in the current requestContext.
+	 */
+	buildMemorySnapshot(): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────
@@ -234,6 +241,44 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			throw new Error('ConversationRetrievalService.listScopedAlerts: AlertService not wired');
 		}
 		return this.deps.alertService.listForUser(userId);
+	}
+
+	async buildMemorySnapshot(): Promise<MemorySnapshot> {
+		const userId = this.assertRequestContext('buildMemorySnapshot');
+		const BUDGET = 4_000;
+		const MARKER = '... (snapshot truncated at session start)';
+		const builtAt = new Date().toISOString();
+
+		let entries: ContextEntry[];
+		try {
+			entries = await this.deps.contextStore!.listForUser(userId);
+		} catch (err) {
+			this.deps.logger?.warn(
+				{ err },
+				'buildMemorySnapshot: ContextStore read failed — returning degraded snapshot',
+			);
+			return { content: '', status: 'degraded', builtAt, entryCount: 0 };
+		}
+
+		if (entries.length === 0) {
+			return { content: '', status: 'empty', builtAt, entryCount: 0 };
+		}
+
+		const sorted = [...entries].sort((a, b) => a.key.localeCompare(b.key));
+		const entryCount = sorted.length;
+
+		// Render each entry; accumulate until budget is exhausted.
+		let content = '';
+		for (const entry of sorted) {
+			const rendered = `## ${entry.key}\n${entry.content}\n\n`;
+			if (content.length + rendered.length > BUDGET) {
+				content += MARKER;
+				break;
+			}
+			content += rendered;
+		}
+
+		return { content: content.trimEnd(), status: 'ok', builtAt, entryCount };
 	}
 
 	async buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot> {
