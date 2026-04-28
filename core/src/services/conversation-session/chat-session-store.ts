@@ -151,35 +151,21 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			const id = this.mintId(now);
 			const existing = await store.read(`conversation/sessions/${id}.md`);
 			if (existing === '') {
-				// Write the transcript skeleton BEFORE publishing to the index.
-				// This guarantees that any concurrent caller which peekActive()s the id
-				// and passes it as expectedSessionId will always find an existing file.
-				const fm: ChatSessionFrontmatter = {
-					id,
-					source: 'telegram',
-					user_id: ctx.userId,
-					household_id: ctx.householdId ?? null,
-					model: ctx.model ?? null,
-					title: null,
-					parent_session_id: null,
-					started_at: startedAt,
-					ended_at: null,
-					token_counts: { input: 0, output: 0 },
-				};
-				await store.write(`conversation/sessions/${id}.md`, encodeNew(fm));
+				// Write transcript skeleton BEFORE publishing to the index.
+				// Guarantees concurrent peekActive + expectedSessionId callers always find an existing file.
+				await store.write(`conversation/sessions/${id}.md`, encodeNew(this.buildFrontmatter(ctx, id, startedAt)));
 				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
 				return id;
 			}
 			this.deps.logger.warn({ id, attempt }, 'conversation-session: id collision, retrying');
 		}
-		throw new Error(
-			`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`,
-		);
+		throw new Error(`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`);
 	}
 
 	private buildFrontmatter(
 		ctx: { userId: string; model?: string; householdId?: string | null },
 		sessionId: string,
+		startedAt?: string,
 	): ChatSessionFrontmatter {
 		return {
 			id: sessionId,
@@ -189,7 +175,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			model: ctx.model ?? null,
 			title: null,
 			parent_session_id: null,
-			started_at: this.now().toISOString(),
+			started_at: startedAt ?? this.now().toISOString(),
 			ended_at: null,
 			token_counts: { input: 0, output: 0 },
 		};
@@ -216,11 +202,12 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 
 	async endActive(
 		ctx: { userId: string; sessionKey: string },
-		_reason: 'newchat' | 'reset' | 'system',
+		reason: 'newchat' | 'reset' | 'system',
 	): Promise<{ endedSessionId: string | null }> {
 		const store = this.deps.data.forUser(ctx.userId);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
 		if (!entry) return { endedSessionId: null };
+		this.deps.logger.debug({ sessionId: entry.id, reason }, 'conversation-session: ending active session');
 
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
 			const path = `conversation/sessions/${entry.id}.md`;
@@ -257,37 +244,36 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	}
 
 	// Migrate legacy history.json once per user, under a per-user mutex.
-	// Idempotent: short-circuits when any existing session has source: legacy-import.
+	// After the first run (regardless of outcome), writes a sentinel file so
+	// subsequent calls are O(1) rather than scanning the sessions directory.
 	private async maybeImportLegacy(
 		store: ReturnType<DataStoreService['forUser']>,
 		userId: string,
 		householdId: string | null,
 	): Promise<void> {
+		const sentinelPath = 'conversation/.legacy-checked';
 		await withFileLock(`legacy-migration:${userId}`, async () => {
-			// Sentinel check: scan existing sessions for any legacy-import
-			const sessionFiles = await store.list('conversation/sessions/');
-			for (const filename of sessionFiles) {
-				if (!filename.endsWith('.md')) continue;
-				const raw = await store.read(`conversation/sessions/${filename}`);
-				try {
-					const { meta } = decode(raw);
-					if (meta.source === 'legacy-import') return;
-				} catch {
-					// Corrupt — skip this file
-				}
-			}
+			// Fast path: already checked on a prior call
+			if ((await store.read(sentinelPath)) !== '') return;
 
 			// Read history.json
 			const historyRaw = await store.read('history.json');
-			if (!historyRaw) return;
+			if (!historyRaw) {
+				await store.write(sentinelPath, this.now().toISOString());
+				return;
+			}
 
 			let legacyTurns: Array<{ role: unknown; content: unknown; timestamp: unknown }>;
 			try {
 				const parsed = JSON.parse(historyRaw);
-				if (!Array.isArray(parsed) || parsed.length === 0) return;
+				if (!Array.isArray(parsed) || parsed.length === 0) {
+					await store.write(sentinelPath, this.now().toISOString());
+					return;
+				}
 				legacyTurns = parsed as typeof legacyTurns;
 			} catch {
 				this.deps.logger.warn({ userId }, 'conversation-session: legacy history.json malformed JSON, skipping migration');
+				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
 
@@ -298,14 +284,13 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				? legacyTurns[0].timestamp
 				: this.now().toISOString();
 			const lastTs = isValidIso(legacyTurns[legacyTurns.length - 1]?.timestamp)
-				? legacyTurns[legacyTurns.length - 1]!.timestamp as string
+				? (legacyTurns[legacyTurns.length - 1]!.timestamp as string)
 				: this.now().toISOString();
 
 			const startDate = isValidIso(legacyTurns[0]?.timestamp)
 				? new Date(legacyTurns[0].timestamp)
 				: this.now();
 
-			// Mint session id with collision retry
 			let sessionId: string | undefined;
 			for (let attempt = 0; attempt < MAX_MINT_ATTEMPTS; attempt++) {
 				const id = this.mintId(startDate);
@@ -317,6 +302,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			}
 			if (!sessionId) {
 				this.deps.logger.warn({ userId }, 'conversation-session: could not mint unique id for legacy migration');
+				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
 
@@ -346,6 +332,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			}
 
 			await store.write(`conversation/sessions/${sessionId}.md`, content);
+			await store.write(sentinelPath, this.now().toISOString());
 		});
 	}
 }

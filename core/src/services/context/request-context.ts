@@ -32,11 +32,6 @@ export interface RequestContext {
 
 	/**
 	 * The chat session the current request belongs to.
-	 *
-	 * P0 adds the field; no production dispatch site populates it yet. P3 wires
-	 * `ChatSessionStore` to set it on every conversation turn, and P5 reads it
-	 * when indexing messages into the FTS5 transcript store.
-	 *
 	 * Undefined for non-conversation dispatch (scheduled jobs, alert actions,
 	 * non-fallback router branches, admin/API writes). Validation is a
 	 * consumer responsibility (the ALS stores the value verbatim).
@@ -70,9 +65,6 @@ export function getCurrentHouseholdId(): string | undefined {
  * Returns undefined if called outside any `requestContext.run()` scope,
  * if the current context has no sessionId set, or if the dispatch path
  * is non-conversational (scheduled jobs, alert actions, API writes).
- *
- * P3 wires this for all conversation dispatch sites. P5 reads it when
- * indexing messages into the FTS5 transcript store.
  */
 export function getCurrentSessionId(): string | undefined {
 	return requestContext.getStore()?.sessionId;

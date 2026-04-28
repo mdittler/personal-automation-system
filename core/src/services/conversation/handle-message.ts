@@ -23,7 +23,7 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
-import { buildSessionKey } from '../conversation-session/session-key.js';
+import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
 	ConversationContextSnapshot,
@@ -80,9 +80,7 @@ export interface HandleMessageDeps {
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
-	const sessionKey =
-		ctx.sessionKey ??
-		buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: ctx.userId });
+	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
 	const [{ wrote: noteWrote }, turns, contextEntries, autoDetect, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {

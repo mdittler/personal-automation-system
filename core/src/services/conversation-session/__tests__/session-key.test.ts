@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSessionKey } from '../session-key.js';
+import { buildSessionKey, resolveOrDefaultSessionKey } from '../session-key.js';
 import { InvalidSessionKeyError } from '../errors.js';
 
 describe('buildSessionKey', () => {
@@ -48,6 +48,24 @@ describe('buildSessionKey', () => {
 	it('accepts chatId with hyphens and underscores', () => {
 		expect(buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: 'user-123_abc' })).toBe(
 			'agent:main:telegram:dm:user-123_abc',
+		);
+	});
+});
+
+describe('resolveOrDefaultSessionKey', () => {
+	it('returns ctx.sessionKey when already set', () => {
+		expect(resolveOrDefaultSessionKey({ sessionKey: 'agent:main:telegram:dm:matt', userId: 'matt' })).toBe(
+			'agent:main:telegram:dm:matt',
+		);
+	});
+
+	it('builds the default dm key when sessionKey is absent', () => {
+		expect(resolveOrDefaultSessionKey({ userId: 'matt' })).toBe('agent:main:telegram:dm:matt');
+	});
+
+	it('builds the default dm key when sessionKey is undefined', () => {
+		expect(resolveOrDefaultSessionKey({ sessionKey: undefined, userId: 'nina' })).toBe(
+			'agent:main:telegram:dm:nina',
 		);
 	});
 });
