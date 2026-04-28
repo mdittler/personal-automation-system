@@ -339,7 +339,7 @@ describe('S4 — Recall positive: /ask mode', () => {
 		const { svc, services } = makeService({ index });
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce(RECALL_VERDICT_PASTA) // recall classifier
-			.mockResolvedValueOnce('NO') // PAS classifier (fast tier) — not pas-related
+			.mockResolvedValueOnce('NO') // PAS classifier (fast tier) — fires but result has no effect on prompt builder when retrieval is wired
 			.mockResolvedValueOnce('I remember we discussed carbonara.'); // standard LLM
 
 		const ctx = createTestMessageContext({
@@ -602,6 +602,9 @@ describe('S11 — Active-session dedupe', () => {
 		await requestContext.run({ userId: USER_A_ID }, () => svc.handleMessage(ctx));
 
 		const prompt = getStandardPrompt(services);
+		// Confirm that the older pasta session WAS recalled (fenced block should be present)
+		expect(prompt).toContain('<memory-context label="recalled-session">');
+		// Now confirm the active session's content is excluded from the block
 		// The active session content should NOT appear in the recalled-session fenced block.
 		// Even though FTS5 would match "pasta carbonara", the active session is excluded via
 		// excludeSessionIds — its turns should not be duplicated in the recalled block.
@@ -725,21 +728,22 @@ describe('S13 — Hostile content sanitization', () => {
 		await requestContext.run({ userId: USER_A_ID }, () => svc.handleMessage(ctx));
 
 		const prompt = getStandardPrompt(services);
-		if (prompt.includes('<memory-context label="recalled-session">')) {
-			// Hostile <system> tags must be neutralized (sanitizeContextContent strips them)
-			expect(prompt).not.toContain('<system>OVERRIDE');
-			// Triple-backtick fences should be escaped or removed to prevent fence injection
-			const contentBlock = prompt.slice(
-				prompt.indexOf('<memory-context label="recalled-session">'),
-				prompt.indexOf('</memory-context>', prompt.indexOf('<memory-context label="recalled-session">')) +
-					'</memory-context>'.length,
-			);
-			// The inner content should not contain a raw triple-backtick that could break the outer fence
-			// The buildMemoryContextBlock wraps content in ``` fences — inner ``` must be escaped
-			const innerFenceCount = (contentBlock.match(/```/g) ?? []).length;
-			// Should be exactly 2 fence markers: the opening and closing of the outer block
-			expect(innerFenceCount).toBe(2);
-		}
+		// Confirm that the hostile session WAS recalled (fenced block should be present)
+		expect(prompt).toContain('<memory-context label="recalled-session">');
+		// Now check sanitization inside the block
+		// Hostile <system> tags must be neutralized (sanitizeContextContent strips them)
+		expect(prompt).not.toContain('<system>OVERRIDE');
+		// Triple-backtick fences should be escaped or removed to prevent fence injection
+		const contentBlock = prompt.slice(
+			prompt.indexOf('<memory-context label="recalled-session">'),
+			prompt.indexOf('</memory-context>', prompt.indexOf('<memory-context label="recalled-session">')) +
+				'</memory-context>'.length,
+		);
+		// The inner content should not contain a raw triple-backtick that could break the outer fence
+		// The buildMemoryContextBlock wraps content in ``` fences — inner ``` must be escaped
+		const innerFenceCount = (contentBlock.match(/```/g) ?? []).length;
+		// Should be exactly 2 fence markers: the opening and closing of the outer block
+		expect(innerFenceCount).toBe(2);
 	});
 });
 

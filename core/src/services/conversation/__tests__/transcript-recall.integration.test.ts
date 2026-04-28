@@ -179,11 +179,9 @@ describe('T2 — Index rebuild: delete DB and rebuild from transcript files', ()
 		};
 		await requestContext.run({ userId, householdId }, () => router.routeMessage(ctx));
 
-		// Wait briefly for index write to complete
-		await new Promise((r) => setTimeout(r, 100));
-
 		// Dispose the runtime to close the DB
 		await runtime.dispose();
+		(runtime as unknown) = null; // prevent double-dispose in afterAll
 
 		const dbPath = join(tempDir, 'data', 'system', 'chat-state.db');
 
