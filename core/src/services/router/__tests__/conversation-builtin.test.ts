@@ -7,6 +7,7 @@
  * - @botname suffix is handled by the parser (pass-through)
  * - commands work regardless of chatbot toggle state
  * - /help lists conversation commands exactly once, with no duplicates
+ * - Tracer C2: sessionId is bound via peekActive before requestContext.run for all conversation dispatch paths
  */
 
 import type { Logger } from 'pino';
@@ -15,9 +16,10 @@ import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import type { MessageContext, TelegramService } from '../../../types/telegram.js';
+import type { MessageContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
 import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
 import type { AppToggleStore } from '../../app-toggle/index.js';
+import { getCurrentSessionId } from '../../context/request-context.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 
@@ -349,5 +351,214 @@ describe('Router /help with conversation built-ins', () => {
 		expect(helpText).toContain('*Conversation*');
 		expect(helpText).toContain('/ask');
 		expect(helpText).toContain('/notes');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Tracer C2 — Router binds requestContext.sessionId via chatSessions.peekActive
+// ---------------------------------------------------------------------------
+
+function makeChatSessions(peekReturn: string | undefined = undefined) {
+	return {
+		peekActive: vi.fn().mockResolvedValue(peekReturn),
+	};
+}
+
+function buildRouterWithChatSessions(options: {
+	conversationService?: ReturnType<typeof makeConversationService>;
+	chatSessions?: ReturnType<typeof makeChatSessions>;
+	chatbotManifest?: AppManifest;
+}) {
+	const cache = new ManifestCache();
+	const manifest = options.chatbotManifest ?? chatbotManifestWithCommands;
+	cache.add(manifest, '/apps/chatbot');
+
+	const registry = {
+		getApp: (id: string) => {
+			if (id !== 'chatbot') return undefined;
+			return {
+				manifest,
+				module: { init: vi.fn(), handleMessage: vi.fn() } as any,
+				appDir: '/apps/chatbot',
+			} as RegisteredApp;
+		},
+		getManifestCache: () => cache,
+		getLoadedAppIds: () => ['chatbot'],
+	} as unknown as AppRegistry;
+
+	const telegram = createMockTelegram();
+	const router = new Router({
+		registry,
+		llm: createMockLLM(),
+		telegram,
+		fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
+		config: createConfig(),
+		logger: createMockLogger(),
+		conversationService: options.conversationService as any,
+		chatSessions: options.chatSessions as any,
+	});
+	router.buildRoutingTables();
+	return { router, telegram };
+}
+
+describe('Router C2 — sessionId binding via chatSessions.peekActive', () => {
+	let conv: ReturnType<typeof makeConversationService>;
+
+	beforeEach(() => {
+		conv = makeConversationService();
+	});
+
+	it('free-text fallback: getCurrentSessionId() inside handleMessage equals peekActive result', async () => {
+		const EXPECTED = '20260427_154500_a1b2c3d4';
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleMessage.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('hello there'));
+
+		expect(chatSessions.peekActive).toHaveBeenCalledWith({
+			userId: 'user1',
+			sessionKey: 'agent:main:telegram:dm:user1',
+		});
+		expect(capturedSessionId).toBe(EXPECTED);
+	});
+
+	it('free-text fallback: getCurrentSessionId() is undefined when no session active (peekActive returns undefined)', async () => {
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleMessage.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(undefined);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('hello there'));
+
+		expect(capturedSessionId).toBeUndefined();
+	});
+
+	it('free-text fallback: ctx.sessionKey and ctx.sessionId are propagated to handleMessage', async () => {
+		const EXPECTED = '20260427_160000_b2c3d4e5';
+		let capturedCtx: MessageContext | undefined;
+		conv.handleMessage.mockImplementation(async (c: MessageContext) => {
+			capturedCtx = c;
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('hello'));
+
+		expect(capturedCtx?.sessionKey).toBe('agent:main:telegram:dm:user1');
+		expect(capturedCtx?.sessionId).toBe(EXPECTED);
+	});
+
+	it('/ask dispatch: getCurrentSessionId() inside handleAsk equals peekActive result', async () => {
+		const EXPECTED = '20260427_161000_c3d4e5f6';
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleAsk.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('/ask what is the weather'));
+
+		expect(capturedSessionId).toBe(EXPECTED);
+	});
+
+	it('/edit dispatch: getCurrentSessionId() inside handleEdit equals peekActive result', async () => {
+		const EXPECTED = '20260427_162000_d4e5f6a7';
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleEdit.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('/edit fix the note'));
+
+		expect(capturedSessionId).toBe(EXPECTED);
+	});
+
+	it('/notes dispatch: getCurrentSessionId() inside handleNotes equals peekActive result', async () => {
+		const EXPECTED = '20260427_163000_e5f6a7b8';
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleNotes.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('/notes on'));
+
+		expect(capturedSessionId).toBe(EXPECTED);
+	});
+
+	it('rv:chatbot callback path (dispatchConversation direct): getCurrentSessionId() equals peekActive result', async () => {
+		const EXPECTED = '20260427_164000_f6a7b8c9';
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleMessage.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		const chatSessions = makeChatSessions(EXPECTED);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		const rvRoute: RouteInfo = {
+			appId: 'chatbot',
+			intent: 'chatbot',
+			confidence: 1.0,
+			source: 'user-override',
+			verifierStatus: 'user-override',
+		};
+		await router.dispatchConversation(msg('the answer is 42'), rvRoute);
+
+		expect(capturedSessionId).toBe(EXPECTED);
+	});
+
+	it('/edit with no active session: ctx.sessionId is undefined; peekActive was called', async () => {
+		let capturedCtx: MessageContext | undefined;
+		// handleEdit signature is (args: string[], ctx: MessageContext)
+		conv.handleEdit.mockImplementation(async (_args: string[], c: MessageContext) => {
+			capturedCtx = c;
+		});
+		const chatSessions = makeChatSessions(undefined);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('/edit some change'));
+
+		expect(chatSessions.peekActive).toHaveBeenCalledOnce();
+		expect(capturedCtx?.sessionId).toBeUndefined();
+		expect(capturedCtx?.sessionKey).toBe('agent:main:telegram:dm:user1');
+	});
+
+	it('/notes with no active session: ctx.sessionId is undefined; peekActive was called', async () => {
+		let capturedCtx: MessageContext | undefined;
+		// handleNotes signature is (args: string[], ctx: MessageContext)
+		conv.handleNotes.mockImplementation(async (_args: string[], c: MessageContext) => {
+			capturedCtx = c;
+		});
+		const chatSessions = makeChatSessions(undefined);
+		const { router } = buildRouterWithChatSessions({ conversationService: conv, chatSessions });
+
+		await router.routeMessage(msg('/notes status'));
+
+		expect(chatSessions.peekActive).toHaveBeenCalledOnce();
+		expect(capturedCtx?.sessionId).toBeUndefined();
+		expect(capturedCtx?.sessionKey).toBe('agent:main:telegram:dm:user1');
+	});
+
+	it('when chatSessions is absent: sessionId is undefined in requestContext', async () => {
+		let capturedSessionId: string | undefined = 'sentinel';
+		conv.handleMessage.mockImplementation(async () => {
+			capturedSessionId = getCurrentSessionId();
+		});
+		// No chatSessions wired
+		const { router } = buildRouterWithChatSessions({ conversationService: conv });
+
+		await router.routeMessage(msg('hello'));
+
+		expect(capturedSessionId).toBeUndefined();
 	});
 });

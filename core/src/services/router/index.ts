@@ -11,6 +11,8 @@
 
 import type { Logger } from 'pino';
 import { getCurrentHouseholdId, requestContext } from '../../services/context/request-context.js';
+import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
 import type {
@@ -165,6 +167,8 @@ export interface RouterOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, records a message hit per routeMessage call for ops metrics. */
 	messageRateTracker?: MessageRateTracker;
+	/** Optional — when present, binds requestContext.sessionId via peekActive before every conversation dispatch. */
+	chatSessions?: ChatSessionStore;
 }
 
 export class Router {
@@ -187,6 +191,7 @@ export class Router {
 	private readonly interactionContext?: InteractionContextService;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	private readonly messageRateTracker?: MessageRateTracker;
+	private readonly chatSessions?: ChatSessionStore;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -210,6 +215,7 @@ export class Router {
 		this.interactionContext = options.interactionContext;
 		this.householdService = options.householdService;
 		this.messageRateTracker = options.messageRateTracker;
+		this.chatSessions = options.chatSessions;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -596,6 +602,18 @@ export class Router {
 	}
 
 	/**
+	 * Resolve the session key and active session id for a user's conversation dispatch.
+	 * Returns undefined for both if chatSessions is not wired.
+	 */
+	private async resolveSession(
+		userId: string,
+	): Promise<{ sessionKey: string; sessionId: string | undefined }> {
+		const sessionKey = buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: userId });
+		const sessionId = await this.chatSessions?.peekActive({ userId, sessionKey });
+		return { sessionKey, sessionId };
+	}
+
+	/**
 	 * Dispatch a free-text message to ConversationService, with the same request-context
 	 * + error-isolation guarantees as dispatchMessage. Used for the chatbot fallback path
 	 * (free-text and rv:chatbot route-verifier callback). Public so compose-runtime can
@@ -606,9 +624,11 @@ export class Router {
 			throw new Error('dispatchConversation called without conversationService');
 		}
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		const { sessionKey, sessionId } = await this.resolveSession(ctx.userId);
+		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, () =>
-				this.conversationService!.handleMessage({ ...ctx, route }),
+			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, () =>
+				this.conversationService!.handleMessage(enrichedCtx),
 			);
 		} catch (error) {
 			this.logger.error({ error }, 'ConversationService handler failed');
@@ -631,10 +651,11 @@ export class Router {
 	): Promise<void> {
 		if (!this.conversationService) return;
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		const { sessionKey, sessionId } = await this.resolveSession(ctx.userId);
 		const route = routeForCommand('chatbot', name);
-		const enrichedCtx: MessageContext = { ...ctx, route };
+		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, async () => {
+			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
