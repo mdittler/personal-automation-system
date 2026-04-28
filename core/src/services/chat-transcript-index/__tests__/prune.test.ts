@@ -177,11 +177,48 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('config-loader defaults', () => {
-	test('absent chat.sessions → auto_prune=false, retention_days=90', () => {
+	test('absent chat.sessions → schema passes, defaults applied at load time', () => {
 		// Validate via Zod schema that absent sessions section gives defaults
 		const raw = parsePasYamlConfig({ chat: {} });
 		// schema passes through (sessions absent) — defaults applied at config load time
 		expect(raw.chat?.['sessions']).toBeUndefined();
+	});
+
+	test('absent chat.sessions → loadSystemConfig materializes auto_prune=false, retention_days=90', async () => {
+		// Create a temp .env file with required env vars
+		const envPath = join(tempDir, '.env');
+		const envContent = [
+			'TELEGRAM_BOT_TOKEN=test-bot-token-123',
+			'ANTHROPIC_API_KEY=test-api-key-456',
+			'GUI_AUTH_TOKEN=test-gui-token-789',
+		].join('\n');
+		await writeFile(envPath, envContent, 'utf8');
+
+		// Create a temp YAML file with empty chat section
+		const yamlPath = join(tempDir, 'test-pas.yaml');
+		await writeFile(
+			yamlPath,
+			`users:
+  - id: "test-user"
+    name: "Test User"
+    is_admin: true
+    enabled_apps: ["*"]
+chat: {}
+`,
+			'utf8',
+		);
+
+		// Load the config through the full config loader
+		const { loadSystemConfig } = await import('../../../services/config/index.js');
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: yamlPath,
+			mode: 'transitional',
+		});
+
+		// Assert the defaults are materialized
+		expect(config.chat?.sessions?.auto_prune).toBe(false);
+		expect(config.chat?.sessions?.retention_days).toBe(90);
 	});
 
 	test('explicit auto_prune=true, retention_days=30 passes schema', () => {
