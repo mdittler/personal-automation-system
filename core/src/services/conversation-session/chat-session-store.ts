@@ -1,5 +1,7 @@
 import type { Logger } from 'pino';
 import type { DataStoreService } from '../../types/data-store.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
+import { parseMemorySnapshotFrontmatter, toMemorySnapshotFrontmatter } from '../prompt-assembly/memory-context.js';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { CorruptTranscriptError } from './errors.js';
 import { mintSessionId } from './session-id.js';
@@ -18,6 +20,8 @@ export interface ChatSessionFrontmatter {
 	started_at: string;
 	ended_at: string | null;
 	token_counts: { input: number; output: number };
+	/** Durable MemorySnapshot frozen at session-mint time (P4). Snake_case on disk. */
+	memory_snapshot?: { content: string; status: 'ok' | 'empty' | 'degraded'; built_at: string; entry_count: number };
 }
 
 export interface SessionTurn {
@@ -30,6 +34,26 @@ export interface SessionTurn {
 export interface ChatSessionStore {
 	/** Read-only. Returns the active session id, or undefined if none. NEVER mints. */
 	peekActive(ctx: { userId: string; sessionKey: string }): Promise<string | undefined>;
+
+	/**
+	 * Ensure an active session exists — minting one if needed — and return the
+	 * session id and any frozen MemorySnapshot.
+	 *
+	 * Called BEFORE prompt assembly so the first turn sees Layer 2 durable memory.
+	 * On the mint path, `opts.buildSnapshot` is invoked once (try/catch → degraded).
+	 * On the peek path (existing session), the snapshot is read from frontmatter.
+	 * When `opts.buildSnapshot` is absent, no memory_snapshot field is written.
+	 */
+	ensureActiveSession(
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
+	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }>;
+
+	/**
+	 * Read-only. Returns the frozen MemorySnapshot from the active session's
+	 * frontmatter, or undefined if no active session or no snapshot field.
+	 */
+	peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined>;
 
 	/**
 	 * Atomic mint-or-reuse + write of one user/assistant exchange.
@@ -96,6 +120,66 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		return entry?.id;
 	}
 
+	async ensureActiveSession(
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
+	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }> {
+		const store = this.deps.data.forUser(ctx.userId);
+		await this.maybeImportLegacy(store, ctx.userId, ctx.householdId ?? null);
+
+		return withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
+			const existing = await getActive(store, ctx.userId, ctx.sessionKey);
+			if (existing) {
+				// Peek path: read snapshot from frontmatter
+				const raw = await store.read(`conversation/sessions/${existing.id}.md`);
+				let snapshot: MemorySnapshot | undefined;
+				if (raw !== '') {
+					try {
+						const { meta } = decode(raw);
+						snapshot = parseMemorySnapshotFrontmatter(meta.memory_snapshot);
+					} catch {
+						// Corrupt transcript — return without snapshot
+					}
+				}
+				return { sessionId: existing.id, isNew: false, snapshot };
+			}
+
+			// Mint path: build snapshot (if callback provided), then mint session
+			let snapshot: MemorySnapshot | undefined;
+			let memorySnapshotFm: ChatSessionFrontmatter['memory_snapshot'] | undefined;
+			if (opts?.buildSnapshot) {
+				try {
+					snapshot = await opts.buildSnapshot();
+					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
+				} catch (err) {
+					this.deps.logger.warn(
+						{ err },
+						'conversation-session: buildSnapshot failed — minting with degraded snapshot',
+					);
+					snapshot = { content: '', status: 'degraded', builtAt: this.now().toISOString(), entryCount: 0 };
+					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
+				}
+			}
+
+			const sessionId = await this.mintAndRegisterWithSnapshot(store, ctx, memorySnapshotFm);
+			return { sessionId, isNew: true, snapshot };
+		});
+	}
+
+	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined> {
+		const store = this.deps.data.forUser(ctx.userId);
+		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
+		if (!entry) return undefined;
+		const raw = await store.read(`conversation/sessions/${entry.id}.md`);
+		if (raw === '') return undefined;
+		try {
+			const { meta } = decode(raw);
+			return parseMemorySnapshotFrontmatter(meta.memory_snapshot);
+		} catch {
+			return undefined;
+		}
+	}
+
 	async appendExchange(
 		ctx: {
 			userId: string;
@@ -145,15 +229,26 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		store: ReturnType<DataStoreService['forUser']>,
 		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
 	): Promise<string> {
+		return this.mintAndRegisterWithSnapshot(store, ctx, undefined);
+	}
+
+	// Must be called while the caller holds the conversation-session-index:<userId> lock.
+	private async mintAndRegisterWithSnapshot(
+		store: ReturnType<DataStoreService['forUser']>,
+		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		memorySnapshot: ChatSessionFrontmatter['memory_snapshot'],
+	): Promise<string> {
 		const now = this.now();
 		const startedAt = now.toISOString();
 		for (let attempt = 0; attempt < MAX_MINT_ATTEMPTS; attempt++) {
 			const id = this.mintId(now);
 			const existing = await store.read(`conversation/sessions/${id}.md`);
 			if (existing === '') {
+				const fm = this.buildFrontmatter(ctx, id, startedAt);
+				if (memorySnapshot !== undefined) fm.memory_snapshot = memorySnapshot;
 				// Write transcript skeleton BEFORE publishing to the index.
 				// Guarantees concurrent peekActive + expectedSessionId callers always find an existing file.
-				await store.write(`conversation/sessions/${id}.md`, encodeNew(this.buildFrontmatter(ctx, id, startedAt)));
+				await store.write(`conversation/sessions/${id}.md`, encodeNew(fm));
 				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
 				return id;
 			}
