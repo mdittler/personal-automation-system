@@ -24,23 +24,29 @@ export interface MemoryContextBlockOpts {
 }
 
 /** Tags that, if present in recalled content, could interfere with the wrapper or the LLM's
- *  role-parsing heuristics. The opening `<` is replaced with `&lt;`. */
+ *  role-parsing heuristics. The opening `<` is replaced with `&lt;`. Case-insensitive. */
 const ROLE_TAG_RE =
-	/(<\/?(memory-context|system|user|assistant)(?=[\s>]))/g;
+	/(<\/?(memory-context|system|user|assistant)(?=[\s>]))/gi;
+
+/** Zero-width chars and Unicode bidi controls that can hide or reverse injected text. */
+const ZERO_WIDTH_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
 
 /**
- * Strips nested backtick fences (≥3 ASCII backticks) and neutralizes role-like
- * XML tags inside recalled content, then truncates with the supplied marker.
+ * Strips zero-width/bidi chars, collapses nested backtick fences (≥3 ASCII backticks),
+ * and neutralizes role-like XML tags inside recalled content, then truncates.
  */
 export function sanitizeContextContent(
 	content: string,
 	maxChars: number,
 	marker: string,
 ): string {
-	// Collapse ASCII backtick runs of 3+ to a single backtick.
-	let sanitized = content.replace(/`{3,}/g, '`');
+	// Strip invisible chars that can hide injected text or alter bidi rendering.
+	let sanitized = content.replace(ZERO_WIDTH_RE, '');
 
-	// Neutralize role-like tags: replace the leading `<` with `&lt;`.
+	// Collapse ASCII backtick runs of 3+ to a single backtick.
+	sanitized = sanitized.replace(/`{3,}/g, '`');
+
+	// Neutralize role-like tags (case-insensitive): replace the leading `<` with `&lt;`.
 	sanitized = sanitized.replace(ROLE_TAG_RE, (_match, tag) => `&lt;${tag.slice(1)}`);
 
 	if (sanitized.length <= maxChars) return sanitized;

@@ -895,7 +895,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 		expect(a.content).toBe(b.content);
 	});
 
-	it('truncates content exceeding 4000 chars and appends durable marker', async () => {
+	it('truncates content exceeding 4000 chars, appends durable marker, and stays within budget', async () => {
 		const longContent = 'x'.repeat(3000);
 		const contextStore = {
 			listForUser: vi.fn().mockResolvedValue([
@@ -907,8 +907,24 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('ok');
 		expect(result.content).toContain('... (snapshot truncated at session start)');
-		// Content length exceeds raw budget due to marker, but base content is bounded
-		expect(result.content.length).toBeLessThan(5000);
+		expect(result.content.length).toBeLessThanOrEqual(4000);
+		expect(result.entryCount).toBe(1);
+	});
+
+	it('includes partial content when the first entry alone exceeds the budget', async () => {
+		const hugeContent = 'x'.repeat(5000);
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([
+				makeEntry('huge', hugeContent),
+			]),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.status).toBe('ok');
+		expect(result.content).toContain('... (snapshot truncated at session start)');
+		expect(result.content.length).toBeLessThanOrEqual(4000);
+		expect(result.content.startsWith('## huge')).toBe(true);
+		expect(result.entryCount).toBe(1);
 	});
 
 	it('returns status:degraded when ContextStore throws', async () => {

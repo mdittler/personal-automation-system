@@ -265,20 +265,30 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		}
 
 		const sorted = [...entries].sort((a, b) => a.key.localeCompare(b.key));
-		const entryCount = sorted.length;
+		const BUDGET_BODY = BUDGET - MARKER.length;
 
-		// Render each entry; accumulate until budget is exhausted.
 		let content = '';
+		let includedCount = 0;
+		let truncated = false;
 		for (const entry of sorted) {
 			const rendered = `## ${entry.key}\n${entry.content}\n\n`;
-			if (content.length + rendered.length > BUDGET) {
-				content += MARKER;
+			if (content.length + rendered.length > BUDGET_BODY) {
+				if (content.length === 0) {
+					// First entry alone exceeds budget — include a partial to avoid a marker-only result.
+					content = rendered.slice(0, BUDGET_BODY);
+					includedCount = 1;
+				}
+				truncated = true;
 				break;
 			}
 			content += rendered;
+			includedCount++;
+		}
+		if (truncated) {
+			content += MARKER;
 		}
 
-		return { content: content.trimEnd(), status: 'ok', builtAt, entryCount };
+		return { content: content.trimEnd(), status: 'ok', builtAt, entryCount: includedCount };
 	}
 
 	async buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot> {

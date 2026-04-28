@@ -170,7 +170,6 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 			expect.objectContaining({
 				userId: 'user-0',
 				sessionKey: SESSION_KEY,
-				// P4: expectedSessionId comes from ensureActiveSession, not ctx.sessionId
 				expectedSessionId: 'ensure-session-id',
 			}),
 			expect.objectContaining({ role: 'user', content: 'hello' }),
@@ -205,7 +204,6 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 			await svc.handleMessage(ctx);
 		});
 
-		// P4: expectedSessionId is always the sessionId from ensureActiveSession
 		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
 			expect.objectContaining({ expectedSessionId: 'ensure-abc' }),
 			expect.any(Object),
@@ -220,14 +218,12 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		const ctx = {
 			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
 			sessionKey: SESSION_KEY,
-			// No ctx.sessionId — P4 uses ensureActiveSession's sessionId regardless
-		};
+			};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
 		});
 
-		// P4: race guard uses ensuredSessionId, not ctx.sessionId; never undefined
 		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
 			expect.objectContaining({ expectedSessionId: 'ensure-xyz' }),
 			expect.any(Object),

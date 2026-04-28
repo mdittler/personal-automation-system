@@ -191,7 +191,6 @@ describe('memory-snapshot persona — mid-session mutation isolation', () => {
 
 	it('two consecutive turns with identical snapshot produce byte-identical Layer 2 prefix', async () => {
 		const frozenSnapshot = makeOkSnapshot(FROZEN_CONTENT);
-		// Mock same frozen snapshot for both turns
 		const chatSessions = makeChatSessionsWithSnapshot(frozenSnapshot);
 		const { svc, services } = makeServiceWithSessions(chatSessions);
 
@@ -200,24 +199,23 @@ describe('memory-snapshot persona — mid-session mutation isolation', () => {
 		const ctx1 = createTestMessageContext({ text: 'Turn 1' });
 		await requestContext.run({ userId: 'test-user' }, () => svc.handleMessage(ctx1));
 
+		const prompt1 = (vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '') as string;
+
 		vi.mocked(services.llm.complete).mockClear();
 
 		const ctx2 = createTestMessageContext({ text: 'Turn 2' });
 		await requestContext.run({ userId: 'test-user' }, () => svc.handleMessage(ctx2));
 
-		const calls = vi.mocked(services.llm.complete).mock.calls;
-		const prompt1 = calls[0]?.[1]?.systemPrompt ?? '';
-		const prompt2 = calls.find(() => true)?.[1]?.systemPrompt ?? '';
+		const prompt2 = (vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '') as string;
 
-		// Extract the memory-context block from each prompt — should be byte-identical
 		const extractBlock = (p: string) => {
 			const start = p.indexOf('<memory-context label="durable-memory">');
 			const end = p.indexOf('</memory-context>', start);
 			return start === -1 ? '' : p.slice(start, end + '</memory-context>'.length);
 		};
 
-		expect(extractBlock(prompt1 as string)).toEqual(extractBlock(prompt2 as string));
-		expect(extractBlock(prompt1 as string)).not.toBe('');
+		expect(extractBlock(prompt1)).toEqual(extractBlock(prompt2));
+		expect(extractBlock(prompt1)).not.toBe('');
 	});
 });
 

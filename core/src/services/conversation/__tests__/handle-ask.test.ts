@@ -507,9 +507,7 @@ describe('handleCommand /ask', () => {
 	});
 });
 
-// ─── Chunk E: ensureActiveSession wiring ─────────────────────────────────────
-
-describe('handleAsk — ensureActiveSession wiring (Chunk E)', () => {
+describe('handleAsk — ensureActiveSession wiring', () => {
 	let services: ReturnType<typeof createMockCoreServices>;
 	let chatSessions: ChatSessionStore;
 
@@ -683,6 +681,70 @@ describe('handleAsk — ensureActiveSession wiring (Chunk E)', () => {
 
 		const call = (chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mock.calls[0];
 		expect(call?.[1]?.buildSnapshot).toBeUndefined();
+	});
+
+	it('still replies when ensureActiveSession throws (fail-open)', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+			new Error('session store unavailable'),
+		);
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(services.telegram.send).toHaveBeenCalled();
+		expect(services.logger.warn).toHaveBeenCalled();
+	});
+
+	it('ends the session when LLM fails on a newly minted session', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'new-sess',
+			isNew: true,
+			snapshot: undefined,
+		});
+		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM failure'));
+
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(chatSessions.endActive).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: ctx.userId }),
+			'system',
+		);
+	});
+
+	it('does not call endActive on LLM failure when session was not newly minted', async () => {
+		(chatSessions.ensureActiveSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: 'existing-sess',
+			isNew: false,
+			snapshot: undefined,
+		});
+		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM failure'));
+
+		const ctx = createTestMessageContext({ text: '/ask hello' });
+		await handleAsk(['hello'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+
+		expect(chatSessions.endActive).not.toHaveBeenCalled();
 	});
 });
 
