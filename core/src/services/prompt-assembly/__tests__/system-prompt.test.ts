@@ -4,7 +4,7 @@ import {
 	appendConversationHistorySection,
 	appendUserContextSection,
 } from '../system-prompt.js';
-import type { ConversationTurn } from '../../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
 
 const NOW = new Date('2026-04-10T12:00:00Z');
 

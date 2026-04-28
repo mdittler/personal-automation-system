@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatConversationHistory } from '../fencing.js';
-import type { ConversationTurn } from '../../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
 
 function turn(
 	role: 'user' | 'assistant',

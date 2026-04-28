@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import type { CoreServices } from '../../../types/app-module.js';
-import type { ConversationTurn } from '../../conversation-history/index.js';
+import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
 import { buildAppAwareSystemPrompt, buildSystemPrompt } from '../prompt-builder.js';
 
 function makeDeps(overrides?: object) {
