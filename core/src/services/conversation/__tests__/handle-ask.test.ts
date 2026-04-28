@@ -561,6 +561,7 @@ describe('handleAsk — ensureActiveSession wiring', () => {
 			buildContextSnapshot: vi.fn().mockResolvedValue(null),
 			buildMemorySnapshot,
 			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
 		};
 
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');
@@ -649,6 +650,7 @@ describe('handleAsk — ensureActiveSession wiring', () => {
 				entryCount: 0,
 			}),
 			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
 		};
 
 		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO').mockResolvedValueOnce('OK');

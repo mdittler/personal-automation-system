@@ -25,8 +25,8 @@ const GREETINGS = new Set(['hi', 'hello', 'thanks', 'thank you', 'ok', 'okay', '
 
 export function recallPreFilter(message: string): PreFilterResult {
 	const trimmed = message.trim();
-	// Slash commands (except /ask) skip recall
-	if (trimmed.startsWith('/') && !trimmed.toLowerCase().startsWith('/ask ')) {
+	// Slash commands skip recall — /ask strips its own prefix before calling this function
+	if (trimmed.startsWith('/')) {
 		return { skip: true, reason: 'slash-command' };
 	}
 	// Too short

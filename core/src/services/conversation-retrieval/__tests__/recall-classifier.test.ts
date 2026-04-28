@@ -28,10 +28,13 @@ describe('recallPreFilter', () => {
 		expect(result.reason).toBe('slash-command');
 	});
 
-	it('does NOT skip /ask message (starts with /ask )', () => {
+	it('skips /ask slash command (handle-ask strips the prefix before calling recallPreFilter)', () => {
+		// handle-ask.ts strips "/ask " and passes only the question text to recallPreFilter,
+		// so recallPreFilter never sees a "/ask " prefix in practice.
+		// Any remaining slash command must be skipped.
 		const result = recallPreFilter('/ask what did we discuss about pasta');
-		expect(result.skip).toBe(false);
-		expect(result.reason).toBe('proceed');
+		expect(result.skip).toBe(true);
+		expect(result.reason).toBe('slash-command');
 	});
 
 	it('skips bare "hi" (greeting)', () => {
@@ -150,6 +153,10 @@ describe('classifyRecallIntent — malformed output', () => {
 		[
 			'truncated/invalid JSON',
 			'{"shouldRecall": tr',
+		],
+		[
+			'query over 200 chars is rejected',
+			JSON.stringify({ shouldRecall: true, query: 'a'.repeat(201), timeWindow: null, reason: 'too long' }),
 		],
 	])('returns safe default for: %s', async (_label, rawResponse) => {
 		const deps = makeDeps(rawResponse);

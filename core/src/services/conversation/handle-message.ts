@@ -113,7 +113,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	// is no index to search against. hasSessionSearch() is a cheap synchronous check.
 	let recalledSessions: SearchHit[] = [];
 	const retrieval = deps.conversationRetrieval;
-	if (retrieval?.hasSessionSearch?.()) {
+	if (retrieval?.hasSessionSearch()) {
 		const recallPre = recallPreFilter(ctx.text);
 		if (!recallPre.skip) {
 			try {

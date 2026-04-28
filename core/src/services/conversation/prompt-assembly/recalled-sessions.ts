@@ -7,7 +7,7 @@
  */
 
 import type { SearchHit } from '../../chat-transcript-index/index.js';
-import { buildMemoryContextBlock, sanitizeContextContent } from '../../prompt-assembly/memory-context.js';
+import { buildMemoryContextBlock } from '../../prompt-assembly/memory-context.js';
 
 const RECALLED_SESSION_LABEL = 'recalled-session';
 const BUDGET_CHARS = 4000;
@@ -32,9 +32,7 @@ export function formatRecalledSessions(hits: SearchHit[]): string {
 export function wrapInRecalledFence(hits: SearchHit[]): string {
 	if (hits.length === 0) return '';
 	const content = formatRecalledSessions(hits);
-	const sanitized = sanitizeContextContent(content, BUDGET_CHARS, TRUNCATION_MARKER);
-	if (!sanitized) return '';
-	return buildMemoryContextBlock(sanitized, {
+	return buildMemoryContextBlock(content, {
 		label: RECALLED_SESSION_LABEL,
 		maxChars: BUDGET_CHARS,
 		marker: TRUNCATION_MARKER,

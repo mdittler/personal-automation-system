@@ -188,6 +188,7 @@ describe('handleMessage — ensureActiveSession wiring', () => {
 			buildContextSnapshot: vi.fn().mockResolvedValue(null),
 			buildMemorySnapshot,
 			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
 		};
 
 		const ctx = createTestMessageContext({ text: 'hello' });
@@ -264,6 +265,7 @@ describe('handleMessage — ensureActiveSession wiring', () => {
 				entryCount: 0,
 			}),
 			searchSessions: vi.fn(),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
 		};
 
 		const ctx = createTestMessageContext({ text: 'test' });
