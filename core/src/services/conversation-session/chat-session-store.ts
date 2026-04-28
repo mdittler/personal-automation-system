@@ -256,6 +256,24 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			// Fast path: already checked on a prior call
 			if ((await store.read(sentinelPath)) !== '') return;
 
+			// Upgrade compatibility: users who ran P3 before the sentinel was
+			// introduced already have a source:legacy-import session but no
+			// sentinel file. Scan once so we don't re-import their history.json.
+			const sessionFiles = await store.list('conversation/sessions/');
+			for (const filename of sessionFiles) {
+				if (!filename.endsWith('.md')) continue;
+				const raw = await store.read(`conversation/sessions/${filename}`);
+				try {
+					const { meta } = decode(raw);
+					if (meta.source === 'legacy-import') {
+						await store.write(sentinelPath, this.now().toISOString());
+						return;
+					}
+				} catch {
+					// Corrupt — skip this file
+				}
+			}
+
 			// Read history.json
 			const historyRaw = await store.read('history.json');
 			if (!historyRaw) {

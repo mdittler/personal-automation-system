@@ -7,8 +7,9 @@ import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
 import { composeChatSessionStore } from '../compose.js';
-import type { ChatSessionStore, SessionTurn } from '../chat-session-store.js';
+import type { ChatSessionStore, ChatSessionFrontmatter, SessionTurn } from '../chat-session-store.js';
 import { mintSessionId } from '../session-id.js';
+import { encodeNew } from '../transcript-codec.js';
 
 const USER = 'matt';
 const SESSION_KEY = 'agent:main:telegram:dm:matt';
@@ -549,5 +550,43 @@ describe('E — Legacy history.json migration', () => {
 		const legacySession = await store.readSession(USER, legacyId);
 		expect(legacySession?.meta.source).toBe('legacy-import');
 		expect(legacySession?.turns).toHaveLength(4);
+	});
+
+	it('upgrade compat: pre-seeded legacy-import session + history.json + no sentinel — does not duplicate', async () => {
+		// Simulates a user who ran Hermes P3 before the .legacy-checked sentinel
+		// was introduced: they already have a source:legacy-import session on disk,
+		// history.json is still present (preserved by design), but there is no
+		// .legacy-checked file. Without the upgrade-compat scan, maybeImportLegacy
+		// would see no sentinel, find history.json, and create a second import.
+		const ds = makeDataStore();
+		const scoped = ds.forUser(USER);
+
+		// Plant the pre-existing legacy-import session (no sentinel)
+		const existingId = mintSessionId(new Date('2026-04-26T10:00:00Z'));
+		const meta: ChatSessionFrontmatter = {
+			id: existingId,
+			source: 'legacy-import',
+			user_id: USER,
+			household_id: null,
+			model: null,
+			title: null,
+			parent_session_id: null,
+			started_at: '2026-04-26T10:00:00Z',
+			ended_at: '2026-04-26T10:01:01Z',
+			token_counts: { input: 0, output: 0 },
+		};
+		await scoped.write(`conversation/sessions/${existingId}.md`, encodeNew(meta));
+
+		// Plant history.json (preserved by design — never deleted)
+		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
+
+		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
+		await store.loadRecentTurns(ctx);
+
+		// Still exactly one session — no duplicate was created
+		const sessions = await scoped.list('conversation/sessions/');
+		const mdSessions = sessions.filter(f => f.endsWith('.md'));
+		expect(mdSessions).toHaveLength(1);
+		expect(mdSessions[0]).toContain(existingId);
 	});
 });
