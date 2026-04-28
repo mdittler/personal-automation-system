@@ -66,6 +66,19 @@ export function getCurrentHouseholdId(): string | undefined {
 }
 
 /**
+ * Get the current chat session ID from the request context.
+ * Returns undefined if called outside any `requestContext.run()` scope,
+ * if the current context has no sessionId set, or if the dispatch path
+ * is non-conversational (scheduled jobs, alert actions, API writes).
+ *
+ * P3 wires this for all conversation dispatch sites. P5 reads it when
+ * indexing messages into the FTS5 transcript store.
+ */
+export function getCurrentSessionId(): string | undefined {
+	return requestContext.getStore()?.sessionId;
+}
+
+/**
  * Enter a request context synchronously, binding the provided store to the
  * current async execution context and all its descendants.
  *
