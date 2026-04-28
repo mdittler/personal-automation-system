@@ -8,6 +8,7 @@ import { mintSessionId } from './session-id.js';
 import { getActive, setActiveUnlocked, clearActive } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
 import { encodeNew, encodeAppend, decode } from './transcript-codec.js';
+import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 
 export interface ChatSessionFrontmatter {
 	id: string;
@@ -103,6 +104,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			logger: Logger;
 			clock?: () => Date;
 			rng?: () => string;
+			index?: ChatTranscriptIndex;
 		},
 	) {}
 
@@ -213,13 +215,47 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		}
 
 		// Append both turns under the transcript lock.
+		let userTurnIndex = 0;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${sessionId}`, async () => {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
 			const base = raw === '' ? encodeNew(this.buildFrontmatter(ctx, sessionId)) : raw;
+			// Compute turn_index for index writes: count existing turns before appending.
+			// Only decode when the index is wired AND the file already has content.
+			if (this.deps.index && raw !== '') {
+				try {
+					const { turns } = decode(raw);
+					userTurnIndex = turns.length;
+				} catch {
+					// Corrupt — fall back to 0; INSERT OR IGNORE in appendMessage makes safe
+					userTurnIndex = 0;
+				}
+			}
 			const next = encodeAppend(encodeAppend(base, userTurn), assistantTurn);
 			await store.write(path, next);
 		});
+
+		if (this.deps.index) {
+			const assistantTurnIndex = userTurnIndex + 1;
+			try {
+				await this.deps.index.appendMessage({
+					session_id: sessionId,
+					turn_index: userTurnIndex,
+					role: 'user',
+					content: userTurn.content,
+					timestamp: userTurn.timestamp,
+				});
+				await this.deps.index.appendMessage({
+					session_id: sessionId,
+					turn_index: assistantTurnIndex,
+					role: 'assistant',
+					content: assistantTurn.content,
+					timestamp: assistantTurn.timestamp,
+				});
+			} catch (err) {
+				this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: appendMessage failed; continuing');
+			}
+		}
 
 		return { sessionId };
 	}
@@ -249,6 +285,22 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				// Write transcript skeleton BEFORE publishing to the index.
 				// Guarantees concurrent peekActive + expectedSessionId callers always find an existing file.
 				await store.write(`conversation/sessions/${id}.md`, encodeNew(fm));
+				if (this.deps.index) {
+					try {
+						await this.deps.index.upsertSession({
+							id,
+							user_id: ctx.userId,
+							household_id: ctx.householdId ?? null,
+							source: 'telegram',
+							started_at: startedAt,
+							ended_at: null,
+							model: ctx.model ?? null,
+							title: null,
+						});
+					} catch (err) {
+						this.deps.logger.warn({ err, sessionId: id }, 'chat-transcript-index: upsertSession failed; continuing');
+					}
+				}
 				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
 				return id;
 			}
@@ -304,6 +356,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		if (!entry) return { endedSessionId: null };
 		this.deps.logger.debug({ sessionId: entry.id, reason }, 'conversation-session: ending active session');
 
+		let endedAt: string | null = null;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
 			const path = `conversation/sessions/${entry.id}.md`;
 			const raw = await store.read(path);
@@ -318,13 +371,25 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 				throw err;
 			}
-			decoded.meta.ended_at = this.now().toISOString();
+			endedAt = this.now().toISOString();
+			decoded.meta.ended_at = endedAt;
 			let next = encodeNew(decoded.meta);
 			for (const t of decoded.turns) next = encodeAppend(next, t);
 			await store.write(path, next);
 		});
 
 		await clearActive(store, ctx.userId, ctx.sessionKey);
+
+		if (this.deps.index && endedAt !== null) {
+			const endedSessionId = entry.id;
+			const endedAtStr = endedAt;
+			try {
+				await this.deps.index.endSession(endedSessionId, endedAtStr);
+			} catch (err) {
+				this.deps.logger.warn({ err, endedSessionId }, 'chat-transcript-index: endSession failed; continuing');
+			}
+		}
+
 		return { endedSessionId: entry.id };
 	}
 
@@ -445,6 +510,36 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			}
 
 			await store.write(`conversation/sessions/${sessionId}.md`, content);
+
+			if (this.deps.index) {
+				try {
+					await this.deps.index.upsertSession({
+						id: sessionId,
+						user_id: userId,
+						household_id: householdId,
+						source: 'legacy-import',
+						started_at: firstTs,
+						ended_at: lastTs,
+						model: null,
+						title: null,
+					});
+					// Index each turn so FTS search can find legacy content.
+					for (let i = 0; i < legacyTurns.length; i++) {
+						const t = legacyTurns[i]!;
+						const role: 'user' | 'assistant' = t.role === 'assistant' ? 'assistant' : 'user';
+						await this.deps.index.appendMessage({
+							session_id: sessionId,
+							turn_index: i,
+							role,
+							content: String(t.content ?? ''),
+							timestamp: isValidIso(t.timestamp) ? t.timestamp : this.now().toISOString(),
+						});
+					}
+				} catch (err) {
+					this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: upsertSession (legacy) failed; continuing');
+				}
+			}
+
 			await store.write(sentinelPath, this.now().toISOString());
 		});
 	}
