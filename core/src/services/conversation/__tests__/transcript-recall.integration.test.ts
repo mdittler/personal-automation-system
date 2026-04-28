@@ -41,9 +41,6 @@ let telegram: ReturnType<typeof fakeTelegramService>;
 let userId: string;
 let householdId: string;
 
-// Track system prompts captured from the stub provider
-const capturedSystemPrompts: string[] = [];
-
 beforeAll(async () => {
 	tempDir = await mkdtemp(join(tmpdir(), 'pas-recall-integration-'));
 	const logger = pino({ level: 'silent' });
@@ -90,35 +87,6 @@ afterAll(async () => {
 
 function getRouter() {
 	return runtime.services.router as any;
-}
-
-/**
- * Send a message through the router under the test user's requestContext.
- * Returns the last system prompt that was passed to the LLM (captured via spy).
- */
-async function sendMessageAndGetPrompt(text: string): Promise<string> {
-	capturedSystemPrompts.length = 0;
-
-	const router = getRouter();
-	// Spy on the conversation service's LLM complete calls
-	const conversationService = router.conversationService;
-	if (!conversationService) throw new Error('conversationService not wired in router');
-
-	// Access the LLM through the service — spy on it before the call
-	const llmService = conversationService.deps?.llm ?? (conversationService as any).deps?.llm;
-
-	const ctx = {
-		userId,
-		text,
-		chatId: 9999,
-		messageId: 1,
-		timestamp: new Date(),
-	};
-
-	await requestContext.run({ userId, householdId }, () => router.routeMessage(ctx));
-
-	// Look at what telegram received — the stub sends a response
-	return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -233,21 +201,21 @@ describe('T2 — Index rebuild: delete DB and rebuild from transcript files', ()
 			dryRun: false,
 		});
 
-		expect(result.sessions).toBeGreaterThanOrEqual(1);
-		expect(result.sessions).toBeGreaterThanOrEqual(result.sessions); // tautological — validates no throw
+		// At least one session must have been indexed during rebuild
+		expect(result.sessions).toBeGreaterThan(0);
 
 		// Open the rebuilt index and search for our keyword
 		const rebuiltIndex = new ChatTranscriptIndexImpl(dbPath);
 		try {
-			// The unique keyword "fruitcake" should be in the transcript
+			// The unique keyword "fruitcake" was sent as the user message above and written
+			// to the transcript markdown file — after rebuild it should be searchable.
 			const searchResult = await rebuiltIndex.searchSessions({
 				userId,
 				householdId,
 				queryTerms: ['fruitcake'],
 			});
-			// If the transcript was indexed, hits > 0; otherwise gracefully empty
-			// (sessions may not contain FTS-visible content if the stub responses don't include it)
-			expect(Array.isArray(searchResult.hits)).toBe(true);
+			// Rebuild must produce a searchable index with at least one matching hit
+			expect(searchResult.hits.length).toBeGreaterThan(0);
 		} finally {
 			await rebuiltIndex.close();
 		}

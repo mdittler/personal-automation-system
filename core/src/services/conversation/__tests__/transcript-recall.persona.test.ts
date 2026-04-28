@@ -410,8 +410,8 @@ describe('S6 — No recall: generic question', () => {
 // S7 — No recall: pleasantry pre-filter
 // ---------------------------------------------------------------------------
 
-describe('S7 — No recall: pleasantry pre-filter rejects', () => {
-	it('"thanks, that helps" → pre-filter rejects, no LLM classifier call, no fenced block', async () => {
+describe('S7 — No recall: pleasantry/short messages', () => {
+	it('"thanks, that helps" — classifier returns no-recall, no fenced block', async () => {
 		// Pre-filter for "thanks, that helps":
 		// recallPreFilter strips punctuation → "thanks that helps"
 		// lower: "thanks that helps" — not in GREETINGS set (only 1-word greetings)
@@ -432,7 +432,7 @@ describe('S7 — No recall: pleasantry pre-filter rejects', () => {
 		expect(prompt).not.toContain('<memory-context label="recalled-session">');
 	});
 
-	it('"thanks" (single word, length < 10) → pre-filter rejects without LLM call', async () => {
+	it('"thanks" (3 chars) — pre-filter rejects, no fast-tier call', async () => {
 		const { svc, services } = makeService({ index });
 		// Only one LLM call — the standard-tier main response (no recall classifier)
 		vi.mocked(services.llm.complete).mockResolvedValue('No problem!');
@@ -602,15 +602,15 @@ describe('S11 — Active-session dedupe', () => {
 		await requestContext.run({ userId: USER_A_ID }, () => svc.handleMessage(ctx));
 
 		const prompt = getStandardPrompt(services);
-		// The active session should NOT appear in the recalled-session block
-		// The older pasta session (PASTA_SESSION_ID) may appear, but not active-session-now
-		if (prompt.includes('<memory-context label="recalled-session">')) {
-			// If there's a block, verify it contains older session content, not in-flight
-			expect(prompt).not.toContain('active-session-now');
-		}
-		// The ensureActiveSession mock returns activeSessionId → this is passed as excludeSessionIds
-		const chatSessionsMock = vi.mocked(services.llm.complete);
-		expect(chatSessionsMock).toHaveBeenCalled();
+		// The active session content should NOT appear in the recalled-session fenced block.
+		// Even though FTS5 would match "pasta carbonara", the active session is excluded via
+		// excludeSessionIds — its turns should not be duplicated in the recalled block.
+		const fencedBlock =
+			prompt.match(/<memory-context label="recalled-session">[\s\S]*?<\/memory-context>/)?.[0] ?? '';
+		// The content seeded specifically in the active session must not appear in the recalled block
+		expect(fencedBlock).not.toContain('Pasta carbonara uses eggs, guanciale, and pecorino.');
+		// The LLM was still called (flow completed without error)
+		expect(vi.mocked(services.llm.complete)).toHaveBeenCalled();
 	});
 });
 
