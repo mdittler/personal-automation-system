@@ -340,7 +340,11 @@ describe('ended session past retention window is pruned', () => {
 		const meta = await index.getSessionMeta('ended-session-3d');
 		expect(meta).toBeUndefined();
 
-		// Messages are gone (cascade) — search returns empty
+		// Messages are physically gone from the messages table (not just invisible via JOIN)
+		const messageCount = await index.getMessageCount('ended-session-3d');
+		expect(messageCount).toBe(0);
+
+		// FTS rows are also cleaned up — search returns empty (verifies messages_fts trigger fired)
 		const searchResult = await index.searchSessions({
 			userId: 'user-bob',
 			householdId: null,

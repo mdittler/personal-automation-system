@@ -38,6 +38,7 @@ function makeMockIndex(searchResult?: SearchResult): ChatTranscriptIndex {
 		searchSessions: vi.fn().mockResolvedValue(searchResult ?? { hits: [] }),
 		getSessionMeta: vi.fn().mockResolvedValue(undefined),
 		listExpiredSessions: vi.fn().mockResolvedValue([]),
+		getMessageCount: vi.fn().mockResolvedValue(0),
 		close: vi.fn(),
 	};
 }

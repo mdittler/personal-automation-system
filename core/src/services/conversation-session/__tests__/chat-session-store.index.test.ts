@@ -137,6 +137,7 @@ describe('Chunk D — live indexer hook: fault isolation', () => {
 			searchSessions: vi.fn().mockResolvedValue({ hits: [] }),
 			getSessionMeta: vi.fn().mockResolvedValue(undefined),
 			listExpiredSessions: vi.fn().mockResolvedValue([]),
+			getMessageCount: vi.fn().mockResolvedValue(0),
 			close: vi.fn().mockResolvedValue(undefined),
 		};
 
@@ -164,6 +165,7 @@ describe('Chunk D — live indexer hook: fault isolation', () => {
 			searchSessions: vi.fn().mockResolvedValue({ hits: [] }),
 			getSessionMeta: vi.fn().mockResolvedValue(undefined),
 			listExpiredSessions: vi.fn().mockResolvedValue([]),
+			getMessageCount: vi.fn().mockResolvedValue(0),
 			close: vi.fn().mockResolvedValue(undefined),
 		};
 
@@ -279,6 +281,7 @@ describe('Chunk D — live indexer hook: legacy migration', () => {
 			searchSessions: vi.fn().mockResolvedValue({ hits: [] }),
 			getSessionMeta: vi.fn().mockResolvedValue(undefined),
 			listExpiredSessions: vi.fn().mockResolvedValue([]),
+			getMessageCount: vi.fn().mockResolvedValue(0),
 			close: vi.fn().mockResolvedValue(undefined),
 		};
 

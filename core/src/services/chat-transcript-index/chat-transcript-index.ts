@@ -12,6 +12,8 @@ export interface ChatTranscriptIndex {
   searchSessions(filters: InternalSearchFilters): Promise<SearchResult>;
   getSessionMeta(sessionId: string): Promise<SessionRow | undefined>;
   listExpiredSessions(cutoffIso: string): Promise<Array<{ id: string; user_id: string }>>;
+  /** @internal Test helper — returns the number of messages rows for the given session. */
+  getMessageCount(sessionId: string): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -100,6 +102,11 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
   async deleteSession(sessionId: string): Promise<void> {
     await withSqliteRetry(() => {
       const txn = this.db.transaction(() => {
+        // Explicitly delete messages first so the messages_ad trigger fires per-row,
+        // cleaning up messages_fts before the parent session row is removed.
+        // ON DELETE CASCADE alone does NOT fire row-level AFTER DELETE triggers on the
+        // child table in SQLite, so orphaned FTS rows would otherwise be left behind.
+        this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(sessionId);
         this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
       });
       txn();
@@ -246,6 +253,14 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
       )
       .all(cutoffIso) as Array<{ id: string; user_id: string }>;
     return rows;
+  }
+
+  /** @internal Test helper — returns the number of messages rows for the given session. */
+  async getMessageCount(sessionId: string): Promise<number> {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?`)
+      .get(sessionId) as { cnt: number };
+    return row.cnt;
   }
 
   async close(): Promise<void> {

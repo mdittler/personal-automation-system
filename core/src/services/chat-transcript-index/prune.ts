@@ -13,7 +13,7 @@
  * user to remove any dangling entries (should be rare, but guards against inconsistency).
  */
 
-import { access, unlink, readFile, writeFile, stat } from 'node:fs/promises';
+import { access, unlink, readFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { withFileLock } from '../../utils/file-mutex.js';
@@ -44,8 +44,14 @@ export interface PruneResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns candidate absolute paths for a session transcript file, in order of
- * preference (household path first, then legacy).
+ * Returns candidate absolute paths for a session transcript file.
+ *
+ * NOTE: This function only returns the legacy path
+ * (<dataDir>/users/<userId>/chatbot/conversation/sessions/<id>.md).
+ * It does NOT return the household path because the householdId is not
+ * available in the sessions DB row at this call site. Household paths are
+ * handled separately by `findHouseholdPath`, which scans the households
+ * directory at runtime.
  */
 function candidatePaths(
 	dataDir: string,
@@ -76,7 +82,6 @@ async function findHouseholdPath(
 	userId: string,
 	sessionId: string,
 ): Promise<string | undefined> {
-	const { readdir } = await import('node:fs/promises');
 	const householdsDir = join(dataDir, 'households');
 	let householdIds: string[];
 	try {
@@ -306,7 +311,6 @@ export async function pruneExpiredSessions(
 			);
 
 			// Household paths — walk all households for this user
-			const { readdir } = await import('node:fs/promises');
 			const householdsDir = join(dataDir, 'households');
 			let householdIds: string[];
 			try {
