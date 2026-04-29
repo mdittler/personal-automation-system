@@ -16,6 +16,7 @@ import type { ChatSessionStore } from '../conversation-session/chat-session-stor
 import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
+import type { PhotoHandlerResult } from '../../types/app-module.js';
 import type {
 	MessageContext,
 	PhotoContext,
@@ -626,17 +627,56 @@ export class Router {
 	 *
 	 * `route` is a required parameter for the same reason as dispatchMessage.
 	 *
-	 * Re-establishes the request context with householdId for the same reason as dispatchMessage.
+	 * Re-establishes the request context with householdId and sessionId for the same
+	 * reason as dispatchConversation. Session is resolved BEFORE dispatch so that a
+	 * concurrent /newchat cannot redirect the append to the wrong session. If the
+	 * handler returns a photoSummary, it is appended to the chat transcript as a
+	 * user/assistant exchange (best-effort — failure is logged but never propagated).
 	 */
 	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+
+		// Bind session BEFORE dispatch — a concurrent /newchat cannot redirect the append.
+		let sessionInfo: { sessionKey: string; sessionId: string | undefined } | undefined;
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, () =>
-				app.module.handlePhoto?.({ ...ctx, route }),
+			sessionInfo = await this.resolveSession(ctx.userId);
+		} catch (error) {
+			this.logger.warn({ userId: ctx.userId, error }, 'Failed to resolve session for photo dispatch');
+		}
+
+		let result: void | PhotoHandlerResult;
+		try {
+			result = await requestContext.run(
+				{ userId: ctx.userId, householdId, sessionId: sessionInfo?.sessionId },
+				() => app.module.handlePhoto?.({ ...ctx, route }),
 			);
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App photo handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong processing your photo.');
+			return;
+		}
+
+		const summary = result?.photoSummary;
+		if (!summary || !this.chatSessions || !sessionInfo) return;
+
+		try {
+			const now = new Date().toISOString();
+			await this.chatSessions.appendExchange(
+				{
+					userId: ctx.userId,
+					sessionKey: sessionInfo.sessionKey,
+					householdId,
+					// expectedSessionId is only meaningful when a pre-existing session was found.
+					...(sessionInfo.sessionId ? { expectedSessionId: sessionInfo.sessionId } : {}),
+				},
+				{ role: 'user', content: summary.userTurn, timestamp: now },
+				{ role: 'assistant', content: summary.assistantTurn, timestamp: now },
+			);
+		} catch (error) {
+			this.logger.warn(
+				{ appId: app.manifest.app.id, error },
+				'Failed to append photo summary to transcript',
+			);
 		}
 	}
 
