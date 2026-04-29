@@ -4301,23 +4301,24 @@ Receipt `assistantTurn` MUST include store, display date, item count, total, and
 
 **Phase:** Hermes P9 | **Status:** Implemented
 
-`sanitizePhotoField` MUST strip ASCII control chars, Unicode zero-width/bidi chars, and prompt-fence-like XML tags (`<system>`, `<content>`, `<memory-context>`, etc.) from every user-controlled string before composing an assistant-role transcript turn. Field length MUST be bounded.
+`sanitizePhotoField` MUST strip ASCII control chars (U+0000–U+001F, U+007F), Unicode zero-width and bidi chars (U+200B–U+200F, U+202A–U+202E, U+2060–U+2069 including bidi isolate controls LRI/RLI/FSI/PDI, U+FEFF), and prompt-fence-like XML tags (`<system>`, `<content>`, `<memory-context>`, etc.) from every user-controlled string before composing an assistant-role transcript turn. Field length MUST be bounded.
 
-**Standard tests** (`sanitize-photo-field.test.ts`):
+**Standard tests** (`photo-handler.test.ts`):
 - ASCII control characters are stripped
 - zero-width and bidi Unicode chars are stripped
 - prompt-fence XML tags are stripped
 - field is truncated at the configured maximum length
 
-**Edge case tests** (`sanitize-photo-field.test.ts`):
+**Edge case tests** (`photo-handler.test.ts`):
 - empty string returns empty string
 - string consisting entirely of stripped characters returns empty string
 - nested XML tags (e.g., `<system><inner></inner></system>`) are fully removed
 
-**Security tests** (`photo-summary-injection.test.ts`):
+**Security tests** (`photo-handler.test.ts`):
 - store name containing `<system>` tag is sanitized before appearing in summary turn
 - item name containing bidi override chars is sanitized
 - total field containing newline + XML injection is sanitized
+- bidi isolate controls (U+2066 LRI, U+2067 RLI, U+2068 FSI, U+2069 PDI) are stripped (P3 regression)
 
 ---
 
@@ -4360,7 +4361,7 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 **Phase:** Hermes P9 | **Status:** Implemented
 
-The receipt parser (`parseReceiptFromPhoto`) MUST inject today's date (timezone-aware via `todayDate(services.timezone)`) into the LLM extraction prompt. The extracted date MUST be validated by `isValidReceiptDate(value, todayISO)`, which rejects: non-string values, malformed ISO format, calendar-impossible dates (e.g., Feb 30), future dates, and dates older than `MAX_RECEIPT_AGE_DAYS` (90) days. When validation fails, the system falls back to today's date and preserves the rejected value as `rawExtractedDate` on the `ParsedReceipt` object. A string-first Pino warning is logged with the rejected and fallback dates.
+The receipt parser (`parseReceiptFromPhoto`) MUST inject today's date (timezone-aware via `todayDate(services.timezone)`) into the LLM extraction prompt. The extracted date MUST be validated by `isValidReceiptDate(value, todayISO)`, which rejects: non-string values, malformed ISO format, calendar-impossible dates (e.g., Feb 30), future dates, and dates older than `MAX_RECEIPT_AGE_DAYS` (90) days. When validation fails for a string date, the system falls back to today's date, preserves the rejected value as `rawExtractedDate` on the `ParsedReceipt` object, and logs a string-first Pino warning including `userId` from `requestContext` with the rejected and fallback dates. Non-string date values (e.g., a number or `null` returned by the LLM) MUST also trigger an explicit warning with `userId` and fall back to today without setting `rawExtractedDate`.
 
 **Standard tests:**
 - `photo-parsers.test.ts` > `isValidReceiptDate` > accepts: today exactly
@@ -4377,6 +4378,8 @@ The receipt parser (`parseReceiptFromPhoto`) MUST inject today's date (timezone-
 - `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: null
 - `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > falls back to today when extracted date fails sanity-check; preserves rawExtractedDate
 - `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > falls back to today when extracted date is non-string; does NOT set rawExtractedDate
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > warn for string-but-invalid date includes userId from requestContext (P2)
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > warn for non-string date includes userId from requestContext (P2)
 
 ---
 
@@ -4384,11 +4387,12 @@ The receipt parser (`parseReceiptFromPhoto`) MUST inject today's date (timezone-
 
 **Phase:** Hermes P9 | **Status:** Implemented
 
-The receipt filename prefix, YAML frontmatter `date:` field, and `PriceEntry.updatedAt` MUST all use `capturedAt` (wall-clock ISO datetime) as the authoritative sort key, not the LLM-extracted display date. Specifically: the receipt `id` MUST be `\`${capturedAt.slice(0,10)}-${generateId()}\``; the frontmatter `date:` field MUST equal `capturedAt.slice(0,10)`; `PriceEntry.updatedAt` MUST equal `receipt.capturedAt.slice(0,10)` with `receipt.date` as fallback for legacy receipts. The LLM-extracted display date (`parsed.date`) MUST be preserved in the receipt YAML body `date` field for human-readable display. When `rawExtractedDate` is present, it MUST be persisted in the receipt YAML body for audit purposes.
+The receipt filename prefix and `PriceEntry.updatedAt` MUST use `capturedAt` (wall-clock ISO datetime) as the authoritative sort key, not the LLM-extracted display date. Specifically: the receipt `id` MUST be `\`${capturedAt.slice(0,10)}-${generateId()}\``; the YAML frontmatter MUST contain both `date: parsed.date` (the LLM-extracted receipt date for human-readable display/querying) and `capturedAt: <ISO instant>` (the capture timestamp, sort authority); `PriceEntry.updatedAt` MUST equal `receipt.capturedAt.slice(0,10)` with `receipt.date` as fallback for legacy receipts. When `rawExtractedDate` is present, it MUST be persisted in the receipt YAML body for audit purposes.
 
 **Standard tests:**
 - `photo-handler.test.ts` > `receipt filename + rawExtractedDate persistence (B3)` > uses capturedAt for receipt filename and persists rawExtractedDate when present
 - `photo-handler.test.ts` > `receipt filename + rawExtractedDate persistence (B3)` > does not include rawExtractedDate in receipt when parser did not reject the date
+- `photo-handler.test.ts` > `receipt filename + rawExtractedDate persistence (B3)` > frontmatter contains display date (parsed.date) and capturedAt separately (P1)
 - `price-store.test.ts` > `updatePricesFromReceipt` > sets updatedAt from capturedAt (date-only) when capturedAt is present
 - `price-store.test.ts` > `updatePricesFromReceipt` > falls back to receipt.date for updatedAt when capturedAt is absent
 
@@ -7634,10 +7638,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-NEWCHAT-008 | compose-runtime-sc-callbacks.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-PHOTO-001 | dispatch-photo-session.test.ts | 2 | 2 | Implemented |
 | REQ-CONV-PHOTO-002 | receipt-photo-summary.test.ts, recipe-photo-summary.test.ts | 3 | 2 | Implemented |
-| REQ-CONV-PHOTO-003 | sanitize-photo-field.test.ts, photo-summary-injection.test.ts | 4 | 3 | Implemented |
+| REQ-CONV-PHOTO-003 | photo-handler.test.ts | 4 | 4 | Implemented |
 | REQ-CONV-PHOTO-004 | format-conversation-history.test.ts | 4 | 2 | Implemented |
 | REQ-CONV-PHOTO-005 | photo-summary-guidance.test.ts | 2 | 1 | Implemented |
-| REQ-FOOD-RECEIPT-001 | photo-parsers.test.ts | 4 | 8 | Implemented |
-| REQ-FOOD-RECEIPT-002 | photo-handler.test.ts, price-store.test.ts | 2 | 2 | Implemented |
+| REQ-FOOD-RECEIPT-001 | photo-parsers.test.ts | 4 | 10 | Implemented |
+| REQ-FOOD-RECEIPT-002 | photo-handler.test.ts, price-store.test.ts | 3 | 2 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
