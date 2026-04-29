@@ -128,7 +128,7 @@ describe('Recipe Photo Parser', () => {
 describe('Receipt Parser', () => {
 	const validReceiptJson = JSON.stringify({
 		store: 'Trader Joe\'s',
-		date: '2026-04-05',
+		date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
 		lineItems: [
 			{ name: 'Organic Milk', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
 			{ name: 'Sourdough Bread', quantity: 2, unitPrice: 3.49, totalPrice: 6.98 },
@@ -341,7 +341,7 @@ describe('Caption injection hardening (F17)', () => {
 	});
 	const validReceiptJson = JSON.stringify({
 		store: 'Test Store',
-		date: '2026-04-05',
+		date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
 		lineItems: [],
 		subtotal: null,
 		tax: null,
