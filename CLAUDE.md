@@ -80,6 +80,14 @@ A local-first home automation platform where users interact through a single Tel
 - If a task is described as "deferred", "out of scope", "future phase", "follow-up", or "to be done in a later session", it must be added to `docs/open-items.md` under the appropriate section: Confirmed Phases, Deferred Infrastructure Work, Unfinished Corrections, Food App Enhancements, Proposals, or Accepted Risks.
 - A `PostToolUse` hook (`check-deferred-work.sh`) automatically reminds you when you write to a spec or plan doc that contains deferred-work language. Do not dismiss this reminder without acting on it.
 
+### Post-Phase Simplify Pass
+After a phase merges, a brief cleanup commit is allowed before starting the next phase. Rules:
+- **Phase footprint only** — touch only files that were part of the completed phase. No opportunistic cleanup of unrelated code.
+- **No restructuring** — rename, extract, or reorganize only if the change is obviously correct and risk-free (e.g., a duplicated helper that is clearly safe to DRY). Do not refactor logic.
+- **Separate commit** — the simplify pass must be its own commit, clearly labeled (e.g., `refactor(hermes-p7): post-merge simplify pass`), so it is easy to revert if it causes regressions.
+- **Zero failing tests** — run `pnpm test` before committing the simplify pass. If any test is red, fix it first.
+- **Triggered by** — dead code found during review, duplicated helpers within the phase, spurious comments, or a reviewer explicitly noting a cleanup opportunity. Not every phase needs one.
+
 ## Key File Paths
 
 | Path | Purpose |
