@@ -17,7 +17,7 @@ import type { ChatTranscriptIndex } from '../../chat-transcript-index/chat-trans
 
 function makeDeps() {
 	// updateTitle on ChatTranscriptIndex is async (returns Promise); setTitle is also async.
-	const setTitle = vi.fn().mockResolvedValue({ updated: true });
+	const setTitle = vi.fn().mockResolvedValue({ updated: true, title: 'My title' });
 	const updateTitle = vi.fn().mockResolvedValue({ updated: true });
 	const warn = vi.fn();
 	const chatSessions = { setTitle } as unknown as ChatSessionStore;
@@ -32,6 +32,7 @@ describe('TitleService.applyTitle', () => {
 		const svc = new TitleService({ chatSessions, chatTranscriptIndex, logger });
 		const result = await svc.applyTitle('u1', 'sess-1', 'My title');
 		expect(setTitle).toHaveBeenCalledWith('u1', 'sess-1', 'My title', undefined);
+		// updateTitle receives the sanitized title from setResult.title, not the raw input
 		expect(updateTitle).toHaveBeenCalledWith('u1', 'sess-1', 'My title');
 		expect(result).toEqual({ updated: true, title: 'My title' });
 	});
@@ -57,6 +58,7 @@ describe('TitleService.applyTitle', () => {
 		deps.updateTitle.mockResolvedValue({ updated: false });
 		const svc = new TitleService(deps);
 		// Markdown is the canonical source — Markdown succeeded, so applyTitle reports success.
+		// The returned title is the sanitized value from setResult.title.
 		const result = await svc.applyTitle('u1', 'sess-1', 'My title');
 		expect(deps.warn).toHaveBeenCalled();
 		expect(result).toEqual({ updated: true, title: 'My title' });

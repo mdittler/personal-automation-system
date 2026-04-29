@@ -101,13 +101,14 @@ export interface ChatSessionStore {
 	 * missing session files, or corrupt transcripts (with a logger.warn in the
 	 * latter two cases). When `opts.skipIfTitled` is true, the write is skipped if
 	 * the session already has a non-empty title.
+	 * When the write succeeds, returns `{ updated: true, title: <sanitized> }`.
 	 */
 	setTitle(
 		userId: string,
 		sessionId: string,
 		title: string,
 		opts?: { skipIfTitled?: boolean },
-	): Promise<{ updated: boolean }>;
+	): Promise<{ updated: boolean; title?: string }>;
 }
 
 const SESSION_ID_RE = /^\d{8}_\d{6}_[0-9a-f]{8}$/;
@@ -427,7 +428,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		sessionId: string,
 		title: string,
 		opts: { skipIfTitled?: boolean } = {},
-	): Promise<{ updated: boolean }> {
+	): Promise<{ updated: boolean; title?: string }> {
 		if (!SESSION_ID_RE.test(sessionId)) return { updated: false };
 
 		const sanitized = sanitizeTitle(title);
@@ -469,7 +470,8 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			updated = true;
 		});
 
-		return { updated };
+		if (updated) return { updated: true, title: sanitized };
+		return { updated: false };
 	}
 
 	async readSession(

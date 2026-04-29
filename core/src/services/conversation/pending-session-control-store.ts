@@ -18,6 +18,8 @@ export interface PendingSessionControlEntry {
 	userId: string;
 	messageText: string; // the original text that triggered the grey-zone
 	expiresAt: number; // Date.now() ms timestamp
+	/** Nonce to prevent stale-button attacks. Each grey-zone prompt gets a unique id. */
+	id: string;
 }
 
 export interface PendingSessionControlStore {
@@ -25,6 +27,8 @@ export interface PendingSessionControlStore {
 	attach(userId: string, entry: PendingSessionControlEntry): void;
 	/** Retrieve and REMOVE the pending entry for a user (consume-once). Returns undefined if absent or expired. */
 	get(userId: string): PendingSessionControlEntry | undefined;
+	/** Non-consuming read — returns the pending entry without removing it. Returns undefined if absent or expired. */
+	peek(userId: string): PendingSessionControlEntry | undefined;
 	/** Check if a non-expired entry exists for a user (does NOT remove it). */
 	has(userId: string): boolean;
 	/** Remove any pending entry for a user. No-op if absent. */
@@ -40,16 +44,19 @@ export interface PendingSessionControlStoreDeps {
 
 /**
  * Create a pending session control entry.
+ * `deps.id` is a nonce (e.g. 4 random hex bytes) that is embedded in the
+ * callback data so stale inline-keyboard buttons cannot consume a newer entry.
  */
 export function createPendingEntry(
 	userId: string,
 	messageText: string,
-	deps: { clock: () => number; ttlMs?: number },
+	deps: { clock: () => number; id: string; ttlMs?: number },
 ): PendingSessionControlEntry {
 	return {
 		userId,
 		messageText,
 		expiresAt: deps.clock() + (deps.ttlMs ?? SC_TTL_MS),
+		id: deps.id,
 	};
 }
 
@@ -84,6 +91,19 @@ class InMemoryPendingSessionControlStore implements PendingSessionControlStore {
 		}
 		// Valid: remove (consume-once) and return
 		this.store.delete(userId);
+		return entry;
+	}
+
+	peek(userId: string): PendingSessionControlEntry | undefined {
+		const entry = this.store.get(userId);
+		if (!entry) {
+			return undefined;
+		}
+		if (entry.expiresAt <= this.clock()) {
+			this.store.delete(userId);
+			return undefined;
+		}
+		// Non-consuming read — do NOT delete
 		return entry;
 	}
 

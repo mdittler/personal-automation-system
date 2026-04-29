@@ -25,8 +25,9 @@ function makeEntry(
 	userId: string,
 	clock: () => number,
 	ttlMs = 5 * 60 * 1000,
+	id = 'deadbeef',
 ): PendingSessionControlEntry {
-	return createPendingEntry(userId, 'start fresh please', { clock, ttlMs });
+	return createPendingEntry(userId, 'start fresh please', { clock, ttlMs, id });
 }
 
 function makeCtx(userId: string): MessageContext {
@@ -149,5 +150,67 @@ describe('session-control callback: sc:yes with no pending entry', () => {
 		expect(entry).toBeUndefined();
 		expect(handleNewChat).not.toHaveBeenCalled();
 		expect(expiredReplies).toEqual(['That confirmation has expired. Please try again.']);
+	});
+});
+
+// ── peek — non-consuming read ────────────────────────────────────────────────
+
+describe('PendingSessionControlStore.peek', () => {
+	it('peek returns the entry without consuming it', () => {
+		const userId = 'user-5';
+		const clock = () => 1000;
+		const store = createPendingSessionControlStore({ clock });
+		store.attach(userId, makeEntry(userId, clock));
+
+		const peeked = store.peek(userId);
+		expect(peeked).toBeDefined();
+		expect(peeked?.id).toBe('deadbeef');
+
+		// Entry still present after peek
+		expect(store.has(userId)).toBe(true);
+	});
+
+	it('peek returns undefined for expired entry and removes it', () => {
+		const userId = 'user-6';
+		let now = 1000;
+		const clock = () => now;
+		const store = createPendingSessionControlStore({ clock, ttlMs: 1000 });
+		store.attach(userId, makeEntry(userId, clock, 1000));
+		now = 2001; // past TTL
+
+		const peeked = store.peek(userId);
+		expect(peeked).toBeUndefined();
+		expect(store.has(userId)).toBe(false);
+	});
+});
+
+// ── nonce mismatch — stale button protection ──────────────────────────────────
+
+describe('session-control callback: nonce mismatch', () => {
+	it('treats stale button as expired when nonce does not match', async () => {
+		const userId = 'user-7';
+		const clock = () => 1000;
+		const store = createPendingSessionControlStore({ clock });
+
+		// Attach entry with id 'deadbeef'
+		store.attach(userId, makeEntry(userId, clock, 5 * 60 * 1000, 'deadbeef'));
+
+		// Simulate sc:yes callback with a DIFFERENT nonce ('cafebabe')
+		const handleNewChat = vi.fn().mockResolvedValue(undefined);
+		const expiredReplies: string[] = [];
+
+		const callbackEntryId = 'cafebabe';
+		const peeked = store.peek(userId);
+		if (!peeked || peeked.id !== callbackEntryId) {
+			expiredReplies.push('That confirmation has expired. Please try again.');
+		} else {
+			const entry = store.get(userId);
+			if (entry) await handleNewChat([], makeCtx(userId));
+		}
+
+		expect(handleNewChat).not.toHaveBeenCalled();
+		expect(expiredReplies).toEqual(['That confirmation has expired. Please try again.']);
+		// Original entry was NOT consumed by the mismatched button
+		expect(store.has(userId)).toBe(true);
 	});
 });

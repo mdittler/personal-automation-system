@@ -245,6 +245,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const userTurn: SessionTurn = { role: 'user', content: ctx.text, timestamp: now };
 	const assistantTurn: SessionTurn = { role: 'assistant', content: finalResponse, timestamp: now };
 
+	let appendSucceeded = false;
 	try {
 		await deps.chatSessions.appendExchange(
 			{
@@ -257,11 +258,12 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			userTurn,
 			assistantTurn,
 		);
+		appendSucceeded = true;
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);
 	}
 
-	if (deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
 		scheduleTitleAfterFirstExchange(
 			{
 				userId: ctx.userId,

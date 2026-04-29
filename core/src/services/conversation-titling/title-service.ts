@@ -31,7 +31,7 @@ export class TitleService {
 		title: string,
 		opts?: { skipIfTitled?: boolean },
 	): Promise<ApplyTitleResult> {
-		let setResult: { updated: boolean };
+		let setResult: { updated: boolean; title?: string };
 		try {
 			setResult = await this.deps.chatSessions.setTitle(userId, sessionId, title, opts);
 		} catch (err) {
@@ -40,8 +40,11 @@ export class TitleService {
 		}
 		if (!setResult.updated) return { updated: false };
 
+		// Prefer the sanitized title returned by setTitle; fall back to the raw input.
+		const canonicalTitle = setResult.title ?? title;
+
 		try {
-			const idxResult = await this.deps.chatTranscriptIndex.updateTitle(userId, sessionId, title);
+			const idxResult = await this.deps.chatTranscriptIndex.updateTitle(userId, sessionId, canonicalTitle);
 			if (!idxResult.updated) {
 				this.deps.logger.warn(
 					{ userId, sessionId },
@@ -52,6 +55,6 @@ export class TitleService {
 			this.deps.logger.warn({ err, userId, sessionId }, 'title-service: chat-transcript-index updateTitle failed');
 		}
 
-		return { updated: true, title };
+		return { updated: true, title: canonicalTitle };
 	}
 }

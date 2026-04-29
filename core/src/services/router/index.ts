@@ -9,6 +9,7 @@
  *   4. Fallback → ConversationService when wired, else FallbackHandler (per-user disable via AppToggleStore preserved)
  */
 
+import { randomBytes } from 'node:crypto';
 import type { Logger } from 'pino';
 import { getCurrentHouseholdId, requestContext } from '../../services/context/request-context.js';
 import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
@@ -738,7 +739,7 @@ export class Router {
 			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
 			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
 			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
-			lines.push('  /title [title] — Set or auto-generate a title for the current session');
+			lines.push('  /title [title] — Show or set the current session title');
 			lines.push('');
 		}
 
@@ -1312,28 +1313,35 @@ export class Router {
 		const isGreyZone = result.confidence >= this.confidenceThreshold && result.confidence < this.verificationUpperBound;
 
 		if (isHighConfidence) {
-			// Start new session immediately
+			// Start new session immediately — handleNewChat confirms internally (Fix 5a)
 			await this.dispatchConversationCommand('newchat', [], ctx);
-			await this.trySend(ctx.userId, 'Starting a new chat. ✓');
 			return true;
 		}
 
 		if (isGreyZone) {
-			// Store pending confirmation and show inline keyboard
+			// Generate a nonce so stale inline-keyboard buttons cannot consume a newer entry.
+			const entryId = randomBytes(4).toString('hex');
 			const entry = createPendingEntry(ctx.userId, ctx.text, {
 				clock: Date.now,
+				id: entryId,
 			});
 			this.pendingSessionControl.attach(ctx.userId, entry);
-			await this.telegram.sendWithButtons(
-				ctx.userId,
-				'Start a new chat session? Your current conversation will be cleared.',
-				[
+			try {
+				await this.telegram.sendWithButtons(
+					ctx.userId,
+					'Start a new chat session? Your current conversation will be cleared.',
 					[
-						{ text: '✓ Yes, start fresh', callbackData: SC_YES },
-						{ text: '✗ No, keep chatting', callbackData: SC_NO },
+						[
+							{ text: '✓ Yes, start fresh', callbackData: `${SC_YES}:${entryId}` },
+							{ text: '✗ No, keep chatting', callbackData: `${SC_NO}:${entryId}` },
+						],
 					],
-				],
-			);
+				);
+			} catch (err) {
+				this.logger.warn({ err }, 'session-control: sendWithButtons failed, falling back to normal routing');
+				this.pendingSessionControl.remove(ctx.userId);
+				return false;
+			}
 			return true;
 		}
 

@@ -228,6 +228,8 @@ describe('Router NL /newchat hook', () => {
 			expect(attachedUserId).toBe('user1');
 			const entry = attachedEntry as PendingSessionControlEntry;
 			expect(entry.messageText).toBe('maybe reset things?');
+			// Entry must carry a nonce id
+			expect(entry.id).toMatch(/^[0-9a-f]+$/);
 		});
 	});
 
@@ -295,8 +297,8 @@ describe('Router NL /newchat hook', () => {
 		});
 	});
 
-	describe('Test 7 — High-confidence sends confirmation message', () => {
-		it('sends "Starting a new chat" confirmation after handleNewChat', async () => {
+	describe('Test 7 — High-confidence triggers handleNewChat (no extra confirmation from router)', () => {
+		it('handleNewChat is called and no duplicate confirmation is sent by the router', async () => {
 			const conv = makeConversationService();
 			const { router, telegram } = buildRouter({
 				sessionControlResult: {
@@ -312,14 +314,15 @@ describe('Router NL /newchat hook', () => {
 
 			expect(conv.handleNewChat).toHaveBeenCalledOnce();
 
+			// The router must NOT send its own confirmation — handleNewChat does it internally.
 			const sendMock = telegram.send as ReturnType<typeof vi.fn>;
 			const sentTexts: string[] = sendMock.mock.calls.map((c: unknown[]) => c[1] as string);
-			expect(sentTexts.some((t) => t.includes('Starting a new chat'))).toBe(true);
+			expect(sentTexts.some((t) => t.includes('Starting a new chat'))).toBe(false);
 		});
 	});
 
 	describe('Test 8 — Grey-zone sends inline keyboard via sendWithButtons', () => {
-		it('sendWithButtons called with yes/no buttons', async () => {
+		it('sendWithButtons called with yes/no buttons bearing nonce suffix', async () => {
 			const pendingStore = createMockPendingSessionControl();
 			const { router, telegram } = buildRouter({
 				sessionControlResult: {
@@ -336,12 +339,17 @@ describe('Router NL /newchat hook', () => {
 			const sendWithButtonsMock = telegram.sendWithButtons as ReturnType<typeof vi.fn>;
 			expect(sendWithButtonsMock).toHaveBeenCalledOnce();
 
-			// Verify the button structure: should have SC_YES and SC_NO
+			// Verify button structure: callback data is now "sc:yes:<nonce>" / "sc:no:<nonce>"
 			const [, , buttons] = sendWithButtonsMock.mock.calls[0]!;
 			const allButtons = (buttons as { text: string; callbackData: string }[][]).flat();
 			const callbackDatas = allButtons.map((b) => b.callbackData);
-			expect(callbackDatas).toContain(SC_YES);
-			expect(callbackDatas).toContain(SC_NO);
+			// Nonce-bearing: starts with SC_YES/SC_NO prefix followed by a colon + hex nonce
+			expect(callbackDatas.some((d) => d.startsWith(SC_YES + ':'))).toBe(true);
+			expect(callbackDatas.some((d) => d.startsWith(SC_NO + ':'))).toBe(true);
+			// Also verify the nonce is a non-empty hex string
+			const yesData = callbackDatas.find((d) => d.startsWith(SC_YES + ':'))!;
+			const nonce = yesData.split(':')[2];
+			expect(nonce).toMatch(/^[0-9a-f]+$/);
 		});
 	});
 });

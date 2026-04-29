@@ -34,15 +34,21 @@ export interface SessionControlClassifierDeps {
 // ─── Pre-filter ───────────────────────────────────────────────────────────────
 
 /**
- * Keywords and phrases that strongly indicate a new-session request.
- * Checked via exact equality OR substring inclusion (case-insensitive).
+ * Exact command strings that are unambiguously a new-session request.
+ * Matched with strict equality only (case-insensitive) — no substring matching.
+ * Natural-language phrases are intentionally excluded from this list so that
+ * negations ("don't start over") and meta-questions ("what does /new do?") are
+ * NOT auto-dispatched; they fall through to the LLM classifier instead.
  */
-const SESSION_CONTROL_KEYWORDS: readonly string[] = [
-	// Exact command matches
-	'/newchat',
-	'/new',
-	'/reset',
-	// Phrases
+const SESSION_CONTROL_COMMANDS: readonly string[] = ['/newchat', '/new', '/reset'];
+
+/**
+ * Natural-language examples of new-session intent.
+ * These are NOT used for pre-filter matching — they exist for documentation
+ * purposes and as context when crafting the LLM classifier system prompt.
+ * The LLM handles all NL phrasing; the pre-filter handles explicit commands only.
+ */
+export const SESSION_CONTROL_NL_EXAMPLES: readonly string[] = [
 	'new chat',
 	'new conversation',
 	'start fresh',
@@ -64,9 +70,9 @@ export function preFilterSessionControl(
 	text: string,
 ): { matched: true; confidence: 1.0; reason: string } | { matched: false } {
 	const lower = text.trim().toLowerCase();
-	for (const keyword of SESSION_CONTROL_KEYWORDS) {
-		if (lower === keyword || lower.includes(keyword)) {
-			return { matched: true, confidence: 1.0, reason: `keyword match: ${keyword}` };
+	for (const cmd of SESSION_CONTROL_COMMANDS) {
+		if (lower === cmd) {
+			return { matched: true, confidence: 1.0, reason: `command: ${cmd}` };
 		}
 	}
 	return { matched: false };

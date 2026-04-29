@@ -268,6 +268,7 @@ export async function handleAsk(
 		content: responseWithConfirmations,
 		timestamp: now,
 	};
+	let appendSucceeded = false;
 	try {
 		await deps.chatSessions.appendExchange(
 			{
@@ -280,11 +281,12 @@ export async function handleAsk(
 			userTurn,
 			assistantTurn,
 		);
+		appendSucceeded = true;
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);
 	}
 
-	if (deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
 		scheduleTitleAfterFirstExchange(
 			{
 				userId: ctx.userId,

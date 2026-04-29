@@ -43,7 +43,7 @@ describe('ChatSessionStore.setTitle', () => {
 		const before = await readDecoded('u1', sessionId!);
 
 		const result = await store.setTitle('u1', sessionId!, 'Weekly grocery planning');
-		expect(result).toEqual({ updated: true });
+		expect(result).toEqual({ updated: true, title: 'Weekly grocery planning' });
 
 		const after = await readDecoded('u1', sessionId!);
 		expect(after.meta.title).toBe('Weekly grocery planning');
@@ -71,7 +71,7 @@ describe('ChatSessionStore.setTitle', () => {
 		const { store, ensure } = await fixture();
 		const { sessionId } = await ensure({ userId: 'u1' });
 		const result = await store.setTitle('u1', sessionId!, 'Auto title', { skipIfTitled: true });
-		expect(result).toEqual({ updated: true });
+		expect(result).toEqual({ updated: true, title: 'Auto title' });
 	});
 
 	it('rejects empty title', async () => {

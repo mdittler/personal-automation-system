@@ -1213,16 +1213,32 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 					return;
 				}
 
-				// Session-control confirmation callbacks (grey-zone NL /newchat)
-				if (data === SC_YES || data === SC_NO) {
+				// Session-control confirmation callbacks (grey-zone NL /newchat).
+				// Callback data format: "sc:yes:<nonce>" or "sc:no:<nonce>".
+				// The nonce prevents a stale button from consuming a newer pending entry.
+				if (data.startsWith(SC_YES + ':') || data.startsWith(SC_NO + ':')) {
+					const parts = data.split(':');
+					// parts: ['sc', 'yes'/'no', '<nonce>']
+					const entryId = parts[2];
+					const isYes = data.startsWith(SC_YES + ':');
 					const scHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
-					if (data === SC_YES) {
+
+					// Peek first to check the nonce without consuming
+					const peeked = pendingSessionControl.peek(userId);
+					if (!peeked || peeked.id !== entryId) {
+						await ctx.reply('That confirmation has expired. Please try again.');
+						return;
+					}
+
+					if (isYes) {
 						const entry = pendingSessionControl.get(userId); // consume-once
 						if (!entry) {
+							// Entry expired between peek and get (very unlikely race)
 							await ctx.reply('That confirmation has expired. Please try again.');
 							return;
 						}
-						// Build a minimal MessageContext for handleNewChat
+						// Build a minimal MessageContext for handleNewChat.
+						// handleNewChat sends its own confirmation — no extra reply needed (Fix 5b).
 						const scCtx = {
 							userId,
 							text: entry.messageText,
@@ -1233,9 +1249,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 						await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
 							await conversationService.handleNewChat([], scCtx);
 						});
-						await ctx.reply('Starting a new chat. ✓');
 					} else {
-						// sc:no
+						// sc:no — nonce verified above; remove the pending entry
 						pendingSessionControl.remove(userId);
 						await ctx.reply('OK, continuing your current conversation.');
 					}
