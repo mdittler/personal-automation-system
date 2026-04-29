@@ -1,5 +1,5 @@
 /**
- * Tests for TitleService.applyTitle (Hermes P7, Chunk A).
+ * Tests for TitleService.applyTitle.
  *
  * Covers:
  *  - Happy path: setTitle + updateTitle both succeed

@@ -1,5 +1,5 @@
 /**
- * Tests for title-generator.ts (Hermes P7, Chunk A).
+ * Tests for title-generator.ts.
  *
  * Covers:
  *  - Happy path: LLM returns valid JSON {"title": "..."} → string returned

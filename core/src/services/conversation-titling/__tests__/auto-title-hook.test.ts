@@ -1,5 +1,5 @@
 /**
- * Tests for auto-title-hook (Hermes P7, Chunk A).
+ * Tests for auto-title-hook.
  *
  * Covers:
  *  - Calls generateTitle then titleService.applyTitle with skipIfTitled: true

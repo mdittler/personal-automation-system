@@ -19,7 +19,12 @@ import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
 import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
-import type { PendingSessionControlEntry, PendingSessionControlStore } from '../../conversation/pending-session-control-store.js';
+import {
+	SC_NO,
+	SC_YES,
+	type PendingSessionControlEntry,
+	type PendingSessionControlStore,
+} from '../../conversation/pending-session-control-store.js';
 import type { SessionControlResult } from '../../conversation/session-control-classifier.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
@@ -86,7 +91,6 @@ function createMockPendingSessionControl(): PendingSessionControlStore {
 		get: vi.fn().mockReturnValue(undefined),
 		has: vi.fn().mockReturnValue(false),
 		remove: vi.fn(),
-		resolveForUser: vi.fn().mockReturnValue(undefined),
 	};
 }
 
@@ -332,12 +336,12 @@ describe('Router NL /newchat hook', () => {
 			const sendWithButtonsMock = telegram.sendWithButtons as ReturnType<typeof vi.fn>;
 			expect(sendWithButtonsMock).toHaveBeenCalledOnce();
 
-			// Verify the button structure: should have sc:yes and sc:no
+			// Verify the button structure: should have SC_YES and SC_NO
 			const [, , buttons] = sendWithButtonsMock.mock.calls[0]!;
 			const allButtons = (buttons as { text: string; callbackData: string }[][]).flat();
 			const callbackDatas = allButtons.map((b) => b.callbackData);
-			expect(callbackDatas).toContain('sc:yes');
-			expect(callbackDatas).toContain('sc:no');
+			expect(callbackDatas).toContain(SC_YES);
+			expect(callbackDatas).toContain(SC_NO);
 		});
 	});
 });

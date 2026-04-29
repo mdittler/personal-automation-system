@@ -31,6 +31,8 @@ import type { ConversationService } from '../conversation/conversation-service.j
 import {
 	createPendingEntry,
 	type PendingSessionControlStore,
+	SC_NO,
+	SC_YES,
 } from '../conversation/pending-session-control-store.js';
 import {
 	detectSessionControl,
@@ -1320,7 +1322,6 @@ export class Router {
 			// Store pending confirmation and show inline keyboard
 			const entry = createPendingEntry(ctx.userId, ctx.text, {
 				clock: Date.now,
-				ttlMs: 5 * 60 * 1000,
 			});
 			this.pendingSessionControl.attach(ctx.userId, entry);
 			await this.telegram.sendWithButtons(
@@ -1328,8 +1329,8 @@ export class Router {
 				'Start a new chat session? Your current conversation will be cleared.',
 				[
 					[
-						{ text: '✓ Yes, start fresh', callbackData: 'sc:yes' },
-						{ text: '✗ No, keep chatting', callbackData: 'sc:no' },
+						{ text: '✓ Yes, start fresh', callbackData: SC_YES },
+						{ text: '✗ No, keep chatting', callbackData: SC_NO },
 					],
 				],
 			);

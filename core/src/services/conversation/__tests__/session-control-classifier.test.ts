@@ -1,5 +1,5 @@
 /**
- * Tests for session-control-classifier.ts (Hermes P7, Task B1).
+ * Tests for session-control-classifier.ts.
  *
  * Covers:
  *  - preFilterSessionControl: exact keyword, command keyword, phrase containing keyword,

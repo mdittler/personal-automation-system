@@ -1,4 +1,5 @@
 import type { LLMService } from '../../types/llm.js';
+import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
 export interface TitleGeneratorDeps {
 	llm: Pick<LLMService, 'complete'>;
@@ -19,7 +20,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const DIGITS_ONLY_RE = /^\d+$/;
 
 function fenceUntrusted(userContent: string, assistantContent: string): string {
-	const stripTags = (s: string): string => s.replace(/[<>]/g, '');
+	const stripTags = (s: string): string => sanitizeInput(s).replace(/[<>]/g, '');
 	return `<conversation>\nUser: ${stripTags(userContent)}\nAssistant: ${stripTags(assistantContent)}\n</conversation>`;
 }
 

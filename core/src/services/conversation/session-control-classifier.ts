@@ -1,5 +1,5 @@
 /**
- * Session-control classifier for Hermes P7.
+ * Session-control classifier.
  *
  * Detects whether a free-text user message is requesting a new chat session
  * (i.e. the natural-language equivalent of /newchat).

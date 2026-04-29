@@ -85,7 +85,11 @@ import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wi
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
-import { createPendingSessionControlStore } from './services/conversation/pending-session-control-store.js';
+import {
+	createPendingSessionControlStore,
+	SC_NO,
+	SC_YES,
+} from './services/conversation/pending-session-control-store.js';
 import { detectSessionControl } from './services/conversation/session-control-classifier.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
@@ -1210,9 +1214,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 				}
 
 				// Session-control confirmation callbacks (grey-zone NL /newchat)
-				if (data === 'sc:yes' || data === 'sc:no') {
+				if (data === SC_YES || data === SC_NO) {
 					const scHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
-					if (data === 'sc:yes') {
+					if (data === SC_YES) {
 						const entry = pendingSessionControl.get(userId); // consume-once
 						if (!entry) {
 							await ctx.reply('That confirmation has expired. Please try again.');

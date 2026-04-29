@@ -1,5 +1,5 @@
 /**
- * Persona tests — Hermes P7 Chunk A auto-titling semantic.
+ * Auto-titling persona tests.
  *
  * Integration-style tests that wire real instances of ChatSessionStore,
  * ChatTranscriptIndex, and TitleService together with a mocked LLM to verify
