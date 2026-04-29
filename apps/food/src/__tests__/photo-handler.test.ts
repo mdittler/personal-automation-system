@@ -886,6 +886,18 @@ describe('Photo Handler', () => {
 			expect(result).not.toMatch(/[‪-‮]/);
 		});
 
+		it('sanitizePhotoField strips bidi isolate controls (U+2066–U+2069, P3 regression)', () => {
+			// LRI (U+2066), RLI (U+2067), FSI (U+2068), PDI (U+2069) — bidi isolate block
+			const lri = String.fromCodePoint(0x2066);
+			const rli = String.fromCodePoint(0x2067);
+			const fsi = String.fromCodePoint(0x2068);
+			const pdi = String.fromCodePoint(0x2069);
+			expect(sanitizePhotoField(`Banana${lri}evil`)).not.toContain(lri);
+			expect(sanitizePhotoField(`Banana${rli}evil`)).not.toContain(rli);
+			expect(sanitizePhotoField(`Banana${fsi}evil`)).not.toContain(fsi);
+			expect(sanitizePhotoField(`Banana${pdi}evil`)).not.toContain(pdi);
+		});
+
 		it('sanitizePhotoField strips ASCII control chars', () => {
 			const hostile = 'Salmon\x00\x07\x1bdo evil';
 			const result = sanitizePhotoField(hostile);
