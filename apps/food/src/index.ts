@@ -314,7 +314,7 @@ function warnInconsistentShadowConfig(primary: string, rate: number): void {
 // ─── Photo Handler (H8: Vision) ────────────────────────────────
 
 export const handlePhoto: AppModule['handlePhoto'] = async (ctx: PhotoContext) => {
-	await handlePhotoDispatch(services, ctx);
+	return await handlePhotoDispatch(services, ctx);
 };
 
 // ─── Route-First Dispatch (LLM Enhancement #2 Chunk A) ──────────────────────

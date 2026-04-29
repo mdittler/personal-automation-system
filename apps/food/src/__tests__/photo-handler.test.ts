@@ -2,9 +2,9 @@
  * Tests for the photo dispatch handler.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { handlePhoto } from '../handlers/photo.js';
-import type { CoreServices, PhotoContext, ScopedDataStore } from '@pas/core/types';
+import type { CoreServices, PhotoContext, ScopedDataStore, PhotoHandlerResult } from '@pas/core/types';
 
 const testPhoto = Buffer.from('fake-jpeg-data');
 
@@ -590,6 +590,57 @@ describe('Photo Handler', () => {
 			// The store name "Grocery Store" should appear lowercased in entity_keys
 			expect(receiptCall![1]).toContain('entity_keys:');
 			expect(receiptCall![1]).toContain('grocery store');
+		});
+	});
+
+	// ─── A2: wrapper propagates result from dispatch ───────────────
+
+	describe('handlePhoto wrapper propagation (A2)', () => {
+		afterEach(() => {
+			vi.doUnmock('../handlers/photo.js');
+			vi.resetModules();
+		});
+
+		it('propagates a PhotoHandlerResult returned by the dispatch function', async () => {
+			const fakeResult: PhotoHandlerResult = {
+				photoSummary: {
+					userTurn: '[Photo: receipt]',
+					assistantTurn: 'Logged receipt from Grocery Store — total $4.23.',
+				},
+			};
+
+			// Stub the dispatch module before dynamically importing the food index
+			vi.doMock('../handlers/photo.js', () => ({
+				handlePhoto: vi.fn().mockResolvedValue(fakeResult),
+			}));
+
+			// Dynamic import ensures the food index picks up the mocked dispatch
+			const { init, handlePhoto: wrapperFn } = await import('../index.js');
+
+			// Wire up a minimal services object so the wrapper has `services` in scope
+			const sharedStore = createMockStore({ 'household.yaml': makeHouseholdYaml(['user-1']) });
+			const minimalServices = {
+				llm: { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() },
+				telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() },
+				data: {
+					forShared: vi.fn().mockReturnValue(sharedStore),
+					forSpace: vi.fn().mockReturnValue(sharedStore),
+					forUser: vi.fn().mockReturnValue(createMockStore()),
+				},
+				logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+				scheduler: { schedule: vi.fn(), cancel: vi.fn() },
+				events: { on: vi.fn(), emit: vi.fn(), off: vi.fn() },
+				eventBus: { on: vi.fn(), emit: vi.fn(), off: vi.fn() },
+				config: { get: vi.fn().mockResolvedValue(undefined) },
+			} as unknown as CoreServices;
+
+			await init(minimalServices);
+
+			const ctx = createPhotoCtx('receipt');
+			const result = await wrapperFn!(ctx);
+
+			expect(result).toEqual(fakeResult);
+			expect(result?.photoSummary?.userTurn).toBe('[Photo: receipt]');
 		});
 	});
 

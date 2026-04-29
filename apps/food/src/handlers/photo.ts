@@ -4,7 +4,7 @@
  * Routes by caption keyword first, falls back to LLM vision classification.
  */
 
-import type { CoreServices, PhotoContext } from '@pas/core/types';
+import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
 import { stringify } from 'yaml';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { savePhoto } from '../services/photo-store.js';
@@ -89,7 +89,7 @@ function buildScopedFoodPath(resolved: ResolvedFoodStore, relativePath: string):
 export async function handlePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-): Promise<void> {
+): Promise<void | PhotoHandlerResult> {
 	try {
 		// F15: require household membership before any LLM call or store write
 		const resolved = await resolveFoodStore(services, ctx.userId, ctx.spaceId);

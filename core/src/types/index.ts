@@ -6,7 +6,7 @@
  */
 
 // Core contract
-export type { AppModule, CoreServices, AppLogger } from './app-module.js';
+export type { AppModule, CoreServices, AppLogger, PhotoSummary, PhotoHandlerResult } from './app-module.js';
 
 // Data query (D2b/D2c)
 export type { DataQueryResult, DataQueryFile, DataQueryService, DataQueryOptions } from './data-query.js';
