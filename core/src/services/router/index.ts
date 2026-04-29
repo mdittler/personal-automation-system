@@ -518,6 +518,10 @@ export class Router {
 				await this.dispatchConversationCommand('newchat', parsed.args, ctx);
 				return;
 			}
+			if (parsed.command === '/title') {
+				await this.dispatchConversationCommand('title', parsed.args, ctx);
+				return;
+			}
 		}
 
 		const result = lookupCommand(parsed, this.commandMap);
@@ -649,7 +653,7 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'notes' | 'newchat',
+		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
@@ -663,6 +667,7 @@ export class Router {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
 				else if (name === 'newchat') await this.conversationService!.handleNewChat(args, enrichedCtx);
+				else if (name === 'title') await this.conversationService!.handleTitle(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -703,12 +708,13 @@ export class Router {
 			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
 			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
 			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
+			lines.push('  /title [title] — Set or auto-generate a title for the current session');
 			lines.push('');
 		}
 
 		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
 		// entries if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset']);
+		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset', '/title']);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {
