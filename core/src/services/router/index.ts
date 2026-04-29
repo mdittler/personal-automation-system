@@ -1306,8 +1306,8 @@ export class Router {
 
 		if (result.intent !== 'new_session') return false;
 
-		const isHighConfidence = result.confidence >= 0.7 || result.source === 'prefilter';
-		const isGreyZone = result.confidence >= 0.4 && result.confidence < 0.7;
+		const isHighConfidence = result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
+		const isGreyZone = result.confidence >= this.confidenceThreshold && result.confidence < this.verificationUpperBound;
 
 		if (isHighConfidence) {
 			// Start new session immediately

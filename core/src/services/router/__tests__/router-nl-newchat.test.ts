@@ -19,7 +19,7 @@ import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
 import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
-import type { PendingSessionControlStore } from '../../conversation/pending-session-control-store.js';
+import type { PendingSessionControlEntry, PendingSessionControlStore } from '../../conversation/pending-session-control-store.js';
 import type { SessionControlResult } from '../../conversation/session-control-classifier.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
@@ -220,8 +220,10 @@ describe('Router NL /newchat hook', () => {
 			await router.routeMessage(msg('maybe reset things?'));
 
 			expect(pendingStore.attach).toHaveBeenCalledOnce();
-			const [attachedUserId] = (pendingStore.attach as ReturnType<typeof vi.fn>).mock.calls[0]!;
+			const [attachedUserId, attachedEntry] = (pendingStore.attach as ReturnType<typeof vi.fn>).mock.calls[0]!;
 			expect(attachedUserId).toBe('user1');
+			const entry = attachedEntry as PendingSessionControlEntry;
+			expect(entry.messageText).toBe('maybe reset things?');
 		});
 	});
 
