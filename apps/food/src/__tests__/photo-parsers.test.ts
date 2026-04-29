@@ -763,6 +763,9 @@ describe('Canonical ingredient names (F18)', () => {
 });
 
 // ─── B1: isValidReceiptDate — calendar-strict, MAX_RECEIPT_AGE_DAYS=90 ──────
+// today = '2026-04-29'; boundary dates:
+//   91 days ago = 2026-04-29 - 91d = 2026-01-28 (rejected: past MAX_RECEIPT_AGE_DAYS)
+//   89 days ago = 2026-04-29 - 89d = 2026-01-30 (accepted: within window)
 
 describe('isValidReceiptDate', () => {
 	const today = '2026-04-29';

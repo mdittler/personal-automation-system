@@ -175,7 +175,11 @@ export async function createPersonaEnv(): Promise<PersonaEnv> {
 
 	// ── Prompt capture ───────────────────────────────────────────────────────
 
-	async function sendAskAndCaptureLLMPrompt(message: string): Promise<string> {
+	// `message` is accepted for test documentation (communicates the simulated question) but is not
+	// passed to buildSystemPrompt — the test verifies what is in the transcript context (turns),
+	// not LLM output. In production /ask would call buildAppAwareSystemPrompt with the live message;
+	// here we use buildSystemPrompt to deterministically assert transcript content.
+	async function sendAskAndCaptureLLMPrompt(_message: string): Promise<string> {
 		const turns = await chatSessions.loadRecentTurns(
 			{ userId, sessionKey },
 			{ maxTurns: 20 },
