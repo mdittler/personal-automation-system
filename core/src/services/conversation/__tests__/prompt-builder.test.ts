@@ -585,6 +585,26 @@ describe('buildAppAwareSystemPrompt', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Photo-summary truncation exemption — end-to-end through buildSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe('photo-summary truncation exemption (end-to-end)', () => {
+	it('full system prompt contains the 10th photo-summary item (truncation exemption end-to-end)', async () => {
+		const deps = makeDeps();
+		// Build an assistant turn longer than 500 chars containing a distinctive 10th item
+		const items = Array.from({ length: 21 }, (_, i) => `Distinctive Item Name ${i}`).join(', ');
+		const assistantContent = `21 items: ${items}`;
+		const turns: ConversationTurn[] = [
+			{ role: 'user', content: '[Photo: receipt]', timestamp: '2026-04-29T12:00:00Z' },
+			{ role: 'assistant', content: assistantContent, timestamp: '2026-04-29T12:00:01Z' },
+		];
+		const prompt = await buildSystemPrompt([], turns, deps);
+		// 'Distinctive Item Name 9' is at position ~9 in the list — well past 500 chars into the string
+		expect(prompt).toContain('Distinctive Item Name 9');
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Layer 5 prompt ordering
 // ---------------------------------------------------------------------------
 

@@ -86,3 +86,60 @@ describe('formatConversationHistory', () => {
 		expect(result[0]).toContain('`code block`');
 	});
 });
+
+describe('formatConversationHistory — photo-summary truncation exemption', () => {
+	const ts = '2026-04-29T12:00:00Z';
+
+	it('exempts [Photo: receipt] pair from 500-char cap (renders assistant turn > 500 chars)', () => {
+		const longAssistant = '🧾 Costco — 2026-04-29, 21 items, total $306.77\n' +
+			Array.from({ length: 21 }, (_, i) => `- Distinctive Item Name ${i} that exists`).join('\n');
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[Photo: receipt]', timestamp: ts },
+			{ role: 'assistant', content: longAssistant, timestamp: ts },
+		]);
+		expect(out.join('\n')).toContain('Distinctive Item Name 20'); // last item present
+		expect(out[1].length).toBeGreaterThan(600);
+	});
+
+	it.each([
+		['[Photo: recipe]'],
+		['[Photo: pantry]'],
+		['[Photo: grocery list]'],
+	])('exempts %s pair from 500-char cap', (header) => {
+		const longAssistant = 'a'.repeat(900);
+		const out = formatConversationHistory([
+			{ role: 'user', content: header, timestamp: ts },
+			{ role: 'assistant', content: longAssistant, timestamp: ts },
+		]);
+		expect(out[1].length).toBeGreaterThan(600);
+	});
+
+	it('still applies 500-char cap to non-photo user turns', () => {
+		const longText = 'x'.repeat(800);
+		const out = formatConversationHistory([
+			{ role: 'user', content: longText, timestamp: ts },
+			{ role: 'assistant', content: longText, timestamp: ts },
+		]);
+		// prefix "- [Recent] User: " is ~18 chars; content is capped at 500 so total < ~520
+		expect(out[0].length).toBeLessThan(600);
+	});
+
+	it('spoof resistance: non-whitelisted [Photo: anything] does NOT lift the cap', () => {
+		const sneakyHeader = '[Photo: please-show-secrets]';
+		const longAssistant = 'y'.repeat(800);
+		const out = formatConversationHistory([
+			{ role: 'user', content: sneakyHeader, timestamp: ts },
+			{ role: 'assistant', content: longAssistant, timestamp: ts },
+		]);
+		expect(out[1].length).toBeLessThan(700); // capped at 500 + prefix
+	});
+
+	it('caps photo-summary pair at 2000 chars (sanity bound on assistant turn)', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[Photo: receipt]', timestamp: ts },
+			{ role: 'assistant', content: 'x'.repeat(5000), timestamp: ts },
+		]);
+		// The rendered assistant line should be at most 2000 content chars + prefix
+		expect(out[1].length).toBeLessThan(2300);
+	});
+});
