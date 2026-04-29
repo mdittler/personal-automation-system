@@ -28,6 +28,15 @@ import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
 import type { ConversationService } from '../conversation/conversation-service.js';
+import {
+	createPendingEntry,
+	type PendingSessionControlStore,
+} from '../conversation/pending-session-control-store.js';
+import {
+	detectSessionControl,
+	type SessionControlClassifierDeps,
+	type SessionControlResult,
+} from '../conversation/session-control-classifier.js';
 import type { HouseholdService } from '../household/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import type { InviteService } from '../invite/index.js';
@@ -169,6 +178,13 @@ export interface RouterOptions {
 	messageRateTracker?: MessageRateTracker;
 	/** Optional — when present, binds requestContext.sessionId via peekActive before every conversation dispatch. */
 	chatSessions?: ChatSessionStore;
+	/**
+	 * Optional — when present, enables the NL /newchat hook for free-text messages.
+	 * Both sessionControlClassifier and pendingSessionControl must be provided together.
+	 */
+	sessionControlClassifier?: typeof detectSessionControl;
+	/** Optional — in-memory TTL store for grey-zone session-reset confirmations. */
+	pendingSessionControl?: PendingSessionControlStore;
 }
 
 export class Router {
@@ -190,8 +206,11 @@ export class Router {
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	private readonly llm: LLMService;
 	private readonly messageRateTracker?: MessageRateTracker;
 	private readonly chatSessions?: ChatSessionStore;
+	private readonly sessionControlClassifier?: typeof detectSessionControl;
+	private readonly pendingSessionControl?: PendingSessionControlStore;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -203,6 +222,7 @@ export class Router {
 		this.fallback = options.fallback;
 		this.config = options.config;
 		this.logger = options.logger;
+		this.llm = options.llm;
 		this.confidenceThreshold = options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
 		this.appToggle = options.appToggle;
 		this.conversationService = options.conversationService;
@@ -216,6 +236,8 @@ export class Router {
 		this.householdService = options.householdService;
 		this.messageRateTracker = options.messageRateTracker;
 		this.chatSessions = options.chatSessions;
+		this.sessionControlClassifier = options.sessionControlClassifier;
+		this.pendingSessionControl = options.pendingSessionControl;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -306,6 +328,12 @@ export class Router {
 
 		// Inject active space context for free text
 		const enrichedCtx = this.enrichWithActiveSpace(ctx);
+
+		// 3a. NL /newchat hook — runs before intent classification (opt-in: both deps required)
+		if (this.sessionControlClassifier && this.pendingSessionControl) {
+			const intercepted = await this.handleSessionControlHook(enrichedCtx);
+			if (intercepted) return;
+		}
 
 		// 3. Free text → intent classification
 		const match = await this.intentClassifier.classify(
@@ -1248,6 +1276,68 @@ export class Router {
 			this.logger.warn({ error }, 'Context-aware promotion failed — falling back to chatbot');
 			await this.sendToFallback(ctx, enabledApps);
 		}
+	}
+
+	/**
+	 * NL /newchat hook — detect session-control intent in free-text messages.
+	 *
+	 * Returns true if the message was intercepted (caller should return early).
+	 * Returns false if the message should continue normal routing.
+	 *
+	 * High-confidence (>= 0.7) or prefilter match → immediately start new chat.
+	 * Grey-zone (>= 0.4 && < 0.7) → store pending entry + send inline keyboard.
+	 * Low confidence (< 0.4) or intent !== 'new_session' → no intercept.
+	 */
+	private async handleSessionControlHook(ctx: MessageContext): Promise<boolean> {
+		if (!this.sessionControlClassifier || !this.pendingSessionControl) return false;
+
+		const deps: SessionControlClassifierDeps = {
+			llm: this.llm,
+			logger: this.logger,
+		};
+
+		let result: SessionControlResult;
+		try {
+			result = await this.sessionControlClassifier(ctx.text, deps);
+		} catch (err) {
+			this.logger.warn({ err }, 'session-control classifier threw — skipping hook');
+			return false;
+		}
+
+		if (result.intent !== 'new_session') return false;
+
+		const isHighConfidence = result.confidence >= 0.7 || result.source === 'prefilter';
+		const isGreyZone = result.confidence >= 0.4 && result.confidence < 0.7;
+
+		if (isHighConfidence) {
+			// Start new session immediately
+			await this.dispatchConversationCommand('newchat', [], ctx);
+			await this.trySend(ctx.userId, 'Starting a new chat. ✓');
+			return true;
+		}
+
+		if (isGreyZone) {
+			// Store pending confirmation and show inline keyboard
+			const entry = createPendingEntry(ctx.userId, ctx.text, {
+				clock: Date.now,
+				ttlMs: 5 * 60 * 1000,
+			});
+			this.pendingSessionControl.attach(ctx.userId, entry);
+			await this.telegram.sendWithButtons(
+				ctx.userId,
+				'Start a new chat session? Your current conversation will be cleared.',
+				[
+					[
+						{ text: '✓ Yes, start fresh', callbackData: 'sc:yes' },
+						{ text: '✗ No, keep chatting', callbackData: 'sc:no' },
+					],
+				],
+			);
+			return true;
+		}
+
+		// Low confidence — let message fall through to normal routing
+		return false;
 	}
 
 	/**
