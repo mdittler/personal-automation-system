@@ -674,6 +674,41 @@ describe('Photo Handler', () => {
 				vi.useRealTimers();
 			}
 		});
+
+		it('frontmatter contains display date (parsed.date) and capturedAt separately (P1)', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-04-29T15:00:00.000Z'));
+			try {
+				// LLM returns a receipt dated 2026-04-15 — valid, within 90 days
+				const receiptWithDistinctDate = JSON.stringify({
+					store: 'Costco',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Salmon', quantity: 1, unitPrice: 30.11, totalPrice: 30.11 }],
+					subtotal: 30.11,
+					tax: 1.81,
+					total: 31.92,
+				});
+				const { services, sharedStore } = createMockServices(receiptWithDistinctDate);
+				(services as unknown as Record<string, unknown>).timezone = 'UTC';
+				await handlePhoto(services, createPhotoCtx('receipt'));
+
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
+				expect(receiptCall).toBeDefined();
+
+				const { parse: parseYAML } = await import('yaml');
+				const parts = receiptCall![1].split('---\n');
+				// parts[1] = frontmatter block (between the --- delimiters)
+				const fm = parseYAML(parts[1]!) as Record<string, unknown>;
+
+				// date in frontmatter = display/receipt date (parsed.date), NOT capturedAt-derived date
+				expect(fm['date']).toBe('2026-04-15');
+				// capturedAt in frontmatter = sort/storage authority (ISO instant from isoNow())
+				expect(fm['capturedAt']).toBe('2026-04-29T15:00:00.000Z');
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 	});
 
 	// ─── A2: wrapper propagates result from dispatch ───────────────

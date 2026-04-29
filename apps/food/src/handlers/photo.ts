@@ -220,10 +220,11 @@ async function handleReceiptPhoto(
 		capturedAt,
 	};
 
-	// Save receipt — frontmatter date uses capturedAt-derived date so sorting by filename matches
+	// Save receipt — date is the display/receipt date; capturedAt is the sort authority
 	const fm = generateFrontmatter({
 		title: `Receipt: ${parsed.store}`,
-		date: capturedDate,            // capturedAt-derived, not parsed.date
+		date: parsed.date,
+		capturedAt,
 		tags: ['food', 'receipt'],
 		type: 'receipt',
 		entity_keys: [parsed.store.toLowerCase()],
