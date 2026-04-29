@@ -34,6 +34,19 @@ export interface SecretsService {
 	has(id: string): boolean;
 }
 
+/** Text-only summary returned by photo handlers for transcript injection. */
+export interface PhotoSummary {
+	/** Synthetic user-side turn, e.g. '[Photo: receipt]'. Keep under 100 chars. */
+	userTurn: string;
+	/** Sanitized assistant-side confirmation with structured detail inline as text.
+	 *  No separate structured field — SessionTurn does not preserve metadata. */
+	assistantTurn: string;
+}
+
+export interface PhotoHandlerResult {
+	photoSummary?: PhotoSummary;
+}
+
 /** What every app exports from its index.ts. */
 export interface AppModule {
 	/**
@@ -52,7 +65,7 @@ export interface AppModule {
 	 * Called when the router sends a photo message to the app.
 	 * Only called if the manifest declares accepts_photos: true.
 	 */
-	handlePhoto?(ctx: PhotoContext): Promise<void>;
+	handlePhoto?(ctx: PhotoContext): Promise<void | PhotoHandlerResult>;
 
 	/**
 	 * Called when a user sends an explicit /command routed to the app.
