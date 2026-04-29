@@ -337,6 +337,32 @@ describe('price-store', () => {
 			const result = await updatePricesFromReceipt(mockServices, mockStore as never, receiptWithDiscount);
 			expect(result.addedCount).toBe(0);
 		});
+
+		it('sets updatedAt from capturedAt (date-only) when capturedAt is present', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			const receiptWithCapturedAt: Receipt = {
+				...receipt,  // receipt fixture has date: '2026-04-07', capturedAt: '2026-04-07T10:00:00.000Z'
+				date: '2026-01-01',      // stale display date (what LLM might hallucinate)
+				capturedAt: '2026-04-07T10:00:00.000Z',  // real capture time
+			};
+			await updatePricesFromReceipt(mockServices, mockStore as never, receiptWithCapturedAt);
+			const [, content] = mockStore.write.mock.calls[0] as [string, string];
+			expect(content).toContain('updated: 2026-04-07');   // capturedAt.slice(0,10), not '2026-01-01'
+			expect(content).not.toContain('updated: 2026-01-01');
+		});
+
+		it('falls back to receipt.date for updatedAt when capturedAt is absent', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			const receiptWithoutCapturedAt: Receipt = {
+				...receipt,
+				capturedAt: undefined as unknown as string,  // legacy receipt without capturedAt
+			};
+			await updatePricesFromReceipt(mockServices, mockStore as never, receiptWithoutCapturedAt);
+			const [, content] = mockStore.write.mock.calls[0] as [string, string];
+			expect(content).toContain('updated: 2026-04-07');   // falls back to receipt.date
+		});
 	});
 
 	describe('isPriceUpdateIntent', () => {
