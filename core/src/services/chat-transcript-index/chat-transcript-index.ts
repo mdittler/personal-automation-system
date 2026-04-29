@@ -221,7 +221,8 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 			// rows already sorted by bm25 ASC, turn_index ASC from the SQL query
 			const topRows = sessionRows.slice(0, limitMessagesPerSession);
 			if (topRows.length === 0) continue;
-			const minBm25 = topRows.reduce((min, r) => (r.bm25 < min ? r.bm25 : min), topRows[0]?.bm25);
+			// topRows[0] is guaranteed non-null: we checked topRows.length === 0 above
+			const minBm25 = topRows.reduce((min, r) => (r.bm25 < min ? r.bm25 : min), topRows[0]!.bm25);
 			const matches: MatchRow[] = topRows.map((r) => ({
 				turn_index: r.turn_index,
 				role: r.role,

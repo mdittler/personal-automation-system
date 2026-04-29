@@ -108,4 +108,10 @@ describe('ChatSessionStore.setTitle', () => {
 		expect(result).toEqual({ updated: false });
 		expect(warnings.some((w) => /corrupt/i.test(w))).toBe(true);
 	});
+
+	it('returns { updated: false } silently for malformed session id', async () => {
+		const { store } = await fixture();
+		const result = await store.setTitle('u1', '../traversal', 'title');
+		expect(result).toEqual({ updated: false });
+	});
 });
