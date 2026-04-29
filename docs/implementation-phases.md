@@ -2835,6 +2835,37 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 ---
 
+## Hermes P7 Chunk A — Session Auto-Titling (2026-04-28)
+
+**Delivered**: Automatic LLM-generated session titles + manual `/title` command.
+
+- `title-generator.ts`: fast-tier LLM call with 3–7 word validation, no-Markdown, no-quotes constraint
+- `title-service.ts`: `applyTitle` writes Markdown frontmatter (canonical) then SQLite (derived, failure-tolerant); `skipIfTitled` guard
+- `auto-title-hook.ts`: `runTitleAfterFirstExchange` — fires after first exchange, non-blocking, skips if session already titled
+- `handle-message.ts` / `handle-ask.ts`: fire-and-forget auto-title after first successful reply
+- `ConversationService.handleTitle`: `/title` display (shows current or "(none)") and `/title <phrase>` manual set
+- `ChatTranscriptIndex.updateTitle`: derives SQLite update from Markdown canonical write
+- `ChatSessionStore.setTitle`: sanitizes (control chars stripped, whitespace collapsed, truncated at 80 chars), rejects empty
+- Router: `/title` command wired as built-in alongside `/newchat`, `/reset`
+- `compose-runtime.ts`: `TitleService` instantiated and injected into `handleMessage`, `handleAsk`, `handleTitle`
+- 8 URS requirements: REQ-CONV-TITLE-001 through REQ-CONV-TITLE-008
+- Tests: persona test (`auto-titling.persona.test.ts`), `handle-message-auto-title.test.ts`, `handle-ask-auto-title.test.ts`, `title-generator.test.ts`, `title-service.test.ts`, `chat-session-store.setTitle.test.ts`, `conversation-service.test.ts`
+
+---
+
+## Hermes P7 Chunk B — NL /newchat Classifier (2026-04-28)
+
+**Delivered**: Natural-language session-reset detection for free-text messages.
+
+- `session-control-classifier.ts`: synchronous keyword pre-filter (16 phrases) + fast-tier LLM two-stage pipeline
+- `pending-session-control-store.ts`: in-memory TTL store for grey-zone pending confirmations (5-minute expiry)
+- `Router` extended with `sessionControlClassifier` + `pendingSessionControl` opt-in hook
+- `compose-runtime.ts`: `sc:yes` / `sc:no` callback query handlers wired
+- 8 URS requirements: REQ-CONV-NEWCHAT-001 through REQ-CONV-NEWCHAT-008
+- Tests: 8 router tests + 4 callback integration tests + 17 classifier unit tests + 10 store unit tests
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

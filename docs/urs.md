@@ -4247,6 +4247,21 @@ Title content MUST be sanitized: control characters stripped, whitespace collaps
 
 ---
 
+### REQ-CONV-NEWCHAT: NL /newchat Classifier (Hermes P7 Chunk B)
+
+| ID | Requirement | Priority |
+|---|---|---|
+| REQ-CONV-NEWCHAT-001 | The system MUST detect new-session intent in free-text messages using a two-stage pipeline: a synchronous keyword pre-filter followed by a fast-tier LLM classifier. | MUST |
+| REQ-CONV-NEWCHAT-002 | High-confidence detections (≥ verificationUpperBound threshold OR source=prefilter) MUST immediately trigger a new chat session without requiring user confirmation. | MUST |
+| REQ-CONV-NEWCHAT-003 | Grey-zone detections (≥ confidenceThreshold AND < verificationUpperBound) MUST show inline Telegram buttons asking the user to confirm or decline. | MUST |
+| REQ-CONV-NEWCHAT-004 | Low-confidence detections (< confidenceThreshold) or intent='continue' MUST NOT intercept the message — normal routing MUST proceed. | MUST |
+| REQ-CONV-NEWCHAT-005 | The NL /newchat feature MUST be opt-in at the Router level (requires both sessionControlClassifier and pendingSessionControl to be configured). | MUST |
+| REQ-CONV-NEWCHAT-006 | Grey-zone pending confirmations MUST expire after 5 minutes. Expired confirmations MUST be rejected with a user-facing message. | MUST |
+| REQ-CONV-NEWCHAT-007 | The keyword pre-filter MUST match at least 16 phrases including exact command aliases (/newchat, /new, /reset) and natural-language variants. | MUST |
+| REQ-CONV-NEWCHAT-008 | User confirmation via sc:yes MUST start a new chat session; sc:no MUST discard the pending entry and continue the current session. | MUST |
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -7477,5 +7492,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-TITLE-006 | conversation-service.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-TITLE-007 | title-service.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-TITLE-008 | chat-session-store.setTitle.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-NEWCHAT-001 | session-control-classifier.test.ts | 2 | 3 | Implemented |
+| REQ-CONV-NEWCHAT-002 | router-nl-newchat.test.ts, compose-runtime-sc-callbacks.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-NEWCHAT-003 | router-nl-newchat.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-NEWCHAT-004 | router-nl-newchat.test.ts | 1 | 2 | Implemented |
+| REQ-CONV-NEWCHAT-005 | router-nl-newchat.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-NEWCHAT-006 | pending-session-control-store.test.ts | 1 | 2 | Implemented |
+| REQ-CONV-NEWCHAT-007 | session-control-classifier.test.ts | 1 | 3 | Implemented |
+| REQ-CONV-NEWCHAT-008 | compose-runtime-sc-callbacks.test.ts | 1 | 1 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
