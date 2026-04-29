@@ -28,6 +28,7 @@ function makeChatSessions(opts: {
 		readSession: vi.fn().mockResolvedValue(undefined),
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
+		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 	};
 }
 

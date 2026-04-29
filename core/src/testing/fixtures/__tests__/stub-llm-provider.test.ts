@@ -54,6 +54,8 @@ describe('StubProvider', () => {
 	it('returns plain text for non-classification prompts', async () => {
 		const provider = new StubProvider(costTracker, logger, {
 			completionText: 'hello world',
+			// Zero out Pareto delay so the test finishes well within the 5s timeout.
+			capMs: 0,
 		});
 		const result = await provider.completeWithUsage('tell me something');
 		expect(result.text).toBe('hello world');

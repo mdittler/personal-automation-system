@@ -20,6 +20,8 @@ import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
+import type { TitleService } from '../conversation-titling/title-service.js';
+import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
@@ -76,6 +78,8 @@ export interface HandleMessageDeps {
 	chatLogToNotesDefault?: boolean;
 	/** ConversationRetrievalService — stored here, wired into handlers in Chunk D. */
 	conversationRetrieval?: ConversationRetrievalService;
+	/** TitleService — when present, auto-title fires after first exchange. */
+	titleService?: TitleService;
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
@@ -241,6 +245,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const userTurn: SessionTurn = { role: 'user', content: ctx.text, timestamp: now };
 	const assistantTurn: SessionTurn = { role: 'assistant', content: finalResponse, timestamp: now };
 
+	let appendSucceeded = false;
 	try {
 		await deps.chatSessions.appendExchange(
 			{
@@ -253,7 +258,24 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			userTurn,
 			assistantTurn,
 		);
+		appendSucceeded = true;
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);
+	}
+
+	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+		scheduleTitleAfterFirstExchange(
+			{
+				userId: ctx.userId,
+				sessionId: ensuredSessionId,
+				userContent: ctx.text,
+				assistantContent: finalResponse,
+			},
+			{
+				titleService: deps.titleService,
+				llm: deps.llm,
+				logger: deps.logger,
+			},
+		);
 	}
 }

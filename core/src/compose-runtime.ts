@@ -54,6 +54,7 @@ import {
 	CONVERSATION_USER_CONFIG,
 	ConversationService,
 } from './services/conversation/index.js';
+import { TitleService } from './services/conversation-titling/index.js';
 import { CredentialService } from './services/credentials/index.js';
 import { DailyDiffService } from './services/daily-diff/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
@@ -84,6 +85,12 @@ import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wi
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
+import {
+	createPendingSessionControlStore,
+	SC_NO,
+	SC_YES,
+} from './services/conversation/pending-session-control-store.js';
+import { detectSessionControl } from './services/conversation/session-control-classifier.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
 import { VerificationLogger } from './services/router/verification-logger.js';
@@ -991,6 +998,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		index: chatTranscriptIndex,
 	});
 
+	const titleService = new TitleService({
+		chatSessions,
+		chatTranscriptIndex,
+		logger: logger.child({ service: 'title-service' }),
+	});
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1009,6 +1022,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		editService: editServiceImpl ?? undefined,
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
 		conversationRetrieval: conversationRetrievalService,
+		titleService,
 	});
 	logger.info('ConversationService: initialized');
 
@@ -1036,6 +1050,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	// 10. Router
 	const messageRateTracker = new MessageRateTracker();
+	const pendingSessionControl = createPendingSessionControlStore();
 
 	const router = new Router({
 		registry,
@@ -1055,6 +1070,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		interactionContext: interactionContextService,
 		householdService,
 		messageRateTracker,
+		sessionControlClassifier: detectSessionControl,
+		pendingSessionControl,
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
@@ -1193,6 +1210,50 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 							data,
 						);
 					});
+					return;
+				}
+
+				// Session-control confirmation callbacks (grey-zone NL /newchat).
+				// Callback data format: "sc:yes:<nonce>" or "sc:no:<nonce>".
+				// The nonce prevents a stale button from consuming a newer pending entry.
+				if (data.startsWith(SC_YES + ':') || data.startsWith(SC_NO + ':')) {
+					const parts = data.split(':');
+					// parts: ['sc', 'yes'/'no', '<nonce>']
+					const entryId = parts[2];
+					const isYes = data.startsWith(SC_YES + ':');
+					const scHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
+
+					// Peek first to check the nonce without consuming
+					const peeked = pendingSessionControl.peek(userId);
+					if (!peeked || peeked.id !== entryId) {
+						await ctx.reply('That confirmation has expired. Please try again.');
+						return;
+					}
+
+					if (isYes) {
+						const entry = pendingSessionControl.get(userId); // consume-once
+						if (!entry) {
+							// Entry expired between peek and get (very unlikely race)
+							await ctx.reply('That confirmation has expired. Please try again.');
+							return;
+						}
+						// Build a minimal MessageContext for handleNewChat.
+						// handleNewChat sends its own confirmation — no extra reply needed (Fix 5b).
+						const scCtx = {
+							userId,
+							text: entry.messageText,
+							timestamp: new Date(),
+							chatId: ctx.callbackQuery.message?.chat.id ?? 0,
+							messageId: ctx.callbackQuery.message?.message_id ?? 0,
+						};
+						await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
+							await conversationService.handleNewChat([], scCtx);
+						});
+					} else {
+						// sc:no — nonce verified above; remove the pending entry
+						pendingSessionControl.remove(userId);
+						await ctx.reply('OK, continuing your current conversation.');
+					}
 					return;
 				}
 

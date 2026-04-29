@@ -92,10 +92,38 @@ export interface ChatSessionStore {
 		userId: string,
 		sessionId: string,
 	): Promise<{ meta: ChatSessionFrontmatter; turns: SessionTurn[] } | undefined>;
+
+	/**
+	 * Set a human-readable title on an existing session transcript.
+	 *
+	 * Sanitizes the input (strips control chars, collapses whitespace, truncates
+	 * at 80 chars). Returns `{ updated: false }` for empty/whitespace-only titles,
+	 * missing session files, or corrupt transcripts (with a logger.warn in the
+	 * latter two cases). When `opts.skipIfTitled` is true, the write is skipped if
+	 * the session already has a non-empty title.
+	 * When the write succeeds, returns `{ updated: true, title: <sanitized> }`.
+	 */
+	setTitle(
+		userId: string,
+		sessionId: string,
+		title: string,
+		opts?: { skipIfTitled?: boolean },
+	): Promise<{ updated: boolean; title?: string }>;
 }
 
 const SESSION_ID_RE = /^\d{8}_\d{6}_[0-9a-f]{8}$/;
 const MAX_MINT_ATTEMPTS = 3;
+const TITLE_MAX_LEN = 80;
+
+function sanitizeTitle(input: string): string | null {
+	const cleaned = input
+		.replace(/[\r\n\t]+/g, ' ')
+		.replace(/[\x00-\x1F\x7F]/g, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	if (cleaned.length === 0) return null;
+	return cleaned.slice(0, TITLE_MAX_LEN);
+}
 
 export class DefaultChatSessionStore implements ChatSessionStore {
 	constructor(
@@ -393,6 +421,57 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		}
 
 		return { endedSessionId: entry.id };
+	}
+
+	async setTitle(
+		userId: string,
+		sessionId: string,
+		title: string,
+		opts: { skipIfTitled?: boolean } = {},
+	): Promise<{ updated: boolean; title?: string }> {
+		if (!SESSION_ID_RE.test(sessionId)) return { updated: false };
+
+		const sanitized = sanitizeTitle(title);
+		if (sanitized === null) return { updated: false };
+
+		let updated = false;
+		await withFileLock(`conversation-session-transcript:${userId}:${sessionId}`, async () => {
+			const store = this.deps.data.forUser(userId);
+			const path = `conversation/sessions/${sessionId}.md`;
+			const raw = await store.read(path);
+			if (raw === '') {
+				this.deps.logger.warn({ sessionId }, 'conversation-session: setTitle on missing session file');
+				return;
+			}
+			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
+			try {
+				decoded = decode(raw);
+			} catch (err) {
+				if (err instanceof CorruptTranscriptError) {
+					this.deps.logger.warn(
+						{ sessionId, err },
+						'conversation-session: corrupt transcript on setTitle',
+					);
+					return;
+				}
+				throw err;
+			}
+			if (
+				opts.skipIfTitled &&
+				typeof decoded.meta.title === 'string' &&
+				decoded.meta.title.trim().length > 0
+			) {
+				return;
+			}
+			decoded.meta.title = sanitized;
+			let next = encodeNew(decoded.meta);
+			for (const t of decoded.turns) next = encodeAppend(next, t);
+			await store.write(path, next);
+			updated = true;
+		});
+
+		if (updated) return { updated: true, title: sanitized };
+		return { updated: false };
 	}
 
 	async readSession(

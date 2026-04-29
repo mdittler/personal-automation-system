@@ -17,6 +17,8 @@ import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
+import type { TitleService } from '../conversation-titling/title-service.js';
+import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
@@ -72,6 +74,8 @@ export interface HandleAskDeps {
 	chatLogToNotesDefault?: boolean;
 	/** ConversationRetrievalService — stored here, wired into handlers in Chunk D. */
 	conversationRetrieval?: ConversationRetrievalService;
+	/** TitleService — when present, auto-title fires after first exchange. */
+	titleService?: TitleService;
 }
 
 export async function handleAsk(
@@ -264,6 +268,7 @@ export async function handleAsk(
 		content: responseWithConfirmations,
 		timestamp: now,
 	};
+	let appendSucceeded = false;
 	try {
 		await deps.chatSessions.appendExchange(
 			{
@@ -276,7 +281,24 @@ export async function handleAsk(
 			userTurn,
 			assistantTurn,
 		);
+		appendSucceeded = true;
 	} catch (error) {
 		deps.logger.warn('Failed to save conversation history: %s', error);
+	}
+
+	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+		scheduleTitleAfterFirstExchange(
+			{
+				userId: ctx.userId,
+				sessionId: ensuredSessionId,
+				userContent: question,
+				assistantContent: responseWithConfirmations,
+			},
+			{
+				titleService: deps.titleService,
+				llm: deps.llm,
+				logger: deps.logger,
+			},
+		);
 	}
 }
