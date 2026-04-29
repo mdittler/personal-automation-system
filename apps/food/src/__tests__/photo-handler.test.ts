@@ -95,9 +95,10 @@ const validRecipeJson = JSON.stringify({
 	allergens: [],
 });
 
+const RECEIPT_DATE = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
 const validReceiptJson = JSON.stringify({
 	store: 'Grocery Store',
-	date: '2026-04-05',
+	date: RECEIPT_DATE,
 	lineItems: [{ name: 'Milk', quantity: 1, unitPrice: 3.99, totalPrice: 3.99 }],
 	subtotal: 3.99,
 	tax: 0.24,
@@ -378,7 +379,7 @@ describe('Photo Handler', () => {
 		it('escapes special chars in receipt store name', async () => {
 			const specialReceipt = JSON.stringify({
 				store: "Bob*s [Grocery] Store",
-				date: '2026-04-05',
+				date: RECEIPT_DATE,
 				lineItems: [{ name: 'Milk', quantity: 1, totalPrice: 3.99 }],
 				total: 3.99,
 			});
@@ -780,7 +781,7 @@ describe('Photo Handler', () => {
 			const { services } = createMockServices(validReceiptJson);
 			const ctx = createPhotoCtx('grocery receipt');
 			const result = await handlePhoto(services, ctx);
-			expect(result?.photoSummary?.assistantTurn).toContain('2026-04-05');
+			expect(result?.photoSummary?.assistantTurn).toContain(RECEIPT_DATE);
 		});
 	});
 

@@ -21,7 +21,7 @@ import {
 	withPantryLock,
 } from '../services/pantry-store.js';
 import { addItems, loadGroceryList, saveGroceryList, createEmptyList, withGroceryLock } from '../services/grocery-store.js';
-import { isoNow } from '../utils/date.js';
+import { isoNow, generateId } from '../utils/date.js';
 import type { Receipt } from '../types.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
 import {
@@ -206,7 +206,7 @@ async function handleReceiptPhoto(
 	// Build receipt record — capturedAt is the sort/storage authority
 	const capturedAt = isoNow();
 	const capturedDate = capturedAt.slice(0, 10); // YYYY-MM-DD
-	const id = `${capturedDate}-${Date.now().toString(36)}`;
+	const id = `${capturedDate}-${generateId()}`;
 	const receipt: Receipt = {
 		id,
 		store: parsed.store,
