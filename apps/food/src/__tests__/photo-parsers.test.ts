@@ -2,9 +2,9 @@
  * Tests for all photo parser services (recipe, receipt, pantry, grocery).
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { parseRecipeFromPhoto } from '../services/recipe-photo-parser.js';
-import { parseReceiptFromPhoto } from '../services/receipt-parser.js';
+import { parseReceiptFromPhoto, isValidReceiptDate, MAX_RECEIPT_AGE_DAYS } from '../services/receipt-parser.js';
 import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
 import { parseGroceryFromPhoto } from '../services/grocery-photo-parser.js';
 import { CAPTION_FENCE_START, CAPTION_FENCE_END } from '../utils/sanitize.js';
@@ -25,7 +25,7 @@ function createMockStore(initialData: Record<string, string> = {}) {
 	};
 }
 
-function createMockServices(llmResponse: string): CoreServices {
+function createMockServices(llmResponse: string = '{}'): CoreServices {
 	const sharedStore = createMockStore();
 	return {
 		llm: {
@@ -43,6 +43,7 @@ function createMockServices(llmResponse: string): CoreServices {
 		eventBus: {} as never,
 		audio: {} as never,
 		contextStore: {} as never,
+		timezone: 'UTC',
 		logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 	} as unknown as CoreServices;
 }
@@ -127,7 +128,7 @@ describe('Recipe Photo Parser', () => {
 describe('Receipt Parser', () => {
 	const validReceiptJson = JSON.stringify({
 		store: 'Trader Joe\'s',
-		date: '2026-04-05',
+		date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
 		lineItems: [
 			{ name: 'Organic Milk', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
 			{ name: 'Sourdough Bread', quantity: 2, unitPrice: 3.49, totalPrice: 6.98 },
@@ -340,7 +341,7 @@ describe('Caption injection hardening (F17)', () => {
 	});
 	const validReceiptJson = JSON.stringify({
 		store: 'Test Store',
-		date: '2026-04-05',
+		date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
 		lineItems: [],
 		subtotal: null,
 		tax: null,
@@ -758,5 +759,134 @@ describe('Canonical ingredient names (F18)', () => {
 		expect(result.parsedRecipe).toBeDefined();
 		expect(result.parsedRecipe!.ingredients).toHaveLength(1);
 		expect(result.parsedRecipe!.ingredients[0]?.canonicalName).toBeDefined();
+	});
+});
+
+// ─── B1: isValidReceiptDate — calendar-strict, MAX_RECEIPT_AGE_DAYS=90 ──────
+// today = '2026-04-29'; boundary dates:
+//   91 days ago = 2026-04-29 - 91d = 2026-01-28 (rejected: past MAX_RECEIPT_AGE_DAYS)
+//   89 days ago = 2026-04-29 - 89d = 2026-01-30 (accepted: within window)
+
+describe('isValidReceiptDate', () => {
+	const today = '2026-04-29';
+
+	describe('rejects invalid inputs', () => {
+		const invalid: Array<[string, unknown]> = [
+			['empty string', ''],
+			['placeholder unknown', 'unknown'],
+			['placeholder today', 'today'],
+			['null', null],
+			['undefined', undefined],
+			['number', 20260429],
+			['NaN-as-string', 'NaN'],
+			['malformed string', 'not-a-date'],
+			['date with garbage', '2026-04-29 plus tax'],
+			['future +1d', '2026-04-30'],
+			['future +1y', '2027-04-29'],
+			['ancient (>90d)', '2026-01-15'],
+			['1990', '1990-01-01'],
+			['malformed ISO month 13', '2026-13-15'],
+			['calendar-impossible Feb 30', '2026-02-30'],
+			['calendar-impossible Apr 31', '2026-04-31'],
+			['calendar-impossible Feb 29 in non-leap 2025', '2025-02-29'],
+			['day 0', '2026-04-00'],
+			['month 0', '2026-00-15'],
+			['91 days ago (just past threshold)', '2026-01-28'],
+		];
+		it.each(invalid)('rejects %s', (_label, input) => {
+			expect(isValidReceiptDate(input as never, today)).toBe(false);
+		});
+	});
+
+	describe('accepts valid dates', () => {
+		const valid: Array<[string, string]> = [
+			['today exactly', '2026-04-29'],
+			['yesterday', '2026-04-28'],
+			['1 week ago', '2026-04-22'],
+			['30 days ago', '2026-03-30'],
+			['89 days ago (just within threshold)', '2026-01-30'],
+		];
+		it.each(valid)('accepts %s', (_label, input) => {
+			expect(isValidReceiptDate(input, today)).toBe(true);
+		});
+	});
+
+	it('accepts Feb 29 in a leap year when today is in range', () => {
+		// 2024 is a leap year; today is 2024-04-15 (within 90 days of Feb 29)
+		expect(isValidReceiptDate('2024-02-29', '2024-04-15')).toBe(true);
+	});
+
+	it('exports MAX_RECEIPT_AGE_DAYS as a named constant equal to 90', () => {
+		expect(MAX_RECEIPT_AGE_DAYS).toBe(90);
+	});
+});
+
+// ─── B2: Today-date injection + sanity-check validation ─────────────────────
+
+describe('parseReceiptFromPhoto — date integrity', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-04-29T12:00:00Z'));
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('injects today (timezone-aware) into the LLM prompt', async () => {
+		const promptsCapture: string[] = [];
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockImplementation(async (prompt: string, _opts?: unknown) => {
+			promptsCapture.push(prompt as string);
+			return JSON.stringify({
+				store: 'X', date: '2026-04-29', total: 1, subtotal: 1, tax: null, lineItems: [],
+			});
+		});
+
+		await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(promptsCapture[0]).toContain('2026-04-29');
+		expect(promptsCapture[0]).toContain('Today');
+	});
+
+	it('falls back to today when extracted date fails sanity-check; preserves rawExtractedDate', async () => {
+		const services = createMockServices();
+		// 2025-01-27 is > 90 days ago from 2026-04-29 → fails isValidReceiptDate
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: '2025-01-27', total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+		const warnSpy = vi.spyOn(services.logger, 'warn');
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-29');
+		expect(result.rawExtractedDate).toBe('2025-01-27');
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining('sanity'),
+			expect.objectContaining({ rejectedDate: '2025-01-27', fallbackDate: '2026-04-29' }),
+		);
+	});
+
+	it('keeps validated extracted date when it passes; rawExtractedDate is undefined', async () => {
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: '2026-04-15', total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-15');
+		expect(result.rawExtractedDate).toBeUndefined();
+	});
+
+	it('falls back to today when extracted date is non-string; does NOT set rawExtractedDate', async () => {
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: null, total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-29');
+		expect(result.rawExtractedDate).toBeUndefined();
 	});
 });

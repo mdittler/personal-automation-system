@@ -8,7 +8,7 @@ import {
 	assertNoLiveContextStoreEntry,
 	assertNoMemoryContextBlock,
 } from './helpers/prompt-assertions.js';
-import { buildAppAwareSystemPrompt, buildSystemPrompt } from '../prompt-builder.js';
+import { PHOTO_SUMMARY_GUIDANCE, buildAppAwareSystemPrompt, buildSystemPrompt } from '../prompt-builder.js';
 
 function makeDeps(overrides?: object) {
 	const services = createMockCoreServices();
@@ -581,6 +581,57 @@ describe('buildAppAwareSystemPrompt', () => {
 			{ modelSlug: CHATBOT_MODEL_SLUG },
 		);
 		assertNoMemoryContextBlock(prompt, 'recalled-data');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Photo summary visibility guidance
+// ---------------------------------------------------------------------------
+
+describe('photo summary visibility guidance', () => {
+	it('PHOTO_SUMMARY_GUIDANCE is exported and contains "captured photo summary"', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).toContain('captured photo summary');
+	});
+
+	it('PHOTO_SUMMARY_GUIDANCE does not claim direct image inspection', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toMatch(/I can see (the )?image/i);
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toMatch(/visually inspect/i);
+	});
+
+	it('PHOTO_SUMMARY_GUIDANCE instructs against oscillation ("do not reverse course")', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).toContain('do not reverse course');
+	});
+
+	it('buildSystemPrompt includes PHOTO_SUMMARY_GUIDANCE', async () => {
+		const deps = makeDeps();
+		const prompt = await buildSystemPrompt([], [], deps);
+		expect(prompt).toContain(PHOTO_SUMMARY_GUIDANCE);
+	});
+
+	it('buildAppAwareSystemPrompt includes PHOTO_SUMMARY_GUIDANCE', async () => {
+		const deps = makeDeps();
+		const prompt = await buildAppAwareSystemPrompt('test', 'user-0', [], [], deps);
+		expect(prompt).toContain(PHOTO_SUMMARY_GUIDANCE);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Photo-summary truncation exemption — end-to-end through buildSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe('photo-summary truncation exemption (end-to-end)', () => {
+	it('full system prompt contains the 10th photo-summary item (truncation exemption end-to-end)', async () => {
+		const deps = makeDeps();
+		// Build an assistant turn longer than 500 chars containing a distinctive 10th item
+		const items = Array.from({ length: 21 }, (_, i) => `Distinctive Item Name ${i}`).join(', ');
+		const assistantContent = `21 items: ${items}`;
+		const turns: ConversationTurn[] = [
+			{ role: 'user', content: '[Photo: receipt]', timestamp: '2026-04-29T12:00:00Z' },
+			{ role: 'assistant', content: assistantContent, timestamp: '2026-04-29T12:00:01Z' },
+		];
+		const prompt = await buildSystemPrompt([], turns, deps);
+		// 'Distinctive Item Name 9' is at position ~9 in the list — well past 500 chars into the string
+		expect(prompt).toContain('Distinctive Item Name 9');
 	});
 });
 

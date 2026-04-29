@@ -243,7 +243,7 @@ export async function updatePricesFromReceipt(
 			price: li.totalPrice,
 			unit: norm.unit,
 			department: norm.department,
-			updatedAt: receipt.date,
+			updatedAt: receipt.capturedAt ? receipt.capturedAt.slice(0, 10) : receipt.date,
 		};
 
 		const existing = lookupPrice(priceData.items, norm.normalizedName);

@@ -53,6 +53,24 @@ import { formatAppMetadata, getEnabledAppInfos, searchKnowledge } from './app-da
 import { formatDataQueryContext } from './data-query-context.js';
 import { categorizeQuestion, gatherSystemData } from './system-data.js';
 
+/**
+ * Guidance injected into every system prompt to prevent the chatbot from
+ * oscillating about whether it can see photo data.
+ *
+ * When a photo handler (receipt, recipe, pantry, grocery) captures a photo
+ * and writes a structured summary into the conversation transcript, the LLM
+ * should answer follow-up questions from that summary — not claim it cannot
+ * see anything, and not reverse itself within the same exchange.
+ */
+export const PHOTO_SUMMARY_GUIDANCE =
+	'When the recent transcript contains a captured photo summary (such as a ' +
+	'receipt, recipe, pantry, or grocery photo with structured details inline), ' +
+	'answer follow-up questions from that summary text. Do not deny information ' +
+	'that appears in the transcript, and do not claim to have directly inspected ' +
+	'the original image — your access is to the extracted summary, not the photo. ' +
+	'If the summary genuinely lacks the requested detail, say so once and stop — ' +
+	'do not reverse course within a single exchange.';
+
 /** Max chars for app metadata section in prompt. */
 const MAX_APP_METADATA_CHARS = 2000;
 
@@ -149,6 +167,8 @@ export async function buildSystemPrompt(
 		const recalledBlock = wrapInRecalledFence(recalledSessions);
 		if (recalledBlock) parts.push(recalledBlock);
 	}
+
+	parts.push(PHOTO_SUMMARY_GUIDANCE);
 
 	appendConversationHistorySection(parts, turns);
 
@@ -387,6 +407,8 @@ export async function buildAppAwareSystemPrompt(
 		const recalledBlock = wrapInRecalledFence(recalledSessions);
 		if (recalledBlock) parts.push(recalledBlock);
 	}
+
+	parts.push(PHOTO_SUMMARY_GUIDANCE);
 
 	appendConversationHistorySection(parts, turns);
 

@@ -71,6 +71,18 @@ Expected benefits:
 - Better correction flows when users speak naturally.
 - Cleaner downstream data without requiring command-like phrasing.
 
+#### Chunk #3.A — Date sanity validation
+**Status:** ✓ Complete (Hermes P9, 2026-04-29)
+`isValidReceiptDate(value, todayISO)` — calendar-strict, MAX_RECEIPT_AGE_DAYS=90. Today's date (timezone-aware) injected into the LLM extraction prompt. Rejected dates preserved as `rawExtractedDate` on `ParsedReceipt`.
+
+#### Chunk #3.B — capturedAt sort authority
+**Status:** ✓ Complete (Hermes P9, 2026-04-29)
+Receipt filename, frontmatter date, and `PriceEntry.updatedAt` all use `capturedAt.slice(0,10)`. Display date (`parsed.date`) preserved in the YAML body. `rawExtractedDate` persisted for audit when sanity-check rejects the LLM date.
+
+#### Chunk #3.C — Sort hygiene verification
+**Status:** ✓ Complete (Hermes P9, 2026-04-29)
+Verified no `frontmatter.date`-based sort exists in production code. Alphabetic filename ordering (from capturedAt prefix) is the only receipt ordering mechanism and is correct after B3.
+
 ### 4. Remove Keyword Gates Around DataQuery
 
 DataQuery is already an LLM-backed natural-language data access layer, but some entry points still use keyword overlap or small keyword lists before allowing a query to reach it. That can miss synonyms, pronouns, entity aliases, and context-dependent follow-ups.

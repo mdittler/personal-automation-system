@@ -4,7 +4,7 @@
  * Routes by caption keyword first, falls back to LLM vision classification.
  */
 
-import type { CoreServices, PhotoContext } from '@pas/core/types';
+import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
 import { stringify } from 'yaml';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { savePhoto } from '../services/photo-store.js';
@@ -21,7 +21,7 @@ import {
 	withPantryLock,
 } from '../services/pantry-store.js';
 import { addItems, loadGroceryList, saveGroceryList, createEmptyList, withGroceryLock } from '../services/grocery-store.js';
-import { isoNow } from '../utils/date.js';
+import { isoNow, generateId } from '../utils/date.js';
 import type { Receipt } from '../types.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
 import {
@@ -29,6 +29,12 @@ import {
 	type ResolvedFoodStore,
 } from '../utils/household-guard.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import {
+	buildReceiptSummary,
+	buildRecipeSummary,
+	buildPantrySummary,
+	buildGrocerySummary,
+} from './photo-summary.js';
 
 type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
 
@@ -89,7 +95,7 @@ function buildScopedFoodPath(resolved: ResolvedFoodStore, relativePath: string):
 export async function handlePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-): Promise<void> {
+): Promise<void | PhotoHandlerResult> {
 	try {
 		// F15: require household membership before any LLM call or store write
 		const resolved = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
@@ -125,18 +131,14 @@ export async function handlePhoto(
 
 		switch (photoType) {
 			case 'recipe':
-				await handleRecipePhoto(services, ctx, resolved);
-				break;
+				return await handleRecipePhoto(services, ctx, resolved);
 			case 'receipt':
-				await handleReceiptPhoto(services, ctx, resolved);
-				break;
+				return await handleReceiptPhoto(services, ctx, resolved);
 			case 'pantry':
 				// Review Phase 7 intentionally leaves pantry photos shared-only.
-				await handlePantryPhoto(services, ctx, services.data.forShared('shared'));
-				break;
+				return await handlePantryPhoto(services, ctx, services.data.forShared('shared'));
 			case 'grocery':
-				await handleGroceryPhoto(services, ctx, resolved);
-				break;
+				return await handleGroceryPhoto(services, ctx, resolved);
 		}
 	} catch (err) {
 		services.logger.error('Photo handler error: %s', err);
@@ -153,7 +155,7 @@ async function handleRecipePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	resolved: ResolvedFoodStore,
-): Promise<void> {
+): Promise<PhotoHandlerResult> {
 	const store = resolved.store;
 	const parsed = await parseRecipeFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
@@ -186,37 +188,42 @@ async function handleRecipePhoto(
 		(recipe.cuisine ? `• Cuisine: ${escapeMarkdown(recipe.cuisine)}\n` : '') +
 		`\nStatus: draft (will be confirmed after you cook and rate it)`,
 	);
+
+	return { photoSummary: buildRecipeSummary(recipe.title, recipe.ingredients.length, recipe.instructions.length) };
 }
 
 async function handleReceiptPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	resolved: ResolvedFoodStore,
-): Promise<void> {
+): Promise<PhotoHandlerResult> {
 	const store = resolved.store;
 	const parsed = await parseReceiptFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	// Save photo
 	const photoPath = await savePhoto(store, ctx.photo, 'receipt');
 
-	// Build receipt record
-	const id = `${parsed.date}-${Date.now().toString(36)}`;
+	// Build receipt record — capturedAt is the sort/storage authority
+	const capturedAt = isoNow();
+	const capturedDate = capturedAt.slice(0, 10); // YYYY-MM-DD
+	const id = `${capturedDate}-${generateId()}`;
 	const receipt: Receipt = {
 		id,
 		store: parsed.store,
-		date: parsed.date,
+		date: parsed.date,                // display date (from LLM, may differ)
+		...(parsed.rawExtractedDate !== undefined ? { rawExtractedDate: parsed.rawExtractedDate } : {}),
 		lineItems: parsed.lineItems,
 		subtotal: parsed.subtotal,
 		tax: parsed.tax,
 		total: parsed.total,
 		photoPath,
-		capturedAt: isoNow(),
+		capturedAt,
 	};
 
-	// Save receipt
+	// Save receipt — frontmatter date uses capturedAt-derived date so sorting by filename matches
 	const fm = generateFrontmatter({
 		title: `Receipt: ${parsed.store}`,
-		date: parsed.date,
+		date: capturedDate,            // capturedAt-derived, not parsed.date
 		tags: ['food', 'receipt'],
 		type: 'receipt',
 		entity_keys: [parsed.store.toLowerCase()],
@@ -248,6 +255,7 @@ async function handleReceiptPhoto(
 		services.logger.error('Failed to update prices from receipt: %s', err);
 	}
 
+	const photoSummary = buildReceiptSummary(parsed);
 	await services.telegram.send(
 		ctx.userId,
 		`🧾 Receipt captured!\n\n` +
@@ -257,13 +265,15 @@ async function handleReceiptPhoto(
 		(parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : '') +
 		priceUpdateMsg,
 	);
+
+	return { photoSummary };
 }
 
 async function handlePantryPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	store: ReturnType<CoreServices['data']['forShared']>,
-): Promise<void> {
+): Promise<PhotoHandlerResult | void> {
 	const items = await parsePantryFromPhoto(services, ctx.photo, ctx.mimeType);
 
 	if (items.length === 0) {
@@ -289,13 +299,15 @@ async function handlePantryPhoto(
 		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}\n\n` +
 		'Not quite right? Say "remove [item] from pantry" to fix.',
 	);
+
+	return { photoSummary: buildPantrySummary(items) };
 }
 
 async function handleGroceryPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	resolved: ResolvedFoodStore,
-): Promise<void> {
+): Promise<PhotoHandlerResult | void> {
 	const store = resolved.store;
 	const result = await parseGroceryFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
@@ -369,4 +381,13 @@ async function handleGroceryPhoto(
 	}
 
 	await services.telegram.send(ctx.userId, message);
+
+	return {
+		photoSummary: buildGrocerySummary(
+			result.items.length,
+			result.items,
+			result.isRecipe ?? false,
+			result.parsedRecipe?.title,
+		),
+	};
 }
