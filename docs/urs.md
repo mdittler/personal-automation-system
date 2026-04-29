@@ -4262,6 +4262,98 @@ Title content MUST be sanitized: control characters stripped, whitespace collaps
 
 ---
 
+## Hermes P9 — Photo Memory Bridge
+
+### REQ-CONV-PHOTO-001 — Photo dispatches MUST append a structured turn pair to the active chat session
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+When `dispatchPhoto` invokes `app.module.handlePhoto` and the handler returns `{ photoSummary: { userTurn, assistantTurn } }`, the router MUST resolve the active session before dispatch (binding `sessionId`), run the handler inside `requestContext.run({userId, householdId, sessionId})`, and call `chatSessions.appendExchange` with `expectedSessionId` when a pre-existing session was bound. If the handler returns void or throws, no append occurs.
+
+**Standard tests** (`dispatch-photo-session.test.ts`):
+- handler returning `{ photoSummary }` appends exchange to active session with correct `expectedSessionId`
+- handler returning void results in no `appendExchange` call
+
+**Edge case tests** (`dispatch-photo-session.test.ts`):
+- handler throwing still suppresses `appendExchange`
+- pre-existing session: `expectedSessionId` is set from `peekActive`; new session: `expectedSessionId` is undefined
+
+---
+
+### REQ-CONV-PHOTO-002 — Photo summaries MUST include identifying detail sufficient for follow-up Q&A
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+Receipt `assistantTurn` MUST include store, display date, item count, total, and the top 10 line items (name + `totalPrice` when available). Other photo types MUST include their core identifying fields (recipe: title + counts; pantry/grocery: counts + bulleted list).
+
+**Standard tests** (`receipt-photo-summary.test.ts`, `recipe-photo-summary.test.ts`):
+- receipt summary includes store, date, item count, total, and top 10 line items
+- recipe summary includes title, ingredient count, step count
+- pantry/grocery summary includes item count and bulleted list
+
+**Edge case tests** (`receipt-photo-summary.test.ts`):
+- receipt with more than 10 items truncates to top 10 with a remainder note
+- receipt with no line items omits the item list gracefully
+
+---
+
+### REQ-CONV-PHOTO-003 — All OCR-extracted fields used in photo summaries MUST be sanitized
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+`sanitizePhotoField` MUST strip ASCII control chars, Unicode zero-width/bidi chars, and prompt-fence-like XML tags (`<system>`, `<content>`, `<memory-context>`, etc.) from every user-controlled string before composing an assistant-role transcript turn. Field length MUST be bounded.
+
+**Standard tests** (`sanitize-photo-field.test.ts`):
+- ASCII control characters are stripped
+- zero-width and bidi Unicode chars are stripped
+- prompt-fence XML tags are stripped
+- field is truncated at the configured maximum length
+
+**Edge case tests** (`sanitize-photo-field.test.ts`):
+- empty string returns empty string
+- string consisting entirely of stripped characters returns empty string
+- nested XML tags (e.g., `<system><inner></inner></system>`) are fully removed
+
+**Security tests** (`photo-summary-injection.test.ts`):
+- store name containing `<system>` tag is sanitized before appearing in summary turn
+- item name containing bidi override chars is sanitized
+- total field containing newline + XML injection is sanitized
+
+---
+
+### REQ-CONV-PHOTO-004 — Photo-summary turns MUST survive prompt history truncation
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+The chat-history truncation cap applied during prompt rendering MUST NOT cut photo-summary turns below the length needed to convey captured detail. Implementation: an exact-string whitelist (`[Photo: receipt]`, `[Photo: recipe]`, `[Photo: pantry]`, `[Photo: grocery list]`) identifies photo-summary turn pairs which use a higher cap (2000 chars) instead of the default 500-char history cap. Non-whitelisted strings starting with `[Photo: ` do NOT receive the higher cap (spoof resistance).
+
+**Standard tests** (`format-conversation-history.test.ts`):
+- turn pair with `[Photo: receipt]` prefix receives the 2000-char cap
+- turn pair with `[Photo: recipe]` prefix receives the 2000-char cap
+- turn pair with `[Photo: pantry]` prefix receives the 2000-char cap
+- turn pair with `[Photo: grocery list]` prefix receives the 2000-char cap
+
+**Edge case tests** (`format-conversation-history.test.ts`):
+- turn pair with `[Photo: unknown]` prefix receives the default 500-char cap (spoof resistance)
+- turn pair with `[Photo: receipt]` prefix but content under 500 chars is not padded
+
+---
+
+### REQ-CONV-PHOTO-005 — Chatbot system prompt MUST instruct trust of summary text without claiming image inspection
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUMMARY_GUIDANCE`. The guidance MUST instruct the model to answer from the captured photo summary, MUST NOT claim direct image inspection, and MUST instruct against oscillating ("reversing course") on visibility within a single exchange.
+
+**Standard tests** (`photo-summary-guidance.test.ts`):
+- `buildSystemPrompt` output contains `PHOTO_SUMMARY_GUIDANCE` text
+- `buildAppAwareSystemPrompt` output contains `PHOTO_SUMMARY_GUIDANCE` text
+
+**Edge case tests** (`photo-summary-guidance.test.ts`):
+- `PHOTO_SUMMARY_GUIDANCE` does not contain the phrase "I can see" or "I am looking at"
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -7500,5 +7592,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-NEWCHAT-006 | pending-session-control-store.test.ts | 1 | 2 | Implemented |
 | REQ-CONV-NEWCHAT-007 | session-control-classifier.test.ts | 1 | 3 | Implemented |
 | REQ-CONV-NEWCHAT-008 | compose-runtime-sc-callbacks.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-PHOTO-001 | dispatch-photo-session.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-PHOTO-002 | receipt-photo-summary.test.ts, recipe-photo-summary.test.ts | 3 | 2 | Implemented |
+| REQ-CONV-PHOTO-003 | sanitize-photo-field.test.ts, photo-summary-injection.test.ts | 4 | 3 | Implemented |
+| REQ-CONV-PHOTO-004 | format-conversation-history.test.ts | 4 | 2 | Implemented |
+| REQ-CONV-PHOTO-005 | photo-summary-guidance.test.ts | 2 | 1 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
