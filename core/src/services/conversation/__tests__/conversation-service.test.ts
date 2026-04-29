@@ -6,6 +6,8 @@ import { createMockCoreServices, createMockScopedStore } from '../../../testing/
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import type { TelegramService } from '../../../types/telegram.js';
+import type { TitleService } from '../../conversation-titling/title-service.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 import { ConversationService } from '../conversation-service.js';
 import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
@@ -646,5 +648,148 @@ describe('ConversationService handleMessage', () => {
 		// The long response splits into 3 parts; first part fails then retries
 		// Total: 1 fail + 1 retry (plain text) + 2 successful = 4 calls
 		expect(services.telegram.send).toHaveBeenCalledTimes(4);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// handleTitle helpers
+// ---------------------------------------------------------------------------
+
+function makeCtx() {
+	return createTestMessageContext({ userId: 'test-user', text: '/title' });
+}
+
+/**
+ * Local override of makeConversationService that also accepts an optional
+ * titleService so handleTitle tests can inject / omit it.
+ */
+function makeConversationServiceWithTitle(
+	overrides: {
+		chatSessions?: ChatSessionStore;
+		telegram?: TelegramService;
+		titleService?: TitleService;
+	} = {},
+): ConversationService {
+	const deps = mockDeps();
+	if (overrides.chatSessions) deps.chatSessions = overrides.chatSessions;
+	if (overrides.telegram) (deps as ConversationServiceDeps).telegram = overrides.telegram;
+	const fullDeps: ConversationServiceDeps = {
+		...deps,
+		...(overrides.titleService !== undefined ? { titleService: overrides.titleService } : {}),
+	};
+	return new ConversationService(fullDeps);
+}
+
+describe('ConversationService.handleTitle', () => {
+	it('replies "No active conversation yet." when there is no active session', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const titleService = { applyTitle: vi.fn() } as unknown as TitleService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram, titleService });
+
+		await svc.handleTitle([], makeCtx());
+
+		expect(telegram.send).toHaveBeenCalledWith('test-user', 'No active conversation yet.');
+		expect(titleService.applyTitle).not.toHaveBeenCalled();
+	});
+
+	it('with no args, replies with the current title read from readSession', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		(chatSessions.readSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			meta: {
+				id: 'sess-1', user_id: 'test-user', title: 'Planning groceries',
+				source: 'telegram', household_id: null, model: null,
+				parent_session_id: null, started_at: '2024-01-01T00:00:00.000Z', ended_at: null,
+				token_counts: { input: 0, output: 0 },
+			},
+			turns: [],
+		});
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram });
+		await svc.handleTitle([], makeCtx());
+		expect(telegram.send).toHaveBeenCalledWith('test-user', 'Current title: Planning groceries');
+	});
+
+	it('with no args and null title, replies with "(none)"', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		(chatSessions.readSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			meta: {
+				id: 'sess-1', user_id: 'test-user', title: null,
+				source: 'telegram', household_id: null, model: null,
+				parent_session_id: null, started_at: '2024-01-01T00:00:00.000Z', ended_at: null,
+				token_counts: { input: 0, output: 0 },
+			},
+			turns: [],
+		});
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram });
+		await svc.handleTitle([], makeCtx());
+		expect(telegram.send).toHaveBeenCalledWith('test-user', 'Current title: (none)');
+	});
+
+	it('with no args and readSession returns undefined (race / missing file), replies with "(none)"', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		(chatSessions.readSession as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram });
+		await svc.handleTitle([], makeCtx());
+		expect(telegram.send).toHaveBeenCalledWith('test-user', 'Current title: (none)');
+	});
+
+	it('escapes Markdown special chars in the displayed title', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		(chatSessions.readSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+			meta: {
+				id: 'sess-1', user_id: 'test-user', title: '*bold* and _italic_',
+				source: 'telegram', household_id: null, model: null,
+				parent_session_id: null, started_at: '2024-01-01T00:00:00.000Z', ended_at: null,
+				token_counts: { input: 0, output: 0 },
+			},
+			turns: [],
+		});
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram });
+		await svc.handleTitle([], makeCtx());
+		// escapeMarkdown escapes * and _
+		expect(telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('\\*bold\\*'));
+	});
+
+	it('with args, calls TitleService.applyTitle and replies with the saved title', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const applyTitle = vi.fn().mockResolvedValue({ updated: true, title: 'My New Title' });
+		const titleService = { applyTitle } as unknown as TitleService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram, titleService });
+
+		await svc.handleTitle(['My', 'New', 'Title'], makeCtx());
+
+		expect(applyTitle).toHaveBeenCalledWith('test-user', 'sess-1', 'My New Title', { skipIfTitled: false });
+		expect(telegram.send).toHaveBeenCalledWith('test-user', expect.stringContaining('Title updated to'));
+	});
+
+	it('with args but applyTitle returns updated:false, replies with rejection message', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const applyTitle = vi.fn().mockResolvedValue({ updated: false });
+		const titleService = { applyTitle } as unknown as TitleService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram, titleService });
+		await svc.handleTitle(['***'], makeCtx());
+		expect(telegram.send).toHaveBeenCalledWith('test-user', "Couldn't set that title — try a short plain-text phrase.");
+	});
+
+	it('with args but no titleService, replies error message', async () => {
+		const chatSessions = makeNullChatSessions();
+		(chatSessions.peekActive as ReturnType<typeof vi.fn>).mockResolvedValue('sess-1');
+		const telegram = { send: vi.fn().mockResolvedValue(undefined) } as unknown as TelegramService;
+		const svc = makeConversationServiceWithTitle({ chatSessions, telegram, titleService: undefined });
+		await svc.handleTitle(['Foo'], makeCtx());
+		expect(telegram.send).toHaveBeenCalledWith('test-user', 'Title updates are not configured.');
 	});
 });

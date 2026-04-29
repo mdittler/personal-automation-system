@@ -1,4 +1,5 @@
 import type { MessageContext } from '../../types/telegram.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import type { EditService } from '../edit/index.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
@@ -10,6 +11,10 @@ import { pendingEdits } from './pending-edits.js';
 /**
  * DI bundle for ConversationService. Equivalent to HandleMessageDeps plus
  * `editService` for /edit dispatch.
+ *
+ * Note: `titleService` from HandleMessageDeps flows through here unchanged —
+ * it is used both by auto-title (handle-message.ts) and by the explicit
+ * `handleTitle` command method.
  */
 export type ConversationServiceDeps = HandleMessageDeps & {
 	editService?: EditService;
@@ -71,6 +76,44 @@ export class ConversationService {
 		} else {
 			await this.deps.telegram.send(ctx.userId, 'No active conversation to reset.');
 		}
+	}
+
+	async handleTitle(args: string[], ctx: MessageContext): Promise<void> {
+		const sessionKey = resolveOrDefaultSessionKey(ctx);
+		const sessionId = await this.deps.chatSessions.peekActive({ userId: ctx.userId, sessionKey });
+		if (!sessionId) {
+			await this.deps.telegram.send(ctx.userId, 'No active conversation yet.');
+			return;
+		}
+
+		if (args.length === 0) {
+			// Read title from session frontmatter via readSession (NOT peekSnapshot, which
+			// returns a MemorySnapshot and does not contain the `title` field).
+			const session = await this.deps.chatSessions.readSession(ctx.userId, sessionId);
+			const title = session?.meta.title ?? null;
+			const display = title ? escapeMarkdown(title) : '(none)';
+			await this.deps.telegram.send(ctx.userId, `Current title: ${display}`);
+			return;
+		}
+
+		if (!this.deps.titleService) {
+			await this.deps.telegram.send(ctx.userId, 'Title updates are not configured.');
+			return;
+		}
+
+		const newTitle = args.join(' ');
+		const result = await this.deps.titleService.applyTitle(ctx.userId, sessionId, newTitle, {
+			skipIfTitled: false,
+		});
+		if (!result.updated) {
+			await this.deps.telegram.send(
+				ctx.userId,
+				"Couldn't set that title — try a short plain-text phrase.",
+			);
+			return;
+		}
+		const written = result.title ?? newTitle;
+		await this.deps.telegram.send(ctx.userId, `Title updated to: ${escapeMarkdown(written)}`);
 	}
 
 	async handleEdit(args: string[], ctx: MessageContext): Promise<void> {
