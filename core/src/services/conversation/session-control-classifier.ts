@@ -15,6 +15,7 @@
  */
 
 import type { LLMCompletionOptions } from '../../types/llm.js';
+import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,11 +76,12 @@ export function preFilterSessionControl(
 
 /**
  * Wrap untrusted user text so it cannot inject classifier instructions.
- * Strips angle brackets, then wraps in <message> tags.
+ * Sanitizes backtick fences (via sanitizeInput), strips angle brackets,
+ * then wraps in <message> tags.
  */
 function fenceUntrusted(text: string): string {
-	const escaped = text.replace(/[<>]/g, '');
-	return `<message>\n${escaped}\n</message>`;
+	const safe = sanitizeInput(text).replace(/[<>]/g, '');
+	return `<message>\n${safe}\n</message>`;
 }
 
 const CLASSIFIER_SYSTEM_PROMPT =

@@ -77,6 +77,19 @@ describe('preFilterSessionControl', () => {
 			expect(result.reason).toContain('new chat');
 		}
 	});
+
+	it.each([
+		['clear chat'],
+		['forget everything'],
+		['reset conversation'],
+	])('returns matched for keyword "%s"', (keyword) => {
+		const result = preFilterSessionControl(keyword);
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			expect(result.confidence).toBe(1.0);
+			expect(result.reason).toMatch(/keyword match/);
+		}
+	});
 });
 
 // ─── detectSessionControl ────────────────────────────────────────────────────
@@ -88,6 +101,7 @@ describe('detectSessionControl', () => {
 		expect(result.source).toBe('prefilter');
 		expect(result.intent).toBe('new_session');
 		expect(result.confidence).toBe(1.0);
+		expect(result.reason).toMatch(/keyword match/);
 		// LLM should never have been called
 		expect(deps.llm.complete).not.toHaveBeenCalled();
 	});
@@ -144,5 +158,39 @@ describe('classifySessionControl', () => {
 		expect(result.intent).toBe('unclear');
 		expect(result.confidence).toBe(0);
 		expect(result.source).toBe('llm');
+		expect(result.reason).toBe('parse error');
+	});
+
+	it('returns safeDefault for confidence below 0', async () => {
+		const deps = makeDeps(
+			JSON.stringify({ intent: 'continue', confidence: -0.1, reason: 'bad' }),
+		);
+		const result = await classifySessionControl('something', deps);
+		expect(result.intent).toBe('unclear');
+		expect(result.confidence).toBe(0);
+		expect(result.source).toBe('llm');
+		expect(result.reason).toBe('parse error');
+	});
+
+	it('returns safeDefault for confidence above 1', async () => {
+		const deps = makeDeps(
+			JSON.stringify({ intent: 'new_session', confidence: 1.1, reason: 'too high' }),
+		);
+		const result = await classifySessionControl('something', deps);
+		expect(result.intent).toBe('unclear');
+		expect(result.confidence).toBe(0);
+		expect(result.source).toBe('llm');
+		expect(result.reason).toBe('parse error');
+	});
+
+	it('returns safeDefault when confidence is a string instead of number', async () => {
+		const deps = makeDeps(
+			JSON.stringify({ intent: 'new_session', confidence: '0.9', reason: 'string type' }),
+		);
+		const result = await classifySessionControl('something', deps);
+		expect(result.intent).toBe('unclear');
+		expect(result.confidence).toBe(0);
+		expect(result.source).toBe('llm');
+		expect(result.reason).toBe('parse error');
 	});
 });
