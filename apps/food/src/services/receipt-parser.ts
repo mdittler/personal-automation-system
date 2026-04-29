@@ -8,6 +8,45 @@ import { parseJsonResponse } from './recipe-parser.js';
 import { fenceCaption } from '../utils/sanitize.js';
 import { isValidReceiptLineItem, isValidReceiptAmount } from '../utils/photo-validators.js';
 
+export const MAX_RECEIPT_AGE_DAYS = 90;
+
+/**
+ * Returns true if `value` is a valid YYYY-MM-DD receipt date:
+ * - correct string format, calendar-valid (no Feb 30, etc.)
+ * - not in the future relative to todayISO
+ * - not older than MAX_RECEIPT_AGE_DAYS days
+ */
+export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
+	if (typeof value !== 'string') return false;
+	const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (!m) return false;
+	const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+	if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return false;
+	if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+
+	// Calendar-strict: construct and round-trip to catch Feb 30, Apr 31, etc.
+	const candidate = new Date(Date.UTC(y, mo - 1, d));
+	if (
+		candidate.getUTCFullYear() !== y ||
+		candidate.getUTCMonth() !== mo - 1 ||
+		candidate.getUTCDate() !== d
+	) return false;
+
+	const todayMatch = todayISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (!todayMatch) return false;
+	const todayDate = new Date(Date.UTC(
+		Number(todayMatch[1]), Number(todayMatch[2]) - 1, Number(todayMatch[3]),
+	));
+
+	// Reject future dates
+	if (candidate.getTime() > todayDate.getTime()) return false;
+	// Reject dates older than MAX_RECEIPT_AGE_DAYS
+	const minMs = todayDate.getTime() - MAX_RECEIPT_AGE_DAYS * 86400000;
+	if (candidate.getTime() < minMs) return false;
+
+	return true;
+}
+
 /** Parsed receipt data (before ID/path assignment). */
 export interface ParsedReceipt {
 	store: string;

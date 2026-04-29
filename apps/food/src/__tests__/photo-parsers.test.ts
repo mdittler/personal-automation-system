@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { parseRecipeFromPhoto } from '../services/recipe-photo-parser.js';
-import { parseReceiptFromPhoto } from '../services/receipt-parser.js';
+import { parseReceiptFromPhoto, isValidReceiptDate, MAX_RECEIPT_AGE_DAYS } from '../services/receipt-parser.js';
 import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
 import { parseGroceryFromPhoto } from '../services/grocery-photo-parser.js';
 import { CAPTION_FENCE_START, CAPTION_FENCE_END } from '../utils/sanitize.js';
@@ -758,5 +758,61 @@ describe('Canonical ingredient names (F18)', () => {
 		expect(result.parsedRecipe).toBeDefined();
 		expect(result.parsedRecipe!.ingredients).toHaveLength(1);
 		expect(result.parsedRecipe!.ingredients[0]?.canonicalName).toBeDefined();
+	});
+});
+
+// ─── B1: isValidReceiptDate — calendar-strict, MAX_RECEIPT_AGE_DAYS=90 ──────
+
+describe('isValidReceiptDate', () => {
+	const today = '2026-04-29';
+
+	describe('rejects invalid inputs', () => {
+		const invalid: Array<[string, unknown]> = [
+			['empty string', ''],
+			['placeholder unknown', 'unknown'],
+			['placeholder today', 'today'],
+			['null', null],
+			['undefined', undefined],
+			['number', 20260429],
+			['NaN-as-string', 'NaN'],
+			['malformed string', 'not-a-date'],
+			['date with garbage', '2026-04-29 plus tax'],
+			['future +1d', '2026-04-30'],
+			['future +1y', '2027-04-29'],
+			['ancient (>90d)', '2026-01-15'],
+			['1990', '1990-01-01'],
+			['malformed ISO month 13', '2026-13-15'],
+			['calendar-impossible Feb 30', '2026-02-30'],
+			['calendar-impossible Apr 31', '2026-04-31'],
+			['calendar-impossible Feb 29 in non-leap 2025', '2025-02-29'],
+			['day 0', '2026-04-00'],
+			['month 0', '2026-00-15'],
+			['91 days ago (just past threshold)', '2026-01-28'],
+		];
+		it.each(invalid)('rejects %s', (_label, input) => {
+			expect(isValidReceiptDate(input as never, today)).toBe(false);
+		});
+	});
+
+	describe('accepts valid dates', () => {
+		const valid: Array<[string, string]> = [
+			['today exactly', '2026-04-29'],
+			['yesterday', '2026-04-28'],
+			['1 week ago', '2026-04-22'],
+			['30 days ago', '2026-03-30'],
+			['89 days ago (just within threshold)', '2026-01-30'],
+		];
+		it.each(valid)('accepts %s', (_label, input) => {
+			expect(isValidReceiptDate(input, today)).toBe(true);
+		});
+	});
+
+	it('accepts Feb 29 in a leap year when today is in range', () => {
+		// 2024 is a leap year; today is 2024-04-15 (within 90 days of Feb 29)
+		expect(isValidReceiptDate('2024-02-29', '2024-04-15')).toBe(true);
+	});
+
+	it('exports MAX_RECEIPT_AGE_DAYS as a named constant equal to 90', () => {
+		expect(MAX_RECEIPT_AGE_DAYS).toBe(90);
 	});
 });
