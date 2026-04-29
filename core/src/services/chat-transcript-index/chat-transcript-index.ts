@@ -16,6 +16,7 @@ export interface ChatTranscriptIndex {
 	appendMessage(row: MessageRow): Promise<void>;
 	endSession(sessionId: string, endedAt: string): Promise<void>;
 	deleteSession(sessionId: string): Promise<void>;
+	updateTitle(userId: string, sessionId: string, title: string): Promise<{ updated: boolean }>;
 	searchSessions(filters: InternalSearchFilters): Promise<SearchResult>;
 	getSessionMeta(sessionId: string): Promise<SessionRow | undefined>;
 	listExpiredSessions(cutoffIso: string): Promise<Array<{ id: string; user_id: string }>>;
@@ -116,6 +117,21 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 			txn();
 		});
 		this.maybeCheckpoint();
+	}
+
+	async updateTitle(userId: string, sessionId: string, title: string): Promise<{ updated: boolean }> {
+		let changes = 0;
+		await withSqliteRetry(() => {
+			const txn = this.db.transaction(() => {
+				const result = this.db
+					.prepare('UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?')
+					.run(title, sessionId, userId);
+				changes = result.changes;
+			});
+			txn();
+		});
+		this.maybeCheckpoint();
+		return { updated: changes > 0 };
 	}
 
 	async searchSessions(filters: InternalSearchFilters): Promise<SearchResult> {
