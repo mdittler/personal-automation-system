@@ -10,6 +10,7 @@ import { parseGroceryFromPhoto } from '../services/grocery-photo-parser.js';
 import { CAPTION_FENCE_START, CAPTION_FENCE_END } from '../utils/sanitize.js';
 import { resetIngredientNormalizerCacheForTests } from '../services/ingredient-normalizer.js';
 import type { CoreServices } from '@pas/core/types';
+import { requestContext } from '@pas/core/services/context/request-context';
 
 const testPhoto = Buffer.from('fake-jpeg-data');
 const testMimeType = 'image/jpeg';
@@ -888,5 +889,40 @@ describe('parseReceiptFromPhoto — date integrity', () => {
 
 		expect(result.date).toBe('2026-04-29');
 		expect(result.rawExtractedDate).toBeUndefined();
+	});
+
+	it('warn for string-but-invalid date includes userId from requestContext (P2)', async () => {
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: '2025-01-27', total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+		const warnSpy = vi.spyOn(services.logger, 'warn');
+
+		await requestContext.run({ userId: 'u1' }, () =>
+			parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg'),
+		);
+
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining('sanity'),
+			expect.objectContaining({ userId: 'u1', rejectedDate: '2025-01-27', fallbackDate: '2026-04-29' }),
+		);
+	});
+
+	it('warn for non-string date includes userId from requestContext (P2)', async () => {
+		const services = createMockServices();
+		// date is a number (42), not a string — triggers non-string warn
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: 42, total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+		const warnSpy = vi.spyOn(services.logger, 'warn');
+
+		await requestContext.run({ userId: 'u2' }, () =>
+			parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg'),
+		);
+
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining('non-string'),
+			expect.objectContaining({ userId: 'u2', rejectedDate: 42, fallbackDate: '2026-04-29' }),
+		);
 	});
 });

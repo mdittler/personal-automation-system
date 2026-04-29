@@ -62,6 +62,10 @@
 		"./services/conversation": {
 			"import": "./dist/services/conversation/index.js",
 			"types": "./dist/services/conversation/index.d.ts"
+		},
+		"./services/context/request-context": {
+			"import": "./dist/services/context/request-context.js",
+			"types": "./dist/services/context/request-context.d.ts"
 		}
 	},
 	"scripts": {
