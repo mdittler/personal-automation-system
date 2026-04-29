@@ -57,6 +57,7 @@ export class ConversationService {
 			...(this.deps.conversationRetrieval !== undefined
 				? { conversationRetrieval: this.deps.conversationRetrieval }
 				: {}),
+			...(this.deps.titleService !== undefined ? { titleService: this.deps.titleService } : {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);

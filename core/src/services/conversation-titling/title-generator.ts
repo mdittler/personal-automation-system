@@ -1,4 +1,4 @@
-import type { LLMService } from '../llm/index.js';
+import type { LLMService } from '../../types/llm.js';
 
 export interface TitleGeneratorDeps {
 	llm: Pick<LLMService, 'complete'>;

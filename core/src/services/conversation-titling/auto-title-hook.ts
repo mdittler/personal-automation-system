@@ -1,6 +1,6 @@
 import { generateTitle } from './title-generator.js';
 import type { TitleService } from './title-service.js';
-import type { LLMService } from '../llm/index.js';
+import type { LLMService } from '../../types/llm.js';
 
 export interface AutoTitleHookParams {
 	userId: string;

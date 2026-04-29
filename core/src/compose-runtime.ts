@@ -54,6 +54,7 @@ import {
 	CONVERSATION_USER_CONFIG,
 	ConversationService,
 } from './services/conversation/index.js';
+import { TitleService } from './services/conversation-titling/index.js';
 import { CredentialService } from './services/credentials/index.js';
 import { DailyDiffService } from './services/daily-diff/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
@@ -991,6 +992,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		index: chatTranscriptIndex,
 	});
 
+	const titleService = new TitleService({
+		chatSessions,
+		chatTranscriptIndex,
+		logger: logger.child({ service: 'title-service' }),
+	});
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1009,6 +1016,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		editService: editServiceImpl ?? undefined,
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
 		conversationRetrieval: conversationRetrievalService,
+		titleService,
 	});
 	logger.info('ConversationService: initialized');
 

@@ -4141,6 +4141,112 @@ Search hits are formatted by `formatRecalledSessions(hits)` and wrapped via the 
 
 ---
 
+## Hermes P7 — Session Auto-Titling (Chunk A)
+
+### REQ-CONV-TITLE-001: Auto-title after first exchange
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+After the first exchange of a new session, the system MUST generate a title via a fast-tier LLM call and apply it to the session in both Markdown frontmatter and the SQLite index.
+
+**Standard tests** (`auto-titling.persona.test.ts`):
+- `auto-titling persona — first exchange: runTitleAfterFirstExchange writes title to ChatSessionStore`
+
+---
+
+### REQ-CONV-TITLE-002: Fire-and-forget, non-blocking
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+Title generation MUST be fire-and-forget (non-blocking); failures MUST be logged but MUST NOT affect the user-visible response.
+
+**Standard tests** (`handle-message-auto-title.test.ts`):
+- `schedules auto-title when session is new and there are no prior turns`
+
+**Edge case tests** (`handle-message-auto-title.test.ts`):
+- `does NOT schedule auto-title when titleService is undefined`
+
+---
+
+### REQ-CONV-TITLE-003: skipIfTitled guard
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+The system MUST NOT generate a title if the session already has a title (skipIfTitled guard).
+
+**Standard tests** (`auto-titling.persona.test.ts`):
+- `auto-titling persona — skipIfTitled guard: second call returns updated:false`
+
+---
+
+### REQ-CONV-TITLE-004: Title validation (3–7 words, plain text, no Markdown)
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+Generated titles MUST be 3–7 words, plain text, no Markdown, no surrounding quotes. Titles that fail validation MUST be discarded silently.
+
+**Standard tests** (`title-generator.test.ts`):
+- Valid 3–7 word titles are accepted
+
+**Edge case tests** (`title-generator.test.ts`):
+- Titles with fewer than 3 words are rejected
+- Titles with more than 7 words are rejected
+- Markdown characters are stripped from title output
+
+---
+
+### REQ-CONV-TITLE-005: /title command displays current title
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+The `/title` command with no arguments MUST display the current session title (or "(none)" if unset).
+
+**Standard tests** (`conversation-service.test.ts`):
+- `/title` with no args and an existing title sends the title
+
+**Edge case tests** (`conversation-service.test.ts`):
+- `/title` with no args when title is null sends "(none)"
+
+---
+
+### REQ-CONV-TITLE-006: /title command allows manual set
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+The `/title <phrase>` command MUST allow the user to set or overwrite the session title manually.
+
+**Standard tests** (`conversation-service.test.ts`):
+- `/title <phrase>` calls applyTitle with skipIfTitled: false and sends confirmation
+
+---
+
+### REQ-CONV-TITLE-007: Markdown is canonical; SQLite is derived
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+The Markdown transcript MUST be the canonical title source; the SQLite index MUST be updated as a derived secondary target. SQLite failures MUST NOT prevent the Markdown write.
+
+**Standard tests** (`title-service.test.ts`):
+- Markdown write succeeds even when chatTranscriptIndex.updateTitle throws
+
+---
+
+### REQ-CONV-TITLE-008: Title sanitization
+
+**Phase:** Hermes P7 | **Status:** Implemented
+
+Title content MUST be sanitized: control characters stripped, whitespace collapsed, truncated at 80 characters; empty results MUST be rejected.
+
+**Standard tests** (`chat-session-store.setTitle.test.ts`):
+- Control characters are stripped from title
+- Whitespace is collapsed
+- Title is truncated at 80 characters
+
+**Edge case tests** (`chat-session-store.setTitle.test.ts`):
+- Empty string title returns updated: false
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -7363,5 +7469,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-SEARCH-012 | transcript-recall.persona.test.ts (S15, S16) | 3 | 2 | Implemented |
 | REQ-CONV-SEARCH-013 | transcript-recall.integration.test.ts (T2), chat-index-rebuild integration | 1 | 2 | Implemented |
 | REQ-CONV-SEARCH-014 | transcript-recall.persona.test.ts (S13, S14), recalled-sessions.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-TITLE-001 | auto-titling.persona.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TITLE-002 | handle-message-auto-title.test.ts, handle-ask-auto-title.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-TITLE-003 | auto-titling.persona.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TITLE-004 | title-generator.test.ts | 1 | 3 | Implemented |
+| REQ-CONV-TITLE-005 | conversation-service.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-TITLE-006 | conversation-service.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TITLE-007 | title-service.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TITLE-008 | chat-session-store.setTitle.test.ts | 1 | 1 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
