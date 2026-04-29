@@ -205,7 +205,7 @@ async function handleReceiptPhoto(
 
 	// Build receipt record — capturedAt is the sort/storage authority
 	const capturedAt = isoNow();
-	const capturedDate = capturedAt.slice(0, 10); // YYYY-MM-DD
+	const capturedDate = capturedAt.slice(0, 10);
 	const id = `${capturedDate}-${generateId()}`;
 	const receipt: Receipt = {
 		id,

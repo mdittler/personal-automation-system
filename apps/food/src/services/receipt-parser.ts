@@ -35,14 +35,14 @@ export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
 
 	const todayMatch = todayISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 	if (!todayMatch) return false;
-	const todayDate = new Date(Date.UTC(
+	const todayDateObj = new Date(Date.UTC(
 		Number(todayMatch[1]), Number(todayMatch[2]) - 1, Number(todayMatch[3]),
 	));
 
 	// Reject future dates
-	if (candidate.getTime() > todayDate.getTime()) return false;
+	if (candidate.getTime() > todayDateObj.getTime()) return false;
 	// Reject dates older than MAX_RECEIPT_AGE_DAYS
-	const minMs = todayDate.getTime() - MAX_RECEIPT_AGE_DAYS * 86400000;
+	const minMs = todayDateObj.getTime() - MAX_RECEIPT_AGE_DAYS * 86400000;
 	if (candidate.getTime() < minMs) return false;
 
 	return true;
