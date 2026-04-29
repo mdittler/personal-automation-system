@@ -1229,6 +1229,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 						await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
 							await conversationService.handleNewChat([], scCtx);
 						});
+						await ctx.reply('Starting a new chat. ✓');
 					} else {
 						// sc:no
 						pendingSessionControl.remove(userId);
