@@ -2,7 +2,7 @@
  * Tests for all photo parser services (recipe, receipt, pantry, grocery).
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { parseRecipeFromPhoto } from '../services/recipe-photo-parser.js';
 import { parseReceiptFromPhoto, isValidReceiptDate, MAX_RECEIPT_AGE_DAYS } from '../services/receipt-parser.js';
 import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
@@ -25,7 +25,7 @@ function createMockStore(initialData: Record<string, string> = {}) {
 	};
 }
 
-function createMockServices(llmResponse: string): CoreServices {
+function createMockServices(llmResponse: string = '{}'): CoreServices {
 	const sharedStore = createMockStore();
 	return {
 		llm: {
@@ -43,6 +43,7 @@ function createMockServices(llmResponse: string): CoreServices {
 		eventBus: {} as never,
 		audio: {} as never,
 		contextStore: {} as never,
+		timezone: 'UTC',
 		logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 	} as unknown as CoreServices;
 }
@@ -814,5 +815,75 @@ describe('isValidReceiptDate', () => {
 
 	it('exports MAX_RECEIPT_AGE_DAYS as a named constant equal to 90', () => {
 		expect(MAX_RECEIPT_AGE_DAYS).toBe(90);
+	});
+});
+
+// ─── B2: Today-date injection + sanity-check validation ─────────────────────
+
+describe('parseReceiptFromPhoto — date integrity', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-04-29T12:00:00Z'));
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('injects today (timezone-aware) into the LLM prompt', async () => {
+		const promptsCapture: string[] = [];
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockImplementation(async (prompt: string, _opts?: unknown) => {
+			promptsCapture.push(prompt as string);
+			return JSON.stringify({
+				store: 'X', date: '2026-04-29', total: 1, subtotal: 1, tax: null, lineItems: [],
+			});
+		});
+
+		await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(promptsCapture[0]).toContain('2026-04-29');
+		expect(promptsCapture[0]).toContain('Today');
+	});
+
+	it('falls back to today when extracted date fails sanity-check; preserves rawExtractedDate', async () => {
+		const services = createMockServices();
+		// 2025-01-27 is > 90 days ago from 2026-04-29 → fails isValidReceiptDate
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: '2025-01-27', total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+		const warnSpy = vi.spyOn(services.logger, 'warn');
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-29');
+		expect(result.rawExtractedDate).toBe('2025-01-27');
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining('sanity'),
+			expect.objectContaining({ rejectedDate: '2025-01-27', fallbackDate: '2026-04-29' }),
+		);
+	});
+
+	it('keeps validated extracted date when it passes; rawExtractedDate is undefined', async () => {
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: '2026-04-15', total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-15');
+		expect(result.rawExtractedDate).toBeUndefined();
+	});
+
+	it('falls back to today when extracted date is non-string; does NOT set rawExtractedDate', async () => {
+		const services = createMockServices();
+		vi.spyOn(services.llm, 'complete').mockResolvedValue(JSON.stringify({
+			store: 'X', date: null, total: 1, subtotal: 1, tax: null, lineItems: [],
+		}));
+
+		const result = await parseReceiptFromPhoto(services, Buffer.from(''), 'image/jpeg');
+
+		expect(result.date).toBe('2026-04-29');
+		expect(result.rawExtractedDate).toBeUndefined();
 	});
 });

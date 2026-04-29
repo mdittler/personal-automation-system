@@ -7,6 +7,7 @@ import type { ReceiptLineItem } from '../types.js';
 import { parseJsonResponse } from './recipe-parser.js';
 import { fenceCaption } from '../utils/sanitize.js';
 import { isValidReceiptLineItem, isValidReceiptAmount } from '../utils/photo-validators.js';
+import { todayDate } from '../utils/date.js';
 
 export const MAX_RECEIPT_AGE_DAYS = 90;
 
@@ -51,13 +52,16 @@ export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
 export interface ParsedReceipt {
 	store: string;
 	date: string;
+	/** The date string extracted by the LLM, preserved only when the sanity-check rejected it. */
+	rawExtractedDate?: string;
 	lineItems: ReceiptLineItem[];
 	subtotal: number | null;
 	tax: number | null;
 	total: number;
 }
 
-const RECEIPT_PROMPT = `You are a grocery receipt parser. Extract data from this receipt photo.
+function buildReceiptPrompt(todayISO: string): string {
+	return `Today is ${todayISO}. You are a grocery receipt parser. Extract data from this receipt photo.
 
 Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 {
@@ -73,11 +77,12 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 
 Rules:
 - store is the store/retailer name
-- date is ISO format (YYYY-MM-DD), use today if unclear
+- date is ISO format (YYYY-MM-DD); if unclear, use today (${todayISO})
 - lineItems: extract as many items as you can read clearly
 - unitPrice can be null if not visible
 - subtotal and tax can be null if not visible
 - total is REQUIRED — estimate from lineItems if necessary`;
+}
 
 /**
  * Parse a grocery receipt from a photo using LLM vision.
@@ -88,9 +93,10 @@ export async function parseReceiptFromPhoto(
 	mimeType: string,
 	caption?: string,
 ): Promise<ParsedReceipt> {
+	const todayISO = todayDate(services.timezone);
 	const captionContext = fenceCaption(caption);
 	const result = await services.llm.complete(
-		`${RECEIPT_PROMPT}${captionContext}\n\nExtract the receipt data from the attached photo.`,
+		`${buildReceiptPrompt(todayISO)}${captionContext}\n\nExtract the receipt data from the attached photo.`,
 		{
 			tier: 'standard',
 			images: [{ data: photo, mimeType }],
@@ -107,9 +113,24 @@ export async function parseReceiptFromPhoto(
 		? (parsed.lineItems as unknown[]).filter(isValidReceiptLineItem) as ReceiptLineItem[]
 		: [];
 
+	let date = todayISO;
+	let rawExtractedDate: string | undefined;
+	if (typeof parsed.date === 'string') {
+		if (isValidReceiptDate(parsed.date, todayISO)) {
+			date = parsed.date;
+		} else {
+			rawExtractedDate = parsed.date;
+			services.logger.warn('Receipt date failed sanity check; falling back to today: %o', {
+				rejectedDate: parsed.date,
+				fallbackDate: todayISO,
+			});
+		}
+	}
+
 	return {
 		store: typeof parsed.store === 'string' ? parsed.store : 'Unknown',
-		date: typeof parsed.date === 'string' ? parsed.date : new Date().toISOString().slice(0, 10),
+		date,
+		...(rawExtractedDate !== undefined ? { rawExtractedDate } : {}),
 		lineItems,
 		subtotal: isValidReceiptAmount(parsed.subtotal) ? parsed.subtotal : null,
 		tax: isValidReceiptAmount(parsed.tax) ? parsed.tax : null,
