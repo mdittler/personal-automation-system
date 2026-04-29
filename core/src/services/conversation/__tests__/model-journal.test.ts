@@ -85,6 +85,7 @@ describe('model journal integration', () => {
 			readSession: vi.fn().mockResolvedValue(undefined),
 			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
+			setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		};
 		const ctx = createTestMessageContext({ text: 'question' });
 

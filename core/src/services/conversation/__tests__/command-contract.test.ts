@@ -23,6 +23,7 @@ function makeChatSessions(): ChatSessionStore {
 		readSession: vi.fn().mockResolvedValue(undefined),
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
+		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 	};
 }
 

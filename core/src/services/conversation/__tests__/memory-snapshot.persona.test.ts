@@ -49,6 +49,7 @@ function makeChatSessionsWithSnapshot(snapshot: MemorySnapshot | undefined, opts
 		readSession: vi.fn().mockResolvedValue(undefined),
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId, isNew: true, snapshot }),
 		peekSnapshot: vi.fn().mockResolvedValue(snapshot),
+		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 	};
 }
 
@@ -245,6 +246,7 @@ describe('memory-snapshot persona — new session after /newchat', () => {
 				.mockResolvedValueOnce({ sessionId: 'session-1', isNew: true, snapshot: sessionOneSnapshot })
 				.mockResolvedValueOnce({ sessionId: 'session-2', isNew: true, snapshot: sessionTwoSnapshot }),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
+			setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		};
 
 		const deps: ConversationServiceDeps = {
