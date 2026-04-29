@@ -8,6 +8,7 @@ import { parseJsonResponse } from './recipe-parser.js';
 import { fenceCaption } from '../utils/sanitize.js';
 import { isValidReceiptLineItem, isValidReceiptAmount } from '../utils/photo-validators.js';
 import { todayDate } from '../utils/date.js';
+import { getCurrentUserId } from '@pas/core/services/context/request-context';
 
 export const MAX_RECEIPT_AGE_DAYS = 90;
 
@@ -121,10 +122,17 @@ export async function parseReceiptFromPhoto(
 		} else {
 			rawExtractedDate = parsed.date;
 			services.logger.warn('Receipt date failed sanity check; falling back to today: %o', {
+				userId: getCurrentUserId(),
 				rejectedDate: parsed.date,
 				fallbackDate: todayISO,
 			});
 		}
+	} else if (parsed.date !== undefined && parsed.date !== null) {
+		services.logger.warn('Receipt date is non-string; falling back to today: %o', {
+			userId: getCurrentUserId(),
+			rejectedDate: parsed.date,
+			fallbackDate: todayISO,
+		});
 	}
 
 	return {
