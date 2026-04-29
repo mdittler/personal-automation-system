@@ -4354,6 +4354,46 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## Track B — Receipt Integrity (Hermes P9)
+
+### REQ-FOOD-RECEIPT-001 — Receipt date extraction MUST be validated against today's date before storage
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+The receipt parser (`parseReceiptFromPhoto`) MUST inject today's date (timezone-aware via `todayDate(services.timezone)`) into the LLM extraction prompt. The extracted date MUST be validated by `isValidReceiptDate(value, todayISO)`, which rejects: non-string values, malformed ISO format, calendar-impossible dates (e.g., Feb 30), future dates, and dates older than `MAX_RECEIPT_AGE_DAYS` (90) days. When validation fails, the system falls back to today's date and preserves the rejected value as `rawExtractedDate` on the `ParsedReceipt` object. A string-first Pino warning is logged with the rejected and fallback dates.
+
+**Standard tests:**
+- `photo-parsers.test.ts` > `isValidReceiptDate` > accepts: today exactly
+- `photo-parsers.test.ts` > `isValidReceiptDate` > accepts: 89 days ago (just within threshold)
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > injects today (timezone-aware) into the LLM prompt
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > keeps validated extracted date when it passes; rawExtractedDate is undefined
+
+**Edge case tests:**
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: future +1d
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: ancient (>90d)
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: calendar-impossible Feb 30
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: 91 days ago (just past threshold)
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: placeholder unknown
+- `photo-parsers.test.ts` > `isValidReceiptDate` > rejects: null
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > falls back to today when extracted date fails sanity-check; preserves rawExtractedDate
+- `photo-parsers.test.ts` > `parseReceiptFromPhoto — date integrity` > falls back to today when extracted date is non-string; does NOT set rawExtractedDate
+
+---
+
+### REQ-FOOD-RECEIPT-002 — Receipt storage MUST use `capturedAt` as the sort/filename authority; display date preserved separately
+
+**Phase:** Hermes P9 | **Status:** Implemented
+
+The receipt filename prefix, YAML frontmatter `date:` field, and `PriceEntry.updatedAt` MUST all use `capturedAt` (wall-clock ISO datetime) as the authoritative sort key, not the LLM-extracted display date. Specifically: the receipt `id` MUST be `\`${capturedAt.slice(0,10)}-${generateId()}\``; the frontmatter `date:` field MUST equal `capturedAt.slice(0,10)`; `PriceEntry.updatedAt` MUST equal `receipt.capturedAt.slice(0,10)` with `receipt.date` as fallback for legacy receipts. The LLM-extracted display date (`parsed.date`) MUST be preserved in the receipt YAML body `date` field for human-readable display. When `rawExtractedDate` is present, it MUST be persisted in the receipt YAML body for audit purposes.
+
+**Standard tests:**
+- `photo-handler.test.ts` > `receipt filename + rawExtractedDate persistence (B3)` > uses capturedAt for receipt filename and persists rawExtractedDate when present
+- `photo-handler.test.ts` > `receipt filename + rawExtractedDate persistence (B3)` > does not include rawExtractedDate in receipt when parser did not reject the date
+- `price-store.test.ts` > `updatePricesFromReceipt` > sets updatedAt from capturedAt (date-only) when capturedAt is present
+- `price-store.test.ts` > `updatePricesFromReceipt` > falls back to receipt.date for updatedAt when capturedAt is absent
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -7597,5 +7637,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-PHOTO-003 | sanitize-photo-field.test.ts, photo-summary-injection.test.ts | 4 | 3 | Implemented |
 | REQ-CONV-PHOTO-004 | format-conversation-history.test.ts | 4 | 2 | Implemented |
 | REQ-CONV-PHOTO-005 | photo-summary-guidance.test.ts | 2 | 1 | Implemented |
+| REQ-FOOD-RECEIPT-001 | photo-parsers.test.ts | 4 | 8 | Implemented |
+| REQ-FOOD-RECEIPT-002 | photo-handler.test.ts, price-store.test.ts | 2 | 2 | Implemented |
 
 | **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
