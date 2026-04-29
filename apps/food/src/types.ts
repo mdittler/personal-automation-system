@@ -259,13 +259,14 @@ export interface ReceiptLineItem {
 export interface Receipt {
 	id: string;
 	store: string;
-	date: string; // ISO date
+	date: string; // ISO date — display/human-readable
+	rawExtractedDate?: string; // present only when sanity-check rejected the LLM-extracted date
 	lineItems: ReceiptLineItem[];
 	subtotal: number | null;
 	tax: number | null;
 	total: number;
 	photoPath: string; // path to original photo in data store
-	capturedAt: string; // ISO datetime
+	capturedAt: string; // ISO datetime — canonical sort authority
 }
 
 // ─── Cost Tracking Types (H10) ─────────────────────────────────

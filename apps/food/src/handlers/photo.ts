@@ -203,24 +203,27 @@ async function handleReceiptPhoto(
 	// Save photo
 	const photoPath = await savePhoto(store, ctx.photo, 'receipt');
 
-	// Build receipt record
-	const id = `${parsed.date}-${Date.now().toString(36)}`;
+	// Build receipt record — capturedAt is the sort/storage authority
+	const capturedAt = isoNow();
+	const capturedDate = capturedAt.slice(0, 10); // YYYY-MM-DD
+	const id = `${capturedDate}-${Date.now().toString(36)}`;
 	const receipt: Receipt = {
 		id,
 		store: parsed.store,
-		date: parsed.date,
+		date: parsed.date,                // display date (from LLM, may differ)
+		...(parsed.rawExtractedDate !== undefined ? { rawExtractedDate: parsed.rawExtractedDate } : {}),
 		lineItems: parsed.lineItems,
 		subtotal: parsed.subtotal,
 		tax: parsed.tax,
 		total: parsed.total,
 		photoPath,
-		capturedAt: isoNow(),
+		capturedAt,
 	};
 
-	// Save receipt
+	// Save receipt — frontmatter date uses capturedAt-derived date so sorting by filename matches
 	const fm = generateFrontmatter({
 		title: `Receipt: ${parsed.store}`,
-		date: parsed.date,
+		date: capturedDate,            // capturedAt-derived, not parsed.date
 		tags: ['food', 'receipt'],
 		type: 'receipt',
 		entity_keys: [parsed.store.toLowerCase()],

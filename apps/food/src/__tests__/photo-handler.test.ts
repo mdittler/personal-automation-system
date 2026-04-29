@@ -598,6 +598,83 @@ describe('Photo Handler', () => {
 		});
 	});
 
+	// ─── B3: capturedAt authority for receipt filename + rawExtractedDate ─────
+
+	describe('receipt filename + rawExtractedDate persistence (B3)', () => {
+		it('uses capturedAt for receipt filename and persists rawExtractedDate when present', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-04-29T15:00:00Z'));
+			try {
+				// The LLM returns a date far in the past (> MAX_RECEIPT_AGE_DAYS).
+				// parseReceiptFromPhoto will reject '2025-01-27', set rawExtractedDate='2025-01-27',
+				// and fall back to today ('2026-04-29') for the display date.
+				const receiptWithOldDate = JSON.stringify({
+					store: 'Test Store',
+					date: '2025-01-27', // > 90 days old → fails sanity check
+					lineItems: [{ name: 'Milk', quantity: 1, unitPrice: 3.99, totalPrice: 3.99 }],
+					subtotal: 3.99,
+					tax: 0.24,
+					total: 4.23,
+				});
+				const { services, sharedStore } = createMockServices(receiptWithOldDate);
+				// Provide timezone so todayDate() is deterministic
+				(services as unknown as Record<string, unknown>).timezone = 'UTC';
+				await handlePhoto(services, createPhotoCtx('receipt'));
+
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
+				expect(receiptCall).toBeDefined();
+
+				// Filename should be derived from capturedAt (2026-04-29), not the rejected LLM date
+				expect(receiptCall![0]).toMatch(/^receipts\/2026-04-29-/);
+
+				// Parse the YAML body from the written content
+				const { parse: parseYAML } = await import('yaml');
+				const parts = receiptCall![1].split('---\n');
+				// parts[0] = '', parts[1] = frontmatter, parts[2] = yaml body
+				const body = parseYAML(parts[2]!) as Record<string, unknown>;
+
+				// rawExtractedDate should be persisted (the rejected date)
+				expect(body['rawExtractedDate']).toBe('2025-01-27');
+				// display date is the fallback (today)
+				expect(body['date']).toBe('2026-04-29');
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('does not include rawExtractedDate in receipt when parser did not reject the date', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-04-29T15:00:00Z'));
+			try {
+				// The LLM returns today's date, which passes the sanity check → no rawExtractedDate
+				const receiptWithValidDate = JSON.stringify({
+					store: 'Test Store',
+					date: '2026-04-29',
+					lineItems: [{ name: 'Milk', quantity: 1, unitPrice: 3.99, totalPrice: 3.99 }],
+					subtotal: 3.99,
+					tax: 0.24,
+					total: 4.23,
+				});
+				const { services, sharedStore } = createMockServices(receiptWithValidDate);
+				(services as unknown as Record<string, unknown>).timezone = 'UTC';
+				await handlePhoto(services, createPhotoCtx('receipt'));
+
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
+				expect(receiptCall).toBeDefined();
+
+				const { parse: parseYAML } = await import('yaml');
+				const parts = receiptCall![1].split('---\n');
+				const body = parseYAML(parts[2]!) as Record<string, unknown>;
+
+				expect(body['rawExtractedDate']).toBeUndefined();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+	});
+
 	// ─── A2: wrapper propagates result from dispatch ───────────────
 
 	describe('handlePhoto wrapper propagation (A2)', () => {
