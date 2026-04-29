@@ -46,6 +46,7 @@ describe('Scenario 1: receipt → ask about specific item present', () => {
 		'whats the cost on the cheddar',
 		'what was the most expensive thing',
 		'how many items total',
+		'tell me the total',
 	];
 
 	const lineItems = [
