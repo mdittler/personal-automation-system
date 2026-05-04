@@ -4389,11 +4389,15 @@ When an idle session is detected, `ChatSessionStore.endActive` MUST be called wi
 - `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > next appendExchange after idle reset lands in a fresh session
 - `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > endActive CAS mismatch: stale expectedSessionId leaves fresh session intact
 
+**Error handling tests:**
+- `chat-session-store.test.ts` > endActive — transcript write failure leaves active session in index > when transcript write throws, peekActive still returns the original session id
+
 **Fixes:**
 - **Codex-P2-1 (2026-05-04):** Initial implementation used stale `activeId` (from `peekActive`) as `endedSessionId` in the return value rather than the id returned by `endActive`. Also did not handle `endedSessionId: null` (concurrent race) — now aborts with `status='none'` and logs a warning. CL: `codex-p2-corrections`.
 - **Codex-P3-1 (2026-05-04):** `formatDuration` used `Math.round(hours)` for non-integer hour values, causing 90 min → "2 hours". Fixed to express non-integer hours as "X hours Y minutes". CL: `codex-p2-corrections`.
 - **Codex-R2-P1 (2026-05-04):** `endActive` wrong-session race — hook read `activeId=A` via `peekActive`, but a concurrent request could end A and mint B before `endActive` ran, causing B (the fresh session) to be closed. Fixed via CAS: `endActive` now holds the index file lock across `getActive + verify expectedSessionId + clearActiveUnlocked`; `runIdleResetHook` passes `expectedSessionId: activeId`; returns `{ endedSessionId: null }` on ID mismatch. CL: `codex-r2-corrections`.
 - **Codex-R2-P3 (2026-05-04):** `formatDuration(1470)` produced "25 hours" — multi-branch logic failed when hours ≥ 24. Rewritten using day/hour/minute parts array (1440 min = 1 day), fixing 1470 min → "1 day 30 minutes" and 1500 min → "1 day 1 hour". CL: `codex-r2-corrections`.
+- **Codex-R3-P2 (2026-05-04):** `endActive` cleared the active index entry (inside the index lock) BEFORE writing `ended_at` to the transcript. If the transcript write failed, the session was orphaned — removed from the index with no `ended_at`. Fixed via safe-ordering: index lock is used only for the CAS verify (no clear inside); `clearIndex` flag is set only after `store.write()` succeeds; `clearActive` is called outside the transcript lock only when `clearIndex=true`. On write failure the exception propagates and the index remains intact. CL: `codex-r3-corrections`.
 
 ---
 
@@ -7862,10 +7866,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-IDLE-003 | idle-detector.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-IDLE-004 | idle-detector.test.ts | 1 | 6 | Implemented |
 | REQ-CONV-IDLE-005 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, pas-yaml-schema.test.ts | 6 | 7 | Implemented |
-| REQ-CONV-IDLE-006 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 18 | Implemented |
+| REQ-CONV-IDLE-006 | chat-session-store.test.ts, idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 19 | Implemented |
 | REQ-CONV-IDLE-007 | idle-reset-hook.test.ts, idle-reset.persona.test.ts | 1 | 3 | Implemented |
 | REQ-CONV-IDLE-008 | idle-reset-hook.test.ts | 0 | 4 | Implemented |
 | REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 11 | 2 | Implemented |
 | REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 3 | 2 | Implemented |
 
-| **Totals** | **207 test files** | **1591** | **1785** | **3376 tests** |
+| **Totals** | **207 test files** | **1591** | **1786** | **3377 tests** |
