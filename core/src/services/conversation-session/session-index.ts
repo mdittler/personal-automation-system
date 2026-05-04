@@ -74,8 +74,7 @@ export async function setActiveUnlocked(
 	key: string,
 	entry: ActiveSessionEntry,
 ): Promise<void> {
-	const raw = await store.read(INDEX_FILE);
-	const map = parseMap(raw);
+	const map = await readMap(store);
 	map[key] = entry;
 	await store.write(INDEX_FILE, stringifyYaml(map));
 }
@@ -86,8 +85,7 @@ export async function setActiveUnlocked(
  * Used by DefaultChatSessionStore.endActive which needs atomic read+CAS+clear.
  */
 export async function clearActiveUnlocked(store: ScopedDataStore, key: string): Promise<void> {
-	const raw = await store.read(INDEX_FILE);
-	const map = parseMap(raw);
+	const map = await readMap(store);
 	delete map[key];
 	await store.write(INDEX_FILE, stringifyYaml(map));
 }

@@ -1078,7 +1078,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			telegram: telegramService,
 			logger: createChildLogger(logger, { service: 'router-idle-reset' }),
 			pendingSessionControl,
-			now: undefined,
 		},
 		logger: createChildLogger(logger, { service: 'router' }),
 	});

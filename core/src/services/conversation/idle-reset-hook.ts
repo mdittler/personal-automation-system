@@ -25,7 +25,7 @@ export async function runIdleResetHook(
 	ctx: { userId: string; sessionKey?: string },
 	deps: IdleResetHookDeps,
 ): Promise<IdleResetState> {
-	if (deps.idleMinutes === null || deps.idleMinutes === undefined) return { status: 'none' };
+	if (deps.idleMinutes == null) return { status: 'none' };
 
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 	const userId = ctx.userId;
@@ -93,7 +93,7 @@ export async function runIdleResetHook(
 	return {
 		status: 'reset',
 		endedSessionId: resolvedSessionId,
-		parentTitle: (session.meta.title as string | null | undefined) ?? null,
+		parentTitle: session.meta.title,
 	};
 }
 
