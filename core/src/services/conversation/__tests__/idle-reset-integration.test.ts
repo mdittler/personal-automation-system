@@ -9,15 +9,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Logger } from 'pino';
 import pino from 'pino';
-import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
-import { ChangeLog } from '../../data-store/change-log.js';
-import { DataStoreServiceImpl } from '../../data-store/index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
 import { composeChatSessionStore } from '../../conversation-session/compose.js';
 import { decode } from '../../conversation-session/transcript-codec.js';
-import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
+import { ChangeLog } from '../../data-store/change-log.js';
+import { DataStoreServiceImpl } from '../../data-store/index.js';
 import { runIdleResetHook } from '../idle-reset-hook.js';
+import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
 
 const USER = 'alice';
 const SESSION_KEY = 'agent:main:telegram:dm:alice';
@@ -77,7 +78,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 				idleMinutes: 1,
 				chatSessions: store,
 				telegram: { send: vi.fn().mockResolvedValue(undefined) },
-				logger: logger as any,
+				logger: logger as Pick<Logger, 'warn'>,
 				now: () => hookNow,
 			},
 		);
@@ -111,7 +112,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 				idleMinutes: 1,
 				chatSessions: store,
 				telegram: { send: vi.fn().mockResolvedValue(undefined) },
-				logger: pino({ level: 'silent' }) as any,
+				logger: pino({ level: 'silent' }) as Pick<Logger, 'warn'>,
 				now: () => hookNow,
 			},
 		);

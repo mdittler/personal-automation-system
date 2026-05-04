@@ -9,10 +9,10 @@
  * - All entry points participate
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runIdleResetHook } from '../idle-reset-hook.js';
-import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 import { pendingEdits } from '../pending-edits.js';
+import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 
 // ---------------------------------------------------------------------------
 // Shared mock factory
@@ -41,7 +41,7 @@ function makeSession(lastActivity: string, title: string | null = null) {
 }
 
 function makeDeps(opts: {
-	idleMinutes: number | null;
+	idleMinutes: number | null | undefined;
 	lastActivity: string;
 	title?: string | null;
 	now?: Date;
@@ -62,7 +62,7 @@ function makeDeps(opts: {
 	};
 }
 
-const BASE_CTX = { userId: 'u1', chatId: 'c1' } as any;
+const BASE_CTX = { userId: 'u1' };
 
 // ---------------------------------------------------------------------------
 // Scenarios
@@ -78,7 +78,10 @@ describe('Idle-reset persona scenarios', () => {
 			});
 			const result = await runIdleResetHook(BASE_CTX, deps);
 			expect(result.status).toBe('reset');
-			expect(deps.chatSessions.endActive).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1' }), 'idle');
+			expect(deps.chatSessions.endActive).toHaveBeenCalledWith(
+				expect.objectContaining({ userId: 'u1' }),
+				'idle',
+			);
 			expect(deps.telegram.send).toHaveBeenCalledWith('u1', expect.stringContaining('inactivity'));
 		});
 
@@ -119,6 +122,7 @@ describe('Idle-reset persona scenarios', () => {
 
 	describe('User returns mid-task (active-work protection)', () => {
 		it('"add bread to the list" after 2h while pendingEdit is active → no reset (protected)', async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: test-only sentinel value
 			pendingEdits.set('u1', {} as any);
 			try {
 				const deps = makeDeps({
@@ -137,7 +141,12 @@ describe('Idle-reset persona scenarios', () => {
 
 		it('grey-zone /newchat buttons pending → no reset (protected)', async () => {
 			const sc = createPendingSessionControlStore();
-			sc.attach('u1', { userId: 'u1', messageText: 'start fresh?', expiresAt: Date.now() + 60_000, id: 'nonce1' });
+			sc.attach('u1', {
+				userId: 'u1',
+				messageText: 'start fresh?',
+				expiresAt: Date.now() + 60_000,
+				id: 'nonce1',
+			});
 			const deps = makeDeps({
 				idleMinutes: 60,
 				lastActivity: '2026-05-04T12:00:00.000Z',
@@ -154,7 +163,11 @@ describe('Idle-reset persona scenarios', () => {
 		it.each([
 			['within threshold: 30 min elapsed vs 60-min threshold', '2026-05-04T13:30:00.000Z', 60],
 			['at threshold exactly: 60 min elapsed vs 60-min threshold', '2026-05-04T13:00:00.000Z', 60],
-			['at threshold exactly: 720 min elapsed vs 720-min threshold', '2026-05-04T02:00:00.000Z', 720],
+			[
+				'at threshold exactly: 720 min elapsed vs 720-min threshold',
+				'2026-05-04T02:00:00.000Z',
+				720,
+			],
 		])('%s', async (_label, lastActivity, idleMinutes) => {
 			const deps = makeDeps({ idleMinutes, lastActivity, now: BASE_NOW });
 			const result = await runIdleResetHook(BASE_CTX, deps);
@@ -178,7 +191,7 @@ describe('Idle-reset persona scenarios', () => {
 
 		it('auto_reset_idle_minutes=undefined → no reset', async () => {
 			const deps = makeDeps({
-				idleMinutes: undefined as any,
+				idleMinutes: undefined,
 				lastActivity: '2026-04-27T14:00:00.000Z',
 				now: BASE_NOW,
 			});
@@ -195,11 +208,17 @@ describe('Idle-reset persona scenarios', () => {
 			[120, '2026-05-04T11:59:59.000Z', '2 hours'],
 			[1440, '2026-05-03T13:59:59.000Z', '1 day'],
 			[2880, '2026-05-02T13:59:59.000Z', '2 days'],
-		])('%d-minute threshold → "%s" in notice', async (idleMinutes, lastActivity, expectedDuration) => {
-			const deps = makeDeps({ idleMinutes, lastActivity, now: BASE_NOW });
-			const result = await runIdleResetHook(BASE_CTX, deps);
-			expect(result.status).toBe('reset');
-			expect(deps.telegram.send).toHaveBeenCalledWith('u1', expect.stringContaining(expectedDuration));
-		});
+		])(
+			'%d-minute threshold → "%s" in notice',
+			async (idleMinutes, lastActivity, expectedDuration) => {
+				const deps = makeDeps({ idleMinutes, lastActivity, now: BASE_NOW });
+				const result = await runIdleResetHook(BASE_CTX, deps);
+				expect(result.status).toBe('reset');
+				expect(deps.telegram.send).toHaveBeenCalledWith(
+					'u1',
+					expect.stringContaining(expectedDuration),
+				);
+			},
+		);
 	});
 });

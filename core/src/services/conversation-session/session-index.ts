@@ -1,6 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { withFileLock } from '../../utils/file-mutex.js';
 import type { ScopedDataStore } from '../../types/data-store.js';
+import { withFileLock } from '../../utils/file-mutex.js';
 
 const INDEX_FILE = 'conversation/active-sessions.yaml';
 
@@ -32,7 +32,7 @@ async function readMap(store: ScopedDataStore): Promise<SessionMap> {
 
 export async function getActive(
 	store: ScopedDataStore,
-	userId: string,
+	_userId: string,
 	key: string,
 ): Promise<ActiveSessionEntry | undefined> {
 	const map = await readMap(store);

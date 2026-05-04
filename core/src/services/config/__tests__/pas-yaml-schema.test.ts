@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parsePasYamlConfig, PasYamlConfigSchema } from '../pas-yaml-schema.js';
+import { PasYamlConfigSchema, parsePasYamlConfig } from '../pas-yaml-schema.js';
 
 describe('PasYamlConfigSchema', () => {
 	it('accepts a valid minimal config (empty)', () => {
@@ -48,6 +48,7 @@ describe('PasYamlConfigSchema', () => {
 		});
 		expect(result.success).toBe(true);
 		if (result.success) {
+			// biome-ignore lint/suspicious/noExplicitAny: passthrough fields not in the typed schema
 			expect((result.data as any).unknownFutureKey).toBe('value');
 		}
 	});
@@ -112,28 +113,55 @@ describe('PasYamlConfigSchema', () => {
 });
 
 describe('chat.sessions.auto_reset_idle_minutes', () => {
-	it('accepts null', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: null } } })).not.toThrow());
-	it('accepts 1', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1 } } })).not.toThrow());
-	it('accepts 1440', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1440 } } })).not.toThrow());
-	it('accepts 525600', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_600 } } })).not.toThrow());
-	it('rejects 0', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 0 } } })).toThrow());
-	it('rejects -1', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: -1 } } })).toThrow());
-	it('rejects 1.5 (non-integer)', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1.5 } } })).toThrow());
-	it('rejects 525601 (above ceiling)', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_601 } } })).toThrow());
-	it('rejects string "1440"', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: '1440' } } })).toThrow());
+	it('accepts null', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: null } } }),
+		).not.toThrow());
+	it('accepts 1', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1 } } }),
+		).not.toThrow());
+	it('accepts 1440', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1440 } } }),
+		).not.toThrow());
+	it('accepts 525600', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_600 } } }),
+		).not.toThrow());
+	it('rejects 0', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 0 } } }),
+		).toThrow());
+	it('rejects -1', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: -1 } } }),
+		).toThrow());
+	it('rejects 1.5 (non-integer)', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1.5 } } }),
+		).toThrow());
+	it('rejects 525601 (above ceiling)', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_601 } } }),
+		).toThrow());
+	it('rejects string "1440"', () =>
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: '1440' } } }),
+		).toThrow());
 });
 
 describe('parsePasYamlConfig()', () => {
 	it('returns parsed config for valid input', () => {
 		const config = parsePasYamlConfig({ users: [{ id: '123', name: 'Alice' }] });
 		expect(config.users).toHaveLength(1);
-		expect(config.users![0].id).toBe('123');
+		expect(config.users?.[0]?.id).toBe('123');
 	});
 
 	it('throws a formatted Error on invalid input', () => {
-		expect(() =>
-			parsePasYamlConfig({ users: [{ name: 'Missing ID' }] }),
-		).toThrow('Invalid pas.yaml configuration:');
+		expect(() => parsePasYamlConfig({ users: [{ name: 'Missing ID' }] })).toThrow(
+			'Invalid pas.yaml configuration:',
+		);
 	});
 
 	it('error message includes path and reason', () => {
@@ -149,6 +177,7 @@ describe('parsePasYamlConfig()', () => {
 
 	it('passes through unknown keys', () => {
 		const config = parsePasYamlConfig({ users: [], futureFeature: true });
+		// biome-ignore lint/suspicious/noExplicitAny: passthrough fields not in the typed schema
 		expect((config as any).futureFeature).toBe(true);
 	});
 });

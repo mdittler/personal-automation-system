@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runIdleResetHook } from '../idle-reset-hook.js';
-import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 import { pendingEdits } from '../pending-edits.js';
+import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 
 const baseCtx = { userId: 'u1' };
 
@@ -141,6 +141,7 @@ describe('runIdleResetHook', () => {
 			expect(deps.chatSessions.endActive).not.toHaveBeenCalled();
 		});
 		it('status="protected" when pending edit is present', async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: test-only sentinel value
 			pendingEdits.set('u1', {} as any);
 			try {
 				const deps = makeDeps({
@@ -163,7 +164,7 @@ describe('runIdleResetHook', () => {
 				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
 				now: new Date('2026-05-01T13:01:00Z'),
 			});
-			(deps.chatSessions.peekActive as any).mockRejectedValueOnce(new Error('peek fail'));
+			vi.mocked(deps.chatSessions.peekActive).mockRejectedValueOnce(new Error('peek fail'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.logger.warn).toHaveBeenCalled();
 			expect(deps.chatSessions.endActive).not.toHaveBeenCalled();
@@ -174,7 +175,7 @@ describe('runIdleResetHook', () => {
 				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
 				now: new Date('2026-05-01T13:01:00Z'),
 			});
-			(deps.chatSessions.readSession as any).mockRejectedValueOnce(new Error('read fail'));
+			vi.mocked(deps.chatSessions.readSession).mockRejectedValueOnce(new Error('read fail'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.logger.warn).toHaveBeenCalled();
 		});
@@ -184,7 +185,7 @@ describe('runIdleResetHook', () => {
 				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
 				now: new Date('2026-05-01T13:01:00Z'),
 			});
-			(deps.chatSessions.endActive as any).mockRejectedValueOnce(new Error('disk full'));
+			vi.mocked(deps.chatSessions.endActive).mockRejectedValueOnce(new Error('disk full'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.telegram.send).not.toHaveBeenCalled();
 			expect(deps.logger.warn).toHaveBeenCalled();
@@ -195,7 +196,7 @@ describe('runIdleResetHook', () => {
 				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
 				now: new Date('2026-05-01T13:01:00Z'),
 			});
-			(deps.telegram.send as any).mockRejectedValueOnce(new Error('telegram down'));
+			vi.mocked(deps.telegram.send).mockRejectedValueOnce(new Error('telegram down'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('reset');
 		});
 		it('endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send', async () => {
@@ -205,7 +206,7 @@ describe('runIdleResetHook', () => {
 				now: new Date('2026-05-01T13:01:00Z'),
 			});
 			// Simulate concurrent race: another handler cleared the active session first
-			(deps.chatSessions.endActive as any).mockResolvedValueOnce({ endedSessionId: null });
+			vi.mocked(deps.chatSessions.endActive).mockResolvedValueOnce({ endedSessionId: null });
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.logger.warn).toHaveBeenCalled();
 			expect(deps.telegram.send).not.toHaveBeenCalled();

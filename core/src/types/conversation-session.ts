@@ -5,6 +5,7 @@ export type IdleResetStatus = 'reset' | 'protected' | 'none';
 export interface IdleResetState {
 	status: IdleResetStatus;
 	endedSessionId?: string;
+	/** Reserved for P8b successor-session lineage. Not consumed in production yet. */
 	parentTitle?: string | null;
 }
 

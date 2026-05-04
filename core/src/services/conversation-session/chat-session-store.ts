@@ -1,17 +1,17 @@
 import type { Logger } from 'pino';
-import type { DataStoreService } from '../../types/data-store.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
+import type { DataStoreService } from '../../types/data-store.js';
+import { withFileLock } from '../../utils/file-mutex.js';
+import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 import {
 	parseMemorySnapshotFrontmatter,
 	toMemorySnapshotFrontmatter,
 } from '../prompt-assembly/memory-context.js';
-import { withFileLock } from '../../utils/file-mutex.js';
 import { CorruptTranscriptError } from './errors.js';
 import { mintSessionId } from './session-id.js';
-import { getActive, setActiveUnlocked, clearActive, clearActiveUnlocked } from './session-index.js';
+import { clearActive, getActive, setActiveUnlocked } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
-import { encodeNew, encodeAppend, decode } from './transcript-codec.js';
-import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
+import { decode, encodeAppend, encodeNew } from './transcript-codec.js';
 
 export interface ChatSessionFrontmatter {
 	id: string;
@@ -440,8 +440,9 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	): Promise<{ endedSessionId: string | null }> {
 		const store = this.deps.data.forUser(ctx.userId);
 
-		// Hold index lock across getActive + CAS verify + clearActiveUnlocked to prevent
-		// closing a fresh session minted after the caller's peekActive snapshot.
+		// CAS under index lock: verify the active session hasn't changed since the caller's
+		// peekActive snapshot. Do NOT clear yet — transcript must be written first to ensure
+		// the index is never cleared without a corresponding ended_at in the transcript.
 		let entry: ActiveSessionEntry | undefined;
 		let mismatch = false;
 		await withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
@@ -450,9 +451,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			entry = found;
 			if (ctx.expectedSessionId !== undefined && found.id !== ctx.expectedSessionId) {
 				mismatch = true;
-				return;
 			}
-			await clearActiveUnlocked(store, ctx.sessionKey);
 		});
 
 		if (!entry) return { endedSessionId: null };
@@ -469,11 +468,18 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			'conversation-session: ending active session',
 		);
 
+		// Write ended_at to transcript first. Track whether to clear the index entry.
+		// If the transcript write throws, clearIndex stays false and the session remains
+		// active — safe to retry. Only clear after a successful (or graceful no-op) write.
 		let endedAt: string | null = null;
+		let clearIndex = false;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
 			const path = `conversation/sessions/${entry!.id}.md`;
 			const raw = await store.read(path);
-			if (raw === '') return;
+			if (raw === '') {
+				clearIndex = true; // Dead index entry — remove, but no ended_at to set
+				return;
+			}
 			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
 			try {
 				decoded = decode(raw);
@@ -483,6 +489,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						{ sessionId: entry!.id, err },
 						'conversation-session: corrupt transcript on endActive',
 					);
+					clearIndex = true; // Corrupt — remove dead entry
 					return;
 				}
 				throw err;
@@ -492,7 +499,13 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			let next = encodeNew(decoded.meta);
 			for (const t of decoded.turns) next = encodeAppend(next, t);
 			await store.write(path, next);
+			clearIndex = true; // Set only after the write succeeds
 		});
+
+		// Clear the active index entry only after transcript outcome is confirmed.
+		if (clearIndex) {
+			await clearActive(store, ctx.userId, ctx.sessionKey);
+		}
 
 		if (this.deps.index && endedAt !== null) {
 			const endedSessionId = entry.id;
@@ -507,7 +520,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			}
 		}
 
-		return { endedSessionId: entry.id };
+		return { endedSessionId: endedAt !== null ? entry.id : null };
 	}
 
 	async setTitle(
