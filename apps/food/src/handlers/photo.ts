@@ -5,14 +5,17 @@
  */
 
 import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
-import { stringify } from 'yaml';
 import { generateFrontmatter } from '@pas/core/utils/frontmatter';
-import { savePhoto } from '../services/photo-store.js';
-import { parseRecipeFromPhoto } from '../services/recipe-photo-parser.js';
-import { parseReceiptFromPhoto } from '../services/receipt-parser.js';
-import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
+import { stringify } from 'yaml';
 import { parseGroceryFromPhoto } from '../services/grocery-photo-parser.js';
-import { saveRecipe, updateRecipe } from '../services/recipe-store.js';
+import {
+	addItems,
+	createEmptyList,
+	loadGroceryList,
+	saveGroceryList,
+	withGroceryLock,
+} from '../services/grocery-store.js';
+import { parsePantryFromPhoto } from '../services/pantry-photo-parser.js';
 import {
 	addPantryItems,
 	loadPantry,
@@ -20,20 +23,20 @@ import {
 	savePantry,
 	withPantryLock,
 } from '../services/pantry-store.js';
-import { addItems, loadGroceryList, saveGroceryList, createEmptyList, withGroceryLock } from '../services/grocery-store.js';
-import { isoNow, generateId } from '../utils/date.js';
-import type { Receipt } from '../types.js';
+import { savePhoto } from '../services/photo-store.js';
 import { updatePricesFromReceipt } from '../services/price-store.js';
-import {
-	resolveFoodStore,
-	type ResolvedFoodStore,
-} from '../utils/household-guard.js';
+import { parseReceiptFromPhoto } from '../services/receipt-parser.js';
+import { parseRecipeFromPhoto } from '../services/recipe-photo-parser.js';
+import { saveRecipe, updateRecipe } from '../services/recipe-store.js';
+import type { Receipt } from '../types.js';
+import { generateId, isoNow } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { type ResolvedFoodStore, resolveFoodStore } from '../utils/household-guard.js';
 import {
+	buildGrocerySummary,
+	buildPantrySummary,
 	buildReceiptSummary,
 	buildRecipeSummary,
-	buildPantrySummary,
-	buildGrocerySummary,
 } from './photo-summary.js';
 
 type PhotoType = 'recipe' | 'receipt' | 'pantry' | 'grocery';
@@ -79,7 +82,10 @@ async function classifyByVision(
 
 	// F16: require exact single-token match; reject negated or verbose responses
 	const VALID_PHOTO_TYPES = new Set<PhotoType>(['recipe', 'receipt', 'pantry', 'grocery']);
-	const normalized = result.trim().toLowerCase().replace(/[^a-z]/g, '');
+	const normalized = result
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z]/g, '');
 	return VALID_PHOTO_TYPES.has(normalized as PhotoType) ? (normalized as PhotoType) : null;
 }
 
@@ -95,7 +101,7 @@ function buildScopedFoodPath(resolved: ResolvedFoodStore, relativePath: string):
 export async function handlePhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
-): Promise<void | PhotoHandlerResult> {
+): Promise<undefined | PhotoHandlerResult> {
 	try {
 		// F15: require household membership before any LLM call or store write
 		const resolved = await resolveFoodStore(services, ctx.userId, ctx.spaceId);
@@ -103,7 +109,7 @@ export async function handlePhoto(
 			await services.telegram.send(
 				ctx.userId,
 				'You need to set up or join a household before using photo features. ' +
-				'Use /household to get started.',
+					'Use /household to get started.',
 			);
 			return;
 		}
@@ -112,7 +118,7 @@ export async function handlePhoto(
 		let photoType: PhotoType | null;
 		if (ctx.caption) {
 			const captionType = classifyByCaption(ctx.caption);
-			photoType = captionType ?? await classifyByVision(services, ctx.photo, ctx.mimeType);
+			photoType = captionType ?? (await classifyByVision(services, ctx.photo, ctx.mimeType));
 		} else {
 			photoType = await classifyByVision(services, ctx.photo, ctx.mimeType);
 		}
@@ -120,11 +126,11 @@ export async function handlePhoto(
 		if (!photoType) {
 			await services.telegram.send(
 				ctx.userId,
-				'I\'m not sure what kind of photo this is. Please add a caption:\n' +
-				'• "save this recipe" for recipe photos\n' +
-				'• "receipt" for grocery receipts\n' +
-				'• "what\'s in my fridge" for pantry photos\n' +
-				'• "add to grocery list" for shopping lists',
+				"I'm not sure what kind of photo this is. Please add a caption:\n" +
+					'• "save this recipe" for recipe photos\n' +
+					'• "receipt" for grocery receipts\n' +
+					'• "what\'s in my fridge" for pantry photos\n' +
+					'• "add to grocery list" for shopping lists',
 			);
 			return;
 		}
@@ -181,15 +187,16 @@ async function handleRecipePhoto(
 
 	await services.telegram.send(
 		ctx.userId,
-		`📷 Recipe saved from photo!\n\n*${escapeMarkdown(recipe.title)}*\n` +
-		`• ${recipe.ingredients.length} ingredients\n` +
-		`• ${recipe.instructions.length} steps\n` +
-		`• Servings: ${recipe.servings}\n` +
-		(recipe.cuisine ? `• Cuisine: ${escapeMarkdown(recipe.cuisine)}\n` : '') +
-		`\nStatus: draft (will be confirmed after you cook and rate it)`,
+		`📷 Recipe saved from photo!\n\n*${escapeMarkdown(recipe.title)}*\n• ${recipe.ingredients.length} ingredients\n• ${recipe.instructions.length} steps\n• Servings: ${recipe.servings}\n${recipe.cuisine ? `• Cuisine: ${escapeMarkdown(recipe.cuisine)}\n` : ''}\nStatus: draft (will be confirmed after you cook and rate it)`,
 	);
 
-	return { photoSummary: buildRecipeSummary(recipe.title, recipe.ingredients.length, recipe.instructions.length) };
+	return {
+		photoSummary: buildRecipeSummary(
+			recipe.title,
+			recipe.ingredients.length,
+			recipe.instructions.length,
+		),
+	};
 }
 
 async function handleReceiptPhoto(
@@ -210,7 +217,7 @@ async function handleReceiptPhoto(
 	const receipt: Receipt = {
 		id,
 		store: parsed.store,
-		date: parsed.date,                // display date (from LLM, may differ)
+		date: parsed.date, // display date (from LLM, may differ)
 		...(parsed.rawExtractedDate !== undefined ? { rawExtractedDate: parsed.rawExtractedDate } : {}),
 		lineItems: parsed.lineItems,
 		subtotal: parsed.subtotal,
@@ -230,7 +237,9 @@ async function handleReceiptPhoto(
 		entity_keys: [parsed.store.toLowerCase()],
 		app: 'food',
 	});
-	await store.write(`receipts/${id}.yaml`, fm + stringify(receipt));
+	const receiptPath = `receipts/${id}.yaml`;
+	const writeReceipt = () => store.write(receiptPath, fm + stringify(receipt));
+	await writeReceipt();
 
 	// Record the interaction after successful write
 	services.interactionContext?.record(ctx.userId, {
@@ -238,7 +247,7 @@ async function handleReceiptPhoto(
 		action: 'receipt_captured',
 		entityType: 'receipt',
 		entityId: id,
-		filePaths: [buildScopedFoodPath(resolved, `receipts/${id}.yaml`)],
+		filePaths: [buildScopedFoodPath(resolved, receiptPath)],
 		scope: resolved.scope,
 	});
 
@@ -246,6 +255,10 @@ async function handleReceiptPhoto(
 	let priceUpdateMsg = '';
 	try {
 		const priceResult = await updatePricesFromReceipt(services, store, receipt);
+		if (priceResult.items.length > 0) {
+			receipt.priceUpdates = priceResult.items;
+			await writeReceipt();
+		}
 		if (priceResult.updatedCount > 0 || priceResult.addedCount > 0) {
 			const parts: string[] = [];
 			if (priceResult.updatedCount > 0) parts.push(`updated ${priceResult.updatedCount}`);
@@ -259,12 +272,7 @@ async function handleReceiptPhoto(
 	const photoSummary = buildReceiptSummary(parsed);
 	await services.telegram.send(
 		ctx.userId,
-		`🧾 Receipt captured!\n\n` +
-		`*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n` +
-		`• ${parsed.lineItems.length} items\n` +
-		`• Total: $${parsed.total.toFixed(2)}\n` +
-		(parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : '') +
-		priceUpdateMsg,
+		`🧾 Receipt captured!\n\n*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n• ${parsed.lineItems.length} items\n• Total: $${parsed.total.toFixed(2)}\n${parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : ''}${priceUpdateMsg}`,
 	);
 
 	return { photoSummary };
@@ -274,7 +282,7 @@ async function handlePantryPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	store: ReturnType<CoreServices['data']['forShared']>,
-): Promise<PhotoHandlerResult | void> {
+): Promise<PhotoHandlerResult | undefined> {
 	const items = await parsePantryFromPhoto(services, ctx.photo, ctx.mimeType);
 
 	if (items.length === 0) {
@@ -294,11 +302,12 @@ async function handlePantryPhoto(
 		await savePantry(store, updated);
 	});
 
-	const itemNames = items.map((i) => `• ${escapeMarkdown(i.name)} (${escapeMarkdown(i.quantity)})`).join('\n');
+	const itemNames = items
+		.map((i) => `• ${escapeMarkdown(i.name)} (${escapeMarkdown(i.quantity)})`)
+		.join('\n');
 	await services.telegram.send(
 		ctx.userId,
-		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}\n\n` +
-		'Not quite right? Say "remove [item] from pantry" to fix.',
+		`📸 Added ${items.length} items to pantry from photo:\n\n${itemNames}\n\nNot quite right? Say "remove [item] from pantry" to fix.`,
 	);
 
 	return { photoSummary: buildPantrySummary(items) };
@@ -308,14 +317,14 @@ async function handleGroceryPhoto(
 	services: CoreServices,
 	ctx: PhotoContext,
 	resolved: ResolvedFoodStore,
-): Promise<PhotoHandlerResult | void> {
+): Promise<PhotoHandlerResult | undefined> {
 	const store = resolved.store;
 	const result = await parseGroceryFromPhoto(services, ctx.photo, ctx.mimeType, ctx.caption);
 
 	if (result.items.length === 0) {
 		await services.telegram.send(
 			ctx.userId,
-			'I couldn\'t extract any items from that photo. Try taking a clearer photo.',
+			"I couldn't extract any items from that photo. Try taking a clearer photo.",
 		);
 		return;
 	}
@@ -342,7 +351,10 @@ async function handleGroceryPhoto(
 		});
 	} catch (err) {
 		services.logger.error('Failed to save grocery list from photo: %s', err);
-		await services.telegram.send(ctx.userId, '⚠️ I recognised the items but couldn\'t save the grocery list. Please try again.');
+		await services.telegram.send(
+			ctx.userId,
+			"⚠️ I recognised the items but couldn't save the grocery list. Please try again.",
+		);
 		return;
 	}
 
@@ -355,18 +367,24 @@ async function handleGroceryPhoto(
 		scope: resolved.scope,
 	});
 
-	const itemNames = result.items.map((i) => {
-		const qty = i.quantity != null ? ` (${i.quantity}${i.unit ? ' ' + escapeMarkdown(i.unit) : ''})` : '';
-		return `• ${escapeMarkdown(i.name)}${qty}`;
-	}).join('\n');
+	const itemNames = result.items
+		.map((i) => {
+			const qty =
+				i.quantity != null ? ` (${i.quantity}${i.unit ? ` ${escapeMarkdown(i.unit)}` : ''})` : '';
+			return `• ${escapeMarkdown(i.name)}${qty}`;
+		})
+		.join('\n');
 	let message = `🛒 Added ${result.items.length} items to grocery list from photo:\n\n${itemNames}`;
 
 	// F19: validate recipe shape before saveRecipe() to prevent partial side effects
 	if (result.isRecipe && result.parsedRecipe) {
 		const pr = result.parsedRecipe;
-		const recipeValid = pr.title?.trim() &&
-			Array.isArray(pr.ingredients) && pr.ingredients.length > 0 &&
-			Array.isArray(pr.instructions) && pr.instructions.length > 0;
+		const recipeValid =
+			pr.title?.trim() &&
+			Array.isArray(pr.ingredients) &&
+			pr.ingredients.length > 0 &&
+			Array.isArray(pr.instructions) &&
+			pr.instructions.length > 0;
 
 		if (recipeValid) {
 			try {
@@ -374,10 +392,10 @@ async function handleGroceryPhoto(
 				message += `\n\n📖 Also saved as recipe: *${escapeMarkdown(recipe.title)}* (draft)`;
 			} catch (err) {
 				services.logger.error('Failed to save recipe from grocery photo: %s', err);
-				message += '\n\n⚠️ I spotted a recipe but couldn\'t save it completely.';
+				message += "\n\n⚠️ I spotted a recipe but couldn't save it completely.";
 			}
 		} else {
-			message += '\n\n⚠️ I spotted a recipe but couldn\'t parse it completely.';
+			message += "\n\n⚠️ I spotted a recipe but couldn't parse it completely.";
 		}
 	}
 

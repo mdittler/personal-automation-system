@@ -267,6 +267,17 @@ export interface Receipt {
 	total: number;
 	photoPath: string; // path to original photo in data store
 	capturedAt: string; // ISO datetime — canonical sort authority
+	priceUpdates?: ReceiptPriceUpdate[];
+}
+
+export interface ReceiptPriceUpdate {
+	receiptName: string;
+	normalizedName: string;
+	price: number;
+	status: 'added' | 'updated';
+	department: string;
+	unit: string;
+	updatedAt: string;
 }
 
 // ─── Cost Tracking Types (H10) ─────────────────────────────────
@@ -408,15 +419,15 @@ export interface MacroTargets {
 export type EstimationKind = 'recipe' | 'quick-meal' | 'llm-ad-hoc' | 'manual';
 
 export interface QuickMealTemplate {
-	id: string;                  // slugified label
+	id: string; // slugified label
 	userId: string;
 	label: string;
 	kind: 'home' | 'restaurant' | 'other';
-	ingredients: string[];       // free text, one per line
+	ingredients: string[]; // free text, one per line
 	notes?: string;
-	estimatedMacros: MacroData;  // LLM-computed at save time
-	confidence: number;          // 0.0-1.0
-	llmModel: string;            // audit trail (model id)
+	estimatedMacros: MacroData; // LLM-computed at save time
+	confidence: number; // 0.0-1.0
+	llmModel: string; // audit trail (model id)
 	usdaCrossCheck?: {
 		calories: number;
 		matchedIngredients: number;
@@ -531,9 +542,9 @@ export interface FixedDateRule {
 
 export interface NthWeekdayDateRule {
 	type: 'nthWeekday';
-	month: number;   // 1-12
+	month: number; // 1-12
 	weekday: number; // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-	n: number;       // 1-based occurrence (4 = 4th occurrence)
+	n: number; // 1-based occurrence (4 = 4th occurrence)
 }
 
 export interface EasterDateRule {

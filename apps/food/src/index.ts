@@ -17,9 +17,11 @@ import type {
 	PhotoContext,
 } from '@pas/core/types';
 import type { ScopedDataStore } from '@pas/core/types';
-import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { formatDataAnswer } from '@pas/core/utils/data-answer-formatter';
+import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import { stringify } from 'yaml';
+import { emitRecipeScheduled } from './events/emitters.js';
+import { registerHealthSubscribers } from './events/subscribers.js';
 import {
 	handleBudgetCommand as handleBudgetCmd,
 	isBudgetViewIntent,
@@ -35,6 +37,11 @@ import {
 	isCookModeActive,
 } from './handlers/cook-mode.js';
 import {
+	handleCulturalCalendarJob,
+	handleCulturalCalendarMessage,
+	isCulturalCalendarIntent,
+} from './handlers/cultural-calendar-handler.js';
+import {
 	buildRecipeApprovalButtons,
 	handleApprovalCallback,
 	handleChildApprovalIntent,
@@ -47,29 +54,33 @@ import {
 	isKidAdaptIntent,
 } from './handlers/family.js';
 import { handleFreezerCallback, handleFreezerCheckJob } from './handlers/freezer-handler.js';
+import {
+	beginGuestAddFlow,
+	cancelGuestAddFlow,
+	handleGuestAddCallback,
+	handleGuestAddReply,
+	hasPendingGuestAdd,
+} from './handlers/guest-add-flow.js';
+import { handleHealthCorrelation, isHealthCorrelationIntent } from './handlers/health.js';
 import { handleHostingCommand as handleHostingCmd, isHostingIntent } from './handlers/hosting.js';
 import { handleLeftoverCallback, handleLeftoverCheckJob } from './handlers/leftover-handler.js';
 import { handleWeeklyNutritionSummaryJob } from './handlers/nutrition-summary.js';
 import {
-	handleNutritionCommand as handleNutritionCmd,
-	handleNutritionLogNL,
 	handleAdHocPromotionCallback,
 	handleAdherencePeriodCallback,
+	handleNutritionCommand as handleNutritionCmd,
+	handleNutritionLogNL,
 	handleRecipeLogCallback,
 	isAdherenceIntent,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
 	isTargetsSetIntent,
 } from './handlers/nutrition.js';
-import { handleHealthCorrelation, isHealthCorrelationIntent } from './handlers/health.js';
 import {
-	isCulturalCalendarIntent,
-	handleCulturalCalendarMessage,
-	handleCulturalCalendarJob,
-} from './handlers/cultural-calendar-handler.js';
-import { correlateHealth } from './services/health-correlator.js';
-import { emitRecipeScheduled } from './events/emitters.js';
-import { registerHealthSubscribers } from './events/subscribers.js';
+	handlePerishableCallback,
+	handlePerishableCheckJob,
+} from './handlers/perishable-handler.js';
+import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
 import {
 	beginQuickMealAdd,
 	handleQuickMealAddCallback,
@@ -79,25 +90,7 @@ import {
 	hasPendingQuickMealAdd,
 	hasPendingQuickMealEdit,
 } from './handlers/quick-meal-flow.js';
-import {
-	beginTargetsFlow,
-	hasPendingTargetsFlow,
-	handleTargetsFlowReply,
-	handleTargetsFlowCallback,
-} from './handlers/targets-flow.js';
-import {
-	beginGuestAddFlow,
-	hasPendingGuestAdd,
-	handleGuestAddReply,
-	handleGuestAddCallback,
-	cancelGuestAddFlow,
-} from './handlers/guest-add-flow.js';
 import { handleQuickMealLogCallback } from './handlers/quick-meal-log.js';
-import {
-	handlePerishableCallback,
-	handlePerishableCheckJob,
-} from './handlers/perishable-handler.js';
-import { handlePhoto as handlePhotoDispatch } from './handlers/photo.js';
 import {
 	handleCookedCallback,
 	handleNightlyRatingPromptJob,
@@ -111,10 +104,27 @@ import {
 	scheduleShoppingFollowup,
 } from './handlers/shopping-followup.js';
 import {
+	beginTargetsFlow,
+	handleTargetsFlowCallback,
+	handleTargetsFlowReply,
+	hasPendingTargetsFlow,
+} from './handlers/targets-flow.js';
+import {
 	handleFinalizeVotesJob,
 	handleVoteCallback,
 	sendVotingMessages,
 } from './handlers/voting.js';
+import { dispatchByRoute } from './routing/dispatch.js';
+import { FoodShadowClassifier } from './routing/shadow-classifier.js';
+import { dispatchShadow } from './routing/shadow-dispatch.js';
+import { finalizeShadow, initShadowDeps, startShadow } from './routing/shadow-integration.js';
+import type { ShadowResult } from './routing/shadow-logger.js';
+import { FoodShadowLogger } from './routing/shadow-logger.js';
+import {
+	FOOD_SHADOW_LABELS,
+	SHADOW_LABELS_WITHOUT_TEXT_HANDLER,
+} from './routing/shadow-taxonomy.js';
+import type { FoodShadowLabel } from './routing/shadow-taxonomy.js';
 import {
 	analyzeBatchPrep,
 	buildBatchFreezeButtons,
@@ -126,18 +136,6 @@ import { listWeeklyHistories, loadWeeklyHistory } from './services/budget-report
 import { getSession } from './services/cook-session.js';
 import { estimateGroceryListCost, estimatePlanCost } from './services/cost-estimator.js';
 import { checkCuisineDiversity } from './services/cuisine-tracker.js';
-import { dispatchByRoute } from './routing/dispatch.js';
-import { dispatchShadow } from './routing/shadow-dispatch.js';
-import { FoodShadowClassifier } from './routing/shadow-classifier.js';
-import type { ShadowResult } from './routing/shadow-logger.js';
-import { FoodShadowLogger } from './routing/shadow-logger.js';
-import { FOOD_SHADOW_LABELS, SHADOW_LABELS_WITHOUT_TEXT_HANDLER } from './routing/shadow-taxonomy.js';
-import type { FoodShadowLabel } from './routing/shadow-taxonomy.js';
-import {
-	finalizeShadow,
-	initShadowDeps,
-	startShadow,
-} from './routing/shadow-integration.js';
 import { loadAllChildren, loadChildProfile } from './services/family-profiles.js';
 import {
 	addFreezerItem,
@@ -163,6 +161,7 @@ import {
 	withGroceryLock,
 } from './services/grocery-store.js';
 import { formatGuestList, loadGuests, removeGuest } from './services/guest-profiles.js';
+import { correlateHealth } from './services/health-correlator.js';
 import {
 	createHousehold,
 	getHouseholdInfo,
@@ -179,8 +178,8 @@ import {
 	saveLeftovers,
 	withLeftoverLock,
 } from './services/leftover-store.js';
-import { autoLogFromCookedMeal } from './services/macro-tracker.js';
 import { findLeftoverRecipeSuggestions } from './services/leftover-suggestions.js';
+import { autoLogFromCookedMeal } from './services/macro-tracker.js';
 import {
 	archivePlan,
 	buildPlanButtons,
@@ -215,6 +214,22 @@ import {
 	saveStorePrices,
 	withPriceLock,
 } from './services/price-store.js';
+import {
+	extractPriceItem,
+	findLatestReceipt,
+	findMentionedPriceStore,
+	findMentionedReceiptStore,
+	formatCheapestPriceAnswer,
+	formatReceiptDetails,
+	formatStorePriceAnswer,
+	formatStoreSpendingAnswer,
+	isPriceLookupIntent,
+	isReceiptQueryIntent,
+	isStoreSpendingIntent,
+	loadAllStorePrices,
+	loadReceipts,
+	loadRecentReceiptFromPaths,
+} from './services/receipt-query.js';
 import { applyRecipeEdit, parseRecipeText } from './services/recipe-parser.js';
 import {
 	EDITABLE_RECIPE_FIELDS,
@@ -344,36 +359,42 @@ async function requireHouseholdOrMessage(
 }
 
 const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
-	'user wants to know what\'s for dinner':
-		(ctx) => handleWhatsForDinner(ctx),
-	'user wants to start cooking a recipe':
-		(ctx) => handleCookIntent(services, ctx.text, ctx),
-	'user wants to know what they can make with what they have':
-		(ctx) => handleWhatCanIMake(ctx),
-	'user wants to set or change their nutrition or macro targets':
-		async (ctx) => { await beginTargetsFlow(services, ctx.userId); },
-	'user wants to see how well they are hitting their macro targets over time':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
-		},
-	'user wants to understand how their diet is affecting their health or energy':
-		(ctx) => handleHealthCorrelation(services, ctx),
-	'user wants holiday or cultural recipe suggestions':
-		(ctx) => handleCulturalCalendarMessage(services, ctx),
-	'user wants to plan for hosting guests':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
-		},
-	'user wants to see food spending':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
-		},
+	"user wants to know what's for dinner": (ctx) => handleWhatsForDinner(ctx),
+	'user wants to start cooking a recipe': (ctx) => handleCookIntent(services, ctx.text, ctx),
+	'user wants to know what they can make with what they have': (ctx) => handleWhatCanIMake(ctx),
+	'user wants to set or change their nutrition or macro targets': async (ctx) => {
+		await beginTargetsFlow(services, ctx.userId);
+	},
+	'user wants to see how well they are hitting their macro targets over time': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
+	},
+	'user wants to understand how their diet is affecting their health or energy': (ctx) =>
+		handleHealthCorrelation(services, ctx),
+	'user wants holiday or cultural recipe suggestions': (ctx) =>
+		handleCulturalCalendarMessage(services, ctx),
+	'user wants to plan for hosting guests': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
+	},
+	'user wants to see food spending': async (ctx) => {
+		if (await handleStoreSpendingIfIntent(ctx.text, ctx, true)) return;
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+	},
+	'user wants to see receipt details or look up items from a receipt': (ctx) =>
+		handleReceiptQueryIfIntent(ctx.text, ctx, true).then(() => undefined),
+	'user asks about prices at a specific store': async (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		if (isPriceUpdateIntent(lower)) {
+			await handlePriceUpdateIntent(ctx.text, ctx);
+			return;
+		}
+		await handlePriceLookupIfIntent(ctx.text, ctx, true);
+	},
 };
 
 // ─── Shadow-Primary Dispatch Table (LLM Enhancement #2 Chunk D) ─────────────
@@ -381,143 +402,165 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 // Excludes: 'none' (fall-through), SHADOW_LABELS_WITHOUT_TEXT_HANDLER (blocklist).
 // INTENTIONALLY_UNMAPPED_LABELS are mapped to their nearest handler.
 // Parity enforced by shadow-handlers-parity.test.ts.
-export const SHADOW_HANDLERS: Partial<Record<FoodShadowLabel, (ctx: MessageContext) => Promise<void>>> = {
-	'user wants to save a recipe':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			return isEditRecipeIntent(lower) ? handleEditRecipe(ctx.text, ctx) : handleSaveRecipe(ctx.text, ctx);
-		},
-	'user wants to search for a recipe':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			return isRecipePhotoIntent(lower) ? handleRecipePhotoRetrieval(ctx.text, ctx) : handleSearchRecipe(ctx.text, ctx);
-		},
-	'user wants to plan meals for the week':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			// Match regex cascade order: swap → generate → view
-			if (isMealSwapIntent(lower)) return handleMealSwap(ctx.text, ctx);
-			return isMealPlanGenerateIntent(lower) ? handleMealPlanGenerate(ctx) : handleMealPlanView(ctx);
-		},
-	'user wants to see or modify the grocery list':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			return isGroceryGenerateIntent(lower) ? handleGroceryGenerate(ctx.text, ctx) : handleGroceryView(ctx);
-		},
-	'user wants to add items to the grocery list':
-		(ctx) => handleGroceryAdd(ctx.text, ctx),
-	"user wants to know what's for dinner":
-		(ctx) => handleWhatsForDinner(ctx),
-	'user has a food-related question':
-		(ctx) => handleFoodQuestion(ctx.text, ctx),
-	'user wants to start cooking a recipe':
-		(ctx) => handleCookIntent(services, ctx.text, ctx),
-	'user wants to check or update the pantry':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			// Match regex cascade order: freezer_add → freezer_view → pantry_add → pantry_remove → pantry_view
-			if (isFreezerAddIntent(lower)) return handleFreezerAddIntent(ctx.text, ctx);
-			if (isFreezerViewIntent(lower)) return handleFreezerView(ctx);
-			if (isPantryAddIntent(lower)) return handlePantryAdd(ctx.text, ctx);
-			if (isPantryRemoveIntent(lower)) return handlePantryRemove(ctx.text, ctx);
-			return handlePantryView(ctx);
-		},
-	'user wants to log leftovers':
-		(ctx) => {
-			const lower = ctx.text.toLowerCase();
-			// Match regex cascade order: add → suggest → view → waste
-			if (isLeftoverAddIntent(lower)) return handleLeftoverAddIntent(ctx.text, ctx);
-			if (isLeftoverSuggestionIntent(lower)) return handleLeftoverSuggestions(ctx);
-			if (isLeftoverViewIntent(lower)) return handleLeftoversView(ctx);
-			if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
-			return handleLeftoversView(ctx);
-		},
-	'user wants to plan for hosting guests':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
-		},
-	'user wants to see food spending':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
-		},
-	'user asks about prices at a specific store':
-		(ctx) => handlePriceUpdateIntent(ctx.text, ctx),
-	'user wants to see nutrition information':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
-		},
-	'user wants to know what they can make with what they have':
-		(ctx) => handleWhatCanIMake(ctx),
-	'user wants to adapt a recipe for a child':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
-			if (!adaptEnabled) {
-				await services.telegram.send(ctx.userId, 'Kid meal adaptation is disabled. Enable it in your Food settings.');
-				return;
-			}
-			const cached = lastSearchResults.get(ctx.userId);
-			const recipe = cached?.[0] ?? null;
-			const allRecipes = await loadAllRecipes(hh.sharedStore);
-			const msg = await handleKidAdaptIntent(services, ctx.text, ctx.userId, hh.sharedStore, recipe, allRecipes);
-			if (msg) await services.telegram.send(ctx.userId, msg);
-		},
-	'user wants to log a new food introduction for a child':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			const waitDays = ((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
-			const result = await handleFoodIntroduction(services, ctx.text, ctx.userId, hh.sharedStore, waitDays);
-			if (result.buttons) {
-				await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
-			} else {
-				await services.telegram.send(ctx.userId, result.text);
-			}
-		},
-	'user wants to tag a recipe as kid-approved or rejected':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			const allChildren = await loadAllChildren(hh.sharedStore);
-			const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
-			const allRecipes = await loadAllRecipes(hh.sharedStore);
-			const msg = await handleChildApprovalIntent(services, ctx.text, hh.sharedStore, allRecipes, childNames);
-			if (msg) await services.telegram.send(ctx.userId, msg);
-		},
-	'user wants to log a meal they cooked by name with an optional portion':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
-		},
+export const SHADOW_HANDLERS: Partial<
+	Record<FoodShadowLabel, (ctx: MessageContext) => Promise<void>>
+> = {
+	'user wants to save a recipe': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		return isEditRecipeIntent(lower)
+			? handleEditRecipe(ctx.text, ctx)
+			: handleSaveRecipe(ctx.text, ctx);
+	},
+	'user wants to search for a recipe': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		return isRecipePhotoIntent(lower)
+			? handleRecipePhotoRetrieval(ctx.text, ctx)
+			: handleSearchRecipe(ctx.text, ctx);
+	},
+	'user wants to plan meals for the week': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		// Match regex cascade order: swap → generate → view
+		if (isMealSwapIntent(lower)) return handleMealSwap(ctx.text, ctx);
+		return isMealPlanGenerateIntent(lower) ? handleMealPlanGenerate(ctx) : handleMealPlanView(ctx);
+	},
+	'user wants to see or modify the grocery list': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		return isGroceryGenerateIntent(lower)
+			? handleGroceryGenerate(ctx.text, ctx)
+			: handleGroceryView(ctx);
+	},
+	'user wants to add items to the grocery list': (ctx) => handleGroceryAdd(ctx.text, ctx),
+	"user wants to know what's for dinner": (ctx) => handleWhatsForDinner(ctx),
+	'user has a food-related question': (ctx) => handleFoodQuestion(ctx.text, ctx),
+	'user wants to start cooking a recipe': (ctx) => handleCookIntent(services, ctx.text, ctx),
+	'user wants to check or update the pantry': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		// Match regex cascade order: freezer_add → freezer_view → pantry_add → pantry_remove → pantry_view
+		if (isFreezerAddIntent(lower)) return handleFreezerAddIntent(ctx.text, ctx);
+		if (isFreezerViewIntent(lower)) return handleFreezerView(ctx);
+		if (isPantryAddIntent(lower)) return handlePantryAdd(ctx.text, ctx);
+		if (isPantryRemoveIntent(lower)) return handlePantryRemove(ctx.text, ctx);
+		return handlePantryView(ctx);
+	},
+	'user wants to log leftovers': (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		// Match regex cascade order: add → suggest → view → waste
+		if (isLeftoverAddIntent(lower)) return handleLeftoverAddIntent(ctx.text, ctx);
+		if (isLeftoverSuggestionIntent(lower)) return handleLeftoverSuggestions(ctx);
+		if (isLeftoverViewIntent(lower)) return handleLeftoversView(ctx);
+		if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
+		return handleLeftoversView(ctx);
+	},
+	'user wants to plan for hosting guests': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
+	},
+	'user wants to see food spending': async (ctx) => {
+		if (await handleStoreSpendingIfIntent(ctx.text, ctx, true)) return;
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+	},
+	'user wants to see receipt details or look up items from a receipt': (ctx) =>
+		handleReceiptQueryIfIntent(ctx.text, ctx, true).then(() => undefined),
+	'user asks about prices at a specific store': async (ctx) => {
+		const lower = ctx.text.toLowerCase();
+		if (isPriceUpdateIntent(lower)) {
+			await handlePriceUpdateIntent(ctx.text, ctx);
+			return;
+		}
+		await handlePriceLookupIfIntent(ctx.text, ctx, true);
+	},
+	'user wants to see nutrition information': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
+	},
+	'user wants to know what they can make with what they have': (ctx) => handleWhatCanIMake(ctx),
+	'user wants to adapt a recipe for a child': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
+		if (!adaptEnabled) {
+			await services.telegram.send(
+				ctx.userId,
+				'Kid meal adaptation is disabled. Enable it in your Food settings.',
+			);
+			return;
+		}
+		const cached = lastSearchResults.get(ctx.userId);
+		const recipe = cached?.[0] ?? null;
+		const allRecipes = await loadAllRecipes(hh.sharedStore);
+		const msg = await handleKidAdaptIntent(
+			services,
+			ctx.text,
+			ctx.userId,
+			hh.sharedStore,
+			recipe,
+			allRecipes,
+		);
+		if (msg) await services.telegram.send(ctx.userId, msg);
+	},
+	'user wants to log a new food introduction for a child': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		const waitDays =
+			((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
+		const result = await handleFoodIntroduction(
+			services,
+			ctx.text,
+			ctx.userId,
+			hh.sharedStore,
+			waitDays,
+		);
+		if (result.buttons) {
+			await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
+		} else {
+			await services.telegram.send(ctx.userId, result.text);
+		}
+	},
+	'user wants to tag a recipe as kid-approved or rejected': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		const allChildren = await loadAllChildren(hh.sharedStore);
+		const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
+		const allRecipes = await loadAllRecipes(hh.sharedStore);
+		const msg = await handleChildApprovalIntent(
+			services,
+			ctx.text,
+			hh.sharedStore,
+			allRecipes,
+			childNames,
+		);
+		if (msg) await services.telegram.send(ctx.userId, msg);
+	},
+	'user wants to log a meal they cooked by name with an optional portion': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
+	},
 	// Unmapped → nearest-handler decisions (per Chunk D design)
-	'user wants to log an unfamiliar meal with a free-text description':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
-		},
-	'user wants to save a frequent meal as a quick-meal template':
-		async (ctx) => { await beginQuickMealAdd(services, ctx.userId); },
-	'user wants to set or change their nutrition or macro targets':
-		async (ctx) => { await beginTargetsFlow(services, ctx.userId); },
-	'user wants to see how well they are hitting their macro targets over time':
-		async (ctx) => {
-			const hh = await requireHouseholdOrMessage(ctx);
-			if (!hh) return;
-			await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
-		},
-	'user wants to understand how their diet is affecting their health or energy':
-		(ctx) => handleHealthCorrelation(services, ctx),
-	'user wants holiday or cultural recipe suggestions':
-		(ctx) => handleCulturalCalendarMessage(services, ctx),
+	'user wants to log an unfamiliar meal with a free-text description': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleNutritionLogNL(services, ctx.text, ctx.userId, hh.sharedStore);
+	},
+	'user wants to save a frequent meal as a quick-meal template': async (ctx) => {
+		await beginQuickMealAdd(services, ctx.userId);
+	},
+	'user wants to set or change their nutrition or macro targets': async (ctx) => {
+		await beginTargetsFlow(services, ctx.userId);
+	},
+	'user wants to see how well they are hitting their macro targets over time': async (ctx) => {
+		const hh = await requireHouseholdOrMessage(ctx);
+		if (!hh) return;
+		await handleNutritionCmd(services, ['adherence'], ctx.userId, hh.sharedStore);
+	},
+	'user wants to understand how their diet is affecting their health or energy': (ctx) =>
+		handleHealthCorrelation(services, ctx),
+	'user wants holiday or cultural recipe suggestions': (ctx) =>
+		handleCulturalCalendarMessage(services, ctx),
 };
 
 const SHADOW_LABELS_WITHOUT_TEXT_HANDLER_SET = new Set<string>(SHADOW_LABELS_WITHOUT_TEXT_HANDLER);
@@ -531,7 +574,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (!text) {
 		void finalizeShadow(
 			Promise.resolve<ShadowResult>({ kind: 'skipped-no-caption' }),
-			ctx, 'help_fallthrough', undefined, services.logger,
+			ctx,
+			'help_fallthrough',
+			undefined,
+			services.logger,
 		);
 		return;
 	}
@@ -555,7 +601,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			}
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'photo-select' }),
-				ctx, 'pending_flow_consumed', undefined, services.logger,
+				ctx,
+				'pending_flow_consumed',
+				undefined,
+				services.logger,
 			);
 			return;
 		}
@@ -567,7 +616,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 				await sendRecipeWithApproval(ctx.userId, selected, formatRecipe(selected));
 				void finalizeShadow(
 					Promise.resolve<ShadowResult>({ kind: 'skipped-number-select' }),
-					ctx, 'pending_flow_consumed', undefined, services.logger,
+					ctx,
+					'pending_flow_consumed',
+					undefined,
+					services.logger,
 				);
 				return;
 			}
@@ -580,7 +632,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) {
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-cook-mode' }),
-				ctx, 'pending_flow_consumed', undefined, services.logger,
+				ctx,
+				'pending_flow_consumed',
+				undefined,
+				services.logger,
 			);
 			return;
 		}
@@ -591,7 +646,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		await handleServingsReply(services, text, ctx);
 		void finalizeShadow(
 			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'cook-servings' }),
-			ctx, 'pending_flow_consumed', 'cook-servings', services.logger,
+			ctx,
+			'pending_flow_consumed',
+			'cook-servings',
+			services.logger,
 		);
 		return;
 	}
@@ -601,7 +659,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		await handlePendingLeftoverAdd(text, ctx);
 		void finalizeShadow(
 			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'leftover-add' }),
-			ctx, 'pending_flow_consumed', 'leftover-add', services.logger,
+			ctx,
+			'pending_flow_consumed',
+			'leftover-add',
+			services.logger,
 		);
 		return;
 	}
@@ -611,7 +672,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		await handlePendingFreezerAdd(text, ctx);
 		void finalizeShadow(
 			Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'freezer-add' }),
-			ctx, 'pending_flow_consumed', 'freezer-add', services.logger,
+			ctx,
+			'pending_flow_consumed',
+			'freezer-add',
+			services.logger,
 		);
 		return;
 	}
@@ -623,7 +687,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) {
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'quickmeal-add' }),
-				ctx, 'pending_flow_consumed', 'quickmeal-add', services.logger,
+				ctx,
+				'pending_flow_consumed',
+				'quickmeal-add',
+				services.logger,
 			);
 			return;
 		}
@@ -636,7 +703,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) {
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'quickmeal-edit' }),
-				ctx, 'pending_flow_consumed', 'quickmeal-edit', services.logger,
+				ctx,
+				'pending_flow_consumed',
+				'quickmeal-edit',
+				services.logger,
 			);
 			return;
 		}
@@ -649,7 +719,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) {
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'targets-set' }),
-				ctx, 'pending_flow_consumed', 'targets-set', services.logger,
+				ctx,
+				'pending_flow_consumed',
+				'targets-set',
+				services.logger,
 			);
 			return;
 		}
@@ -661,10 +734,16 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (!hhForGuest) {
 			// Household dissolved — cancel the in-progress flow so it doesn't leak
 			cancelGuestAddFlow(ctx.userId);
-			await services.telegram.send(ctx.userId, 'Guest setup cancelled — household no longer found.');
+			await services.telegram.send(
+				ctx.userId,
+				'Guest setup cancelled — household no longer found.',
+			);
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'guest-add' }),
-				ctx, 'pending_flow_consumed', 'guest-add', services.logger,
+				ctx,
+				'pending_flow_consumed',
+				'guest-add',
+				services.logger,
 			);
 			return;
 		}
@@ -672,7 +751,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (handled) {
 			void finalizeShadow(
 				Promise.resolve<ShadowResult>({ kind: 'skipped-pending-flow', flow: 'guest-add' }),
-				ctx, 'pending_flow_consumed', 'guest-add', services.logger,
+				ctx,
+				'pending_flow_consumed',
+				'guest-add',
+				services.logger,
 			);
 			return;
 		}
@@ -683,7 +765,10 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (await dispatchByRoute(ctx, ROUTE_HANDLERS, { logger: services.logger })) {
 		void finalizeShadow(
 			Promise.resolve<ShadowResult>({ kind: 'legacy-skipped' }),
-			ctx, '(route-dispatched)', undefined, services.logger,
+			ctx,
+			'(route-dispatched)',
+			undefined,
+			services.logger,
 		);
 		return;
 	}
@@ -702,11 +787,20 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 	if (primary === 'shadow') {
 		const shadow = await startShadow(ctx.text, sampleRate);
 		preAwaitedShadow = shadow;
-		const outcome = await dispatchShadow(ctx, shadow, minConfidence, SHADOW_HANDLERS, SHADOW_LABELS_WITHOUT_TEXT_HANDLER_SET);
+		const outcome = await dispatchShadow(
+			ctx,
+			shadow,
+			minConfidence,
+			SHADOW_HANDLERS,
+			SHADOW_LABELS_WITHOUT_TEXT_HANDLER_SET,
+		);
 		if (outcome.dispatched) {
 			void finalizeShadow(
 				Promise.resolve(shadow),
-				ctx, '(shadow-dispatched)', undefined, services.logger,
+				ctx,
+				'(shadow-dispatched)',
+				undefined,
+				services.logger,
 			);
 			return;
 		}
@@ -715,409 +809,435 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 
 	// Regex cascade: reuse preAwaitedShadow if available (shadow-primary fall-through),
 	// otherwise kick off a fresh shadow classify call in parallel.
-	const shadowPromise = preAwaitedShadow !== undefined
-		? Promise.resolve(preAwaitedShadow)
-		: startShadow(ctx.text, sampleRate);
+	const shadowPromise =
+		preAwaitedShadow !== undefined
+			? Promise.resolve(preAwaitedShadow)
+			: startShadow(ctx.text, sampleRate);
 	let regexWinner = 'help_fallthrough';
 
 	// Try to detect intent from the message
 	const lower = text.toLowerCase();
 	try {
+		// Recipe save intent
+		if (isSaveRecipeIntent(lower)) {
+			regexWinner = 'save_recipe';
+			await handleSaveRecipe(text, ctx);
+			return;
+		}
 
-	// Recipe save intent
-	if (isSaveRecipeIntent(lower)) {
-		regexWinner = 'save_recipe';
-		await handleSaveRecipe(text, ctx);
-		return;
-	}
+		// H8: Recipe photo retrieval intent
+		if (isRecipePhotoIntent(lower)) {
+			regexWinner = 'recipe_photo';
+			await handleRecipePhotoRetrieval(text, ctx);
+			return;
+		}
 
-	// H8: Recipe photo retrieval intent
-	if (isRecipePhotoIntent(lower)) {
-		regexWinner = 'recipe_photo';
-		await handleRecipePhotoRetrieval(text, ctx);
-		return;
-	}
+		// Recipe search intent
+		if (isSearchRecipeIntent(lower)) {
+			regexWinner = 'search_recipe';
+			await handleSearchRecipe(text, ctx);
+			return;
+		}
 
-	// Recipe search intent
-	if (isSearchRecipeIntent(lower)) {
-		regexWinner = 'search_recipe';
-		await handleSearchRecipe(text, ctx);
-		return;
-	}
+		// Recipe edit intent
+		if (isEditRecipeIntent(lower)) {
+			regexWinner = 'edit_recipe';
+			await handleEditRecipe(text, ctx);
+			return;
+		}
 
-	// Recipe edit intent
-	if (isEditRecipeIntent(lower)) {
-		regexWinner = 'edit_recipe';
-		await handleEditRecipe(text, ctx);
-		return;
-	}
+		// Meal plan generate intent (before view — "plan meals" vs "show plan")
+		if (isMealPlanGenerateIntent(lower)) {
+			regexWinner = 'meal_plan_generate';
+			await handleMealPlanGenerate(ctx);
+			return;
+		}
 
-	// Meal plan generate intent (before view — "plan meals" vs "show plan")
-	if (isMealPlanGenerateIntent(lower)) {
-		regexWinner = 'meal_plan_generate';
-		await handleMealPlanGenerate(ctx);
-		return;
-	}
+		// Meal plan view intent
+		if (isMealPlanViewIntent(lower)) {
+			regexWinner = 'meal_plan_view';
+			await handleMealPlanView(ctx);
+			return;
+		}
 
-	// Meal plan view intent
-	if (isMealPlanViewIntent(lower)) {
-		regexWinner = 'meal_plan_view';
-		await handleMealPlanView(ctx);
-		return;
-	}
+		// What's for dinner intent
+		if (isWhatsForDinnerIntent(lower)) {
+			regexWinner = 'whats_for_dinner';
+			await handleWhatsForDinner(ctx);
+			return;
+		}
 
-	// What's for dinner intent
-	if (isWhatsForDinnerIntent(lower)) {
-		regexWinner = 'whats_for_dinner';
-		await handleWhatsForDinner(ctx);
-		return;
-	}
+		// What can I make intent
+		if (isWhatCanIMakeIntent(lower)) {
+			regexWinner = 'what_can_i_make';
+			await handleWhatCanIMake(ctx);
+			return;
+		}
 
-	// What can I make intent
-	if (isWhatCanIMakeIntent(lower)) {
-		regexWinner = 'what_can_i_make';
-		await handleWhatCanIMake(ctx);
-		return;
-	}
+		// Meal swap intent
+		if (isMealSwapIntent(lower)) {
+			regexWinner = 'meal_swap';
+			await handleMealSwap(text, ctx);
+			return;
+		}
 
-	// Meal swap intent
-	if (isMealSwapIntent(lower)) {
-		regexWinner = 'meal_swap';
-		await handleMealSwap(text, ctx);
-		return;
-	}
+		// H6: Leftover intents
+		if (isLeftoverAddIntent(lower)) {
+			regexWinner = 'leftover_add';
+			await handleLeftoverAddIntent(text, ctx);
+			return;
+		}
 
-	// H6: Leftover intents
-	if (isLeftoverAddIntent(lower)) {
-		regexWinner = 'leftover_add';
-		await handleLeftoverAddIntent(text, ctx);
-		return;
-	}
+		if (isLeftoverSuggestionIntent(lower)) {
+			regexWinner = 'leftover_suggest';
+			await handleLeftoverSuggestions(ctx);
+			return;
+		}
 
-	if (isLeftoverSuggestionIntent(lower)) {
-		regexWinner = 'leftover_suggest';
-		await handleLeftoverSuggestions(ctx);
-		return;
-	}
+		if (isLeftoverViewIntent(lower)) {
+			regexWinner = 'leftover_view';
+			await handleLeftoversView(ctx);
+			return;
+		}
 
-	if (isLeftoverViewIntent(lower)) {
-		regexWinner = 'leftover_view';
-		await handleLeftoversView(ctx);
-		return;
-	}
+		// H6: Freezer intents
+		if (isFreezerAddIntent(lower)) {
+			regexWinner = 'freezer_add';
+			await handleFreezerAddIntent(text, ctx);
+			return;
+		}
 
-	// H6: Freezer intents
-	if (isFreezerAddIntent(lower)) {
-		regexWinner = 'freezer_add';
-		await handleFreezerAddIntent(text, ctx);
-		return;
-	}
+		if (isFreezerViewIntent(lower)) {
+			regexWinner = 'freezer_view';
+			await handleFreezerView(ctx);
+			return;
+		}
 
-	if (isFreezerViewIntent(lower)) {
-		regexWinner = 'freezer_view';
-		await handleFreezerView(ctx);
-		return;
-	}
+		// H6: Waste intent
+		if (isWasteIntent(lower)) {
+			regexWinner = 'waste_log';
+			await handleWasteIntent(text, ctx);
+			return;
+		}
 
-	// H6: Waste intent
-	if (isWasteIntent(lower)) {
-		regexWinner = 'waste_log';
-		await handleWasteIntent(text, ctx);
-		return;
-	}
+		// H9: Family intents — kid adaptation, food introduction, child approval (silent check, no error message)
+		{
+			const hh = await requireHousehold(services, ctx.userId);
+			if (hh) {
+				const allChildren = await loadAllChildren(hh.sharedStore);
+				const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
 
-	// H9: Family intents — kid adaptation, food introduction, child approval (silent check, no error message)
-	{
-		const hh = await requireHousehold(services, ctx.userId);
-		if (hh) {
-			const allChildren = await loadAllChildren(hh.sharedStore);
-			const childNames = allChildren.map((c) => c.profile.name.toLowerCase());
-
-			if (isKidAdaptIntent(lower, childNames)) {
-				const adaptEnabled = (await services.config.get<boolean>('child_meal_adaptation')) ?? true;
-				if (!adaptEnabled) {
-					await services.telegram.send(
+				if (isKidAdaptIntent(lower, childNames)) {
+					const adaptEnabled =
+						(await services.config.get<boolean>('child_meal_adaptation')) ?? true;
+					if (!adaptEnabled) {
+						await services.telegram.send(
+							ctx.userId,
+							'Kid meal adaptation is disabled. Enable it in your Food settings.',
+						);
+						regexWinner = 'kid_adapt';
+						return;
+					}
+					const cached = lastSearchResults.get(ctx.userId);
+					const recipe = cached?.[0] ?? null;
+					const allRecipes = await loadAllRecipes(hh.sharedStore);
+					const msg = await handleKidAdaptIntent(
+						services,
+						text,
 						ctx.userId,
-						'Kid meal adaptation is disabled. Enable it in your Food settings.',
+						hh.sharedStore,
+						recipe,
+						allRecipes,
 					);
-					regexWinner = 'kid_adapt';
+					if (msg) {
+						await services.telegram.send(ctx.userId, msg);
+						regexWinner = 'kid_adapt';
+						return;
+					}
+				}
+
+				if (isFoodIntroIntent(lower)) {
+					const waitDays =
+						((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
+					const result = await handleFoodIntroduction(
+						services,
+						text,
+						ctx.userId,
+						hh.sharedStore,
+						waitDays,
+					);
+					if (result.buttons) {
+						await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
+					} else {
+						await services.telegram.send(ctx.userId, result.text);
+					}
+					regexWinner = 'food_intro';
 					return;
 				}
-				const cached = lastSearchResults.get(ctx.userId);
-				const recipe = cached?.[0] ?? null;
-				const allRecipes = await loadAllRecipes(hh.sharedStore);
-				const msg = await handleKidAdaptIntent(
-					services,
-					text,
-					ctx.userId,
-					hh.sharedStore,
-					recipe,
-					allRecipes,
-				);
-				if (msg) {
-					await services.telegram.send(ctx.userId, msg);
-					regexWinner = 'kid_adapt';
-					return;
+
+				if (isChildApprovalIntent(lower, childNames)) {
+					const allRecipes = await loadAllRecipes(hh.sharedStore);
+					const msg = await handleChildApprovalIntent(
+						services,
+						text,
+						hh.sharedStore,
+						allRecipes,
+						childNames,
+					);
+					if (msg) {
+						await services.telegram.send(ctx.userId, msg);
+						regexWinner = 'child_approval';
+						return;
+					}
 				}
 			}
+		}
 
-			if (isFoodIntroIntent(lower)) {
-				const waitDays =
-					((await services.config.get<number>('allergen_wait_days')) as number | undefined) ?? 3;
-				const result = await handleFoodIntroduction(
-					services,
-					text,
+		// H10: Receipt follow-up/detail intent
+		if (await handleReceiptQueryIfIntent(text, ctx)) {
+			regexWinner = 'receipt_query';
+			return;
+		}
+
+		// H10: Price update intent — "eggs are $3.50 at costco"
+		if (isPriceUpdateIntent(lower)) {
+			regexWinner = 'price_update';
+			await handlePriceUpdateIntent(text, ctx);
+			return;
+		}
+
+		// H10: Price lookup intent — "how much are blueberries at Costco?"
+		if (await handlePriceLookupIfIntent(text, ctx)) {
+			regexWinner = 'price_lookup';
+			return;
+		}
+
+		// H10: Grocery-store spending intent — "how much do I spend at each grocery store?"
+		if (await handleStoreSpendingIfIntent(text, ctx)) {
+			regexWinner = 'store_spending';
+			return;
+		}
+
+		// H11.w Task 15: Natural-language meal log intent — "I had X",
+		// "I just ate X", "log X". Routes into handleNutritionLogNL which
+		// bypasses the legacy 6-arg numeric guard in /nutrition log.
+		// Must run BEFORE isNutritionViewIntent so "I had lasagna" doesn't
+		// get eaten by the macro-view intent, and the exclusion list in
+		// isLogMealNLIntent keeps "how are my macros" on the view path.
+		if (isLogMealNLIntent(text)) {
+			regexWinner = 'meal_log_nl';
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(
 					ctx.userId,
-					hh.sharedStore,
-					waitDays,
+					'Set up a household first with /household create <name>',
 				);
-				if (result.buttons) {
-					await services.telegram.sendWithButtons(ctx.userId, result.text, result.buttons);
-				} else {
-					await services.telegram.send(ctx.userId, result.text);
-				}
-				regexWinner = 'food_intro';
 				return;
 			}
+			await handleNutritionLogNL(services, text, ctx.userId, hh.sharedStore);
+			return;
+		}
 
-			if (isChildApprovalIntent(lower, childNames)) {
-				const allRecipes = await loadAllRecipes(hh.sharedStore);
-				const msg = await handleChildApprovalIntent(
-					services,
-					text,
-					hh.sharedStore,
-					allRecipes,
-					childNames,
+		// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
+		if (isTargetsSetIntent(text)) {
+			regexWinner = 'targets_set';
+			await beginTargetsFlow(services, ctx.userId);
+			return;
+		}
+
+		// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
+		if (isAdherenceIntent(text)) {
+			regexWinner = 'adherence';
+			const hhAdh = await requireHousehold(services, ctx.userId);
+			if (!hhAdh) {
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
 				);
-				if (msg) {
-					await services.telegram.send(ctx.userId, msg);
-					regexWinner = 'child_approval';
-					return;
+				return;
+			}
+			await handleNutritionCmd(services, ['adherence'], ctx.userId, hhAdh.sharedStore);
+			return;
+		}
+
+		// H12a: Health correlation intent — "how does my diet affect my energy"
+		if (isHealthCorrelationIntent(text)) {
+			regexWinner = 'health_correlation';
+			await handleHealthCorrelation(services, ctx);
+			return;
+		}
+
+		// H11: Nutrition intent — "how are my macros", "show nutrition summary"
+		if (isNutritionViewIntent(text)) {
+			regexWinner = 'nutrition_view';
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
+				return;
+			}
+			await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
+			return;
+		}
+
+		// H12b: Cultural calendar intent — "holiday recipes", "what should I cook for Thanksgiving"
+		// Must come BEFORE isHostingIntent to not be blocked by it, but uses exclusion for "host/party/guests"
+		if (isCulturalCalendarIntent(text)) {
+			regexWinner = 'cultural_calendar';
+			await handleCulturalCalendarMessage(services, ctx);
+			return;
+		}
+
+		// H11: Hosting intent — "we're having people over", "plan a dinner party"
+		if (isHostingIntent(lower)) {
+			regexWinner = 'hosting';
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
+				return;
+			}
+			await handleHostingCmd(services, ['plan', text], ctx.userId, hh.sharedStore);
+			return;
+		}
+
+		// H10: Budget view intent — "how much did we spend on food"
+		if (isBudgetViewIntent(lower)) {
+			regexWinner = 'budget_view';
+			const hh = await requireHousehold(services, ctx.userId);
+			if (!hh) {
+				await services.telegram.send(
+					ctx.userId,
+					'Set up a household first with /household create <name>',
+				);
+				return;
+			}
+			await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+			return;
+		}
+
+		// Food question intent
+		if (isFoodQuestionIntent(lower)) {
+			regexWinner = 'food_question';
+			await handleFoodQuestion(text, ctx);
+			return;
+		}
+
+		// Grocery generate intent (must come before add/view — "make grocery list for X")
+		if (isGroceryGenerateIntent(lower)) {
+			regexWinner = 'grocery_generate';
+			await handleGroceryGenerate(text, ctx);
+			return;
+		}
+
+		// Grocery view intent (must come before add — "what do we need" has "we need" substring)
+		if (isGroceryViewIntent(lower)) {
+			regexWinner = 'grocery_view';
+			await handleGroceryView(ctx);
+			return;
+		}
+
+		// Grocery add intent
+		if (isGroceryAddIntent(lower)) {
+			regexWinner = 'grocery_add';
+			await handleGroceryAdd(text, ctx);
+			return;
+		}
+
+		// Pantry add intent (must come before pantry view)
+		if (isPantryAddIntent(lower)) {
+			regexWinner = 'pantry_add';
+			await handlePantryAdd(text, ctx);
+			return;
+		}
+
+		// Pantry remove intent
+		if (isPantryRemoveIntent(lower)) {
+			regexWinner = 'pantry_remove';
+			await handlePantryRemove(text, ctx);
+			return;
+		}
+
+		// Pantry view intent
+		if (isPantryViewIntent(lower)) {
+			regexWinner = 'pantry_view';
+			await handlePantryView(ctx);
+			return;
+		}
+
+		// H5: Cook mode intent
+		if (isCookIntent(lower)) {
+			regexWinner = 'cook_intent';
+			await handleCookIntent(services, text, ctx);
+			return;
+		}
+
+		// Fallback: try to interpret as a recipe save if it looks like recipe text
+		if (looksLikeRecipe(text)) {
+			regexWinner = 'save_recipe';
+			await handleSaveRecipe(text, ctx);
+			return;
+		}
+
+		// D2c: Gated data query fallback — try DataQueryService before sending help message
+		if (services.dataQuery) {
+			const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
+			const hasRecentFoodContext = recentEntries.some((e) => e.appId === 'food');
+			// Narrow set of data-question keywords — intentionally conservative to avoid false positives
+			const isDataQuestion = /\b(show|what|how much|how many|list|tell me about)\b/i.test(ctx.text);
+
+			if (hasRecentFoodContext || isDataQuestion) {
+				const recentFilePaths = recentEntries.flatMap((e) => e.filePaths ?? []);
+				const result = await services.dataQuery.query(
+					ctx.text,
+					ctx.userId,
+					recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
+				);
+				if (!result.empty) {
+					const answer = await formatDataAnswer(ctx.text, result, services.llm, services.logger);
+					if (answer) {
+						regexWinner = 'data_query_fallback';
+						await services.telegram.send(ctx.userId, answer);
+						return;
+					}
 				}
 			}
 		}
-	}
 
-	// H10: Price update intent — "eggs are $3.50 at costco"
-	if (isPriceUpdateIntent(lower)) {
-		regexWinner = 'price_update';
-		await handlePriceUpdateIntent(text, ctx);
-		return;
-	}
-
-	// H11.w Task 15: Natural-language meal log intent — "I had X",
-	// "I just ate X", "log X". Routes into handleNutritionLogNL which
-	// bypasses the legacy 6-arg numeric guard in /nutrition log.
-	// Must run BEFORE isNutritionViewIntent so "I had lasagna" doesn't
-	// get eaten by the macro-view intent, and the exclusion list in
-	// isLogMealNLIntent keeps "how are my macros" on the view path.
-	if (isLogMealNLIntent(text)) {
-		regexWinner = 'meal_log_nl';
-		const hh = await requireHousehold(services, ctx.userId);
-		if (!hh) {
-			await services.telegram.send(
-				ctx.userId,
-				'Set up a household first with /household create <name>',
-			);
-			return;
-		}
-		await handleNutritionLogNL(services, text, ctx.userId, hh.sharedStore);
-		return;
-	}
-
-	// H11.y: Targets set NL intent — "set my calorie targets", "change my macros"
-	if (isTargetsSetIntent(text)) {
-		regexWinner = 'targets_set';
-		await beginTargetsFlow(services, ctx.userId);
-		return;
-	}
-
-	// H11.y: Adherence NL intent — "how am I doing on my macros", "macro streak"
-	if (isAdherenceIntent(text)) {
-		regexWinner = 'adherence';
-		const hhAdh = await requireHousehold(services, ctx.userId);
-		if (!hhAdh) {
-			await services.telegram.send(ctx.userId, 'Set up a household first with /household create <name>');
-			return;
-		}
-		await handleNutritionCmd(services, ['adherence'], ctx.userId, hhAdh.sharedStore);
-		return;
-	}
-
-	// H12a: Health correlation intent — "how does my diet affect my energy"
-	if (isHealthCorrelationIntent(text)) {
-		regexWinner = 'health_correlation';
-		await handleHealthCorrelation(services, ctx);
-		return;
-	}
-
-	// H11: Nutrition intent — "how are my macros", "show nutrition summary"
-	if (isNutritionViewIntent(text)) {
-		regexWinner = 'nutrition_view';
-		const hh = await requireHousehold(services, ctx.userId);
-		if (!hh) {
-			await services.telegram.send(
-				ctx.userId,
-				'Set up a household first with /household create <name>',
-			);
-			return;
-		}
-		await handleNutritionCmd(services, [], ctx.userId, hh.sharedStore);
-		return;
-	}
-
-	// H12b: Cultural calendar intent — "holiday recipes", "what should I cook for Thanksgiving"
-	// Must come BEFORE isHostingIntent to not be blocked by it, but uses exclusion for "host/party/guests"
-	if (isCulturalCalendarIntent(text)) {
-		regexWinner = 'cultural_calendar';
-		await handleCulturalCalendarMessage(services, ctx);
-		return;
-	}
-
-	// H11: Hosting intent — "we're having people over", "plan a dinner party"
-	if (isHostingIntent(lower)) {
-		regexWinner = 'hosting';
-		const hh = await requireHousehold(services, ctx.userId);
-		if (!hh) {
-			await services.telegram.send(
-				ctx.userId,
-				'Set up a household first with /household create <name>',
-			);
-			return;
-		}
-		await handleHostingCmd(services, ['plan', text], ctx.userId, hh.sharedStore);
-		return;
-	}
-
-	// H10: Budget view intent — "how much did we spend on food"
-	if (isBudgetViewIntent(lower)) {
-		regexWinner = 'budget_view';
-		const hh = await requireHousehold(services, ctx.userId);
-		if (!hh) {
-			await services.telegram.send(
-				ctx.userId,
-				'Set up a household first with /household create <name>',
-			);
-			return;
-		}
-		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
-		return;
-	}
-
-	// Food question intent
-	if (isFoodQuestionIntent(lower)) {
-		regexWinner = 'food_question';
-		await handleFoodQuestion(text, ctx);
-		return;
-	}
-
-	// Grocery generate intent (must come before add/view — "make grocery list for X")
-	if (isGroceryGenerateIntent(lower)) {
-		regexWinner = 'grocery_generate';
-		await handleGroceryGenerate(text, ctx);
-		return;
-	}
-
-	// Grocery view intent (must come before add — "what do we need" has "we need" substring)
-	if (isGroceryViewIntent(lower)) {
-		regexWinner = 'grocery_view';
-		await handleGroceryView(ctx);
-		return;
-	}
-
-	// Grocery add intent
-	if (isGroceryAddIntent(lower)) {
-		regexWinner = 'grocery_add';
-		await handleGroceryAdd(text, ctx);
-		return;
-	}
-
-	// Pantry add intent (must come before pantry view)
-	if (isPantryAddIntent(lower)) {
-		regexWinner = 'pantry_add';
-		await handlePantryAdd(text, ctx);
-		return;
-	}
-
-	// Pantry remove intent
-	if (isPantryRemoveIntent(lower)) {
-		regexWinner = 'pantry_remove';
-		await handlePantryRemove(text, ctx);
-		return;
-	}
-
-	// Pantry view intent
-	if (isPantryViewIntent(lower)) {
-		regexWinner = 'pantry_view';
-		await handlePantryView(ctx);
-		return;
-	}
-
-	// H5: Cook mode intent
-	if (isCookIntent(lower)) {
-		regexWinner = 'cook_intent';
-		await handleCookIntent(services, text, ctx);
-		return;
-	}
-
-	// Fallback: try to interpret as a recipe save if it looks like recipe text
-	if (looksLikeRecipe(text)) {
-		regexWinner = 'save_recipe';
-		await handleSaveRecipe(text, ctx);
-		return;
-	}
-
-	// D2c: Gated data query fallback — try DataQueryService before sending help message
-	if (services.dataQuery) {
-		const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
-		const hasRecentFoodContext = recentEntries.some((e) => e.appId === 'food');
-		// Narrow set of data-question keywords — intentionally conservative to avoid false positives
-		const isDataQuestion = /\b(show|what|how much|how many|list|tell me about)\b/i.test(ctx.text);
-
-		if (hasRecentFoodContext || isDataQuestion) {
-			const recentFilePaths = recentEntries.flatMap((e) => e.filePaths ?? []);
-			const result = await services.dataQuery.query(
-				ctx.text,
-				ctx.userId,
-				recentFilePaths.length > 0 ? { recentFilePaths } : undefined,
-			);
-			if (!result.empty) {
-				const answer = await formatDataAnswer(ctx.text, result, services.llm, services.logger);
-				if (answer) {
-					regexWinner = 'data_query_fallback';
-					await services.telegram.send(ctx.userId, answer);
-					return;
-				}
-			}
-		}
-	}
-
-	await services.telegram.send(
-		ctx.userId,
-		"I'm not sure what you'd like to do. Try:\n" +
-			'• "I made spaghetti bolognese last night" — save a recipe\n' +
-			'• "chicken" — search your recipes\n' +
-			'• "what can I substitute for buttermilk?" — cooking questions\n' +
-			'• "add milk and eggs to grocery list" — add grocery items\n' +
-			'• "plan meals for this week" — generate a meal plan\n' +
-			'• "what\'s for dinner?" — see tonight\'s meal\n' +
-			'• "what can I make?" — match pantry to recipes\n' +
-			'• "start cooking the lasagna" — step-by-step cook mode\n' +
-			'• Send a photo — save recipes, receipts, or pantry contents\n' +
-			'• "we have leftover chili" — log leftovers\n' +
-			'• /leftovers — view and manage leftovers\n' +
-			'• /freezer — view and manage freezer\n' +
-			'• /grocery — view your grocery list\n' +
-			'• /pantry — view your pantry\n' +
-			'• /recipes — browse all recipes\n' +
-			'• /cook <recipe> — cook step-by-step\n' +
-			'• /family — manage child profiles and food introductions\n' +
-			'• /foodbudget — view food spending\n' +
-			'• /household — manage your household',
-	);
+		await services.telegram.send(
+			ctx.userId,
+			"I'm not sure what you'd like to do. Try:\n" +
+				'• "I made spaghetti bolognese last night" — save a recipe\n' +
+				'• "chicken" — search your recipes\n' +
+				'• "what can I substitute for buttermilk?" — cooking questions\n' +
+				'• "add milk and eggs to grocery list" — add grocery items\n' +
+				'• "plan meals for this week" — generate a meal plan\n' +
+				'• "what\'s for dinner?" — see tonight\'s meal\n' +
+				'• "what can I make?" — match pantry to recipes\n' +
+				'• "start cooking the lasagna" — step-by-step cook mode\n' +
+				'• Send a photo — save recipes, receipts, or pantry contents\n' +
+				'• "we have leftover chili" — log leftovers\n' +
+				'• /leftovers — view and manage leftovers\n' +
+				'• /freezer — view and manage freezer\n' +
+				'• /grocery — view your grocery list\n' +
+				'• /pantry — view your pantry\n' +
+				'• /recipes — browse all recipes\n' +
+				'• /cook <recipe> — cook step-by-step\n' +
+				'• /family — manage child profiles and food introductions\n' +
+				'• /foodbudget — view food spending\n' +
+				'• /household — manage your household',
+		);
 	} finally {
 		void finalizeShadow(
-			shadowPromise, ctx, regexWinner, undefined, services.logger,
+			shadowPromise,
+			ctx,
+			regexWinner,
+			undefined,
+			services.logger,
 			shadowSuppressedByThreshold ? { shadowSuppressedByThreshold: true } : undefined,
 		);
 	}
@@ -1806,19 +1926,13 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 		}
 
 		// ─── H11.w Task 14: Ad-hoc dedup promote callbacks ───
-		if (
-			data === 'app:food:nut:log:promote:yes' ||
-			data === 'app:food:nut:log:promote:no'
-		) {
+		if (data === 'app:food:nut:log:promote:yes' || data === 'app:food:nut:log:promote:no') {
 			await handleAdHocPromotionCallback(services, ctx.userId, data);
 			return;
 		}
 
 		// ─── H11.w review: Ambiguous recipe picker callbacks ──
-		if (
-			data.startsWith('app:food:nut:log:recipe:') ||
-			data === 'app:food:nut:log:none'
-		) {
+		if (data.startsWith('app:food:nut:log:recipe:') || data === 'app:food:nut:log:none') {
 			const userStore = services.data.forUser(ctx.userId);
 			await handleRecipeLogCallback(services, userStore, hh.sharedStore, ctx.userId, data);
 			return;
@@ -1826,7 +1940,14 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 
 		// ─── H11.y: Guest add flow callbacks ─────────────────────────────────
 		if (data.startsWith('app:food:host:gadd:')) {
-			await handleGuestAddCallback(services, hh.sharedStore, ctx.userId, data, ctx.chatId, ctx.messageId);
+			await handleGuestAddCallback(
+				services,
+				hh.sharedStore,
+				ctx.userId,
+				data,
+				ctx.chatId,
+				ctx.messageId,
+			);
 			return;
 		}
 
@@ -1879,7 +2000,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (
 					`Removed guest: **${slug}**`,
 				);
 			} else {
-				await services.telegram.editMessage(ctx.chatId, ctx.messageId, `Guest not found.`);
+				await services.telegram.editMessage(ctx.chatId, ctx.messageId, 'Guest not found.');
 			}
 			return;
 		}
@@ -2347,10 +2468,7 @@ async function sendRecipePhoto(
 ): Promise<void> {
 	const store = sharedStore ?? (await requireHousehold(services, userId))?.sharedStore;
 	if (!store) {
-		await services.telegram.send(
-			userId,
-			'Set up a household first with /household create <name>',
-		);
+		await services.telegram.send(userId, 'Set up a household first with /household create <name>');
 		return;
 	}
 
@@ -2408,6 +2526,7 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 				return;
 			}
 			if (photoRecipes.length === 1) {
+				// biome-ignore lint/style/noNonNullAssertion: length check above guarantees non-null
 				await sendRecipePhoto(ctx.userId, photoRecipes[0]!, hh.sharedStore);
 				return;
 			}
@@ -2423,7 +2542,10 @@ async function handleRecipePhotoRetrieval(text: string, ctx: MessageContext): Pr
 		const recipe = findRecipeByTitle(recipes, query);
 
 		if (!recipe) {
-			await services.telegram.send(ctx.userId, `Couldn't find a recipe matching "${escapeMarkdown(query)}".`);
+			await services.telegram.send(
+				ctx.userId,
+				`Couldn't find a recipe matching "${escapeMarkdown(query)}".`,
+			);
 			return;
 		}
 
@@ -3022,7 +3144,7 @@ async function handleMealPlanGenerate(ctx: MessageContext): Promise<void> {
 							}
 							const alert = checkBudgetAlert(estimates, recentWeeks);
 							if (alert) {
-								planMsg += '\n' + formatBudgetAlert(alert);
+								planMsg += `\n${formatBudgetAlert(alert)}`;
 							}
 						}
 					}
@@ -3504,6 +3626,123 @@ function isFoodQuestionIntent(text: string): boolean {
 	);
 }
 
+function getRecentReceiptPaths(userId: string): string[] {
+	const recentEntries = services.interactionContext?.getRecent(userId) ?? [];
+	return recentEntries
+		.filter((entry) => entry.appId === 'food')
+		.flatMap((entry) => entry.filePaths ?? [])
+		.filter((path) => /(?:^|[\\/])receipts[\\/][^\\/]+\.ya?ml$/i.test(path));
+}
+
+async function handleReceiptQueryIfIntent(
+	text: string,
+	ctx: MessageContext,
+	force = false,
+): Promise<boolean> {
+	const recentReceiptPaths = getRecentReceiptPaths(ctx.userId);
+	if (!force && !isReceiptQueryIntent(text, recentReceiptPaths.length > 0)) return false;
+
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return true;
+	}
+
+	const [recentReceipt, receipts] = await Promise.all([
+		loadRecentReceiptFromPaths(hh.sharedStore, recentReceiptPaths),
+		loadReceipts(hh.sharedStore),
+	]);
+	const storeName = findMentionedReceiptStore(text, receipts);
+	const receipt = storeName
+		? findLatestReceipt(receipts, storeName)
+		: (recentReceipt ?? findLatestReceipt(receipts));
+
+	if (!receipt) {
+		await services.telegram.send(ctx.userId, 'I do not have any grocery receipts saved yet.');
+		return true;
+	}
+
+	await services.telegram.send(ctx.userId, formatReceiptDetails(receipt, text));
+	return true;
+}
+
+async function handlePriceLookupIfIntent(
+	text: string,
+	ctx: MessageContext,
+	force = false,
+): Promise<boolean> {
+	if (!force && !isPriceLookupIntent(text)) return false;
+
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return true;
+	}
+
+	const priceData = await loadAllStorePrices(hh.sharedStore);
+	if (priceData.length === 0) {
+		await services.telegram.send(
+			ctx.userId,
+			'No price data available. Add a receipt photo or price update to start tracking costs.',
+		);
+		return true;
+	}
+
+	const storeName = findMentionedPriceStore(text, priceData);
+	const itemQuery = extractPriceItem(
+		text,
+		priceData.map((data) => data.store),
+	);
+	if (!itemQuery) {
+		if (!force) return false;
+		await services.telegram.send(ctx.userId, 'Which grocery item should I look up?');
+		return true;
+	}
+
+	if (/\bcheapest\b/i.test(text)) {
+		await services.telegram.send(ctx.userId, formatCheapestPriceAnswer(priceData, itemQuery));
+		return true;
+	}
+
+	if (storeName) {
+		await services.telegram.send(
+			ctx.userId,
+			formatStorePriceAnswer(priceData, itemQuery, storeName),
+		);
+		return true;
+	}
+
+	await services.telegram.send(ctx.userId, formatCheapestPriceAnswer(priceData, itemQuery));
+	return true;
+}
+
+async function handleStoreSpendingIfIntent(
+	text: string,
+	ctx: MessageContext,
+	force = false,
+): Promise<boolean> {
+	if (!force && !isStoreSpendingIntent(text)) return false;
+
+	const hh = await requireHousehold(services, ctx.userId);
+	if (!hh) {
+		await services.telegram.send(
+			ctx.userId,
+			'Set up a household first with /household create <name>',
+		);
+		return true;
+	}
+
+	const receipts = await loadReceipts(hh.sharedStore);
+	await services.telegram.send(ctx.userId, formatStoreSpendingAnswer(receipts));
+	return true;
+}
+
 // H10: Handle price update intent
 async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promise<void> {
 	const hh = await requireHousehold(services, ctx.userId);
@@ -3939,7 +4178,10 @@ async function handleFreezerAddIntent(text: string, ctx: MessageContext): Promis
 		await saveFreezer(hh.sharedStore, updated);
 	});
 
-	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
+	await services.telegram.send(
+		ctx.userId,
+		`🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`,
+	);
 	services.logger.info('Added freezer item "%s" for %s', item.name, ctx.userId);
 }
 
@@ -3956,7 +4198,10 @@ async function handlePendingFreezerAdd(text: string, ctx: MessageContext): Promi
 		await saveFreezer(hh.sharedStore, updated);
 	});
 
-	await services.telegram.send(ctx.userId, `🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`);
+	await services.telegram.send(
+		ctx.userId,
+		`🧊 Added to freezer: ${escapeMarkdown(item.name)} — ${escapeMarkdown(String(item.quantity))}`,
+	);
 }
 
 // ─── H6: Waste Intent Handler ──────────────────────────────────
@@ -4011,7 +4256,10 @@ async function handleWasteIntent(text: string, ctx: MessageContext): Promise<voi
 		}
 	});
 
-	await services.telegram.send(ctx.userId, `🗑 Logged waste: ${escapeMarkdown(itemText)}. Sorry about that!`);
+	await services.telegram.send(
+		ctx.userId,
+		`🗑 Logged waste: ${escapeMarkdown(itemText)}. Sorry about that!`,
+	);
 	services.logger.info('Logged food waste "%s" for %s', itemText, ctx.userId);
 }
 
