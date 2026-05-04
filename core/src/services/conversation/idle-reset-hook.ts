@@ -68,7 +68,6 @@ export async function runIdleResetHook(
 	if (deps.pendingSessionControl?.has(userId)) return { status: 'protected' };
 	if (pendingEdits.has(userId)) return { status: 'protected' };
 
-	// 1. END the session FIRST (CAS). Only the winner of concurrent hooks proceeds.
 	let resolvedSessionId: string | null;
 	try {
 		const result = await deps.chatSessions.endActive(
@@ -91,7 +90,6 @@ export async function runIdleResetHook(
 		return { status: 'none' };
 	}
 
-	// 2. Summarize + flush AFTER the CAS winner is known. Bounded by timeout.
 	const summaryStatus = await runFlushWithTimeout(
 		userId,
 		session.turns,
@@ -99,7 +97,6 @@ export async function runIdleResetHook(
 		deps.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS,
 	);
 
-	// 3. Notify user (P8a behavior — unchanged).
 	const friendly = formatDuration(deps.idleMinutes);
 	try {
 		await deps.telegram.send(

@@ -60,6 +60,7 @@ import {
 	type MemoryFlushSave,
 } from './services/conversation/memory-flush.js';
 import { summarizeSession } from './services/conversation/session-summarizer.js';
+import type { SessionTurn } from './services/conversation-session/chat-session-store.js';
 import { resolveUserBool } from './services/conversation/settings-resolver.js';
 import { TitleService } from './services/conversation-titling/index.js';
 import { CredentialService } from './services/credentials/index.js';
@@ -1011,7 +1012,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: logger.child({ service: 'title-service' }),
 	});
 
-	// P8b: memory-flush wiring — closures capture CONTEXT_INTERNAL_BYPASS and conversationAppConfig
+	// These closures capture CONTEXT_INTERNAL_BYPASS so the hook never imports it directly.
 	const flushSave: MemoryFlushSave = (uid, key, content) =>
 		contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
 	const flushRemove: MemoryFlushRemove = (uid, key) =>
@@ -1020,10 +1021,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const onDisableFlush = (userId: string) =>
 		disableFlushHelper(userId, { flushRemove, logger: flushLogger });
 	const summarizerLogger = createChildLogger(logger, { service: 'session-summarizer' });
-	const sessionSummarizer = (
-		turns: Parameters<typeof summarizeSession>[0],
-		signal?: AbortSignal,
-	) => summarizeSession(turns, { llm: systemLlm, logger: summarizerLogger }, signal);
+	const sessionSummarizer = (turns: SessionTurn[], signal?: AbortSignal) =>
+		summarizeSession(turns, { llm: systemLlm, logger: summarizerLogger }, signal);
 	const getFlushEnabled = (userId: string) =>
 		resolveUserBool(conversationAppConfig, userId, 'flush_memory_on_idle_reset', false, flushLogger);
 

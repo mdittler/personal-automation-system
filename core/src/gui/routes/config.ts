@@ -110,12 +110,12 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 
 		const appConfig = getAppConfigService(appId, configDefs);
 
-		// Snapshot previous value to detect flush_memory_on_idle_reset turning off
-		let prevFlushEnabled: unknown = undefined;
+		let prevFlushEnabled: boolean | undefined;
 		if (appId === 'chatbot' && disableFlushAndCleanup) {
 			try {
 				const prev = await appConfig.getOverrides(userId);
-				prevFlushEnabled = prev?.flush_memory_on_idle_reset;
+				const raw = prev?.flush_memory_on_idle_reset;
+				prevFlushEnabled = typeof raw === 'boolean' ? raw : undefined;
 			} catch {
 				// Non-fatal; proceed with write
 			}
