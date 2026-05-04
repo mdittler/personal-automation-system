@@ -9,7 +9,7 @@ import { DataStoreServiceImpl } from '../../data-store/index.js';
 import { composeChatSessionStore } from '../compose.js';
 import type { ChatSessionStore, ChatSessionFrontmatter, SessionTurn } from '../chat-session-store.js';
 import { mintSessionId } from '../session-id.js';
-import { encodeNew } from '../transcript-codec.js';
+import { encodeNew, decode } from '../transcript-codec.js';
 
 const USER = 'matt';
 const SESSION_KEY = 'agent:main:telegram:dm:matt';
@@ -769,5 +769,26 @@ describe('endActive reason: idle', () => {
 
 		const decoded = await store.readSession(USER, endedSessionId!);
 		expect(decoded?.meta.ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A2 — last_activity_at written on mint
+// ---------------------------------------------------------------------------
+
+describe('last_activity_at on mint', () => {
+	it('mintAndRegister writes last_activity_at equal to started_at', async () => {
+		const FROZEN = new Date('2026-05-01T12:00:00.000Z');
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock: () => FROZEN,
+		});
+		const { sessionId } = await store.ensureActiveSession(ctx);
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta } = decode(raw);
+		expect((meta as any).last_activity_at).toBe('2026-05-01T12:00:00.000Z');
+		expect((meta as any).last_activity_at).toBe(meta.started_at);
 	});
 });

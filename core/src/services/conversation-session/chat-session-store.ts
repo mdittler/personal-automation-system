@@ -19,6 +19,8 @@ export interface ChatSessionFrontmatter {
 	title: string | null;
 	parent_session_id: string | null;
 	started_at: string;
+	/** Refreshed on every appendExchange. Falls back to started_at on read for legacy transcripts. */
+	last_activity_at?: string;
 	ended_at: string | null;
 	token_counts: { input: number; output: number };
 	/** Durable MemorySnapshot frozen at session-mint time (P4). Snake_case on disk. */
@@ -344,6 +346,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		sessionId: string,
 		startedAt?: string,
 	): ChatSessionFrontmatter {
+		const now = startedAt ?? this.now().toISOString();
 		return {
 			id: sessionId,
 			source: 'telegram',
@@ -352,7 +355,8 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			model: ctx.model ?? null,
 			title: null,
 			parent_session_id: null,
-			started_at: startedAt ?? this.now().toISOString(),
+			started_at: now,
+			last_activity_at: now,
 			ended_at: null,
 			token_counts: { input: 0, output: 0 },
 		};
