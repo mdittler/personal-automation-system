@@ -1072,6 +1072,14 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		messageRateTracker,
 		sessionControlClassifier: detectSessionControl,
 		pendingSessionControl,
+		idleResetDeps: {
+			idleMinutes: config.chat?.sessions?.auto_reset_idle_minutes ?? null,
+			chatSessions,
+			telegram: telegramService,
+			logger: createChildLogger(logger, { service: 'router-idle-reset' }),
+			pendingSessionControl,
+			now: undefined,
+		},
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();

@@ -53,6 +53,8 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import { runIdleResetHook } from '../conversation/idle-reset-hook.js';
+import type { IdleResetHookDeps, IdleResetState } from '../conversation/idle-reset-hook.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -189,6 +191,8 @@ export interface RouterOptions {
 	sessionControlClassifier?: typeof detectSessionControl;
 	/** Optional — in-memory TTL store for grey-zone session-reset confirmations. */
 	pendingSessionControl?: PendingSessionControlStore;
+	/** Optional — when present, enables idle session auto-reset at the top of routeMessage/routePhoto. */
+	idleResetDeps?: IdleResetHookDeps;
 }
 
 export class Router {
@@ -215,6 +219,7 @@ export class Router {
 	private readonly chatSessions?: ChatSessionStore;
 	private readonly sessionControlClassifier?: typeof detectSessionControl;
 	private readonly pendingSessionControl?: PendingSessionControlStore;
+	private readonly idleResetDeps?: IdleResetHookDeps;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -242,6 +247,7 @@ export class Router {
 		this.chatSessions = options.chatSessions;
 		this.sessionControlClassifier = options.sessionControlClassifier;
 		this.pendingSessionControl = options.pendingSessionControl;
+		this.idleResetDeps = options.idleResetDeps;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -301,6 +307,17 @@ export class Router {
 			return;
 		}
 
+		// Idle-reset hook — runs at the very top so /ask, /edit, /notes, /newchat, /title,
+		// free text, and photo paths all participate before any routing decision.
+		let idleResetState: IdleResetState | undefined;
+		if (this.idleResetDeps) {
+			try {
+				idleResetState = await runIdleResetHook(ctx, this.idleResetDeps);
+			} catch (err) {
+				this.logger.warn({ err, userId: ctx.userId }, 'router: idle-reset hook threw; continuing');
+			}
+		}
+
 		// D5b-9a: First-run wizard intercept — only for free text.
 		// Commands (/help, /start, etc.) pass through so the user isn't locked out.
 		if (!parsed && hasPendingFirstRunWizard(ctx.userId)) {
@@ -326,12 +343,14 @@ export class Router {
 			}
 			// Inject active space context for all other commands
 			const enrichedCtx = this.enrichWithActiveSpace(ctx);
+			if (idleResetState) enrichedCtx.idleResetState = idleResetState;
 			await this.handleCommand(parsed, enrichedCtx, user.enabledApps);
 			return;
 		}
 
 		// Inject active space context for free text
 		const enrichedCtx = this.enrichWithActiveSpace(ctx);
+		if (idleResetState) enrichedCtx.idleResetState = idleResetState;
 
 		// 3a. NL /newchat hook — runs before intent classification (opt-in: both deps required)
 		if (this.sessionControlClassifier && this.pendingSessionControl) {
@@ -435,6 +454,15 @@ export class Router {
 		}
 
 		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
+
+		// Idle-reset hook for photo messages
+		if (this.idleResetDeps) {
+			try {
+				await runIdleResetHook(enrichedCtx, this.idleResetDeps);
+			} catch (err) {
+				this.logger.warn({ err, userId: enrichedCtx.userId }, 'router: idle-reset hook threw; continuing');
+			}
+		}
 
 		// 3. Classify photo
 		const match = await this.photoClassifier.classify(
