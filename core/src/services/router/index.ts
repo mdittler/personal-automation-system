@@ -354,8 +354,14 @@ export class Router {
 
 		// 3a. NL /newchat hook — runs before intent classification (opt-in: both deps required)
 		if (this.sessionControlClassifier && this.pendingSessionControl) {
-			const intercepted = await this.handleSessionControlHook(enrichedCtx);
-			if (intercepted) return;
+			// If idle-reset already ended a session and notified the user this turn, skip the
+			// NL hook entirely. The old session is gone; there is nothing to end and we must
+			// not send a second "new chat" notice. Non-reset-intent messages fall through to
+			// normal classification as usual.
+			if (enrichedCtx.idleResetState?.status !== 'reset') {
+				const intercepted = await this.handleSessionControlHook(enrichedCtx);
+				if (intercepted) return;
+			}
 		}
 
 		// 3. Free text → intent classification

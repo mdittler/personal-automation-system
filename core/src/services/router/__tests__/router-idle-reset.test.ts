@@ -443,4 +443,139 @@ describe('Router idle-reset hook wiring', () => {
 			expect(callOrder.indexOf('idleHook')).toBeLessThan(callOrder.indexOf('sessionControl'));
 		});
 	});
+
+	describe('NL /newchat conflict with idle reset', () => {
+		/**
+		 * Helper: build a Router with BOTH idle-reset AND NL session-control wired.
+		 * idleState controls what the idle hook returns; classifierResult controls the
+		 * session-control classifier's return value.
+		 */
+		function buildConflictRouter(options: {
+			idleState: IdleResetState;
+			classifierResult: { intent: string; confidence: number; source: string };
+			conversationService?: ReturnType<typeof makeConversationService>;
+		}) {
+			const idleResetDeps = makeIdleResetDeps(options.idleState, 1 /* idleMinutes=1 */);
+
+			const sessionControlClassifier = vi.fn().mockResolvedValue({
+				...options.classifierResult,
+				reason: 'test',
+			});
+
+			const pendingSessionControl = {
+				attach: vi.fn(),
+				get: vi.fn().mockReturnValue(undefined),
+				has: vi.fn().mockReturnValue(false),
+				remove: vi.fn(),
+			};
+
+			const cache = new ManifestCache();
+			cache.add(echoManifest, '/apps/echo');
+			const registry = {
+				getApp: () => undefined,
+				getManifestCache: () => cache,
+				getAll: () => [],
+				getLoadedAppIds: () => [],
+			} as unknown as AppRegistry;
+
+			const conv = options.conversationService ?? makeConversationService();
+			const telegram = createMockTelegram();
+
+			const router = new Router({
+				registry,
+				llm: createMockLLM(),
+				telegram,
+				fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
+				config: createConfig(),
+				logger: createMockLogger(),
+				conversationService: conv as any,
+				idleResetDeps,
+				sessionControlClassifier: sessionControlClassifier as any,
+				pendingSessionControl: pendingSessionControl as any,
+			});
+			router.buildRoutingTables();
+
+			return { router, telegram, conv, sessionControlClassifier, pendingSessionControl, idleResetDeps };
+		}
+
+		it('idle reset + reset-intent message → NL hook does NOT double-message (silent consume)', async () => {
+			// The user sends "let's start over" after being idle.
+			// The idle hook fires and resets the session (sending an inactivity notice via its
+			// own deps.telegram). The NL hook should stay silent — it must not call handleNewChat
+			// and must not send a second "Starting a new chat" notice via the router's telegram.
+			const conv = makeConversationService();
+			const { router, telegram, idleResetDeps } = buildConflictRouter({
+				idleState: { status: 'reset', endedSessionId: 'session-idle-1', parentTitle: null },
+				classifierResult: { intent: 'new_session', confidence: 0.95, source: 'llm' },
+				conversationService: conv,
+			});
+
+			await router.routeMessage(msg("let's start over"));
+
+			// The router's main telegram.send must have zero "Starting" / "new chat" calls —
+			// the NL hook must not have sent a second notice.
+			const routerSendMock = telegram.send as ReturnType<typeof vi.fn>;
+			const routerSentTexts: string[] = routerSendMock.mock.calls.map((c: unknown[]) => c[1] as string);
+			const newChatNotices = routerSentTexts.filter(
+				(t) => t.toLowerCase().includes('starting') || t.toLowerCase().includes('new chat'),
+			);
+			expect(newChatNotices).toHaveLength(0);
+
+			// The idle hook's own telegram.send must have sent the inactivity notice.
+			const idleSendMock = idleResetDeps.telegram.send as ReturnType<typeof vi.fn>;
+			const idleSentTexts: string[] = idleSendMock.mock.calls.map((c: unknown[]) => c[1] as string);
+			const inactivityNotices = idleSentTexts.filter((t) => t.toLowerCase().includes('inactiv'));
+			expect(inactivityNotices).toHaveLength(1);
+
+			// handleNewChat must NOT have been called by the NL hook (idle hook handled the reset).
+			expect(conv.handleNewChat).not.toHaveBeenCalled();
+		});
+
+		it('idle reset + non-reset-intent message → routes normally (no NL hook intercept)', async () => {
+			// The user sends "what's for dinner" after being idle.
+			// Idle reset fires (one inactivity notice). NL hook must NOT intercept.
+			// Message should fall through to normal routing (conversation service).
+			const conv = makeConversationService();
+			const { router, telegram } = buildConflictRouter({
+				idleState: { status: 'reset', endedSessionId: 'session-idle-2', parentTitle: null },
+				classifierResult: { intent: 'other', confidence: 0.9, source: 'llm' },
+				conversationService: conv,
+			});
+
+			await router.routeMessage(msg("what's for dinner"));
+
+			const sendMock = telegram.send as ReturnType<typeof vi.fn>;
+			const sentTexts: string[] = sendMock.mock.calls.map((c: unknown[]) => c[1] as string);
+
+			// No NL-hook intercept messages.
+			const newChatNotices = sentTexts.filter(
+				(t) => t.toLowerCase().includes('starting') || t.toLowerCase().includes('new chat'),
+			);
+			expect(newChatNotices).toHaveLength(0);
+
+			// handleNewChat must NOT have been called.
+			expect(conv.handleNewChat).not.toHaveBeenCalled();
+
+			// Message falls through to conversation service.
+			expect(conv.handleMessage).toHaveBeenCalledOnce();
+		});
+
+		it('no idle reset + reset-intent message → NL hook fires normally', async () => {
+			// No idle reset (session still active/recent), user sends "let's start over".
+			// NL hook should fire normally — handleNewChat is called.
+			const conv = makeConversationService();
+			const { router } = buildConflictRouter({
+				idleState: { status: 'none' },
+				classifierResult: { intent: 'new_session', confidence: 0.95, source: 'llm' },
+				conversationService: conv,
+			});
+
+			await router.routeMessage(msg("let's start over"));
+
+			// NL hook fires → handleNewChat called.
+			expect(conv.handleNewChat).toHaveBeenCalledOnce();
+			// Normal routing suppressed.
+			expect(conv.handleMessage).not.toHaveBeenCalled();
+		});
+	});
 });
