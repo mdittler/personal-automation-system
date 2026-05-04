@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -11,10 +11,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   started_at TEXT NOT NULL,
   ended_at TEXT,
   model TEXT,
-  title TEXT
+  title TEXT,
+  parent_session_id TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_user_started ON sessions(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS sessions_household_started ON sessions(household_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS sessions_parent_session ON sessions(parent_session_id);
 
 CREATE TABLE IF NOT EXISTS messages (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -74,7 +76,16 @@ export function applyMigrations(db: Database.Database): void {
 			`chat-transcript-index: DB schema version ${currentVersion} is newer than supported ${SCHEMA_VERSION}. Upgrade the application.`,
 		);
 	}
+	// P8c: for v1 DBs, add the column BEFORE running DDL (DDL includes the index on that column)
+	if (currentVersion === 1) {
+		const cols = db.prepare("PRAGMA table_info('sessions')").all() as Array<{ name: string }>;
+		if (!cols.some((c) => c.name === 'parent_session_id')) {
+			db.exec('ALTER TABLE sessions ADD COLUMN parent_session_id TEXT');
+		}
+	}
+
 	// Apply DDL — IF NOT EXISTS guards make each statement idempotent
 	db.exec(DDL);
+
 	db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
