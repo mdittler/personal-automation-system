@@ -14,7 +14,9 @@ import { basename, dirname, join } from 'node:path';
 import { CorruptTranscriptError } from '../conversation-session/errors.js';
 import { decode } from '../conversation-session/transcript-codec.js';
 import { ChatTranscriptIndexImpl } from './chat-transcript-index.js';
-import type { MessageRow, SessionRow } from './types.js';
+import type { MessageRow, SessionRowInput } from './types.js';
+
+const PARENT_SESSION_ID_RE = /^\d{8}_\d{6}_[0-9a-f]{8}$/;
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -213,7 +215,7 @@ export async function rebuildIndex(opts: {
 			return;
 		}
 
-		const sessionRow: SessionRow = {
+		const sessionRow: SessionRowInput = {
 			id: sessionId,
 			user_id: sf.userId,
 			household_id: sf.householdId,
@@ -222,6 +224,11 @@ export async function rebuildIndex(opts: {
 			ended_at: meta.ended_at ?? null,
 			model: meta.model ?? null,
 			title: meta.title ?? null,
+			parent_session_id:
+				typeof meta.parent_session_id === 'string' &&
+				PARENT_SESSION_ID_RE.test(meta.parent_session_id)
+					? meta.parent_session_id
+					: null,
 		};
 
 		await index!.upsertSession(sessionRow);
