@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppConfigService } from '../../../types/config.js';
 import type { ManifestUserConfig } from '../../../types/manifest.js';
-import { NOTES_INTENT_REGEX, processConfigSetTags } from '../control-tags.js';
+import {
+	FLUSH_MEMORY_INSTRUCTION_BLOCK,
+	MEMORY_FLUSH_INTENT_REGEX,
+	NOTES_INTENT_REGEX,
+	processConfigSetTags,
+} from '../control-tags.js';
 
 const LOG_TO_NOTES_ENTRY: ManifestUserConfig = {
 	key: 'log_to_notes',
@@ -327,5 +332,199 @@ describe('processConfigSetTags — write failure resilience', () => {
 		expect(result.confirmations).toHaveLength(0);
 		// Write failure is logged as a warning
 		expect(logger.warn).toHaveBeenCalled();
+	});
+});
+
+// ─── MEMORY_FLUSH_INTENT_REGEX table-driven tests ─────────────────────────
+
+const FLUSH_MEMORY_ENTRY: ManifestUserConfig = {
+	key: 'flush_memory_on_idle_reset',
+	type: 'boolean',
+	default: false,
+	description: 'Save session summary on idle reset',
+};
+
+describe('MEMORY_FLUSH_INTENT_REGEX — positive matches', () => {
+	it.each([
+		'turn on session memory please',
+		'enable session memory',
+		'turn off session memory',
+		'stop saving session summaries',
+		'disable automatic idle summaries',
+		'turn off idle summary',
+		'turn off the idle summaries',
+		'please disable session memory',
+		'start saving session summaries',
+		"don't save session summaries",
+	])('matches: %s', (phrase) => {
+		expect(MEMORY_FLUSH_INTENT_REGEX.test(phrase)).toBe(true);
+	});
+});
+
+describe('MEMORY_FLUSH_INTENT_REGEX — negative (should NOT match)', () => {
+	it.each([
+		'remember this for me',
+		'save the recipe',
+		'how much memory does this use',
+		'memory usage is high',
+		'save a draft',
+		'save my notes',
+		'enable daily notes',
+		'turn on logging',
+		'remind me about session next week',
+		'i want to save this conversation',
+		'what is session management?',
+		'show me my memory entries',
+		// "please" without an action verb must NOT false-fire on session memory phrases
+		'please explain session memory',
+		'please show me my session memory',
+		'please tell me about session memory',
+	])('does NOT match: %s', (phrase) => {
+		expect(MEMORY_FLUSH_INTENT_REGEX.test(phrase)).toBe(false);
+	});
+});
+
+describe('FLUSH_MEMORY_INSTRUCTION_BLOCK export', () => {
+	it('is a non-empty string referencing flush_memory_on_idle_reset', () => {
+		expect(typeof FLUSH_MEMORY_INSTRUCTION_BLOCK).toBe('string');
+		expect(FLUSH_MEMORY_INSTRUCTION_BLOCK.length).toBeGreaterThan(0);
+		expect(FLUSH_MEMORY_INSTRUCTION_BLOCK).toContain('flush_memory_on_idle_reset');
+	});
+});
+
+// ─── processConfigSetTags for flush_memory_on_idle_reset ──────────────────
+
+describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
+	it('persists true when MEMORY_FLUSH_INTENT_REGEX matches', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response =
+			'Sure! <config-set key="flush_memory_on_idle_reset" value="true"/> Done.';
+		const result = await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'enable session memory',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+		});
+
+		expect(updateOverrides).toHaveBeenCalledOnce();
+		expect(updateOverrides).toHaveBeenCalledWith('alice', { flush_memory_on_idle_reset: true });
+		expect(result.cleanedResponse).not.toContain('<config-set');
+		expect(result.confirmations.some((c) => c.toLowerCase().includes('session memory'))).toBe(true);
+	});
+
+	it('strips tag and does not write when MEMORY_FLUSH_INTENT_REGEX does not match', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response =
+			'Here you go! <config-set key="flush_memory_on_idle_reset" value="true"/>';
+		const result = await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: "what's the weather like today?",
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+		});
+
+		expect(updateOverrides).not.toHaveBeenCalled();
+		expect(result.cleanedResponse).not.toContain('<config-set');
+		expect(result.confirmations).toHaveLength(0);
+	});
+});
+
+describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup', () => {
+	it('persists false and calls disableFlushAndCleanup when intent matches disable phrasing', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const cleanup = vi.fn().mockResolvedValue(undefined);
+		const response =
+			'OK! <config-set key="flush_memory_on_idle_reset" value="false"/> Disabled.';
+		const result = await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'turn off session memory',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+			disableFlushAndCleanup: cleanup,
+		});
+
+		expect(updateOverrides).toHaveBeenCalledWith('alice', { flush_memory_on_idle_reset: false });
+		expect(cleanup).toHaveBeenCalledWith('alice');
+		expect(result.cleanedResponse).not.toContain('<config-set');
+	});
+
+	it('disable confirm message mentions session memory turned off', async () => {
+		const { config } = makeConfig();
+		const response = '<config-set key="flush_memory_on_idle_reset" value="false"/>';
+		const result = await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'turn off session memory',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+			disableFlushAndCleanup: vi.fn().mockResolvedValue(undefined),
+		});
+
+		expect(result.confirmations.some((c) => c.toLowerCase().includes('off'))).toBe(true);
+	});
+
+	it('does not call disableFlushAndCleanup when not provided', async () => {
+		const { config } = makeConfig();
+		// Just verify it doesn't throw when the option is absent
+		const response = '<config-set key="flush_memory_on_idle_reset" value="false"/>';
+		await expect(
+			processConfigSetTags(response, {
+				userId: 'alice',
+				userMessage: 'turn off session memory',
+				config,
+				manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+				logger: makeLogger(),
+			}),
+		).resolves.toBeDefined();
+	});
+});
+
+describe('processConfigSetTags — co-existence: notes intent does NOT toggle flush', () => {
+	it('notes-only message does not process flush_memory_on_idle_reset tag', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response =
+			'<config-set key="flush_memory_on_idle_reset" value="true"/>';
+		await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'turn on daily notes',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+		});
+
+		expect(updateOverrides).not.toHaveBeenCalled();
+	});
+
+	it('flush-only message does not process log_to_notes tag', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response = '<config-set key="log_to_notes" value="true"/>';
+		await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'enable session memory',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+		});
+
+		expect(updateOverrides).not.toHaveBeenCalled();
+	});
+
+	it('message matching both intents processes both tags independently', async () => {
+		const { config, updateOverrides } = makeConfig();
+		const response =
+			'<config-set key="log_to_notes" value="true"/> <config-set key="flush_memory_on_idle_reset" value="true"/>';
+		// Craft a message that matches BOTH regexes
+		await processConfigSetTags(response, {
+			userId: 'alice',
+			userMessage: 'turn on daily notes and enable session memory',
+			config,
+			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			logger: makeLogger(),
+		});
+
+		expect(updateOverrides).toHaveBeenCalledTimes(2);
 	});
 });

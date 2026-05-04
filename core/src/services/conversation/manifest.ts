@@ -28,6 +28,13 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		default: false,
 		description: 'Append every message to a daily-notes file (per-user opt-in, default OFF)',
 	},
+	{
+		key: 'flush_memory_on_idle_reset',
+		type: 'boolean',
+		default: false,
+		description:
+			'When an idle session auto-resets, save a short summary of the conversation to your durable memory so the next session can refer back to it. (Per-user opt-in, default OFF. Turning OFF also deletes the most recent saved summary.)',
+	},
 ];
 
 export interface ConversationLLMSafeguards {

@@ -58,6 +58,9 @@ export class ConversationService {
 				? { conversationRetrieval: this.deps.conversationRetrieval }
 				: {}),
 			...(this.deps.titleService !== undefined ? { titleService: this.deps.titleService } : {}),
+			...(this.deps.disableFlushAndCleanup !== undefined
+				? { disableFlushAndCleanup: this.deps.disableFlushAndCleanup }
+				: {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);

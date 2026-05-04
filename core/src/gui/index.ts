@@ -83,6 +83,8 @@ export interface GuiOptions {
 	messageRateTracker?: MessageRateTracker;
 	/** D5c-D: LLM safeguards config for per-household cap display. */
 	llmSafeguards?: LLMSafeguardsConfig;
+	/** P8b: Called when flush_memory_on_idle_reset is toggled OFF via the GUI. */
+	disableFlushAndCleanup?: (userId: string) => Promise<void>;
 }
 
 /**
@@ -152,7 +154,13 @@ export async function registerGuiRoutes(
 				householdService: options.householdService,
 				spaceService: spaceService ?? undefined,
 			});
-			registerConfigRoutes(gui, { registry, config, dataDir, logger });
+			registerConfigRoutes(gui, {
+					registry,
+					config,
+					dataDir,
+					logger,
+					disableFlushAndCleanup: options.disableFlushAndCleanup,
+				});
 			if (contextStore) {
 				if (!options.householdService) {
 					throw new Error(

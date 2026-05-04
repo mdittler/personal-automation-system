@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { IdleResetState } from '../../../types/conversation-session.js';
 import { runIdleResetHook } from '../idle-reset-hook.js';
+import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 import { pendingEdits } from '../pending-edits.js';
 import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 
@@ -37,6 +39,15 @@ function makeDeps(opts: {
 		pendingSessionControl: opts.pendingSessionControl,
 	};
 }
+
+describe('summaryStatus', () => {
+	it('IdleResetState type carries summaryStatus literal union (compile-time)', () => {
+		const a: IdleResetState = { status: 'reset', endedSessionId: 'x', summaryStatus: 'disabled' };
+		const b: IdleResetState = { status: 'reset', endedSessionId: 'x', summaryStatus: 'timeout' };
+		expect(a.summaryStatus).toBe('disabled');
+		expect(b.summaryStatus).toBe('timeout');
+	});
+});
 
 describe('runIdleResetHook', () => {
 	describe('disabled / no-op paths', () => {
@@ -84,7 +95,8 @@ describe('runIdleResetHook', () => {
 				now: new Date('2026-05-01T14:00:01Z'), // 120 min + 1ms = idle
 			});
 			const result = await runIdleResetHook(baseCtx, deps);
-			expect(result).toEqual({
+			// P8b adds summaryStatus:'disabled' when no flush deps — use toMatchObject
+			expect(result).toMatchObject({
 				status: 'reset',
 				endedSessionId: 's1',
 				parentTitle: 'shopping list',
@@ -211,5 +223,207 @@ describe('runIdleResetHook', () => {
 			expect(deps.logger.warn).toHaveBeenCalled();
 			expect(deps.telegram.send).not.toHaveBeenCalled();
 		});
+	});
+});
+
+// ── P8b flush integration tests ─────────────────────────────────────────────
+
+const IDLE_SESSION = { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: 'test session' };
+const IDLE_NOW = new Date('2026-05-01T13:01:00Z');
+const IDLE_OPTS = { idleMinutes: 60, activeSession: IDLE_SESSION, now: IDLE_NOW };
+
+// 4-turn session (2 pairs) — enough for summarizer
+const FOUR_TURNS = [
+	{ role: 'user' as const, content: 'hello', timestamp: '2026-05-01T12:00:00Z' },
+	{ role: 'assistant' as const, content: 'hi there', timestamp: '2026-05-01T12:01:00Z' },
+	{ role: 'user' as const, content: 'how are you', timestamp: '2026-05-01T12:02:00Z' },
+	{ role: 'assistant' as const, content: 'good thanks', timestamp: '2026-05-01T12:03:00Z' },
+];
+
+function makeIdleDepsWithTurns(turns: typeof FOUR_TURNS) {
+	return {
+		...IDLE_OPTS,
+		readSession: { turns },
+	};
+}
+
+function makeFlushDeps(overrides?: {
+	summarizerResult?: string | null | (() => Promise<string | null>);
+	flushSaveResult?: 'ok' | 'throw';
+	getFlushEnabledResult?: boolean | 'throw';
+	flushTimeoutMs?: number;
+	turns?: typeof FOUR_TURNS;
+}) {
+	const {
+		summarizerResult = 'Alice prefers tea.',
+		flushSaveResult = 'ok',
+		getFlushEnabledResult = true,
+		flushTimeoutMs = 8_000,
+		turns = FOUR_TURNS,
+	} = overrides ?? {};
+
+	const base = makeDeps({
+		idleMinutes: 60,
+		activeSession: {
+			...IDLE_SESSION,
+			// Inject turns into readSession mock
+		},
+		now: IDLE_NOW,
+	});
+
+	// Override readSession to return turns
+	vi.mocked(base.chatSessions.readSession).mockResolvedValue({
+		meta: {
+			id: IDLE_SESSION.id,
+			last_activity_at: IDLE_SESSION.last_activity_at,
+			started_at: '2026-05-01T12:00:00Z',
+			title: IDLE_SESSION.title,
+			ended_at: null,
+		},
+		turns,
+	});
+
+	const summarizer =
+		typeof summarizerResult === 'function'
+			? vi.fn().mockImplementation(summarizerResult)
+			: vi.fn().mockResolvedValue(summarizerResult);
+
+	const flushSave =
+		flushSaveResult === 'throw'
+			? vi.fn().mockRejectedValue(new Error('save failed'))
+			: vi.fn().mockResolvedValue(undefined);
+
+	const getFlushEnabled =
+		getFlushEnabledResult === 'throw'
+			? vi.fn().mockRejectedValue(new Error('config error'))
+			: vi.fn().mockResolvedValue(getFlushEnabledResult);
+
+	return {
+		...base,
+		summarizer,
+		flushSave,
+		getFlushEnabled,
+		flushTimeoutMs,
+	};
+}
+
+describe('P8b: summaryStatus branches', () => {
+	it('summaryStatus="written" on happy path with flush enabled + 4-turn session', async () => {
+		const deps = makeFlushDeps();
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('written');
+		expect(deps.flushSave).toHaveBeenCalledWith('u1', RECENT_SESSION_SUMMARY_KEY, expect.any(String));
+	});
+
+	it('summaryStatus="disabled" when getFlushEnabled returns false', async () => {
+		const deps = makeFlushDeps({ getFlushEnabledResult: false });
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('disabled');
+		expect(deps.summarizer).not.toHaveBeenCalled();
+		expect(deps.flushSave).not.toHaveBeenCalled();
+	});
+
+	it('summaryStatus="disabled" when no flush deps provided', async () => {
+		const deps = makeDeps(IDLE_OPTS);
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('disabled');
+	});
+
+	it('summaryStatus="skipped" when session has < 2 turns', async () => {
+		const deps = makeFlushDeps({ turns: [FOUR_TURNS[0]!] });
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('skipped');
+		expect(deps.summarizer).not.toHaveBeenCalled();
+	});
+
+	it('summaryStatus="skipped" when summarizer returns null', async () => {
+		const deps = makeFlushDeps({ summarizerResult: null });
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.summaryStatus).toBe('skipped');
+		expect(deps.flushSave).not.toHaveBeenCalled();
+	});
+
+	it('summaryStatus="failed" when summarizer throws — idle reset still proceeds', async () => {
+		const deps = makeFlushDeps({
+			summarizerResult: () => Promise.reject(new Error('model error')),
+		});
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('failed');
+		expect(deps.logger.warn).toHaveBeenCalled();
+	});
+
+	it('summaryStatus="failed" when flushSave throws', async () => {
+		const deps = makeFlushDeps({ flushSaveResult: 'throw' });
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('failed');
+	});
+
+	it('summaryStatus="failed" when getFlushEnabled throws (fail-open)', async () => {
+		const deps = makeFlushDeps({ getFlushEnabledResult: 'throw' });
+		const result = await runIdleResetHook(baseCtx, deps);
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('failed');
+		expect(deps.logger.warn).toHaveBeenCalled();
+	});
+});
+
+describe('P8b: endActive CAS ordering', () => {
+	it('endActive runs BEFORE summarize (CAS-first ordering)', async () => {
+		const callOrder: string[] = [];
+		const deps = makeFlushDeps();
+		vi.mocked(deps.chatSessions.endActive).mockImplementation(async (...args) => {
+			callOrder.push('endActive');
+			return { endedSessionId: IDLE_SESSION.id };
+		});
+		deps.summarizer.mockImplementation(async () => {
+			callOrder.push('summarizer');
+			return 'summary text';
+		});
+		await runIdleResetHook(baseCtx, deps);
+		expect(callOrder.indexOf('endActive')).toBeLessThan(callOrder.indexOf('summarizer'));
+	});
+
+	it('two concurrent hooks for same user — CAS ensures only one summarizes', async () => {
+		const deps1 = makeFlushDeps();
+		const deps2 = makeFlushDeps();
+		// Second hook's endActive loses the CAS race (returns null)
+		vi.mocked(deps2.chatSessions.endActive).mockResolvedValueOnce({ endedSessionId: null });
+
+		await Promise.all([
+			runIdleResetHook(baseCtx, deps1),
+			runIdleResetHook(baseCtx, deps2),
+		]);
+
+		// Only the CAS winner (deps1) summarizes; deps2 returned status='none'
+		expect(deps1.summarizer).toHaveBeenCalledTimes(1);
+		expect(deps2.summarizer).not.toHaveBeenCalled();
+	});
+});
+
+describe('P8b: timeout behavior', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('summaryStatus="timeout" when summarize+save exceeds flushTimeoutMs', async () => {
+		const deps = makeFlushDeps({
+			summarizerResult: () => new Promise(() => {}), // never resolves
+			flushTimeoutMs: 100,
+		});
+		const promise = runIdleResetHook(baseCtx, deps);
+		await vi.advanceTimersByTimeAsync(150);
+		const result = await promise;
+		expect(result.status).toBe('reset');
+		expect(result.summaryStatus).toBe('timeout');
+		expect(deps.flushSave).not.toHaveBeenCalled();
 	});
 });

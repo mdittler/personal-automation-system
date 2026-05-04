@@ -432,7 +432,8 @@ describe('Router idle-reset hook wiring', () => {
 			await router.routeMessage(msg('/ask what is 2+2'));
 
 			expect(capturedCtx).toBeDefined();
-			expect(capturedCtx!.idleResetState).toEqual(resetState);
+			// P8b adds summaryStatus to IdleResetState — use toMatchObject to allow for it
+			expect(capturedCtx!.idleResetState).toMatchObject(resetState);
 		});
 	});
 

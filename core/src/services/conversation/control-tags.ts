@@ -98,7 +98,10 @@ export async function processModelSwitchTags(
 
 const CONFIG_SET_TAG_REGEX = /<config-set\s+key="([^"]+)"\s+value="([^"]+)"\s*\/>/g;
 
-const ALLOWED_CONFIG_KEYS: ReadonlySet<string> = new Set(['log_to_notes']);
+const ALLOWED_CONFIG_KEYS: ReadonlySet<string> = new Set([
+	'log_to_notes',
+	'flush_memory_on_idle_reset',
+]);
 
 /**
  * Bidirectional detector for user intent to toggle daily-notes logging.
@@ -113,6 +116,22 @@ export const NOTES_INTENT_REGEX =
 	/(?:\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not)\b[^.?!]{0,50}\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|log(?:ging)?\s+(?:my\s+)?(?:notes?|messages?)|saving\s+(?:my|all|everything))\b)|(?:\b(?:daily[-\s]?notes?|note[-\s]?log(?:ging)?|saving\s+everything)\b[^.?!]{0,50}\b(?:on|off|enable|disable|stop|start|turn)\b)/i;
 
 /**
+ * Bidirectional detector for user intent to toggle memory-flush on idle reset.
+ * Requires explicit "session memory", "session summary/summaries",
+ * "automatic idle summaries", or "idle summary/summaries" phrasing.
+ * Avoids false-firing on "remember this" / "memory usage" / "save X" /
+ * "save my conversation".
+ */
+export const MEMORY_FLUSH_INTENT_REGEX =
+	/\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not)\b[^.?!]{0,40}\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b|\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b[^.?!]{0,40}\b(?:on|off|enable|disable|stop|start|turn)\b/i;
+
+/** Per-key intent gates — each allowlisted key requires its own intent signal. */
+const INTENT_GATES: Record<string, RegExp> = {
+	log_to_notes: NOTES_INTENT_REGEX,
+	flush_memory_on_idle_reset: MEMORY_FLUSH_INTENT_REGEX,
+};
+
+/**
  * Instruction appended to the system prompt when the user message matches
  * NOTES_INTENT_REGEX. Tells the LLM how to request a config change.
  */
@@ -122,12 +141,36 @@ When the user wants to enable or disable daily notes logging, include exactly on
   To disable: <config-set key="log_to_notes" value="false"/>
 Only emit this tag when the user explicitly requests a change. Do not emit it to report the current state.`.trim();
 
+/**
+ * Instruction appended to the system prompt when the user message matches
+ * MEMORY_FLUSH_INTENT_REGEX. Tells the LLM how to toggle session memory.
+ */
+export const FLUSH_MEMORY_INSTRUCTION_BLOCK = `
+When the user wants to enable or disable session memory (saving a summary of the chat when an idle session auto-resets), include exactly one of these tags in your response (it will be removed from your visible reply after processing):
+  To enable:  <config-set key="flush_memory_on_idle_reset" value="true"/>
+  To disable: <config-set key="flush_memory_on_idle_reset" value="false"/>
+Only emit this tag when the user explicitly requests a change. Do not emit it to report the current state.`.trim();
+
+function confirmationFor(key: string, coerced: unknown): string | null {
+	if (key === 'log_to_notes') {
+		return coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.';
+	}
+	if (key === 'flush_memory_on_idle_reset') {
+		return coerced
+			? "Session memory turned ON — I'll save a short summary when our chats time out."
+			: 'Session memory turned OFF. The most recent saved summary has been deleted.';
+	}
+	return null;
+}
+
 export interface ProcessConfigSetTagsOptions {
 	userId: string;
 	userMessage: string;
 	config: AppConfigService;
 	manifest: ManifestUserConfig[];
 	logger: AppLogger;
+	/** Called when flush_memory_on_idle_reset is turned OFF, to delete the prior summary. */
+	disableFlushAndCleanup?: (userId: string) => Promise<void>;
 }
 
 /**
@@ -135,7 +178,7 @@ export interface ProcessConfigSetTagsOptions {
  *
  * Security guards (in order):
  * 1. Keys not in ALLOWED_CONFIG_KEYS → strip and warn.
- * 2. User message lacks notes intent → strip all tags, no writes.
+ * 2. Per-key: user message lacks the key's intent gate → skip that tag.
  * 3. Coercion failure → strip and warn (no user-facing message).
  * 4. Otherwise → updateOverrides with only the changed key (raw overrides only).
  */
@@ -164,13 +207,13 @@ export async function processConfigSetTags(
 	// Strip all well-formed tags; sweep for malformed/reordered/extra-attr remnants
 	const stripped = response.replace(CONFIG_SET_TAG_REGEX, '').replace(/<config-set\b[^>]*\/?>/g, '');
 
-	// Gate: intent regex must match the actual user message
-	if (!NOTES_INTENT_REGEX.test(options.userMessage)) {
-		return { cleanedResponse: normalizeResponse(stripped), confirmations };
-	}
-
-	// Process surviving tags
+	// Process surviving tags — each key has its own per-key intent gate
 	for (const { key, value } of allowedTags) {
+		const intentGate = INTENT_GATES[key];
+		if (!intentGate || !intentGate.test(options.userMessage)) {
+			continue;
+		}
+
 		const entry = options.manifest.find((e) => e.key === key);
 		if (!entry) {
 			options.logger.warn('<config-set> key not in manifest: %s', key);
@@ -186,10 +229,12 @@ export async function processConfigSetTags(
 		// Write only raw override keys (never manifest defaults)
 		try {
 			await options.config.updateOverrides(options.userId, { [key]: result.coerced });
-			if (key === 'log_to_notes') {
-				confirmations.push(
-					result.coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.',
-				);
+			const confirmation = confirmationFor(key, result.coerced);
+			if (confirmation) confirmations.push(confirmation);
+
+			// On disable, delete prior summary so toggle semantics match the name
+			if (key === 'flush_memory_on_idle_reset' && result.coerced === false) {
+				await options.disableFlushAndCleanup?.(options.userId);
 			}
 		} catch (err) {
 			options.logger.warn('<config-set> failed to persist %s: %s', key, err);

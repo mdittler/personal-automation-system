@@ -146,7 +146,7 @@ export interface ConversationRetrievalService {
 	 * Called at session-mint time, before the first prompt is assembled.
 	 * Requires a userId in the current requestContext.
 	 */
-	buildMemorySnapshot(): Promise<MemorySnapshot>;
+	buildMemorySnapshot(opts?: { pinnedKeys?: string[] }): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────
@@ -317,11 +317,14 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		});
 	}
 
-	async buildMemorySnapshot(): Promise<MemorySnapshot> {
+	async buildMemorySnapshot(
+		opts: { pinnedKeys?: string[] } = {},
+	): Promise<MemorySnapshot> {
 		const userId = this.assertRequestContext('buildMemorySnapshot');
 		const BUDGET = 4_000;
 		const MARKER = '... (snapshot truncated at session start)';
 		const builtAt = new Date().toISOString();
+		const pinned = opts.pinnedKeys ?? ['recent-session-summary'];
 
 		let entries: ContextEntry[];
 		try {
@@ -338,13 +341,22 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			return { content: '', status: 'empty', builtAt, entryCount: 0 };
 		}
 
-		const sorted = [...entries].sort((a, b) => a.key.localeCompare(b.key));
+		// Pinned entries first (in pinnedKeys order), then alphabetical remainder.
+		const pinnedSet = new Set(pinned);
+		const pinnedEntries = pinned
+			.map((k) => entries.find((e) => e.key === k))
+			.filter((e): e is ContextEntry => e !== undefined);
+		const remaining = entries
+			.filter((e) => !pinnedSet.has(e.key))
+			.sort((a, b) => a.key.localeCompare(b.key));
+		const ordered = [...pinnedEntries, ...remaining];
+
 		const BUDGET_BODY = BUDGET - MARKER.length;
 
 		let content = '';
 		let includedCount = 0;
 		let truncated = false;
-		for (const entry of sorted) {
+		for (const entry of ordered) {
 			const rendered = `## ${entry.key}\n${entry.content}\n\n`;
 			if (content.length + rendered.length > BUDGET_BODY) {
 				if (content.length === 0) {
