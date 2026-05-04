@@ -1101,4 +1101,28 @@ describe('P8c — parent_session_id on mint', () => {
 			expect.anything(),
 		);
 	});
+
+	// A.5 — appendExchange cold-mint path
+	it('appendExchange cold-mint with parentSessionId stamps it into frontmatter', async () => {
+		const store = makeStore();
+		const parentId = '20260427_140000_aaaaaaaa';
+		const { sessionId } = await store.appendExchange(
+			{ ...ctx, parentSessionId: parentId },
+			turn('user', 'photo'),
+			turn('assistant', 'ok'),
+		);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBe(parentId);
+	});
+
+	it('appendExchange cold-mint without parentSessionId stamps null', async () => {
+		const store = makeStore();
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'hi'),
+			turn('assistant', 'hello'),
+		);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBeNull();
+	});
 });
