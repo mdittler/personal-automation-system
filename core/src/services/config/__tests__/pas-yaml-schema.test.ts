@@ -111,6 +111,18 @@ describe('PasYamlConfigSchema', () => {
 	});
 });
 
+describe('chat.sessions.auto_reset_idle_minutes', () => {
+	it('accepts null', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: null } } })).not.toThrow());
+	it('accepts 1', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1 } } })).not.toThrow());
+	it('accepts 1440', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1440 } } })).not.toThrow());
+	it('accepts 525600', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_600 } } })).not.toThrow());
+	it('rejects 0', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 0 } } })).toThrow());
+	it('rejects -1', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: -1 } } })).toThrow());
+	it('rejects 1.5 (non-integer)', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 1.5 } } })).toThrow());
+	it('rejects 525601 (above ceiling)', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: 525_601 } } })).toThrow());
+	it('rejects string "1440"', () => expect(() => PasYamlConfigSchema.parse({ chat: { sessions: { auto_reset_idle_minutes: '1440' } } })).toThrow());
+});
+
 describe('parsePasYamlConfig()', () => {
 	it('returns parsed config for valid input', () => {
 		const config = parsePasYamlConfig({ users: [{ id: '123', name: 'Alice' }] });

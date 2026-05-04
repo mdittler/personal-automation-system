@@ -875,4 +875,34 @@ describe('loadSystemConfig', () => {
 		expect(config.users).toHaveLength(0);
 		expect(config.migrationNeeded).toBeUndefined();
 	});
+
+	// --- auto_reset_idle_minutes materialization tests ---
+
+	it('auto_reset_idle_minutes defaults to null when YAML omits it', async () => {
+		const envPath = join(tempDir, '.env');
+		await writeEnvFile(envPath, requiredEnvVars);
+
+		const config = await loadSystemConfig({
+			envPath,
+			configPath: join(tempDir, 'nonexistent.yaml'),
+		});
+
+		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBeNull();
+	});
+
+	it('auto_reset_idle_minutes is honored when YAML sets it to 1440', async () => {
+		const config = await loadConfigFromYamlObj({
+			chat: { sessions: { auto_reset_idle_minutes: 1440 } },
+		});
+
+		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBe(1440);
+	});
+
+	it('explicit null in YAML stays null for auto_reset_idle_minutes', async () => {
+		const config = await loadConfigFromYamlObj({
+			chat: { sessions: { auto_reset_idle_minutes: null } },
+		});
+
+		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBeNull();
+	});
 });
