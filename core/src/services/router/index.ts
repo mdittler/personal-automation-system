@@ -341,6 +341,14 @@ export class Router {
 				await this.handleInviteCommand(parsed.rawArgs, ctx);
 				return;
 			}
+			// If idle reset already ended a session this turn, suppress /newchat and /reset
+			// to prevent a second "Starting a new chat" notice being sent.
+			if (
+				idleResetState?.status === 'reset' &&
+				(parsed.command === '/newchat' || parsed.command === '/reset')
+			) {
+				return;
+			}
 			// Inject active space context for all other commands
 			const enrichedCtx = this.enrichWithActiveSpace(ctx);
 			if (idleResetState) enrichedCtx.idleResetState = idleResetState;

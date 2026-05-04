@@ -4,14 +4,9 @@ import type { PendingSessionControlStore } from './pending-session-control-store
 import { isIdle, getLastActivityIso } from '../conversation-session/idle-detector.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import { pendingEdits } from './pending-edits.js';
+import type { IdleResetState, IdleResetStatus } from '../../types/conversation-session.js';
 
-export type IdleResetStatus = 'reset' | 'protected' | 'none';
-
-export interface IdleResetState {
-	status: IdleResetStatus;
-	endedSessionId?: string;
-	parentTitle?: string | null;
-}
+export type { IdleResetStatus, IdleResetState };
 
 export interface IdleResetHookDeps {
 	idleMinutes: number | null | undefined;
@@ -56,10 +51,16 @@ export async function runIdleResetHook(
 	if (deps.pendingSessionControl?.has(userId)) return { status: 'protected' };
 	if (pendingEdits.has(userId)) return { status: 'protected' };
 
+	let resolvedSessionId: string | null;
 	try {
-		await deps.chatSessions.endActive({ userId, sessionKey }, 'idle');
+		const result = await deps.chatSessions.endActive({ userId, sessionKey }, 'idle');
+		resolvedSessionId = result.endedSessionId;
 	} catch (err) {
 		deps.logger.warn({ err, userId, sessionId: activeId }, 'idle-reset-hook: endActive failed; aborting reset');
+		return { status: 'none' };
+	}
+	if (resolvedSessionId === null) {
+		deps.logger.warn({ userId, sessionId: activeId }, 'idle-reset-hook: endActive returned null (concurrent race); aborting reset');
 		return { status: 'none' };
 	}
 
@@ -75,7 +76,7 @@ export async function runIdleResetHook(
 
 	return {
 		status: 'reset',
-		endedSessionId: activeId,
+		endedSessionId: resolvedSessionId,
 		parentTitle: (session.meta.title as string | null | undefined) ?? null,
 	};
 }
@@ -83,8 +84,18 @@ export async function runIdleResetHook(
 function formatDuration(minutes: number): string {
 	if (minutes < 60) return minutes === 1 ? '1 minute' : `${minutes} minutes`;
 	const hours = minutes / 60;
-	if (Number.isInteger(hours) && hours < 24) return hours === 1 ? '1 hour' : `${hours} hours`;
-	const days = hours / 24;
-	if (Number.isInteger(days)) return days === 1 ? '1 day' : `${days} days`;
+	if (Number.isInteger(hours)) {
+		if (hours < 24) return hours === 1 ? '1 hour' : `${hours} hours`;
+		const days = hours / 24;
+		if (Number.isInteger(days)) return days === 1 ? '1 day' : `${days} days`;
+	}
+	// Non-integer hours: express as "X hours Y minutes"
+	const h = Math.floor(hours);
+	const m = minutes % 60;
+	if (h < 24) {
+		const hourPart = h === 1 ? '1 hour' : `${h} hours`;
+		const minPart = m === 1 ? '1 minute' : `${m} minutes`;
+		return `${hourPart} ${minPart}`;
+	}
 	return `${Math.round(hours)} hours`;
 }

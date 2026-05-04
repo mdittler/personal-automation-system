@@ -103,7 +103,9 @@ describe('runIdleResetHook', () => {
 			[1, '2026-05-01T00:01:01Z', '1 minute'],
 			[30, '2026-05-01T00:30:01Z', '30 minutes'],
 			[60, '2026-05-01T01:00:01Z', '1 hour'],
+			[90, '2026-05-01T01:30:01Z', '1 hour 30 minutes'],
 			[120, '2026-05-01T02:00:01Z', '2 hours'],
+			[150, '2026-05-01T02:30:01Z', '2 hours 30 minutes'],
 			[1440, '2026-05-02T00:00:01Z', '1 day'],
 			[2880, '2026-05-03T00:00:01Z', '2 days'],
 		])('%d minutes → "%s"', async (idleMinutes, nowIso, expected) => {
@@ -168,6 +170,14 @@ describe('runIdleResetHook', () => {
 			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
 			(deps.telegram.send as any).mockRejectedValueOnce(new Error('telegram down'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('reset');
+		});
+		it('endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send', async () => {
+			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			// Simulate concurrent race: another handler cleared the active session first
+			(deps.chatSessions.endActive as any).mockResolvedValueOnce({ endedSessionId: null });
+			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
+			expect(deps.logger.warn).toHaveBeenCalled();
+			expect(deps.telegram.send).not.toHaveBeenCalled();
 		});
 	});
 });

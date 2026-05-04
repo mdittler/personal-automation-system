@@ -820,6 +820,42 @@ describe('last_activity_at refresh on appendExchange', () => {
 		expect(meta.started_at).toBe('2026-05-01T12:00:00.000Z');
 	});
 
+	it('appendExchange does NOT bump last_activity_at on an already-ended session (in-flight race path)', async () => {
+		let now = new Date('2026-05-01T12:00:00.000Z');
+		const clock2 = () => now;
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock: clock2,
+		});
+
+		// Mint and register the session
+		const { sessionId } = await store.ensureActiveSession(ctx);
+
+		// End the session (sets ended_at)
+		now = new Date('2026-05-01T13:00:00.000Z');
+		await store.endActive(ctx, 'idle');
+
+		// Read the ended session's last_activity_at before the in-flight append
+		const rawBefore = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta: metaBefore } = decode(rawBefore);
+		const lastActivityBefore = (metaBefore as any).last_activity_at as string;
+
+		// Simulate an in-flight append that targets the now-ended session via expectedSessionId
+		now = new Date('2026-05-01T14:00:00.000Z'); // advance clock further
+		const userTurn: SessionTurn = { role: 'user', content: 'late message', timestamp: now.toISOString() };
+		const assistantTurn: SessionTurn = { role: 'assistant', content: 'reply', timestamp: now.toISOString() };
+		await store.appendExchange({ ...ctx, expectedSessionId: sessionId }, userTurn, assistantTurn);
+
+		// last_activity_at must not have been bumped to 14:00
+		const rawAfter = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta: metaAfter } = decode(rawAfter);
+		expect((metaAfter as any).last_activity_at).toBe(lastActivityBefore);
+		// ended_at must still be intact
+		expect(metaAfter.ended_at).toBe('2026-05-01T13:00:00.000Z');
+	});
+
 	it('appendExchange falls back to raw append on decode failure (no last_activity_at bump)', async () => {
 		const dataStore = makeDataStore();
 		const store = composeChatSessionStore({

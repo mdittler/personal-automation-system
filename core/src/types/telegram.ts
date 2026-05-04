@@ -5,7 +5,7 @@
  * TelegramService interface apps use to send messages.
  */
 
-import type { IdleResetState } from '../services/conversation/idle-reset-hook.js';
+import type { IdleResetState } from './conversation-session.js';
 
 // ---------------------------------------------------------------------------
 // Route metadata — how a message reached its app handler

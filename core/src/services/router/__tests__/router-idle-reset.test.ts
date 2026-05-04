@@ -529,6 +529,9 @@ describe('Router idle-reset hook wiring', () => {
 
 			// handleNewChat must NOT have been called by the NL hook (idle hook handled the reset).
 			expect(conv.handleNewChat).not.toHaveBeenCalled();
+
+			// The message must still be answered by the conversation service in the new session.
+			expect(conv.handleMessage).toHaveBeenCalledOnce();
 		});
 
 		it('idle reset + non-reset-intent message → routes normally (no NL hook intercept)', async () => {
@@ -577,5 +580,52 @@ describe('Router idle-reset hook wiring', () => {
 			// Normal routing suppressed.
 			expect(conv.handleMessage).not.toHaveBeenCalled();
 		});
+	});
+
+	describe('Literal /newchat and /reset suppressed after idle reset', () => {
+		it.each([['/newchat'], ['/reset']])(
+			'idle reset + %s command → handleNewChat NOT called (no double-message)',
+			async (command) => {
+				// The idle reset already ended the session and sent the inactivity notice.
+				// A literal /newchat or /reset arriving in the same turn must be silently suppressed.
+				const conv = makeConversationService();
+				const idleResetDeps = makeIdleResetDeps(
+					{ status: 'reset', endedSessionId: 'session-idle-cmd', parentTitle: null },
+					1,
+				);
+				const cache = new ManifestCache();
+				cache.add(echoManifest, '/apps/echo');
+				const registry = {
+					getApp: () => undefined,
+					getManifestCache: () => cache,
+					getAll: () => [],
+					getLoadedAppIds: () => [],
+				} as unknown as AppRegistry;
+				const telegram = createMockTelegram();
+				const router = new Router({
+					registry,
+					llm: createMockLLM(),
+					telegram,
+					fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
+					config: createConfig(),
+					logger: createMockLogger(),
+					conversationService: conv as any,
+					idleResetDeps,
+				});
+				router.buildRoutingTables();
+
+				await router.routeMessage(msg(command));
+
+				// handleNewChat must NOT be called — idle reset handled the session end.
+				expect(conv.handleNewChat).not.toHaveBeenCalled();
+				// No "Starting a new chat" notice from the router's telegram.
+				const sendMock = telegram.send as ReturnType<typeof vi.fn>;
+				const sentTexts: string[] = sendMock.mock.calls.map((c: unknown[]) => c[1] as string);
+				const newChatNotices = sentTexts.filter(
+					(t) => t.toLowerCase().includes('starting') || t.toLowerCase().includes('new chat'),
+				);
+				expect(newChatNotices).toHaveLength(0);
+			},
+		);
 	});
 });

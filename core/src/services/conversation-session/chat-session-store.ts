@@ -258,7 +258,8 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				try {
 					const { meta, turns } = decode(raw);
 					userTurnIndex = turns.length;
-					meta.last_activity_at = this.now().toISOString();
+					// Don't bump last_activity_at on an already-ended session (in-flight race path).
+					if (!meta.ended_at) meta.last_activity_at = this.now().toISOString();
 					let rebuilt = encodeNew(meta);
 					for (const t of turns) rebuilt = encodeAppend(rebuilt, t);
 					next = encodeAppend(encodeAppend(rebuilt, userTurn), assistantTurn);
