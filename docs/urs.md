@@ -4371,6 +4371,8 @@ When an idle session is detected, `ChatSessionStore.endActive` MUST be called wi
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 120 minutes → "2 hours"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 150 minutes → "2 hours 30 minutes"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1440 minutes → "1 day"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1470 minutes → "1 day 30 minutes"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1500 minutes → "1 day 1 hour"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 2880 minutes → "2 days"
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 1-minute threshold → "1 minute" in notice
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 30-minute threshold → "30 minutes" in notice
@@ -4385,10 +4387,13 @@ When an idle session is detected, `ChatSessionStore.endActive` MUST be called wi
 **Integration tests:**
 - `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > hook ends an idle session and sets ended_at in the filesystem
 - `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > next appendExchange after idle reset lands in a fresh session
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > endActive CAS mismatch: stale expectedSessionId leaves fresh session intact
 
 **Fixes:**
 - **Codex-P2-1 (2026-05-04):** Initial implementation used stale `activeId` (from `peekActive`) as `endedSessionId` in the return value rather than the id returned by `endActive`. Also did not handle `endedSessionId: null` (concurrent race) — now aborts with `status='none'` and logs a warning. CL: `codex-p2-corrections`.
 - **Codex-P3-1 (2026-05-04):** `formatDuration` used `Math.round(hours)` for non-integer hour values, causing 90 min → "2 hours". Fixed to express non-integer hours as "X hours Y minutes". CL: `codex-p2-corrections`.
+- **Codex-R2-P1 (2026-05-04):** `endActive` wrong-session race — hook read `activeId=A` via `peekActive`, but a concurrent request could end A and mint B before `endActive` ran, causing B (the fresh session) to be closed. Fixed via CAS: `endActive` now holds the index file lock across `getActive + verify expectedSessionId + clearActiveUnlocked`; `runIdleResetHook` passes `expectedSessionId: activeId`; returns `{ endedSessionId: null }` on ID mismatch. CL: `codex-r2-corrections`.
+- **Codex-R2-P3 (2026-05-04):** `formatDuration(1470)` produced "25 hours" — multi-branch logic failed when hours ≥ 24. Rewritten using day/hour/minute parts array (1440 min = 1 day), fixing 1470 min → "1 day 30 minutes" and 1500 min → "1 day 1 hour". CL: `codex-r2-corrections`.
 
 ---
 
@@ -4436,6 +4441,7 @@ The hook MUST execute before `handleCommand` (covering `/ask`, `/edit`, `/notes`
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/title set My Session"
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "hello free text"
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 2 — Hook fires before photo classification > peekActive called before handlePhoto is invoked
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 2 — Hook fires before photo classification > peekActive called even when no photo apps are installed
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 3 — IdleResetState propagated to enrichedCtx > when hook returns reset state, enrichedCtx.idleResetState is set on handleMessage ctx
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 6 — Command path: idleResetState set on enrichedCtx passed to handleCommand > for /ask command, enrichedCtx.idleResetState is set when hook returns reset
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 7 — Ordering: hook fires before NL /newchat hook in free-text path > peekActive is called before sessionControlClassifier
@@ -4443,6 +4449,9 @@ The hook MUST execute before `handleCommand` (covering `/ask`, `/edit`, `/notes`
 **Edge case tests:**
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 4 — No idleResetDeps → hook never called > when idleResetDeps is undefined, no hook side-effects occur
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 5 — Hook throws → fail-open, routing continues > when idleResetDeps.chatSessions.peekActive throws, message is still routed
+
+**Fixes:**
+- **Codex-R2-P2 (2026-05-04):** Initial `routePhoto` called `enrichPhotoWithActiveSpace` and ran the idle-reset hook AFTER the "no photo apps installed" early return, silently skipping the hook when no photo-accepting apps were registered. Moved the enrich + hook calls before the availability check so photo messages always advance session lifecycle regardless of installed apps. CL: `codex-r2-corrections`.
 
 ---
 
@@ -7853,10 +7862,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-IDLE-003 | idle-detector.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-IDLE-004 | idle-detector.test.ts | 1 | 6 | Implemented |
 | REQ-CONV-IDLE-005 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, pas-yaml-schema.test.ts | 6 | 7 | Implemented |
-| REQ-CONV-IDLE-006 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 15 | Implemented |
+| REQ-CONV-IDLE-006 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 18 | Implemented |
 | REQ-CONV-IDLE-007 | idle-reset-hook.test.ts, idle-reset.persona.test.ts | 1 | 3 | Implemented |
 | REQ-CONV-IDLE-008 | idle-reset-hook.test.ts | 0 | 4 | Implemented |
-| REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 10 | 2 | Implemented |
+| REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 11 | 2 | Implemented |
 | REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 3 | 2 | Implemented |
 
-| **Totals** | **207 test files** | **1590** | **1782** | **3372 tests** |
+| **Totals** | **207 test files** | **1591** | **1785** | **3376 tests** |
