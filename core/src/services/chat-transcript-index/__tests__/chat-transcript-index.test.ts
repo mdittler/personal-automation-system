@@ -666,3 +666,44 @@ describe('date range filters', () => {
 		expect(result.hits[0].sessionId).toBe('old');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P8c — parent_session_id round-trip
+// ---------------------------------------------------------------------------
+
+describe('P8c — upsertSession persists parent_session_id', () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	test('round-trips parent_session_id via getSessionMeta', async () => {
+		await index.upsertSession({
+			id: '20260504_120000_cafef00d',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T12:00:00.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+			parent_session_id: '20260504_110000_aaaaaaaa',
+		});
+		const meta = await index.getSessionMeta('20260504_120000_cafef00d');
+		expect(meta?.parent_session_id).toBe('20260504_110000_aaaaaaaa');
+	});
+
+	test('omitted parent_session_id normalizes to null (back-compat)', async () => {
+		await index.upsertSession({
+			id: '20260504_120001_cafef00e',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T12:00:01.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+			// parent_session_id intentionally omitted
+		} as Parameters<typeof index.upsertSession>[0]);
+		const meta = await index.getSessionMeta('20260504_120001_cafef00e');
+		expect(meta?.parent_session_id).toBeNull();
+	});
+});

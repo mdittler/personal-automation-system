@@ -7,7 +7,13 @@ export interface SessionRow {
 	ended_at: string | null;
 	model: string | null;
 	title: string | null;
+	parent_session_id: string | null;
 }
+
+/** Input shape for upsertSession — parent_session_id is optional, defaults to null. */
+export type SessionRowInput = Omit<SessionRow, 'parent_session_id'> & {
+	parent_session_id?: string | null;
+};
 
 export interface MessageRow {
 	session_id: string;
