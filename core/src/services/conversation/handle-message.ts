@@ -25,6 +25,7 @@ import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-ti
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
+import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
@@ -92,6 +93,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
+	const parentSessionId = parentSessionFromIdleReset(ctx.idleResetState);
 	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot }, autoDetect, userCtx] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
@@ -107,9 +109,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				sessionKey,
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
-				...(ctx.idleResetState?.status === 'reset'
-					? { parentSessionId: ctx.idleResetState.endedSessionId ?? null }
-					: {}),
+				...(parentSessionId !== null ? { parentSessionId } : {}),
 			},
 			{
 				buildSnapshot: deps.conversationRetrieval

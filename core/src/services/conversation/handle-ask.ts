@@ -17,19 +17,19 @@ import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
-import type { TitleService } from '../conversation-titling/title-service.js';
-import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
-import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
-import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
 } from '../conversation-retrieval/index.js';
-import type { SearchHit } from '../chat-transcript-index/index.js';
-import { runRecallPipeline } from './recall-pipeline.js';
+import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
+import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
+import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
+import type { TitleService } from '../conversation-titling/title-service.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -51,10 +51,11 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { resolveUserBool } from './settings-resolver.js';
 import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
+import { runRecallPipeline } from './recall-pipeline.js';
+import { resolveUserBool } from './settings-resolver.js';
 import { sendSplitResponse } from './telegram-format.js';
 import { buildUserContext } from './user-context.js';
 
@@ -113,11 +114,17 @@ export async function handleAsk(
 	const modelId = deps.llm.getModelForTier?.('standard') ?? 'unknown';
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
+	const parentSessionId = parentSessionFromIdleReset(ctx.idleResetState);
 	const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 	const recentContextSummary = formatInteractionContextSummary(recentEntries);
 	const recentFilePaths = extractRecentFilePaths(recentEntries);
 
-	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot }, userCtx] = await Promise.all([
+	const [
+		{ wrote: noteWrote },
+		turns,
+		{ sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot },
+		userCtx,
+	] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -125,33 +132,45 @@ export async function handleAsk(
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		deps.chatSessions.ensureActiveSession(
-			{
-				userId: ctx.userId,
-				sessionKey,
-				model: modelId,
-				householdId: getCurrentHouseholdId(),
-				...(ctx.idleResetState?.status === 'reset'
-					? { parentSessionId: ctx.idleResetState.endedSessionId ?? null }
-					: {}),
-			},
-			{
-				buildSnapshot: deps.conversationRetrieval
-					? async () => {
-							const flushEnabled = deps.config
-								? await resolveUserBool(deps.config, ctx.userId, 'flush_memory_on_idle_reset', false, deps.logger)
-								: false;
-							return deps.conversationRetrieval!.buildMemorySnapshot(
-								flushEnabled ? {} : { pinnedKeys: [] },
-							);
-						}
-					: undefined,
-			},
-		).catch((err: unknown) => {
-			deps.logger.warn('ensureActiveSession failed; continuing without session persistence: %s', err);
-			return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
-		}),
+		deps.chatSessions.loadRecentTurns(
+			{ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() },
+			{ maxTurns: 20 },
+		),
+		deps.chatSessions
+			.ensureActiveSession(
+				{
+					userId: ctx.userId,
+					sessionKey,
+					model: modelId,
+					householdId: getCurrentHouseholdId(),
+					...(parentSessionId !== null ? { parentSessionId } : {}),
+				},
+				{
+					buildSnapshot: deps.conversationRetrieval
+						? async () => {
+								const flushEnabled = deps.config
+									? await resolveUserBool(
+											deps.config,
+											ctx.userId,
+											'flush_memory_on_idle_reset',
+											false,
+											deps.logger,
+										)
+									: false;
+								return deps.conversationRetrieval!.buildMemorySnapshot(
+									flushEnabled ? {} : { pinnedKeys: [] },
+								);
+							}
+						: undefined,
+				},
+			)
+			.catch((err: unknown) => {
+				deps.logger.warn(
+					'ensureActiveSession failed; continuing without session persistence: %s',
+					err,
+				);
+				return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
+			}),
 		buildUserContext(ctx, deps),
 	]);
 
@@ -184,14 +203,13 @@ export async function handleAsk(
 				error,
 			);
 		}
-		systemPrompt = await buildAppAwareSystemPrompt(
-			question,
-			ctx.userId,
-			[],
-			turns,
-			deps,
-			{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot, recalledSessions },
-		);
+		systemPrompt = await buildAppAwareSystemPrompt(question, ctx.userId, [], turns, deps, {
+			modelSlug,
+			userCtx,
+			dataContextOrSnapshot: snapshot,
+			memorySnapshot: memSnapshot,
+			recalledSessions,
+		});
 	} else {
 		let askDataContext = '';
 		if (askClassification.dataQueryCandidate && deps.dataQuery) {
@@ -208,14 +226,13 @@ export async function handleAsk(
 				deps.logger.warn('DataQueryService call failed in /ask: %s', error);
 			}
 		}
-		systemPrompt = await buildAppAwareSystemPrompt(
-			question,
-			ctx.userId,
-			[],
-			turns,
-			deps,
-			{ modelSlug, userCtx, dataContextOrSnapshot: askDataContext, memorySnapshot: memSnapshot, recalledSessions },
-		);
+		systemPrompt = await buildAppAwareSystemPrompt(question, ctx.userId, [], turns, deps, {
+			modelSlug,
+			userCtx,
+			dataContextOrSnapshot: askDataContext,
+			memorySnapshot: memSnapshot,
+			recalledSessions,
+		});
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
@@ -235,12 +252,11 @@ export async function handleAsk(
 		});
 	} catch (error) {
 		if (sessionIsNew && ensuredSessionId) {
-			await deps.chatSessions.endActive(
-				{ userId: ctx.userId, sessionKey },
-				'system',
-			).catch((rollbackErr: unknown) => {
-				deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
-			});
+			await deps.chatSessions
+				.endActive({ userId: ctx.userId, sessionKey }, 'system')
+				.catch((rollbackErr: unknown) => {
+					deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
+				});
 		}
 		deps.logger.error('Chatbot /ask LLM call failed: %s', error);
 		const { userMessage } = classifyLLMError(error);
@@ -310,7 +326,13 @@ export async function handleAsk(
 		deps.logger.warn('Failed to save conversation history: %s', error);
 	}
 
-	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+	if (
+		appendSucceeded &&
+		deps.titleService &&
+		sessionIsNew &&
+		turns.length === 0 &&
+		ensuredSessionId
+	) {
 		scheduleTitleAfterFirstExchange(
 			{
 				userId: ctx.userId,

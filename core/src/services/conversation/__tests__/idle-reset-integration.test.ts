@@ -13,20 +13,20 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
+import type { ChatTranscriptIndex } from '../../chat-transcript-index/index.js';
+import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../../context-store/index.js';
 import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
 import { composeChatSessionStore } from '../../conversation-session/compose.js';
 import { decode } from '../../conversation-session/transcript-codec.js';
-import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../../context-store/index.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
-import { createMockCoreServices } from '../../../testing/mock-services.js';
-import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import type { ChatTranscriptIndex } from '../../chat-transcript-index/index.js';
 import { handleMessage } from '../handle-message.js';
 import { runIdleResetHook } from '../idle-reset-hook.js';
-import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
+import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 
 const USER = 'alice';
 const SESSION_KEY = 'agent:main:telegram:dm:alice';
@@ -229,13 +229,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 		expect(result.status).toBe('reset');
 		expect(result.summaryStatus).toBe('written');
 
-		const filePath = join(
-			tempDir,
-			'users',
-			USER,
-			'context',
-			`${RECENT_SESSION_SUMMARY_KEY}.md`,
-		);
+		const filePath = join(tempDir, 'users', USER, 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
 		expect(onDisk).toBe('Alice prefers tea.');
 	});
@@ -297,20 +291,18 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 			},
 		);
 
-		const filePath = join(
-			tempDir,
-			'users',
-			USER,
-			'context',
-			`${RECENT_SESSION_SUMMARY_KEY}.md`,
-		);
+		const filePath = join(tempDir, 'users', USER, 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
 		expect(onDisk).toBe('Second summary.');
 		expect(onDisk).not.toContain('First summary');
 	});
 
 	it('ContextStore.save failure — idle reset still proceeds with summaryStatus="failed"', async () => {
-		const failingFlushSave = async (_uid: string, _key: string, _content: string): Promise<void> => {
+		const failingFlushSave = async (
+			_uid: string,
+			_key: string,
+			_content: string,
+		): Promise<void> => {
 			throw new Error('disk full');
 		};
 
@@ -397,7 +389,11 @@ describe('P8c — parent-session lineage persona', () => {
 			// Last night — user discusses weekend trip
 			const { sessionId: yesterdayId } = await store.appendExchange(
 				{ userId: USER, sessionKey: SESSION_KEY },
-				makeTurn('user', 'help me think through a weekend trip — beach or mountains?', lastNight.toISOString()),
+				makeTurn(
+					'user',
+					'help me think through a weekend trip — beach or mountains?',
+					lastNight.toISOString(),
+				),
 				makeTurn('assistant', "Both sound great! Let's compare...", lastNight.toISOString()),
 			);
 
@@ -423,9 +419,14 @@ describe('P8c — parent-session lineage persona', () => {
 			);
 
 			// User: "good morning! can we keep planning the trip?"
-			const { store: morningStore, dataStore: morningDataStore } = makeStore(() => thisMorning, index);
+			const { store: morningStore, dataStore: morningDataStore } = makeStore(
+				() => thisMorning,
+				index,
+			);
 			const services = createMockCoreServices();
-			vi.mocked(services.llm.complete).mockResolvedValue('Good morning! Of course, let us continue planning.');
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				'Good morning! Of course, let us continue planning.',
+			);
 
 			await handleMessage(
 				createTestMessageContext({
@@ -560,7 +561,7 @@ describe('P8c — parent-session lineage: real handleMessage + real SQLite index
 
 	it('D.2 — manual endActive (newchat) produces successor with parent_session_id null', async () => {
 		const t1 = new Date('2026-05-01T10:00:00.000Z');
-		const { store, dataStore } = makeStore(() => t1);
+		const { store } = makeStore(() => t1);
 
 		const { sessionId: sessionA } = await store.appendExchange(
 			{ userId: USER, sessionKey: SESSION_KEY },
@@ -604,7 +605,11 @@ describe('P8c — parent-session lineage: real handleMessage + real SQLite index
 
 		// Second exchange — would-be attacker tries to override parent
 		await store.appendExchange(
-			{ userId: USER, sessionKey: SESSION_KEY, parentSessionId: '20260427_150000_bbbbbbbb' } as Parameters<typeof store.appendExchange>[0],
+			{
+				userId: USER,
+				sessionKey: SESSION_KEY,
+				parentSessionId: '20260427_150000_bbbbbbbb',
+			} as Parameters<typeof store.appendExchange>[0],
 			makeTurn('user', 'q2', t.toISOString()),
 			makeTurn('assistant', 'a2', t.toISOString()),
 		);

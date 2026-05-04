@@ -756,6 +756,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						ended_at: lastTs,
 						model: null,
 						title: null,
+						parent_session_id: null,
 					});
 					// Index each turn so FTS search can find legacy content.
 					for (let i = 0; i < legacyTurns.length; i++) {
