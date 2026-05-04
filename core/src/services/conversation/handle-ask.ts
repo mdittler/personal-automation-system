@@ -127,7 +127,15 @@ export async function handleAsk(
 		}),
 		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
 		deps.chatSessions.ensureActiveSession(
-			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
+			{
+				userId: ctx.userId,
+				sessionKey,
+				model: modelId,
+				householdId: getCurrentHouseholdId(),
+				...(ctx.idleResetState?.status === 'reset'
+					? { parentSessionId: ctx.idleResetState.endedSessionId ?? null }
+					: {}),
+			},
 			{
 				buildSnapshot: deps.conversationRetrieval
 					? async () => {
