@@ -123,7 +123,7 @@ export const NOTES_INTENT_REGEX =
  * "save my conversation".
  */
 export const MEMORY_FLUSH_INTENT_REGEX =
-	/\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not|please)\b[^.?!]{0,40}\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b|\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b[^.?!]{0,40}\b(?:on|off|enable|disable|stop|start|turn)\b/i;
+	/\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not)\b[^.?!]{0,40}\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b|\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b[^.?!]{0,40}\b(?:on|off|enable|disable|stop|start|turn)\b/i;
 
 /** Per-key intent gates — each allowlisted key requires its own intent signal. */
 const INTENT_GATES: Record<string, RegExp> = {

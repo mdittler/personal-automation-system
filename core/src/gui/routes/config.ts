@@ -136,9 +136,11 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 			prevFlushEnabled === true &&
 			validated.flush_memory_on_idle_reset === false
 		) {
-			disableFlushAndCleanup(userId).catch((err: unknown) => {
-				logger.warn({ userId, err }, 'GUI config: disableFlushAndCleanup failed');
-			});
+			try {
+				await disableFlushAndCleanup(userId);
+			} catch (err) {
+				logger.error({ userId, err }, 'GUI config: disableFlushAndCleanup failed');
+			}
 		}
 
 		return reply.redirect(`/gui/apps/${appId}`);

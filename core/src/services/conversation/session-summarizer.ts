@@ -15,7 +15,7 @@ const SYSTEM_PROMPT =
 	'You extract durable memory from a chat transcript. Output JSON of the form {"summary": "..."} where summary is plain prose under 1200 characters listing: stable facts about the user, expressed preferences, decisions made, and unresolved questions or follow-ups. Do NOT recap turn-by-turn. Do NOT include greetings, fillers, or chit-chat. The summary must not contain Markdown headings, code fences, HTML/XML tags, or quote characters. If there is nothing durable to record, return {"summary": null}. Output ONLY the JSON object — no fences.';
 
 // Bidi + zero-width: U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF
-const BIDI_ZERO_WIDTH_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
+const BIDI_ZERO_WIDTH_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
 
 function fenceTranscript(turns: SessionTurn[]): string {
 	const tail = turns.slice(-TURNS_TAIL);
@@ -40,7 +40,8 @@ export function sanitizeSummaryOutput(raw: string): string | null {
 		.replace(/`/g, '')
 		.replace(/[<>]/g, '')
 		.replace(BIDI_ZERO_WIDTH_RE, '')
-		.replace(/[\x00-\x1F\x7F]/g, ' ')
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips control chars from LLM output
+		.replace(/[\u0000-\u001F\u007F]/g, ' ')
 		.replace(/\s+/g, ' ')
 		.trim();
 	if (cleaned.length === 0) return null;

@@ -51,6 +51,7 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
+import { resolveUserBool } from './settings-resolver.js';
 import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
@@ -129,7 +130,14 @@ export async function handleAsk(
 			{ userId: ctx.userId, sessionKey, model: modelId, householdId: getCurrentHouseholdId() },
 			{
 				buildSnapshot: deps.conversationRetrieval
-					? () => deps.conversationRetrieval!.buildMemorySnapshot()
+					? async () => {
+							const flushEnabled = deps.config
+								? await resolveUserBool(deps.config, ctx.userId, 'flush_memory_on_idle_reset', false, deps.logger)
+								: false;
+							return deps.conversationRetrieval!.buildMemorySnapshot(
+								flushEnabled ? {} : { pinnedKeys: [] },
+							);
+						}
 					: undefined,
 			},
 		).catch((err: unknown) => {

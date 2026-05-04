@@ -20,6 +20,7 @@ import type { InteractionEntry } from '../../interaction-context/index.js';
 import {
 	ConversationRetrievalServiceImpl,
 	MissingRequestContextError,
+	type ConversationRetrievalService,
 } from '../conversation-retrieval-service.js';
 import { METHOD_SOURCE_CATEGORIES } from '../source-policy.js';
 
@@ -1002,5 +1003,17 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 		const idxBbb = result.content.indexOf('## bbb');
 		expect(idxAaa).toBeLessThan(idxBbb);
 		expect(result.content).not.toContain('## recent-session-summary');
+	});
+
+	it('interface accepts opts (compile-time: ConversationRetrievalService.buildMemorySnapshot)', async () => {
+		const contextStore = {
+			listForUser: vi.fn().mockResolvedValue([makeEntry('recent-session-summary', 'prev session')]),
+		} as never;
+		// Use interface-typed reference to confirm opts are exposed on the interface.
+		const svc: ConversationRetrievalService = new ConversationRetrievalServiceImpl({ contextStore });
+		const withPinning = await withUserId('u1', () => svc.buildMemorySnapshot({}));
+		const noPinning = await withUserId('u1', () => svc.buildMemorySnapshot({ pinnedKeys: [] }));
+		expect(withPinning.content).toContain('## recent-session-summary');
+		expect(noPinning.content).toContain('## recent-session-summary'); // still present alphabetically (only entry)
 	});
 });

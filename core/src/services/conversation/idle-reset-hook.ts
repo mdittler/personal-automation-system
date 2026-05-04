@@ -123,7 +123,8 @@ async function runFlushWithTimeout(
 	deps: IdleResetHookDeps,
 	timeoutMs: number,
 ): Promise<FlushStatus> {
-	if (!deps.summarizer || !deps.flushSave || !deps.getFlushEnabled) {
+	const { summarizer, flushSave, getFlushEnabled } = deps;
+	if (!summarizer || !flushSave || !getFlushEnabled) {
 		return 'disabled';
 	}
 
@@ -140,7 +141,7 @@ async function runFlushWithTimeout(
 	const work = (async (): Promise<FlushStatus> => {
 		let enabled: boolean;
 		try {
-			enabled = await deps.getFlushEnabled!(userId);
+			enabled = await getFlushEnabled(userId);
 		} catch (err) {
 			deps.logger.warn({ err, userId }, 'idle-reset-hook: getFlushEnabled threw');
 			return 'failed';
@@ -150,7 +151,7 @@ async function runFlushWithTimeout(
 
 		let summary: string | null;
 		try {
-			summary = await deps.summarizer!(turns, controller.signal);
+			summary = await summarizer(turns, controller.signal);
 		} catch (err) {
 			deps.logger.warn({ err, userId }, 'idle-reset-hook: summarizer threw');
 			return 'failed';
@@ -158,7 +159,7 @@ async function runFlushWithTimeout(
 		if (summary === null) return 'skipped';
 
 		return flushMemoryToContextStore(userId, summary, {
-			flushSave: deps.flushSave!,
+			flushSave,
 			logger: deps.logger,
 		});
 	})();

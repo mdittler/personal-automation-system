@@ -4633,10 +4633,16 @@ Every I/O boundary in the flush path is wrapped in a try/catch that logs a warni
 - `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "save the recipe"
 - `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "enable daily notes"
 - `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "memory usage is high"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "please explain session memory"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "please show me my session memory"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "please tell me about session memory"
 - `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > notes intent does NOT toggle flush_memory_on_idle_reset
 - `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > flush intent does NOT toggle log_to_notes
 - `handle-message.test.ts` > FLUSH_MEMORY_INSTRUCTION_BLOCK injection > appends FLUSH_MEMORY_INSTRUCTION_BLOCK when MEMORY_FLUSH_INTENT_REGEX matches
 - `handle-message.test.ts` > FLUSH_MEMORY_INSTRUCTION_BLOCK injection > does not append block when regex does not match
+
+**Fixes:**
+- **Codex-P2 (2026-05-04):** Removed `please` from action-verb group in `MEMORY_FLUSH_INTENT_REGEX` — false-positive on "please explain session memory" style read-only queries. Three negative tests added to guard against regression. CL: codex-p8b-corrections.
 
 ---
 
@@ -4667,6 +4673,11 @@ Every I/O boundary in the flush path is wrapped in a try/catch that logs a warni
 
 **Edge case tests:**
 - `conversation-retrieval-service.test.ts` > buildMemorySnapshot > pinnedKeys: recent-session-summary appears first even when alphabetically-earlier keys fill the budget
+- `conversation-retrieval-service.test.ts` > buildMemorySnapshot > interface accepts opts (compile-time: ConversationRetrievalService.buildMemorySnapshot)
+
+**Fixes:**
+- **Codex-P3a (2026-05-04):** Updated `ConversationRetrievalService` interface to expose `opts?: { pinnedKeys?: string[] }`. Added compile-time test that calls `buildMemorySnapshot` through an interface-typed reference with both empty and `pinnedKeys: []` forms. CL: codex-p8b-corrections.
+- **Codex-P1 (2026-05-04):** `buildSnapshot` callback in `handle-ask.ts` and `handle-message.ts` now gates pinning on user's `flush_memory_on_idle_reset` setting via `resolveUserBool`. When setting is OFF, passes `{ pinnedKeys: [] }` so a stale `recent-session-summary` entry (e.g., from a failed cleanup) is not promoted to Layer 2 pinned position. CL: codex-p8b-corrections.
 
 ---
 
@@ -8070,8 +8081,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-FLUSH-007 | idle-reset-hook.test.ts | 1 | 2 | Implemented |
 | REQ-CONV-FLUSH-008 | idle-reset-hook.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-FLUSH-009 | idle-reset-hook.test.ts, idle-reset-integration.test.ts, idle-reset.persona.test.ts | 0 | 5 | Implemented |
-| REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 8 | Implemented |
+| REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 11 | Implemented |
 | REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts | 2 | 1 | Implemented |
-| REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 2 | Implemented |
 
-| **Totals** | **210 test files** | **1614** | **1819** | **3433 tests** |
+| **Totals** | **210 test files** | **1614** | **1823** | **3437 tests** |

@@ -146,7 +146,7 @@ export interface ConversationRetrievalService {
 	 * Called at session-mint time, before the first prompt is assembled.
 	 * Requires a userId in the current requestContext.
 	 */
-	buildMemorySnapshot(): Promise<MemorySnapshot>;
+	buildMemorySnapshot(opts?: { pinnedKeys?: string[] }): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────

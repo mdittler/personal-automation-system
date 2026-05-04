@@ -375,6 +375,10 @@ describe('MEMORY_FLUSH_INTENT_REGEX — negative (should NOT match)', () => {
 		'i want to save this conversation',
 		'what is session management?',
 		'show me my memory entries',
+		// "please" without an action verb must NOT false-fire on session memory phrases
+		'please explain session memory',
+		'please show me my session memory',
+		'please tell me about session memory',
 	])('does NOT match: %s', (phrase) => {
 		expect(MEMORY_FLUSH_INTENT_REGEX.test(phrase)).toBe(false);
 	});
