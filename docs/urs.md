@@ -4681,6 +4681,68 @@ Every I/O boundary in the flush path is wrapped in a try/catch that logs a warni
 
 ---
 
+## Hermes P8c — Parent-Session Lineage
+
+### REQ-CONV-LINEAGE-001 — Idle-reset successor MUST carry `parent_session_id` pointing to the ended session
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+When the **event that ended the prior session** is `runIdleResetHook` (status `reset`), the **next mint** (via `ensureActiveSession` OR `appendExchange` cold-mint) SHALL record the ended session's id in the successor's `parent_session_id` frontmatter field. Lineage source = the event that ended the prior session.
+
+**Primary test:** `idle-reset-integration.test.ts > D.1 — idle reset → handleMessage mints successor with parent_session_id in frontmatter AND SQLite`
+
+---
+
+### REQ-CONV-LINEAGE-002 — Non-idle session endings produce `parent_session_id: null`
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+When the prior session was ended by **any non-idle event** (manual `/newchat`, `/reset`, or a system reset without `IdleResetState`), the successor SHALL mint with `parent_session_id: null`. Lineage source = the event that ended the prior session, not the command verb.
+
+**Primary test:** `idle-reset-integration.test.ts > D.2 — manual endActive (newchat) produces successor with parent_session_id null`
+
+---
+
+### REQ-CONV-LINEAGE-003 — `parentSessionId` MUST be format-validated before writing; strings that fail warn, non-strings silently coerce
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+The store SHALL format-validate `parentSessionId` against `SESSION_ID_RE` before writing. **Strings** that fail validation SHALL coerce to `null` and emit `logger.warn({ suspectedParentSessionId, sessionId }, ...)`. **Non-string** inputs (`null`/`undefined`/non-string types) SHALL silently coerce to `null` (these are intentional "no parent" signals). Existence/ownership of the parent transcript is NOT verified — out of threat-model scope (per-user data scoping handles isolation).
+
+**Primary tests:** `chat-session-store.test.ts > validator rejects malformed parent ids and warns` and `chat-session-store.test.ts > non-string parents silently coerce (no warn)`
+
+---
+
+### REQ-CONV-LINEAGE-004 — SQLite `sessions` table MUST persist `parent_session_id` with a btree index; v1→v2 migration MUST be idempotent and preserve existing rows
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+The chat-transcript-index `sessions` table SHALL persist `parent_session_id` (TEXT NULL) with a btree index `sessions_parent_session` for lineage walks. `upsertSession` SHALL accept the field as optional input (default null). The v1→v2 migration SHALL be idempotent (PRAGMA-checked) and preserve all existing rows.
+
+**Primary tests:** `schema.test.ts > P8c — fresh DB has a parent_session_id TEXT NULL column`, `schema.test.ts > P8c — migrates existing v1 DB`, `schema.test.ts > P8c — CREATE INDEX sessions_parent_session exists`; `chat-transcript-index.test.ts > P8c — upsertSession persists parent_session_id`
+
+---
+
+### REQ-CONV-LINEAGE-005 — `chat-index-rebuild` MUST propagate `parent_session_id` from frontmatter with format validation
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+`chat-index-rebuild` SHALL propagate `parent_session_id` from frontmatter and format-validate against `SESSION_ID_RE`. Missing or malformed values SHALL map to `null`. Markdown is the canonical source of truth; rebuild is the recovery path for frontmatter↔SQLite divergence.
+
+**Primary tests:** `chat-index-rebuild.integration.test.ts > P8c — preserves valid parent_session_id from frontmatter`, `> maps missing parent_session_id to null`, `> malformed parent_session_id coerces to null`
+
+---
+
+### REQ-CONV-LINEAGE-006 — `parent_session_id` MUST be set at mint only; subsequent exchanges MUST NOT alter it
+
+**Phase:** Hermes P8c | **Status:** Implemented
+
+`parent_session_id` SHALL be set ONLY at mint time. Subsequent `appendExchange` calls on an existing session SHALL NOT alter it.
+
+**Primary test:** `idle-reset-integration.test.ts > D.3 — parent_session_id is set only at mint; second appendExchange does not alter it`
+
+---
+
 ## Hermes P9 — Photo Memory Bridge
 
 ### REQ-CONV-PHOTO-001 — Photo dispatches MUST append a structured turn pair to the active chat session
@@ -8084,5 +8146,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 11 | Implemented |
 | REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts | 2 | 1 | Implemented |
 | REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-LINEAGE-001 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-LINEAGE-002 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-LINEAGE-003 | chat-session-store.test.ts | 7 | 4 | Implemented |
+| REQ-CONV-LINEAGE-004 | schema.test.ts, chat-transcript-index.test.ts | 4 | 0 | Implemented |
+| REQ-CONV-LINEAGE-005 | chat-index-rebuild.integration.test.ts | 3 | 0 | Implemented |
+| REQ-CONV-LINEAGE-006 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
 
 | **Totals** | **210 test files** | **1614** | **1823** | **3437 tests** |

@@ -97,4 +97,61 @@ describe('ChatTranscriptIndex schema', () => {
 			.get() as any;
 		expect(count.c).toBe(0);
 	});
+
+	// C.1 — fresh DB includes parent_session_id TEXT NULL column
+	it('P8c — fresh DB has a parent_session_id TEXT NULL column', () => {
+		const db = makeDb(makeTmpPath());
+		applyMigrations(db);
+		const cols = db
+			.prepare("PRAGMA table_info('sessions')")
+			.all() as Array<{ name: string; type: string; notnull: number }>;
+		const col = cols.find((c) => c.name === 'parent_session_id');
+		expect(col).toBeDefined();
+		expect(col!.type).toBe('TEXT');
+		expect(col!.notnull).toBe(0);
+	});
+
+	// C.2 — v1→v2 migration preserves existing row and adds column
+	it('P8c — migrates existing v1 DB: ALTER adds column AND preserves rows', () => {
+		const dbPath = makeTmpPath();
+		// Seed a real v1 DB by hand
+		const v1 = new Database(dbPath);
+		v1.exec(
+			`CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+      household_id TEXT, source TEXT NOT NULL, started_at TEXT NOT NULL,
+      ended_at TEXT, model TEXT, title TEXT)`,
+		);
+		v1.prepare(
+			'INSERT INTO sessions (id, user_id, source, started_at) VALUES (?, ?, ?, ?)',
+		).run('20260101_010101_deadbeef', 'u1', 'telegram', '2026-01-01T01:01:01.000Z');
+		v1.pragma('user_version = 1');
+		v1.close();
+
+		// Open via applyMigrations — should upgrade to v2
+		const db = makeDb(dbPath);
+		applyMigrations(db);
+		const cols = db
+			.prepare("PRAGMA table_info('sessions')")
+			.all() as Array<{ name: string }>;
+		expect(cols.find((c) => c.name === 'parent_session_id')).toBeDefined();
+		expect(db.pragma('user_version', { simple: true })).toBe(2);
+
+		// Existing row survived; parent_session_id is NULL
+		const row = db
+			.prepare('SELECT id, parent_session_id FROM sessions WHERE id = ?')
+			.get('20260101_010101_deadbeef') as { id: string; parent_session_id: string | null };
+		expect(row).toBeDefined();
+		expect(row.id).toBe('20260101_010101_deadbeef');
+		expect(row.parent_session_id).toBeNull();
+	});
+
+	// C.3 — btree index exists for lineage queries
+	it('P8c — sessions_parent_session btree index exists', () => {
+		const db = makeDb(makeTmpPath());
+		applyMigrations(db);
+		const indexes = db
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'")
+			.all() as Array<{ name: string }>;
+		expect(indexes.map((r) => r.name)).toContain('sessions_parent_session');
+	});
 });

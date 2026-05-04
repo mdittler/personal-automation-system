@@ -13,15 +13,20 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMockCoreServices } from '../../../testing/mock-services.js';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
+import type { ChatTranscriptIndex } from '../../chat-transcript-index/index.js';
+import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../../context-store/index.js';
 import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
 import { composeChatSessionStore } from '../../conversation-session/compose.js';
 import { decode } from '../../conversation-session/transcript-codec.js';
-import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../../context-store/index.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
+import { handleMessage } from '../handle-message.js';
 import { runIdleResetHook } from '../idle-reset-hook.js';
-import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
+import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 
 const USER = 'alice';
 const SESSION_KEY = 'agent:main:telegram:dm:alice';
@@ -35,7 +40,7 @@ afterEach(async () => {
 	await rm(tempDir, { recursive: true, force: true });
 });
 
-function makeStore(clock?: () => Date) {
+function makeStore(clock?: () => Date, index?: ChatTranscriptIndex) {
 	const dataStore = new DataStoreServiceImpl({
 		dataDir: tempDir,
 		appId: 'chatbot',
@@ -48,6 +53,7 @@ function makeStore(clock?: () => Date) {
 			data: dataStore,
 			logger: pino({ level: 'silent' }),
 			clock,
+			index,
 		}),
 		dataStore,
 	};
@@ -223,13 +229,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 		expect(result.status).toBe('reset');
 		expect(result.summaryStatus).toBe('written');
 
-		const filePath = join(
-			tempDir,
-			'users',
-			USER,
-			'context',
-			`${RECENT_SESSION_SUMMARY_KEY}.md`,
-		);
+		const filePath = join(tempDir, 'users', USER, 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
 		expect(onDisk).toBe('Alice prefers tea.');
 	});
@@ -291,20 +291,18 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 			},
 		);
 
-		const filePath = join(
-			tempDir,
-			'users',
-			USER,
-			'context',
-			`${RECENT_SESSION_SUMMARY_KEY}.md`,
-		);
+		const filePath = join(tempDir, 'users', USER, 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
 		expect(onDisk).toBe('Second summary.');
 		expect(onDisk).not.toContain('First summary');
 	});
 
 	it('ContextStore.save failure — idle reset still proceeds with summaryStatus="failed"', async () => {
-		const failingFlushSave = async (_uid: string, _key: string, _content: string): Promise<void> => {
+		const failingFlushSave = async (
+			_uid: string,
+			_key: string,
+			_content: string,
+		): Promise<void> => {
 			throw new Error('disk full');
 		};
 
@@ -374,5 +372,251 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionB}.md`);
 		const { meta } = decode(raw);
 		expect(meta.ended_at).toBeNull();
+	});
+});
+
+// ── P8c — parent-session lineage persona test ────────────────────────────────
+
+describe('P8c — parent-session lineage persona', () => {
+	it('D.4a — user chats overnight and returns next morning: bot notices gap + parent lineage stamped', async () => {
+		const lastNight = new Date('2026-05-03T22:30:00.000Z');
+		const dbPath = join(tempDir, 'p8c-persona.sqlite');
+		const index = new ChatTranscriptIndexImpl(dbPath);
+
+		try {
+			const { store, dataStore: _dataStore } = makeStore(() => lastNight, index);
+
+			// Last night — user discusses weekend trip
+			const { sessionId: yesterdayId } = await store.appendExchange(
+				{ userId: USER, sessionKey: SESSION_KEY },
+				makeTurn(
+					'user',
+					'help me think through a weekend trip — beach or mountains?',
+					lastNight.toISOString(),
+				),
+				makeTurn('assistant', "Both sound great! Let's compare...", lastNight.toISOString()),
+			);
+
+			// 12+ hours pass — idle threshold met
+			const thisMorning = new Date('2026-05-04T11:05:00.000Z');
+			const sendSpy = vi.fn().mockResolvedValue(undefined);
+			const idleResult = await runIdleResetHook(
+				{ userId: USER, sessionKey: SESSION_KEY },
+				{
+					idleMinutes: 720, // 12-hour threshold
+					chatSessions: store,
+					telegram: { send: sendSpy },
+					logger: pino({ level: 'silent' }) as Pick<Logger, 'warn'>,
+					now: () => thisMorning,
+				},
+			);
+			expect(idleResult.status).toBe('reset');
+
+			// User-visible: bot sent the inactivity notice
+			expect(sendSpy).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.stringContaining('Started a new session'),
+			);
+
+			// User: "good morning! can we keep planning the trip?"
+			const { store: morningStore, dataStore: morningDataStore } = makeStore(
+				() => thisMorning,
+				index,
+			);
+			const services = createMockCoreServices();
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				'Good morning! Of course, let us continue planning.',
+			);
+
+			await handleMessage(
+				createTestMessageContext({
+					userId: USER,
+					sessionKey: SESSION_KEY,
+					text: 'good morning! can we keep planning the trip?',
+					timestamp: thisMorning,
+					idleResetState: idleResult,
+				}),
+				{
+					llm: services.llm,
+					telegram: services.telegram,
+					data: services.data,
+					logger: services.logger,
+					timezone: 'UTC',
+					chatSessions: morningStore,
+				},
+			);
+
+			const todayId = await morningStore.peekActive({ userId: USER, sessionKey: SESSION_KEY });
+			expect(todayId).toBeDefined();
+			expect(todayId).not.toBe(yesterdayId);
+
+			// Persisted lineage in Markdown frontmatter
+			const raw = await morningDataStore.forUser(USER).read(`conversation/sessions/${todayId}.md`);
+			expect(decode(raw).meta.parent_session_id).toBe(yesterdayId);
+
+			// Persisted lineage in SQLite
+			expect((await index.getSessionMeta(todayId!))?.parent_session_id).toBe(yesterdayId);
+		} finally {
+			await index.close();
+		}
+	});
+
+	it('D.4b — user starts /newchat manually: no lineage attribution', async () => {
+		const t = new Date('2026-05-04T11:00:00.000Z');
+		const { store, dataStore } = makeStore(() => t);
+
+		const { sessionId: firstId } = await store.appendExchange(
+			{ userId: USER, sessionKey: SESSION_KEY },
+			makeTurn('user', 'tell me about Mars', t.toISOString()),
+			makeTurn('assistant', 'Mars is the fourth planet...', t.toISOString()),
+		);
+		await store.endActive({ userId: USER, sessionKey: SESSION_KEY }, 'newchat');
+
+		// No idleResetState — manual /newchat has no lineage
+		const { sessionId: secondId } = await store.ensureActiveSession({
+			userId: USER,
+			sessionKey: SESSION_KEY,
+		});
+
+		expect(secondId).not.toBe(firstId);
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${secondId}.md`);
+		expect(decode(raw).meta.parent_session_id).toBeNull();
+	});
+});
+
+// ── P8c — parent-session lineage integration ─────────────────────────────────
+
+describe('P8c — parent-session lineage: real handleMessage + real SQLite index', () => {
+	it('D.1 — idle reset → handleMessage mints successor with parent_session_id in frontmatter AND SQLite', async () => {
+		const t1 = new Date('2026-05-01T10:00:00.000Z');
+		const dbPath = join(tempDir, 'p8c-d1.sqlite');
+		const index = new ChatTranscriptIndexImpl(dbPath);
+
+		try {
+			const { store, dataStore: _dataStore } = makeStore(() => t1, index);
+
+			// Mint session A
+			const { sessionId: sessionA } = await store.appendExchange(
+				{ userId: USER, sessionKey: SESSION_KEY },
+				makeTurn('user', 'planning a weekend trip', t1.toISOString()),
+				makeTurn('assistant', 'sounds great!', t1.toISOString()),
+			);
+
+			// Hook fires 2+ hours later
+			const tHook = new Date('2026-05-01T12:00:01.000Z');
+			const idleResult = await runIdleResetHook(
+				{ userId: USER, sessionKey: SESSION_KEY },
+				{
+					idleMinutes: 1,
+					chatSessions: store,
+					telegram: { send: vi.fn().mockResolvedValue(undefined) },
+					logger: pino({ level: 'silent' }) as Pick<Logger, 'warn'>,
+					now: () => tHook,
+				},
+			);
+			expect(idleResult.status).toBe('reset');
+			expect(idleResult.endedSessionId).toBe(sessionA);
+
+			// Next user turn via real handleMessage with idleResetState attached
+			const t2 = new Date('2026-05-01T12:00:10.000Z');
+			const { store: store2, dataStore: dataStore2 } = makeStore(() => t2, index);
+			const services = createMockCoreServices();
+			vi.mocked(services.llm.complete).mockResolvedValue('ok, continuing the trip plan!');
+
+			await handleMessage(
+				createTestMessageContext({
+					userId: USER,
+					sessionKey: SESSION_KEY,
+					text: 'ok continue',
+					timestamp: t2,
+					idleResetState: idleResult,
+				}),
+				{
+					llm: services.llm,
+					telegram: services.telegram,
+					data: services.data,
+					logger: services.logger,
+					timezone: 'UTC',
+					chatSessions: store2,
+				},
+			);
+
+			// Session B is new
+			const sessionB = await store2.peekActive({ userId: USER, sessionKey: SESSION_KEY });
+			expect(sessionB).toBeDefined();
+			expect(sessionB).not.toBe(sessionA);
+
+			// Markdown frontmatter has parent_session_id = sessionA
+			const raw = await dataStore2.forUser(USER).read(`conversation/sessions/${sessionB}.md`);
+			const { meta } = decode(raw);
+			expect(meta.parent_session_id).toBe(sessionA);
+
+			// SQLite also has parent_session_id = sessionA
+			const dbMeta = await index.getSessionMeta(sessionB!);
+			expect(dbMeta?.parent_session_id).toBe(sessionA);
+		} finally {
+			await index.close();
+		}
+	});
+
+	it('D.2 — manual endActive (newchat) produces successor with parent_session_id null', async () => {
+		const t1 = new Date('2026-05-01T10:00:00.000Z');
+		const { store } = makeStore(() => t1);
+
+		const { sessionId: sessionA } = await store.appendExchange(
+			{ userId: USER, sessionKey: SESSION_KEY },
+			makeTurn('user', 'first message', t1.toISOString()),
+			makeTurn('assistant', 'first reply', t1.toISOString()),
+		);
+		await store.endActive({ userId: USER, sessionKey: SESSION_KEY }, 'newchat');
+
+		// Next session — no idleResetState, so no parentSessionId forwarded
+		const t2 = new Date('2026-05-01T10:00:30.000Z');
+		const { store: store2, dataStore: dataStore2 } = makeStore(() => t2);
+		const { sessionId: sessionB } = await store2.ensureActiveSession({
+			userId: USER,
+			sessionKey: SESSION_KEY,
+		});
+
+		expect(sessionB).not.toBe(sessionA);
+		const raw = await dataStore2.forUser(USER).read(`conversation/sessions/${sessionB}.md`);
+		const { meta } = decode(raw);
+		expect(meta.parent_session_id).toBeNull();
+	});
+
+	it('D.3 — parent_session_id is set only at mint; second appendExchange does not alter it', async () => {
+		const t = new Date('2026-05-01T10:00:00.000Z');
+		const { store, dataStore } = makeStore(() => t);
+		const parentId = '20260427_140000_aaaaaaaa';
+
+		// Mint with a parent
+		const { sessionId } = await store.ensureActiveSession({
+			userId: USER,
+			sessionKey: SESSION_KEY,
+			parentSessionId: parentId,
+		} as Parameters<typeof store.ensureActiveSession>[0]);
+
+		// First exchange on the session
+		await store.appendExchange(
+			{ userId: USER, sessionKey: SESSION_KEY },
+			makeTurn('user', 'q1', t.toISOString()),
+			makeTurn('assistant', 'a1', t.toISOString()),
+		);
+
+		// Second exchange — would-be attacker tries to override parent
+		await store.appendExchange(
+			{
+				userId: USER,
+				sessionKey: SESSION_KEY,
+				parentSessionId: '20260427_150000_bbbbbbbb',
+			} as Parameters<typeof store.appendExchange>[0],
+			makeTurn('user', 'q2', t.toISOString()),
+			makeTurn('assistant', 'a2', t.toISOString()),
+		);
+
+		// Original parent must be preserved
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta } = decode(raw);
+		expect(meta.parent_session_id).toBe(parentId);
 	});
 });

@@ -54,9 +54,17 @@ export interface ChatSessionStore {
 	 * On the mint path, `opts.buildSnapshot` is invoked once (try/catch → degraded).
 	 * On the peek path (existing session), the snapshot is read from frontmatter.
 	 * When `opts.buildSnapshot` is absent, no memory_snapshot field is written.
+	 * When `ctx.parentSessionId` is provided, it is format-validated and stamped on the
+	 * new transcript's frontmatter (P8c lineage).
 	 */
 	ensureActiveSession(
-		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		ctx: {
+			userId: string;
+			sessionKey: string;
+			model?: string;
+			householdId?: string | null;
+			parentSessionId?: string | null;
+		},
 		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
 	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }>;
 
@@ -80,6 +88,7 @@ export interface ChatSessionStore {
 			model?: string;
 			householdId?: string | null;
 			expectedSessionId?: string;
+			parentSessionId?: string | null;
 		},
 		userTurn: SessionTurn,
 		assistantTurn: SessionTurn,
@@ -132,6 +141,19 @@ const SESSION_ID_RE = /^\d{8}_\d{6}_[0-9a-f]{8}$/;
 const MAX_MINT_ATTEMPTS = 3;
 const TITLE_MAX_LEN = 80;
 
+function validateParentSessionId(input: unknown, sessionId: string, logger: Logger): string | null {
+	if (input === null || input === undefined) return null;
+	if (typeof input !== 'string') return null;
+	if (!SESSION_ID_RE.test(input)) {
+		logger.warn(
+			{ suspectedParentSessionId: input, sessionId },
+			'conversation-session: parentSessionId rejected — does not match SESSION_ID_RE',
+		);
+		return null;
+	}
+	return input;
+}
+
 function sanitizeTitle(input: string): string | null {
 	const cleaned = input
 		.replace(/[\r\n\t]+/g, ' ')
@@ -171,7 +193,13 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	}
 
 	async ensureActiveSession(
-		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		ctx: {
+			userId: string;
+			sessionKey: string;
+			model?: string;
+			householdId?: string | null;
+			parentSessionId?: string | null;
+		},
 		opts?: { buildSnapshot?: () => Promise<MemorySnapshot> },
 	): Promise<{ sessionId: string; isNew: boolean; snapshot: MemorySnapshot | undefined }> {
 		const store = this.deps.data.forUser(ctx.userId);
@@ -216,7 +244,12 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 			}
 
-			const sessionId = await this.mintAndRegisterWithSnapshot(store, ctx, memorySnapshotFm);
+			const sessionId = await this.mintAndRegisterWithSnapshot(
+				store,
+				ctx,
+				memorySnapshotFm,
+				ctx.parentSessionId ?? null,
+			);
 			return { sessionId, isNew: true, snapshot };
 		});
 	}
@@ -244,6 +277,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			model?: string;
 			householdId?: string | null;
 			expectedSessionId?: string;
+			parentSessionId?: string | null;
 		},
 		userTurn: SessionTurn,
 		assistantTurn: SessionTurn,
@@ -339,9 +373,15 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	// Must be called while the caller holds the conversation-session-index:<userId> lock.
 	private async mintAndRegister(
 		store: ReturnType<DataStoreService['forUser']>,
-		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
+		ctx: {
+			userId: string;
+			sessionKey: string;
+			model?: string;
+			householdId?: string | null;
+			parentSessionId?: string | null;
+		},
 	): Promise<string> {
-		return this.mintAndRegisterWithSnapshot(store, ctx, undefined);
+		return this.mintAndRegisterWithSnapshot(store, ctx, undefined, ctx.parentSessionId ?? null);
 	}
 
 	// Must be called while the caller holds the conversation-session-index:<userId> lock.
@@ -349,6 +389,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		store: ReturnType<DataStoreService['forUser']>,
 		ctx: { userId: string; sessionKey: string; model?: string; householdId?: string | null },
 		memorySnapshot: ChatSessionFrontmatter['memory_snapshot'],
+		parentSessionId: string | null = null,
 	): Promise<string> {
 		const now = this.now();
 		const startedAt = now.toISOString();
@@ -356,7 +397,8 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			const id = this.mintId(now);
 			const existing = await store.read(`conversation/sessions/${id}.md`);
 			if (existing === '') {
-				const fm = this.buildFrontmatter(ctx, id, startedAt);
+				const validatedParent = validateParentSessionId(parentSessionId, id, this.deps.logger);
+				const fm = this.buildFrontmatter(ctx, id, startedAt, validatedParent);
 				if (memorySnapshot !== undefined) fm.memory_snapshot = memorySnapshot;
 				// Write transcript skeleton BEFORE publishing to the index.
 				// Guarantees concurrent peekActive + expectedSessionId callers always find an existing file.
@@ -372,10 +414,11 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 							ended_at: null,
 							model: ctx.model ?? null,
 							title: null,
+							parent_session_id: validatedParent,
 						});
 					} catch (err) {
 						this.deps.logger.warn(
-							{ err, sessionId: id },
+							{ err, sessionId: id, parentSessionId: validatedParent },
 							'chat-transcript-index: upsertSession failed; continuing',
 						);
 					}
@@ -398,6 +441,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		ctx: { userId: string; model?: string; householdId?: string | null },
 		sessionId: string,
 		startedAt?: string,
+		parentSessionId: string | null = null,
 	): ChatSessionFrontmatter {
 		const now = startedAt ?? this.now().toISOString();
 		return {
@@ -407,7 +451,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			household_id: ctx.householdId ?? null,
 			model: ctx.model ?? null,
 			title: null,
-			parent_session_id: null,
+			parent_session_id: parentSessionId,
 			started_at: now,
 			last_activity_at: now,
 			ended_at: null,
@@ -712,6 +756,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						ended_at: lastTs,
 						model: null,
 						title: null,
+						parent_session_id: null,
 					});
 					// Index each turn so FTS search can find legacy content.
 					for (let i = 0; i < legacyTurns.length; i++) {

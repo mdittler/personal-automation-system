@@ -362,3 +362,57 @@ describe('handleMessage — ensureActiveSession wiring', () => {
 		expect(chatSessions.endActive).not.toHaveBeenCalled();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P8c — handleMessage lineage forwarding
+// ---------------------------------------------------------------------------
+
+describe('handleMessage — P8c lineage forwarding', () => {
+	// B.1 — reset state forwards endedSessionId as parentSessionId
+	it('passes idleResetState.endedSessionId as parentSessionId on reset', async () => {
+		const { services, chatSessions } = makeDeps();
+		const ctx = createTestMessageContext({
+			text: 'hi',
+			idleResetState: {
+				status: 'reset',
+				endedSessionId: '20260504_090000_aaaaaaaa',
+				parentTitle: 'old session',
+				summaryStatus: 'written',
+			},
+		});
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+		expect(chatSessions.ensureActiveSession).toHaveBeenCalledWith(
+			expect.objectContaining({ parentSessionId: '20260504_090000_aaaaaaaa' }),
+			expect.anything(),
+		);
+	});
+
+	// B.2 — non-reset states do NOT pass parentSessionId
+	it.each([
+		{ label: 'absent idleResetState', state: undefined },
+		{ label: "status: 'none'", state: { status: 'none' as const } },
+		{ label: "status: 'protected'", state: { status: 'protected' as const } },
+	])('does NOT pass parentSessionId when $label', async ({ state }) => {
+		const { services, chatSessions } = makeDeps();
+		const ctx = createTestMessageContext({ text: 'hi', idleResetState: state });
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+		expect(chatSessions.ensureActiveSession).toHaveBeenCalledWith(
+			expect.not.objectContaining({ parentSessionId: expect.any(String) }),
+			expect.anything(),
+		);
+	});
+});

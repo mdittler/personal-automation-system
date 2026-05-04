@@ -9,10 +9,11 @@ import type {
 	SearchHit,
 	SearchResult,
 	SessionRow,
+	SessionRowInput,
 } from './types.js';
 
 export interface ChatTranscriptIndex {
-	upsertSession(row: SessionRow): Promise<void>;
+	upsertSession(row: SessionRowInput): Promise<void>;
 	appendMessage(row: MessageRow): Promise<void>;
 	endSession(sessionId: string, endedAt: string): Promise<void>;
 	deleteSession(sessionId: string): Promise<void>;
@@ -55,13 +56,13 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 		}
 	}
 
-	async upsertSession(row: SessionRow): Promise<void> {
+	async upsertSession(row: SessionRowInput): Promise<void> {
 		await withSqliteRetry(() => {
 			const txn = this.db.transaction(() => {
 				this.db
 					.prepare(
-						`INSERT OR REPLACE INTO sessions(id, user_id, household_id, source, started_at, ended_at, model, title)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+						`INSERT OR REPLACE INTO sessions(id, user_id, household_id, source, started_at, ended_at, model, title, parent_session_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 					)
 					.run(
 						row.id,
@@ -72,6 +73,7 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 						row.ended_at ?? null,
 						row.model ?? null,
 						row.title ?? null,
+						row.parent_session_id ?? null,
 					);
 			});
 			txn();

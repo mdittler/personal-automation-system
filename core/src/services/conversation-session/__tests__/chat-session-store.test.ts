@@ -1021,3 +1021,108 @@ describe('last_activity_at refresh on appendExchange', () => {
 		expect(after).toContain('still works');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P8c — parent_session_id on mint
+// ---------------------------------------------------------------------------
+
+describe('P8c — parent_session_id on mint', () => {
+	it('ensureActiveSession with a well-formed parentSessionId stamps it into frontmatter', async () => {
+		const store = makeStore();
+		const parentId = '20260427_140000_aaaaaaaa';
+		const { sessionId, isNew } = await store.ensureActiveSession({
+			...ctx,
+			parentSessionId: parentId,
+		});
+		expect(isNew).toBe(true);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBe(parentId);
+	});
+
+	// A.2 — regression-guard: default is null
+	it('ensureActiveSession without parentSessionId leaves parent_session_id null', async () => {
+		const store = makeStore();
+		const { sessionId } = await store.ensureActiveSession(ctx);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBeNull();
+	});
+
+	// A.3 — malformed strings warn and coerce to null
+	it.each([
+		'../../../etc/passwd',
+		'<script>alert(1)</script>',
+		'20260427_140000_NOTHEX!',
+		'20260427_140000_AAAAAAAA',
+		'20260427_140000_aaaa',
+		'twas-brillig-and-the-slithy-toves',
+		'',
+	])('malformed parentSessionId "%s" coerces to null and warns', async (bad) => {
+		const warnSpy = vi.fn();
+		const store = composeChatSessionStore({
+			data: makeDataStore(),
+			logger: { warn: warnSpy } as unknown as Parameters<typeof composeChatSessionStore>[0]['logger'],
+			clock,
+		});
+		const { sessionId } = await store.ensureActiveSession({
+			userId: USER,
+			sessionKey: `key-bad-${bad.length}`,
+			parentSessionId: bad,
+		});
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBeNull();
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ suspectedParentSessionId: bad, sessionId }),
+			expect.stringContaining('does not match SESSION_ID_RE'),
+		);
+	});
+
+	// A.4 — non-string inputs silently coerce to null (no warn)
+	it.each([
+		{ label: 'number', value: 42 },
+		{ label: 'object', value: {} },
+		{ label: 'null', value: null },
+		{ label: 'undefined', value: undefined },
+	])('non-string parentSessionId ($label) silently coerces to null', async ({ value }) => {
+		const warnSpy = vi.fn();
+		const store = composeChatSessionStore({
+			data: makeDataStore(),
+			logger: { warn: warnSpy } as unknown as Parameters<typeof composeChatSessionStore>[0]['logger'],
+			clock,
+		});
+		const { sessionId } = await store.ensureActiveSession({
+			userId: USER,
+			sessionKey: `key-nonstr-${String(value)}`,
+			parentSessionId: value as unknown as string | null | undefined,
+		});
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBeNull();
+		expect(warnSpy).not.toHaveBeenCalledWith(
+			expect.objectContaining({ suspectedParentSessionId: value }),
+			expect.anything(),
+		);
+	});
+
+	// A.5 — appendExchange cold-mint path
+	it('appendExchange cold-mint with parentSessionId stamps it into frontmatter', async () => {
+		const store = makeStore();
+		const parentId = '20260427_140000_aaaaaaaa';
+		const { sessionId } = await store.appendExchange(
+			{ ...ctx, parentSessionId: parentId },
+			turn('user', 'photo'),
+			turn('assistant', 'ok'),
+		);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBe(parentId);
+	});
+
+	it('appendExchange cold-mint without parentSessionId stamps null', async () => {
+		const store = makeStore();
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'hi'),
+			turn('assistant', 'hello'),
+		);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBeNull();
+	});
+});

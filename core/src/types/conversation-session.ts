@@ -4,8 +4,9 @@ export type IdleResetStatus = 'reset' | 'protected' | 'none';
 
 export interface IdleResetState {
 	status: IdleResetStatus;
+	/** P8c: id of the session ended by this idle reset. Forwarded by handlers as parentSessionId on the next mint. */
 	endedSessionId?: string;
-	/** Reserved for P8b successor-session lineage. Not consumed in production yet. */
+	/** P8a: title of the ended session. Surfaced in the inactivity notice text. */
 	parentTitle?: string | null;
 	/** P8b: outcome of the memory-flush sub-step. Absent on 'protected'/'none'. */
 	summaryStatus?: 'written' | 'skipped' | 'failed' | 'disabled' | 'timeout';
