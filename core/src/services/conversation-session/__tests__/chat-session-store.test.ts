@@ -1021,3 +1021,20 @@ describe('last_activity_at refresh on appendExchange', () => {
 		expect(after).toContain('still works');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P8c — parent_session_id on mint
+// ---------------------------------------------------------------------------
+
+describe('P8c — parent_session_id on mint', () => {
+	it('ensureActiveSession with a well-formed parentSessionId stamps it into frontmatter', async () => {
+		const store = makeStore();
+		const parentId = '20260427_140000_aaaaaaaa';
+		const { sessionId, isNew } = await store.ensureActiveSession(
+			{ ...ctx, parentSessionId: parentId } as unknown as Parameters<typeof store.ensureActiveSession>[0],
+		);
+		expect(isNew).toBe(true);
+		const session = await store.readSession(USER, sessionId);
+		expect(session?.meta.parent_session_id).toBe(parentId);
+	});
+});
