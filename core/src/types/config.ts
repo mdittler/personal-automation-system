@@ -195,6 +195,11 @@ export interface SystemConfig {
 			 * Default: 90.
 			 */
 			retention_days?: number;
+			/**
+			 * When set, sessions idle for more than N minutes are auto-ended on the next
+			 * incoming message. Accepts 1–525600 (up to 1 year). Default: null (disabled).
+			 */
+			auto_reset_idle_minutes?: number | null;
 		};
 	};
 }

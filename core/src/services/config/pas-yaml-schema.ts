@@ -147,6 +147,13 @@ export const PasYamlConfigSchema = z
 							.min(1, 'retention_days must be at least 1')
 							.max(3650, 'retention_days must be at most 3650')
 							.optional(),
+						auto_reset_idle_minutes: z
+							.number()
+							.int('auto_reset_idle_minutes must be an integer')
+							.min(1, 'auto_reset_idle_minutes must be at least 1')
+							.max(525_600, 'auto_reset_idle_minutes must be at most 525600')
+							.nullable()
+							.optional(),
 					})
 					.passthrough()
 					.optional(),

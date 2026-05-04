@@ -1,14 +1,17 @@
 import type { Logger } from 'pino';
-import type { DataStoreService } from '../../types/data-store.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
-import { parseMemorySnapshotFrontmatter, toMemorySnapshotFrontmatter } from '../prompt-assembly/memory-context.js';
+import type { DataStoreService } from '../../types/data-store.js';
 import { withFileLock } from '../../utils/file-mutex.js';
+import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
+import {
+	parseMemorySnapshotFrontmatter,
+	toMemorySnapshotFrontmatter,
+} from '../prompt-assembly/memory-context.js';
 import { CorruptTranscriptError } from './errors.js';
 import { mintSessionId } from './session-id.js';
-import { getActive, setActiveUnlocked, clearActive } from './session-index.js';
+import { clearActive, getActive, setActiveUnlocked } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
-import { encodeNew, encodeAppend, decode } from './transcript-codec.js';
-import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
+import { decode, encodeAppend, encodeNew } from './transcript-codec.js';
 
 export interface ChatSessionFrontmatter {
 	id: string;
@@ -19,10 +22,17 @@ export interface ChatSessionFrontmatter {
 	title: string | null;
 	parent_session_id: string | null;
 	started_at: string;
+	/** Refreshed on every appendExchange. Falls back to started_at on read for legacy transcripts. */
+	last_activity_at?: string;
 	ended_at: string | null;
 	token_counts: { input: number; output: number };
 	/** Durable MemorySnapshot frozen at session-mint time (P4). Snake_case on disk. */
-	memory_snapshot?: { content: string; status: 'ok' | 'empty' | 'degraded'; built_at: string; entry_count: number };
+	memory_snapshot?: {
+		content: string;
+		status: 'ok' | 'empty' | 'degraded';
+		built_at: string;
+		entry_count: number;
+	};
 }
 
 export interface SessionTurn {
@@ -81,10 +91,17 @@ export interface ChatSessionStore {
 		opts?: { maxTurns?: number },
 	): Promise<SessionTurn[]>;
 
-	/** Sets ended_at on the active transcript and clears the index entry. Idempotent. */
+	/**
+	 * Sets ended_at on the active transcript and clears the index entry.
+	 *
+	 * When `expectedSessionId` is provided, the clear is compare-and-swap: if the
+	 * currently-active session id does not match, no changes are made and
+	 * `endedSessionId` is returned as `null`. This prevents the idle-reset hook from
+	 * accidentally ending a fresh session that was minted after the hook peeked.
+	 */
 	endActive(
-		ctx: { userId: string; sessionKey: string },
-		reason: 'newchat' | 'reset' | 'system',
+		ctx: { userId: string; sessionKey: string; expectedSessionId?: string },
+		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }>;
 
 	/** Read any session by id. Validates id format. Returns undefined if missing. */
@@ -118,7 +135,7 @@ const TITLE_MAX_LEN = 80;
 function sanitizeTitle(input: string): string | null {
 	const cleaned = input
 		.replace(/[\r\n\t]+/g, ' ')
-		.replace(/[\x00-\x1F\x7F]/g, '')
+		.replace(/[\u0000-\u001F\u007F]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 	if (cleaned.length === 0) return null;
@@ -144,7 +161,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		return mintSessionId(now, this.deps.rng);
 	}
 
-	async peekActive({ userId, sessionKey }: { userId: string; sessionKey: string }): Promise<string | undefined> {
+	async peekActive({
+		userId,
+		sessionKey,
+	}: { userId: string; sessionKey: string }): Promise<string | undefined> {
 		const store = this.deps.data.forUser(userId);
 		const entry = await getActive(store, userId, sessionKey);
 		return entry?.id;
@@ -186,7 +206,12 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						{ err },
 						'conversation-session: buildSnapshot failed — minting with degraded snapshot',
 					);
-					snapshot = { content: '', status: 'degraded', builtAt: this.now().toISOString(), entryCount: 0 };
+					snapshot = {
+						content: '',
+						status: 'degraded',
+						builtAt: this.now().toISOString(),
+						entryCount: 0,
+					};
 					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
 				}
 			}
@@ -196,7 +221,9 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		});
 	}
 
-	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined> {
+	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<
+		MemorySnapshot | undefined
+	> {
 		const store = this.deps.data.forUser(ctx.userId);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
 		if (!entry) return undefined;
@@ -230,7 +257,9 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			// Target the exact session — throw if the file was never written.
 			const raw = await store.read(`conversation/sessions/${ctx.expectedSessionId}.md`);
 			if (raw === '') {
-				throw new Error(`conversation-session: expected session ${ctx.expectedSessionId} not found`);
+				throw new Error(
+					`conversation-session: expected session ${ctx.expectedSessionId} not found`,
+				);
 			}
 			sessionId = ctx.expectedSessionId;
 		} else {
@@ -247,19 +276,33 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${sessionId}`, async () => {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
-			const base = raw === '' ? encodeNew(this.buildFrontmatter(ctx, sessionId)) : raw;
-			// Compute turn_index for index writes: count existing turns before appending.
-			// Only decode when the index is wired AND the file already has content.
-			if (this.deps.index && raw !== '') {
+			let next: string;
+			if (raw === '') {
+				// Brand-new file: build from scratch (no existing turns, no bump needed).
+				next = encodeAppend(
+					encodeAppend(encodeNew(this.buildFrontmatter(ctx, sessionId)), userTurn),
+					assistantTurn,
+				);
+			} else {
+				// Existing file: decode so we can bump last_activity_at and capture userTurnIndex.
 				try {
-					const { turns } = decode(raw);
+					const { meta, turns } = decode(raw);
 					userTurnIndex = turns.length;
-				} catch {
-					// Corrupt — fall back to 0; INSERT OR IGNORE in appendMessage makes safe
-					userTurnIndex = 0;
+					// Don't bump last_activity_at on an already-ended session (in-flight race path).
+					if (!meta.ended_at) meta.last_activity_at = this.now().toISOString();
+					let rebuilt = encodeNew(meta);
+					for (const t of turns) rebuilt = encodeAppend(rebuilt, t);
+					next = encodeAppend(encodeAppend(rebuilt, userTurn), assistantTurn);
+				} catch (err) {
+					// Corrupt transcript — fall back to raw append; don't bump last_activity_at.
+					// userTurnIndex stays 0; INSERT OR IGNORE in appendMessage makes this safe.
+					this.deps.logger.warn(
+						{ err, sessionId, userId: ctx.userId },
+						'conversation-session: decode failed in appendExchange; falling back to raw append',
+					);
+					next = encodeAppend(encodeAppend(raw, userTurn), assistantTurn);
 				}
 			}
-			const next = encodeAppend(encodeAppend(base, userTurn), assistantTurn);
 			await store.write(path, next);
 		});
 
@@ -283,7 +326,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 					}),
 				]);
 			} catch (err) {
-				this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: appendMessage failed; continuing');
+				this.deps.logger.warn(
+					{ err, sessionId },
+					'chat-transcript-index: appendMessage failed; continuing',
+				);
 			}
 		}
 
@@ -328,15 +374,24 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 							title: null,
 						});
 					} catch (err) {
-						this.deps.logger.warn({ err, sessionId: id }, 'chat-transcript-index: upsertSession failed; continuing');
+						this.deps.logger.warn(
+							{ err, sessionId: id },
+							'chat-transcript-index: upsertSession failed; continuing',
+						);
 					}
 				}
-				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
+				await setActiveUnlocked(store, ctx.sessionKey, {
+					id,
+					started_at: startedAt,
+					model: ctx.model ?? null,
+				});
 				return id;
 			}
 			this.deps.logger.warn({ id, attempt }, 'conversation-session: id collision, retrying');
 		}
-		throw new Error(`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`);
+		throw new Error(
+			`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`,
+		);
 	}
 
 	private buildFrontmatter(
@@ -344,6 +399,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		sessionId: string,
 		startedAt?: string,
 	): ChatSessionFrontmatter {
+		const now = startedAt ?? this.now().toISOString();
 		return {
 			id: sessionId,
 			source: 'telegram',
@@ -352,7 +408,8 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			model: ctx.model ?? null,
 			title: null,
 			parent_session_id: null,
-			started_at: startedAt ?? this.now().toISOString(),
+			started_at: now,
+			last_activity_at: now,
 			ended_at: null,
 			token_counts: { input: 0, output: 0 },
 		};
@@ -378,25 +435,61 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	}
 
 	async endActive(
-		ctx: { userId: string; sessionKey: string },
-		reason: 'newchat' | 'reset' | 'system',
+		ctx: { userId: string; sessionKey: string; expectedSessionId?: string },
+		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }> {
 		const store = this.deps.data.forUser(ctx.userId);
-		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
-		if (!entry) return { endedSessionId: null };
-		this.deps.logger.debug({ sessionId: entry.id, reason }, 'conversation-session: ending active session');
 
+		// CAS under index lock: verify the active session hasn't changed since the caller's
+		// peekActive snapshot. Do NOT clear yet — transcript must be written first to ensure
+		// the index is never cleared without a corresponding ended_at in the transcript.
+		let entry: ActiveSessionEntry | undefined;
+		let mismatch = false;
+		await withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
+			const found = await getActive(store, ctx.userId, ctx.sessionKey);
+			if (!found) return;
+			entry = found;
+			if (ctx.expectedSessionId !== undefined && found.id !== ctx.expectedSessionId) {
+				mismatch = true;
+			}
+		});
+
+		if (!entry) return { endedSessionId: null };
+		if (mismatch) {
+			this.deps.logger.warn(
+				{ userId: ctx.userId, expectedSessionId: ctx.expectedSessionId, actualId: entry.id },
+				'conversation-session: endActive CAS mismatch — active session changed; aborting',
+			);
+			return { endedSessionId: null };
+		}
+
+		this.deps.logger.debug(
+			{ sessionId: entry.id, reason },
+			'conversation-session: ending active session',
+		);
+
+		// Write ended_at to transcript first. Track whether to clear the index entry.
+		// If the transcript write throws, clearIndex stays false and the session remains
+		// active — safe to retry. Only clear after a successful (or graceful no-op) write.
 		let endedAt: string | null = null;
+		let clearIndex = false;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
-			const path = `conversation/sessions/${entry.id}.md`;
+			const path = `conversation/sessions/${entry!.id}.md`;
 			const raw = await store.read(path);
-			if (raw === '') return;
+			if (raw === '') {
+				clearIndex = true; // Dead index entry — remove, but no ended_at to set
+				return;
+			}
 			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
 			try {
 				decoded = decode(raw);
 			} catch (err) {
 				if (err instanceof CorruptTranscriptError) {
-					this.deps.logger.warn({ sessionId: entry.id, err }, 'conversation-session: corrupt transcript on endActive');
+					this.deps.logger.warn(
+						{ sessionId: entry!.id, err },
+						'conversation-session: corrupt transcript on endActive',
+					);
+					clearIndex = true; // Corrupt — remove dead entry
 					return;
 				}
 				throw err;
@@ -406,9 +499,13 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			let next = encodeNew(decoded.meta);
 			for (const t of decoded.turns) next = encodeAppend(next, t);
 			await store.write(path, next);
+			clearIndex = true; // Set only after the write succeeds
 		});
 
-		await clearActive(store, ctx.userId, ctx.sessionKey);
+		// Clear the active index entry only after transcript outcome is confirmed.
+		if (clearIndex) {
+			await clearActive(store, ctx.userId, ctx.sessionKey);
+		}
 
 		if (this.deps.index && endedAt !== null) {
 			const endedSessionId = entry.id;
@@ -416,11 +513,14 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			try {
 				await this.deps.index.endSession(endedSessionId, endedAtStr);
 			} catch (err) {
-				this.deps.logger.warn({ err, endedSessionId }, 'chat-transcript-index: endSession failed; continuing');
+				this.deps.logger.warn(
+					{ err, endedSessionId },
+					'chat-transcript-index: endSession failed; continuing',
+				);
 			}
 		}
 
-		return { endedSessionId: entry.id };
+		return { endedSessionId: endedAt !== null ? entry.id : null };
 	}
 
 	async setTitle(
@@ -440,7 +540,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
 			if (raw === '') {
-				this.deps.logger.warn({ sessionId }, 'conversation-session: setTitle on missing session file');
+				this.deps.logger.warn(
+					{ sessionId },
+					'conversation-session: setTitle on missing session file',
+				);
 				return;
 			}
 			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
@@ -531,7 +634,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 				legacyTurns = parsed as typeof legacyTurns;
 			} catch {
-				this.deps.logger.warn({ userId }, 'conversation-session: legacy history.json malformed JSON, skipping migration');
+				this.deps.logger.warn(
+					{ userId },
+					'conversation-session: legacy history.json malformed JSON, skipping migration',
+				);
 				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
@@ -560,7 +666,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 			}
 			if (!sessionId) {
-				this.deps.logger.warn({ userId }, 'conversation-session: could not mint unique id for legacy migration');
+				this.deps.logger.warn(
+					{ userId },
+					'conversation-session: could not mint unique id for legacy migration',
+				);
 				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
@@ -617,7 +726,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						});
 					}
 				} catch (err) {
-					this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: upsertSession (legacy) failed; continuing');
+					this.deps.logger.warn(
+						{ err, sessionId },
+						'chat-transcript-index: upsertSession (legacy) failed; continuing',
+					);
 				}
 			}
 

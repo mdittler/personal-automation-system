@@ -4262,6 +4262,224 @@ Title content MUST be sanitized: control characters stripped, whitespace collaps
 
 ---
 
+## Hermes P8a — Idle Auto-reset (Chunk A)
+
+### REQ-CONV-IDLE-001 — `last_activity_at` MUST be written to session frontmatter on mint, equal to `started_at`
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+When a new session is minted, the frontmatter field `last_activity_at` MUST be set to the same timestamp as `started_at`. This gives pre-P8 transcripts a safe floor value when they lack the field.
+
+**Standard tests:**
+- `chat-session-store.test.ts` > last_activity_at on mint > mintAndRegister writes last_activity_at equal to started_at
+
+---
+
+### REQ-CONV-IDLE-002 — `last_activity_at` MUST be refreshed on every `appendExchange`, but MUST NOT be bumped if the session has already ended
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+Every call to `appendExchange` MUST decode the session transcript, update `last_activity_at` to the current clock value, re-encode, and write back. If decoding fails (corrupt transcript), the exchange MUST be appended via raw-string fallback without bumping the field — never crash. When the in-flight race path (`expectedSessionId`) targets a session that has already been ended (i.e. `meta.ended_at` is set), `last_activity_at` MUST NOT be bumped; `ended_at > last_activity_at` must remain true.
+
+**Standard tests:**
+- `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange updates last_activity_at to current clock
+
+**Edge case tests:**
+- `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange falls back to raw append on decode failure (no last_activity_at bump)
+- `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange does NOT bump last_activity_at on an already-ended session (in-flight race path)
+
+**Fixes:**
+- **Codex-P2-3 (2026-05-04):** Initial implementation bumped `last_activity_at` unconditionally in the `expectedSessionId` path, leaving `last_activity_at > ended_at`. Fixed by checking `!meta.ended_at` before the bump. CL: `codex-p2-corrections`.
+
+---
+
+### REQ-CONV-IDLE-003 — Legacy transcripts lacking `last_activity_at` MUST fall back to `started_at`
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+When reading session metadata for idle detection, if `last_activity_at` is absent (pre-P8 transcript), the system MUST treat `started_at` as the effective last-activity timestamp.
+
+**Standard tests:**
+- `idle-detector.test.ts` > idle-detector > getLastActivityIso > returns last_activity_at when present
+
+**Edge case tests:**
+- `idle-detector.test.ts` > idle-detector > getLastActivityIso > falls back to started_at when last_activity_at is absent (legacy transcripts)
+
+---
+
+### REQ-CONV-IDLE-004 — Idle detection threshold MUST be exclusive (elapsed strictly GREATER THAN threshold)
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+A session is considered idle only when `(now - last_activity_at) > idleMinutes * 60_000ms`. Sessions at exactly the threshold MUST NOT be reset. The check MUST return false for non-positive or non-finite `idleMinutes` (treated as disabled), and for unparseable timestamps.
+
+**Standard tests:**
+- `idle-detector.test.ts` > idle-detector > isIdle > returns true when elapsed > idleMinutes
+
+**Edge case tests:**
+- `idle-detector.test.ts` > idle-detector > isIdle > returns false when elapsed === idleMinutes (exclusive boundary)
+- `idle-detector.test.ts` > idle-detector > isIdle > returns false when elapsed < idleMinutes
+- `idle-detector.test.ts` > idle-detector > isIdle > returns false for zero idleMinutes (disabled signal)
+- `idle-detector.test.ts` > idle-detector > isIdle > returns false for negative idleMinutes
+- `idle-detector.test.ts` > idle-detector > isIdle > returns false on unparseable lastActivityIso (defensive)
+- `idle-detector.test.ts` > idle-detector > isIdle > returns true for 1ms past threshold
+
+---
+
+### REQ-CONV-IDLE-005 — `auto_reset_idle_minutes: null` MUST disable idle reset entirely
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+When `chat.sessions.auto_reset_idle_minutes` is `null` (the default) or `undefined`, the idle-reset hook MUST be a no-op — no session reads, no ends, no user notifications. Valid range when set: 1–525,600 (minutes).
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > disabled / no-op paths > status="none" when idleMinutes is null
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Disabled by config > auto_reset_idle_minutes=null → no reset ever, even after 7 days
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > accepts null
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > accepts 1
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > accepts 1440
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > accepts 525600
+
+**Edge case tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > disabled / no-op paths > status="none" when idleMinutes is undefined
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Disabled by config > auto_reset_idle_minutes=undefined → no reset
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > rejects 0
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > rejects -1
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > rejects 1.5 (non-integer)
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > rejects 525601 (above ceiling)
+- `pas-yaml-schema.test.ts` > chat.sessions.auto_reset_idle_minutes > rejects string "1440"
+
+---
+
+### REQ-CONV-IDLE-006 — Idle sessions MUST be ended with reason `'idle'` and the user notified before the current message routes
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+When an idle session is detected, `ChatSessionStore.endActive` MUST be called with reason `'idle'`. A human-readable notice ("X of inactivity") MUST be sent to the user via `TelegramService.send` before the current message is classified or dispatched to any handler. The notice MUST include a formatted duration (1 minute, 30 minutes, 1 hour 30 minutes, 2 hours, 1 day, etc.). If `endActive` returns `endedSessionId: null` (concurrent race — another handler ended the session first), the hook MUST abort the reset and return `{ status: 'none' }` without sending any notice.
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > happy path > status="reset", returns endedSessionId + parentTitle, ends session, notifies user
+- `idle-reset-hook.test.ts` > runIdleResetHook > happy path > parentTitle is null when session has no title
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > User returns after a long break > "hey are you still there?" after 25 hours → idle notice sent + session ended
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > User returns after a long break > parentTitle is returned so successor session can inherit lineage
+
+**Edge case tests (formatDuration):**
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1 minutes → "1 minute"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 30 minutes → "30 minutes"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 60 minutes → "1 hour"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 90 minutes → "1 hour 30 minutes"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 120 minutes → "2 hours"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 150 minutes → "2 hours 30 minutes"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1440 minutes → "1 day"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1470 minutes → "1 day 30 minutes"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1500 minutes → "1 day 1 hour"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 2880 minutes → "2 days"
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 1-minute threshold → "1 minute" in notice
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 30-minute threshold → "30 minutes" in notice
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 60-minute threshold → "1 hour" in notice
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 120-minute threshold → "2 hours" in notice
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 1440-minute threshold → "1 day" in notice
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 2880-minute threshold → "2 days" in notice
+
+**Edge case tests (concurrent race):**
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send
+
+**Integration tests:**
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > hook ends an idle session and sets ended_at in the filesystem
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > next appendExchange after idle reset lands in a fresh session
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > endActive CAS mismatch: stale expectedSessionId leaves fresh session intact
+
+**Error handling tests:**
+- `chat-session-store.test.ts` > endActive — transcript write failure leaves active session in index > when transcript write throws, peekActive still returns the original session id
+
+**Fixes:**
+- **Codex-P2-1 (2026-05-04):** Initial implementation used stale `activeId` (from `peekActive`) as `endedSessionId` in the return value rather than the id returned by `endActive`. Also did not handle `endedSessionId: null` (concurrent race) — now aborts with `status='none'` and logs a warning. CL: `codex-p2-corrections`.
+- **Codex-P3-1 (2026-05-04):** `formatDuration` used `Math.round(hours)` for non-integer hour values, causing 90 min → "2 hours". Fixed to express non-integer hours as "X hours Y minutes". CL: `codex-p2-corrections`.
+- **Codex-R2-P1 (2026-05-04):** `endActive` wrong-session race — hook read `activeId=A` via `peekActive`, but a concurrent request could end A and mint B before `endActive` ran, causing B (the fresh session) to be closed. Fixed via CAS: `endActive` now holds the index file lock across `getActive + verify expectedSessionId + clearActiveUnlocked`; `runIdleResetHook` passes `expectedSessionId: activeId`; returns `{ endedSessionId: null }` on ID mismatch. CL: `codex-r2-corrections`.
+- **Codex-R2-P3 (2026-05-04):** `formatDuration(1470)` produced "25 hours" — multi-branch logic failed when hours ≥ 24. Rewritten using day/hour/minute parts array (1440 min = 1 day), fixing 1470 min → "1 day 30 minutes" and 1500 min → "1 day 1 hour". CL: `codex-r2-corrections`.
+- **Codex-R3-P2 (2026-05-04):** `endActive` cleared the active index entry (inside the index lock) BEFORE writing `ended_at` to the transcript. If the transcript write failed, the session was orphaned — removed from the index with no `ended_at`. Fixed via safe-ordering: index lock is used only for the CAS verify (no clear inside); `clearIndex` flag is set only after `store.write()` succeeds; `clearActive` is called outside the transcript lock only when `clearIndex=true`. On write failure the exception propagates and the index remains intact. CL: `codex-r3-corrections`.
+
+---
+
+### REQ-CONV-IDLE-007 — Active-work protection: pending session-control or pending edit MUST block idle reset
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+If a grey-zone `/newchat` confirmation is pending (`PendingSessionControlStore.has(userId)`) or an edit proposal is in-flight (`pendingEdits.has(userId)`), the idle-reset hook MUST return `{ status: 'protected' }` without ending the session or sending any notice.
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > active-work protection > status="protected" when pending session-control entry is present
+
+**Edge case tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > active-work protection > status="protected" when pending edit is present
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > User returns mid-task (active-work protection) > "add bread to the list" after 2h while pendingEdit is active → no reset (protected)
+- `idle-reset.persona.test.ts` > Idle-reset persona scenarios > User returns mid-task (active-work protection) > grey-zone /newchat buttons pending → no reset (protected)
+
+---
+
+### REQ-CONV-IDLE-008 — Idle-reset hook MUST be fully fail-open at every I/O boundary
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+Failures at any boundary (peekActive, readSession, endActive, telegram.send) MUST be caught, logged as warnings, and result in `{ status: 'none' }` — the message dispatch MUST continue normally. Exception: a telegram.send failure AFTER endActive succeeds MUST NOT roll back the session end (status stays `'reset'`).
+
+**Edge case tests:**
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > peekActive throw → status="none", warn logged, no endActive call
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > readSession throw → status="none", warn logged
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > endActive throw → status="none", warn logged, NO telegram.send
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > telegram.send throw → status stays "reset" (session already ended)
+
+---
+
+### REQ-CONV-IDLE-009 — Idle-reset hook MUST run at the TOP of `routeMessage` AND `routePhoto`, BEFORE any command or classification dispatch
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+The hook MUST execute before `handleCommand` (covering `/ask`, `/edit`, `/notes`, `/newchat`, `/title`) and before photo classification. The result (`IdleResetState`) MUST be stashed on `MessageContext.idleResetState` so downstream stages can read same-turn lineage state.
+
+**Standard tests:**
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/ask hi"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/edit grocery add milk"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/notes on"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/newchat"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "/title set My Session"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 1 — Hook fires before command dispatch (all command types) > hook peekActive called for text "hello free text"
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 2 — Hook fires before photo classification > peekActive called before handlePhoto is invoked
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 2 — Hook fires before photo classification > peekActive called even when no photo apps are installed
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 3 — IdleResetState propagated to enrichedCtx > when hook returns reset state, enrichedCtx.idleResetState is set on handleMessage ctx
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 6 — Command path: idleResetState set on enrichedCtx passed to handleCommand > for /ask command, enrichedCtx.idleResetState is set when hook returns reset
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 7 — Ordering: hook fires before NL /newchat hook in free-text path > peekActive is called before sessionControlClassifier
+
+**Edge case tests:**
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 4 — No idleResetDeps → hook never called > when idleResetDeps is undefined, no hook side-effects occur
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Test 5 — Hook throws → fail-open, routing continues > when idleResetDeps.chatSessions.peekActive throws, message is still routed
+
+**Fixes:**
+- **Codex-R2-P2 (2026-05-04):** Initial `routePhoto` called `enrichPhotoWithActiveSpace` and ran the idle-reset hook AFTER the "no photo apps installed" early return, silently skipping the hook when no photo-accepting apps were registered. Moved the enrich + hook calls before the availability check so photo messages always advance session lifecycle regardless of installed apps. CL: `codex-r2-corrections`.
+
+---
+
+### REQ-CONV-IDLE-010 — When idle reset fires on the same turn, the NL `/newchat` hook and literal `/newchat`/`/reset` commands MUST be suppressed
+
+**Phase:** Hermes P8a | **Status:** Implemented
+
+When `enrichedCtx.idleResetState.status === 'reset'`, the NL `/newchat` hook MUST be skipped entirely, and literal `/newchat` and `/reset` commands MUST be silently suppressed — preventing a second "new chat" notice from being sent to the user. Free-text messages with non-reset intent route normally in the new session.
+
+**Standard tests:**
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > idle reset + reset-intent message → NL hook does NOT double-message (silent consume)
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Literal /newchat and /reset suppressed after idle reset > idle reset + /newchat command → handleNewChat NOT called (no double-message)
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Literal /newchat and /reset suppressed after idle reset > idle reset + /reset command → handleNewChat NOT called (no double-message)
+
+**Edge case tests:**
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > idle reset + non-reset-intent message → routes normally (no NL hook intercept)
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > no idle reset + reset-intent message → NL hook fires normally
+
+**Fixes:**
+- **Codex-P2-2 (2026-05-04):** Initial implementation only guarded the NL hook (free-text path). Literal `/newchat` and `/reset` commands in the command path had no guard, allowing `handleNewChat` to run and send a second notice. Fixed with an early-return guard in the command path. CL: `codex-p2-corrections`.
+- **Codex-P2-4 (2026-05-04):** Test for the NL hook silent-consume case was missing an assertion that `conv.handleMessage` was called, so it could not detect if the message was incorrectly dropped. Added `expect(conv.handleMessage).toHaveBeenCalledOnce()`. CL: `codex-p2-corrections`.
+
+---
+
 ## Hermes P9 — Photo Memory Bridge
 
 ### REQ-CONV-PHOTO-001 — Photo dispatches MUST append a structured turn pair to the active chat session
@@ -7643,5 +7861,15 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-PHOTO-005 | photo-summary-guidance.test.ts | 2 | 1 | Implemented |
 | REQ-FOOD-RECEIPT-001 | photo-parsers.test.ts | 4 | 10 | Implemented |
 | REQ-FOOD-RECEIPT-002 | photo-handler.test.ts, price-store.test.ts | 3 | 2 | Implemented |
+| REQ-CONV-IDLE-001 | chat-session-store.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-IDLE-002 | chat-session-store.test.ts | 1 | 2 | Implemented |
+| REQ-CONV-IDLE-003 | idle-detector.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-IDLE-004 | idle-detector.test.ts | 1 | 6 | Implemented |
+| REQ-CONV-IDLE-005 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, pas-yaml-schema.test.ts | 6 | 7 | Implemented |
+| REQ-CONV-IDLE-006 | chat-session-store.test.ts, idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 19 | Implemented |
+| REQ-CONV-IDLE-007 | idle-reset-hook.test.ts, idle-reset.persona.test.ts | 1 | 3 | Implemented |
+| REQ-CONV-IDLE-008 | idle-reset-hook.test.ts | 0 | 4 | Implemented |
+| REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 11 | 2 | Implemented |
+| REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 3 | 2 | Implemented |
 
-| **Totals** | **202 test files** | **1560** | **1740** | **3300 tests** |
+| **Totals** | **207 test files** | **1591** | **1786** | **3377 tests** |

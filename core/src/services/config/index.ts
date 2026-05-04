@@ -100,6 +100,7 @@ interface PasYamlConfig {
 		sessions?: {
 			auto_prune?: boolean;
 			retention_days?: number;
+			auto_reset_idle_minutes?: number | null;
 		};
 	};
 }
@@ -271,6 +272,7 @@ export async function loadSystemConfig(options?: {
 			sessions: {
 				auto_prune: yamlConfig?.chat?.sessions?.auto_prune ?? false,
 				retention_days: yamlConfig?.chat?.sessions?.retention_days ?? 90,
+				auto_reset_idle_minutes: yamlConfig?.chat?.sessions?.auto_reset_idle_minutes ?? null,
 			},
 		},
 	};

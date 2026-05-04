@@ -7,9 +7,13 @@ import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
 import { composeChatSessionStore } from '../compose.js';
-import type { ChatSessionStore, ChatSessionFrontmatter, SessionTurn } from '../chat-session-store.js';
+import type {
+	ChatSessionStore,
+	ChatSessionFrontmatter,
+	SessionTurn,
+} from '../chat-session-store.js';
 import { mintSessionId } from '../session-id.js';
-import { encodeNew } from '../transcript-codec.js';
+import { encodeNew, decode } from '../transcript-codec.js';
 
 const USER = 'matt';
 const SESSION_KEY = 'agent:main:telegram:dm:matt';
@@ -70,20 +74,36 @@ afterEach(async () => {
 describe('D.1 — appendExchange happy path', () => {
 	it('first appendExchange mints a session with deterministic id format', async () => {
 		const store = makeStore();
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'hi'), turn('assistant', 'hello'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'hi'),
+			turn('assistant', 'hello'),
+		);
 		expect(sessionId).toMatch(/^\d{8}_\d{6}_[0-9a-f]{8}$/);
 	});
 
 	it('peekActive returns the minted session id after first appendExchange', async () => {
 		const store = makeStore();
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'hi'), turn('assistant', 'hello'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'hi'),
+			turn('assistant', 'hello'),
+		);
 		expect(await store.peekActive(ctx)).toBe(sessionId);
 	});
 
 	it('second appendExchange reuses the same session id', async () => {
 		const store = makeStore();
-		const { sessionId: id1 } = await store.appendExchange(ctx, turn('user', 'hi'), turn('assistant', 'hello'));
-		const { sessionId: id2 } = await store.appendExchange(ctx, turn('user', 'q2'), turn('assistant', 'a2'));
+		const { sessionId: id1 } = await store.appendExchange(
+			ctx,
+			turn('user', 'hi'),
+			turn('assistant', 'hello'),
+		);
+		const { sessionId: id2 } = await store.appendExchange(
+			ctx,
+			turn('user', 'q2'),
+			turn('assistant', 'a2'),
+		);
 		expect(id1).toBe(id2);
 	});
 
@@ -159,7 +179,11 @@ describe('D.2 — concurrency', () => {
 	it('expectedSessionId race: turns land in old session after endActive clears it', async () => {
 		const store = makeStore();
 		// Create session s1
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'original'), turn('assistant', 'reply'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'original'),
+			turn('assistant', 'reply'),
+		);
 		// End the session (simulating /newchat)
 		await store.endActive(ctx, 'newchat');
 		// In-flight reply with bound expectedSessionId (simulating locked decision)
@@ -181,10 +205,7 @@ describe('D.2 — concurrency', () => {
 	it('parallel endActive calls leave consistent active-sessions.yaml with no active session', async () => {
 		const store = makeStore();
 		await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
-		await Promise.all([
-			store.endActive(ctx, 'newchat'),
-			store.endActive(ctx, 'reset'),
-		]);
+		await Promise.all([store.endActive(ctx, 'newchat'), store.endActive(ctx, 'reset')]);
 		expect(await store.peekActive(ctx)).toBeUndefined();
 	});
 });
@@ -197,11 +218,19 @@ describe('D.3 — restart', () => {
 	it('re-created store reuses same sessionId and appends to same file', async () => {
 		const dataStore = makeDataStore();
 		const store1 = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
-		const { sessionId } = await store1.appendExchange(ctx, turn('user', 'q1'), turn('assistant', 'a1'));
+		const { sessionId } = await store1.appendExchange(
+			ctx,
+			turn('user', 'q1'),
+			turn('assistant', 'a1'),
+		);
 
 		// Drop store1, create store2 from same data dir
 		const store2 = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
-		const { sessionId: sessionId2 } = await store2.appendExchange(ctx, turn('user', 'q2'), turn('assistant', 'a2'));
+		const { sessionId: sessionId2 } = await store2.appendExchange(
+			ctx,
+			turn('user', 'q2'),
+			turn('assistant', 'a2'),
+		);
 
 		expect(sessionId2).toBe(sessionId);
 		const decoded = await store2.readSession(USER, sessionId);
@@ -238,7 +267,11 @@ describe('D.4 — security', () => {
 		const dataStore = makeDataStore();
 		const storeA = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
 		const ctxA = { userId: USER, sessionKey: SESSION_KEY };
-		const { sessionId } = await storeA.appendExchange(ctxA, turn('user', 'secret'), turn('assistant', 'reply'));
+		const { sessionId } = await storeA.appendExchange(
+			ctxA,
+			turn('user', 'secret'),
+			turn('assistant', 'reply'),
+		);
 
 		// UserB reads by sessionId via their own store — file doesn't exist in their scope
 		const storeB = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
@@ -266,7 +299,10 @@ describe('D.5 — collision retry', () => {
 		// The above created a session with a random id; we need to plant the specific collision file
 		// Use the scoped store directly to write a file with the collision id
 		const scopedStore = dataStore.forUser(USER);
-		await scopedStore.write(`conversation/sessions/${collisionId}.md`, '---\nid: placeholder\n---\n');
+		await scopedStore.write(
+			`conversation/sessions/${collisionId}.md`,
+			'---\nid: placeholder\n---\n',
+		);
 
 		let callCount = 0;
 		const rng = () => {
@@ -274,8 +310,17 @@ describe('D.5 — collision retry', () => {
 			return callCount === 1 ? 'aaaabbbb' : 'ccccdddd';
 		};
 
-		const store = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock, rng });
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'new'), turn('assistant', 'reply'));
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+			rng,
+		});
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'new'),
+			turn('assistant', 'reply'),
+		);
 		// Should have retried and used 'ccccdddd'
 		expect(sessionId).toContain('ccccdddd');
 		expect(callCount).toBe(2);
@@ -299,7 +344,11 @@ describe('D.6 — clock injection', () => {
 		};
 
 		const store = makeStore({ clock: dynamicClock });
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 		await store.endActive(ctx, 'newchat');
 
 		const decoded = await store.readSession(USER, sessionId);
@@ -308,7 +357,11 @@ describe('D.6 — clock injection', () => {
 
 	it('started_at in frontmatter matches injected clock at mint time', async () => {
 		const store = makeStore({ clock });
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 		const decoded = await store.readSession(USER, sessionId);
 		expect(decoded?.meta.started_at).toBe(FROZEN.toISOString());
 	});
@@ -326,7 +379,11 @@ describe('D.7 — corruption self-heal', () => {
 		await scopedStore.write('conversation/active-sessions.yaml', 'invalid: [[[corrupt');
 
 		const store = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 
 		// A new session was minted
 		expect(sessionId).toMatch(/^\d{8}_\d{6}_[0-9a-f]{8}$/);
@@ -353,7 +410,11 @@ describe('D.7 — corruption self-heal', () => {
 describe('endActive — token_counts preservation', () => {
 	it('endActive preserves existing token_counts unchanged', async () => {
 		const store = makeStore();
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 
 		// Manually set token_counts to non-zero by reading + verifying initial state
 		// P3 ships zeros; we just verify they don't get clobbered
@@ -535,7 +596,11 @@ describe('E — Legacy history.json migration', () => {
 		await plantHistoryJson(ds, JSON.stringify(LEGACY_TURNS));
 		const store = composeChatSessionStore({ data: ds, logger: makeMockLogger(), clock });
 
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'new msg'), turn('assistant', 'new reply'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'new msg'),
+			turn('assistant', 'new reply'),
+		);
 
 		const sessions = await ds.forUser(USER).list('conversation/sessions/');
 		// Two sessions: one legacy-import, one telegram
@@ -546,7 +611,7 @@ describe('E — Legacy history.json migration', () => {
 		expect(newSession?.turns).toHaveLength(2);
 
 		// Find the legacy session
-		const legacyId = sessions.find(f => f.replace('.md', '') !== sessionId)!.replace('.md', '');
+		const legacyId = sessions.find((f) => f.replace('.md', '') !== sessionId)!.replace('.md', '');
 		const legacySession = await store.readSession(USER, legacyId);
 		expect(legacySession?.meta.source).toBe('legacy-import');
 		expect(legacySession?.turns).toHaveLength(4);
@@ -585,7 +650,7 @@ describe('E — Legacy history.json migration', () => {
 
 		// Still exactly one session — no duplicate was created
 		const sessions = await scoped.list('conversation/sessions/');
-		const mdSessions = sessions.filter(f => f.endsWith('.md'));
+		const mdSessions = sessions.filter((f) => f.endsWith('.md'));
 		expect(mdSessions).toHaveLength(1);
 		expect(mdSessions[0]).toContain(existingId);
 	});
@@ -650,7 +715,12 @@ describe('ChatSessionStore.ensureActiveSession', () => {
 		const session = await store.readSession(USER, sessionId);
 		const fm = session!.meta as ChatSessionFrontmatter & { memory_snapshot?: unknown };
 		expect(fm.memory_snapshot).toBeDefined();
-		const ms = fm.memory_snapshot as { content: string; status: string; built_at: string; entry_count: number };
+		const ms = fm.memory_snapshot as {
+			content: string;
+			status: string;
+			built_at: string;
+			entry_count: number;
+		};
 		expect(ms.content).toBe(snapshot.content);
 		expect(ms.status).toBe('ok');
 		expect(ms.built_at).toBe(snapshot.builtAt);
@@ -750,5 +820,204 @@ describe('ChatSessionStore.peekSnapshot', () => {
 		await store.ensureActiveSession(ctx, { buildSnapshot: vi.fn().mockResolvedValue(snapshot) });
 		const result = await store.peekSnapshot(ctx);
 		expect(result).toEqual(snapshot);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A1 — endActive accepts 'idle' reason
+// ---------------------------------------------------------------------------
+
+describe('endActive reason: idle', () => {
+	it('endActive accepts reason: idle and writes ended_at', async () => {
+		const store = makeStore();
+		await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const activeId = await store.peekActive(ctx);
+		expect(activeId).not.toBeNull();
+
+		const { endedSessionId } = await store.endActive(ctx, 'idle');
+		expect(endedSessionId).toBe(activeId);
+
+		const decoded = await store.readSession(USER, endedSessionId!);
+		expect(decoded?.meta.ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A1b — endActive safe ordering: transcript write failure leaves index intact
+// ---------------------------------------------------------------------------
+
+describe('endActive — transcript write failure leaves active session in index', () => {
+	it('when transcript write throws, peekActive still returns the original session id', async () => {
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({ data: dataStore, logger: makeMockLogger(), clock });
+
+		// Mint a session
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
+		expect(await store.peekActive(ctx)).toBe(sessionId);
+
+		// Wrap the real forUser store so writes to the transcript path throw
+		const realForUser = dataStore.forUser.bind(dataStore);
+		const transcriptPath = `conversation/sessions/${sessionId}.md`;
+		vi.spyOn(dataStore, 'forUser').mockImplementation((uid: string) => {
+			const real = realForUser(uid);
+			const writeOrig = real.write.bind(real);
+			vi.spyOn(real, 'write').mockImplementation(async (path: string, content: string) => {
+				if (path === transcriptPath) throw new Error('simulated disk full');
+				return writeOrig(path, content);
+			});
+			return real;
+		});
+
+		// endActive should propagate the write error
+		await expect(store.endActive(ctx, 'idle')).rejects.toThrow('simulated disk full');
+
+		// After the failure, the session must still be active in the index
+		const postFailureStore = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+		});
+		vi.restoreAllMocks();
+		expect(await postFailureStore.peekActive(ctx)).toBe(sessionId);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A2 — last_activity_at written on mint
+// ---------------------------------------------------------------------------
+
+describe('last_activity_at on mint', () => {
+	it('mintAndRegister writes last_activity_at equal to started_at', async () => {
+		const FROZEN = new Date('2026-05-01T12:00:00.000Z');
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock: () => FROZEN,
+		});
+		const { sessionId } = await store.ensureActiveSession(ctx);
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta } = decode(raw);
+		expect((meta as any).last_activity_at).toBe('2026-05-01T12:00:00.000Z');
+		expect((meta as any).last_activity_at).toBe(meta.started_at);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A3 — last_activity_at refreshed on appendExchange
+// ---------------------------------------------------------------------------
+
+describe('last_activity_at refresh on appendExchange', () => {
+	it('appendExchange updates last_activity_at to current clock', async () => {
+		let now = new Date('2026-05-01T12:00:00.000Z');
+		const clock = () => now;
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+		});
+		await store.ensureActiveSession(ctx);
+
+		now = new Date('2026-05-01T13:30:00.000Z');
+		const userTurn: SessionTurn = { role: 'user', content: 'hi', timestamp: now.toISOString() };
+		const assistantTurn: SessionTurn = {
+			role: 'assistant',
+			content: 'hello',
+			timestamp: now.toISOString(),
+		};
+		const { sessionId } = await store.appendExchange(ctx, userTurn, assistantTurn);
+
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta } = decode(raw);
+		expect((meta as any).last_activity_at).toBe('2026-05-01T13:30:00.000Z');
+		expect(meta.started_at).toBe('2026-05-01T12:00:00.000Z');
+	});
+
+	it('appendExchange does NOT bump last_activity_at on an already-ended session (in-flight race path)', async () => {
+		let now = new Date('2026-05-01T12:00:00.000Z');
+		const clock2 = () => now;
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock: clock2,
+		});
+
+		// Mint and register the session
+		const { sessionId } = await store.ensureActiveSession(ctx);
+
+		// End the session (sets ended_at)
+		now = new Date('2026-05-01T13:00:00.000Z');
+		await store.endActive(ctx, 'idle');
+
+		// Read the ended session's last_activity_at before the in-flight append
+		const rawBefore = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta: metaBefore } = decode(rawBefore);
+		const lastActivityBefore = (metaBefore as any).last_activity_at as string;
+
+		// Simulate an in-flight append that targets the now-ended session via expectedSessionId
+		now = new Date('2026-05-01T14:00:00.000Z'); // advance clock further
+		const userTurn: SessionTurn = {
+			role: 'user',
+			content: 'late message',
+			timestamp: now.toISOString(),
+		};
+		const assistantTurn: SessionTurn = {
+			role: 'assistant',
+			content: 'reply',
+			timestamp: now.toISOString(),
+		};
+		await store.appendExchange({ ...ctx, expectedSessionId: sessionId }, userTurn, assistantTurn);
+
+		// last_activity_at must not have been bumped to 14:00
+		const rawAfter = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta: metaAfter } = decode(rawAfter);
+		expect((metaAfter as any).last_activity_at).toBe(lastActivityBefore);
+		// ended_at must still be intact
+		expect(metaAfter.ended_at).toBe('2026-05-01T13:00:00.000Z');
+	});
+
+	it('appendExchange falls back to raw append on decode failure (no last_activity_at bump)', async () => {
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+		});
+		const { sessionId } = await store.ensureActiveSession(ctx);
+
+		// Corrupt the transcript by injecting garbage that breaks the turn-fence parser
+		const path = `conversation/sessions/${sessionId}.md`;
+		const raw = await dataStore.forUser(USER).read(path);
+		// Append a header line without a matching fence to trigger CorruptTranscriptError
+		await dataStore
+			.forUser(USER)
+			.write(path, raw + '\n### user — 2026-05-01T12:00:00.000Z\n[no fence here]\n');
+
+		const now2 = new Date();
+		const userTurn: SessionTurn = {
+			role: 'user',
+			content: 'still works',
+			timestamp: now2.toISOString(),
+		};
+		const assistantTurn: SessionTurn = {
+			role: 'assistant',
+			content: 'ok',
+			timestamp: now2.toISOString(),
+		};
+
+		// Must NOT throw
+		await expect(store.appendExchange(ctx, userTurn, assistantTurn)).resolves.toMatchObject({
+			sessionId: expect.any(String),
+		});
+
+		// The new turn must appear in the file
+		const after = await dataStore.forUser(USER).read(path);
+		expect(after).toContain('still works');
 	});
 });

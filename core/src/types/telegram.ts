@@ -5,6 +5,8 @@
  * TelegramService interface apps use to send messages.
  */
 
+import type { IdleResetState } from './conversation-session.js';
+
 // ---------------------------------------------------------------------------
 // Route metadata — how a message reached its app handler
 // ---------------------------------------------------------------------------
@@ -97,6 +99,8 @@ export interface MessageContext {
 	sessionKey?: string;
 	/** Active session id resolved by ChatSessionStore.peekActive (set by Router before dispatch). Undefined when no session active. */
 	sessionId?: string;
+	/** Set by Router idle-reset hook before dispatch. Read by NL session-control + handle-message. */
+	idleResetState?: IdleResetState;
 }
 
 /** Context for an inbound photo message routed to an app. */

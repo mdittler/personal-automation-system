@@ -53,6 +53,8 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import { runIdleResetHook } from '../conversation/idle-reset-hook.js';
+import type { IdleResetHookDeps, IdleResetState } from '../conversation/idle-reset-hook.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -189,6 +191,8 @@ export interface RouterOptions {
 	sessionControlClassifier?: typeof detectSessionControl;
 	/** Optional — in-memory TTL store for grey-zone session-reset confirmations. */
 	pendingSessionControl?: PendingSessionControlStore;
+	/** Optional — when present, enables idle session auto-reset at the top of routeMessage/routePhoto. */
+	idleResetDeps?: IdleResetHookDeps;
 }
 
 export class Router {
@@ -215,6 +219,7 @@ export class Router {
 	private readonly chatSessions?: ChatSessionStore;
 	private readonly sessionControlClassifier?: typeof detectSessionControl;
 	private readonly pendingSessionControl?: PendingSessionControlStore;
+	private readonly idleResetDeps?: IdleResetHookDeps;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -242,6 +247,7 @@ export class Router {
 		this.chatSessions = options.chatSessions;
 		this.sessionControlClassifier = options.sessionControlClassifier;
 		this.pendingSessionControl = options.pendingSessionControl;
+		this.idleResetDeps = options.idleResetDeps;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -301,6 +307,17 @@ export class Router {
 			return;
 		}
 
+		// Idle-reset hook — runs at the very top so /ask, /edit, /notes, /newchat, /title,
+		// free text, and photo paths all participate before any routing decision.
+		let idleResetState: IdleResetState | undefined;
+		if (this.idleResetDeps) {
+			try {
+				idleResetState = await runIdleResetHook(ctx, this.idleResetDeps);
+			} catch (err) {
+				this.logger.warn({ err, userId: ctx.userId }, 'router: idle-reset hook threw; continuing');
+			}
+		}
+
 		// D5b-9a: First-run wizard intercept — only for free text.
 		// Commands (/help, /start, etc.) pass through so the user isn't locked out.
 		if (!parsed && hasPendingFirstRunWizard(ctx.userId)) {
@@ -324,19 +341,35 @@ export class Router {
 				await this.handleInviteCommand(parsed.rawArgs, ctx);
 				return;
 			}
+			// If idle reset already ended a session this turn, suppress /newchat and /reset
+			// to prevent a second "Starting a new chat" notice being sent.
+			if (
+				idleResetState?.status === 'reset' &&
+				(parsed.command === '/newchat' || parsed.command === '/reset')
+			) {
+				return;
+			}
 			// Inject active space context for all other commands
 			const enrichedCtx = this.enrichWithActiveSpace(ctx);
+			if (idleResetState) enrichedCtx.idleResetState = idleResetState;
 			await this.handleCommand(parsed, enrichedCtx, user.enabledApps);
 			return;
 		}
 
 		// Inject active space context for free text
 		const enrichedCtx = this.enrichWithActiveSpace(ctx);
+		if (idleResetState) enrichedCtx.idleResetState = idleResetState;
 
 		// 3a. NL /newchat hook — runs before intent classification (opt-in: both deps required)
 		if (this.sessionControlClassifier && this.pendingSessionControl) {
-			const intercepted = await this.handleSessionControlHook(enrichedCtx);
-			if (intercepted) return;
+			// If idle-reset already ended a session and notified the user this turn, skip the
+			// NL hook entirely. The old session is gone; there is nothing to end and we must
+			// not send a second "new chat" notice. Non-reset-intent messages fall through to
+			// normal classification as usual.
+			if (enrichedCtx.idleResetState?.status !== 'reset') {
+				const intercepted = await this.handleSessionControlHook(enrichedCtx);
+				if (intercepted) return;
+			}
 		}
 
 		// 3. Free text → intent classification
@@ -427,14 +460,27 @@ export class Router {
 			return;
 		}
 
+		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
+
+		// Idle-reset hook runs before any app-availability check so photo messages
+		// always advance the session lifecycle regardless of installed apps.
+		if (this.idleResetDeps) {
+			try {
+				await runIdleResetHook(enrichedCtx, this.idleResetDeps);
+			} catch (err) {
+				this.logger.warn(
+					{ err, userId: enrichedCtx.userId },
+					'router: idle-reset hook threw; continuing',
+				);
+			}
+		}
+
 		// 2. Check if any apps accept photos
 		const photoAppIds = this.registry.getManifestCache().getPhotoAppIds();
 		if (photoAppIds.length === 0) {
 			await this.trySend(ctx.userId, 'No apps are configured to handle photos.');
 			return;
 		}
-
-		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
 
 		// 3. Classify photo
 		const match = await this.photoClassifier.classify(
@@ -641,7 +687,10 @@ export class Router {
 		try {
 			sessionInfo = await this.resolveSession(ctx.userId);
 		} catch (error) {
-			this.logger.warn({ userId: ctx.userId, error }, 'Failed to resolve session for photo dispatch');
+			this.logger.warn(
+				{ userId: ctx.userId, error },
+				'Failed to resolve session for photo dispatch',
+			);
 		}
 
 		let result: void | PhotoHandlerResult;
@@ -687,7 +736,12 @@ export class Router {
 	private async resolveSession(
 		userId: string,
 	): Promise<{ sessionKey: string; sessionId: string | undefined }> {
-		const sessionKey = buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: userId });
+		const sessionKey = buildSessionKey({
+			agent: 'main',
+			channel: 'telegram',
+			scope: 'dm',
+			chatId: userId,
+		});
 		const sessionId = await this.chatSessions?.peekActive({ userId, sessionKey });
 		return { sessionKey, sessionId };
 	}
@@ -737,7 +791,8 @@ export class Router {
 			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
-				else if (name === 'newchat') await this.conversationService!.handleNewChat(args, enrichedCtx);
+				else if (name === 'newchat')
+					await this.conversationService!.handleNewChat(args, enrichedCtx);
 				else if (name === 'title') await this.conversationService!.handleTitle(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
 			});
@@ -785,7 +840,14 @@ export class Router {
 
 		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
 		// entries if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset', '/title']);
+		const BUILTIN_COMMAND_NAMES = new Set([
+			'/ask',
+			'/edit',
+			'/notes',
+			'/newchat',
+			'/reset',
+			'/title',
+		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {
@@ -1349,8 +1411,11 @@ export class Router {
 
 		if (result.intent !== 'new_session') return false;
 
-		const isHighConfidence = result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
-		const isGreyZone = result.confidence >= this.confidenceThreshold && result.confidence < this.verificationUpperBound;
+		const isHighConfidence =
+			result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
+		const isGreyZone =
+			result.confidence >= this.confidenceThreshold &&
+			result.confidence < this.verificationUpperBound;
 
 		if (isHighConfidence) {
 			// Start new session immediately — handleNewChat confirms internally (Fix 5a)
@@ -1378,7 +1443,10 @@ export class Router {
 					],
 				);
 			} catch (err) {
-				this.logger.warn({ err }, 'session-control: sendWithButtons failed, falling back to normal routing');
+				this.logger.warn(
+					{ err },
+					'session-control: sendWithButtons failed, falling back to normal routing',
+				);
 				this.pendingSessionControl.remove(ctx.userId);
 				return false;
 			}

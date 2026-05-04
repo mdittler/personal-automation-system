@@ -1,6 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { withFileLock } from '../../utils/file-mutex.js';
 import type { ScopedDataStore } from '../../types/data-store.js';
+import { withFileLock } from '../../utils/file-mutex.js';
 
 const INDEX_FILE = 'conversation/active-sessions.yaml';
 
@@ -32,7 +32,7 @@ async function readMap(store: ScopedDataStore): Promise<SessionMap> {
 
 export async function getActive(
 	store: ScopedDataStore,
-	userId: string,
+	_userId: string,
 	key: string,
 ): Promise<ActiveSessionEntry | undefined> {
 	const map = await readMap(store);
@@ -52,7 +52,11 @@ export async function setActive(
 	});
 }
 
-export async function clearActive(store: ScopedDataStore, userId: string, key: string): Promise<void> {
+export async function clearActive(
+	store: ScopedDataStore,
+	userId: string,
+	key: string,
+): Promise<void> {
 	await withFileLock(`conversation-session-index:${userId}`, async () => {
 		const map = await readMap(store);
 		delete map[key];
@@ -70,8 +74,18 @@ export async function setActiveUnlocked(
 	key: string,
 	entry: ActiveSessionEntry,
 ): Promise<void> {
-	const raw = await store.read(INDEX_FILE);
-	const map = parseMap(raw);
+	const map = await readMap(store);
 	map[key] = entry;
+	await store.write(INDEX_FILE, stringifyYaml(map));
+}
+
+/**
+ * Remove an active-session entry WITHOUT acquiring the file lock.
+ * Callers MUST already hold the conversation-session-index:<userId> lock.
+ * Used by DefaultChatSessionStore.endActive which needs atomic read+CAS+clear.
+ */
+export async function clearActiveUnlocked(store: ScopedDataStore, key: string): Promise<void> {
+	const map = await readMap(store);
+	delete map[key];
 	await store.write(INDEX_FILE, stringifyYaml(map));
 }

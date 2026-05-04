@@ -1,4 +1,13 @@
-/** Types for conversation session and durable memory snapshot. */
+/** Types for conversation session, idle-reset state, and durable memory snapshot. */
+
+export type IdleResetStatus = 'reset' | 'protected' | 'none';
+
+export interface IdleResetState {
+	status: IdleResetStatus;
+	endedSessionId?: string;
+	/** Reserved for P8b successor-session lineage. Not consumed in production yet. */
+	parentTitle?: string | null;
+}
 
 /** A frozen snapshot of durable ContextStore entries, built at session-mint time. */
 export interface MemorySnapshot {
