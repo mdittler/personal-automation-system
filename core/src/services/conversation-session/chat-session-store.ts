@@ -249,19 +249,29 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${sessionId}`, async () => {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
-			const base = raw === '' ? encodeNew(this.buildFrontmatter(ctx, sessionId)) : raw;
-			// Compute turn_index for index writes: count existing turns before appending.
-			// Only decode when the index is wired AND the file already has content.
-			if (this.deps.index && raw !== '') {
+			let next: string;
+			if (raw === '') {
+				// Brand-new file: build from scratch (no existing turns, no bump needed).
+				next = encodeAppend(encodeAppend(encodeNew(this.buildFrontmatter(ctx, sessionId)), userTurn), assistantTurn);
+			} else {
+				// Existing file: decode so we can bump last_activity_at and capture userTurnIndex.
 				try {
-					const { turns } = decode(raw);
+					const { meta, turns } = decode(raw);
 					userTurnIndex = turns.length;
-				} catch {
-					// Corrupt — fall back to 0; INSERT OR IGNORE in appendMessage makes safe
-					userTurnIndex = 0;
+					meta.last_activity_at = this.now().toISOString();
+					let rebuilt = encodeNew(meta);
+					for (const t of turns) rebuilt = encodeAppend(rebuilt, t);
+					next = encodeAppend(encodeAppend(rebuilt, userTurn), assistantTurn);
+				} catch (err) {
+					// Corrupt transcript — fall back to raw append; don't bump last_activity_at.
+					// userTurnIndex stays 0; INSERT OR IGNORE in appendMessage makes this safe.
+					this.deps.logger.warn(
+						{ err, sessionId, userId: ctx.userId },
+						'conversation-session: decode failed in appendExchange; falling back to raw append',
+					);
+					next = encodeAppend(encodeAppend(raw, userTurn), assistantTurn);
 				}
 			}
-			const next = encodeAppend(encodeAppend(base, userTurn), assistantTurn);
 			await store.write(path, next);
 		});
 

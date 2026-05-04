@@ -792,3 +792,58 @@ describe('last_activity_at on mint', () => {
 		expect((meta as any).last_activity_at).toBe(meta.started_at);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// A3 — last_activity_at refreshed on appendExchange
+// ---------------------------------------------------------------------------
+
+describe('last_activity_at refresh on appendExchange', () => {
+	it('appendExchange updates last_activity_at to current clock', async () => {
+		let now = new Date('2026-05-01T12:00:00.000Z');
+		const clock = () => now;
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+		});
+		await store.ensureActiveSession(ctx);
+
+		now = new Date('2026-05-01T13:30:00.000Z');
+		const userTurn: SessionTurn = { role: 'user', content: 'hi', timestamp: now.toISOString() };
+		const assistantTurn: SessionTurn = { role: 'assistant', content: 'hello', timestamp: now.toISOString() };
+		const { sessionId } = await store.appendExchange(ctx, userTurn, assistantTurn);
+
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionId}.md`);
+		const { meta } = decode(raw);
+		expect((meta as any).last_activity_at).toBe('2026-05-01T13:30:00.000Z');
+		expect(meta.started_at).toBe('2026-05-01T12:00:00.000Z');
+	});
+
+	it('appendExchange falls back to raw append on decode failure (no last_activity_at bump)', async () => {
+		const dataStore = makeDataStore();
+		const store = composeChatSessionStore({
+			data: dataStore,
+			logger: makeMockLogger(),
+			clock,
+		});
+		const { sessionId } = await store.ensureActiveSession(ctx);
+
+		// Corrupt the transcript by injecting garbage that breaks the turn-fence parser
+		const path = `conversation/sessions/${sessionId}.md`;
+		const raw = await dataStore.forUser(USER).read(path);
+		// Append a header line without a matching fence to trigger CorruptTranscriptError
+		await dataStore.forUser(USER).write(path, raw + '\n### user — 2026-05-01T12:00:00.000Z\n[no fence here]\n');
+
+		const now2 = new Date();
+		const userTurn: SessionTurn = { role: 'user', content: 'still works', timestamp: now2.toISOString() };
+		const assistantTurn: SessionTurn = { role: 'assistant', content: 'ok', timestamp: now2.toISOString() };
+
+		// Must NOT throw
+		await expect(store.appendExchange(ctx, userTurn, assistantTurn)).resolves.toMatchObject({ sessionId: expect.any(String) });
+
+		// The new turn must appear in the file
+		const after = await dataStore.forUser(USER).read(path);
+		expect(after).toContain('still works');
+	});
+});
