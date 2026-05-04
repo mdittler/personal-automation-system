@@ -4275,17 +4275,21 @@ When a new session is minted, the frontmatter field `last_activity_at` MUST be s
 
 ---
 
-### REQ-CONV-IDLE-002 — `last_activity_at` MUST be refreshed on every `appendExchange`
+### REQ-CONV-IDLE-002 — `last_activity_at` MUST be refreshed on every `appendExchange`, but MUST NOT be bumped if the session has already ended
 
 **Phase:** Hermes P8a | **Status:** Implemented
 
-Every call to `appendExchange` MUST decode the session transcript, update `last_activity_at` to the current clock value, re-encode, and write back. If decoding fails (corrupt transcript), the exchange MUST be appended via raw-string fallback without bumping the field — never crash.
+Every call to `appendExchange` MUST decode the session transcript, update `last_activity_at` to the current clock value, re-encode, and write back. If decoding fails (corrupt transcript), the exchange MUST be appended via raw-string fallback without bumping the field — never crash. When the in-flight race path (`expectedSessionId`) targets a session that has already been ended (i.e. `meta.ended_at` is set), `last_activity_at` MUST NOT be bumped; `ended_at > last_activity_at` must remain true.
 
 **Standard tests:**
 - `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange updates last_activity_at to current clock
 
 **Edge case tests:**
 - `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange falls back to raw append on decode failure (no last_activity_at bump)
+- `chat-session-store.test.ts` > last_activity_at refresh on appendExchange > appendExchange does NOT bump last_activity_at on an already-ended session (in-flight race path)
+
+**Fixes:**
+- **Codex-P2-3 (2026-05-04):** Initial implementation bumped `last_activity_at` unconditionally in the `expectedSessionId` path, leaving `last_activity_at > ended_at`. Fixed by checking `!meta.ended_at` before the bump. CL: `codex-p2-corrections`.
 
 ---
 
@@ -4351,7 +4355,7 @@ When `chat.sessions.auto_reset_idle_minutes` is `null` (the default) or `undefin
 
 **Phase:** Hermes P8a | **Status:** Implemented
 
-When an idle session is detected, `ChatSessionStore.endActive` MUST be called with reason `'idle'`. A human-readable notice ("X of inactivity") MUST be sent to the user via `TelegramService.send` before the current message is classified or dispatched to any handler. The notice MUST include a formatted duration (1 minute, 30 minutes, 1 hour, 2 hours, 1 day, 2 days, etc.).
+When an idle session is detected, `ChatSessionStore.endActive` MUST be called with reason `'idle'`. A human-readable notice ("X of inactivity") MUST be sent to the user via `TelegramService.send` before the current message is classified or dispatched to any handler. The notice MUST include a formatted duration (1 minute, 30 minutes, 1 hour 30 minutes, 2 hours, 1 day, etc.). If `endActive` returns `endedSessionId: null` (concurrent race — another handler ended the session first), the hook MUST abort the reset and return `{ status: 'none' }` without sending any notice.
 
 **Standard tests:**
 - `idle-reset-hook.test.ts` > runIdleResetHook > happy path > status="reset", returns endedSessionId + parentTitle, ends session, notifies user
@@ -4363,7 +4367,9 @@ When an idle session is detected, `ChatSessionStore.endActive` MUST be called wi
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1 minutes → "1 minute"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 30 minutes → "30 minutes"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 60 minutes → "1 hour"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 90 minutes → "1 hour 30 minutes"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 120 minutes → "2 hours"
+- `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 150 minutes → "2 hours 30 minutes"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 1440 minutes → "1 day"
 - `idle-reset-hook.test.ts` > runIdleResetHook > formatDuration in notification message > 2880 minutes → "2 days"
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 1-minute threshold → "1 minute" in notice
@@ -4372,6 +4378,17 @@ When an idle session is detected, `ChatSessionStore.endActive` MUST be called wi
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 120-minute threshold → "2 hours" in notice
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 1440-minute threshold → "1 day" in notice
 - `idle-reset.persona.test.ts` > Idle-reset persona scenarios > Duration message formatting in idle notice > 2880-minute threshold → "2 days" in notice
+
+**Edge case tests (concurrent race):**
+- `idle-reset-hook.test.ts` > runIdleResetHook > fail-open coverage (every boundary) > endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send
+
+**Integration tests:**
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > hook ends an idle session and sets ended_at in the filesystem
+- `idle-reset-integration.test.ts` > idle-reset integration — real ChatSessionStore > next appendExchange after idle reset lands in a fresh session
+
+**Fixes:**
+- **Codex-P2-1 (2026-05-04):** Initial implementation used stale `activeId` (from `peekActive`) as `endedSessionId` in the return value rather than the id returned by `endActive`. Also did not handle `endedSessionId: null` (concurrent race) — now aborts with `status='none'` and logs a warning. CL: `codex-p2-corrections`.
+- **Codex-P3-1 (2026-05-04):** `formatDuration` used `Math.round(hours)` for non-integer hour values, causing 90 min → "2 hours". Fixed to express non-integer hours as "X hours Y minutes". CL: `codex-p2-corrections`.
 
 ---
 
@@ -4429,18 +4446,24 @@ The hook MUST execute before `handleCommand` (covering `/ask`, `/edit`, `/notes`
 
 ---
 
-### REQ-CONV-IDLE-010 — When idle reset fires on the same turn as a reset-intent message, the NL `/newchat` hook MUST stay silent
+### REQ-CONV-IDLE-010 — When idle reset fires on the same turn, the NL `/newchat` hook and literal `/newchat`/`/reset` commands MUST be suppressed
 
 **Phase:** Hermes P8a | **Status:** Implemented
 
-When `enrichedCtx.idleResetState.status === 'reset'`, the NL `/newchat` hook MUST be skipped entirely, preventing a second "new chat" notice from being sent to the user. The message routes normally if it was not reset-intent.
+When `enrichedCtx.idleResetState.status === 'reset'`, the NL `/newchat` hook MUST be skipped entirely, and literal `/newchat` and `/reset` commands MUST be silently suppressed — preventing a second "new chat" notice from being sent to the user. Free-text messages with non-reset intent route normally in the new session.
 
 **Standard tests:**
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > idle reset + reset-intent message → NL hook does NOT double-message (silent consume)
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Literal /newchat and /reset suppressed after idle reset > idle reset + /newchat command → handleNewChat NOT called (no double-message)
+- `router-idle-reset.test.ts` > Router idle-reset hook wiring > Literal /newchat and /reset suppressed after idle reset > idle reset + /reset command → handleNewChat NOT called (no double-message)
 
 **Edge case tests:**
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > idle reset + non-reset-intent message → routes normally (no NL hook intercept)
 - `router-idle-reset.test.ts` > Router idle-reset hook wiring > NL /newchat conflict with idle reset > no idle reset + reset-intent message → NL hook fires normally
+
+**Fixes:**
+- **Codex-P2-2 (2026-05-04):** Initial implementation only guarded the NL hook (free-text path). Literal `/newchat` and `/reset` commands in the command path had no guard, allowing `handleNewChat` to run and send a second notice. Fixed with an early-return guard in the command path. CL: `codex-p2-corrections`.
+- **Codex-P2-4 (2026-05-04):** Test for the NL hook silent-consume case was missing an assertion that `conv.handleMessage` was called, so it could not detect if the message was incorrectly dropped. Added `expect(conv.handleMessage).toHaveBeenCalledOnce()`. CL: `codex-p2-corrections`.
 
 ---
 
@@ -7826,14 +7849,14 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-RECEIPT-001 | photo-parsers.test.ts | 4 | 10 | Implemented |
 | REQ-FOOD-RECEIPT-002 | photo-handler.test.ts, price-store.test.ts | 3 | 2 | Implemented |
 | REQ-CONV-IDLE-001 | chat-session-store.test.ts | 1 | 0 | Implemented |
-| REQ-CONV-IDLE-002 | chat-session-store.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-IDLE-002 | chat-session-store.test.ts | 1 | 2 | Implemented |
 | REQ-CONV-IDLE-003 | idle-detector.test.ts | 1 | 1 | Implemented |
 | REQ-CONV-IDLE-004 | idle-detector.test.ts | 1 | 6 | Implemented |
 | REQ-CONV-IDLE-005 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, pas-yaml-schema.test.ts | 6 | 7 | Implemented |
-| REQ-CONV-IDLE-006 | idle-reset-hook.test.ts, idle-reset.persona.test.ts | 4 | 12 | Implemented |
+| REQ-CONV-IDLE-006 | idle-reset-hook.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 6 | 15 | Implemented |
 | REQ-CONV-IDLE-007 | idle-reset-hook.test.ts, idle-reset.persona.test.ts | 1 | 3 | Implemented |
 | REQ-CONV-IDLE-008 | idle-reset-hook.test.ts | 0 | 4 | Implemented |
 | REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 10 | 2 | Implemented |
-| REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 1 | 2 | Implemented |
+| REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 3 | 2 | Implemented |
 
-| **Totals** | **206 test files** | **1586** | **1778** | **3364 tests** |
+| **Totals** | **207 test files** | **1590** | **1782** | **3372 tests** |
