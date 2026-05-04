@@ -278,6 +278,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
 				expectedSessionId: ensuredSessionId,
+				...(parentSessionId !== null ? { parentSessionId } : {}),
 			},
 			userTurn,
 			assistantTurn,

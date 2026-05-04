@@ -10,6 +10,7 @@
  *   5. best-effort — appendExchange throws, dispatch still resolves
  *   6. expectedSessionId binding — appendExchange called with correct expectedSessionId
  *   7. ALS context — getCurrentUserId/HouseholdId/SessionId populated inside handler
+ *   8. P8c Codex P1 — parentSessionId forwarding on idle reset
  */
 
 import type { Logger } from 'pino';
@@ -26,6 +27,7 @@ import {
 	getCurrentUserId,
 } from '../../context/request-context.js';
 import type { HouseholdService } from '../../household/index.js';
+import type { IdleResetHookDeps, IdleResetState } from '../../conversation/idle-reset-hook.js';
 import { makeStoreFixture, type StoreFixture } from '../../conversation-session/__tests__/fixtures.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
@@ -56,11 +58,34 @@ function createMockTelegram(): TelegramService {
 	};
 }
 
-function createMockLLM(): LLMService {
+function createMockLLM(classifyResult = { category: 'unknown', confidence: 0.1 }): LLMService {
 	return {
 		complete: vi.fn().mockResolvedValue('ok'),
-		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0.1 }),
+		classify: vi.fn().mockResolvedValue(classifyResult),
 		extractStructured: vi.fn(),
+	};
+}
+
+function makeResetIdleResetDeps(endedSessionId: string): IdleResetHookDeps {
+	const lastActivity = new Date(Date.now() - 99_999_999).toISOString();
+	const startedAt = new Date(Date.now() - 99_999_999).toISOString();
+	return {
+		idleMinutes: 1,
+		chatSessions: {
+			peekActive: vi.fn().mockResolvedValue(endedSessionId),
+			readSession: vi.fn().mockResolvedValue({
+				meta: { id: endedSessionId, last_activity_at: lastActivity, started_at: startedAt, title: null, ended_at: null },
+				turns: [],
+			}),
+			endActive: vi.fn().mockResolvedValue({ endedSessionId }),
+		},
+		telegram: { send: vi.fn().mockResolvedValue(undefined) },
+		logger: {
+			debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
+			trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+		} as unknown as Pick<Logger, 'warn'>,
+		pendingSessionControl: undefined,
+		now: undefined,
 	};
 }
 
@@ -124,6 +149,8 @@ function buildRouter(options: {
 	chatSessions?: StoreFixture['store'];
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	logger?: Logger;
+	idleResetDeps?: IdleResetHookDeps;
+	classifyResult?: { category: string; confidence: number };
 }): { router: Router; telegram: TelegramService } {
 	const cache = new ManifestCache();
 	cache.add(photoManifest, '/apps/food');
@@ -147,13 +174,14 @@ function buildRouter(options: {
 
 	const router = new Router({
 		registry,
-		llm: createMockLLM(),
+		llm: createMockLLM(options.classifyResult),
 		telegram,
 		fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
 		config: createMockConfig(),
 		logger,
 		chatSessions: options.chatSessions as any,
 		householdService: options.householdService,
+		idleResetDeps: options.idleResetDeps,
 	});
 	router.buildRoutingTables();
 	return { router, telegram };
@@ -588,5 +616,86 @@ describe('dispatchPhoto — ALS context binding', () => {
 		);
 
 		expect(capturedSessionId).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 8: P8c Codex P1 — parentSessionId forwarding on idle reset
+// ---------------------------------------------------------------------------
+
+describe('P8c Codex P1 — photo post-idle-reset parent_session_id forwarding', () => {
+	let fixture: StoreFixture;
+
+	beforeEach(async () => {
+		fixture = await makeStoreFixture();
+	});
+
+	afterEach(async () => {
+		const { rm } = await import('node:fs/promises');
+		await rm(fixture.tempDir, { recursive: true, force: true });
+	});
+
+	it('dispatchPhoto with parentSessionId stamps it into the cold-minted session frontmatter', async () => {
+		const userId = 'u1';
+		const sessionKey = `agent:main:telegram:dm:${userId}`;
+		const parentId = '20260427_140000_aaaaaaaa';
+
+		const photoModule: AppModule = {
+			init: vi.fn().mockResolvedValue(undefined),
+			handleMessage: vi.fn().mockResolvedValue(undefined),
+			handlePhoto: vi.fn().mockResolvedValue(makeSummaryResult()),
+		};
+
+		const { router } = buildRouter({ photoModule, chatSessions: fixture.store });
+
+		// Call dispatchPhoto with parentSessionId (4th arg — not yet accepted, so this fails)
+		await router.dispatchPhoto(
+			{ manifest: photoManifest, module: photoModule, appDir: '/apps/food' } as RegisteredApp,
+			createPhotoCtx(userId),
+			PHOTO_ROUTE,
+			parentId,
+		);
+
+		const newSessionId = await fixture.store.peekActive({ userId, sessionKey });
+		expect(newSessionId).toBeDefined();
+		const decoded = await fixture.readDecoded(userId, newSessionId!);
+		expect(decoded.meta.parent_session_id).toBe(parentId);
+	});
+
+	it('routePhoto on idle reset passes parentSessionId to the appended transcript', async () => {
+		const userId = 'u1';
+		const sessionKey = `agent:main:telegram:dm:${userId}`;
+		const fakeParentId = '20260427_120000_cafef00d';
+
+		const photoModule: AppModule = {
+			init: vi.fn().mockResolvedValue(undefined),
+			handleMessage: vi.fn().mockResolvedValue(undefined),
+			handlePhoto: vi.fn().mockResolvedValue(makeSummaryResult()),
+		};
+
+		const idleResetDeps = makeResetIdleResetDeps(fakeParentId);
+
+		const { router } = buildRouter({
+			photoModule,
+			chatSessions: fixture.store,
+			idleResetDeps,
+			// Make photo classification succeed so routePhoto reaches dispatchPhoto
+			classifyResult: { category: 'receipt', confidence: 0.9 },
+		});
+
+		await router.routePhoto({
+			userId,
+			photo: Buffer.from('fake-image'),
+			caption: 'grocery receipt',
+			mimeType: 'image/jpeg',
+			timestamp: new Date(),
+			chatId: 1,
+			messageId: 1,
+		});
+
+		const newSessionId = await fixture.store.peekActive({ userId, sessionKey });
+		expect(newSessionId).toBeDefined();
+		const decoded = await fixture.readDecoded(userId, newSessionId!);
+		expect(decoded.meta.parent_session_id).toBe(fakeParentId);
 	});
 });

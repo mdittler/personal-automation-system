@@ -707,3 +707,106 @@ describe('P8c — upsertSession persists parent_session_id', () => {
 		expect(meta?.parent_session_id).toBeNull();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P8c Codex P3 — upsertSession set-once invariant + FTS orphan defence
+// ---------------------------------------------------------------------------
+
+describe('P8c Codex P3 — upsertSession set-once + FTS orphan defence', () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	test('preserves parent_session_id across re-upserts while updating other fields', async () => {
+		await index.upsertSession({
+			id: '20260504_120000_cafef00d',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T12:00:00.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+			parent_session_id: '20260504_110000_aaaaaaaa',
+		});
+		// Re-upsert at session-end without re-supplying parent_session_id
+		await index.upsertSession({
+			id: '20260504_120000_cafef00d',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T12:00:00.000Z',
+			ended_at: '2026-05-04T13:00:00.000Z',
+			model: 'claude-sonnet-4-6',
+			title: 'Trip planning',
+			// parent_session_id intentionally omitted
+		} as Parameters<typeof index.upsertSession>[0]);
+		const meta = await index.getSessionMeta('20260504_120000_cafef00d');
+		expect(meta?.parent_session_id).toBe('20260504_110000_aaaaaaaa'); // set-once preserved
+		expect(meta?.title).toBe('Trip planning');                          // other fields updated
+		expect(meta?.ended_at).toBe('2026-05-04T13:00:00.000Z');
+	});
+
+	test('explicit null parent_session_id on re-upsert does not overwrite existing lineage', async () => {
+		await index.upsertSession({
+			id: '20260504_130000_cafe0001',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T13:00:00.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+			parent_session_id: '20260504_120000_aaaaaaaa',
+		});
+		// Re-upsert with explicit null
+		await index.upsertSession({
+			id: '20260504_130000_cafe0001',
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T13:00:00.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+			parent_session_id: null,
+		});
+		const meta = await index.getSessionMeta('20260504_130000_cafe0001');
+		expect(meta?.parent_session_id).toBe('20260504_120000_aaaaaaaa'); // unchanged
+	});
+
+	test('re-upsert does not orphan messages_fts rows (FTS still searchable after re-upsert)', async () => {
+		const sessionId = '20260504_140000_cafe0002';
+		await index.upsertSession({
+			id: sessionId,
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T14:00:00.000Z',
+			ended_at: null,
+			model: null,
+			title: null,
+		});
+		await index.appendMessage(makeMessage({ session_id: sessionId, turn_index: 0, content: 'unique-fts-canary-word' }));
+
+		// Confirm searchable before re-upsert
+		const before = await index.searchSessions({ userId: 'u1', householdId: null, queryTerms: ['unique-fts-canary-word'] });
+		expect(before.hits).toHaveLength(1);
+
+		// Re-upsert with a title change (simulates session-end title write)
+		await index.upsertSession({
+			id: sessionId,
+			user_id: 'u1',
+			household_id: null,
+			source: 'telegram',
+			started_at: '2026-05-04T14:00:00.000Z',
+			ended_at: '2026-05-04T15:00:00.000Z',
+			model: 'claude-sonnet-4-6',
+			title: 'Updated title',
+		});
+
+		// FTS rows must still be present — not orphaned by the re-upsert
+		const after = await index.searchSessions({ userId: 'u1', householdId: null, queryTerms: ['unique-fts-canary-word'] });
+		expect(after.hits).toHaveLength(1);
+		expect(after.hits[0].sessionId).toBe(sessionId);
+	});
+});

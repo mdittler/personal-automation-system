@@ -317,6 +317,7 @@ export async function handleAsk(
 				model: modelId,
 				householdId: getCurrentHouseholdId(),
 				expectedSessionId: ensuredSessionId,
+				...(parentSessionId !== null ? { parentSessionId } : {}),
 			},
 			userTurn,
 			assistantTurn,

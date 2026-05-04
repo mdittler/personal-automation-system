@@ -61,8 +61,16 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 			const txn = this.db.transaction(() => {
 				this.db
 					.prepare(
-						`INSERT OR REPLACE INTO sessions(id, user_id, household_id, source, started_at, ended_at, model, title, parent_session_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						`INSERT INTO sessions(id, user_id, household_id, source, started_at, ended_at, model, title, parent_session_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               user_id      = excluded.user_id,
+               household_id = excluded.household_id,
+               source       = excluded.source,
+               started_at   = excluded.started_at,
+               ended_at     = excluded.ended_at,
+               model        = excluded.model,
+               title        = excluded.title`,
 					)
 					.run(
 						row.id,

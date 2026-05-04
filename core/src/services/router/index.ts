@@ -55,6 +55,7 @@ import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
 import { runIdleResetHook } from '../conversation/idle-reset-hook.js';
 import type { IdleResetHookDeps, IdleResetState } from '../conversation/idle-reset-hook.js';
+import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -464,9 +465,10 @@ export class Router {
 
 		// Idle-reset hook runs before any app-availability check so photo messages
 		// always advance the session lifecycle regardless of installed apps.
+		let photoIdleResetState: IdleResetState | undefined;
 		if (this.idleResetDeps) {
 			try {
-				await runIdleResetHook(enrichedCtx, this.idleResetDeps);
+				photoIdleResetState = await runIdleResetHook(enrichedCtx, this.idleResetDeps);
 			} catch (err) {
 				this.logger.warn(
 					{ err, userId: enrichedCtx.userId },
@@ -474,6 +476,7 @@ export class Router {
 				);
 			}
 		}
+		const photoParentSessionId = parentSessionFromIdleReset(photoIdleResetState);
 
 		// 2. Check if any apps accept photos
 		const photoAppIds = this.registry.getManifestCache().getPhotoAppIds();
@@ -529,6 +532,7 @@ export class Router {
 						verifiedApp,
 						enrichedCtx,
 						routeFromVerifyAction(result, 'photo-intent'),
+						photoParentSessionId,
 					);
 					return;
 				}
@@ -546,6 +550,7 @@ export class Router {
 						'photo-intent',
 						this.routeVerifier ? 'skipped' : 'not-run',
 					),
+					photoParentSessionId,
 				);
 				return;
 			}
@@ -679,7 +684,7 @@ export class Router {
 	 * handler returns a photoSummary, it is appended to the chat transcript as a
 	 * user/assistant exchange (best-effort — failure is logged but never propagated).
 	 */
-	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo): Promise<void> {
+	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo, parentSessionId?: string | null): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 
 		// Bind session BEFORE dispatch — a concurrent /newchat cannot redirect the append.
@@ -717,6 +722,8 @@ export class Router {
 					householdId,
 					// expectedSessionId is only meaningful when a pre-existing session was found.
 					...(sessionInfo.sessionId ? { expectedSessionId: sessionInfo.sessionId } : {}),
+					// parentSessionId stamps lineage on cold-mint when idle reset just fired.
+					...(parentSessionId != null ? { parentSessionId } : {}),
 				},
 				{ role: 'user', content: summary.userTurn, timestamp: now },
 				{ role: 'assistant', content: summary.assistantTurn, timestamp: now },
