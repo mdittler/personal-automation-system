@@ -4687,9 +4687,9 @@ Every I/O boundary in the flush path is wrapped in a try/catch that logs a warni
 
 **Phase:** Hermes P8c | **Status:** Implemented
 
-When the **event that ended the prior session** is `runIdleResetHook` (status `reset`), the **next mint** (via `ensureActiveSession` OR `appendExchange` cold-mint) SHALL record the ended session's id in the successor's `parent_session_id` frontmatter field. Lineage source = the event that ended the prior session.
+When the **event that ended the prior session** is `runIdleResetHook` (status `reset`), the **next mint** (via `ensureActiveSession` OR `appendExchange` cold-mint, including the photo dispatch path) SHALL record the ended session's id in the successor's `parent_session_id` frontmatter field. Lineage source = the event that ended the prior session. This applies to both text messages and photo dispatches routed after an idle reset.
 
-**Primary test:** `idle-reset-integration.test.ts > D.1 — idle reset → handleMessage mints successor with parent_session_id in frontmatter AND SQLite`
+**Primary test:** `idle-reset-integration.test.ts > D.1 — idle reset → handleMessage mints successor with parent_session_id in frontmatter AND SQLite`; `dispatch-photo-transcript.test.ts > P8c Codex P1 — photo post-idle-reset parent_session_id forwarding`
 
 ---
 
@@ -4737,9 +4737,19 @@ The chat-transcript-index `sessions` table SHALL persist `parent_session_id` (TE
 
 **Phase:** Hermes P8c | **Status:** Implemented
 
-`parent_session_id` SHALL be set ONLY at mint time. Subsequent `appendExchange` calls on an existing session SHALL NOT alter it.
+`parent_session_id` SHALL be set ONLY at mint time. Subsequent `appendExchange` calls on an existing session SHALL NOT alter it. This invariant is enforced at the store layer (chat-session-store) and at the SQLite layer (see REQ-CONV-LINEAGE-007).
 
 **Primary test:** `idle-reset-integration.test.ts > D.3 — parent_session_id is set only at mint; second appendExchange does not alter it`
+
+---
+
+### REQ-CONV-LINEAGE-007 — `upsertSession` SHALL treat `parent_session_id` as set-once at the SQLite layer
+
+**Phase:** Hermes P8c (Codex corrections) | **Status:** Implemented
+
+`ChatTranscriptIndexImpl.upsertSession` SHALL use `INSERT INTO ... ON CONFLICT(id) DO UPDATE SET` and SHALL exclude `parent_session_id` from the SET clause. Once written, the SQLite row's `parent_session_id` SHALL NOT be overwritten by any subsequent `upsertSession` call, regardless of the input row's `parent_session_id` value (including explicit `null`). New rows still receive whatever value the caller passes (or `NULL` if omitted) on first insert. This in-place update also avoids the `DELETE + INSERT` that `INSERT OR REPLACE` performs, preventing `ON DELETE CASCADE` from orphaning `messages_fts` rows.
+
+**Primary tests:** `chat-transcript-index.test.ts > P8c Codex P3 — upsertSession set-once + FTS orphan defence > preserves parent_session_id across re-upserts while updating other fields`; `> explicit null parent_session_id on re-upsert does not overwrite existing lineage`; `> re-upsert does not orphan messages_fts rows`
 
 ---
 
@@ -8146,11 +8156,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 11 | Implemented |
 | REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts | 2 | 1 | Implemented |
 | REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 2 | Implemented |
-| REQ-CONV-LINEAGE-001 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-LINEAGE-001 | idle-reset-integration.test.ts, dispatch-photo-transcript.test.ts, handle-message.test.ts, handle-ask.test.ts | 1 | 5 | Implemented |
 | REQ-CONV-LINEAGE-002 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-LINEAGE-003 | chat-session-store.test.ts | 7 | 4 | Implemented |
 | REQ-CONV-LINEAGE-004 | schema.test.ts, chat-transcript-index.test.ts | 4 | 0 | Implemented |
 | REQ-CONV-LINEAGE-005 | chat-index-rebuild.integration.test.ts | 3 | 0 | Implemented |
 | REQ-CONV-LINEAGE-006 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-LINEAGE-007 | chat-transcript-index.test.ts | 3 | 0 | Implemented |
 
-| **Totals** | **210 test files** | **1614** | **1823** | **3437 tests** |
+| **Totals** | **210 test files** | **1620** | **1823** | **3443 tests** |
