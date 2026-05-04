@@ -52,7 +52,11 @@ export async function setActive(
 	});
 }
 
-export async function clearActive(store: ScopedDataStore, userId: string, key: string): Promise<void> {
+export async function clearActive(
+	store: ScopedDataStore,
+	userId: string,
+	key: string,
+): Promise<void> {
 	await withFileLock(`conversation-session-index:${userId}`, async () => {
 		const map = await readMap(store);
 		delete map[key];
@@ -73,5 +77,17 @@ export async function setActiveUnlocked(
 	const raw = await store.read(INDEX_FILE);
 	const map = parseMap(raw);
 	map[key] = entry;
+	await store.write(INDEX_FILE, stringifyYaml(map));
+}
+
+/**
+ * Remove an active-session entry WITHOUT acquiring the file lock.
+ * Callers MUST already hold the conversation-session-index:<userId> lock.
+ * Used by DefaultChatSessionStore.endActive which needs atomic read+CAS+clear.
+ */
+export async function clearActiveUnlocked(store: ScopedDataStore, key: string): Promise<void> {
+	const raw = await store.read(INDEX_FILE);
+	const map = parseMap(raw);
+	delete map[key];
 	await store.write(INDEX_FILE, stringifyYaml(map));
 }

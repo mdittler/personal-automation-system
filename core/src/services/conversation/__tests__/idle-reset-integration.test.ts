@@ -131,4 +131,43 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 		const active = await freshStore.peekActive({ userId: USER, sessionKey: SESSION_KEY });
 		expect(active).toBe(sessionB);
 	});
+
+	it('endActive CAS mismatch: stale expectedSessionId leaves fresh session intact', async () => {
+		const mintTime = new Date('2026-05-01T10:00:00.000Z');
+		const { store } = makeStore(() => mintTime);
+
+		// Mint session A
+		const { sessionId: sessionA } = await store.appendExchange(
+			{ userId: USER, sessionKey: SESSION_KEY },
+			makeTurn('user', 'first message', mintTime.toISOString()),
+			makeTurn('assistant', 'first reply', mintTime.toISOString()),
+		);
+
+		// Concurrent operation: end A and mint B (simulates another request racing the hook)
+		await store.endActive({ userId: USER, sessionKey: SESSION_KEY }, 'newchat');
+		const nextTime = new Date('2026-05-01T10:01:00.000Z');
+		const { store: storeB, dataStore } = makeStore(() => nextTime);
+		const { sessionId: sessionB } = await storeB.appendExchange(
+			{ userId: USER, sessionKey: SESSION_KEY },
+			makeTurn('user', 'second message', nextTime.toISOString()),
+			makeTurn('assistant', 'second reply', nextTime.toISOString()),
+		);
+
+		// Hook calls endActive with stale expectedSessionId = A, but B is now active
+		const result = await storeB.endActive(
+			{ userId: USER, sessionKey: SESSION_KEY, expectedSessionId: sessionA },
+			'idle',
+		);
+
+		// CAS mismatch → no change
+		expect(result.endedSessionId).toBeNull();
+
+		// Session B must still be active and not have ended_at set
+		const active = await storeB.peekActive({ userId: USER, sessionKey: SESSION_KEY });
+		expect(active).toBe(sessionB);
+
+		const raw = await dataStore.forUser(USER).read(`conversation/sessions/${sessionB}.md`);
+		const { meta } = decode(raw);
+		expect(meta.ended_at).toBeNull();
+	});
 });

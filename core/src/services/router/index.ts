@@ -460,22 +460,26 @@ export class Router {
 			return;
 		}
 
+		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
+
+		// Idle-reset hook runs before any app-availability check so photo messages
+		// always advance the session lifecycle regardless of installed apps.
+		if (this.idleResetDeps) {
+			try {
+				await runIdleResetHook(enrichedCtx, this.idleResetDeps);
+			} catch (err) {
+				this.logger.warn(
+					{ err, userId: enrichedCtx.userId },
+					'router: idle-reset hook threw; continuing',
+				);
+			}
+		}
+
 		// 2. Check if any apps accept photos
 		const photoAppIds = this.registry.getManifestCache().getPhotoAppIds();
 		if (photoAppIds.length === 0) {
 			await this.trySend(ctx.userId, 'No apps are configured to handle photos.');
 			return;
-		}
-
-		const enrichedCtx = this.enrichPhotoWithActiveSpace(ctx);
-
-		// Idle-reset hook for photo messages
-		if (this.idleResetDeps) {
-			try {
-				await runIdleResetHook(enrichedCtx, this.idleResetDeps);
-			} catch (err) {
-				this.logger.warn({ err, userId: enrichedCtx.userId }, 'router: idle-reset hook threw; continuing');
-			}
 		}
 
 		// 3. Classify photo
@@ -683,7 +687,10 @@ export class Router {
 		try {
 			sessionInfo = await this.resolveSession(ctx.userId);
 		} catch (error) {
-			this.logger.warn({ userId: ctx.userId, error }, 'Failed to resolve session for photo dispatch');
+			this.logger.warn(
+				{ userId: ctx.userId, error },
+				'Failed to resolve session for photo dispatch',
+			);
 		}
 
 		let result: void | PhotoHandlerResult;
@@ -729,7 +736,12 @@ export class Router {
 	private async resolveSession(
 		userId: string,
 	): Promise<{ sessionKey: string; sessionId: string | undefined }> {
-		const sessionKey = buildSessionKey({ agent: 'main', channel: 'telegram', scope: 'dm', chatId: userId });
+		const sessionKey = buildSessionKey({
+			agent: 'main',
+			channel: 'telegram',
+			scope: 'dm',
+			chatId: userId,
+		});
 		const sessionId = await this.chatSessions?.peekActive({ userId, sessionKey });
 		return { sessionKey, sessionId };
 	}
@@ -779,7 +791,8 @@ export class Router {
 			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
 				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
 				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
-				else if (name === 'newchat') await this.conversationService!.handleNewChat(args, enrichedCtx);
+				else if (name === 'newchat')
+					await this.conversationService!.handleNewChat(args, enrichedCtx);
 				else if (name === 'title') await this.conversationService!.handleTitle(args, enrichedCtx);
 				else await this.conversationService!.handleNotes(args, enrichedCtx);
 			});
@@ -827,7 +840,14 @@ export class Router {
 
 		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
 		// entries if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set(['/ask', '/edit', '/notes', '/newchat', '/reset', '/title']);
+		const BUILTIN_COMMAND_NAMES = new Set([
+			'/ask',
+			'/edit',
+			'/notes',
+			'/newchat',
+			'/reset',
+			'/title',
+		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {
@@ -1391,8 +1411,11 @@ export class Router {
 
 		if (result.intent !== 'new_session') return false;
 
-		const isHighConfidence = result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
-		const isGreyZone = result.confidence >= this.confidenceThreshold && result.confidence < this.verificationUpperBound;
+		const isHighConfidence =
+			result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
+		const isGreyZone =
+			result.confidence >= this.confidenceThreshold &&
+			result.confidence < this.verificationUpperBound;
 
 		if (isHighConfidence) {
 			// Start new session immediately — handleNewChat confirms internally (Fix 5a)
@@ -1420,7 +1443,10 @@ export class Router {
 					],
 				);
 			} catch (err) {
-				this.logger.warn({ err }, 'session-control: sendWithButtons failed, falling back to normal routing');
+				this.logger.warn(
+					{ err },
+					'session-control: sendWithButtons failed, falling back to normal routing',
+				);
 				this.pendingSessionControl.remove(ctx.userId);
 				return false;
 			}

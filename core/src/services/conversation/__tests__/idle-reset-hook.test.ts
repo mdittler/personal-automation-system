@@ -3,7 +3,7 @@ import { runIdleResetHook } from '../idle-reset-hook.js';
 import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 import { pendingEdits } from '../pending-edits.js';
 
-const baseCtx = { userId: 'u1', chatId: 'c1' } as any;
+const baseCtx = { userId: 'u1' };
 
 function makeDeps(opts: {
 	idleMinutes?: number | null;
@@ -46,7 +46,8 @@ describe('runIdleResetHook', () => {
 			expect(deps.chatSessions.endActive).not.toHaveBeenCalled();
 		});
 		it('status="none" when idleMinutes is undefined', async () => {
-			const deps = makeDeps({ idleMinutes: undefined as any });
+			const deps = makeDeps({});
+			// idleMinutes defaults to null in makeDeps — either null or undefined → 'none'
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 		});
 		it('status="none" when no active session', async () => {
@@ -75,11 +76,19 @@ describe('runIdleResetHook', () => {
 		it('status="reset", returns endedSessionId + parentTitle, ends session, notifies user', async () => {
 			const deps = makeDeps({
 				idleMinutes: 120,
-				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: 'shopping list' },
+				activeSession: {
+					id: 's1',
+					last_activity_at: '2026-05-01T12:00:00Z',
+					title: 'shopping list',
+				},
 				now: new Date('2026-05-01T14:00:01Z'), // 120 min + 1ms = idle
 			});
 			const result = await runIdleResetHook(baseCtx, deps);
-			expect(result).toEqual({ status: 'reset', endedSessionId: 's1', parentTitle: 'shopping list' });
+			expect(result).toEqual({
+				status: 'reset',
+				endedSessionId: 's1',
+				parentTitle: 'shopping list',
+			});
 			expect(deps.chatSessions.endActive).toHaveBeenCalledWith(
 				expect.objectContaining({ userId: 'u1' }),
 				'idle',
@@ -107,6 +116,8 @@ describe('runIdleResetHook', () => {
 			[120, '2026-05-01T02:00:01Z', '2 hours'],
 			[150, '2026-05-01T02:30:01Z', '2 hours 30 minutes'],
 			[1440, '2026-05-02T00:00:01Z', '1 day'],
+			[1470, '2026-05-02T00:30:01Z', '1 day 30 minutes'],
+			[1500, '2026-05-02T01:00:01Z', '1 day 1 hour'],
 			[2880, '2026-05-03T00:00:01Z', '2 days'],
 		])('%d minutes → "%s"', async (idleMinutes, nowIso, expected) => {
 			const deps = makeDeps({ idleMinutes, activeSession: ACTIVE, now: new Date(nowIso) });
@@ -147,32 +158,52 @@ describe('runIdleResetHook', () => {
 
 	describe('fail-open coverage (every boundary)', () => {
 		it('peekActive throw → status="none", warn logged, no endActive call', async () => {
-			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			const deps = makeDeps({
+				idleMinutes: 60,
+				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
+				now: new Date('2026-05-01T13:01:00Z'),
+			});
 			(deps.chatSessions.peekActive as any).mockRejectedValueOnce(new Error('peek fail'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.logger.warn).toHaveBeenCalled();
 			expect(deps.chatSessions.endActive).not.toHaveBeenCalled();
 		});
 		it('readSession throw → status="none", warn logged', async () => {
-			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			const deps = makeDeps({
+				idleMinutes: 60,
+				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
+				now: new Date('2026-05-01T13:01:00Z'),
+			});
 			(deps.chatSessions.readSession as any).mockRejectedValueOnce(new Error('read fail'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.logger.warn).toHaveBeenCalled();
 		});
 		it('endActive throw → status="none", warn logged, NO telegram.send', async () => {
-			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			const deps = makeDeps({
+				idleMinutes: 60,
+				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
+				now: new Date('2026-05-01T13:01:00Z'),
+			});
 			(deps.chatSessions.endActive as any).mockRejectedValueOnce(new Error('disk full'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');
 			expect(deps.telegram.send).not.toHaveBeenCalled();
 			expect(deps.logger.warn).toHaveBeenCalled();
 		});
 		it('telegram.send throw → status stays "reset" (session already ended)', async () => {
-			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			const deps = makeDeps({
+				idleMinutes: 60,
+				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
+				now: new Date('2026-05-01T13:01:00Z'),
+			});
 			(deps.telegram.send as any).mockRejectedValueOnce(new Error('telegram down'));
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('reset');
 		});
 		it('endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send', async () => {
-			const deps = makeDeps({ idleMinutes: 60, activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null }, now: new Date('2026-05-01T13:01:00Z') });
+			const deps = makeDeps({
+				idleMinutes: 60,
+				activeSession: { id: 's1', last_activity_at: '2026-05-01T12:00:00Z', title: null },
+				now: new Date('2026-05-01T13:01:00Z'),
+			});
 			// Simulate concurrent race: another handler cleared the active session first
 			(deps.chatSessions.endActive as any).mockResolvedValueOnce({ endedSessionId: null });
 			expect((await runIdleResetHook(baseCtx, deps)).status).toBe('none');

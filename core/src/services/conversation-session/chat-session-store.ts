@@ -1,11 +1,14 @@
 import type { Logger } from 'pino';
 import type { DataStoreService } from '../../types/data-store.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
-import { parseMemorySnapshotFrontmatter, toMemorySnapshotFrontmatter } from '../prompt-assembly/memory-context.js';
+import {
+	parseMemorySnapshotFrontmatter,
+	toMemorySnapshotFrontmatter,
+} from '../prompt-assembly/memory-context.js';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { CorruptTranscriptError } from './errors.js';
 import { mintSessionId } from './session-id.js';
-import { getActive, setActiveUnlocked, clearActive } from './session-index.js';
+import { getActive, setActiveUnlocked, clearActive, clearActiveUnlocked } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
 import { encodeNew, encodeAppend, decode } from './transcript-codec.js';
 import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
@@ -24,7 +27,12 @@ export interface ChatSessionFrontmatter {
 	ended_at: string | null;
 	token_counts: { input: number; output: number };
 	/** Durable MemorySnapshot frozen at session-mint time (P4). Snake_case on disk. */
-	memory_snapshot?: { content: string; status: 'ok' | 'empty' | 'degraded'; built_at: string; entry_count: number };
+	memory_snapshot?: {
+		content: string;
+		status: 'ok' | 'empty' | 'degraded';
+		built_at: string;
+		entry_count: number;
+	};
 }
 
 export interface SessionTurn {
@@ -83,9 +91,16 @@ export interface ChatSessionStore {
 		opts?: { maxTurns?: number },
 	): Promise<SessionTurn[]>;
 
-	/** Sets ended_at on the active transcript and clears the index entry. Idempotent. */
+	/**
+	 * Sets ended_at on the active transcript and clears the index entry.
+	 *
+	 * When `expectedSessionId` is provided, the clear is compare-and-swap: if the
+	 * currently-active session id does not match, no changes are made and
+	 * `endedSessionId` is returned as `null`. This prevents the idle-reset hook from
+	 * accidentally ending a fresh session that was minted after the hook peeked.
+	 */
 	endActive(
-		ctx: { userId: string; sessionKey: string },
+		ctx: { userId: string; sessionKey: string; expectedSessionId?: string },
 		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }>;
 
@@ -120,7 +135,7 @@ const TITLE_MAX_LEN = 80;
 function sanitizeTitle(input: string): string | null {
 	const cleaned = input
 		.replace(/[\r\n\t]+/g, ' ')
-		.replace(/[\x00-\x1F\x7F]/g, '')
+		.replace(/[\u0000-\u001F\u007F]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 	if (cleaned.length === 0) return null;
@@ -146,7 +161,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		return mintSessionId(now, this.deps.rng);
 	}
 
-	async peekActive({ userId, sessionKey }: { userId: string; sessionKey: string }): Promise<string | undefined> {
+	async peekActive({
+		userId,
+		sessionKey,
+	}: { userId: string; sessionKey: string }): Promise<string | undefined> {
 		const store = this.deps.data.forUser(userId);
 		const entry = await getActive(store, userId, sessionKey);
 		return entry?.id;
@@ -188,7 +206,12 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						{ err },
 						'conversation-session: buildSnapshot failed — minting with degraded snapshot',
 					);
-					snapshot = { content: '', status: 'degraded', builtAt: this.now().toISOString(), entryCount: 0 };
+					snapshot = {
+						content: '',
+						status: 'degraded',
+						builtAt: this.now().toISOString(),
+						entryCount: 0,
+					};
 					memorySnapshotFm = toMemorySnapshotFrontmatter(snapshot);
 				}
 			}
@@ -198,7 +221,9 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		});
 	}
 
-	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<MemorySnapshot | undefined> {
+	async peekSnapshot(ctx: { userId: string; sessionKey: string }): Promise<
+		MemorySnapshot | undefined
+	> {
 		const store = this.deps.data.forUser(ctx.userId);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
 		if (!entry) return undefined;
@@ -232,7 +257,9 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			// Target the exact session — throw if the file was never written.
 			const raw = await store.read(`conversation/sessions/${ctx.expectedSessionId}.md`);
 			if (raw === '') {
-				throw new Error(`conversation-session: expected session ${ctx.expectedSessionId} not found`);
+				throw new Error(
+					`conversation-session: expected session ${ctx.expectedSessionId} not found`,
+				);
 			}
 			sessionId = ctx.expectedSessionId;
 		} else {
@@ -252,7 +279,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			let next: string;
 			if (raw === '') {
 				// Brand-new file: build from scratch (no existing turns, no bump needed).
-				next = encodeAppend(encodeAppend(encodeNew(this.buildFrontmatter(ctx, sessionId)), userTurn), assistantTurn);
+				next = encodeAppend(
+					encodeAppend(encodeNew(this.buildFrontmatter(ctx, sessionId)), userTurn),
+					assistantTurn,
+				);
 			} else {
 				// Existing file: decode so we can bump last_activity_at and capture userTurnIndex.
 				try {
@@ -296,7 +326,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 					}),
 				]);
 			} catch (err) {
-				this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: appendMessage failed; continuing');
+				this.deps.logger.warn(
+					{ err, sessionId },
+					'chat-transcript-index: appendMessage failed; continuing',
+				);
 			}
 		}
 
@@ -341,15 +374,24 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 							title: null,
 						});
 					} catch (err) {
-						this.deps.logger.warn({ err, sessionId: id }, 'chat-transcript-index: upsertSession failed; continuing');
+						this.deps.logger.warn(
+							{ err, sessionId: id },
+							'chat-transcript-index: upsertSession failed; continuing',
+						);
 					}
 				}
-				await setActiveUnlocked(store, ctx.sessionKey, { id, started_at: startedAt, model: ctx.model ?? null });
+				await setActiveUnlocked(store, ctx.sessionKey, {
+					id,
+					started_at: startedAt,
+					model: ctx.model ?? null,
+				});
 				return id;
 			}
 			this.deps.logger.warn({ id, attempt }, 'conversation-session: id collision, retrying');
 		}
-		throw new Error(`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`);
+		throw new Error(
+			`conversation-session: unable to mint a unique session id after ${MAX_MINT_ATTEMPTS} attempts`,
+		);
 	}
 
 	private buildFrontmatter(
@@ -393,17 +435,43 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	}
 
 	async endActive(
-		ctx: { userId: string; sessionKey: string },
+		ctx: { userId: string; sessionKey: string; expectedSessionId?: string },
 		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }> {
 		const store = this.deps.data.forUser(ctx.userId);
-		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
+
+		// Hold index lock across getActive + CAS verify + clearActiveUnlocked to prevent
+		// closing a fresh session minted after the caller's peekActive snapshot.
+		let entry: ActiveSessionEntry | undefined;
+		let mismatch = false;
+		await withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
+			const found = await getActive(store, ctx.userId, ctx.sessionKey);
+			if (!found) return;
+			entry = found;
+			if (ctx.expectedSessionId !== undefined && found.id !== ctx.expectedSessionId) {
+				mismatch = true;
+				return;
+			}
+			await clearActiveUnlocked(store, ctx.sessionKey);
+		});
+
 		if (!entry) return { endedSessionId: null };
-		this.deps.logger.debug({ sessionId: entry.id, reason }, 'conversation-session: ending active session');
+		if (mismatch) {
+			this.deps.logger.warn(
+				{ userId: ctx.userId, expectedSessionId: ctx.expectedSessionId, actualId: entry.id },
+				'conversation-session: endActive CAS mismatch — active session changed; aborting',
+			);
+			return { endedSessionId: null };
+		}
+
+		this.deps.logger.debug(
+			{ sessionId: entry.id, reason },
+			'conversation-session: ending active session',
+		);
 
 		let endedAt: string | null = null;
 		await withFileLock(`conversation-session-transcript:${ctx.userId}:${entry.id}`, async () => {
-			const path = `conversation/sessions/${entry.id}.md`;
+			const path = `conversation/sessions/${entry!.id}.md`;
 			const raw = await store.read(path);
 			if (raw === '') return;
 			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
@@ -411,7 +479,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				decoded = decode(raw);
 			} catch (err) {
 				if (err instanceof CorruptTranscriptError) {
-					this.deps.logger.warn({ sessionId: entry.id, err }, 'conversation-session: corrupt transcript on endActive');
+					this.deps.logger.warn(
+						{ sessionId: entry!.id, err },
+						'conversation-session: corrupt transcript on endActive',
+					);
 					return;
 				}
 				throw err;
@@ -423,15 +494,16 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			await store.write(path, next);
 		});
 
-		await clearActive(store, ctx.userId, ctx.sessionKey);
-
 		if (this.deps.index && endedAt !== null) {
 			const endedSessionId = entry.id;
 			const endedAtStr = endedAt;
 			try {
 				await this.deps.index.endSession(endedSessionId, endedAtStr);
 			} catch (err) {
-				this.deps.logger.warn({ err, endedSessionId }, 'chat-transcript-index: endSession failed; continuing');
+				this.deps.logger.warn(
+					{ err, endedSessionId },
+					'chat-transcript-index: endSession failed; continuing',
+				);
 			}
 		}
 
@@ -455,7 +527,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 			const path = `conversation/sessions/${sessionId}.md`;
 			const raw = await store.read(path);
 			if (raw === '') {
-				this.deps.logger.warn({ sessionId }, 'conversation-session: setTitle on missing session file');
+				this.deps.logger.warn(
+					{ sessionId },
+					'conversation-session: setTitle on missing session file',
+				);
 				return;
 			}
 			let decoded: { meta: ChatSessionFrontmatter; turns: SessionTurn[] };
@@ -546,7 +621,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 				legacyTurns = parsed as typeof legacyTurns;
 			} catch {
-				this.deps.logger.warn({ userId }, 'conversation-session: legacy history.json malformed JSON, skipping migration');
+				this.deps.logger.warn(
+					{ userId },
+					'conversation-session: legacy history.json malformed JSON, skipping migration',
+				);
 				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
@@ -575,7 +653,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 				}
 			}
 			if (!sessionId) {
-				this.deps.logger.warn({ userId }, 'conversation-session: could not mint unique id for legacy migration');
+				this.deps.logger.warn(
+					{ userId },
+					'conversation-session: could not mint unique id for legacy migration',
+				);
 				await store.write(sentinelPath, this.now().toISOString());
 				return;
 			}
@@ -632,7 +713,10 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 						});
 					}
 				} catch (err) {
-					this.deps.logger.warn({ err, sessionId }, 'chat-transcript-index: upsertSession (legacy) failed; continuing');
+					this.deps.logger.warn(
+						{ err, sessionId },
+						'chat-transcript-index: upsertSession (legacy) failed; continuing',
+					);
 				}
 			}
 

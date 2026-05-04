@@ -252,6 +252,46 @@ describe('Router idle-reset hook wiring', () => {
 	});
 
 	describe('Test 2 — Hook fires before photo classification', () => {
+		it('peekActive called even when no photo apps are installed', async () => {
+			const { deps, peekActiveSpy } = makeSpyIdleResetDeps();
+
+			// Build registry with no photo-accepting apps
+			const textOnlyManifest: AppManifest = {
+				app: {
+					id: 'text-only',
+					name: 'Text Only',
+					version: '1.0.0',
+					description: 'No photos',
+					author: 'Test',
+				},
+				capabilities: { messages: { intents: ['text-only'] } },
+			};
+			const noPhotoCache = new ManifestCache();
+			noPhotoCache.add(textOnlyManifest, '/apps/text-only');
+			const noPhotoRegistry = {
+				getApp: () => undefined,
+				getManifestCache: () => noPhotoCache,
+				getAll: () => [],
+				getLoadedAppIds: () => [],
+			} as unknown as AppRegistry;
+
+			const router = new Router({
+				registry: noPhotoRegistry,
+				llm: createMockLLM(),
+				telegram: createMockTelegram(),
+				fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
+				config: createConfig(),
+				logger: createMockLogger(),
+				idleResetDeps: deps,
+			});
+			router.buildRoutingTables();
+
+			await router.routePhoto(photo());
+
+			// Hook must fire even though no photo apps exist (session lifecycle before app availability)
+			expect(peekActiveSpy).toHaveBeenCalledOnce();
+		});
+
 		it('peekActive called before handlePhoto is invoked', async () => {
 			const { deps, peekActiveSpy } = makeSpyIdleResetDeps();
 			// Make LLM classify return a high-confidence photo match so handlePhoto is called
@@ -373,7 +413,11 @@ describe('Router idle-reset hook wiring', () => {
 
 	describe('Test 6 — Command path: idleResetState set on enrichedCtx passed to handleCommand', () => {
 		it('for /ask command, enrichedCtx.idleResetState is set when hook returns reset', async () => {
-			const resetState: IdleResetState = { status: 'reset', endedSessionId: 's2', parentTitle: null };
+			const resetState: IdleResetState = {
+				status: 'reset',
+				endedSessionId: 's2',
+				parentTitle: null,
+			};
 			const deps = makeIdleResetDeps(resetState, 1);
 
 			let capturedCtx: MessageContext | undefined;
@@ -495,7 +539,14 @@ describe('Router idle-reset hook wiring', () => {
 			});
 			router.buildRoutingTables();
 
-			return { router, telegram, conv, sessionControlClassifier, pendingSessionControl, idleResetDeps };
+			return {
+				router,
+				telegram,
+				conv,
+				sessionControlClassifier,
+				pendingSessionControl,
+				idleResetDeps,
+			};
 		}
 
 		it('idle reset + reset-intent message → NL hook does NOT double-message (silent consume)', async () => {
@@ -515,7 +566,9 @@ describe('Router idle-reset hook wiring', () => {
 			// The router's main telegram.send must have zero "Starting" / "new chat" calls —
 			// the NL hook must not have sent a second notice.
 			const routerSendMock = telegram.send as ReturnType<typeof vi.fn>;
-			const routerSentTexts: string[] = routerSendMock.mock.calls.map((c: unknown[]) => c[1] as string);
+			const routerSentTexts: string[] = routerSendMock.mock.calls.map(
+				(c: unknown[]) => c[1] as string,
+			);
 			const newChatNotices = routerSentTexts.filter(
 				(t) => t.toLowerCase().includes('starting') || t.toLowerCase().includes('new chat'),
 			);

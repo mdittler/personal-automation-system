@@ -1,5 +1,9 @@
 import type { Logger } from 'pino';
-import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
+import type {
+	ChatSessionStore,
+	ChatSessionFrontmatter,
+	SessionTurn,
+} from '../conversation-session/chat-session-store.js';
 import type { PendingSessionControlStore } from './pending-session-control-store.js';
 import { isIdle, getLastActivityIso } from '../conversation-session/idle-detector.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
@@ -35,11 +39,14 @@ export async function runIdleResetHook(
 	}
 	if (!activeId) return { status: 'none' };
 
-	let session: { meta: any; turns: any[] } | undefined;
+	let session: { meta: ChatSessionFrontmatter; turns: SessionTurn[] } | undefined;
 	try {
 		session = await deps.chatSessions.readSession(userId, activeId);
 	} catch (err) {
-		deps.logger.warn({ err, userId, sessionId: activeId }, 'idle-reset-hook: readSession failed; continuing as no-op');
+		deps.logger.warn(
+			{ err, userId, sessionId: activeId },
+			'idle-reset-hook: readSession failed; continuing as no-op',
+		);
 		return { status: 'none' };
 	}
 	if (!session) return { status: 'none' };
@@ -53,14 +60,23 @@ export async function runIdleResetHook(
 
 	let resolvedSessionId: string | null;
 	try {
-		const result = await deps.chatSessions.endActive({ userId, sessionKey }, 'idle');
+		const result = await deps.chatSessions.endActive(
+			{ userId, sessionKey, expectedSessionId: activeId },
+			'idle',
+		);
 		resolvedSessionId = result.endedSessionId;
 	} catch (err) {
-		deps.logger.warn({ err, userId, sessionId: activeId }, 'idle-reset-hook: endActive failed; aborting reset');
+		deps.logger.warn(
+			{ err, userId, sessionId: activeId },
+			'idle-reset-hook: endActive failed; aborting reset',
+		);
 		return { status: 'none' };
 	}
 	if (resolvedSessionId === null) {
-		deps.logger.warn({ userId, sessionId: activeId }, 'idle-reset-hook: endActive returned null (concurrent race); aborting reset');
+		deps.logger.warn(
+			{ userId, sessionId: activeId },
+			'idle-reset-hook: endActive returned null (concurrent race); aborting reset',
+		);
 		return { status: 'none' };
 	}
 
@@ -83,19 +99,12 @@ export async function runIdleResetHook(
 
 function formatDuration(minutes: number): string {
 	if (minutes < 60) return minutes === 1 ? '1 minute' : `${minutes} minutes`;
-	const hours = minutes / 60;
-	if (Number.isInteger(hours)) {
-		if (hours < 24) return hours === 1 ? '1 hour' : `${hours} hours`;
-		const days = hours / 24;
-		if (Number.isInteger(days)) return days === 1 ? '1 day' : `${days} days`;
-	}
-	// Non-integer hours: express as "X hours Y minutes"
-	const h = Math.floor(hours);
+	const d = Math.floor(minutes / 1440);
+	const h = Math.floor((minutes % 1440) / 60);
 	const m = minutes % 60;
-	if (h < 24) {
-		const hourPart = h === 1 ? '1 hour' : `${h} hours`;
-		const minPart = m === 1 ? '1 minute' : `${m} minutes`;
-		return `${hourPart} ${minPart}`;
-	}
-	return `${Math.round(hours)} hours`;
+	const parts: string[] = [];
+	if (d > 0) parts.push(d === 1 ? '1 day' : `${d} days`);
+	if (h > 0) parts.push(h === 1 ? '1 hour' : `${h} hours`);
+	if (m > 0) parts.push(m === 1 ? '1 minute' : `${m} minutes`);
+	return parts.join(' ');
 }
