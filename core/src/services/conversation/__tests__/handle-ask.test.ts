@@ -907,4 +907,32 @@ describe('handleAsk — P8c lineage forwarding', () => {
 			expect.anything(),
 		);
 	});
+
+	// B.P2 — fail-open: when ensureActiveSession rejects, appendExchange still gets parentSessionId
+	it('forwards parentSessionId to appendExchange when ensureActiveSession fails (Codex P2)', async () => {
+		const { services, chatSessions } = makeDeps();
+		vi.mocked(chatSessions.ensureActiveSession).mockRejectedValue(new Error('lock contention'));
+		const ctx = createTestMessageContext({
+			text: '/ask continue',
+			idleResetState: {
+				status: 'reset',
+				endedSessionId: '20260504_090000_aaaaaaaa',
+				parentTitle: 'old session',
+				summaryStatus: 'written',
+			},
+		});
+		await handleAsk(['continue'], ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+		});
+		expect(chatSessions.appendExchange).toHaveBeenCalledWith(
+			expect.objectContaining({ parentSessionId: '20260504_090000_aaaaaaaa' }),
+			expect.anything(),
+			expect.anything(),
+		);
+	});
 });
