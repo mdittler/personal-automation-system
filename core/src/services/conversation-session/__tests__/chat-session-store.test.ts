@@ -752,3 +752,22 @@ describe('ChatSessionStore.peekSnapshot', () => {
 		expect(result).toEqual(snapshot);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// A1 — endActive accepts 'idle' reason
+// ---------------------------------------------------------------------------
+
+describe('endActive reason: idle', () => {
+	it('endActive accepts reason: idle and writes ended_at', async () => {
+		const store = makeStore();
+		await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const activeId = await store.peekActive(ctx);
+		expect(activeId).not.toBeNull();
+
+		const { endedSessionId } = await store.endActive(ctx, 'idle');
+		expect(endedSessionId).toBe(activeId);
+
+		const decoded = await store.readSession(USER, endedSessionId!);
+		expect(decoded?.meta.ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+});

@@ -84,7 +84,7 @@ export interface ChatSessionStore {
 	/** Sets ended_at on the active transcript and clears the index entry. Idempotent. */
 	endActive(
 		ctx: { userId: string; sessionKey: string },
-		reason: 'newchat' | 'reset' | 'system',
+		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }>;
 
 	/** Read any session by id. Validates id format. Returns undefined if missing. */
@@ -379,7 +379,7 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 
 	async endActive(
 		ctx: { userId: string; sessionKey: string },
-		reason: 'newchat' | 'reset' | 'system',
+		reason: 'newchat' | 'reset' | 'system' | 'idle',
 	): Promise<{ endedSessionId: string | null }> {
 		const store = this.deps.data.forUser(ctx.userId);
 		const entry = await getActive(store, ctx.userId, ctx.sessionKey);
