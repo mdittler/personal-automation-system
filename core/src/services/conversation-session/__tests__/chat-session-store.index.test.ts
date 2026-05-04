@@ -270,6 +270,22 @@ describe('Chunk D — live indexer hook: legacy migration', () => {
 		expect(meta!.ended_at).not.toBeNull();
 	});
 
+	it('P8c — legacy-import upsert payload includes parent_session_id: null', async () => {
+		await plantHistoryJson(tempDir, JSON.stringify(LEGACY_TURNS));
+
+		const store = makeStore();
+		await store.loadRecentTurns(ctx);
+
+		const ds = makeDataStore(tempDir);
+		const sessions = await ds.forUser(USER).list('conversation/sessions/');
+		expect(sessions).toHaveLength(1);
+		const sessionId = sessions[0]!.replace('.md', '');
+
+		const meta = await index.getSessionMeta(sessionId);
+		expect(meta).toBeDefined();
+		expect(meta!.parent_session_id).toBeNull();
+	});
+
 	it('legacy migration index failure does not break the migration itself', async () => {
 		await plantHistoryJson(tempDir, JSON.stringify(LEGACY_TURNS));
 
