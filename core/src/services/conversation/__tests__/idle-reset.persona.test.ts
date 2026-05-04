@@ -11,6 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { runIdleResetHook } from '../idle-reset-hook.js';
+import { RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 import { pendingEdits } from '../pending-edits.js';
 import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 
@@ -46,8 +47,10 @@ function makeDeps(opts: {
 	title?: string | null;
 	now?: Date;
 	pendingSessionControl?: ReturnType<typeof createPendingSessionControlStore>;
+	turns?: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
 }) {
 	const session = makeSession(opts.lastActivity, opts.title ?? null);
+	if (opts.turns) session.turns = opts.turns;
 	return {
 		idleMinutes: opts.idleMinutes,
 		now: () => opts.now ?? BASE_NOW,
@@ -221,4 +224,142 @@ describe('Idle-reset persona scenarios', () => {
 			},
 		);
 	});
+
+	// ── P8b persona scenarios (hook-level) ───────────────────────────────────
+
+	describe('S2 — Summarizer fails: idle reset still completes, user notified', () => {
+		it('summaryStatus="failed" when summarizer throws — user is still notified', async () => {
+			const turns = [
+				{ role: 'user' as const, content: 'hello', timestamp: '2026-05-04T12:00:00.000Z' },
+				{ role: 'assistant' as const, content: 'hi', timestamp: '2026-05-04T12:00:01.000Z' },
+			];
+			const deps = {
+				...makeDeps({
+					idleMinutes: 60,
+					lastActivity: '2026-05-04T12:00:00.000Z',
+					now: BASE_NOW,
+					turns,
+				}),
+				summarizer: vi.fn().mockRejectedValue(new Error('LLM unavailable')),
+				flushSave: vi.fn().mockResolvedValue(undefined),
+				getFlushEnabled: vi.fn().mockResolvedValue(true),
+			};
+
+			const result = await runIdleResetHook(BASE_CTX, deps);
+
+			expect(result.status).toBe('reset');
+			expect(result.summaryStatus).toBe('failed');
+			expect(deps.telegram.send).toHaveBeenCalledWith(
+				'u1',
+				expect.stringContaining('inactivity'),
+			);
+			expect(deps.flushSave).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('S3 — Flush disabled: toggle off suppresses summarizer', () => {
+		it('summaryStatus="disabled" when getFlushEnabled returns false, summarizer never called', async () => {
+			const turns = [
+				{ role: 'user' as const, content: 'hello', timestamp: '2026-05-04T12:00:00.000Z' },
+				{ role: 'assistant' as const, content: 'hi', timestamp: '2026-05-04T12:00:01.000Z' },
+			];
+			const summarizer = vi.fn().mockResolvedValue('summary');
+			const deps = {
+				...makeDeps({
+					idleMinutes: 60,
+					lastActivity: '2026-05-04T12:00:00.000Z',
+					now: BASE_NOW,
+					turns,
+				}),
+				summarizer,
+				flushSave: vi.fn().mockResolvedValue(undefined),
+				getFlushEnabled: vi.fn().mockResolvedValue(false),
+			};
+
+			const result = await runIdleResetHook(BASE_CTX, deps);
+
+			expect(result.status).toBe('reset');
+			expect(result.summaryStatus).toBe('disabled');
+			expect(summarizer).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('S6 — Empty session: summarizer skipped for sessions with < 2 turns', () => {
+		it('summaryStatus="skipped" when session has 1 turn', async () => {
+			const turns = [
+				{ role: 'user' as const, content: 'hello', timestamp: '2026-05-04T12:00:00.000Z' },
+			];
+			const summarizer = vi.fn().mockResolvedValue('summary');
+			const deps = {
+				...makeDeps({
+					idleMinutes: 60,
+					lastActivity: '2026-05-04T12:00:00.000Z',
+					now: BASE_NOW,
+					turns,
+				}),
+				summarizer,
+				flushSave: vi.fn().mockResolvedValue(undefined),
+				getFlushEnabled: vi.fn().mockResolvedValue(true),
+			};
+
+			const result = await runIdleResetHook(BASE_CTX, deps);
+
+			expect(result.status).toBe('reset');
+			expect(result.summaryStatus).toBe('skipped');
+			expect(summarizer).not.toHaveBeenCalled();
+		});
+
+		it('summaryStatus="skipped" when session has 0 turns', async () => {
+			const summarizer = vi.fn().mockResolvedValue('summary');
+			const deps = {
+				...makeDeps({
+					idleMinutes: 60,
+					lastActivity: '2026-05-04T12:00:00.000Z',
+					now: BASE_NOW,
+					turns: [],
+				}),
+				summarizer,
+				flushSave: vi.fn().mockResolvedValue(undefined),
+				getFlushEnabled: vi.fn().mockResolvedValue(true),
+			};
+
+			const result = await runIdleResetHook(BASE_CTX, deps);
+
+			expect(result.status).toBe('reset');
+			expect(result.summaryStatus).toBe('skipped');
+			expect(summarizer).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('S7 — Rolling key: second idle reset overwrites first (hook-level)', () => {
+		it('flushSave is called on each reset — overwrite is enforced by key strategy', async () => {
+			const turns = [
+				{ role: 'user' as const, content: 'hi', timestamp: '2026-05-04T12:00:00.000Z' },
+				{ role: 'assistant' as const, content: 'hey', timestamp: '2026-05-04T12:00:01.000Z' },
+			];
+			const flushSave = vi.fn().mockResolvedValue(undefined);
+
+			for (const summaryText of ['First summary.', 'Second summary.']) {
+				const deps = {
+					...makeDeps({
+						idleMinutes: 60,
+						lastActivity: '2026-05-04T12:00:00.000Z',
+						now: BASE_NOW,
+						turns,
+					}),
+					summarizer: vi.fn().mockResolvedValue(summaryText),
+					flushSave,
+					getFlushEnabled: vi.fn().mockResolvedValue(true),
+				};
+				await runIdleResetHook(BASE_CTX, deps);
+			}
+
+			// Both calls use the same key
+			expect(flushSave).toHaveBeenCalledTimes(2);
+			expect(flushSave).toHaveBeenNthCalledWith(1, 'u1', RECENT_SESSION_SUMMARY_KEY, 'First summary.');
+			expect(flushSave).toHaveBeenNthCalledWith(2, 'u1', RECENT_SESSION_SUMMARY_KEY, 'Second summary.');
+		});
+	});
+
+	it.todo('S8 — group-chat session keys (deferred to P3 group-chat work)');
 });

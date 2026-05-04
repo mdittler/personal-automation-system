@@ -7,6 +7,8 @@ export interface IdleResetState {
 	endedSessionId?: string;
 	/** Reserved for P8b successor-session lineage. Not consumed in production yet. */
 	parentTitle?: string | null;
+	/** P8b: outcome of the memory-flush sub-step. Absent on 'protected'/'none'. */
+	summaryStatus?: 'written' | 'skipped' | 'failed' | 'disabled' | 'timeout';
 }
 
 /** A frozen snapshot of durable ContextStore entries, built at session-mint time. */

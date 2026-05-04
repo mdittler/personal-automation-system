@@ -956,4 +956,51 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
 	});
+
+	it('pinnedKeys: recent-session-summary appears first even when alphabetically-earlier keys fill the budget', async () => {
+		// 5 entries keyed 'aaa-1'..'aaa-5' each ~1000 chars, plus one 'recent-session-summary' ~200 chars
+		// Without pinning, 'recent-session-summary' (sorts under 'r') would be evicted
+		const bigContent = 'x'.repeat(900);
+		const entries = [
+			makeEntry('aaa-1', bigContent),
+			makeEntry('aaa-2', bigContent),
+			makeEntry('aaa-3', bigContent),
+			makeEntry('aaa-4', bigContent),
+			makeEntry('aaa-5', bigContent),
+			makeEntry('recent-session-summary', 'Alice prefers tea over coffee.'),
+		];
+		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		expect(result.content).toContain('## recent-session-summary');
+		expect(result.status).toBe('ok');
+	});
+
+	it('pinnedKeys: pinned entries appear before alphabetical entries', async () => {
+		const entries = [
+			makeEntry('aaa', 'aaa content'),
+			makeEntry('bbb', 'bbb content'),
+			makeEntry('recent-session-summary', 'summary content'),
+		];
+		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		const idxRecent = result.content.indexOf('## recent-session-summary');
+		const idxAaa = result.content.indexOf('## aaa');
+		expect(idxRecent).toBeLessThan(idxAaa);
+	});
+
+	it('pinnedKeys: falls back to alphabetical-only when no pinned key is present in user data', async () => {
+		const entries = [
+			makeEntry('bbb', 'bbb content'),
+			makeEntry('aaa', 'aaa content'),
+		];
+		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const service = new ConversationRetrievalServiceImpl({ contextStore });
+		const result = await withUserId('u1', () => service.buildMemorySnapshot());
+		const idxAaa = result.content.indexOf('## aaa');
+		const idxBbb = result.content.indexOf('## bbb');
+		expect(idxAaa).toBeLessThan(idxBbb);
+		expect(result.content).not.toContain('## recent-session-summary');
+	});
 });

@@ -42,7 +42,7 @@ import { ConditionEvaluatorServiceImpl } from './services/condition-evaluator/in
 import { AppConfigServiceImpl } from './services/config/app-config-service.js';
 import { DEFAULT_LLM_SAFEGUARDS } from './services/config/defaults.js';
 import { loadSystemConfig } from './services/config/index.js';
-import { ContextStoreServiceImpl } from './services/context-store/index.js';
+import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from './services/context-store/index.js';
 import { requestContext } from './services/context/request-context.js';
 import { ConversationRetrievalServiceImpl } from './services/conversation-retrieval/index.js';
 import { composeChatSessionStore } from './services/conversation-session/compose.js';
@@ -54,6 +54,13 @@ import {
 	CONVERSATION_USER_CONFIG,
 	ConversationService,
 } from './services/conversation/index.js';
+import {
+	disableFlushAndCleanup as disableFlushHelper,
+	type MemoryFlushRemove,
+	type MemoryFlushSave,
+} from './services/conversation/memory-flush.js';
+import { summarizeSession } from './services/conversation/session-summarizer.js';
+import { resolveUserBool } from './services/conversation/settings-resolver.js';
 import { TitleService } from './services/conversation-titling/index.js';
 import { CredentialService } from './services/credentials/index.js';
 import { DailyDiffService } from './services/daily-diff/index.js';
@@ -1004,6 +1011,22 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: logger.child({ service: 'title-service' }),
 	});
 
+	// P8b: memory-flush wiring — closures capture CONTEXT_INTERNAL_BYPASS and conversationAppConfig
+	const flushSave: MemoryFlushSave = (uid, key, content) =>
+		contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+	const flushRemove: MemoryFlushRemove = (uid, key) =>
+		contextStore.remove(uid, key, CONTEXT_INTERNAL_BYPASS);
+	const flushLogger = createChildLogger(logger, { service: 'memory-flush' });
+	const onDisableFlush = (userId: string) =>
+		disableFlushHelper(userId, { flushRemove, logger: flushLogger });
+	const summarizerLogger = createChildLogger(logger, { service: 'session-summarizer' });
+	const sessionSummarizer = (
+		turns: Parameters<typeof summarizeSession>[0],
+		signal?: AbortSignal,
+	) => summarizeSession(turns, { llm: systemLlm, logger: summarizerLogger }, signal);
+	const getFlushEnabled = (userId: string) =>
+		resolveUserBool(conversationAppConfig, userId, 'flush_memory_on_idle_reset', false, flushLogger);
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1023,6 +1046,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		chatLogToNotesDefault: config.chat?.logToNotes ?? false,
 		conversationRetrieval: conversationRetrievalService,
 		titleService,
+		disableFlushAndCleanup: onDisableFlush,
 	});
 	logger.info('ConversationService: initialized');
 
@@ -1078,6 +1102,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			telegram: telegramService,
 			logger: createChildLogger(logger, { service: 'router-idle-reset' }),
 			pendingSessionControl,
+			summarizer: sessionSummarizer,
+			flushSave,
+			getFlushEnabled,
+			flushTimeoutMs: 8_000,
 		},
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
@@ -1363,6 +1391,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		costTracker,
 		messageRateTracker,
 		llmSafeguards: safeguardsConfig,
+		disableFlushAndCleanup: onDisableFlush,
 	});
 
 	// 13b. External Data API (optional)

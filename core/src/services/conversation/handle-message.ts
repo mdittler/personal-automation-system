@@ -42,6 +42,8 @@ import {
 import { getAutoDetectSetting } from './auto-detect.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
+	FLUSH_MEMORY_INSTRUCTION_BLOCK,
+	MEMORY_FLUSH_INTENT_REGEX,
 	NOTES_INTENT_REGEX,
 	SWITCH_MODEL_TAG_REGEX,
 	normalizeResponse,
@@ -80,6 +82,8 @@ export interface HandleMessageDeps {
 	conversationRetrieval?: ConversationRetrievalService;
 	/** TitleService — when present, auto-title fires after first exchange. */
 	titleService?: TitleService;
+	/** Called when flush_memory_on_idle_reset is turned OFF via <config-set> tag. */
+	disableFlushAndCleanup?: (userId: string) => Promise<void>;
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
@@ -185,6 +189,9 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
+	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(ctx.text)) {
+		systemPrompt = `${systemPrompt}\n\n${FLUSH_MEMORY_INSTRUCTION_BLOCK}`;
+	}
 
 	let response: string;
 	try {
@@ -229,6 +236,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				config: deps.config,
 				manifest: CONVERSATION_USER_CONFIG,
 				logger: deps.logger,
+				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			},
 		);
 		finalResponse =

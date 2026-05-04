@@ -4480,6 +4480,196 @@ When `enrichedCtx.idleResetState.status === 'reset'`, the NL `/newchat` hook MUS
 
 ---
 
+## Hermes P8b — Memory Flush on Idle Reset
+
+### REQ-CONV-FLUSH-001 — `IdleResetState.summaryStatus` MUST carry a `'written' | 'skipped' | 'failed' | 'disabled' | 'timeout'` literal union
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`IdleResetState` (in `types/conversation-session.ts`) MUST include an optional `summaryStatus` field typed as the five-value literal union. The field is absent when `status` is `'protected'` or `'none'`; it is present (and set to one of the five values) whenever `status === 'reset'`.
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > summaryStatus > IdleResetState type carries summaryStatus literal union (compile-time)
+
+---
+
+### REQ-CONV-FLUSH-002 — Per-user toggle `flush_memory_on_idle_reset` MUST be declared in `CONVERSATION_USER_CONFIG` with default `false`
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+The toggle MUST appear in `CONVERSATION_USER_CONFIG` (the virtual chatbot's user-config declaration) with `type: 'boolean'` and `default: false`. This makes it visible in the GUI app-config page and toggleable via the `<config-set>` LLM tag without requiring any change to `pas.yaml` or `apps/chatbot/manifest.yaml` (which does not exist — the chatbot is virtual).
+
+**Standard tests:**
+- `manifest-parity.test.ts` > user_config includes flush_memory_on_idle_reset entry
+- `manifest-parity.test.ts` > flush_memory_on_idle_reset has type=boolean and default=false
+
+---
+
+### REQ-CONV-FLUSH-003 — Summarizer MUST use fast tier, `maxTokens=400`, `temperature=0`, tail of 60 turns, transcript capped at 12,000 chars
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`summarizeSession` (in `session-summarizer.ts`) MUST call `llm.complete` with `tier: 'fast'`, `maxTokens: 400`, `temperature: 0`. It MUST take the last `TURNS_TAIL=60` turns and truncate the rendered transcript to `TRANSCRIPT_MAX_CHARS=12,000` characters. Fewer than 2 turns returns `null` without calling the LLM. The system prompt instructs the LLM to output `{"summary": "..."}` JSON (or `{"summary": null}` for nothing durable).
+
+**Standard tests:**
+- `session-summarizer.test.ts` > summarizeSession > returns a cleaned summary string on valid JSON response
+- `session-summarizer.test.ts` > summarizeSession > calls llm.complete with fast tier, temperature 0, maxTokens 400
+- `session-summarizer.test.ts` > summarizeSession > wraps transcript in \<conversation\> tags
+
+**Edge case tests:**
+- `session-summarizer.test.ts` > summarizeSession > returns null when fewer than 2 turns
+- `session-summarizer.test.ts` > summarizeSession > uses tail of TURNS_TAIL=60 turns when conversation is long
+- `session-summarizer.test.ts` > summarizeSession > truncates transcript to TRANSCRIPT_MAX_CHARS (12000) when very long
+- `session-summarizer.test.ts` > summarizeSession > returns null and warns when llm.complete throws
+- `session-summarizer.test.ts` > summarizeSession > returns null and warns on invalid JSON from LLM
+
+---
+
+### REQ-CONV-FLUSH-004 — Summarizer output and all ContextStore writes MUST be sanitized: strips `<>`, backticks, bidi/zero-width chars, control chars; caps at 1,500 chars
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`sanitizeSummaryOutput` (in `session-summarizer.ts`) strips angle brackets, backticks, bidi/zero-width characters (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF), ASCII control characters, collapses whitespace, and caps at 1,500 chars. `flushMemoryToContextStore` (in `memory-flush.ts`) re-runs `sanitizeSummaryOutput` as defense-in-depth on every write — any future caller that bypasses the summarizer is still safe.
+
+**Standard tests:**
+- `session-summarizer.test.ts` > sanitizeSummaryOutput > strips angle bracket characters
+- `session-summarizer.test.ts` > sanitizeSummaryOutput > strips backtick characters
+
+**Edge case tests:**
+- `session-summarizer.test.ts` > sanitizeSummaryOutput > strips bidi/zero-width chars: U+200B, U+200F, U+202A, U+202E, U+2066, U+2069, U+FEFF
+- `session-summarizer.test.ts` > sanitizeSummaryOutput > replaces control characters with spaces
+- `session-summarizer.test.ts` > sanitizeSummaryOutput > caps at 1500 characters
+- `memory-flush.test.ts` > flushMemoryToContextStore > defense-in-depth: re-runs sanitization — strips angle brackets and backticks
+- `memory-flush.test.ts` > flushMemoryToContextStore > defense-in-depth: re-runs sanitization — strips bidi/zero-width chars
+- `idle-reset-memory-flush.integration.test.ts` > S5 — hostile LLM output > XML fence tags in LLM summary are stripped by sanitizeSummaryOutput
+
+---
+
+### REQ-CONV-FLUSH-005 — ContextStore key MUST be `'recent-session-summary'` — a rolling key where the latest write overwrites the prior entry
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`RECENT_SESSION_SUMMARY_KEY = 'recent-session-summary'` is the single key used for all session summaries. Successive idle resets overwrite prior entries, so the store always contains at most one summary per user.
+
+**Standard tests:**
+- `memory-flush.test.ts` > flushMemoryToContextStore > uses key = "recent-session-summary"
+- `memory-flush.test.ts` > flushMemoryToContextStore > writes to ContextStore under the rolling key
+
+**Edge case tests:**
+- `idle-reset.persona.test.ts` > S7 — Rolling key: successive idle resets > flushSave is called on each reset — overwrite is enforced by key strategy
+- `idle-reset-integration.test.ts` > P8b: memory-flush household-aware path > rolling key: second idle reset overwrites first
+
+---
+
+### REQ-CONV-FLUSH-006 — Capability bypass: `CONTEXT_INTERNAL_BYPASS` symbol MUST be captured in compose-runtime closures; the hook and helpers MUST NOT import it
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`flushSave` and `flushRemove` are constructed in `compose-runtime.ts` as closures that capture `CONTEXT_INTERNAL_BYPASS`. `memory-flush.ts` and `idle-reset-hook.ts` accept pre-bound `MemoryFlushSave`/`MemoryFlushRemove` types and never import the symbol. This preserves the capability-based access control boundary.
+
+**Standard tests:**
+- `idle-reset-integration.test.ts` > P8b: memory-flush household-aware path > writes summary to data/households/h1/users/alice/context/recent-session-summary.md
+
+**Edge case tests:**
+- `idle-reset-integration.test.ts` > P8b: memory-flush household-aware path > legacy non-household path: data/users/alice/context/recent-session-summary.md
+
+---
+
+### REQ-CONV-FLUSH-007 — `endActive` CAS MUST run FIRST; summarize+save runs only if the CAS winner is this invocation
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`runIdleResetHook` calls `endActive` before invoking the summarizer. If `endActive` returns `{ endedSessionId: null }` (CAS race lost), the function returns `{ status: 'none' }` without summarizing. This prevents duplicate summaries from concurrent hooks and uses the already-in-memory `session.turns` from the read before `endActive`.
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > endActive runs BEFORE summarize (CAS-first ordering)
+
+**Edge case tests:**
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > two concurrent hooks for same user — CAS ensures only one summarizes
+- `idle-reset-hook.test.ts` > Fail-open error handling > endActive returns null (concurrent race) → status="none", warn logged, NO telegram.send
+
+---
+
+### REQ-CONV-FLUSH-008 — Summarize+save MUST be bounded by `flushTimeoutMs` (default 8,000 ms) via `Promise.race` + `AbortController`; timeout MUST NOT block idle reset
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`runFlushWithTimeout` wraps the summarizer+save in a `Promise.race` against a `setTimeout` that resolves `'timeout'`. On overrun, the `AbortController` is aborted (signal passed to summarizer), `summaryStatus` is `'timeout'`, and the idle reset still completes and notifies the user. The timer is `unref()`-ed so it does not block process exit in tests.
+
+**Standard tests:**
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > summaryStatus="timeout" when summarize+save exceeds flushTimeoutMs
+
+---
+
+### REQ-CONV-FLUSH-009 — Hook MUST be fully fail-open: summarizer/save/getFlushEnabled errors MUST NOT surface to the user or block idle reset
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+Every I/O boundary in the flush path is wrapped in a try/catch that logs a warning and returns `'failed'`. `summaryStatus: 'failed'` is recorded in the returned `IdleResetState` but the user receives the normal idle-reset notification regardless of the flush outcome.
+
+**Edge case tests:**
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > summaryStatus="failed" when summarizer throws — idle reset still proceeds
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > summaryStatus="failed" when flushSave throws
+- `idle-reset-hook.test.ts` > P8b: summaryStatus branches > summaryStatus="failed" when getFlushEnabled throws (fail-open)
+- `idle-reset-integration.test.ts` > P8b: memory-flush household-aware path > ContextStore.save failure: summaryStatus="failed", idle reset still proceeds
+- `idle-reset.persona.test.ts` > S2 — Summarizer fails > summaryStatus="failed" when summarizer throws — user is still notified
+
+---
+
+### REQ-CONV-FLUSH-010 — `<config-set key="flush_memory_on_idle_reset">` tag MUST be gated by `MEMORY_FLUSH_INTENT_REGEX`; negative cases MUST NOT false-fire
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`MEMORY_FLUSH_INTENT_REGEX` requires explicit "session memory", "session summary/summaries", "automatic idle summaries", or "idle summary/summaries" phrasing alongside an action verb. It does not fire on "remember this", "save the recipe", "memory usage", "enable daily notes", or "save my conversation". `FLUSH_MEMORY_INSTRUCTION_BLOCK` is injected into the system prompt in both `handleMessage` and `handleAsk` when the regex matches. Per-key `INTENT_GATES` allow `flush_memory_on_idle_reset` and `log_to_notes` to be toggled independently without cross-contamination.
+
+**Standard tests:**
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > matches "turn on session memory please"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > matches "enable session memory"
+- `control-tags.config-set.test.ts` > FLUSH_MEMORY_INSTRUCTION_BLOCK > is a non-empty string export
+- `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > persists true when message matches MEMORY_FLUSH_INTENT_REGEX
+
+**Edge case tests:**
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "remember this for me"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "save the recipe"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "enable daily notes"
+- `control-tags.config-set.test.ts` > MEMORY_FLUSH_INTENT_REGEX > does NOT match "memory usage is high"
+- `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > notes intent does NOT toggle flush_memory_on_idle_reset
+- `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > flush intent does NOT toggle log_to_notes
+- `handle-message.test.ts` > FLUSH_MEMORY_INSTRUCTION_BLOCK injection > appends FLUSH_MEMORY_INSTRUCTION_BLOCK when MEMORY_FLUSH_INTENT_REGEX matches
+- `handle-message.test.ts` > FLUSH_MEMORY_INSTRUCTION_BLOCK injection > does not append block when regex does not match
+
+---
+
+### REQ-CONV-FLUSH-011 — Turning the toggle OFF (chat OR GUI) MUST delete the existing `recent-session-summary` entry
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`disableFlushAndCleanup` calls `flushRemove(userId, RECENT_SESSION_SUMMARY_KEY)` and swallows any errors (so the toggle still flips even if the remove fails). It is invoked both by `processConfigSetTags` (when `<config-set key="flush_memory_on_idle_reset" value="false"/>` is processed) and by the GUI POST handler in `config.ts` (when the prior value was `true` and the new value is `false`). This ensures on/off semantics match the toggle name.
+
+**Standard tests:**
+- `memory-flush.test.ts` > disableFlushAndCleanup > removes the rolling key on disable
+- `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > persists false on disable intent AND calls disableFlushAndCleanup
+
+**Edge case tests:**
+- `memory-flush.test.ts` > disableFlushAndCleanup > swallows errors so the toggle still flips off
+
+---
+
+### REQ-CONV-FLUSH-012 — `buildMemorySnapshot` MUST accept `pinnedKeys` (default `['recent-session-summary']`); pinned entries MUST appear before alphabetical entries and survive budget truncation
+
+**Phase:** Hermes P8b | **Status:** Implemented
+
+`buildMemorySnapshot` accepts an optional `{ pinnedKeys?: string[] }` argument (default `['recent-session-summary']`). Pinned entries are emitted first (in declaration order), followed by remaining entries in alphabetical key order. The 4,000-char budget is applied to the combined list; pinned entries are consumed first, so they are guaranteed to appear in the Layer 2 snapshot even when alphabetically-earlier entries fill the remaining budget.
+
+**Standard tests:**
+- `conversation-retrieval-service.test.ts` > buildMemorySnapshot > pinnedKeys: pinned entries appear before alphabetical entries
+- `conversation-retrieval-service.test.ts` > buildMemorySnapshot > pinnedKeys: falls back to alphabetical-only when no pinned key is present in user data
+
+**Edge case tests:**
+- `conversation-retrieval-service.test.ts` > buildMemorySnapshot > pinnedKeys: recent-session-summary appears first even when alphabetically-earlier keys fill the budget
+
+---
+
 ## Hermes P9 — Photo Memory Bridge
 
 ### REQ-CONV-PHOTO-001 — Photo dispatches MUST append a structured turn pair to the active chat session
@@ -7871,5 +8061,17 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-IDLE-008 | idle-reset-hook.test.ts | 0 | 4 | Implemented |
 | REQ-CONV-IDLE-009 | router-idle-reset.test.ts | 11 | 2 | Implemented |
 | REQ-CONV-IDLE-010 | router-idle-reset.test.ts | 3 | 2 | Implemented |
+| REQ-CONV-FLUSH-001 | idle-reset-hook.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-FLUSH-002 | manifest-parity.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-FLUSH-003 | session-summarizer.test.ts | 3 | 5 | Implemented |
+| REQ-CONV-FLUSH-004 | session-summarizer.test.ts, memory-flush.test.ts, idle-reset-memory-flush.integration.test.ts | 2 | 8 | Implemented |
+| REQ-CONV-FLUSH-005 | memory-flush.test.ts, idle-reset.persona.test.ts, idle-reset-integration.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-FLUSH-006 | idle-reset-integration.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-FLUSH-007 | idle-reset-hook.test.ts | 1 | 2 | Implemented |
+| REQ-CONV-FLUSH-008 | idle-reset-hook.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-FLUSH-009 | idle-reset-hook.test.ts, idle-reset-integration.test.ts, idle-reset.persona.test.ts | 0 | 5 | Implemented |
+| REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 8 | Implemented |
+| REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 1 | Implemented |
 
-| **Totals** | **207 test files** | **1591** | **1786** | **3377 tests** |
+| **Totals** | **210 test files** | **1614** | **1819** | **3433 tests** |

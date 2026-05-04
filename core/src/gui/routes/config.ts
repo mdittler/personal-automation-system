@@ -19,10 +19,12 @@ export interface ConfigOptions {
 	config: SystemConfig;
 	dataDir: string;
 	logger: Logger;
+	/** Called when flush_memory_on_idle_reset is toggled OFF via the GUI. */
+	disableFlushAndCleanup?: (userId: string) => Promise<void>;
 }
 
 export function registerConfigRoutes(server: FastifyInstance, options: ConfigOptions): void {
-	const { registry, config, dataDir, logger } = options;
+	const { registry, config, dataDir, logger, disableFlushAndCleanup } = options;
 
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
@@ -108,12 +110,35 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 
 		const appConfig = getAppConfigService(appId, configDefs);
 
+		// Snapshot previous value to detect flush_memory_on_idle_reset turning off
+		let prevFlushEnabled: unknown = undefined;
+		if (appId === 'chatbot' && disableFlushAndCleanup) {
+			try {
+				const prev = await appConfig.getOverrides(userId);
+				prevFlushEnabled = prev?.flush_memory_on_idle_reset;
+			} catch {
+				// Non-fatal; proceed with write
+			}
+		}
+
 		try {
 			await appConfig.setAll(userId, validated);
 			logger.info({ appId, userId }, 'App config updated via GUI');
 		} catch (err) {
 			logger.error({ appId, userId, error: err }, 'Failed to update app config');
 			return reply.status(500).send('Failed to update config');
+		}
+
+		// If flush_memory_on_idle_reset was turned off, delete prior summary
+		if (
+			appId === 'chatbot' &&
+			disableFlushAndCleanup &&
+			prevFlushEnabled === true &&
+			validated.flush_memory_on_idle_reset === false
+		) {
+			disableFlushAndCleanup(userId).catch((err: unknown) => {
+				logger.warn({ userId, err }, 'GUI config: disableFlushAndCleanup failed');
+			});
 		}
 
 		return reply.redirect(`/gui/apps/${appId}`);

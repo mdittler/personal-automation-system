@@ -9,6 +9,7 @@ import { isIdle, getLastActivityIso } from '../conversation-session/idle-detecto
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import { pendingEdits } from './pending-edits.js';
 import type { IdleResetState, IdleResetStatus } from '../../types/conversation-session.js';
+import { flushMemoryToContextStore, type MemoryFlushSave } from './memory-flush.js';
 
 export type { IdleResetStatus, IdleResetState };
 
@@ -19,7 +20,16 @@ export interface IdleResetHookDeps {
 	logger: Pick<Logger, 'warn'>;
 	pendingSessionControl?: PendingSessionControlStore;
 	now?: () => Date;
+	// P8b — all optional; absent = 'disabled'
+	summarizer?: (turns: SessionTurn[], signal?: AbortSignal) => Promise<string | null>;
+	flushSave?: MemoryFlushSave;
+	getFlushEnabled?: (userId: string) => Promise<boolean>;
+	/** Soft cap on summarize+save wall time. Default 8000 ms. Hook returns
+	 *  summaryStatus 'timeout' and lets idle reset proceed normally on overrun. */
+	flushTimeoutMs?: number;
 }
+
+const DEFAULT_FLUSH_TIMEOUT_MS = 8_000;
 
 export async function runIdleResetHook(
 	ctx: { userId: string; sessionKey?: string },
@@ -58,6 +68,7 @@ export async function runIdleResetHook(
 	if (deps.pendingSessionControl?.has(userId)) return { status: 'protected' };
 	if (pendingEdits.has(userId)) return { status: 'protected' };
 
+	// 1. END the session FIRST (CAS). Only the winner of concurrent hooks proceeds.
 	let resolvedSessionId: string | null;
 	try {
 		const result = await deps.chatSessions.endActive(
@@ -80,6 +91,15 @@ export async function runIdleResetHook(
 		return { status: 'none' };
 	}
 
+	// 2. Summarize + flush AFTER the CAS winner is known. Bounded by timeout.
+	const summaryStatus = await runFlushWithTimeout(
+		userId,
+		session.turns,
+		deps,
+		deps.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS,
+	);
+
+	// 3. Notify user (P8a behavior — unchanged).
 	const friendly = formatDuration(deps.idleMinutes);
 	try {
 		await deps.telegram.send(
@@ -94,7 +114,63 @@ export async function runIdleResetHook(
 		status: 'reset',
 		endedSessionId: resolvedSessionId,
 		parentTitle: session.meta.title,
+		summaryStatus,
 	};
+}
+
+type FlushStatus = NonNullable<IdleResetState['summaryStatus']>;
+
+async function runFlushWithTimeout(
+	userId: string,
+	turns: SessionTurn[],
+	deps: IdleResetHookDeps,
+	timeoutMs: number,
+): Promise<FlushStatus> {
+	if (!deps.summarizer || !deps.flushSave || !deps.getFlushEnabled) {
+		return 'disabled';
+	}
+
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	const timeoutPromise = new Promise<'timeout'>((resolve) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			resolve('timeout');
+		}, timeoutMs);
+		timer.unref?.();
+	});
+
+	const work = (async (): Promise<FlushStatus> => {
+		let enabled: boolean;
+		try {
+			enabled = await deps.getFlushEnabled!(userId);
+		} catch (err) {
+			deps.logger.warn({ err, userId }, 'idle-reset-hook: getFlushEnabled threw');
+			return 'failed';
+		}
+		if (!enabled) return 'disabled';
+		if (turns.length < 2) return 'skipped';
+
+		let summary: string | null;
+		try {
+			summary = await deps.summarizer!(turns, controller.signal);
+		} catch (err) {
+			deps.logger.warn({ err, userId }, 'idle-reset-hook: summarizer threw');
+			return 'failed';
+		}
+		if (summary === null) return 'skipped';
+
+		return flushMemoryToContextStore(userId, summary, {
+			flushSave: deps.flushSave!,
+			logger: deps.logger,
+		});
+	})();
+
+	try {
+		return await Promise.race([work, timeoutPromise]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 }
 
 function formatDuration(minutes: number): string {
