@@ -11,6 +11,7 @@ import type { ManifestUserConfig } from '../../types/manifest.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import { coerceUserConfigValue } from '../config/coerce-user-config.js';
 import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from './control-tags/session-search-instruction.js';
 
 export const normalizeResponse = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
 
@@ -101,6 +102,7 @@ const CONFIG_SET_TAG_REGEX = /<config-set\s+key="([^"]+)"\s+value="([^"]+)"\s*\/
 const ALLOWED_CONFIG_KEYS: ReadonlySet<string> = new Set([
 	'log_to_notes',
 	'flush_memory_on_idle_reset',
+	'session_search_tool_enabled',
 ]);
 
 /**
@@ -129,6 +131,7 @@ export const MEMORY_FLUSH_INTENT_REGEX =
 const INTENT_GATES: Record<string, RegExp> = {
 	log_to_notes: NOTES_INTENT_REGEX,
 	flush_memory_on_idle_reset: MEMORY_FLUSH_INTENT_REGEX,
+	session_search_tool_enabled: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
 };
 
 /**
@@ -159,6 +162,9 @@ function confirmationFor(key: string, coerced: unknown): string | null {
 		return coerced
 			? "Session memory turned ON — I'll save a short summary when our chats time out."
 			: 'Session memory turned OFF. The most recent saved summary has been deleted.';
+	}
+	if (key === 'session_search_tool_enabled') {
+		return coerced ? 'Session-search tool turned ON.' : 'Session-search tool turned OFF.';
 	}
 	return null;
 }

@@ -605,6 +605,10 @@ export class Router {
 				await this.dispatchConversationCommand('title', parsed.args, ctx);
 				return;
 			}
+			if (parsed.command === '/recall') {
+				await this.dispatchConversationCommand('recall', parsed.args, ctx);
+				return;
+			}
 		}
 
 		const result = lookupCommand(parsed, this.commandMap);
@@ -801,7 +805,7 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes',
+		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
@@ -817,6 +821,7 @@ export class Router {
 				else if (name === 'newchat')
 					await this.conversationService?.handleNewChat(args, enrichedCtx);
 				else if (name === 'title') await this.conversationService?.handleTitle(args, enrichedCtx);
+				else if (name === 'recall') await this.conversationService?.handleRecall(args, enrichedCtx);
 				else await this.conversationService?.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -858,6 +863,7 @@ export class Router {
 			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
 			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
 			lines.push('  /title [title] — Show or set the current session title');
+			lines.push('  /recall <query> — Search your past conversations');
 			lines.push('');
 		}
 
@@ -870,6 +876,7 @@ export class Router {
 			'/newchat',
 			'/reset',
 			'/title',
+			'/recall',
 		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 

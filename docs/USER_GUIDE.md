@@ -78,6 +78,38 @@ Use `/ask` for questions about PAS itself:
 
 Admins may see more system-level information than regular users.
 
+### Searching Past Conversations
+
+Use `/recall <query>` to search your conversation history:
+
+```text
+/recall pasta carbonara
+/recall what did we discuss about grocery lists
+/recall school lunch ideas
+```
+
+Results show the session title, date, full session ID, and relevant snippets. The search includes your current active session.
+
+### Session-Search Tool (automatic)
+
+The chatbot can also search past conversations mid-reply when it decides extra context would help. This fires automatically when you ask about something from a previous session (e.g. "what did we decide about pasta last time?"). You can toggle this behavior:
+
+- **Turn off:** Tell the chatbot "turn off session search" or visit the GUI config page and set `session_search_tool_enabled` to false.
+- **Turn on:** Tell the chatbot "turn on session search" or toggle it back in the GUI.
+
+When the tool fires, the chatbot makes one additional LLM call to incorporate search results, then delivers a single response.
+
+### Chatbot Configuration
+
+| Config key | Default | What it does |
+| --- | --- | --- |
+| `auto_detect_pas` | on | Switches to the app-aware prompt for PAS-related questions |
+| `log_to_notes` | off | Saves every chat message to your daily notes |
+| `flush_memory_on_idle_reset` | off | Summarizes the session into memory when idle reset fires |
+| `session_search_tool_enabled` | on | Lets the chatbot search past conversations mid-reply |
+
+Use `/ask` or tell the chatbot to change a setting (e.g. "turn off chat logging"), or edit it in the GUI config page.
+
 ## Shared Spaces
 
 Spaces let a group work on shared data instead of personal data. For example, a family can share a grocery list or a project group can share notes.

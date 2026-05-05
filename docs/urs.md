@@ -4846,6 +4846,277 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## Track C — `/recall` Command + `<session-search>` Pseudo-Tool (Hermes P5 Carry-Forwards)
+
+### REQ-CONV-RECALL-001 — `/recall` MUST be a Router built-in that bypasses AppToggleStore
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`/recall <query>` is dispatched by the Router as a built-in command (`BUILTIN_COMMAND_NAMES`). It executes regardless of whether the chatbot app is toggled on or off for the user, consistent with other built-ins (`/ask`, `/newchat`, `/title`). `dispatchConversationCommand('recall', ...)` is called, which enters the request context before dispatch.
+
+**Standard tests** (`router-recall.test.ts`):
+- `/recall pasta` dispatches to `handleRecall` with `['pasta']` and command route
+- `/recall@PASBot pasta` strips `@bot` suffix and dispatches
+- `/recall` (no args) dispatches with empty args
+- `" /recall pasta"` (leading whitespace) dispatches — `parseCommand` trims input first
+- `/recall` dispatches even without additional AppToggleStore setup (bypasses app toggle)
+
+---
+
+### REQ-CONV-RECALL-002 — Empty and no-result queries MUST produce helpful messages
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+If `args.join(' ').trim()` is empty, `handleRecall` sends a usage help message without calling `searchSessions`. If `searchSessions` returns zero hits, it sends `No past conversations matched "<escaped-query>".` (query escaped via Markdown escape).
+
+**Standard tests** (`handle-recall.test.ts`):
+- `empty query (no args) sends usage help`
+- `empty query (whitespace-only args) sends usage help`
+- `empty hits sends "no matching conversations" with escaped query`
+
+---
+
+### REQ-CONV-RECALL-003 — Query MUST be sanitized via `buildUntrustedQuery`; no stopword filter
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+The raw query string is passed to `buildUntrustedQuery`, which strips FTS5 operators and zero-width/bidi characters but does NOT filter stopwords. If `queryTerms.length === 0` after sanitization (only FTS operators or control chars), a "no searchable terms" message is sent. Ordinary words — including stopwords — produce at least one term.
+
+**Edge case tests** (`handle-recall.test.ts`):
+- `query containing only FTS operators and control chars sends "no searchable terms"`
+- `stopwords like "the" ARE valid query terms (buildUntrustedQuery has no stopword filter)`
+
+---
+
+### REQ-CONV-RECALL-004 — userId/householdId MUST come from `requestContext`; cross-user isolation enforced
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`conversationRetrieval.searchSessions` reads `userId` and `householdId` from the `AsyncLocalStorage` request context (set by `dispatchConversationCommand`). Two concurrent `/recall` calls in different request contexts each see only their own sessions.
+
+**Edge case tests** (`handle-recall.test.ts`):
+- `two concurrent /recall calls in different requestContexts return their own results`
+
+---
+
+### REQ-CONV-RECALL-005 — Reply format MUST include title, date, full session id, and snippets
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+Each hit is formatted as: `*<title>* — <YYYY-MM-DD>` on line 1; `Session: \`<YYYYMMDD_HHMMSS_<8hex>>\`` on line 2; up to 3 snippet lines as `> _Role_ (turn N): <text>`. Session id is the full 23-char form (`SESSION_ID_RE`). Results are limited to 5 sessions, 3 messages per session (`limitSessions: 5, limitMessagesPerSession: 3`).
+
+**Standard tests** (`handle-recall.test.ts`):
+- `recognizes valid query and formats hits`
+- `formats title, date, and full session id (YYYYMMDD_HHMMSS_<8hex>) per hit`
+- `passes limitSessions=5 and limitMessagesPerSession=3 to searchSessions`
+- `shows (untitled) when hit title is null`
+- `single-hit reply formats correctly`
+
+---
+
+### REQ-CONV-RECALL-006 — All dynamic reply content MUST be Markdown-escaped; FTS5 highlights stripped term-aware
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`escapeMarkdown` is applied to: title (or `(untitled)`), date string, snippet text. Session id is rendered inside a backtick span (treated literally by Telegram Markdown). FTS5 `[<term>]` markers are stripped term-aware: for each `queryTerm`, `[<term>]` (case-insensitive, exact term) is replaced by `<term>`. User-typed `[not a highlight]` content is preserved because the bracketed text is not a query term.
+
+**Edge case tests** (`handle-recall.test.ts`):
+- `hostile snippet "*bold*" rendered as escaped \\*bold\\*, not as Markdown bold`
+- `hostile title with backticks does not break monospace formatting`
+- `FTS5 [highlight] markers stripped term-aware: [pasta] → pasta`
+- `user content with literal [not a highlight] survives unmodified`
+- `hostile session id escaping does not break the reply`
+
+---
+
+### REQ-CONV-RECALL-007 — Long replies MUST use `sendSplitResponse`; permanent send failures bubble
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`sendSplitResponse` handles paragraph-aware Markdown splitting (3800-char limit) with plain-text fallback on Markdown parse errors only. Permanent send failures (e.g., Telegram `400 Bad Request`) are not caught by `handleRecall` — they bubble to the router's error logger, matching the pattern of all other command handlers.
+
+**Standard tests** (`handle-recall.test.ts`):
+- `sends split response for 5 hits with long snippets`
+
+**Edge case tests** (`handle-recall.test.ts`):
+- `permanent telegram.send failure (non-Markdown error) propagates`
+
+---
+
+### REQ-CONV-RECALL-008 — `/recall` MUST appear in `/help` output exactly once
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`sendHelp` in the router includes `  /recall <query> — Search your past conversations` in the Conversation block. `/recall` is in `BUILTIN_COMMAND_NAMES` so it is not double-listed.
+
+**Standard tests** (`router-recall.test.ts`):
+- `/help includes /recall <query> line`
+- `/help mentions /recall exactly once`
+
+---
+
+### REQ-CONV-RECALL-009 — `/recall` MUST search the active session (no `excludeSessionIds`)
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`handleRecall` does not pass `excludeSessionIds` to `searchSessions`. The current active session is searchable from `/recall`, because the command represents explicit user intent to recall any matching conversation — including one currently open. (This is an intentional asymmetry with the `<session-search>` pseudo-tool, which excludes the current session to avoid context bias.)
+
+**Standard tests** (`handle-recall.test.ts`):
+- `does NOT pass excludeSessionIds — current session is searchable`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-001 — Instruction block MUST be injected only when intent matches, tool enabled, and search available
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`SESSION_SEARCH_INSTRUCTION_BLOCK` is appended to the system prompt in `handleMessage` and `handleAsk` only when ALL of: `SESSION_SEARCH_TOOL_INTENT_REGEX.test(userMessage)` is true, `session_search_tool_enabled` resolves to `true` via `resolveUserBool` (default `true`), and `conversationRetrieval?.hasSessionSearch()` is true. The block is appended in the handlers, not in `prompt-builder.ts`.
+
+**Standard tests** (`handle-message-session-search-tool.test.ts`):
+- `injects instruction block when intent matches AND config enabled AND hasSessionSearch=true`
+
+**Edge case tests** (`handle-message-session-search-tool.test.ts`):
+- `omits instruction block when intent regex does NOT match`
+- `omits instruction block when config explicitly disables session_search_tool_enabled`
+- `omits instruction block when hasSessionSearch=false`
+- `omits instruction block when conversationRetrieval is undefined`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-002 — Tag parser MUST accept only self-closing form; paired form rejected and stripped
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`extractSessionSearchTag` uses `SESSION_SEARCH_TAG_REGEX = /<session-search\s+query="([^"<>]{1,200})"\s*\/>/i` (self-closing only). Paired form `<session-search query="x"></session-search>` returns `query: null` and both tags are stripped by `stripSessionSearchTags`.
+
+**Edge case tests** (`session-search-tag.test.ts`):
+- `paired form <session-search query="x"></session-search> → query: null (not supported)`
+- `paired form stripped: no session-search tag remains in beforeTag after extraction`
+- `malformed tag (missing query attribute) → null, shape removed from beforeTag`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-003 — Query MUST be capped at 200 chars; control chars, bidi, and `<>/` chars rejected
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+The regex character class `[^"<>]{1,200}` rejects queries containing quotes, angle brackets, or exceeding 200 characters at the regex level. After extraction, `sanitizeQuery` strips zero-width and bidi characters; an empty result returns `null`. Queries containing only control or bidi characters are rejected.
+
+**Edge case tests** (`session-search-tag.test.ts`):
+- `query containing " character → null (regex rejects)`
+- `query containing < character → null (regex rejects via [^<>] class)`
+- `query containing > character → null (regex rejects via [^<>] class)`
+- `query > 200 chars → null (regex {1,200} enforces)`
+- `query exactly 200 chars → accepted`
+- `query empty string (after regex match) → null`
+- `query with only zero-width chars → null after sanitize`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-004 — Single re-prompt per turn; second-response tag shapes stripped (recursion cap)
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+The re-prompt driver runs at most once per turn. After the second LLM response, `stripSessionSearchTags` is applied unconditionally — any `<session-search>` tag emitted by the second call is removed and never parsed. The string `<session-search` MUST NOT appear in any string passed to `telegram.send` on any code path.
+
+**Edge case tests** (`handle-message-session-search-tool.test.ts`):
+- `second response emitting another tag → tag stripped, not re-parsed, no third LLM call`
+- `session_search_tool_enabled=false: tag stripped, single LLM call, no search`
+- `conversationRetrieval=undefined: tag stripped, single LLM call`
+- `hasSessionSearch=false: tag stripped, single LLM call, no search`
+- `config=undefined: tag stripped, single LLM call`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-005 — Search MUST obey requestContext auth; active session excluded from tool search
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`searchSessions` reads `userId`/`householdId` from `AsyncLocalStorage`. The re-prompt driver passes `excludeSessionIds: [ensuredSessionId]` when the active session id is known, preventing the current in-progress session from biasing search results. (Asymmetry with `/recall`, which does not exclude the current session.)
+
+**Standard tests** (`handle-message-session-search-tool.test.ts`):
+- `search excludes the active session id`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-006 — Continuation prompt MUST fence search results via `buildMemoryContextBlock`
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`buildToolContinuationPrompt` wraps search results in `buildMemoryContextBlock({ label: 'session-search-result', maxChars: 4000, marker: '... (search results truncated)' })`. Hostile snippet content (e.g., XML tags, backtick fences) cannot break the outer structure. When no hits are returned, the fence contains `(No matching conversations found.)`.
+
+**Standard tests** (`handle-message-session-search-tool.test.ts`):
+- `no hits → continuation prompt still issued, second response delivered`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-007 — Search or second-call failure MUST fall back to first-response prose
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+If `searchSessions` throws or the second `llm.complete` call throws, the driver falls back to `beforeTag` (first-response prose with the tag removed), logs a `warn`, and delivers the result via a single `telegram.send`. No user-visible error is shown for tool failures; the user gets the first-response prose transparently.
+
+**Edge case tests** (`handle-message-session-search-tool.test.ts`):
+- `searchSessions throws → falls back to first-response prose (without tag), warns, one telegram.send`
+- `second LLM call throws → falls back to first-response prose (without tag)`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-008 — Auto-injection (`runRecallPipeline`) MUST continue running; tool is additive
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+The recall pipeline (`runRecallPipeline`) runs before the first LLM call and injects Layer 5 fenced results unconditionally (subject to its own classifier gate). The `<session-search>` tool is an additional, model-driven retrieval path that runs after the first LLM response. Both may fire on the same turn.
+
+---
+
+### REQ-CONV-TOOL-SEARCH-009 — Tool loop MUST add exactly one additional standard-tier LLM call per triggered turn
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+When the tool fires (tag present, enabled, available, non-empty query terms), exactly one additional `llm.complete({ tier: 'standard' })` call is made. The total for a tool-triggering turn is 2 standard-tier calls (first response + second/continuation response).
+
+**Standard tests** (`handle-message-session-search-tool.test.ts`):
+- `makes exactly two LLM calls when the tool fires`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-010 — `session_search_tool_enabled` MUST be registered end-to-end as a user config key
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`session_search_tool_enabled` (type: `boolean`, default: `true`) is registered in `CONVERSATION_USER_CONFIG` (manifest), `ALLOWED_CONFIG_KEYS` and `INTENT_GATES` (control-tags), and `confirmationFor` (acknowledgment messages). It is settable via the GUI config page and via the `<config-set>` tag (gated by `SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX`).
+
+**Standard tests** (`manifest-parity.test.ts`):
+- `user_config exposes auto_detect_pas, log_to_notes, flush_memory_on_idle_reset, and session_search_tool_enabled`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-011 — Tool re-prompt MUST run before existing post-processors
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+The re-prompt driver runs immediately after the first LLM call's error-handling block and before `extractJournalEntries`, `processModelSwitchTags`, and `processConfigSetTags`. Journal entries, model-switch tags, and config-set tags in the **second** response are processed; tags in the first (partial) response are discarded along with the `beforeTag` prose when the second response replaces it.
+
+**Standard tests** (`handle-message-session-search-tool.test.ts`):
+- `journal tags in second response are extracted (not first partial)`
+
+---
+
+### REQ-CONV-TOOL-SEARCH-012 — `<session-search` MUST never appear in any string passed to `telegram.send`
+
+**Phase:** Hermes P5-CF | **Status:** Implemented
+
+`stripSessionSearchTags` is applied at every exit path of the re-prompt driver block, plus a final unconditional strip after the block exits. This covers: success path (second response stripped), no-tag path, malformed tag path, disabled/unavailable path, search failure, second-call failure, and the recursion cap on a second-response tag. The `SESSION_SEARCH_SWEEP_REGEX` (`/<session-search\b[^>]*\/?>/gi`) removes any variant shape not matched by the primary regex.
+
+**Edge case tests** (`handle-message-session-search-tool.test.ts`):
+- `session_search_tool_enabled=false: tag stripped, single LLM call, no search`
+- `conversationRetrieval=undefined: tag stripped, single LLM call`
+- `hasSessionSearch=false: tag stripped, single LLM call, no search`
+- `config=undefined: tag stripped, single LLM call`
+
+---
+
 ## Track B — Receipt Integrity (Hermes P9)
 
 ### REQ-FOOD-RECEIPT-001 — Receipt date extraction MUST be validated against today's date before storage
@@ -8210,9 +8481,30 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-LINEAGE-005 | chat-index-rebuild.integration.test.ts | 3 | 0 | Implemented |
 | REQ-CONV-LINEAGE-006 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-LINEAGE-007 | chat-transcript-index.test.ts | 3 | 0 | Implemented |
+| REQ-CONV-RECALL-001 | router-recall.test.ts | 5 | 0 | Implemented |
+| REQ-CONV-RECALL-002 | handle-recall.test.ts | 3 | 0 | Implemented |
+| REQ-CONV-RECALL-003 | handle-recall.test.ts | 0 | 2 | Implemented |
+| REQ-CONV-RECALL-004 | handle-recall.test.ts | 0 | 1 | Implemented |
+| REQ-CONV-RECALL-005 | handle-recall.test.ts | 5 | 0 | Implemented |
+| REQ-CONV-RECALL-006 | handle-recall.test.ts | 0 | 5 | Implemented |
+| REQ-CONV-RECALL-007 | handle-recall.test.ts | 1 | 1 | Implemented |
+| REQ-CONV-RECALL-008 | router-recall.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-RECALL-009 | handle-recall.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-001 | handle-message-session-search-tool.test.ts | 1 | 4 | Implemented |
+| REQ-CONV-TOOL-SEARCH-002 | session-search-tag.test.ts | 0 | 3 | Implemented |
+| REQ-CONV-TOOL-SEARCH-003 | session-search-tag.test.ts | 0 | 7 | Implemented |
+| REQ-CONV-TOOL-SEARCH-004 | handle-message-session-search-tool.test.ts | 0 | 5 | Implemented |
+| REQ-CONV-TOOL-SEARCH-005 | handle-message-session-search-tool.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-006 | handle-message-session-search-tool.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-007 | handle-message-session-search-tool.test.ts | 0 | 2 | Implemented |
+| REQ-CONV-TOOL-SEARCH-008 | handle-message-session-search-tool.test.ts | 0 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-009 | handle-message-session-search-tool.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-010 | manifest-parity.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-011 | handle-message-session-search-tool.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TOOL-SEARCH-012 | handle-message-session-search-tool.test.ts | 0 | 4 | Implemented |
 | REQ-FOOD-RECEIPT-003 | receipt-query.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
 
-| **Totals** | **210 test files** | **1627** | **1823** | **3450 tests** |
+| **Totals** | **214 test files** | **1650** | **1857** | **3507 tests** |

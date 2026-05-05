@@ -35,6 +35,13 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		description:
 			'When an idle session auto-resets, save a short summary of the conversation to your durable memory so the next session can refer back to it. (Per-user opt-in, default OFF. Turning OFF also deletes the most recent saved summary.)',
 	},
+	{
+		key: 'session_search_tool_enabled',
+		type: 'boolean',
+		default: true,
+		description:
+			'Allow the chatbot to search your past conversations mid-reply when the model decides extra context is needed. (Per-user opt-in, default ON.)',
+	},
 ];
 
 export interface ConversationLLMSafeguards {
