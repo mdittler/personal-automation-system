@@ -184,8 +184,18 @@ function christmasWindow(today: string): { start: string; end: string } {
 
 const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH_NAMES = [
-	'January', 'February', 'March', 'April', 'May', 'June',
-	'July', 'August', 'September', 'October', 'November', 'December',
+	'January',
+	'February',
+	'March',
+	'April',
+	'May',
+	'June',
+	'July',
+	'August',
+	'September',
+	'October',
+	'November',
+	'December',
 ];
 
 /** Build dynamic date examples relative to today so the prompt never goes stale. */
@@ -198,7 +208,7 @@ function buildExamples(today: string): string {
 	const yesterday = subtractDays(today, 1);
 
 	// Last Tuesday: if today is Tue (2), go back 7; otherwise find most-recent prior Tuesday.
-	const daysToLastTue = dow === 2 ? 7 : ((dow + 7 - 2) % 7 || 7);
+	const daysToLastTue = dow === 2 ? 7 : (dow + 7 - 2) % 7 || 7;
 	const lastTuesday = subtractDays(today, daysToLastTue);
 
 	// "Two weeks ago" window: centred ~17 days back, ±3-day spread (11–23 days ago)
