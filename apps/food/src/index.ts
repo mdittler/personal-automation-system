@@ -1187,10 +1187,12 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		if (services.dataQuery) {
 			const recentEntries = services.interactionContext?.getRecent(ctx.userId) ?? [];
 			const hasRecentFoodContext = recentEntries.some((e) => e.appId === 'food');
-			// Narrow set of data-question keywords — intentionally conservative to avoid false positives
 			const isDataQuestion = /\b(show|what|how much|how many|list|tell me about)\b/i.test(ctx.text);
+			// Also open the gate for any trailing-question-mark sentence — covers verbs
+			// like "can/could/describe/explain/break out" that the keyword list misses (RC6).
+			const isTrailingQuestion = /\?\s*$/.test(ctx.text);
 
-			if (hasRecentFoodContext || isDataQuestion) {
+			if (hasRecentFoodContext || isDataQuestion || isTrailingQuestion) {
 				const recentFilePaths = recentEntries.flatMap((e) => e.filePaths ?? []);
 				const result = await services.dataQuery.query(
 					ctx.text,
@@ -3833,7 +3835,10 @@ export function isPantryRemoveIntent(text: string): boolean {
 export function isMealPlanViewIntent(text: string): boolean {
 	return (
 		/\b(show|view|see|check)\b.*\b(meal\s+plan|weekly\s+plan)\b/i.test(text) ||
-		/\b(meal\s+plan|weekly\s+plan)\b/i.test(text) ||
+		// Anchor bare "meal plan"/"weekly plan" so it only matches when the phrase is
+		// the primary content of the message — not an incidental mention in a longer
+		// sentence like "Meal plan? I want the receipt." (RC4 false positive).
+		/^(?:(?:show\s+me|the|my|a)\s+)?(meal\s+plan|weekly\s+plan)\s*\??\s*$/i.test(text) ||
 		/\bwhat'?s\s+planned\b/i.test(text)
 	);
 }
