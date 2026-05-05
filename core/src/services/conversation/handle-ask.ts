@@ -196,6 +196,7 @@ export async function handleAsk(
 		llm: deps.llm,
 		logger: deps.logger,
 		conversationRetrieval: deps.conversationRetrieval,
+		timezone: deps.timezone,
 	});
 
 	const askClassification = await classifyPASMessage(

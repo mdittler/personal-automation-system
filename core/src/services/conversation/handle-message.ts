@@ -172,6 +172,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		llm: deps.llm,
 		logger: deps.logger,
 		conversationRetrieval: deps.conversationRetrieval,
+		timezone: deps.timezone,
 	});
 
 	let systemPrompt: string;

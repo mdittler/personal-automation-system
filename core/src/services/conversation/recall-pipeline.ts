@@ -21,6 +21,8 @@ export interface RecallPipelineDeps {
 	llm: LLMService;
 	logger: AppLogger;
 	conversationRetrieval: ConversationRetrievalService | undefined;
+	/** IANA timezone; used to compute today's local date for the classifier. Default: system. */
+	timezone?: string;
 }
 
 /**
@@ -45,24 +47,29 @@ export async function runRecallPipeline(
 	if (preFilter.skip) return [];
 
 	try {
+		// Compute today's local date (YYYY-MM-DD) for the classifier prompt.
+		// Chunk G will thread timezone through more precisely; for now use Intl.
+		const today = new Intl.DateTimeFormat('en-CA', {
+			timeZone: deps.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+		}).format(new Date());
+
 		const verdict = await classifyRecallIntent(message, {
 			llm: deps.llm,
 			logger: deps.logger,
+			today,
 		});
 		if (!verdict.shouldRecall || !verdict.query) return [];
 
 		const { terms } = buildUntrustedQuery(verdict.query);
 		if (terms.length === 0) return [];
 
+		// Full timeAnchor-to-filter logic is implemented in Chunk G.
+		// For now: null anchor = no temporal filter (14-day fallback removed).
 		const result = await retrieval.searchSessions({
 			queryTerms: terms,
 			limitSessions: 5,
 			limitMessagesPerSession: 3,
 			excludeSessionIds: activeSessionId ? [activeSessionId] : [],
-			startedAfter:
-				verdict.timeWindow === 'recent'
-					? new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
-					: undefined,
 		});
 		return result.hits;
 	} catch (err) {
