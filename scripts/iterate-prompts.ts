@@ -52,6 +52,7 @@ interface TestCase {
 
 interface CaseResult {
 	index: number;
+	meta: TestCaseMeta;
 	prompt: string;
 	reply: string;
 	oracle: OracleResult;
@@ -629,23 +630,23 @@ async function main(): Promise<void> {
 					`\nCost cap exceeded ($${cumulativeCostUsd.toFixed(4)} > $${COST_CAP_USD}). Aborting after this call.`,
 				);
 				const oracle = testCase.oracle(reply);
-				results.push({ index: i + 1, prompt: testCase.prompt, reply, oracle });
+				results.push({ index: i + 1, meta: testCase.meta, prompt: testCase.prompt, reply, oracle });
 				break;
 			}
 
 			const oracle = testCase.oracle(reply);
-			results.push({ index: i + 1, prompt: testCase.prompt, reply, oracle });
+			results.push({ index: i + 1, meta: testCase.meta, prompt: testCase.prompt, reply, oracle });
 		}
 
 		// ---------------------------------------------------------------------------
 		// Print results table
 		// ---------------------------------------------------------------------------
 
-		const header = '| # | Prompt (60 chars) | Reply (240 chars) | Oracle |';
-		const sep = '|---|---|---|---|';
+		const header = '| # | id (bucket) | Prompt (60 chars) | Reply (240 chars) | Oracle |';
+		const sep = '|---|---|---|---|---|';
 		const rows = results.map((r) => {
 			const passStr = r.oracle.pass ? '✅ PASS' : '❌ FAIL';
-			return `| ${r.index} | ${truncate(r.prompt, 60)} | ${truncate(r.reply, 240)} | ${passStr} |`;
+			return `| ${r.index} | ${r.meta.id} (${r.meta.bucket}) | ${truncate(r.prompt, 60)} | ${truncate(r.reply, 240)} | ${passStr} |`;
 		});
 
 		console.log(header);
@@ -663,7 +664,7 @@ async function main(): Promise<void> {
 			console.log('\nFAILED CASES:');
 			for (const f of failed) {
 				console.log(
-					`\nCase ${f.index}: ${f.prompt}\nOracle reason: ${f.oracle.reason}\nFull reply:\n${f.reply}`,
+					`\nCase ${f.index} [${f.meta.id}] (${f.meta.bucket}): ${f.prompt}\nOracle reason: ${f.oracle.reason}\nFull reply:\n${f.reply}`,
 				);
 			}
 		}

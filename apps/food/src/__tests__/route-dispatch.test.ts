@@ -1,18 +1,5 @@
 /**
- * Route-dispatch integration tests (LLM Enhancement #2, Chunk A — Task A4).
- *
- * RED phase behaviour:
- * - handleMessage does NOT yet call dispatchByRoute.
- * - Group 1 tests: route is ignored, ambiguous text hits no regex, the fallback
- *   help message ("I'm not sure what you'd like to do") is sent.
- *   Assertions require the help message was NOT sent → tests FAIL in RED.
- * - Group 2 + Group 3: existing regex cascade fires → correct handler calls
- *   telegram.send → tests PASS in RED.
- *
- * After Task A5 wires dispatchByRoute into handleMessage:
- * - Group 1: route fires correct handler → non-help message → tests PASS (GREEN).
- * - Group 2 + Group 3: deferred/non-manifest intents still fall through to regex
- *   (dispatchByRoute returns false for intents not in ROUTE_HANDLERS) → PASS.
+ * Route-dispatch integration tests (LLM Enhancement #2, Chunk A).
  */
 
 import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing';
