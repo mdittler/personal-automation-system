@@ -6,17 +6,21 @@
  * capturing logger.warn calls.
  */
 
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { vi } from 'vitest';
+import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
+import type {
+	ChatSessionFrontmatter,
+	ChatSessionStore,
+	SessionTurn,
+} from '../chat-session-store.js';
 import { composeChatSessionStore } from '../compose.js';
-import type { ChatSessionStore, ChatSessionFrontmatter, SessionTurn } from '../chat-session-store.js';
-import { decode } from '../transcript-codec.js';
+import { decode, encodeAppend, encodeNew } from '../transcript-codec.js';
 
 const FROZEN = new Date('2026-01-01T12:00:00Z');
 
@@ -45,9 +49,20 @@ export interface StoreFixture {
 	 */
 	ensure(opts: { userId: string }): Promise<{ sessionId: string | undefined }>;
 	/** Read + decode the raw session file directly (bypasses the store). */
-	readDecoded(userId: string, sessionId: string): Promise<{ meta: ChatSessionFrontmatter; turns: SessionTurn[] }>;
+	readDecoded(
+		userId: string,
+		sessionId: string,
+	): Promise<{ meta: ChatSessionFrontmatter; turns: SessionTurn[] }>;
 	/** Overwrite the session file with garbage YAML to simulate corruption. */
 	corruptSessionFile(userId: string, sessionId: string): Promise<void>;
+	/** Delete the session file from disk without modifying the active-sessions index. */
+	deleteSessionFile(userId: string, sessionId: string): Promise<void>;
+	/**
+	 * Write ended_at into the transcript WITHOUT clearing the active-sessions index.
+	 * Simulates the race window where endActive has written the transcript but not yet
+	 * cleared the index lock (P1 guard scenario).
+	 */
+	markSessionEndedInTranscriptOnly(userId: string, sessionId: string): Promise<void>;
 	/** Array of all strings captured from logger.warn calls. */
 	warnings: string[];
 	/** Raw temp dir (for afterEach cleanup). */
@@ -73,7 +88,9 @@ export async function makeStoreFixture(): Promise<StoreFixture> {
 		clock: () => FROZEN,
 	});
 
-	async function ensure({ userId }: { userId: string }): Promise<{ sessionId: string | undefined }> {
+	async function ensure({
+		userId,
+	}: { userId: string }): Promise<{ sessionId: string | undefined }> {
 		const sessionKey = `agent:main:telegram:dm:${userId}`;
 		const { sessionId } = await store.appendExchange(
 			{ userId, sessionKey },
@@ -95,10 +112,62 @@ export async function makeStoreFixture(): Promise<StoreFixture> {
 	async function corruptSessionFile(userId: string, sessionId: string): Promise<void> {
 		// Locate the file within the DataStore directory structure.
 		// DataStoreServiceImpl writes to <dataDir>/users/<userId>/chatbot/conversation/sessions/<sessionId>.md
-		const filePath = join(tempDir, 'users', userId, 'chatbot', 'conversation', 'sessions', `${sessionId}.md`);
+		const filePath = join(
+			tempDir,
+			'users',
+			userId,
+			'chatbot',
+			'conversation',
+			'sessions',
+			`${sessionId}.md`,
+		);
 		// Write garbage that decode() will reject as corrupt YAML
 		await writeFile(filePath, '---\nnot: [valid\n yaml: {\n---\ncorrupt body\n');
 	}
 
-	return { store, ensure, readDecoded, corruptSessionFile, warnings, tempDir };
+	async function deleteSessionFile(userId: string, sessionId: string): Promise<void> {
+		const filePath = join(
+			tempDir,
+			'users',
+			userId,
+			'chatbot',
+			'conversation',
+			'sessions',
+			`${sessionId}.md`,
+		);
+		await unlink(filePath);
+	}
+
+	async function markSessionEndedInTranscriptOnly(
+		userId: string,
+		sessionId: string,
+	): Promise<void> {
+		const filePath = join(
+			tempDir,
+			'users',
+			userId,
+			'chatbot',
+			'conversation',
+			'sessions',
+			`${sessionId}.md`,
+		);
+		const userStore = data.forUser(userId);
+		const raw = await userStore.read(`conversation/sessions/${sessionId}.md`);
+		const { meta, turns } = decode(raw);
+		meta.ended_at = FROZEN.toISOString();
+		let updated = encodeNew(meta);
+		for (const t of turns) updated = encodeAppend(updated, t);
+		await writeFile(filePath, updated, 'utf-8');
+	}
+
+	return {
+		store,
+		ensure,
+		readDecoded,
+		corruptSessionFile,
+		deleteSessionFile,
+		markSessionEndedInTranscriptOnly,
+		warnings,
+		tempDir,
+	};
 }

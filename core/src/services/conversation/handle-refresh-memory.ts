@@ -1,9 +1,3 @@
-/**
- * /refreshmemory slash command handler — mid-session MemorySnapshot rebuild.
- *
- * REQ-CONV-MEMORY-013..022
- */
-
 import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService } from '../../types/config.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
@@ -31,21 +25,18 @@ export async function handleRefreshMemory(
 	const userId = ctx.userId;
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
-	// Reuse the same buildSnapshot callback pattern as handle-message.ts:143-156 and
-	// handle-ask.ts:168-180, gating pinnedKeys on flush_memory_on_idle_reset.
+	if (!deps.conversationRetrieval) {
+		deps.logger.warn({ userId }, 'refresh-memory: conversationRetrieval not available');
+		await deps.telegram.send(userId, 'Memory refresh deferred — try again later.');
+		return;
+	}
+	const retrieval = deps.conversationRetrieval;
+
 	const buildSnapshot = async (): Promise<MemorySnapshot> => {
-		if (!deps.conversationRetrieval) {
-			return {
-				content: '',
-				status: 'empty',
-				builtAt: new Date().toISOString(),
-				entryCount: 0,
-			};
-		}
 		const flushEnabled = deps.config
 			? await resolveUserBool(deps.config, userId, 'flush_memory_on_idle_reset', false, deps.logger)
 			: false;
-		return deps.conversationRetrieval.buildMemorySnapshot(flushEnabled ? {} : { pinnedKeys: [] });
+		return retrieval.buildMemorySnapshot(flushEnabled ? {} : { pinnedKeys: [] });
 	};
 
 	try {

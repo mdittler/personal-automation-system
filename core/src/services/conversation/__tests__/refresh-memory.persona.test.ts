@@ -22,13 +22,13 @@
  * REQ-CONV-MEMORY-013..022
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { describe, expect, it, vi } from 'vitest';
 import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
+import type { ConversationRetrievalService } from '../../conversation-retrieval/conversation-retrieval-service.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { NoActiveSessionError } from '../../conversation-session/errors.js';
-import type { ConversationRetrievalService } from '../../conversation-retrieval/conversation-retrieval-service.js';
 import { handleRefreshMemory } from '../handle-refresh-memory.js';
 
 // ---------------------------------------------------------------------------
@@ -126,9 +126,7 @@ interface HandleRefreshMemoryDeps {
 	logger: Logger;
 }
 
-function makeDeps(
-	overrides: Partial<HandleRefreshMemoryDeps> = {},
-): HandleRefreshMemoryDeps {
+function makeDeps(overrides: Partial<HandleRefreshMemoryDeps> = {}): HandleRefreshMemoryDeps {
 	return {
 		telegram: makeTelegram(),
 		chatSessions: makeSessionStore(),
@@ -473,12 +471,74 @@ describe('PR8 — pinnedKeys gate', () => {
 		expect(result.content).toBe('callback-content');
 	});
 
-	it('no conversationRetrieval → still calls rebuildMemorySnapshot (deps optional)', async () => {
+	it('no conversationRetrieval → sends deferred message, does NOT call rebuildMemorySnapshot', async () => {
 		const store = makeSessionStore();
-		const deps = makeDeps({ chatSessions: store, conversationRetrieval: undefined });
-		// Should not crash — conversationRetrieval is optional
+		const telegram = makeTelegram();
+		const deps = makeDeps({ chatSessions: store, conversationRetrieval: undefined, telegram });
 		await handleRefreshMemory('', makeCtx(), deps);
-		expect(store.rebuildMemorySnapshot).toHaveBeenCalledOnce();
+		expect(store.rebuildMemorySnapshot).not.toHaveBeenCalled();
+		expect(telegram.send).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.stringContaining('deferred'),
+		);
+	});
+
+	it('flush_memory_on_idle_reset=true → buildSnapshot calls buildMemorySnapshot with {} (no pinnedKeys restriction)', async () => {
+		const snap: MemorySnapshot = {
+			content: 'x',
+			status: 'ok',
+			builtAt: '2026-05-05T00:00:00.000Z',
+			entryCount: 1,
+		};
+		const retrieval = makeRetrieval(snap);
+		const store = makeSessionStore({ rebuildResult: snap });
+		const config = {
+			getOverrides: vi.fn().mockResolvedValue({ flush_memory_on_idle_reset: true }),
+		};
+
+		let capturedBuildSnapshot: (() => Promise<MemorySnapshot>) | undefined;
+		(store.rebuildMemorySnapshot as ReturnType<typeof vi.fn>).mockImplementation(
+			async (_ctx: unknown, opts: { buildSnapshot: () => Promise<MemorySnapshot> }) => {
+				capturedBuildSnapshot = opts.buildSnapshot;
+				return snap;
+			},
+		);
+
+		const deps = makeDeps({ chatSessions: store, conversationRetrieval: retrieval, config });
+		await handleRefreshMemory('', makeCtx(), deps);
+
+		expect(capturedBuildSnapshot).toBeDefined();
+		await capturedBuildSnapshot!();
+		expect(retrieval.buildMemorySnapshot).toHaveBeenCalledWith({});
+	});
+
+	it('flush_memory_on_idle_reset=false → buildSnapshot calls buildMemorySnapshot with { pinnedKeys: [] }', async () => {
+		const snap: MemorySnapshot = {
+			content: 'x',
+			status: 'ok',
+			builtAt: '2026-05-05T00:00:00.000Z',
+			entryCount: 1,
+		};
+		const retrieval = makeRetrieval(snap);
+		const store = makeSessionStore({ rebuildResult: snap });
+		const config = {
+			getOverrides: vi.fn().mockResolvedValue({ flush_memory_on_idle_reset: false }),
+		};
+
+		let capturedBuildSnapshot: (() => Promise<MemorySnapshot>) | undefined;
+		(store.rebuildMemorySnapshot as ReturnType<typeof vi.fn>).mockImplementation(
+			async (_ctx: unknown, opts: { buildSnapshot: () => Promise<MemorySnapshot> }) => {
+				capturedBuildSnapshot = opts.buildSnapshot;
+				return snap;
+			},
+		);
+
+		const deps = makeDeps({ chatSessions: store, conversationRetrieval: retrieval, config });
+		await handleRefreshMemory('', makeCtx(), deps);
+
+		expect(capturedBuildSnapshot).toBeDefined();
+		await capturedBuildSnapshot!();
+		expect(retrieval.buildMemorySnapshot).toHaveBeenCalledWith({ pinnedKeys: [] });
 	});
 });
 

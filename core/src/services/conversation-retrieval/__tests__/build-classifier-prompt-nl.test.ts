@@ -228,3 +228,52 @@ describe('buildClassifierPrompt — helpers are deterministic (REQ-CONV-TEMPORAL
 		expect(p1).not.toBe(p2);
 	});
 });
+
+// ─── P2b: christmasWindow future-date clamp (Codex P2b) ────────────────────────
+
+describe('buildClassifierPrompt — christmasWindow end-date clamp (Codex P2b)', () => {
+	it('today=Dec 25: end is clamped to today (not Dec 27)', () => {
+		const prompt = buildClassifierPrompt('2025-12-25');
+		// rawEnd=2025-12-27 is in the future; should be clamped to today=2025-12-25
+		expect(prompt).toContain('"around Christmas" → window 2025-12-23 to 2025-12-25');
+	});
+
+	it('today=Dec 26: end is clamped to today (not Dec 27)', () => {
+		const prompt = buildClassifierPrompt('2025-12-26');
+		// rawEnd=2025-12-27 is in the future; should be clamped to today=2025-12-26
+		expect(prompt).toContain('"around Christmas" → window 2025-12-23 to 2025-12-26');
+	});
+
+	it('today=Dec 27: end is Dec 27 (exactly today, not clamped)', () => {
+		const prompt = buildClassifierPrompt('2025-12-27');
+		// rawEnd=2025-12-27 equals today; not future, so no clamping
+		expect(prompt).toContain('"around Christmas" → window 2025-12-23 to 2025-12-27');
+	});
+
+	it('today=Dec 28 or later: full ±2-day window 2025-12-23 to 2025-12-27 (not clamped)', () => {
+		const prompt = buildClassifierPrompt('2025-12-30');
+		expect(prompt).toContain('"around Christmas" → window 2025-12-23 to 2025-12-27');
+	});
+});
+
+// ─── P2b: last weekend Sunday anchor fix (Codex P2b) ──────────────────────────
+
+describe('buildClassifierPrompt — last weekend window (Sunday anchor, Codex P2b)', () => {
+	// today=Sunday → lastSunday=today-7, lastSaturday=lastSunday-1 (not today-1)
+	// Without fix: lastSaturday=today-1, lastSunday=today-7 → reversed window (Sat > Sun)
+	// 2026-05-10 is a Sunday (DOW=0)
+	const SUNDAY = '2026-05-10';
+
+	it('today=Sunday: "last weekend" is Sat+Sun of PREVIOUS week, not this week', () => {
+		const prompt = buildClassifierPrompt(SUNDAY);
+		// lastSunday = 2026-05-03 (today-7); lastSat = 2026-05-02 (today-8)
+		expect(prompt).toContain('"last weekend" → window 2026-05-02 to 2026-05-03');
+	});
+
+	it('today=Sunday: "last weekend" end is NOT yesterday (today-1 would be Saturday this week)', () => {
+		const prompt = buildClassifierPrompt(SUNDAY);
+		// Should NOT reference this week's Saturday (2026-05-09) as part of last weekend
+		expect(prompt).not.toContain('"last weekend" → window 2026-05-02 to 2026-05-09');
+		expect(prompt).not.toContain('"last weekend" → window 2026-05-09 to 2026-05-03');
+	});
+});
