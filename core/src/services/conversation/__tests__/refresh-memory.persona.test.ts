@@ -473,12 +473,16 @@ describe('PR8 — pinnedKeys gate', () => {
 		expect(result.content).toBe('callback-content');
 	});
 
-	it('no conversationRetrieval → still calls rebuildMemorySnapshot (deps optional)', async () => {
+	it('no conversationRetrieval → sends deferred message, does NOT call rebuildMemorySnapshot', async () => {
 		const store = makeSessionStore();
-		const deps = makeDeps({ chatSessions: store, conversationRetrieval: undefined });
-		// Should not crash — conversationRetrieval is optional
+		const telegram = makeTelegram();
+		const deps = makeDeps({ chatSessions: store, conversationRetrieval: undefined, telegram });
 		await handleRefreshMemory('', makeCtx(), deps);
-		expect(store.rebuildMemorySnapshot).toHaveBeenCalledOnce();
+		expect(store.rebuildMemorySnapshot).not.toHaveBeenCalled();
+		expect(telegram.send).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.stringContaining('deferred'),
+		);
 	});
 });
 

@@ -25,19 +25,18 @@ export async function handleRefreshMemory(
 	const userId = ctx.userId;
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
+	if (!deps.conversationRetrieval) {
+		deps.logger.warn({ userId }, 'refresh-memory: conversationRetrieval not available');
+		await deps.telegram.send(userId, 'Memory refresh deferred — try again later.');
+		return;
+	}
+	const retrieval = deps.conversationRetrieval;
+
 	const buildSnapshot = async (): Promise<MemorySnapshot> => {
-		if (!deps.conversationRetrieval) {
-			return {
-				content: '',
-				status: 'empty',
-				builtAt: new Date().toISOString(),
-				entryCount: 0,
-			};
-		}
 		const flushEnabled = deps.config
 			? await resolveUserBool(deps.config, userId, 'flush_memory_on_idle_reset', false, deps.logger)
 			: false;
-		return deps.conversationRetrieval.buildMemorySnapshot(flushEnabled ? {} : { pinnedKeys: [] });
+		return retrieval.buildMemorySnapshot(flushEnabled ? {} : { pinnedKeys: [] });
 	};
 
 	try {
