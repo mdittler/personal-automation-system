@@ -13,16 +13,18 @@ import type { AlertDefinition } from '../../types/alert.js';
 import type { AppKnowledgeBaseService, KnowledgeEntry } from '../../types/app-knowledge.js';
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
-import type { ContextEntry, ContextStoreService } from '../../types/context-store.js';
 import type { SystemConfig } from '../../types/config.js';
+import type { ContextEntry, ContextEntryKind, ContextStoreService } from '../../types/context-store.js';
+import { CONTEXT_ENTRY_KINDS, DURABLE_KINDS } from '../../types/context-store.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
 import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
 import type { ReportDefinition } from '../../types/report.js';
 import type { SystemInfoService } from '../../types/system-info.js';
-import type { MemorySnapshot } from '../../types/conversation-session.js';
+import type { ChatTranscriptIndex, SearchResult } from '../chat-transcript-index/index.js';
+import { CONTEXT_INTERNAL_BYPASS } from '../context-store/index.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
-import type { ChatTranscriptIndex, SearchResult } from '../chat-transcript-index/index.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
 import { chooseSources } from './source-selection.js';
@@ -146,8 +148,12 @@ export interface ConversationRetrievalService {
 	 * Build a frozen MemorySnapshot from durable ContextStore entries.
 	 * Called at session-mint time, before the first prompt is assembled.
 	 * Requires a userId in the current requestContext.
+	 *
+	 * @param opts.pinnedKeys - Keys to guarantee inclusion at the front of the snapshot.
+	 * @param opts.kinds - Override the entry-kind filter. Defaults to DURABLE_KINDS when
+	 *   strict_durable_kinds is true, otherwise CONTEXT_ENTRY_KINDS (all 6 kinds).
 	 */
-	buildMemorySnapshot(opts?: { pinnedKeys?: string[] }): Promise<MemorySnapshot>;
+	buildMemorySnapshot(opts?: { pinnedKeys?: string[]; kinds?: ContextEntryKind[] }): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────
@@ -325,7 +331,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 	}
 
 	async buildMemorySnapshot(
-		opts: { pinnedKeys?: string[] } = {},
+		opts: { pinnedKeys?: string[]; kinds?: ContextEntryKind[] } = {},
 	): Promise<MemorySnapshot> {
 		const userId = this.assertRequestContext('buildMemorySnapshot');
 		const BUDGET = 4_000;
@@ -333,9 +339,17 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		const builtAt = new Date().toISOString();
 		const pinned = opts.pinnedKeys ?? ['recent-session-summary'];
 
+		const strictDurable = this.deps.systemConfig?.chat?.memory?.strict_durable_kinds === true;
+		const defaultKinds = strictDurable ? DURABLE_KINDS : CONTEXT_ENTRY_KINDS;
+		const kinds = opts.kinds ?? defaultKinds;
+
 		let entries: ContextEntry[];
 		try {
-			entries = await this.deps.contextStore!.listForUser(userId);
+			// biome-ignore lint/style/noNonNullAssertion: contextStore is required for buildMemorySnapshot (callers wire it)
+			entries = await this.deps.contextStore!.listDurableForUser(userId, {
+				kinds: [...kinds],
+				bypass: CONTEXT_INTERNAL_BYPASS,
+			});
 		} catch (err) {
 			this.deps.logger?.warn(
 				'buildMemorySnapshot: ContextStore read failed — returning degraded snapshot: %s',
