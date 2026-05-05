@@ -12,7 +12,7 @@ import type { PhotoSummary } from '@pas/core/types';
 
 const MAX_FIELD_LEN = 80;
 const MAX_STORE_LEN = 100;
-const MAX_TOP_ITEMS = 10;
+const MAX_TOP_ITEMS = 30;
 
 /**
  * Strip control chars, zero-width/bidi chars, and prompt-fence-like tags.
@@ -44,20 +44,25 @@ export function buildReceiptSummary(parsed: ParsedReceipt): PhotoSummary {
 	const itemCount = parsed.lineItems.length;
 	const total = Number.isFinite(parsed.total) ? parsed.total : 0;
 
-	const topItems = parsed.lineItems
-		.slice(0, MAX_TOP_ITEMS)
+	const itemsToShow = parsed.lineItems.slice(0, MAX_TOP_ITEMS);
+	const remainingCount = parsed.lineItems.length - itemsToShow.length;
+	const topItems = itemsToShow
 		.map((item: ReceiptLineItem) => {
 			const name = sanitizePhotoField(item.name);
 			const price = Number.isFinite(item.totalPrice) ? ` — $${item.totalPrice.toFixed(2)}` : '';
 			return `- ${name}${price}`;
 		})
 		.join('\n');
+	const moreMarker =
+		remainingCount > 0
+			? `\n… and ${remainingCount} more (say "show all items" to see the rest)`
+			: '';
 
 	const parts = [
 		`🧾 Receipt captured: ${store} — ${date}`,
 		`${itemCount} items, total $${total.toFixed(2)}`,
 	];
-	if (topItems) parts.push(`Items:\n${topItems}`);
+	if (topItems) parts.push(`Items:\n${topItems}${moreMarker}`);
 
 	return { userTurn: '[Photo: receipt]', assistantTurn: parts.join('\n') };
 }

@@ -69,7 +69,9 @@ export const PHOTO_SUMMARY_GUIDANCE =
 	'that appears in the transcript, and do not claim to have directly inspected ' +
 	'the original image — your access is to the extracted summary, not the photo. ' +
 	'If the summary genuinely lacks the requested detail, say so once and stop — ' +
-	'do not reverse course within a single exchange.';
+	'do not reverse course within a single exchange. ' +
+	'If a photo summary lists fewer items than the stated count, the full data is on disk; ' +
+	'offer to retrieve it — do NOT invent reasons for the truncation.';
 
 /** Max chars for app metadata section in prompt. */
 const MAX_APP_METADATA_CHARS = 2000;

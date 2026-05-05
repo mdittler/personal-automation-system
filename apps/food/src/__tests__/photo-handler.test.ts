@@ -855,7 +855,7 @@ describe('Photo Handler', () => {
 			expect(result?.photoSummary?.assistantTurn).toContain('$30.11');
 		});
 
-		it('caps top items at 10', async () => {
+		it('includes all items when count is 15 (≤30 threshold)', async () => {
 			const lineItems = Array.from({ length: 15 }, (_, i) => ({
 				name: `Item ${i}`,
 				quantity: 1,
@@ -873,8 +873,11 @@ describe('Photo Handler', () => {
 			const { services } = createMockServices(receiptJson);
 			const result = await handlePhoto(services, createPhotoCtx('receipt'));
 			const summary = result?.photoSummary?.assistantTurn ?? '';
-			expect(summary).toContain('Item 9');
-			expect(summary).not.toContain('Item 10');
+			// All 15 items should appear — cap is 30
+			for (let i = 0; i < 15; i++) {
+				expect(summary).toContain(`Item ${i}`);
+			}
+			expect(summary).not.toMatch(/and \d+ more/i);
 		});
 
 		it('returns receipt photoSummary with date in the assistantTurn', async () => {

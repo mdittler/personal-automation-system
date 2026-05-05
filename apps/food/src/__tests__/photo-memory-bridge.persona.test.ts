@@ -25,6 +25,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { PHOTO_SUMMARY_GUIDANCE } from '../../../../core/src/services/conversation/prompt-builder.js';
 import { createPersonaEnv } from './helpers/persona-env.js';
 
 // ─── Scenario 1: Receipt → ask about specific items ─────────────────────────
@@ -103,9 +104,9 @@ describe('Scenario 1: receipt → ask about specific item present', () => {
 				lineItems: items,
 			});
 			const prompt = await env.sendAskAndCaptureLLMPrompt('whats on the receipt');
-			// buildReceiptSummary slices the first 10 items (MAX_TOP_ITEMS = 10)
-			// so index 9 = "Distinctive Item Name 9" must appear
+			// All 21 items should be present (MAX_TOP_ITEMS = 30, so no truncation for ≤30)
 			expect(prompt).toContain('Distinctive Item Name 9');
+			expect(prompt).toContain('Distinctive Item Name 20');
 		} finally {
 			await env.teardown();
 		}
@@ -317,4 +318,40 @@ describe('Scenario 6: grocery list photo → ask about it', () => {
 			}
 		},
 	);
+});
+
+// ─── Scenario 7: PHOTO_SUMMARY_GUIDANCE regression guard ─────────────────────
+
+describe('Scenario 7: PHOTO_SUMMARY_GUIDANCE regression guard', () => {
+	it('PHOTO_SUMMARY_GUIDANCE contains counter-instruction against invented truncation', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).toContain('do NOT invent reasons for the truncation');
+	});
+});
+
+// ─── Scenario 8: receipt with 21 items — all items in prompt ─────────────────
+
+describe('Scenario 8: receipt with 21 items — all items in prompt', () => {
+	it('prompt contains all 21 item names after receipt upload', async () => {
+		const env = await createPersonaEnv();
+		try {
+			const lineItems = Array.from({ length: 21 }, (_, i) => ({
+				name: `UniqueItem${i + 1}`,
+				quantity: 1,
+				unitPrice: 1.0 + i * 0.01,
+				totalPrice: 1.0 + i * 0.01,
+			}));
+			await env.uploadReceipt({
+				store: 'Big Store',
+				date: '2026-05-01',
+				total: lineItems.reduce((sum, item) => sum + item.totalPrice, 0),
+				lineItems,
+			});
+			const prompt = await env.sendAskAndCaptureLLMPrompt('what did I buy?');
+			for (let i = 1; i <= 21; i++) {
+				expect(prompt).toContain(`UniqueItem${i}`);
+			}
+		} finally {
+			await env.teardown();
+		}
+	});
 });
