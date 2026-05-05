@@ -32,3 +32,13 @@ Development open items (deferred phases, corrections, proposals) are tracked in 
 - [x] **Choose a GUI auth token** — Set in `.env`
 - [ ] **Set the webhook URL** — Configure the Telegram bot webhook to point to your Cloudflare Tunnel URL. Not needed for local dev (polling mode).
 - [ ] **Pull the Ollama model** — `docker compose exec ollama ollama pull llama3.2:3b` (optional — system works without Ollama)
+
+## Upgrade Steps
+
+### Hermes P1 (2026-04-26)
+
+- [ ] **Remove deprecated `defaults.fallback` from `config/pas.yaml`** — The key is silently ignored as of D.4, but can be safely deleted. If you want daily-notes on by default for all new users, add `chat: log_to_notes: true` to `config/pas.yaml` instead. Per-user preference (`/notes on`/`/notes off`) always wins.
+
+### Shadow Classifier Telemetry Baseline (2026-05-05)
+
+- [ ] **Restart PAS** — The contaminated shadow log was archived to `data/system/food/shadow-classifier-log.archive-2026-05-05.md`. Restart PAS so it creates a fresh `shadow-classifier-log.md` and begins accumulating clean telemetry. After ≥1 week of usage, run `pnpm analyze-shadow-log` to evaluate the flip.
