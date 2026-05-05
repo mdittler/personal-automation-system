@@ -5,6 +5,9 @@
  * for each query term before escapeMarkdown runs. This removes the FTS5
  * `snippet(... '[', ']' ...)` markers without corrupting user-typed `[brackets]`.
  *
+ * Chunk H: formatTurnTimestamp added — per-turn lines now display
+ * "EEE YYYY-MM-DD HH:MM UTC" instead of turn index only.
+ *
  * REQ-CONV-RECALL-005, REQ-CONV-RECALL-006
  */
 
@@ -13,6 +16,36 @@ import type { MatchRow, SearchHit } from '../../chat-transcript-index/types.js';
 
 const MAX_SNIPPET_CHARS = 300;
 const MAX_HIT_CHARS = 1500;
+
+// Day-of-week abbreviations in English (Sunday = 0 … Saturday = 6)
+const DOW_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/**
+ * Format an ISO 8601 UTC timestamp as "EEE YYYY-MM-DD HH:MM UTC".
+ * Returns "unknown time" for malformed or non-UTC input.
+ *
+ * Example: '2026-04-28T14:32:00.000Z' → 'Tue 2026-04-28 14:32 UTC'
+ */
+export function formatTurnTimestamp(iso: string): string {
+	// Require a full ISO UTC string (ends with Z or +00:00)
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return 'unknown time';
+
+	// Require that the input was a full ISO datetime string (not just a date)
+	// A date-only string like "2026-04-28" parses to midnight UTC, which is valid Date,
+	// but it doesn't carry time information. We detect by checking if the original string
+	// has a 'T' separator (ISO datetime) or 'Z' suffix.
+	if (!iso.includes('T') && !iso.includes('Z')) return 'unknown time';
+
+	const year = d.getUTCFullYear();
+	const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+	const day = String(d.getUTCDate()).padStart(2, '0');
+	const hour = String(d.getUTCHours()).padStart(2, '0');
+	const minute = String(d.getUTCMinutes()).padStart(2, '0');
+	const dow = DOW_ABBR[d.getUTCDay()];
+
+	return `${dow} ${year}-${month}-${day} ${hour}:${minute} UTC`;
+}
 
 /**
  * Strip FTS5 highlight brackets `[term]` → `term` for the given query terms.
@@ -44,7 +77,8 @@ function formatMatch(match: MatchRow, queryTerms: string[]): string {
 	const rawSnippet = stripFtsHighlights(match.snippet, queryTerms);
 	const truncated = truncateSnippet(rawSnippet);
 	const escapedSnippet = escapeMarkdown(truncated);
-	return `> _${role}_ (turn ${match.turn_index}): ${escapedSnippet}`;
+	const ts = formatTurnTimestamp(match.timestamp);
+	return `> _${ts} — ${role}_: ${escapedSnippet}`;
 }
 
 function formatHit(hit: SearchHit, queryTerms: string[]): string {

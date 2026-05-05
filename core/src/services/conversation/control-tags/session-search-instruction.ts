@@ -18,6 +18,16 @@ If you need to recall what was said in past conversations, you can search them b
 
 Stop your reply immediately after the tag. The system will run the search and then prompt you again with the results inside a <session-search-result> block. You can then complete your reply using the new context.
 
+Supported attributes:
+  query  (required) — the search terms
+  after  (optional) — restrict to messages on or after this date (YYYY-MM-DD)
+  before (optional) — restrict to messages before or on this date (YYYY-MM-DD)
+
+To search with date filters:
+  Absolute day: <session-search query="pizza recipe" after="2026-04-28" before="2026-04-29"/>
+  Date window:  <session-search query="trip" after="2026-04-14" before="2026-04-22"/>
+  No date filter: <session-search query="pasta"/>
+
 Use this only when the user is asking about specific past discussions. Do not use it for general or factual questions.
 `.trim();
 

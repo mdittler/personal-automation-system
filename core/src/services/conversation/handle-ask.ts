@@ -307,22 +307,38 @@ export async function handleAsk(
 	// Runs before journal/switch-model/config-set so the second response flows
 	// through the full existing post-processing chain.
 	let workingResponse = response;
-	const { query: toolQuery, beforeTag } = extractSessionSearchTag(workingResponse);
+	const {
+		query: toolQuery,
+		after: toolAfter,
+		before: toolBefore,
+		beforeTag,
+	} = extractSessionSearchTag(workingResponse);
 	if (toolQuery !== null && sessionSearchAllowed && retrieval) {
 		try {
 			const queryTerms = buildUntrustedQuery(toolQuery).terms;
 			if (queryTerms.length > 0) {
+				// Convert after/before date attrs to UTC message-timestamp filter bounds
+				const tz = deps.timezone ?? 'UTC';
+				const { localDayToUtcRange } = await import('../../utils/temporal.js');
+				const messageAfter = toolAfter ? localDayToUtcRange(toolAfter, tz).startUtc : undefined;
+				const messageBefore = toolBefore
+					? localDayToUtcRange(toolBefore, tz).endUtcExclusive
+					: undefined;
 				const search = await retrieval.searchSessions({
 					queryTerms,
 					limitSessions: 5,
 					limitMessagesPerSession: 3,
 					excludeSessionIds: ensuredSessionId ? [ensuredSessionId] : [],
+					messageAfter,
+					messageBefore,
 				});
 				const continuationPrompt = buildToolContinuationPrompt({
 					userMessage: question,
 					assistantPreTag: beforeTag,
 					toolQuery,
 					toolResult: search.hits,
+					toolAfter,
+					toolBefore,
 				});
 				const second = await deps.llm.complete(continuationPrompt, {
 					tier: 'standard',
