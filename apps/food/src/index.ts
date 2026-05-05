@@ -8,7 +8,7 @@
  * Phase H10: Cost tracking — price DB, budget reports, cost annotations.
  */
 
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type {
 	AppModule,
 	CallbackContext,
@@ -299,7 +299,7 @@ export const init: AppModule['init'] = async (s: CoreServices) => {
 	// shadow_sample_rate default 1 = classify every message; set to 0 to disable.
 	initShadowDeps(
 		new FoodShadowClassifier({ llm: s.llm, logger: s.logger, labels: FOOD_SHADOW_LABELS }),
-		new FoodShadowLogger(resolve(process.cwd(), 'data', 'system', 'food')),
+		new FoodShadowLogger(join(s.dataDir, 'system', 'food')),
 	);
 
 	// LLM Enhancement #2 Chunk D: warn once at startup when shadow primary + low sample rate

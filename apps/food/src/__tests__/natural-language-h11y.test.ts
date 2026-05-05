@@ -23,7 +23,7 @@
  * Companion to natural-language-h11w-persona.test.ts and natural-language-h11.test.ts.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
@@ -35,6 +35,11 @@ import {
 } from '../handlers/nutrition.js';
 import { isHostingIntent } from '../handlers/hosting.js';
 import { handleMessage, init } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Section 1: isTargetsSetIntent — recognises target-setting phrasings ─────
 

@@ -789,6 +789,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 				: undefined,
 			secrets,
 			config: appConfig,
+			dataDir: config.dataDir,
 			timezone: config.timezone,
 			logger: appLogger,
 		} as CoreServices;

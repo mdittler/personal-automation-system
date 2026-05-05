@@ -19,10 +19,15 @@ import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import type { CoreServices } from '@pas/core/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
 import type { Household, MonthlyMacroLog, QuickMealTemplate, Recipe } from '../types.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
