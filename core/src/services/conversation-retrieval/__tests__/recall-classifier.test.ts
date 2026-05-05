@@ -166,7 +166,7 @@ describe('classifyRecallIntent — malformed output', () => {
 		expect(result.query).toBeNull();
 	});
 
-	it('rejects legacy timeWindow field (P5 clean break) — but valid query returns safe default due to timeAnchor missing', async () => {
+	it('tolerates legacy top-level timeWindow field (top-level extras are accepted)', async () => {
 		// Old format: has timeWindow but no timeAnchor → timeAnchor is undefined → treated as null (ok)
 		// Actually: timeWindow is a top-level extra field (tolerated), and timeAnchor undefined → null
 		const raw = JSON.stringify({

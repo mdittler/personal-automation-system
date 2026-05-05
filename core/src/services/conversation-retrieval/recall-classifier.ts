@@ -205,6 +205,8 @@ function validateTimeAnchor(
 		if (after !== undefined) {
 			if (typeof after !== 'string') return INVALID_ANCHOR;
 			if (!isCalendarStrict(after)) return INVALID_ANCHOR;
+			// after must not be in the future
+			if (after > today) return INVALID_ANCHOR;
 		}
 
 		// Validate before when present

@@ -210,6 +210,15 @@ describe('parseRecallVerdict — window anchor rejections', () => {
 		})).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
+	it('rejects after-only window where after is in the future', () => {
+		expect(parse({
+			shouldRecall: true,
+			query: 'food',
+			timeAnchor: { type: 'window', after: '2027-01-01' },
+			reason: 'bad',
+		})).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
 	it('rejects window span >365 days: after=2024-01-01, before=2026-01-01', () => {
 		expect(parse({
 			shouldRecall: true,
