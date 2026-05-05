@@ -296,7 +296,7 @@ describe('shadow-primary router integration (Chunk D)', () => {
 		});
 		__setShadowDepsForTests(stub, captureLogger);
 
-		await handleMessage(
+		const result = await handleMessage(
 			createTestMessageContext({
 				userId: 'user1',
 				text: 'zxcvbnmasdfghjkl completely random',
@@ -305,8 +305,10 @@ describe('shadow-primary router integration (Chunk D)', () => {
 		await __flushShadowForTests();
 
 		expect(stub.callCount).toBe(1);
+		// Food returns {handled:false} — no help text sent; router forwards to chatbot
+		expect(result).toEqual({ handled: false });
 		const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
-		expect(sends.some(([, msg]) => msg.startsWith(HELP_MSG))).toBe(true);
+		expect(sends.some(([, msg]) => msg.startsWith(HELP_MSG))).toBe(false);
 
 		const e = lastEntry();
 		expect(e.regexWinner).toBe('help_fallthrough');

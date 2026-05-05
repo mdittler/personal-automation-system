@@ -175,16 +175,13 @@ describe('H12a persona — end-to-end routing', () => {
 		expect(msg as string).toMatch(/more data|not enough|need.*data|track/i);
 	});
 
-	it('"how does my food affect my sleep" sends error message when LLM fails', async () => {
+	it('"how does my diet affect my health" sends error message when LLM fails', async () => {
 		// Simulate LLM failure so correlateHealth returns null → handler sends "ran into an issue"
+		// Note: "sleep" is biometric-excluded; use "health" which is matched by isHealthCorrelationIntent
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
-		const ctx = createTestMessageContext({ userId: 'user1', text: 'how does my food affect my sleep' });
+		const ctx = createTestMessageContext({ userId: 'user1', text: 'how does my diet affect my health' });
 		await handleMessage(ctx);
-		// The handler sends either an error message (null) or needs-more-data (empty [])
-		// With no nutrition/health data, we get [] first — to isolate the null path we need
-		// the correlator to get past the data check. Since the mock store returns null for all
-		// reads, correlator always gets empty data → returns [] → needs-more-data message.
-		// This test documents the routing is reached; the null path is unit-tested in health-correlator.test.ts
+		// correlateHealth catches the LLM rejection → returns null → handler sends error message
 		const [_uid, msg] = vi.mocked(services.telegram.send).mock.calls[0]!;
 		expect(typeof msg).toBe('string');
 		expect((msg as string).length).toBeGreaterThan(0);

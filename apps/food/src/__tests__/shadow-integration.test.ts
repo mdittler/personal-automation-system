@@ -187,16 +187,18 @@ describe('Shadow classifier integration (Chunk C)', () => {
     // Test 3 — Help fallback + both-none
     // =========================================================================
 
-    it('both-none: unrecognised text falls to help, shadow also says none', async () => {
+    it('both-none: unrecognised text returns {handled:false}, shadow also says none', async () => {
         const stubClassifier = makeStubClassifier({ kind: 'ok', action: 'none', confidence: 0.3 });
         __setShadowDepsForTests(stubClassifier, captureLogger);
 
         const ctx = createTestMessageContext({ userId: 'user1', text: 'zxcvbnmasdfghjkl' });
-        await handleMessage(ctx);
+        const result = await handleMessage(ctx);
         await __flushShadowForTests();
 
+        // Food returns {handled:false} — no help text sent; router forwards to chatbot
+        expect(result).toEqual({ handled: false });
         const sends = vi.mocked(services.telegram.send).mock.calls as [string, string][];
-        expect(sends.some(([, msg]) => msg.startsWith(HELP_MSG))).toBe(true);
+        expect(sends.some(([, msg]) => msg.startsWith(HELP_MSG))).toBe(false);
 
         expect(captureLogger.entries).toHaveLength(1);
         expect(captureLogger.entries[0]!.verdict).toBe('both-none');

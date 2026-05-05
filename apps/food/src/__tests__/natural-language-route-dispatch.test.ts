@@ -507,10 +507,10 @@ describe('natural-language-route-dispatch persona tests', () => {
 			expect(vi.mocked(services.telegram.send)).toHaveBeenCalled();
 		});
 
-		it('leftover-add NOT allowlisted — "leftover chicken soup in the fridge" at 0.95 → leftover-add via regex', async () => {
+		it('leftover-add NOT allowlisted — "I have leftover chicken soup" at 0.95 → leftover-add via regex', async () => {
 			const ctx = createTestMessageContext({
 				userId: 'matt',
-				text: 'leftover chicken soup in the fridge',
+				text: 'I have leftover chicken soup',
 				route: makeRoute('user wants to log leftovers', { confidence: 0.95 }),
 			});
 			await handleMessage(ctx);
