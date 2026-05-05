@@ -21,7 +21,7 @@
 import { rm } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MemorySnapshot } from '../../../types/conversation-session.js';
-import { NoActiveSessionError } from '../errors.js';
+import { NoActiveSessionError, SessionCasMismatchError } from '../errors.js';
 import { makeStoreFixture } from './fixtures.js';
 
 const USER = 'u1';
@@ -291,8 +291,7 @@ describe('RB-5 — Transcript file missing', () => {
 		fixtures.push(f);
 		const { sessionId } = await f.ensure({ userId: USER });
 
-		// Corrupt the file (codec will reject it, simulating "missing/corrupt")
-		await f.corruptSessionFile(USER, sessionId!);
+		await f.deleteSessionFile(USER, sessionId!);
 
 		await expect(
 			f.store.rebuildMemorySnapshot(ctx, {
@@ -511,5 +510,52 @@ describe('RB-9 — Field preservation (REQ-CONV-MEMORY-022)', () => {
 
 		const { turns: after } = await f.readDecoded(USER, sessionId!);
 		expect(after).toEqual(before);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// RB-10 — P1 guard: ended_at in transcript under multi-lock → SessionCasMismatchError
+// ---------------------------------------------------------------------------
+
+describe('RB-10 — ended_at in transcript detected under lock (P1 guard)', () => {
+	const fixtures: Array<{ tempDir: string }> = [];
+	afterEach(async () => {
+		for (const f of fixtures.splice(0)) await rm(f.tempDir, { recursive: true, force: true });
+	});
+
+	it('throws SessionCasMismatchError when transcript has ended_at but index still shows session active', async () => {
+		const f = await makeStoreFixture();
+		fixtures.push(f);
+		const { sessionId } = await f.ensure({ userId: USER });
+
+		// Simulate the P1 race: endActive wrote ended_at to transcript but hasn't cleared the index yet.
+		await f.markSessionEndedInTranscriptOnly(USER, sessionId!);
+
+		await expect(
+			f.store.rebuildMemorySnapshot(ctx, {
+				buildSnapshot: async () => snapshot(),
+				expectedSessionId: sessionId!,
+			}),
+		).rejects.toBeInstanceOf(SessionCasMismatchError);
+	});
+
+	it('does not overwrite transcript when ended_at is found under lock', async () => {
+		const f = await makeStoreFixture();
+		fixtures.push(f);
+		const { sessionId } = await f.ensure({ userId: USER });
+
+		await f.markSessionEndedInTranscriptOnly(USER, sessionId!);
+		const { meta: before } = await f.readDecoded(USER, sessionId!);
+
+		await f.store
+			.rebuildMemorySnapshot(ctx, {
+				buildSnapshot: async () => snapshot({ content: 'should-not-appear' }),
+				expectedSessionId: sessionId!,
+			})
+			.catch(() => {});
+
+		const { meta: after } = await f.readDecoded(USER, sessionId!);
+		expect(after.memory_snapshot?.content).not.toBe('should-not-appear');
+		expect(after.memory_snapshot).toEqual(before.memory_snapshot);
 	});
 });

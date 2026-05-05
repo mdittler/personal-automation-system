@@ -6,7 +6,7 @@
  * capturing logger.warn calls.
  */
 
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, vi } from 'vitest';
@@ -16,7 +16,7 @@ import { DataStoreServiceImpl } from '../../data-store/index.js';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { composeChatSessionStore } from '../compose.js';
 import type { ChatSessionStore, ChatSessionFrontmatter, SessionTurn } from '../chat-session-store.js';
-import { decode } from '../transcript-codec.js';
+import { decode, encodeNew, encodeAppend } from '../transcript-codec.js';
 
 const FROZEN = new Date('2026-01-01T12:00:00Z');
 
@@ -48,6 +48,14 @@ export interface StoreFixture {
 	readDecoded(userId: string, sessionId: string): Promise<{ meta: ChatSessionFrontmatter; turns: SessionTurn[] }>;
 	/** Overwrite the session file with garbage YAML to simulate corruption. */
 	corruptSessionFile(userId: string, sessionId: string): Promise<void>;
+	/** Delete the session file from disk without modifying the active-sessions index. */
+	deleteSessionFile(userId: string, sessionId: string): Promise<void>;
+	/**
+	 * Write ended_at into the transcript WITHOUT clearing the active-sessions index.
+	 * Simulates the race window where endActive has written the transcript but not yet
+	 * cleared the index lock (P1 guard scenario).
+	 */
+	markSessionEndedInTranscriptOnly(userId: string, sessionId: string): Promise<void>;
 	/** Array of all strings captured from logger.warn calls. */
 	warnings: string[];
 	/** Raw temp dir (for afterEach cleanup). */
@@ -100,5 +108,21 @@ export async function makeStoreFixture(): Promise<StoreFixture> {
 		await writeFile(filePath, '---\nnot: [valid\n yaml: {\n---\ncorrupt body\n');
 	}
 
-	return { store, ensure, readDecoded, corruptSessionFile, warnings, tempDir };
+	async function deleteSessionFile(userId: string, sessionId: string): Promise<void> {
+		const filePath = join(tempDir, 'users', userId, 'chatbot', 'conversation', 'sessions', `${sessionId}.md`);
+		await unlink(filePath);
+	}
+
+	async function markSessionEndedInTranscriptOnly(userId: string, sessionId: string): Promise<void> {
+		const filePath = join(tempDir, 'users', userId, 'chatbot', 'conversation', 'sessions', `${sessionId}.md`);
+		const userStore = data.forUser(userId);
+		const raw = await userStore.read(`conversation/sessions/${sessionId}.md`);
+		const { meta, turns } = decode(raw);
+		meta.ended_at = FROZEN.toISOString();
+		let updated = encodeNew(meta);
+		for (const t of turns) updated = encodeAppend(updated, t);
+		await writeFile(filePath, updated, 'utf-8');
+	}
+
+	return { store, ensure, readDecoded, corruptSessionFile, deleteSessionFile, markSessionEndedInTranscriptOnly, warnings, tempDir };
 }

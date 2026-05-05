@@ -693,6 +693,11 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 					);
 				}
 				const { meta, turns } = decode(raw); // throws CorruptTranscriptError if corrupt
+				if (meta.ended_at) {
+					throw new SessionCasMismatchError(
+						`Session ${sessionId} was ended during rebuild`,
+					);
+				}
 				meta.memory_snapshot = toMemorySnapshotFrontmatter(snapshot);
 				meta.last_activity_at = this.now().toISOString();
 				let next = encodeNew(meta);
