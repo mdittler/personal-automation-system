@@ -2871,6 +2871,36 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 ---
 
+## Food Receipt/Price TDD Batches 0–6 + Post-TDD Simplify Pass (2026-05-05)
+
+**Delivered**: Bug closure for receipt/price query handlers + chatbot+DataQuery generalization.
+
+**Batches 0–6** (`ecc6c2b`–`6b7d04a` on `hermes-receipt-tdd`):
+- Batch 0: `receipt-query.ts` service isolation, `formatReceiptDetails` 4096-char length guard, `isValidPriceEntry` warning on malformed price entries, shadow taxonomy expansion
+- Batch 1: Receipt date validator (`isValidReceiptDate`, calendar-strict, 90-day window) + `capturedAt` as sort authority
+- Batch 2: Receipt summary integrity — hallucination counter-instruction injected into `formatReceiptDetails` prompt
+- Batch 3: `HandlerResult` void contract — food `handleMessage` yields `{handled:false}` to chatbot fallback for unhandled free-text (RC1); 16 existing tests updated
+- Batch 4: Regex tightening (`EXPLICIT_RECEIPT_RE`, `PRICE_LOOKUP_EXCLUDE_RE`, `STORE_SPENDING_RE`, `ITEM_STOPWORDS`) + DataQuery verb expansion to cover receipt/price/spending phrasings (RC2–RC6)
+- Batch 5: Chatbot+DataQuery generalization (RC7) — PAS classifier pre-filter for price/receipt/spending intent, `formatDataAnswer` shared utility in `core/src/utils/`, chatbot path handles these questions when no deterministic match fires
+- Batch 6: Codex polish — `formatReceiptDetails` guard confirmed at 4096 chars, `isValidPriceEntry` warning confirmed on rejection path
+
+**Post-TDD simplify pass** (commits `2fb70c1`, `f40ed7a`, `0689d44`, `67a0378`, `7457987`):
+- `HandlerResult = void | {handled:boolean}` — unblocked `pnpm -r build` (echo + notes apps return `Promise<void>`)
+- Compile-time regression test in `core/src/types/__tests__/handler-result.test.ts`
+- 5 pre-existing TS errors in `apps/food/src/services/price-store.ts` fixed
+- Stale RED/GREEN/RC# comments stripped from 7 test files
+- 4 inline `requireHousehold` + `telegram.send` blocks collapsed to `requireHouseholdOrMessage(ctx)`
+- Gate/executor split: `handleReceiptQueryIfIntent` / `handlePriceLookupIfIntent` / `handleStoreSpendingIfIntent` replaced by `isXIntent()` + `executeX()` returning `ExecuteOutcome`; `force` param removed
+- `writeSeedData(dataDir, householdId)` — fixed household-scope path (`data/households/<id>/shared/food/`); seeded data now actually read at runtime
+- `TestCaseMeta` interface + `meta` field on all 10 `iterate-prompts.ts` TEST_CASES (stable IDs, bucket, oracleKind, expectedRoute, seedPointer, coversFiles) for Chunk-C migration to `regression/fixtures/`
+- Both untracked regression/settings specs committed; Bucket 2 v0-corpus paragraph updated in persona-regression-suite-design.md
+- Two new `docs/open-items.md` entries: deterministic-filter chain inversion (Confirmed Phases) + `formatCheapestPriceAnswer` unit-price metadata (Unfinished Corrections)
+- Codex corrections: corpus spec line range + IDs corrected, route-dispatch.test.ts stale comment stripped, `CaseResult` carries `meta`
+
+**Tests**: 409 files / 9136 passing / 10 skipped / 1 todo.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
