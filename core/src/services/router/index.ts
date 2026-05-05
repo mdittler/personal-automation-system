@@ -609,6 +609,10 @@ export class Router {
 				await this.dispatchConversationCommand('recall', parsed.args, ctx);
 				return;
 			}
+			if (parsed.command === '/refreshmemory' || parsed.command === '/refresh-memory') {
+				await this.dispatchConversationCommand('refresh-memory', parsed.args, ctx);
+				return;
+			}
 		}
 
 		const result = lookupCommand(parsed, this.commandMap);
@@ -805,7 +809,7 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall',
+		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
@@ -822,6 +826,8 @@ export class Router {
 					await this.conversationService?.handleNewChat(args, enrichedCtx);
 				else if (name === 'title') await this.conversationService?.handleTitle(args, enrichedCtx);
 				else if (name === 'recall') await this.conversationService?.handleRecall(args, enrichedCtx);
+				else if (name === 'refresh-memory')
+					await this.conversationService?.handleRefreshMemory(args, enrichedCtx);
 				else await this.conversationService?.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -864,6 +870,7 @@ export class Router {
 			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
 			lines.push('  /title [title] — Show or set the current session title');
 			lines.push('  /recall <query> — Search your past conversations');
+			lines.push('  /refreshmemory — Rebuild memory snapshot for the active session');
 			lines.push('');
 		}
 
@@ -877,6 +884,8 @@ export class Router {
 			'/reset',
 			'/title',
 			'/recall',
+			'/refreshmemory',
+			'/refresh-memory',
 		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 

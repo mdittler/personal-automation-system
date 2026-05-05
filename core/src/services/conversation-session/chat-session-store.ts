@@ -1,13 +1,13 @@
 import type { Logger } from 'pino';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
 import type { DataStoreService } from '../../types/data-store.js';
-import { withFileLock } from '../../utils/file-mutex.js';
+import { withFileLock, withMultiFileLock } from '../../utils/file-mutex.js';
 import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 import {
 	parseMemorySnapshotFrontmatter,
 	toMemorySnapshotFrontmatter,
 } from '../prompt-assembly/memory-context.js';
-import { CorruptTranscriptError } from './errors.js';
+import { CorruptTranscriptError, NoActiveSessionError, SessionCasMismatchError } from './errors.js';
 import { mintSessionId } from './session-id.js';
 import { clearActive, getActive, setActiveUnlocked } from './session-index.js';
 import type { ActiveSessionEntry } from './session-index.js';
@@ -135,6 +135,30 @@ export interface ChatSessionStore {
 		title: string,
 		opts?: { skipIfTitled?: boolean },
 	): Promise<{ updated: boolean; title?: string }>;
+
+	/**
+	 * Rebuild the active session's MemorySnapshot in-place.
+	 *
+	 * Double-CAS pattern (REQ-CONV-MEMORY-016, REQ-CONV-MEMORY-017):
+	 *   1. Under index lock: verify active session matches expectedSessionId
+	 *   2. Call buildSnapshot() OUTSIDE all locks
+	 *   3. Under multi-lock (index + transcript, sorted order): re-read index
+	 *      to catch in-flight session changes, then write updated frontmatter
+	 *
+	 * Always writes on success (REQ-CONV-MEMORY-020): built_at always reflects
+	 * the rebuild time even when content is identical to the prior snapshot.
+	 *
+	 * Throws NoActiveSessionError if no session is active.
+	 * Throws SessionCasMismatchError if the active session changed mid-rebuild.
+	 * Propagates buildSnapshot() errors without writing (fail-soft caller contract).
+	 */
+	rebuildMemorySnapshot(
+		ctx: { userId: string; sessionKey: string },
+		opts: {
+			buildSnapshot: () => Promise<MemorySnapshot>;
+			expectedSessionId?: string;
+		},
+	): Promise<MemorySnapshot>;
 }
 
 const SESSION_ID_RE = /^\d{8}_\d{6}_[0-9a-f]{8}$/;
@@ -619,6 +643,70 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 
 		if (updated) return { updated: true, title: sanitized };
 		return { updated: false };
+	}
+
+	async rebuildMemorySnapshot(
+		ctx: { userId: string; sessionKey: string },
+		opts: {
+			buildSnapshot: () => Promise<MemorySnapshot>;
+			expectedSessionId?: string;
+		},
+	): Promise<MemorySnapshot> {
+		const store = this.deps.data.forUser(ctx.userId);
+
+		// Step 1: resolve active session under index lock, then release.
+		let activeId: string | undefined;
+		await withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
+			activeId = (await getActive(store, ctx.userId, ctx.sessionKey))?.id;
+		});
+		if (!activeId) throw new NoActiveSessionError();
+		if (opts.expectedSessionId !== undefined && opts.expectedSessionId !== activeId) {
+			throw new SessionCasMismatchError(
+				`expectedSessionId ${opts.expectedSessionId} does not match active ${activeId}`,
+			);
+		}
+		const sessionId = opts.expectedSessionId ?? activeId;
+
+		// Step 2: build snapshot OUTSIDE all locks (avoids holding locks across LLM calls).
+		const snapshot = await opts.buildSnapshot();
+
+		// Step 3: acquire both locks in sorted order (prevents deadlock with endActive).
+		// Under the locks: CAS-recheck the index, then atomically write the transcript.
+		await withMultiFileLock(
+			[
+				`conversation-session-index:${ctx.userId}`,
+				`conversation-session-transcript:${ctx.userId}:${sessionId}`,
+			],
+			async () => {
+				// CAS recheck: active session must still be the same (REQ-CONV-MEMORY-017).
+				const recheckId = (await getActive(store, ctx.userId, ctx.sessionKey))?.id;
+				if (recheckId !== sessionId) {
+					this.deps.logger.warn(
+						{ userId: ctx.userId, sessionId, recheckId },
+						'rebuild-memory-snapshot: CAS recheck failed — session changed during rebuild',
+					);
+					throw new SessionCasMismatchError(
+						`Session changed during rebuild: expected ${sessionId}, found ${recheckId ?? 'none'}`,
+					);
+				}
+
+				const path = `conversation/sessions/${sessionId}.md`;
+				const raw = await store.read(path);
+				if (raw === '') {
+					throw new Error(
+						`conversation-session: rebuildMemorySnapshot — session file missing for ${sessionId}`,
+					);
+				}
+				const { meta, turns } = decode(raw); // throws CorruptTranscriptError if corrupt
+				meta.memory_snapshot = toMemorySnapshotFrontmatter(snapshot);
+				meta.last_activity_at = this.now().toISOString();
+				let next = encodeNew(meta);
+				for (const t of turns) next = encodeAppend(next, t);
+				await store.write(path, next);
+			},
+		);
+
+		return snapshot;
 	}
 
 	async readSession(

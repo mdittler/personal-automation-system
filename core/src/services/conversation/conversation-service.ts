@@ -7,6 +7,7 @@ import { handleEdit as coreHandleEdit } from './handle-edit.js';
 import { type HandleMessageDeps, handleMessage as coreHandleMessage } from './handle-message.js';
 import { handleNotes as coreHandleNotes } from './handle-notes.js';
 import { handleRecall as coreHandleRecall } from './handle-recall.js';
+import { handleRefreshMemory as coreHandleRefreshMemory } from './handle-refresh-memory.js';
 import { pendingEdits } from './pending-edits.js';
 
 /**
@@ -147,6 +148,16 @@ export class ConversationService {
 		return coreHandleRecall(args, ctx, {
 			conversationRetrieval: this.deps.conversationRetrieval,
 			telegram: this.deps.telegram,
+			logger: this.deps.logger,
+		});
+	}
+
+	async handleRefreshMemory(args: string[], ctx: MessageContext): Promise<void> {
+		return coreHandleRefreshMemory(args.join(' ').trim(), ctx, {
+			telegram: this.deps.telegram,
+			chatSessions: this.deps.chatSessions,
+			conversationRetrieval: this.deps.conversationRetrieval,
+			config: this.deps.config,
 			logger: this.deps.logger,
 		});
 	}
