@@ -2902,6 +2902,63 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 ---
 
+## Hermes P6 — Typed Memory + Temporal Recall (2026-05-05)
+
+**Delivered**: Typed `ContextEntry` kinds, sidecar persistence, `listDurableForUser`, threat-scan hardening, `<memory-kind-set>` LLM tag, `RecallVerdict` / `TimeAnchor` discriminated union, DST-correct UTC temporal range conversion, pipeline message-timestamp filtering, and `<session-search>` any-order attribute parser with `after`/`before` temporal filter support.
+
+**Chunk A — ContextEntryKind enum + kinds-sidecar.ts codec**
+- `ContextEntryKind` string literal union in `core/src/types/context-store.ts`: `user-preference`, `communication-preference`, `environment-fact`, `project-convention`, `household-policy`, `untyped`; `DURABLE_KINDS` excludes `untyped`
+- `kinds-sidecar.ts`: `loadKindsMap` + `setKind`; sidecar at `<context-dir>/.kinds.yaml`; fail-open (corrupt/missing → empty map + warn); invalid kind values skipped + warned
+- `listForUser` now decorates returned `ContextEntry` objects with `kind` from sidecar; absent entries → `untyped`
+- URS REQ-CONV-KIND-001, REQ-CONV-KIND-002
+
+**Chunk B — ContextStore.save(opts) + threat-scan.ts**
+- `ContextStoreService.save(userId, key, content, opts?)` extended with `opts.kind?: ContextEntryKind`; sidecar written atomically after `.md` write
+- `threat-scan.ts` validates content before any write; rejects script tags, iframe, prompt-injection patterns; throws `ContextStoreThreatError` with `pattern` field
+- URS REQ-CONV-KIND-003
+
+**Chunk C — listDurableForUser + SystemConfig.chat.memory.strict_durable_kinds**
+- `listDurableForUser(userId, opts?)` merges `data/system/context/` + `data/users/<userId>/context/`, user wins on key collision, filters to `DURABLE_KINDS`; respects household scoping
+- `SystemConfig.chat.memory.strict_durable_kinds` boolean (default `false`); when `true`, `buildMemorySnapshot` uses `listDurableForUser` instead of `listForUser`
+- URS REQ-CONV-KIND-004
+
+**Chunk D — buildMemorySnapshot narrowing**
+- `buildMemorySnapshot` respects `strict_durable_kinds` config flag; when enabled, only durable-kind entries enter the 4000-char budget window
+- `pinnedKeys` carried forward from P8b (`['recent-session-summary']`) still included regardless of kind filtering
+- URS REQ-CONV-MEMORY-004 adaptation note updated
+
+**Chunk E — `<memory-kind-set>` control tag**
+- `memory-kind-set.ts` in `control-tags/`: `MEMORY_KIND_INTENT_REGEX` + `MEMORY_KIND_SET_TAG_REGEX` + `processMemoryKindSetTags`
+- Self-closing form `<memory-kind-set key="..." kind="..."/>` only; unknown key/kind → rejected; tag stripped from final response
+- Gated by intent regex requiring memory-management phrasing before injection into system prompt
+- URS REQ-CONV-KIND-005
+
+**Chunk F — RecallVerdict TimeAnchor + parseRecallVerdict**
+- `TimeAnchor` discriminated union: `null` | `{type:'absolute'; on:string}` | `{type:'window'; after?:string; before?:string}`
+- `parseRecallVerdict(raw, opts)` validates LLM JSON; `RECALL_SAFE_DEFAULT` (`shouldRecall:false`) on any violation; future dates rejected; spans > `maxWindowDays` (365) rejected; `after > before` rejected
+- `isCalendarStrict(s)` validates YYYY-MM-DD including calendar correctness (rejects Feb 30 etc.)
+- URS REQ-CONV-TEMPORAL-001
+
+**Chunk G — Pipeline + message-timestamp filtering**
+- `timeAnchorToFilters(anchor, tz)` in `recall-pipeline.ts`: converts `TimeAnchor` to `{messageAfter?, messageBefore?}` UTC bounds using `localDayToUtcRange`
+- `localDayToUtcRange(date, tz)` in `core/src/utils/temporal.ts`: DST-correct binary-search via `Intl.DateTimeFormat`; returns `{startUtc, endUtcExclusive}`
+- `runRecallPipeline` passes `messageAfter`/`messageBefore` to `searchSessions`; null anchor → no window (legacy 14-day window removed)
+- URS REQ-CONV-TEMPORAL-002, REQ-CONV-TEMPORAL-003
+
+**Chunk H — `<session-search>` attr parser + /recall reply formatting**
+- `session-search-tag.ts` replaced fixed-order regex with `TAG_OUTER + ATTR_RE` any-order attribute parser; `after`/`before` attrs added to `SessionSearchTagResult`; unknown/duplicate attrs → `rejectAll`; calendar-invalid or after>before → `rejectAll`
+- `SESSION_SEARCH_INSTRUCTION_BLOCK` updated with `after`/`before` documentation and examples
+- `buildToolContinuationPrompt` surfaces applied filters in result fence label: `session-search-result query="..." after="..." before="..."`; `escapeAttrValue` helper for XML attribute safety
+- `handle-message.ts` + `handle-ask.ts`: destructure `after`/`before` from tag; convert to UTC via `localDayToUtcRange`; pass to `searchSessions` and continuation prompt
+- `formatTurnTimestamp(iso)` in `recall-reply.ts`: `DOW_ABBR` lookup + `'Tue 2026-04-28 14:32 UTC'` format; `formatRecallReply` now prefixes each turn with `> _<ts> — <Role>_:`
+- URS REQ-CONV-TEMPORAL-004, REQ-CONV-TEMPORAL-005, REQ-CONV-TEMPORAL-006
+
+**Tests**: 432 test files / 9590 tests passing / 10 skipped / 1 todo (net +284 tests / +16 test files vs P5 carry-forwards baseline). New test files: `session-search-tag.attr.test.ts` (42 tests), `recall-reply.test.ts` (20 tests), `recall-temporal.persona.test.ts` (34 tests), `kinds-sidecar.test.ts` (9), `context-entry-decoration.test.ts` (7), `context-store-save.integration.test.ts` (15), `list-durable-for-user.test.ts` (12), `memory-kind-set.test.ts` (25), `recall-pipeline.translate.test.ts` (11), `parse-recall-verdict.test.ts` (31), `recall-classifier.test.ts` (22), `temporal.test.ts` (15), plus `recall-temporal.persona.test.ts`.
+
+**URS requirements**: REQ-CONV-KIND-001..005, REQ-CONV-TEMPORAL-001..006 (11 new requirements).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

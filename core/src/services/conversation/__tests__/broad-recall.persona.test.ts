@@ -435,7 +435,7 @@ describe('P5 — cross-user denial: user B cannot see user A data in prompt', ()
 			'matt',
 			'food-prefs',
 			"Matt's grocery list preference: always buy organic",
-			CONTEXT_INTERNAL_BYPASS,
+			{ bypass: CONTEXT_INTERNAL_BYPASS },
 		);
 
 		// Seed Bob's context entry
@@ -443,7 +443,7 @@ describe('P5 — cross-user denial: user B cannot see user A data in prompt', ()
 			'bob',
 			'food-prefs',
 			"Bob's preference: budget shopping",
-			CONTEXT_INTERNAL_BYPASS,
+			{ bypass: CONTEXT_INTERNAL_BYPASS },
 		);
 
 		retrieval = new ConversationRetrievalServiceImpl({

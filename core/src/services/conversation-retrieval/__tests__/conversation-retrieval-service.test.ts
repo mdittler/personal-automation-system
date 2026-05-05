@@ -337,7 +337,7 @@ describe('ConversationRetrievalServiceImpl — searchData', () => {
 
 describe('ConversationRetrievalServiceImpl — listContextEntries', () => {
 	const mockEntries: ContextEntry[] = [
-		{ key: 'food-prefs', content: 'I like pasta', lastUpdated: new Date() },
+		{ key: 'food-prefs', content: 'I like pasta', lastUpdated: new Date(), kind: 'untyped' },
 	];
 	const mockContextStore = {
 		listForUser: vi.fn().mockResolvedValue(mockEntries),
@@ -797,10 +797,10 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 
 		// User1's context store returns specific data
 		const user1Entries: ContextEntry[] = [
-			{ key: 'u1-key', content: 'user1 content', lastUpdated: new Date() },
+			{ key: 'u1-key', content: 'user1 content', lastUpdated: new Date(), kind: 'untyped' },
 		];
 		const user2Entries: ContextEntry[] = [
-			{ key: 'u2-key', content: 'user2 content', lastUpdated: new Date() },
+			{ key: 'u2-key', content: 'user2 content', lastUpdated: new Date(), kind: 'untyped' },
 		];
 		deps1.contextStore.listForUser.mockResolvedValue(user1Entries);
 		deps2.contextStore.listForUser.mockResolvedValue(user2Entries);
@@ -840,13 +840,23 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 
 describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	function makeEntry(key: string, content: string): ContextEntry {
-		return { key, content, lastUpdated: new Date('2026-01-01') };
+		return { key, content, lastUpdated: new Date('2026-01-01'), kind: 'untyped' as const };
+	}
+
+	/**
+	 * Build a minimal contextStore mock that satisfies the listDurableForUser call
+	 * made by buildMemorySnapshot. Entries are returned as-is (no kind filtering)
+	 * to keep these tests focused on snapshot behaviour, not kind filtering.
+	 */
+	function makeContextStore(entries: ContextEntry[]) {
+		return {
+			listForUser: vi.fn().mockResolvedValue(entries),
+			listDurableForUser: vi.fn().mockResolvedValue(entries),
+		};
 	}
 
 	it('returns status:empty when ContextStore has no entries', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([]),
-		} as never;
+		const contextStore = makeContextStore([]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('empty');
@@ -855,11 +865,9 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('returns status:ok with rendered content for non-empty store', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([
-				makeEntry('food-prefs', 'I prefer metric units'),
-			]),
-		} as never;
+		const contextStore = makeContextStore([
+			makeEntry('food-prefs', 'I prefer metric units'),
+		]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('ok');
@@ -869,13 +877,11 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('sorts entries alphabetically by key for determinism', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([
-				makeEntry('zebra', 'z'),
-				makeEntry('alpha', 'a'),
-				makeEntry('middle', 'm'),
-			]),
-		} as never;
+		const contextStore = makeContextStore([
+			makeEntry('zebra', 'z'),
+			makeEntry('alpha', 'a'),
+			makeEntry('middle', 'm'),
+		]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		const alphaIdx = result.content.indexOf('## alpha');
@@ -886,11 +892,9 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('produces byte-identical output on consecutive calls with identical input', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([
-				makeEntry('pref', 'Celsius'),
-			]),
-		} as never;
+		const contextStore = makeContextStore([
+			makeEntry('pref', 'Celsius'),
+		]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const a = await withUserId('u1', () => service.buildMemorySnapshot());
 		const b = await withUserId('u1', () => service.buildMemorySnapshot());
@@ -899,12 +903,10 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 
 	it('truncates content exceeding 4000 chars, appends durable marker, and stays within budget', async () => {
 		const longContent = 'x'.repeat(3000);
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([
-				makeEntry('aaa', longContent),
-				makeEntry('bbb', longContent),
-			]),
-		} as never;
+		const contextStore = makeContextStore([
+			makeEntry('aaa', longContent),
+			makeEntry('bbb', longContent),
+		]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('ok');
@@ -915,11 +917,9 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 
 	it('includes partial content when the first entry alone exceeds the budget', async () => {
 		const hugeContent = 'x'.repeat(5000);
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([
-				makeEntry('huge', hugeContent),
-			]),
-		} as never;
+		const contextStore = makeContextStore([
+			makeEntry('huge', hugeContent),
+		]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('ok');
@@ -932,6 +932,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	it('returns status:degraded when ContextStore throws', async () => {
 		const contextStore = {
 			listForUser: vi.fn().mockRejectedValue(new Error('disk read failed')),
+			listDurableForUser: vi.fn().mockRejectedValue(new Error('disk read failed')),
 		} as never;
 		const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore, logger });
@@ -950,9 +951,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('sets builtAt to an ISO 8601 timestamp', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([makeEntry('k', 'v')]),
-		} as never;
+		const contextStore = makeContextStore([makeEntry('k', 'v')]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
@@ -970,7 +969,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 			makeEntry('aaa-5', bigContent),
 			makeEntry('recent-session-summary', 'Alice prefers tea over coffee.'),
 		];
-		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const contextStore = makeContextStore(entries) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.content).toContain('## recent-session-summary');
@@ -983,7 +982,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 			makeEntry('bbb', 'bbb content'),
 			makeEntry('recent-session-summary', 'summary content'),
 		];
-		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const contextStore = makeContextStore(entries) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		const idxRecent = result.content.indexOf('## recent-session-summary');
@@ -996,7 +995,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 			makeEntry('bbb', 'bbb content'),
 			makeEntry('aaa', 'aaa content'),
 		];
-		const contextStore = { listForUser: vi.fn().mockResolvedValue(entries) } as never;
+		const contextStore = makeContextStore(entries) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		const idxAaa = result.content.indexOf('## aaa');
@@ -1006,9 +1005,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('interface accepts opts (compile-time: ConversationRetrievalService.buildMemorySnapshot)', async () => {
-		const contextStore = {
-			listForUser: vi.fn().mockResolvedValue([makeEntry('recent-session-summary', 'prev session')]),
-		} as never;
+		const contextStore = makeContextStore([makeEntry('recent-session-summary', 'prev session')]) as never;
 		// Use interface-typed reference to confirm opts are exposed on the interface.
 		const svc: ConversationRetrievalService = new ConversationRetrievalServiceImpl({ contextStore });
 		const withPinning = await withUserId('u1', () => svc.buildMemorySnapshot({}));

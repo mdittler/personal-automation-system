@@ -181,6 +181,15 @@ export interface SystemConfig {
 	chat?: {
 		/** System-wide default for daily-notes opt-in. Per-user override always wins. Default: false. */
 		logToNotes: boolean;
+		/** Memory snapshot settings. */
+		memory?: {
+			/**
+			 * When true, only typed (non-`untyped`) ContextStore entries are included
+			 * in the durable memory snapshot. Untyped entries are silently excluded.
+			 * Default: false (untyped entries are included for backward compat).
+			 */
+			strict_durable_kinds?: boolean;
+		};
 		/** Transcript retention settings. */
 		sessions?: {
 			/**

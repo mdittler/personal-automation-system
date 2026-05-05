@@ -4987,7 +4987,7 @@ Each hit is formatted as: `*<title>* — <YYYY-MM-DD>` on line 1; `Session: \`<Y
 
 **Phase:** Hermes P5-CF | **Status:** Implemented
 
-`extractSessionSearchTag` uses `SESSION_SEARCH_TAG_REGEX = /<session-search\s+query="([^"<>]{1,200})"\s*\/>/i` (self-closing only). Paired form `<session-search query="x"></session-search>` returns `query: null` and both tags are stripped by `stripSessionSearchTags`.
+`extractSessionSearchTag` uses `TAG_OUTER = /<session-search\s+([^<>]+?)\s*\/>/i` (self-closing only) plus an `ATTR_RE` global regex to walk key="value" pairs. Only `query`, `after`, and `before` are allowed; unknown/duplicate attrs invoke `rejectAll`. Paired form `<session-search query="x"></session-search>` returns `query: null` and both tags are stripped by `stripSessionSearchTags`. The attr parser is specified in REQ-CONV-TEMPORAL-004 (Hermes P6).
 
 **Edge case tests** (`session-search-tag.test.ts`):
 - `paired form <session-search query="x"></session-search> → query: null (not supported)`
@@ -5000,7 +5000,7 @@ Each hit is formatted as: `*<title>* — <YYYY-MM-DD>` on line 1; `Session: \`<Y
 
 **Phase:** Hermes P5-CF | **Status:** Implemented
 
-The regex character class `[^"<>]{1,200}` rejects queries containing quotes, angle brackets, or exceeding 200 characters at the regex level. After extraction, `sanitizeQuery` strips zero-width and bidi characters; an empty result returns `null`. Queries containing only control or bidi characters are rejected.
+`ATTR_RE` captures `query` values up to 200 chars via `[^"<>]{1,200}`, rejecting embedded angle brackets or values exceeding the cap. After extraction, `sanitizeQuery` strips zero-width and bidi characters; an empty result returns `null`. Queries containing only control or bidi characters are rejected.
 
 **Edge case tests** (`session-search-tag.test.ts`):
 - `query containing " character → null (regex rejects)`
@@ -5114,6 +5114,220 @@ The re-prompt driver runs immediately after the first LLM call's error-handling 
 - `conversationRetrieval=undefined: tag stripped, single LLM call`
 - `hasSessionSearch=false: tag stripped, single LLM call, no search`
 - `config=undefined: tag stripped, single LLM call`
+
+---
+
+## Track D — Typed Memory + Temporal Recall (Hermes P6)
+
+### REQ-CONV-KIND-001 — ContextEntry MUST carry a `kind` field drawn from the ContextEntryKind enum
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`ContextEntryKind` is a string literal union (`user-preference`, `communication-preference`, `environment-fact`, `project-convention`, `household-policy`, `untyped`) exported from `core/src/types/context-store.ts`. `CONTEXT_ENTRY_KINDS` is the companion read-only array; `DURABLE_KINDS` is the 5-element subset that excludes `untyped`. The `kind` field is persisted in a `.kinds.yaml` sidecar file (not in the `.md` frontmatter) managed by `kinds-sidecar.ts`.
+
+**Standard tests** (`kinds-sidecar.test.ts`):
+- `returns correct entries for valid .kinds.yaml`
+- `setKind writes a new entry to .kinds.yaml`
+- `setKind overwrites an existing entry`
+
+**Edge case tests** (`kinds-sidecar.test.ts`):
+- `returns empty map for missing directory`
+- `returns empty map for missing .kinds.yaml`
+- `returns empty map for corrupt YAML and logs a warning`
+- `skips entries with invalid kind values and logs a warning`
+
+---
+
+### REQ-CONV-KIND-002 — `listForUser` MUST decorate returned `ContextEntry` objects with `kind` from the sidecar
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`ContextStoreServiceImpl.listForUser` reads the `.kinds.yaml` sidecar after loading entries and decorates each `ContextEntry` with its stored kind. Entries absent from the sidecar receive `kind: 'untyped'`.
+
+**Standard tests** (`context-entry-decoration.test.ts`):
+- `decorates entries with kind from sidecar`
+- `falls back to "untyped" when no sidecar entry exists`
+- `listForUser returns entries with correct kind from sidecar`
+
+**Edge case tests** (`context-entry-decoration.test.ts`):
+- `listForUser returns "untyped" when sidecar is absent`
+
+---
+
+### REQ-CONV-KIND-003 — `ContextStoreService.save` MUST accept an optional `kind` and write the sidecar atomically; threat content MUST be rejected before any write
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`ContextStoreService.save(userId, key, content, opts?)` accepts `opts.kind: ContextEntryKind`. When `kind` is provided the sidecar is updated atomically after the `.md` write succeeds. When no `kind` is given the sidecar entry is set to `'untyped'`. `threat-scan.ts` checks `content` before any write; hostile patterns (script tags, prompt-injection) throw `ContextStoreThreatError` and leave both the `.md` file and sidecar untouched.
+
+**Standard tests** (`context-store-save.integration.test.ts`):
+- `T2 — save with kind: 'user-preference' → .md written + sidecar entry = 'user-preference'`
+- `T3 — save without kind opt → sidecar entry = 'untyped'`
+- `T4 — save then listForUser → returned entry has correct kind from sidecar`
+
+**Edge case tests** (`context-store-save.integration.test.ts`):
+- `T1 — throws ContextStoreThreatError for <script> injection`
+- `T1 — throws ContextStoreThreatError with the matched pattern name`
+- `T5 — bypass symbol via opts form { bypass: CONTEXT_INTERNAL_BYPASS } works correctly`
+
+---
+
+### REQ-CONV-KIND-004 — `listDurableForUser` MUST merge system + user entries, with user taking precedence, filtered to DURABLE_KINDS
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`ContextStoreService.listDurableForUser(userId)` reads both `data/system/context/` and `data/users/<userId>/context/`, merges them (user entry wins on key collision), filters to `DURABLE_KINDS` (excludes `untyped`), and respects household scoping. The method also accepts `opts.kinds` to further narrow the filter. When `strict_durable_kinds: true` is set in `SystemConfig.chat.memory`, `buildMemorySnapshot` calls `listDurableForUser` instead of `listForUser`.
+
+**Standard tests** (`list-durable-for-user.test.ts`):
+- `user-only key returned with user's kind`
+- `system-only key returned with system's kind`
+- `same key in both dirs → user wins, user's kind reported`
+- `kinds filter narrows results`
+- `opts.bypass honored (skips actor check)`
+
+**Edge case tests** (`list-durable-for-user.test.ts`):
+- `user dir missing → returns system-only set (no throw)`
+- `system dir missing → returns user-only set (no throw)`
+- `both dirs missing → returns []`
+- `Household-aware routing`
+- `User without household → throws HouseholdBoundaryError`
+
+---
+
+### REQ-CONV-KIND-005 — `<memory-kind-set>` LLM tag MUST update a context entry's kind via `processMemoryKindSetTags`
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`<memory-kind-set key="..." kind="..."/>` is a self-closing LLM control tag processed by `processMemoryKindSetTags` in `memory-kind-set.ts`. It is injected only when `MEMORY_KIND_INTENT_REGEX` matches the user message AND the LLM response contains the tag. Unknown keys are rejected; unknown kind values are rejected; `key` and `kind` attributes are validated before any write. Tags are stripped from the final user-visible response. The tag is gated by an intent regex that requires memory-management phrasing.
+
+**Standard tests** (`memory-kind-set.test.ts`):
+- `processes a valid <memory-kind-set> tag and calls save with the correct kind`
+- `strips the tag from the response text after processing`
+- `MEMORY_KIND_SET_TAG_REGEX matches a valid self-closing tag`
+- `MEMORY_KIND_INTENT_REGEX matches memory-management phrases`
+
+**Edge case tests** (`memory-kind-set.test.ts`):
+- `rejects unknown kind value`
+- `rejects missing key attribute`
+- `rejects missing kind attribute`
+- `is a no-op when no tag is present`
+- `MEMORY_KIND_INTENT_REGEX does not match unrelated messages`
+
+---
+
+### REQ-CONV-TEMPORAL-001 — Recall classifier MUST parse LLM response into a validated `RecallVerdict` with a `TimeAnchor`
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`parseRecallVerdict(raw, opts)` in `recall-classifier.ts` validates LLM JSON into a `RecallVerdict` with `{ shouldRecall: boolean, query: string | null, timeAnchor: TimeAnchor, reason: string }`. `TimeAnchor` is a discriminated union: `null` (no time constraint), `{ type: 'absolute'; on: string }` (single calendar day), or `{ type: 'window'; after?: string; before?: string }` (date range). Invalid shapes fall back to `RECALL_SAFE_DEFAULT` (`shouldRecall: false`). Future dates (any anchor field `> today`) are rejected. Spans exceeding `maxWindowDays` (default 365) are rejected.
+
+**Standard tests** (`parse-recall-verdict.test.ts`):
+- `shouldRecall=true + query + null timeAnchor → verdict returned`
+- `absolute anchor on a past date → verdict returned`
+- `window anchor with after+before → verdict returned`
+- `window anchor with after only → verdict returned`
+
+**Edge case tests** (`parse-recall-verdict.test.ts`):
+- `null raw → RECALL_SAFE_DEFAULT`
+- `shouldRecall=false → verdict with shouldRecall=false`
+- `absolute anchor with future date → RECALL_SAFE_DEFAULT`
+- `window anchor with after in future → RECALL_SAFE_DEFAULT`
+- `window anchor with after > before → RECALL_SAFE_DEFAULT`
+- `window span exceeds maxWindowDays → RECALL_SAFE_DEFAULT`
+- `unknown timeAnchor shape → RECALL_SAFE_DEFAULT`
+
+---
+
+### REQ-CONV-TEMPORAL-002 — `localDayToUtcRange` MUST convert a YYYY-MM-DD calendar day to a UTC `[startUtc, endUtcExclusive)` range using `Intl.DateTimeFormat` DST-correct binary search
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`localDayToUtcRange(date: string, tz: string)` in `core/src/utils/temporal.ts` returns `{ startUtc: string, endUtcExclusive: string }` (ISO strings). `isCalendarStrict(s)` validates YYYY-MM-DD and rejects calendar-impossible dates (e.g., Feb 30). Both are used by `timeAnchorToFilters` in the recall pipeline and by the session-search attribute handler in `handle-message.ts` / `handle-ask.ts` to convert `after`/`before` attrs to UTC message-timestamp bounds.
+
+**Standard tests** (`temporal.test.ts`):
+- `isCalendarStrict: accepts 2026-01-01`
+- `isCalendarStrict: rejects 2026-02-30`
+- `localDayToUtcRange: UTC timezone startUtc = midnight`
+- `localDayToUtcRange: NY timezone — winter offset correct`
+- `localDayToUtcRange: NY timezone — summer DST offset correct`
+
+**Edge case tests** (`temporal.test.ts`):
+- `isCalendarStrict: rejects non-string input`
+- `isCalendarStrict: rejects wrong format`
+- `localDayToUtcRange: throws on invalid date`
+- `localDayToUtcRange: throws on unknown timezone`
+
+---
+
+### REQ-CONV-TEMPORAL-003 — Recall pipeline MUST translate `TimeAnchor` to UTC message-timestamp filters passed to `searchSessions`
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`timeAnchorToFilters(anchor, tz)` in `recall-pipeline.ts` converts a validated `TimeAnchor` to `{ messageAfter?: string; messageBefore?: string }`. A `null` anchor returns `{}` (no filters — no 14-day legacy window). An `absolute` anchor expands the calendar day to `[localDayStart, nextDayStart)` in UTC. A `window` anchor converts each boundary independently. `runRecallPipeline` passes these filters to `searchSessions` as `opts.messageAfter` / `opts.messageBefore`.
+
+**Standard tests** (`recall-pipeline.translate.test.ts`):
+- `null anchor → empty filter object`
+- `absolute anchor UTC → startUtc = T00:00:00.000Z`
+- `absolute anchor NY winter → correct UTC offset`
+- `window anchor {after, before} → both filters set`
+- `window anchor {after only} → only messageAfter set`
+- `runRecallPipeline passes messageAfter/messageBefore to searchSessions`
+
+**Edge case tests** (`recall-pipeline.translate.test.ts`):
+- `window anchor {before only} → only messageBefore set`
+- `empty window anchor {} → empty filter object`
+- `legacy-fallback removed: null anchor does NOT inject 14d window`
+
+---
+
+### REQ-CONV-TEMPORAL-004 — `<session-search>` tag parser MUST accept `after` and `before` attributes in any order; unknown or duplicate attributes MUST cause rejection
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`extractSessionSearchTag` uses `TAG_OUTER = /<session-search\s+([^<>]+?)\s*\/>/i` plus an `ATTR_RE` global regex to collect key="value" pairs. Allowed attributes are `query`, `after`, and `before`. Unknown attributes, duplicate attributes, after/before values that fail `isCalendarStrict`, and `after > before` all invoke `rejectAll(response)` which returns `{ query: null, after: null, before: null, beforeTag: response, raw: null }`. The `after` and `before` values are surfaced on `SessionSearchTagResult` for use by the re-prompt loop.
+
+**Standard tests** (`session-search-tag.attr.test.ts`):
+- `any-order: after before query → all fields extracted`
+- `any-order: query after → query + after returned, before null`
+- `only query attr → after and before are null`
+- `calendar-valid after and before accepted`
+
+**Edge case tests** (`session-search-tag.attr.test.ts`):
+- `unknown attr → query null, beforeTag is full response`
+- `duplicate query attr → null`
+- `after > before → null`
+- `after non-calendar (2026-02-30) → null`
+- `before future date → null`
+
+---
+
+### REQ-CONV-TEMPORAL-005 — Applied `after`/`before` filters MUST be surfaced in the continuation prompt result fence label
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`buildToolContinuationPrompt` in `tool-continuation-prompt.ts` accepts `toolAfter?: string | null` and `toolBefore?: string | null`. When present they are XML-attribute-escaped via `escapeAttrValue` and appended to the result fence label: `session-search-result query="..." after="..." before="..."`. This gives the second LLM call visibility into which filters were applied. When absent the label contains only the query attribute.
+
+**Standard tests** (`recall-reply.test.ts`, `session-search-tag.attr.test.ts`):
+- `buildToolContinuationPrompt: after/before attrs appear in result fence label`
+- `escapeAttrValue: escapes &, ", <, >`
+
+---
+
+### REQ-CONV-TEMPORAL-006 — `/recall` reply MUST prefix each turn with a formatted UTC timestamp in italic `_DOW YYYY-MM-DD HH:MM UTC_:` style
+
+**Phase:** Hermes P6 | **Status:** Implemented
+
+`formatTurnTimestamp(iso: string): string` in `recall-reply.ts` accepts an ISO datetime string and returns `'Tue 2026-04-28 14:32 UTC'` using `DOW_ABBR` (Sun–Sat). Date-only strings (no `T`) and `NaN` dates return `'unknown time'`. `formatRecallReply` prefixes each turn entry with `> _<ts> — <Role>_:`.
+
+**Standard tests** (`recall-reply.test.ts`):
+- `formatTurnTimestamp: returns correct DOW for all 7 weekdays`
+- `formatTurnTimestamp: formats time as HH:MM UTC`
+- `formatRecallReply: turn lines include italic timestamp prefix`
+
+**Edge case tests** (`recall-reply.test.ts`):
+- `formatTurnTimestamp: date-only string (no T) → "unknown time"`
+- `formatTurnTimestamp: invalid ISO → "unknown time"`
+- `formatTurnTimestamp: NaN date → "unknown time"`
 
 ---
 
@@ -8506,5 +8720,16 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
+| REQ-CONV-KIND-002 | context-entry-decoration.test.ts | 3 | 1 | Implemented |
+| REQ-CONV-KIND-003 | context-store-save.integration.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-KIND-004 | list-durable-for-user.test.ts | 5 | 5 | Implemented |
+| REQ-CONV-KIND-005 | memory-kind-set.test.ts | 4 | 5 | Implemented |
+| REQ-CONV-TEMPORAL-001 | parse-recall-verdict.test.ts | 4 | 7 | Implemented |
+| REQ-CONV-TEMPORAL-002 | temporal.test.ts | 5 | 4 | Implemented |
+| REQ-CONV-TEMPORAL-003 | recall-pipeline.translate.test.ts | 6 | 3 | Implemented |
+| REQ-CONV-TEMPORAL-004 | session-search-tag.attr.test.ts | 4 | 5 | Implemented |
+| REQ-CONV-TEMPORAL-005 | recall-reply.test.ts, session-search-tag.attr.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-TEMPORAL-006 | recall-reply.test.ts | 3 | 3 | Implemented |
 
-| **Totals** | **214 test files** | **1650** | **1857** | **3507 tests** |
+| **Totals** | **222 test files** | **1698** | **1896** | **3594 tests** |

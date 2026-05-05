@@ -53,9 +53,9 @@ describe('ConversationRetrievalServiceImpl integration — two-user isolation', 
 		});
 
 		// Seed alice's context entry (bypass actor check — seeding outside a user request)
-		await contextStore.save('alice', 'food-prefs', 'alice likes sushi', CONTEXT_INTERNAL_BYPASS);
+		await contextStore.save('alice', 'food-prefs', 'alice likes sushi', { bypass: CONTEXT_INTERNAL_BYPASS });
 		// Seed bob's context entry
-		await contextStore.save('bob', 'food-prefs', 'bob likes tacos', CONTEXT_INTERNAL_BYPASS);
+		await contextStore.save('bob', 'food-prefs', 'bob likes tacos', { bypass: CONTEXT_INTERNAL_BYPASS });
 	});
 
 	afterEach(async () => {
@@ -201,7 +201,7 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 		interactionContext = new InteractionContextServiceImpl();
 
 		// Seed a context entry for alice
-		await contextStore.save('alice', 'diet-pref', 'vegetarian', CONTEXT_INTERNAL_BYPASS);
+		await contextStore.save('alice', 'diet-pref', 'vegetarian', { bypass: CONTEXT_INTERNAL_BYPASS });
 
 		// Seed a recent interaction for alice
 		interactionContext.record('alice', { appId: 'food', action: 'view-recipe' });

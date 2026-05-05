@@ -2210,7 +2210,7 @@ describe('Natural Language — Real User Messages', () => {
 		it('includes dietary context when user has preferences stored', async () => {
 			setupHousehold();
 			vi.mocked(services.contextStore.searchForUser).mockResolvedValue([
-				{ key: 'dietary', content: 'Matt is allergic to shellfish. Sarah is vegetarian on weekdays.', lastUpdated: new Date() },
+				{ key: 'dietary', content: 'Matt is allergic to shellfish. Sarah is vegetarian on weekdays.', lastUpdated: new Date(), kind: 'untyped' },
 			]);
 
 			await handleMessage(msg('what can I use instead of shrimp'));

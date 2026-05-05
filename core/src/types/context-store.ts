@@ -6,6 +6,27 @@
  * priority over system entries when keys collide.
  */
 
+/** All valid semantic kinds for a context entry. */
+export const CONTEXT_ENTRY_KINDS = [
+	'user-preference',
+	'communication-preference',
+	'environment-fact',
+	'project-convention',
+	'household-policy',
+	'untyped',
+] as const;
+
+export type ContextEntryKind = (typeof CONTEXT_ENTRY_KINDS)[number];
+
+/** Kinds that represent durable, long-lived memory used by `listDurableForUser` to narrow the memory snapshot. */
+export const DURABLE_KINDS: readonly ContextEntryKind[] = [
+	'user-preference',
+	'communication-preference',
+	'environment-fact',
+	'project-convention',
+	'household-policy',
+];
+
 /** A single context store entry. */
 export interface ContextEntry {
 	/** Topic key (matches the filename, e.g. "food-preferences"). */
@@ -14,6 +35,8 @@ export interface ContextEntry {
 	content: string;
 	/** When this entry was last modified. */
 	lastUpdated: Date;
+	/** Semantic kind of this entry. Defaults to 'untyped' when not set in sidecar. */
+	kind: ContextEntryKind;
 }
 
 /** Context store service provided to apps via CoreServices. */
@@ -50,11 +73,38 @@ export interface ContextStoreService {
 	/**
 	 * Save a context entry for a user.
 	 * Creates the file if it doesn't exist, overwrites if it does.
+	 *
+	 * @param opts.kind - Semantic kind to record in the sidecar (defaults to 'untyped').
+	 * @param opts.bypass - Pass `CONTEXT_INTERNAL_BYPASS` to skip the actor-vs-target check.
 	 */
-	save(userId: string, key: string, content: string): Promise<void>;
+	save(
+		userId: string,
+		key: string,
+		content: string,
+		opts?: { kind?: ContextEntryKind; bypass?: symbol },
+	): Promise<void>;
 
 	/**
 	 * Remove a context entry for a user.
 	 */
 	remove(userId: string, key: string): Promise<void>;
+
+	/**
+	 * List all durable context entries for a user, merging user-scoped and
+	 * system-scoped entries (user takes precedence on key collision).
+	 *
+	 * All 6 kinds (CONTEXT_ENTRY_KINDS, including 'untyped') are returned by
+	 * default. Pass `opts.kinds` to narrow — e.g., pass DURABLE_KINDS to
+	 * exclude untyped entries and keep only the 5 typed durable kinds.
+	 *
+	 * Fail-open: if the user directory is missing, returns the system-only set.
+	 * HouseholdBoundaryError from the user-dir resolution is allowed to bubble.
+	 *
+	 * @param opts.kinds - Filter to these kinds only (defaults to CONTEXT_ENTRY_KINDS — all 6 kinds).
+	 * @param opts.bypass - Pass `CONTEXT_INTERNAL_BYPASS` to skip the actor-vs-target check.
+	 */
+	listDurableForUser(
+		userId: string,
+		opts?: { kinds?: ContextEntryKind[]; bypass?: symbol },
+	): Promise<ContextEntry[]>;
 }

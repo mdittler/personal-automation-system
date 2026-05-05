@@ -122,11 +122,10 @@ describe('extractSessionSearchTag — edge cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('extractSessionSearchTag — security', () => {
-	it('query containing " character → null (regex rejects)', () => {
-		// Double quote in query would break the attribute parsing — regex rejects at [^"]
+	it('query containing " character → REJECTED (coverage remainder check detects stray text)', () => {
+		// ATTR_RE extracts query="break" and the remainder "here"" is non-empty.
+		// The coverage-remainder check (P2-4) rejects the tag.
 		const result = extractSessionSearchTag('<session-search query="break "here""/>');
-		// The regex won't match the whole intended tag; query should be null or partial match
-		// Either way, the query containing embedded " must not be extracted as valid
 		expect(result.query).toBeNull();
 	});
 
@@ -173,10 +172,14 @@ describe('extractSessionSearchTag — security', () => {
 		expect(result.beforeTag).not.toContain('<session-search');
 	});
 
-	it('malformed tag with unknown attribute → null, shape removed', () => {
+	it('malformed tag with unknown attribute → null, shape NOT pre-stripped from beforeTag', () => {
+		// Chunk H: rejectAll() returns beforeTag: response (full response) so callers can
+		// use stripSessionSearchTags() on the final working response via the else-path.
 		const result = extractSessionSearchTag('<session-search foo="bar"/> text');
 		expect(result.query).toBeNull();
-		expect(result.beforeTag).not.toContain('<session-search');
+		expect(result.raw).toBeNull();
+		// beforeTag is the full response (including the tag shape); the caller strips via stripSessionSearchTags
+		expect(result.beforeTag).toBe('<session-search foo="bar"/> text');
 	});
 
 	it('query containing ONLY bidi override (U+202E) → null after sanitize', () => {

@@ -41,9 +41,12 @@ import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
 	MEMORY_FLUSH_INTENT_REGEX,
+	MEMORY_KIND_INTENT_REGEX,
+	MEMORY_KIND_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
 	normalizeResponse,
 	processConfigSetTags,
+	processMemoryKindSetTags,
 	processModelSwitchTags,
 } from './control-tags.js';
 import {
@@ -193,6 +196,7 @@ export async function handleAsk(
 		llm: deps.llm,
 		logger: deps.logger,
 		conversationRetrieval: deps.conversationRetrieval,
+		timezone: deps.timezone,
 	});
 
 	const askClassification = await classifyPASMessage(
@@ -258,6 +262,9 @@ export async function handleAsk(
 	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
 	}
+	if (deps.contextStore && MEMORY_KIND_INTENT_REGEX.test(question)) {
+		systemPrompt = `${systemPrompt}\n\n${MEMORY_KIND_SET_INSTRUCTION_BLOCK}`;
+	}
 	const sessionSearchAllowed =
 		deps.config !== undefined &&
 		retrieval?.hasSessionSearch() === true &&
@@ -300,22 +307,38 @@ export async function handleAsk(
 	// Runs before journal/switch-model/config-set so the second response flows
 	// through the full existing post-processing chain.
 	let workingResponse = response;
-	const { query: toolQuery, beforeTag } = extractSessionSearchTag(workingResponse);
+	const {
+		query: toolQuery,
+		after: toolAfter,
+		before: toolBefore,
+		beforeTag,
+	} = extractSessionSearchTag(workingResponse);
 	if (toolQuery !== null && sessionSearchAllowed && retrieval) {
 		try {
 			const queryTerms = buildUntrustedQuery(toolQuery).terms;
 			if (queryTerms.length > 0) {
+				// Convert after/before date attrs to UTC message-timestamp filter bounds
+				const tz = deps.timezone ?? 'UTC';
+				const { localDayToUtcRange } = await import('../../utils/temporal.js');
+				const messageAfter = toolAfter ? localDayToUtcRange(toolAfter, tz).startUtc : undefined;
+				const messageBefore = toolBefore
+					? localDayToUtcRange(toolBefore, tz).endUtcExclusive
+					: undefined;
 				const search = await retrieval.searchSessions({
 					queryTerms,
 					limitSessions: 5,
 					limitMessagesPerSession: 3,
 					excludeSessionIds: ensuredSessionId ? [ensuredSessionId] : [],
+					messageAfter,
+					messageBefore,
 				});
 				const continuationPrompt = buildToolContinuationPrompt({
 					userMessage: question,
 					assistantPreTag: beforeTag,
 					toolQuery,
 					toolResult: search.hits,
+					toolAfter,
+					toolBefore,
 				});
 				const second = await deps.llm.complete(continuationPrompt, {
 					tier: 'standard',
@@ -364,8 +387,19 @@ export async function handleAsk(
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});
-		finalResponse = afterConfigSet;
 		allConfirmations.push(...configConfirmations);
+		finalResponse = afterConfigSet;
+	}
+	if (deps.contextStore) {
+		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
+			await processMemoryKindSetTags(finalResponse, {
+				userId: ctx.userId,
+				userMessage: question,
+				contextStore: deps.contextStore,
+				logger: deps.logger,
+			});
+		allConfirmations.push(...kindConfirmations);
+		finalResponse = afterKindSet;
 	}
 
 	const responseWithConfirmations =

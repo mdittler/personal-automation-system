@@ -87,7 +87,8 @@ export type { EventHandler, EventBusService } from './events.js';
 export type { AudioService } from './audio.js';
 
 // Context Store
-export type { ContextEntry, ContextStoreService } from './context-store.js';
+export type { ContextEntry, ContextEntryKind, ContextStoreService } from './context-store.js';
+export { CONTEXT_ENTRY_KINDS, DURABLE_KINDS } from './context-store.js';
 
 // App Metadata
 export type { AppInfo, CommandInfo, AppMetadataService } from './app-metadata.js';

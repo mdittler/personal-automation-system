@@ -40,28 +40,28 @@ import type { ConversationServiceDeps } from '../conversation-service.js';
 const RECALL_VERDICT_PASTA = JSON.stringify({
 	shouldRecall: true,
 	query: 'pasta',
-	timeWindow: 'recent',
+	timeAnchor: null,
 	reason: 'user asked about past discussion',
 });
 
 const RECALL_VERDICT_PANTRY = JSON.stringify({
 	shouldRecall: true,
 	query: 'pantry',
-	timeWindow: null,
+	timeAnchor: null,
 	reason: 'user asked about prior discussion',
 });
 
 const RECALL_VERDICT_SCHOOL_LUNCHES = JSON.stringify({
 	shouldRecall: true,
 	query: 'school lunches',
-	timeWindow: 'older',
+	timeAnchor: null,
 	reason: 'user asked about historical discussion',
 });
 
 const NO_RECALL_VERDICT = JSON.stringify({
 	shouldRecall: false,
 	query: null,
-	timeWindow: null,
+	timeAnchor: null,
 	reason: 'generic question',
 });
 
@@ -651,11 +651,11 @@ describe('S12 — Pre-household legacy import session', () => {
 			],
 		);
 
-		// Use a verdict with no time window so the 20-days-old session is not filtered out
+		// Use a verdict with no time anchor so the 20-days-old session is not filtered out
 		const recallVerdictNoWindow = JSON.stringify({
 			shouldRecall: true,
 			query: 'pasta',
-			timeWindow: null,
+			timeAnchor: null,
 			reason: 'user asked about past pasta discussion',
 		});
 
@@ -713,7 +713,7 @@ describe('S13 — Hostile content sanitization', () => {
 		const verdictWithHostile = JSON.stringify({
 			shouldRecall: true,
 			query: 'pasta',
-			timeWindow: 'recent',
+			timeAnchor: null,
 			reason: 'past discussion about pasta',
 		});
 
