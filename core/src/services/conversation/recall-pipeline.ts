@@ -80,7 +80,6 @@ export async function runRecallPipeline(
 
 	try {
 		// Compute today's local date (YYYY-MM-DD) for the classifier prompt.
-		// Chunk G will thread timezone through more precisely; for now use Intl.
 		const today = new Intl.DateTimeFormat('en-CA', {
 			timeZone: deps.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
 		}).format(new Date());
