@@ -52,6 +52,10 @@ export interface InternalSearchFilters {
 	limitMessagesPerSession?: number; // default 3
 	startedAfter?: string; // ISO8601 inclusive
 	startedBefore?: string; // ISO8601 exclusive
+	/** Filter on message timestamp (m.timestamp >= messageAfter). ISO8601 UTC inclusive. */
+	messageAfter?: string;
+	/** Filter on message timestamp (m.timestamp < messageBefore). ISO8601 UTC exclusive. */
+	messageBefore?: string;
 	excludeSessionIds?: string[];
 }
 

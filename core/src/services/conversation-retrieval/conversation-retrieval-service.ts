@@ -14,7 +14,11 @@ import type { AppKnowledgeBaseService, KnowledgeEntry } from '../../types/app-kn
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
 import type { SystemConfig } from '../../types/config.js';
-import type { ContextEntry, ContextEntryKind, ContextStoreService } from '../../types/context-store.js';
+import type {
+	ContextEntry,
+	ContextEntryKind,
+	ContextStoreService,
+} from '../../types/context-store.js';
 import { CONTEXT_ENTRY_KINDS, DURABLE_KINDS } from '../../types/context-store.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
 import type { DataQueryResult } from '../../types/data-query.js';
@@ -109,6 +113,10 @@ export interface SessionSearchOpts {
 	limitMessagesPerSession?: number;
 	startedAfter?: string;
 	startedBefore?: string;
+	/** Filter on message timestamp (m.timestamp >= messageAfter). ISO8601 UTC inclusive. */
+	messageAfter?: string;
+	/** Filter on message timestamp (m.timestamp < messageBefore). ISO8601 UTC exclusive. */
+	messageBefore?: string;
 	excludeSessionIds?: string[];
 }
 
@@ -153,7 +161,10 @@ export interface ConversationRetrievalService {
 	 * @param opts.kinds - Override the entry-kind filter. Defaults to DURABLE_KINDS when
 	 *   strict_durable_kinds is true, otherwise CONTEXT_ENTRY_KINDS (all 6 kinds).
 	 */
-	buildMemorySnapshot(opts?: { pinnedKeys?: string[]; kinds?: ContextEntryKind[] }): Promise<MemorySnapshot>;
+	buildMemorySnapshot(opts?: {
+		pinnedKeys?: string[];
+		kinds?: ContextEntryKind[];
+	}): Promise<MemorySnapshot>;
 }
 
 // ─── Structural service interfaces ───────────────────────────────────────────
@@ -326,6 +337,8 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			limitMessagesPerSession: opts.limitMessagesPerSession,
 			startedAfter: opts.startedAfter,
 			startedBefore: opts.startedBefore,
+			messageAfter: opts.messageAfter,
+			messageBefore: opts.messageBefore,
 			excludeSessionIds: opts.excludeSessionIds,
 		});
 	}

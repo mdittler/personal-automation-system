@@ -9,6 +9,7 @@
 
 import type { AppLogger } from '../../types/app-module.js';
 import type { LLMService } from '../../types/llm.js';
+import { localDayToUtcRange } from '../../utils/temporal.js';
 import { buildUntrustedQuery } from '../chat-transcript-index/fts-query.js';
 import type { SearchHit } from '../chat-transcript-index/index.js';
 import type { ConversationRetrievalService } from '../conversation-retrieval/index.js';
@@ -16,6 +17,37 @@ import {
 	classifyRecallIntent,
 	recallPreFilter,
 } from '../conversation-retrieval/recall-classifier.js';
+import type { TimeAnchor } from '../conversation-retrieval/recall-classifier.js';
+
+/**
+ * Translate a validated TimeAnchor into UTC message-timestamp filter bounds.
+ *
+ * - null anchor → no filter (empty object)
+ * - absolute anchor → exact day in the given timezone
+ * - window anchor → open-ended or bounded interval
+ *
+ * @param anchor  Validated TimeAnchor from parseRecallVerdict
+ * @param tz      IANA timezone string (e.g. 'America/New_York', 'UTC')
+ */
+export function timeAnchorToFilters(
+	anchor: TimeAnchor,
+	tz: string,
+): { messageAfter?: string; messageBefore?: string } {
+	if (!anchor) return {};
+
+	if (anchor.type === 'absolute') {
+		const { startUtc, endUtcExclusive } = localDayToUtcRange(anchor.on, tz);
+		return { messageAfter: startUtc, messageBefore: endUtcExclusive };
+	}
+
+	// window
+	return {
+		messageAfter: anchor.after ? localDayToUtcRange(anchor.after, tz).startUtc : undefined,
+		messageBefore: anchor.before
+			? localDayToUtcRange(anchor.before, tz).endUtcExclusive
+			: undefined,
+	};
+}
 
 export interface RecallPipelineDeps {
 	llm: LLMService;
@@ -63,12 +95,15 @@ export async function runRecallPipeline(
 		const { terms } = buildUntrustedQuery(verdict.query);
 		if (terms.length === 0) return [];
 
-		// Full timeAnchor-to-filter logic is implemented in Chunk G.
-		// For now: null anchor = no temporal filter (14-day fallback removed).
+		const tz = deps.timezone ?? 'UTC';
+		const { messageAfter, messageBefore } = timeAnchorToFilters(verdict.timeAnchor, tz);
+
 		const result = await retrieval.searchSessions({
 			queryTerms: terms,
 			limitSessions: 5,
 			limitMessagesPerSession: 3,
+			messageAfter,
+			messageBefore,
 			excludeSessionIds: activeSessionId ? [activeSessionId] : [],
 		});
 		return result.hits;

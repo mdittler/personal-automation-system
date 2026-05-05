@@ -129,7 +129,11 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 		this.maybeCheckpoint();
 	}
 
-	async updateTitle(userId: string, sessionId: string, title: string): Promise<{ updated: boolean }> {
+	async updateTitle(
+		userId: string,
+		sessionId: string,
+		title: string,
+	): Promise<{ updated: boolean }> {
 		let changes = 0;
 		await withSqliteRetry(() => {
 			const txn = this.db.transaction(() => {
@@ -166,6 +170,14 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 		if (filters.startedBefore) {
 			conditions.push('s.started_at < ?');
 			params.push(filters.startedBefore);
+		}
+		if (filters.messageAfter) {
+			conditions.push('m.timestamp >= ?');
+			params.push(filters.messageAfter);
+		}
+		if (filters.messageBefore) {
+			conditions.push('m.timestamp < ?');
+			params.push(filters.messageBefore);
 		}
 		if (filters.excludeSessionIds && filters.excludeSessionIds.length > 0) {
 			const placeholders = filters.excludeSessionIds.map(() => '?').join(', ');
