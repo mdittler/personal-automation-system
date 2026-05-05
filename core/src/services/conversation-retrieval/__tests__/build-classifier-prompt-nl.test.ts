@@ -173,13 +173,12 @@ describe('buildClassifierPrompt — edge case: named month = future if interpret
 
 describe('buildClassifierPrompt — edge case: leap year', () => {
 	// today=2024-02-29 (Thursday, DOW=4)
-	// "last Tuesday" (DOW=2): diff = 4>2 → 4-2=2 days back → 2024-02-27
+	// "last Friday" (DOW=5): 4>5? No → 7-(5-4)=6 days back → 2024-02-23
 	const LEAP_DAY = '2024-02-29';
 
-	it('"last Tuesday" from leap day 2024-02-29 → 2024-02-27', () => {
+	it('"last Friday" from leap day 2024-02-29 → 2024-02-23 (6 days back)', () => {
 		const prompt = buildClassifierPrompt(LEAP_DAY);
-		// last Tuesday from Thursday = 2 days back
-		expect(prompt).toContain('"last Tuesday" → 2024-02-27');
+		expect(prompt).toContain('"last Friday" → 2024-02-23');
 	});
 
 	it('prompt does not contain invalid date "2024-02-30"', () => {
@@ -205,10 +204,11 @@ describe('buildClassifierPrompt — edge case: DST transition', () => {
 		}
 	});
 
-	it('"last Saturday" from Monday 2026-03-09 → 2026-03-07 (2 days back, no DST distortion)', () => {
-		// DOW=1 (Mon), Saturday=6: 1 > 6? No → 7-(6-1)=2 days back
+	it('"last weekend" from Monday 2026-03-09 → window 2026-03-07 to 2026-03-08 (no DST distortion)', () => {
+		// Saturday (DOW=6): Mon(1)>6? No → 7-(6-1)=2 days back → 2026-03-07
+		// Sunday  (DOW=0): Mon(1)>0? Yes → 1-0=1 day back → 2026-03-08
 		const prompt = buildClassifierPrompt(AFTER_DST);
-		expect(prompt).toContain('"last Saturday" → 2026-03-07');
+		expect(prompt).toContain('"last weekend" → window 2026-03-07 to 2026-03-08');
 	});
 });
 

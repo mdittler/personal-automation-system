@@ -105,13 +105,94 @@ function subtractDays(dateStr: string, days: number): string {
 	return d.toISOString().slice(0, 10);
 }
 
+/** Add N calendar days to a YYYY-MM-DD string (UTC noon arithmetic). */
+function addDays(dateStr: string, days: number): string {
+	const d = new Date(`${dateStr}T12:00:00Z`);
+	d.setUTCDate(d.getUTCDate() + days);
+	return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Return the most-recent past occurrence of targetDow (0=Sun…6=Sat) before today.
+ * If today IS that weekday, go back 7 days (REQ-CONV-TEMPORAL-011).
+ */
+function findLastWeekday(today: string, targetDow: number): string {
+	const d = new Date(`${today}T12:00:00Z`);
+	const todayDow = d.getUTCDay();
+	const diff = todayDow > targetDow ? todayDow - targetDow : 7 - (targetDow - todayDow);
+	return subtractDays(today, diff || 7);
+}
+
+/** Return 'YYYY-MM-01' for the first day of today's month. */
+function firstOfMonth(today: string): string {
+	return today.slice(0, 7) + '-01';
+}
+
+/** Return 'YYYY-MM-01' for the first day of the prior calendar month. */
+function firstOfPriorMonth(today: string): string {
+	const d = new Date(`${today}T12:00:00Z`);
+	const year = d.getUTCFullYear();
+	const month = d.getUTCMonth(); // 0-indexed
+	const priorMonth = month === 0 ? 11 : month - 1;
+	const priorYear = month === 0 ? year - 1 : year;
+	return `${String(priorYear).padStart(4, '0')}-${String(priorMonth + 1).padStart(2, '0')}-01`;
+}
+
+/** Return the last calendar day of the given 1-indexed month as a YYYY-MM-DD string. */
+function lastDayOfMonth(year: number, month: number): string {
+	// day 0 of month+1 = last day of month
+	return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * Return {start, end} for "in [Month]" / "during [Month]" phrases.
+ * - current month → from 1st to today (REQ-CONV-TEMPORAL-012)
+ * - prior month in current year → full month
+ * - future month if same year → wrap to prior year (REQ-CONV-TEMPORAL-012)
+ */
+function monthWindow(today: string, targetMonth: number): { start: string; end: string } {
+	const todayYear = Number(today.slice(0, 4));
+	const todayMonth = Number(today.slice(5, 7));
+	const mm = String(targetMonth).padStart(2, '0');
+	if (targetMonth === todayMonth) {
+		return { start: `${todayYear}-${mm}-01`, end: today };
+	}
+	if (targetMonth < todayMonth) {
+		return {
+			start: `${todayYear}-${mm}-01`,
+			end: lastDayOfMonth(todayYear, targetMonth),
+		};
+	}
+	// targetMonth > todayMonth → future in current year → prior year
+	const priorYear = todayYear - 1;
+	return {
+		start: `${priorYear}-${mm}-01`,
+		end: lastDayOfMonth(priorYear, targetMonth),
+	};
+}
+
+/** Return the ±2-day window around the most recent past Christmas (Dec 25). */
+function christmasWindow(today: string): { start: string; end: string } {
+	const year = Number(today.slice(0, 4));
+	const targetYear = `${year}-12-25` > today ? year - 1 : year;
+	return {
+		start: `${targetYear}-12-23`,
+		end: `${targetYear}-12-27`,
+	};
+}
+
 const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTH_NAMES = [
+	'January', 'February', 'March', 'April', 'May', 'June',
+	'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 /** Build dynamic date examples relative to today so the prompt never goes stale. */
 function buildExamples(today: string): string {
 	const d = new Date(`${today}T12:00:00Z`);
 	const dow = d.getUTCDay(); // 0=Sun … 6=Sat
 	const dayName = DOW_NAMES[dow] ?? 'Day';
+	const todayMonth = d.getUTCMonth(); // 0-indexed
 
 	const yesterday = subtractDays(today, 1);
 
@@ -123,6 +204,30 @@ function buildExamples(today: string): string {
 	const twoWeeksStart = subtractDays(today, 19);
 	const twoWeeksEnd = subtractDays(today, 11);
 
+	// ── Phrasing reference helpers ───────────────────────────────────────────
+	const lastFriday = findLastWeekday(today, 5);
+	const dayBeforeYesterday = subtractDays(today, 2);
+	const thisMonthStart = firstOfMonth(today);
+	const lastMonthStart = firstOfPriorMonth(today);
+	const lastMonthMid = addDays(lastMonthStart, 14);
+	const currentMonthName = MONTH_NAMES[todayMonth] ?? 'this month';
+	const currentMonth = monthWindow(today, todayMonth + 1); // 1-indexed
+	// "during [prior month]" — two months before current to avoid overlapping with "earlier last month"
+	const priorMonthIndex = todayMonth === 0 ? 11 : todayMonth === 1 ? 0 : todayMonth - 2;
+	const priorMonthName = MONTH_NAMES[priorMonthIndex] ?? 'earlier';
+	const priorMonth = monthWindow(today, priorMonthIndex + 1); // 1-indexed
+	const coupleWeeksAfter = subtractDays(today, 21);
+	const coupleWeeksBefore = subtractDays(today, 7);
+	const threeWeeksAfter = subtractDays(today, 23);
+	const threeWeeksBefore = subtractDays(today, 16);
+	const xmas = christmasWindow(today);
+	// "in November" — pick a month clearly in the past (10 months before current, wrapping)
+	const novIdx = 10; // November = index 10 (0-based)
+	const novName = MONTH_NAMES[novIdx] ?? 'November';
+	const nov = monthWindow(today, novIdx + 1); // 1-indexed = 11
+	const lastSaturday = findLastWeekday(today, 6);
+	const lastSunday = findLastWeekday(today, 0);
+
 	return (
 		`\nExamples (today = ${today}, ${dayName}):\n` +
 		`- "what did we say last Tuesday about the recipe"\n` +
@@ -132,7 +237,20 @@ function buildExamples(today: string): string {
 		`- "two weeks ago we talked about the trip"\n` +
 		`  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"${twoWeeksStart}","before":"${twoWeeksEnd}"},"reason":"~14 days ago, ±3-day spread"}\n` +
 		`- "what's the weather"\n` +
-		`  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}`
+		`  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}\n` +
+		`\n<phrasing reference> (today = ${today}, ${dayName})\n` +
+		`- "last Friday" → ${lastFriday} (absolute)\n` +
+		`- "the day before yesterday" → ${dayBeforeYesterday} (absolute)\n` +
+		`- "earlier this month" → window ${thisMonthStart} to ${today}\n` +
+		`- "earlier last month" → window ${lastMonthStart} to ${lastMonthMid}\n` +
+		`- "in ${currentMonthName}" → window ${currentMonth.start} to ${currentMonth.end}\n` +
+		`- "during ${priorMonthName}" → window ${priorMonth.start} to ${priorMonth.end}\n` +
+		`- "a couple weeks ago" → window ${coupleWeeksAfter} to ${coupleWeeksBefore}\n` +
+		`- "around Christmas" → window ${xmas.start} to ${xmas.end}\n` +
+		`- "last weekend" → window ${lastSaturday} to ${lastSunday}\n` +
+		`- "three weeks ago" → window ${threeWeeksAfter} to ${threeWeeksBefore}\n` +
+		`- "in ${novName}" → window ${nov.start} to ${nov.end}\n` +
+		`</phrasing reference>`
 	);
 }
 
