@@ -39,17 +39,21 @@ export function buildToolContinuationPrompt(opts: {
 			? formatRecalledSessions(opts.toolResult)
 			: '(No matching conversations found.)';
 
-	// Build the result fence label with optional filter attributes surfaced to the LLM
+	// Build a metadata header line (query/after/before) and prepend it to the fenced content.
+	// The header MUST NOT be embedded in the label="" attribute — that would produce malformed
+	// XML like label="session-search-result query="x" after="y"". Putting it in the body keeps
+	// the opening tag well-formed while still surfacing the filter context to the LLM.
 	const escapedQuery = escapeAttrValue(opts.toolQuery);
 	const after = opts.toolAfter ?? null;
 	const before = opts.toolBefore ?? null;
 
-	let labelAttrs = `query="${escapedQuery}"`;
-	if (after !== null) labelAttrs += ` after="${escapeAttrValue(after)}"`;
-	if (before !== null) labelAttrs += ` before="${escapeAttrValue(before)}"`;
+	let metadataHeader = `query="${escapedQuery}"`;
+	if (after !== null) metadataHeader += ` after="${escapeAttrValue(after)}"`;
+	if (before !== null) metadataHeader += ` before="${escapeAttrValue(before)}"`;
+	const contentWithMeta = `${metadataHeader}\n\n${rawContent}`;
 
-	const resultFence = buildMemoryContextBlock(rawContent, {
-		label: `session-search-result ${labelAttrs}`,
+	const resultFence = buildMemoryContextBlock(contentWithMeta, {
+		label: 'session-search-result',
 		maxChars: 4000,
 		marker: '... (search results truncated)',
 	});

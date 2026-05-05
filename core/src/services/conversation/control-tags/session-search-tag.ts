@@ -92,6 +92,17 @@ export function extractSessionSearchTag(response: string): SessionSearchTagResul
 		attrMatches.push(next);
 	}
 
+	// Full-coverage check: after removing all matched spans, only whitespace may remain.
+	// This rejects tags with unrecognized tokens like <session-search query="x" garbage/>.
+	let coverageRemainder = innerAttrs;
+	for (const am of attrMatches) {
+		const idx = coverageRemainder.indexOf(am[0]);
+		if (idx !== -1) {
+			coverageRemainder = coverageRemainder.slice(0, idx) + coverageRemainder.slice(idx + am[0].length);
+		}
+	}
+	if (coverageRemainder.trim().length > 0) return rejectAll(response);
+
 	const seen = new Set<string>();
 	let query: string | null = null;
 	let after: string | null = null;

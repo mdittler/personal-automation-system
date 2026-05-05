@@ -242,3 +242,93 @@ describe('T5 — opts form { bypass: CONTEXT_INTERNAL_BYPASS } works correctly',
 		).resolves.toBeUndefined();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// P2-7 — runtime kind validation
+// ---------------------------------------------------------------------------
+
+describe('P2-7 — runtime kind validation in save()', () => {
+	it('save with an invalid kind string throws at runtime', async () => {
+		const store = makeStore(tempDir);
+
+		await expect(
+			store.save('alice', 'test-key', 'content', {
+				bypass: CONTEXT_INTERNAL_BYPASS,
+				// Cast to defeat TypeScript's compile-time check — tests runtime guard
+				kind: 'not-a-real-kind' as Parameters<typeof store.save>[3] extends { kind?: infer K }
+					? K
+					: never,
+			}),
+		).rejects.toThrow(/invalid kind/i);
+	});
+
+	it('save with a valid kind string does not throw', async () => {
+		const store = makeStore(tempDir);
+
+		await expect(
+			store.save('alice', 'test-key', 'content', {
+				bypass: CONTEXT_INTERNAL_BYPASS,
+				kind: 'user-preference',
+			}),
+		).resolves.toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P3-11 — remove cleans up sidecar entry
+// ---------------------------------------------------------------------------
+
+describe('P3-11 — remove() cleans sidecar entry', () => {
+	it('remove() deletes the .md file AND the sidecar kind entry', async () => {
+		const store = makeStore(tempDir);
+		const slug = slugifyKey('my-entry');
+		const sidecarFile = join(tempDir, 'users', 'alice', 'context', '.kinds.yaml');
+		const mdFile = join(tempDir, 'users', 'alice', 'context', `${slug}.md`);
+
+		// Save with a specific kind
+		await store.save('alice', 'my-entry', 'Some content', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+			kind: 'user-preference',
+		});
+
+		// Confirm sidecar has the entry
+		const sidecarBefore = await readFile(sidecarFile, 'utf-8');
+		expect(sidecarBefore).toContain('my-entry: user-preference');
+
+		// Remove the entry
+		await store.remove('alice', 'my-entry', CONTEXT_INTERNAL_BYPASS);
+
+		// .md file should be gone
+		await expect(access(mdFile)).rejects.toThrow();
+
+		// Sidecar entry should also be gone
+		const sidecarAfter = await readFile(sidecarFile, 'utf-8');
+		expect(sidecarAfter).not.toContain('my-entry');
+	});
+
+	it('remove then re-create produces "untyped" (no stale kind inherited)', async () => {
+		const store = makeStore(tempDir);
+		const sidecarFile = join(tempDir, 'users', 'alice', 'context', '.kinds.yaml');
+
+		// Save with kind, then remove
+		await store.save('alice', 'my-entry', 'First content', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+			kind: 'user-preference',
+		});
+		await store.remove('alice', 'my-entry', CONTEXT_INTERNAL_BYPASS);
+
+		// Re-create without specifying kind
+		await store.save('alice', 'my-entry', 'Second content', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
+
+		// Should be 'untyped', not the stale 'user-preference'
+		const sidecar = await readFile(sidecarFile, 'utf-8');
+		expect(sidecar).toContain('my-entry: untyped');
+		expect(sidecar).not.toContain('my-entry: user-preference');
+
+		const entries = await store.listForUser('alice', CONTEXT_INTERNAL_BYPASS);
+		const entry = entries.find((e) => e.key === 'my-entry');
+		expect(entry?.kind).toBe('untyped');
+	});
+});

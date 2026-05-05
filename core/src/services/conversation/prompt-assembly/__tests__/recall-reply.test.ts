@@ -83,6 +83,14 @@ describe('formatTurnTimestamp', () => {
 		expect(formatTurnTimestamp('yesterday')).toBe('unknown time');
 	});
 
+	it('returns "unknown time" for datetime without Z suffix: "2026-04-28T14:32:00"', () => {
+		expect(formatTurnTimestamp('2026-04-28T14:32:00')).toBe('unknown time');
+	});
+
+	it('returns "unknown time" for non-UTC offset: "2026-04-28T14:32:00+05:30"', () => {
+		expect(formatTurnTimestamp('2026-04-28T14:32:00+05:30')).toBe('unknown time');
+	});
+
 	it('all day-of-week abbreviations are 3 letters', () => {
 		const dates = [
 			'2026-04-27T00:00:00.000Z', // Mon

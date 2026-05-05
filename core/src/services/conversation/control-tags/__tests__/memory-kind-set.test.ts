@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { ContextStoreService } from '../../../../../types/context-store.js';
 import type { AppLogger } from '../../../../../types/app-module.js';
+import type { ContextEntry, ContextStoreService } from '../../../../../types/context-store.js';
 import {
 	MEMORY_KIND_INTENT_REGEX,
 	MEMORY_KIND_SET_TAG_REGEX,
@@ -17,13 +17,23 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeContextStore(getForUserResult: string | null = 'existing content'): ContextStoreService {
+function makeEntry(overrides: Partial<ContextEntry> = {}): ContextEntry {
+	return {
+		key: 'food-preferences',
+		content: 'existing content',
+		kind: 'untyped',
+		lastUpdated: new Date(),
+		...overrides,
+	};
+}
+
+function makeContextStore(listForUserResult: ContextEntry[] = [makeEntry()]): ContextStoreService {
 	return {
 		get: vi.fn(),
 		search: vi.fn(),
 		searchForUser: vi.fn(),
-		getForUser: vi.fn().mockResolvedValue(getForUserResult),
-		listForUser: vi.fn(),
+		getForUser: vi.fn(),
+		listForUser: vi.fn().mockResolvedValue(listForUserResult),
 		save: vi.fn().mockResolvedValue(undefined),
 		remove: vi.fn(),
 		listDurableForUser: vi.fn(),
@@ -132,7 +142,9 @@ describe('MEMORY_KIND_INTENT_REGEX', () => {
 
 describe('processMemoryKindSetTags — happy path', () => {
 	it('valid kind + matching entry → updates kind, returns confirmation, strips tag', async () => {
-		const contextStore = makeContextStore('my food preferences content');
+		const contextStore = makeContextStore([
+			makeEntry({ key: 'food-preferences', content: 'my food preferences content' }),
+		]);
 		const logger = makeLogger();
 
 		const response =
@@ -152,7 +164,7 @@ describe('processMemoryKindSetTags — happy path', () => {
 		expect(result.confirmations[0]).toContain('food-preferences');
 		expect(result.confirmations[0]).toContain('user-preference');
 
-		expect(contextStore.getForUser).toHaveBeenCalledWith('food-preferences', 'user1');
+		expect(contextStore.listForUser).toHaveBeenCalledWith('user1');
 		expect(contextStore.save).toHaveBeenCalledWith(
 			'user1',
 			'food-preferences',
@@ -172,7 +184,7 @@ describe('processMemoryKindSetTags — happy path', () => {
 		] as const;
 
 		for (const kind of kinds) {
-			const contextStore = makeContextStore('content');
+			const contextStore = makeContextStore([makeEntry({ key: 'test-entry', content: 'content' })]);
 			const logger = makeLogger();
 			const response = `<memory-kind-set entry="test-entry" kind="${kind}"/>`;
 			const userMessage = 'categorize test-entry as a memory';
@@ -190,7 +202,10 @@ describe('processMemoryKindSetTags — happy path', () => {
 	});
 
 	it('multiple tags in one response → each processed independently', async () => {
-		const contextStore = makeContextStore('entry content');
+		const contextStore = makeContextStore([
+			makeEntry({ key: 'entry-a', content: 'entry content' }),
+			makeEntry({ key: 'entry-b', content: 'entry content' }),
+		]);
 		const logger = makeLogger();
 
 		const response =
@@ -211,7 +226,7 @@ describe('processMemoryKindSetTags — happy path', () => {
 	});
 
 	it('tag stripped from response but surrounding prose preserved', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([makeEntry({ key: 'my-note', content: 'content' })]);
 		const logger = makeLogger();
 
 		const response =
@@ -237,7 +252,7 @@ describe('processMemoryKindSetTags — happy path', () => {
 
 describe('processMemoryKindSetTags — non-existent entry', () => {
 	it('entry not found → skipped + warning logged, no confirmation, tag stripped', async () => {
-		const contextStore = makeContextStore(null); // getForUser returns null
+		const contextStore = makeContextStore([]); // empty — entry not in user context
 		const logger = makeLogger();
 
 		const response = '<memory-kind-set entry="nonexistent-entry" kind="user-preference"/> Done.';
@@ -263,7 +278,9 @@ describe('processMemoryKindSetTags — non-existent entry', () => {
 
 describe('processMemoryKindSetTags — invalid kind', () => {
 	it('invalid kind value → skipped + warning logged, tag stripped, no confirmation', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([
+			makeEntry({ key: 'food-preferences', content: 'content' }),
+		]);
 		const logger = makeLogger();
 
 		const response = '<memory-kind-set entry="food-preferences" kind="nonsense"/> Done.';
@@ -289,7 +306,7 @@ describe('processMemoryKindSetTags — invalid kind', () => {
 
 describe('processMemoryKindSetTags — intent gate', () => {
 	it('user message lacks intent → tags stripped without applying, no confirmation', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([makeEntry()]);
 		const logger = makeLogger();
 
 		const response = '<memory-kind-set entry="food-preferences" kind="user-preference"/> Done.';
@@ -309,7 +326,7 @@ describe('processMemoryKindSetTags — intent gate', () => {
 	});
 
 	it('response with no memory-kind-set tag → returned immediately without contextStore calls', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([makeEntry()]);
 		const logger = makeLogger();
 
 		const response = 'Just a normal response without any tags.';
@@ -334,7 +351,7 @@ describe('processMemoryKindSetTags — intent gate', () => {
 
 describe('processMemoryKindSetTags — security / regex rejection', () => {
 	it('path traversal entry "../../../etc/passwd" → regex does not match, tag stripped', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([makeEntry()]);
 		const logger = makeLogger();
 
 		const response = '<memory-kind-set entry="../../../etc/passwd" kind="user-preference"/> Done.';
@@ -355,7 +372,7 @@ describe('processMemoryKindSetTags — security / regex rejection', () => {
 	});
 
 	it('bidi RTL override in entry "food‮preferences" → regex does not match', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([makeEntry()]);
 		const logger = makeLogger();
 
 		const response = `<memory-kind-set entry="food‮preferences" kind="user-preference"/> Done.`;
@@ -379,7 +396,9 @@ describe('processMemoryKindSetTags — security / regex rejection', () => {
 
 describe('processMemoryKindSetTags — coexistence with <config-set>', () => {
 	it('response containing BOTH config-set and memory-kind-set → memory-kind-set processed, config-set preserved in output', async () => {
-		const contextStore = makeContextStore('content');
+		const contextStore = makeContextStore([
+			makeEntry({ key: 'food-preferences', content: 'content' }),
+		]);
 		const logger = makeLogger();
 
 		// Simulate a response with both tags; processMemoryKindSetTags only touches <memory-kind-set>
@@ -401,5 +420,103 @@ describe('processMemoryKindSetTags — coexistence with <config-set>', () => {
 		expect(result.cleanedResponse).toContain('<config-set');
 		// kind update was applied
 		expect(result.confirmations).toHaveLength(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P2-6: system-only entry must NOT be copied into user context
+// ---------------------------------------------------------------------------
+
+describe('processMemoryKindSetTags — system entry not copied to user (P2-6)', () => {
+	it('system-only entry absent from listForUser → skipped + warning, no user context copy created', async () => {
+		// listForUser returns only user-owned entries.
+		// If the entry exists ONLY in system context, listForUser returns [] for that key.
+		const contextStore = makeContextStore([]); // empty user context
+		const logger = makeLogger();
+
+		const response = '<memory-kind-set entry="system-only-entry" kind="user-preference"/> Done.';
+		const userMessage = 'categorize system-only-entry as a user preference';
+
+		const result = await processMemoryKindSetTags(response, {
+			userId: 'user1',
+			userMessage,
+			contextStore,
+			logger,
+		});
+
+		// Tag stripped
+		expect(result.cleanedResponse).not.toContain('<memory-kind-set');
+		// No save call — entry not found in user context
+		expect(contextStore.save).not.toHaveBeenCalled();
+		// Warning logged
+		expect(logger.warn).toHaveBeenCalled();
+		// No confirmation
+		expect(result.confirmations).toHaveLength(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P3-9: uppercase and closing tags
+// ---------------------------------------------------------------------------
+
+describe('processMemoryKindSetTags — case-insensitive tag detection (P3-9)', () => {
+	it('uppercase <MEMORY-KIND-SET .../> tag → stripped from response', async () => {
+		const contextStore = makeContextStore([]);
+		const logger = makeLogger();
+
+		// Uppercase tag — regex won't structurally match but sweep should remove it
+		const response = '<MEMORY-KIND-SET entry="food-preferences" kind="user-preference"/> Done.';
+		const userMessage = 'categorize food as a preference';
+
+		const result = await processMemoryKindSetTags(response, {
+			userId: 'user1',
+			userMessage,
+			contextStore,
+			logger,
+		});
+
+		expect(result.cleanedResponse).not.toContain('<MEMORY-KIND-SET');
+		expect(result.cleanedResponse).not.toContain('<memory-kind-set');
+	});
+
+	it('paired closing </memory-kind-set> tag alongside opening tag → both stripped', async () => {
+		const contextStore = makeContextStore([
+			makeEntry({ key: 'food-preferences', content: 'content' }),
+		]);
+		const logger = makeLogger();
+
+		// LLM sometimes emits paired tags instead of self-closing form
+		const response =
+			'Before. <memory-kind-set entry="food-preferences" kind="user-preference">extra</memory-kind-set> After.';
+		const userMessage = 'categorize food preferences as user preference';
+
+		const result = await processMemoryKindSetTags(response, {
+			userId: 'user1',
+			userMessage,
+			contextStore,
+			logger,
+		});
+
+		expect(result.cleanedResponse).not.toContain('<memory-kind-set');
+		expect(result.cleanedResponse).not.toContain('</memory-kind-set>');
+		expect(result.cleanedResponse).toContain('Before.');
+		expect(result.cleanedResponse).toContain('After.');
+	});
+
+	it('mixed-case <Memory-Kind-Set .../> → stripped (case-insensitive sweep)', async () => {
+		const contextStore = makeContextStore([]);
+		const logger = makeLogger();
+
+		const response = '<Memory-Kind-Set entry="food" kind="user-preference"/> Done.';
+		const userMessage = 'categorize this as a preference';
+
+		const result = await processMemoryKindSetTags(response, {
+			userId: 'user1',
+			userMessage,
+			contextStore,
+			logger,
+		});
+
+		expect(result.cleanedResponse).not.toMatch(/<[Mm]emory-[Kk]ind-[Ss]et/);
 	});
 });

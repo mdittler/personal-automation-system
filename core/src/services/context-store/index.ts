@@ -22,7 +22,7 @@ import { getCurrentUserId } from '../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
 import { scanForThreats } from '../prompt-assembly/threat-scan.js';
 import { ContextStoreThreatError } from './errors.js';
-import { loadKindsMap, setKind } from './kinds-sidecar.js';
+import { loadKindsMap, removeKind, setKind } from './kinds-sidecar.js';
 
 /**
  * Private capability token for bypassing the actor-vs-target check in
@@ -311,6 +311,12 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 			throw new Error('Invalid userId format');
 		}
 		this.checkActor(userId, opts?.bypass);
+
+		// Runtime kind validation — callers may pass LLM-derived or dynamically typed values.
+		if (opts?.kind !== undefined && !(CONTEXT_ENTRY_KINDS as readonly string[]).includes(opts.kind)) {
+			throw new Error(`Invalid kind: "${opts.kind}"`);
+		}
+
 		const slug = slugifyKey(key);
 		if (!slug || !SLUG_PATTERN.test(slug)) {
 			throw new Error('Invalid name — must contain at least one letter or number');
@@ -377,6 +383,16 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 				return; // Already gone
 			}
 			throw error;
+		}
+
+		// Best-effort sidecar cleanup — stale entries cause orphan kind inheritance on re-create.
+		try {
+			await removeKind(dir, slug, this.logger);
+		} catch (error) {
+			this.logger.warn(
+				{ userId, key: slug, error },
+				'Context store: sidecar kind removal failed (best-effort)',
+			);
 		}
 	}
 

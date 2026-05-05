@@ -24,7 +24,7 @@ Supported attributes:
   before (optional) — restrict to messages before or on this date (YYYY-MM-DD)
 
 To search with date filters:
-  Absolute day: <session-search query="pizza recipe" after="2026-04-28" before="2026-04-29"/>
+  Absolute day: <session-search query="pizza recipe" after="2026-04-28" before="2026-04-28"/>
   Date window:  <session-search query="trip" after="2026-04-14" before="2026-04-22"/>
   No date filter: <session-search query="pasta"/>
 

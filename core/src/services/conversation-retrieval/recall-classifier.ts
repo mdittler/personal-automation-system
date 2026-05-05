@@ -80,9 +80,7 @@ export interface RecallClassifierLLM {
 
 // ─── Prompt template ─────────────────────────────────────────────────────────
 
-// Using regular string concatenation (not template literals without expressions)
-// to satisfy biome noUnusedTemplateLiteral.
-const CLASSIFIER_SYSTEM_PROMPT_TEMPLATE =
+const CLASSIFIER_SYSTEM_PROMPT_BASE =
 	'Today: <today>\n' +
 	'You are a recall intent classifier. Determine if the user message is asking about past conversations or trying to recall something discussed previously.\n' +
 	'Respond with ONLY valid JSON (no markdown, no explanation):\n' +
@@ -98,21 +96,49 @@ const CLASSIFIER_SYSTEM_PROMPT_TEMPLATE =
 	'  query = key topic/phrase to search for (1-5 words), null if shouldRecall=false.\n' +
 	'  timeAnchor = use absolute for specific days, window for ranges, null if not time-specified.\n' +
 	'  All dates must be YYYY-MM-DD format, in the past, and not more than 365 days before today.\n' +
-	'  reason = brief explanation (under 20 words).\n' +
-	'\n' +
-	'Examples (today = 2026-05-05, Tuesday):\n' +
-	'- "what did we say last Tuesday about the recipe"\n' +
-	'  → {"shouldRecall":true,"query":"recipe","timeAnchor":{"type":"absolute","on":"2026-04-28"},"reason":"specific past Tuesday"}\n' +
-	'- "remind me yesterday\'s plan"\n' +
-	'  → {"shouldRecall":true,"query":"plan","timeAnchor":{"type":"absolute","on":"2026-05-04"},"reason":"yesterday"}\n' +
-	'- "two weeks ago we talked about the trip"\n' +
-	'  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"2026-04-14","before":"2026-04-22"},"reason":"~14 days ago, ±3-day spread"}\n' +
-	'- "what\'s the weather"\n' +
-	'  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}';
+	'  reason = brief explanation (under 20 words).';
 
-/** Build the classifier system prompt by substituting today's date. */
+/** Subtract N calendar days from a YYYY-MM-DD string (UTC noon arithmetic). */
+function subtractDays(dateStr: string, days: number): string {
+	const d = new Date(`${dateStr}T12:00:00Z`);
+	d.setUTCDate(d.getUTCDate() - days);
+	return d.toISOString().slice(0, 10);
+}
+
+const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Build dynamic date examples relative to today so the prompt never goes stale. */
+function buildExamples(today: string): string {
+	const d = new Date(`${today}T12:00:00Z`);
+	const dow = d.getUTCDay(); // 0=Sun … 6=Sat
+	const dayName = DOW_NAMES[dow] ?? 'Day';
+
+	const yesterday = subtractDays(today, 1);
+
+	// Last Tuesday: if today is Tue (2), go back 7; otherwise find most-recent prior Tuesday.
+	const daysToLastTue = dow === 2 ? 7 : ((dow + 7 - 2) % 7 || 7);
+	const lastTuesday = subtractDays(today, daysToLastTue);
+
+	// "Two weeks ago" window: centred ~17 days back, ±3-day spread (11–23 days ago)
+	const twoWeeksStart = subtractDays(today, 19);
+	const twoWeeksEnd = subtractDays(today, 11);
+
+	return (
+		`\nExamples (today = ${today}, ${dayName}):\n` +
+		`- "what did we say last Tuesday about the recipe"\n` +
+		`  → {"shouldRecall":true,"query":"recipe","timeAnchor":{"type":"absolute","on":"${lastTuesday}"},"reason":"specific past Tuesday"}\n` +
+		`- "remind me yesterday's plan"\n` +
+		`  → {"shouldRecall":true,"query":"plan","timeAnchor":{"type":"absolute","on":"${yesterday}"},"reason":"yesterday"}\n` +
+		`- "two weeks ago we talked about the trip"\n` +
+		`  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"${twoWeeksStart}","before":"${twoWeeksEnd}"},"reason":"~14 days ago, ±3-day spread"}\n` +
+		`- "what's the weather"\n` +
+		`  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}`
+	);
+}
+
+/** Build the classifier system prompt with today's date and dynamic date examples. */
 export function buildClassifierPrompt(today: string): string {
-	return CLASSIFIER_SYSTEM_PROMPT_TEMPLATE.replace('<today>', today);
+	return CLASSIFIER_SYSTEM_PROMPT_BASE.replace('<today>', today) + buildExamples(today);
 }
 
 // ─── Output validation ────────────────────────────────────────────────────────
@@ -201,20 +227,28 @@ function validateTimeAnchor(
 		const after = anchor.after;
 		const before = anchor.before;
 
+		const todayMs = Date.parse(today);
+
 		// Validate after when present
 		if (after !== undefined) {
 			if (typeof after !== 'string') return INVALID_ANCHOR;
 			if (!isCalendarStrict(after)) return INVALID_ANCHOR;
-			// after must not be in the future
 			if (after > today) return INVALID_ANCHOR;
+			// Individual age check: must be within maxWindowDays of today
+			if ((todayMs - Date.parse(after)) / (24 * 60 * 60 * 1000) > maxWindowDays) {
+				return INVALID_ANCHOR;
+			}
 		}
 
 		// Validate before when present
 		if (before !== undefined) {
 			if (typeof before !== 'string') return INVALID_ANCHOR;
 			if (!isCalendarStrict(before)) return INVALID_ANCHOR;
-			// before must not be in the future
 			if (before > today) return INVALID_ANCHOR;
+			// Individual age check: must be within maxWindowDays of today
+			if ((todayMs - Date.parse(before)) / (24 * 60 * 60 * 1000) > maxWindowDays) {
+				return INVALID_ANCHOR;
+			}
 		}
 
 		// When both present: after <= before and span <= maxWindowDays

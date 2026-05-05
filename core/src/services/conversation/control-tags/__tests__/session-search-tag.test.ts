@@ -122,14 +122,11 @@ describe('extractSessionSearchTag — edge cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('extractSessionSearchTag — security', () => {
-	it('query containing " character — ATTR_RE stops at first ", content before " is extracted', () => {
-		// Double quote ends the attribute value. The attribute parser (Chunk H) reads key="value"
-		// where ATTR_RE stops at the first unescaped ". For query="break "here"", the extracted
-		// value is "break" — the embedded " acts as a terminator, not a security bypass.
-		// The outer TAG_OUTER regex still matches the self-closing form.
+	it('query containing " character → REJECTED (coverage remainder check detects stray text)', () => {
+		// ATTR_RE extracts query="break" and the remainder "here"" is non-empty.
+		// The coverage-remainder check (P2-4) rejects the tag.
 		const result = extractSessionSearchTag('<session-search query="break "here""/>');
-		// The query up to the first " is extracted: "break" (after trim)
-		expect(result.query).toBe('break');
+		expect(result.query).toBeNull();
 	});
 
 	it('query containing < character → null (regex rejects via [^<>] class)', () => {

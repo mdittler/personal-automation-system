@@ -134,6 +134,22 @@ describe('attribute parser — unknown attribute rejection', () => {
 		const result = extractSessionSearchTag('<session-search foo="bar" baz="qux"/>');
 		expect(result.query).toBeNull();
 	});
+
+	it('stray unquoted text mixed with known attrs → REJECTED (full-coverage check)', () => {
+		// "garbage" is unquoted text that ATTR_RE does not match → remainder is non-empty → reject
+		const result = extractSessionSearchTag('<session-search query="pasta" garbage/>');
+		expect(result.query).toBeNull();
+	});
+
+	it('unquoted attribute value → REJECTED (ATTR_RE requires quoted values)', () => {
+		const result = extractSessionSearchTag('<session-search query="x" after=2026-04-28/>');
+		expect(result.query).toBeNull();
+	});
+
+	it('attribute with no value → REJECTED', () => {
+		const result = extractSessionSearchTag('<session-search query="x" novalue/>');
+		expect(result.query).toBeNull();
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -40,7 +40,10 @@ function makeContextStore() {
 
 function makeFlushSave(contextStore: ContextStoreServiceImpl) {
 	return (uid: string, key: string, content: string) =>
-		contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
+		contextStore.save(uid, key, content, {
+			kind: 'environment-fact',
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 }
 
 function makeRetrieval(contextStore: ContextStoreServiceImpl) {
@@ -87,8 +90,12 @@ describe('S4 — Next-session recall: pinned entry precedes alphabetical entries
 		const logger = { warn: vi.fn() };
 
 		// Write an alphabetically-earlier entry
-		await contextStore.save('alice', 'apple-facts', 'Alice loves apples.', { bypass: CONTEXT_INTERNAL_BYPASS });
-		await contextStore.save('alice', 'banana-notes', 'Banana is her snack.', { bypass: CONTEXT_INTERNAL_BYPASS });
+		await contextStore.save('alice', 'apple-facts', 'Alice loves apples.', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
+		await contextStore.save('alice', 'banana-notes', 'Banana is her snack.', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 
 		// Write the pinned summary (sorts after 'b' alphabetically but must come first)
 		await flushMemoryToContextStore('alice', 'Alice prefers tea over coffee.', {
@@ -119,12 +126,9 @@ describe('S4 — Next-session recall: pinned entry precedes alphabetical entries
 
 		// Seed alphabetically-earlier keys that together exceed the 4000-char budget
 		for (let i = 1; i <= 5; i++) {
-			await contextStore.save(
-				'alice',
-				`aaa-entry-${i}`,
-				'x'.repeat(900),
-				{ bypass: CONTEXT_INTERNAL_BYPASS },
-			);
+			await contextStore.save('alice', `aaa-entry-${i}`, 'x'.repeat(900), {
+				bypass: CONTEXT_INTERNAL_BYPASS,
+			});
 		}
 
 		// Write the pinned summary
@@ -201,15 +205,51 @@ describe('S5 — Hostile LLM output: sanitization strips tags and backticks befo
 		});
 		expect(result).toBe('written');
 
-		const filePath = join(
-			tempDir,
-			'users',
-			'alice',
-			'context',
-			`${RECENT_SESSION_SUMMARY_KEY}.md`,
-		);
+		const filePath = join(tempDir, 'users', 'alice', 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
 		expect(onDisk).not.toContain('`');
 		expect(onDisk).toContain('real content here');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P2-8 — flushed summary survives strict_durable_kinds=true
+// ---------------------------------------------------------------------------
+
+describe('P2-8 — flushed summary included under strict_durable_kinds=true', () => {
+	it('recent-session-summary is included in snapshot when strict_durable_kinds is true', async () => {
+		const contextStore = makeContextStore();
+		const flushSave = makeFlushSave(contextStore); // saves as 'environment-fact'
+		const logger = { warn: vi.fn() };
+
+		// Flush a summary — flushSave saves with kind='environment-fact' (durable)
+		await flushMemoryToContextStore('alice', 'Alice prefers tea over coffee.', {
+			flushSave,
+			logger,
+		});
+
+		// Intentionally add an untyped entry that should be excluded under strict mode
+		await contextStore.save('alice', 'untyped-note', 'Should be excluded.', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+			// no kind → defaults to 'untyped'
+		});
+
+		// Build snapshot with strict_durable_kinds=true
+		const retrieval = new ConversationRetrievalServiceImpl({
+			contextStore,
+			systemConfig: { chat: { memory: { strict_durable_kinds: true } } },
+		});
+
+		const snapshot = await requestContext.run({ userId: 'alice' }, () =>
+			retrieval.buildMemorySnapshot(),
+		);
+
+		expect(snapshot.status).toBe('ok');
+		// recent-session-summary (environment-fact) must be present
+		expect(snapshot.content).toContain('## recent-session-summary');
+		expect(snapshot.content).toContain('Alice prefers tea over coffee.');
+		// untyped-note must be excluded
+		expect(snapshot.content).not.toContain('## untyped-note');
+		expect(snapshot.content).not.toContain('Should be excluded.');
 	});
 });

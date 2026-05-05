@@ -26,16 +26,16 @@ const DOW_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
  *
  * Example: '2026-04-28T14:32:00.000Z' → 'Tue 2026-04-28 14:32 UTC'
  */
+// Strict UTC datetime: must end with Z or +00:00 and contain a T separator.
+const UTC_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)$/;
+
 export function formatTurnTimestamp(iso: string): string {
-	// Require a full ISO UTC string (ends with Z or +00:00)
+	// Reject anything that is not a strict UTC datetime — e.g. '2026-04-28T14:32:00' (missing Z)
+	// or '2026-04-28T14:32:00+05:30' (non-UTC offset) would be silently wrong without this check.
+	if (!UTC_DATETIME_RE.test(iso.trim())) return 'unknown time';
+
 	const d = new Date(iso);
 	if (Number.isNaN(d.getTime())) return 'unknown time';
-
-	// Require that the input was a full ISO datetime string (not just a date)
-	// A date-only string like "2026-04-28" parses to midnight UTC, which is valid Date,
-	// but it doesn't carry time information. We detect by checking if the original string
-	// has a 'T' separator (ISO datetime) or 'Z' suffix.
-	if (!iso.includes('T') && !iso.includes('Z')) return 'unknown time';
 
 	const year = d.getUTCFullYear();
 	const month = String(d.getUTCMonth() + 1).padStart(2, '0');

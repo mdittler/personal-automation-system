@@ -245,6 +245,36 @@ describe('parseRecallVerdict — window anchor rejections', () => {
 			reason: 'bad',
 		})).toEqual(RECALL_SAFE_DEFAULT);
 	});
+
+	it('rejects before-only window where before is an ancient date (>365d ago)', () => {
+		// One-sided windows must be individually validated against today, not only by span.
+		expect(parse({
+			shouldRecall: true,
+			query: 'food',
+			timeAnchor: { type: 'window', before: '2020-01-01' },
+			reason: 'very old',
+		})).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
+	it('rejects after-only window where after is an ancient date (>365d ago)', () => {
+		expect(parse({
+			shouldRecall: true,
+			query: 'food',
+			timeAnchor: { type: 'window', after: '2020-01-01' },
+			reason: 'very old',
+		})).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
+	it('accepts before-only window where before is within 365 days', () => {
+		const result = parse({
+			shouldRecall: true,
+			query: 'food',
+			timeAnchor: { type: 'window', before: '2026-04-01' },
+			reason: 'before April',
+		});
+		expect(result.shouldRecall).toBe(true);
+		expect(result.timeAnchor).toEqual({ type: 'window', before: '2026-04-01' });
+	});
 });
 
 // ── Legacy clean break ───────────────────────────────────────────────────────

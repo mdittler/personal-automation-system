@@ -1015,8 +1015,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	});
 
 	// These closures capture CONTEXT_INTERNAL_BYPASS so the hook never imports it directly.
+	// Save the generated session summary as 'environment-fact' (a durable kind) so it
+	// survives strict_durable_kinds=true filtering in buildMemorySnapshot.
 	const flushSave: MemoryFlushSave = (uid, key, content) =>
-		contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
+		contextStore.save(uid, key, content, { kind: 'environment-fact', bypass: CONTEXT_INTERNAL_BYPASS });
 	const flushRemove: MemoryFlushRemove = (uid, key) =>
 		contextStore.remove(uid, key, CONTEXT_INTERNAL_BYPASS);
 	const flushLogger = createChildLogger(logger, { service: 'memory-flush' });

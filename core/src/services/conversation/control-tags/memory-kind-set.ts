@@ -24,8 +24,10 @@ import { normalizeResponse } from '../control-tags.js';
 export const MEMORY_KIND_SET_TAG_REGEX =
 	/<memory-kind-set\s+entry="([a-z0-9][a-z0-9-]{0,99})"\s+kind="([a-z-]{1,40})"\s*\/>/g;
 
-/** Broad sweeper that removes any shape of <memory-kind-set ...> tag. */
+/** Broad sweeper that removes any shape of <memory-kind-set> opening/self-closing tag. */
 const MEMORY_KIND_SET_ANY_REGEX = /<memory-kind-set\b[^>]*\/?>/gi;
+/** Sweeper for paired closing tags (LLMs occasionally emit them). */
+const MEMORY_KIND_SET_CLOSE_REGEX = /<\/memory-kind-set>/gi;
 
 /**
  * Detects user intent to categorize/tag a memory entry by kind.
@@ -70,14 +72,16 @@ export async function processMemoryKindSetTags(
 ): Promise<{ cleanedResponse: string; confirmations: string[] }> {
 	const confirmations: string[] = [];
 
-	// Fast pre-check
-	if (!response.includes('<memory-kind-set')) {
+	// Fast pre-check — case-insensitive so <MEMORY-KIND-SET .../> is also caught
+	if (!/<memory-kind-set/i.test(response)) {
 		return { cleanedResponse: response, confirmations };
 	}
 
 	// Intent gate — strip tags silently if user didn't ask for categorization
 	if (!MEMORY_KIND_INTENT_REGEX.test(options.userMessage)) {
-		const stripped = response.replace(MEMORY_KIND_SET_ANY_REGEX, '');
+		const stripped = response
+			.replace(MEMORY_KIND_SET_ANY_REGEX, '')
+			.replace(MEMORY_KIND_SET_CLOSE_REGEX, '');
 		return { cleanedResponse: normalizeResponse(stripped), confirmations };
 	}
 
@@ -89,8 +93,10 @@ export async function processMemoryKindSetTags(
 		actions.push({ entry, kind });
 	}
 
-	// Strip all <memory-kind-set ...> tags (well-formed and malformed)
-	const stripped = response.replace(MEMORY_KIND_SET_ANY_REGEX, '');
+	// Strip all <memory-kind-set ...> tags (well-formed, malformed, and closing)
+	const stripped = response
+		.replace(MEMORY_KIND_SET_ANY_REGEX, '')
+		.replace(MEMORY_KIND_SET_CLOSE_REGEX, '');
 
 	// Process each collected action
 	for (const { entry, kind } of actions) {
@@ -105,13 +111,15 @@ export async function processMemoryKindSetTags(
 			continue;
 		}
 
-		// Confirm entry exists
-		let existingContent: string | null;
+		// User-only lookup via listForUser — does NOT fall back to system context.
+		// Using getForUser would fall back to system context on miss, causing save() to create
+		// a user-context copy of a system entry and silently change durable-memory precedence.
+		let userEntries: Awaited<ReturnType<typeof options.contextStore.listForUser>>;
 		try {
-			existingContent = await options.contextStore.getForUser(entry, options.userId);
+			userEntries = await options.contextStore.listForUser(options.userId);
 		} catch (err) {
 			options.logger.warn(
-				'<memory-kind-set> getForUser failed for entry "%s" (userId=%s): %s',
+				'<memory-kind-set> listForUser failed for entry "%s" (userId=%s): %s',
 				entry,
 				options.userId,
 				err,
@@ -119,9 +127,10 @@ export async function processMemoryKindSetTags(
 			continue;
 		}
 
-		if (existingContent === null) {
+		const userEntry = userEntries.find((e) => e.key === entry);
+		if (!userEntry) {
 			options.logger.warn(
-				'<memory-kind-set> entry not found: "%s" (userId=%s)',
+				'<memory-kind-set> entry "%s" not found in user context (userId=%s)',
 				entry,
 				options.userId,
 			);
@@ -130,7 +139,7 @@ export async function processMemoryKindSetTags(
 
 		// Re-save with updated kind
 		try {
-			await options.contextStore.save(options.userId, entry, existingContent, {
+			await options.contextStore.save(options.userId, entry, userEntry.content, {
 				kind: kind as ContextEntryKind,
 				bypass: CONTEXT_INTERNAL_BYPASS,
 			});

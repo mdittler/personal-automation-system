@@ -1,10 +1,11 @@
 /**
- * Tests for CLASSIFIER_SYSTEM_PROMPT template substitution (Hermes P6 Chunk F).
+ * Tests for buildClassifierPrompt (Hermes P6 Chunk F / Codex correction).
  *
  * Verifies:
- *  - Prompt with today='2026-05-05' contains 'Today: 2026-05-05'
- *  - Prompt contains all 4 pinned example dates
- *  - classifyRecallIntent throws (or rejects) when today is missing
+ *  - Today date is injected correctly
+ *  - Examples are generated relative to the supplied today (not hardcoded)
+ *  - A different today produces different example dates (no stale May-5 dates)
+ *  - classifyRecallIntent throws when today is missing
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -19,19 +20,29 @@ describe('buildClassifierPrompt', () => {
 		expect(prompt).toContain('Today: 2026-05-05');
 	});
 
-	it('contains all 4 pinned example dates', () => {
+	it('generates examples relative to today — prompt for 2026-05-05 (Tuesday) has correct relative dates', () => {
 		const prompt = buildClassifierPrompt('2026-05-05');
-		expect(prompt).toContain('2026-04-28'); // last Tuesday
-		expect(prompt).toContain('2026-05-04'); // yesterday
-		expect(prompt).toContain('2026-04-14'); // two weeks ago window start
-		expect(prompt).toContain('2026-04-22'); // two weeks ago window end
+		// yesterday = 2026-05-04
+		expect(prompt).toContain('2026-05-04');
+		// last Tuesday (today is Tue, so go back 7) = 2026-04-28
+		expect(prompt).toContain('2026-04-28');
 	});
 
-	it('produces different output when different today values are passed', () => {
+	it('buildClassifierPrompt("2026-06-01") contains no stale 2026-05-05 example dates', () => {
+		const prompt = buildClassifierPrompt('2026-06-01');
+		expect(prompt).toContain('Today: 2026-06-01');
+		// Stale May-5 anchor dates must NOT appear
+		expect(prompt).not.toContain('2026-04-28'); // last-Tuesday relative to 2026-05-05
+		expect(prompt).not.toContain('2026-05-04'); // yesterday relative to 2026-05-05
+	});
+
+	it('different today values produce different example dates', () => {
 		const p1 = buildClassifierPrompt('2026-05-05');
 		const p2 = buildClassifierPrompt('2026-06-01');
 		expect(p1).not.toBe(p2);
 		expect(p2).toContain('Today: 2026-06-01');
+		// Yesterday relative to 2026-06-01
+		expect(p2).toContain('2026-05-31');
 	});
 });
 

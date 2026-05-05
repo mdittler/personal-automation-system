@@ -76,6 +76,30 @@ export async function loadKindsMap(
 }
 
 /**
+ * Remove a slug from the `.kinds.yaml` sidecar in the given directory.
+ *
+ * No-op when the sidecar is missing or the slug is not present.
+ * Uses `withFileLock` for serialised concurrent access (same lock as setKind).
+ */
+export async function removeKind(dir: string, slug: string, logger: Logger): Promise<void> {
+	const filePath = kindsSidecarPath(dir);
+
+	await withFileLock(filePath, async () => {
+		const existing = await loadKindsMap(dir, logger);
+		if (!existing.has(slug)) return;
+
+		existing.delete(slug);
+
+		const obj: Record<string, string> = {};
+		for (const [k, v] of existing) {
+			obj[k] = v;
+		}
+
+		await atomicWrite(filePath, stringify(obj));
+	});
+}
+
+/**
  * Persist a slug→kind mapping to the `.kinds.yaml` sidecar in the given directory.
  *
  * Uses `withFileLock` to serialise concurrent writes for the same directory.
