@@ -16,7 +16,7 @@ import type {
 	ContextEntryKind,
 	ContextStoreService,
 } from '../../types/context-store.js';
-import { DURABLE_KINDS } from '../../types/context-store.js';
+import { CONTEXT_ENTRY_KINDS } from '../../types/context-store.js';
 import { atomicWrite } from '../../utils/file.js';
 import { getCurrentUserId } from '../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
@@ -275,7 +275,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 
 		// Resolve the user directory — HouseholdBoundaryError bubbles (fail-closed).
 		const userDir = this.userDir(userId);
-		const allowedKinds = new Set<ContextEntryKind>(opts?.kinds ?? DURABLE_KINDS);
+		const allowedKinds = new Set<ContextEntryKind>(opts?.kinds ?? CONTEXT_ENTRY_KINDS);
 
 		// Load both directories in parallel; user dir may not exist (fail-open).
 		const [userKindsMap, systemKindsMap] = await Promise.all([

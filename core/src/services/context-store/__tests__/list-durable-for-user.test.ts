@@ -224,7 +224,7 @@ describe('ContextStoreServiceImpl.listDurableForUser', () => {
 		).rejects.toThrow(HouseholdBoundaryError);
 	});
 
-	it('default: untyped entries are excluded (only DURABLE_KINDS returned by default)', async () => {
+	it('default: untyped entries ARE included (CONTEXT_ENTRY_KINDS is the default)', async () => {
 		const store = new ContextStoreServiceImpl({ dataDir: tempDir, logger });
 		const userDir = join(tempDir, 'users', 'alice', 'context');
 		// untyped entry — no sidecar kind set
@@ -233,11 +233,13 @@ describe('ContextStoreServiceImpl.listDurableForUser', () => {
 		const results = await requestContext.run({ userId: 'alice' }, () =>
 			store.listDurableForUser('alice'),
 		);
-		// untyped is not in DURABLE_KINDS, so it should be excluded
-		expect(results).toEqual([]);
+		// untyped IS in CONTEXT_ENTRY_KINDS, so it should be included by default
+		expect(results).toHaveLength(1);
+		expect(results[0]?.key).toBe('random-note');
+		expect(results[0]?.kind).toBe('untyped');
 	});
 
-	it('default includes all DURABLE_KINDS when no filter supplied', async () => {
+	it('default includes all CONTEXT_ENTRY_KINDS (6 kinds, including untyped) when no filter supplied', async () => {
 		const store = new ContextStoreServiceImpl({ dataDir: tempDir, logger });
 		const userDir = join(tempDir, 'users', 'alice', 'context');
 
@@ -246,18 +248,18 @@ describe('ContextStoreServiceImpl.listDurableForUser', () => {
 		await writeEntry(userDir, 'env', 'Environment note', 'environment-fact');
 		await writeEntry(userDir, 'conv', 'Convention', 'project-convention');
 		await writeEntry(userDir, 'policy', 'Household rule', 'household-policy');
-		await writeEntry(userDir, 'untyped-note', 'Raw note'); // untyped — excluded
+		await writeEntry(userDir, 'untyped-note', 'Raw note'); // untyped — included by default
 
 		const results = await requestContext.run({ userId: 'alice' }, () =>
 			store.listDurableForUser('alice'),
 		);
-		expect(results).toHaveLength(5);
+		expect(results).toHaveLength(6);
 		const kinds = results.map((e) => e.kind);
 		expect(kinds).toContain('user-preference');
 		expect(kinds).toContain('communication-preference');
 		expect(kinds).toContain('environment-fact');
 		expect(kinds).toContain('project-convention');
 		expect(kinds).toContain('household-policy');
-		expect(kinds).not.toContain('untyped');
+		expect(kinds).toContain('untyped');
 	});
 });

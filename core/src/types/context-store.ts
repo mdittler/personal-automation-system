@@ -93,13 +93,14 @@ export interface ContextStoreService {
 	 * List all durable context entries for a user, merging user-scoped and
 	 * system-scoped entries (user takes precedence on key collision).
 	 *
-	 * Only entries whose kind is in DURABLE_KINDS are returned by default.
-	 * Pass `opts.kinds` to narrow to a specific subset.
+	 * All 6 kinds (CONTEXT_ENTRY_KINDS, including 'untyped') are returned by
+	 * default. Pass `opts.kinds` to narrow — e.g., pass DURABLE_KINDS to
+	 * exclude untyped entries and keep only the 5 typed durable kinds.
 	 *
 	 * Fail-open: if the user directory is missing, returns the system-only set.
 	 * HouseholdBoundaryError from the user-dir resolution is allowed to bubble.
 	 *
-	 * @param opts.kinds - Filter to these kinds only (defaults to DURABLE_KINDS).
+	 * @param opts.kinds - Filter to these kinds only (defaults to CONTEXT_ENTRY_KINDS — all 6 kinds).
 	 * @param opts.bypass - Pass `CONTEXT_INTERNAL_BYPASS` to skip the actor-vs-target check.
 	 */
 	listDurableForUser(
