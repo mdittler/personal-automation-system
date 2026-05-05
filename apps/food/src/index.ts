@@ -1208,29 +1208,7 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 			}
 		}
 
-		await services.telegram.send(
-			ctx.userId,
-			"I'm not sure what you'd like to do. Try:\n" +
-				'• "I made spaghetti bolognese last night" — save a recipe\n' +
-				'• "chicken" — search your recipes\n' +
-				'• "what can I substitute for buttermilk?" — cooking questions\n' +
-				'• "add milk and eggs to grocery list" — add grocery items\n' +
-				'• "plan meals for this week" — generate a meal plan\n' +
-				'• "what\'s for dinner?" — see tonight\'s meal\n' +
-				'• "what can I make?" — match pantry to recipes\n' +
-				'• "start cooking the lasagna" — step-by-step cook mode\n' +
-				'• Send a photo — save recipes, receipts, or pantry contents\n' +
-				'• "we have leftover chili" — log leftovers\n' +
-				'• /leftovers — view and manage leftovers\n' +
-				'• /freezer — view and manage freezer\n' +
-				'• /grocery — view your grocery list\n' +
-				'• /pantry — view your pantry\n' +
-				'• /recipes — browse all recipes\n' +
-				'• /cook <recipe> — cook step-by-step\n' +
-				'• /family — manage child profiles and food introductions\n' +
-				'• /foodbudget — view food spending\n' +
-				'• /household — manage your household',
-		);
+		return { handled: false };
 	} finally {
 		void finalizeShadow(
 			shadowPromise,

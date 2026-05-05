@@ -9,6 +9,8 @@
  * Apps only receive the services they declared in requirements.services.
  */
 
+import type { EditService } from '../services/edit/index.js';
+import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { AppKnowledgeBaseService } from './app-knowledge.js';
 import type { AppMetadataService } from './app-metadata.js';
 import type { AudioService } from './audio.js';
@@ -16,10 +18,9 @@ import type { ConditionEvaluatorService } from './condition.js';
 import type { AppConfigService } from './config.js';
 import type { ContextStoreService } from './context-store.js';
 import type { DataQueryService } from './data-query.js';
-import type { InteractionContextService } from '../services/interaction-context/index.js';
-import type { EditService } from '../services/edit/index.js';
 import type { DataStoreService } from './data-store.js';
 import type { EventBusService } from './events.js';
+import type { HandlerResult } from './handler-result.js';
 import type { LLMService } from './llm.js';
 import type { ModelJournalService } from './model-journal.js';
 import type { SchedulerService } from './scheduler.js';
@@ -58,14 +59,17 @@ export interface AppModule {
 	/**
 	 * Called when the router sends a text message to the app.
 	 * This is the main handler.
+	 *
+	 * Return {handled: false} to signal the router to yield to the chatbot fallback.
+	 * Returning void (undefined) or {handled: true} means the message was handled.
 	 */
-	handleMessage(ctx: MessageContext): Promise<void>;
+	handleMessage(ctx: MessageContext): Promise<HandlerResult>;
 
 	/**
 	 * Called when the router sends a photo message to the app.
 	 * Only called if the manifest declares accepts_photos: true.
 	 */
-	handlePhoto?(ctx: PhotoContext): Promise<void | PhotoHandlerResult>;
+	handlePhoto?(ctx: PhotoContext): Promise<undefined | PhotoHandlerResult>;
 
 	/**
 	 * Called when a user sends an explicit /command routed to the app.
