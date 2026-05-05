@@ -140,10 +140,9 @@ describe('kinds-sidecar', () => {
 			]);
 
 			const result = await loadKindsMap(tempDir, logger);
-			// At least one of the two keys must survive
-			const alphaOk = result.get('key-alpha') === 'user-preference';
-			const betaOk = result.get('key-beta') === 'environment-fact';
-			expect(alphaOk || betaOk).toBe(true);
+			// withFileLock serialises both writes — both keys must survive
+			expect(result.get('key-alpha')).toBe('user-preference');
+			expect(result.get('key-beta')).toBe('environment-fact');
 		});
 	});
 });

@@ -13,7 +13,7 @@
 
 import { join } from 'node:path';
 import type { Logger } from 'pino';
-import { parse, stringify } from 'yaml';
+import { stringify } from 'yaml';
 import type { ContextEntryKind } from '../../types/context-store.js';
 import { CONTEXT_ENTRY_KINDS } from '../../types/context-store.js';
 import { withFileLock } from '../../utils/file-mutex.js';
@@ -103,6 +103,3 @@ export async function setKind(
 		await atomicWrite(filePath, stringify(obj));
 	});
 }
-
-// Re-export parse for internal use by callers that need raw YAML round-trips
-export { parse, stringify };
