@@ -654,7 +654,6 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 	): Promise<MemorySnapshot> {
 		const store = this.deps.data.forUser(ctx.userId);
 
-		// Step 1: resolve active session under index lock, then release.
 		let activeId: string | undefined;
 		await withFileLock(`conversation-session-index:${ctx.userId}`, async () => {
 			activeId = (await getActive(store, ctx.userId, ctx.sessionKey))?.id;
@@ -667,18 +666,14 @@ export class DefaultChatSessionStore implements ChatSessionStore {
 		}
 		const sessionId = opts.expectedSessionId ?? activeId;
 
-		// Step 2: build snapshot OUTSIDE all locks (avoids holding locks across LLM calls).
 		const snapshot = await opts.buildSnapshot();
 
-		// Step 3: acquire both locks in sorted order (prevents deadlock with endActive).
-		// Under the locks: CAS-recheck the index, then atomically write the transcript.
 		await withMultiFileLock(
 			[
 				`conversation-session-index:${ctx.userId}`,
 				`conversation-session-transcript:${ctx.userId}:${sessionId}`,
 			],
 			async () => {
-				// CAS recheck: active session must still be the same (REQ-CONV-MEMORY-017).
 				const recheckId = (await getActive(store, ctx.userId, ctx.sessionKey))?.id;
 				if (recheckId !== sessionId) {
 					this.deps.logger.warn(

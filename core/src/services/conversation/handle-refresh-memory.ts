@@ -1,9 +1,3 @@
-/**
- * /refreshmemory slash command handler — mid-session MemorySnapshot rebuild.
- *
- * REQ-CONV-MEMORY-013..022
- */
-
 import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService } from '../../types/config.js';
 import type { MemorySnapshot } from '../../types/conversation-session.js';
@@ -31,8 +25,6 @@ export async function handleRefreshMemory(
 	const userId = ctx.userId;
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
-	// Reuse the same buildSnapshot callback pattern as handle-message.ts:143-156 and
-	// handle-ask.ts:168-180, gating pinnedKeys on flush_memory_on_idle_reset.
 	const buildSnapshot = async (): Promise<MemorySnapshot> => {
 		if (!deps.conversationRetrieval) {
 			return {
