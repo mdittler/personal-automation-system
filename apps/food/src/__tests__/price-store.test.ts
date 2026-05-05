@@ -494,6 +494,43 @@ describe('price-store', () => {
 			const [, content] = mockStore.write.mock.calls[0]!;
 			expect(content).toContain('updated: 2026-04-07'); // falls back to receipt.date
 		});
+
+		it('logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)', async () => {
+			const mockStore = createMockStore();
+			const mockServices = createMockServices();
+			// LLM normalizes the item but returns price=0, which isValidPriceEntry rejects
+			vi.mocked(mockServices.llm.complete).mockResolvedValue(
+				JSON.stringify([
+					{
+						receiptName: 'FREE SAMPLE',
+						normalizedName: 'Free Sample',
+						department: 'Other',
+						unit: '',
+					},
+				]),
+			);
+			const receiptWithZeroPrice: Receipt = {
+				...receipt,
+				lineItems: [{ name: 'FREE SAMPLE', quantity: 1, unitPrice: 0.01, totalPrice: 0.01 }],
+			};
+			// Force totalPrice through but make normalizedName empty so isValidPriceEntry rejects
+			vi.mocked(mockServices.llm.complete).mockResolvedValue(
+				JSON.stringify([
+					{ receiptName: 'FREE SAMPLE', normalizedName: '', department: 'Other', unit: '' },
+				]),
+			);
+			const result = await updatePricesFromReceipt(
+				mockServices,
+				mockStore as never,
+				receiptWithZeroPrice,
+			);
+			// RED: no warn call today; GREEN: warn added to the rejection path
+			expect(mockServices.logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining('isValidPriceEntry'),
+				expect.any(String),
+			);
+			expect(result.items).toHaveLength(0);
+		});
 	});
 
 	describe('isPriceUpdateIntent', () => {

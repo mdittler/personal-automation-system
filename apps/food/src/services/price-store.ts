@@ -273,6 +273,7 @@ export async function updatePricesFromReceipt(
 				department: entry.department,
 			})
 		) {
+			services.logger.warn('isValidPriceEntry rejected item from receipt', entry.name);
 			continue;
 		}
 

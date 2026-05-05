@@ -219,19 +219,33 @@ export function formatReceiptDetails(receipt: Receipt, text: string): string {
 	const updateByReceiptName = new Map(
 		updates.map((update) => [update.receiptName.toLowerCase(), update]),
 	);
-	const lines = receipt.lineItems.map((item) =>
+	const allLines = receipt.lineItems.map((item) =>
 		formatLineItem(item, updateByReceiptName.get(item.name.toLowerCase())),
 	);
 
-	return [
-		`${receipt.store} receipt (${receipt.date}) - ${receipt.lineItems.length} items`,
-		...lines,
+	const header = `${receipt.store} receipt (${receipt.date}) - ${receipt.lineItems.length} items`;
+	const footer = [
 		`Subtotal: ${receipt.subtotal == null ? 'n/a' : formatMoney(receipt.subtotal)}`,
 		receipt.tax == null ? null : `Tax: ${formatMoney(receipt.tax)}`,
 		`Total: ${formatMoney(receipt.total)}`,
-	]
-		.filter((line): line is string => line !== null)
-		.join('\n');
+	].filter((line): line is string => line !== null);
+
+	const MAX_RECEIPT_CHARS = 3500;
+	const footerText = footer.join('\n');
+	// Reserve space for header + footer + newlines + truncation marker
+	let budget = MAX_RECEIPT_CHARS - header.length - footerText.length - 4;
+	const includedLines: string[] = [];
+	for (const line of allLines) {
+		if (budget - line.length - 1 < 50) break;
+		includedLines.push(line);
+		budget -= line.length + 1;
+	}
+
+	const omitted = allLines.length - includedLines.length;
+	const parts: string[] = [header, ...includedLines];
+	if (omitted > 0) parts.push(`…and ${omitted} more items`);
+	parts.push(...footer);
+	return parts.join('\n');
 }
 
 export async function loadAllStorePrices(store: ScopedDataStore): Promise<StorePriceData[]> {

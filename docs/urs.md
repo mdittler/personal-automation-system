@@ -4889,6 +4889,53 @@ The receipt filename prefix and `PriceEntry.updatedAt` MUST use `capturedAt` (wa
 
 ---
 
+### REQ-FOOD-RECEIPT-003 — Receipt detail Q&A MUST be answerable via the food handler; response MUST NOT exceed 4096 chars
+
+**Phase:** Hermes P8c Codex polish (TDD Batch 6) | **Status:** Implemented
+
+`formatReceiptDetails` SHALL produce a Telegram-safe response (≤ 4096 chars). When the full item list would exceed 3500 characters, items SHALL be truncated and a `…and N more items` marker appended so the user knows items were omitted. Regression guard: receipts short enough to fit within 3500 chars MUST show all items with no truncation marker.
+
+**Standard tests:**
+- `receipt-query.test.ts` > `formatReceiptDetails` > returns ≤ 4096 chars for a 50-item receipt with long item names
+- `receipt-query.test.ts` > `formatReceiptDetails` > includes a truncation marker when items are omitted
+- `receipt-query.test.ts` > `formatReceiptDetails` > shows all items when receipt is short enough
+
+---
+
+### REQ-FOOD-PRICE-001 — Price-lookup Q&A MUST route through `handlePriceLookupIfIntent` and return store + amount
+
+**Phase:** Hermes P8c Codex polish (TDD Batch 6) | **Status:** Implemented
+
+When the user asks about the price of an item at a specific store (e.g. "How much are blueberries at Costco?"), `handlePriceLookupIfIntent` SHALL match via `isPriceLookupIntent`, load the relevant `prices/<store>.md` file, and return a natural-language answer that includes the item name, price, and store name. The handler MUST NOT route to budget or meal-plan logic.
+
+**Standard tests:**
+- `receipt-prompt-loop.test.ts` > price lookup routes to price handler and returns item + store
+
+---
+
+### REQ-FOOD-SPEND-001 — Per-store spending Q&A MUST route through `handleStoreSpendingIfIntent`
+
+**Phase:** Hermes P8c Codex polish (TDD Batch 6) | **Status:** Implemented
+
+When the user asks about spending at a named store (e.g. "How much do I spend at Costco?"), `handleStoreSpendingIfIntent` SHALL match via `isStoreSpendingIntent` and return a total or per-trip breakdown derived from receipt history. The handler MUST NOT respond with "No active meal plan" or route to the budget flow.
+
+**Standard tests:**
+- `receipt-prompt-loop.test.ts` > store spending query routes to spending handler
+
+---
+
+### REQ-FOOD-RECEIPT-004 — `priceUpdates` audit trail MUST be persisted on receipt YAML and validated before write
+
+**Phase:** Hermes P8c Codex polish (TDD Batch 6) | **Status:** Implemented
+
+Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `ReceiptPriceUpdate` entry (`receiptName`, `normalizedName`, `price`, `status: added|updated`, `department`, `unit`, `updatedAt`) persisted in the receipt YAML body under `priceUpdates`. Items rejected by `isValidPriceEntry` SHALL NOT be written to the price store and SHALL trigger a `logger.warn` call so the rejection is visible in logs.
+
+**Standard tests:**
+- `price-store.test.ts` > `updatePricesFromReceipt` > logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)
+- `photo-handler.test.ts` > `priceUpdates` persistence
+
+---
+
 ### REQ-APPMETA-001: App metadata service
 
 **Phase:** 18 | **Status:** Implemented
@@ -8163,5 +8210,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-LINEAGE-005 | chat-index-rebuild.integration.test.ts | 3 | 0 | Implemented |
 | REQ-CONV-LINEAGE-006 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-LINEAGE-007 | chat-transcript-index.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-003 | receipt-query.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
+| REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
 
-| **Totals** | **210 test files** | **1620** | **1823** | **3443 tests** |
+| **Totals** | **210 test files** | **1627** | **1823** | **3450 tests** |
