@@ -380,20 +380,21 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
 	},
 	'user wants to see food spending': async (ctx) => {
-		if (await handleStoreSpendingIfIntent(ctx.text, ctx, true)) return;
-		const hh = await requireHouseholdOrMessage(ctx);
-		if (!hh) return;
-		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+		await executeStoreSpending(ctx);
 	},
-	'user wants to see receipt details or look up items from a receipt': (ctx) =>
-		handleReceiptQueryIfIntent(ctx.text, ctx, true).then(() => undefined),
+	'user wants to see receipt details or look up items from a receipt': async (ctx) => {
+		await executeReceiptQuery(ctx.text, ctx);
+	},
 	'user asks about prices at a specific store': async (ctx) => {
 		const lower = ctx.text.toLowerCase();
 		if (isPriceUpdateIntent(lower)) {
 			await handlePriceUpdateIntent(ctx.text, ctx);
 			return;
 		}
-		await handlePriceLookupIfIntent(ctx.text, ctx, true);
+		const outcome = await executePriceLookup(ctx.text, ctx);
+		if (outcome === 'no-item') {
+			await services.telegram.send(ctx.userId, 'Which grocery item should I look up?');
+		}
 	},
 };
 
@@ -457,20 +458,21 @@ export const SHADOW_HANDLERS: Partial<
 		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
 	},
 	'user wants to see food spending': async (ctx) => {
-		if (await handleStoreSpendingIfIntent(ctx.text, ctx, true)) return;
-		const hh = await requireHouseholdOrMessage(ctx);
-		if (!hh) return;
-		await handleBudgetCmd(services, [], ctx.userId, hh.sharedStore);
+		await executeStoreSpending(ctx);
 	},
-	'user wants to see receipt details or look up items from a receipt': (ctx) =>
-		handleReceiptQueryIfIntent(ctx.text, ctx, true).then(() => undefined),
+	'user wants to see receipt details or look up items from a receipt': async (ctx) => {
+		await executeReceiptQuery(ctx.text, ctx);
+	},
 	'user asks about prices at a specific store': async (ctx) => {
 		const lower = ctx.text.toLowerCase();
 		if (isPriceUpdateIntent(lower)) {
 			await handlePriceUpdateIntent(ctx.text, ctx);
 			return;
 		}
-		await handlePriceLookupIfIntent(ctx.text, ctx, true);
+		const outcome = await executePriceLookup(ctx.text, ctx);
+		if (outcome === 'no-item') {
+			await services.telegram.send(ctx.userId, 'Which grocery item should I look up?');
+		}
 	},
 	'user wants to see nutrition information': async (ctx) => {
 		const hh = await requireHouseholdOrMessage(ctx);
@@ -994,8 +996,9 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		}
 
 		// H10: Receipt follow-up/detail intent
-		if (await handleReceiptQueryIfIntent(text, ctx)) {
+		if (isReceiptQueryIntent(text, getRecentReceiptPaths(ctx.userId).length > 0)) {
 			regexWinner = 'receipt_query';
+			await executeReceiptQuery(text, ctx);
 			return;
 		}
 
@@ -1007,14 +1010,19 @@ export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageCont
 		}
 
 		// H10: Price lookup intent — "how much are blueberries at Costco?"
-		if (await handlePriceLookupIfIntent(text, ctx)) {
-			regexWinner = 'price_lookup';
-			return;
+		// Falls through to chatbot when no item is extractable ('no-item' outcome).
+		if (isPriceLookupIntent(text)) {
+			const outcome = await executePriceLookup(text, ctx);
+			if (outcome !== 'no-item') {
+				regexWinner = 'price_lookup';
+				return;
+			}
 		}
 
 		// H10: Grocery-store spending intent — "how much do I spend at each grocery store?"
-		if (await handleStoreSpendingIfIntent(text, ctx)) {
+		if (isStoreSpendingIntent(text)) {
 			regexWinner = 'store_spending';
+			await executeStoreSpending(ctx);
 			return;
 		}
 
@@ -3614,17 +3622,13 @@ function getRecentReceiptPaths(userId: string): string[] {
 		.filter((path) => /(?:^|[\\/])receipts[\\/][^\\/]+\.ya?ml$/i.test(path));
 }
 
-async function handleReceiptQueryIfIntent(
-	text: string,
-	ctx: MessageContext,
-	force = false,
-): Promise<boolean> {
-	const recentReceiptPaths = getRecentReceiptPaths(ctx.userId);
-	if (!force && !isReceiptQueryIntent(text, recentReceiptPaths.length > 0)) return false;
+type ExecuteOutcome = 'sent' | 'no-item' | 'no-data';
 
+async function executeReceiptQuery(text: string, ctx: MessageContext): Promise<ExecuteOutcome> {
 	const hh = await requireHouseholdOrMessage(ctx);
-	if (!hh) return true;
+	if (!hh) return 'sent';
 
+	const recentReceiptPaths = getRecentReceiptPaths(ctx.userId);
 	const [recentReceipt, receipts] = await Promise.all([
 		loadRecentReceiptFromPaths(hh.sharedStore, recentReceiptPaths),
 		loadReceipts(hh.sharedStore),
@@ -3636,22 +3640,16 @@ async function handleReceiptQueryIfIntent(
 
 	if (!receipt) {
 		await services.telegram.send(ctx.userId, 'I do not have any grocery receipts saved yet.');
-		return true;
+		return 'no-data';
 	}
 
 	await services.telegram.send(ctx.userId, formatReceiptDetails(receipt, text));
-	return true;
+	return 'sent';
 }
 
-async function handlePriceLookupIfIntent(
-	text: string,
-	ctx: MessageContext,
-	force = false,
-): Promise<boolean> {
-	if (!force && !isPriceLookupIntent(text)) return false;
-
+async function executePriceLookup(text: string, ctx: MessageContext): Promise<ExecuteOutcome> {
 	const hh = await requireHouseholdOrMessage(ctx);
-	if (!hh) return true;
+	if (!hh) return 'sent';
 
 	const priceData = await loadAllStorePrices(hh.sharedStore);
 	if (priceData.length === 0) {
@@ -3659,7 +3657,7 @@ async function handlePriceLookupIfIntent(
 			ctx.userId,
 			'No price data available. Add a receipt photo or price update to start tracking costs.',
 		);
-		return true;
+		return 'no-data';
 	}
 
 	const storeName = findMentionedPriceStore(text, priceData);
@@ -3667,15 +3665,11 @@ async function handlePriceLookupIfIntent(
 		text,
 		priceData.map((data) => data.store),
 	);
-	if (!itemQuery) {
-		if (!force) return false;
-		await services.telegram.send(ctx.userId, 'Which grocery item should I look up?');
-		return true;
-	}
+	if (!itemQuery) return 'no-item';
 
 	if (/\bcheapest\b/i.test(text)) {
 		await services.telegram.send(ctx.userId, formatCheapestPriceAnswer(priceData, itemQuery));
-		return true;
+		return 'sent';
 	}
 
 	if (storeName) {
@@ -3683,26 +3677,20 @@ async function handlePriceLookupIfIntent(
 			ctx.userId,
 			formatStorePriceAnswer(priceData, itemQuery, storeName),
 		);
-		return true;
+		return 'sent';
 	}
 
 	await services.telegram.send(ctx.userId, formatCheapestPriceAnswer(priceData, itemQuery));
-	return true;
+	return 'sent';
 }
 
-async function handleStoreSpendingIfIntent(
-	text: string,
-	ctx: MessageContext,
-	force = false,
-): Promise<boolean> {
-	if (!force && !isStoreSpendingIntent(text)) return false;
-
+async function executeStoreSpending(ctx: MessageContext): Promise<ExecuteOutcome> {
 	const hh = await requireHouseholdOrMessage(ctx);
-	if (!hh) return true;
+	if (!hh) return 'sent';
 
 	const receipts = await loadReceipts(hh.sharedStore);
 	await services.telegram.send(ctx.userId, formatStoreSpendingAnswer(receipts));
-	return true;
+	return 'sent';
 }
 
 // H10: Handle price update intent
