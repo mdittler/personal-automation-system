@@ -13,6 +13,7 @@
 import type { AppLogger } from '../../types/app-module.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { buildUntrustedQuery } from '../chat-transcript-index/index.js';
+import type { SearchHit } from '../chat-transcript-index/types.js';
 import type { ConversationRetrievalService } from '../conversation-retrieval/conversation-retrieval-service.js';
 import { formatRecallReply } from './prompt-assembly/recall-reply.js';
 import { sendSplitResponse } from './telegram-format.js';
@@ -47,23 +48,26 @@ export async function handleRecall(
 		return;
 	}
 
+	let hits: SearchHit[];
 	try {
 		const result = await deps.conversationRetrieval.searchSessions({
 			queryTerms,
 			limitSessions: 5,
 			limitMessagesPerSession: 3,
 		});
-
-		if (result.hits.length === 0) {
-			const escapedQuery = query.replace(/[*_`[\]()]/g, (m) => `\\${m}`);
-			await deps.telegram.send(ctx.userId, `No past conversations matched "${escapedQuery}".`);
-			return;
-		}
-
-		const reply = formatRecallReply(result.hits, queryTerms);
-		await sendSplitResponse(ctx.userId, reply, deps);
+		hits = result.hits;
 	} catch (error) {
 		deps.logger.warn('handleRecall: searchSessions failed: %s', error);
 		await deps.telegram.send(ctx.userId, 'Search failed. Try again later.');
+		return;
 	}
+
+	if (hits.length === 0) {
+		const escapedQuery = query.replace(/[*_`[\]()]/g, (m) => `\\${m}`);
+		await deps.telegram.send(ctx.userId, `No past conversations matched "${escapedQuery}".`);
+		return;
+	}
+
+	const reply = formatRecallReply(hits, queryTerms);
+	await sendSplitResponse(ctx.userId, reply, deps);
 }

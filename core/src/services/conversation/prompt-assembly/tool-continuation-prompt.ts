@@ -30,10 +30,21 @@ export function buildToolContinuationPrompt(opts: {
 		marker: '... (search results truncated)',
 	});
 
+	const userFence = buildMemoryContextBlock(opts.userMessage, {
+		label: 'user-request',
+		maxChars: 2000,
+		marker: '... (truncated)',
+	});
+
 	const parts: string[] = [];
-	parts.push(`<user-message>${opts.userMessage}</user-message>`);
+	if (userFence) parts.push(userFence);
 	if (cleanedPreTag.trim()) {
-		parts.push(`<assistant-partial>${cleanedPreTag}</assistant-partial>`);
+		const partialFence = buildMemoryContextBlock(cleanedPreTag, {
+			label: 'assistant-partial',
+			maxChars: 2000,
+			marker: '... (truncated)',
+		});
+		if (partialFence) parts.push(partialFence);
 	}
 	parts.push(resultFence);
 	parts.push('Continue your reply using these results. Do not search again.');

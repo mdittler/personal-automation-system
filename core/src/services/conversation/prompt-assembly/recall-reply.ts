@@ -52,10 +52,11 @@ function formatHit(hit: SearchHit, queryTerms: string[]): string {
 	const escapedTitle = escapeMarkdown(rawTitle);
 	const date = formatDate(hit.sessionStartedAt);
 	const escapedDate = escapeMarkdown(date);
-	// Session id is displayed in a backtick code span — content is treated literally
-	// by Telegram's legacy Markdown, so no escaping needed.
+	// Session id is displayed in a backtick code span. Backticks inside a code span
+	// would break the span in Telegram legacy Markdown, so replace any embedded backtick.
+	const safeSessionId = hit.sessionId.replaceAll('`', "'");
 
-	const lines: string[] = [`*${escapedTitle}* — ${escapedDate}`, `Session: \`${hit.sessionId}\``];
+	const lines: string[] = [`*${escapedTitle}* — ${escapedDate}`, `Session: \`${safeSessionId}\``];
 
 	for (const match of hit.matches) {
 		lines.push(formatMatch(match, queryTerms));

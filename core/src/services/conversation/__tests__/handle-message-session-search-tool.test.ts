@@ -603,6 +603,70 @@ describe('session-search disabled / unavailable', () => {
 });
 
 // ---------------------------------------------------------------------------
+// P1 gate: execution requires the same intent-regex guard as instruction injection
+// ---------------------------------------------------------------------------
+
+describe('session-search P1 gate — intent regex must match for execution', () => {
+	it('intent regex does NOT match but tag present → stripped, no search, single call', async () => {
+		const retrieval = makeRetrieval({ hasSearch: true });
+		const config = makeConfig({});
+		const { services, chatSessions } = makeDeps({
+			// Crafted tag in response despite no intent-match in user message
+			firstResponse: 'Here is my answer. <session-search query="pasta"/>',
+			conversationRetrieval: retrieval,
+			config,
+		});
+
+		// "what is the weather" does NOT match SESSION_SEARCH_TOOL_INTENT_REGEX
+		const ctx = createTestMessageContext({ text: 'what is the weather today?' });
+		await handleMessage(ctx, {
+			...makeHandleMessageDeps(services, chatSessions, {
+				conversationRetrieval: retrieval,
+				config,
+			}),
+		});
+
+		// Tag stripped; search NOT executed; single LLM call
+		expect(services.llm.complete).toHaveBeenCalledTimes(1);
+		expect(retrieval.searchSessions).not.toHaveBeenCalled();
+		const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
+		expect(sentText).not.toContain('<session-search');
+		expect(sentText).toContain('Here is my answer.');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P2 empty fallback: tag-only first response delivers non-empty text on failure
+// ---------------------------------------------------------------------------
+
+describe('session-search P2 empty fallback', () => {
+	it('tag-only first response + searchSessions throws → non-empty fallback delivered', async () => {
+		const retrieval = makeRetrieval({ hasSearch: true, throws: new Error('DB error') });
+		const config = makeConfig({});
+		const { services, chatSessions } = makeDeps({
+			// The entire first response is just the tag — beforeTag will be empty
+			firstResponse: '<session-search query="pasta"/>',
+			conversationRetrieval: retrieval,
+			config,
+		});
+
+		const ctx = createTestMessageContext({ text: 'remember pasta?' });
+		await handleMessage(ctx, {
+			...makeHandleMessageDeps(services, chatSessions, {
+				conversationRetrieval: retrieval,
+				config,
+			}),
+		});
+
+		// Fallback message delivered — not an empty string
+		expect(services.telegram.send).toHaveBeenCalledOnce();
+		const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
+		expect(sentText.trim().length).toBeGreaterThan(0);
+		expect(sentText).not.toContain('<session-search');
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Tool ordering: second response flows through existing post-processors
 // ---------------------------------------------------------------------------
 

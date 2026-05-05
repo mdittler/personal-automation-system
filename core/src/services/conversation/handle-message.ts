@@ -105,6 +105,9 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const modelSlug = slugifyModelId(modelId);
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
+	// Capture once — used in buildSnapshot callback (P3: avoids type regression from ?.)
+	// and reused later for instruction-injection and execution gating.
+	const retrieval = deps.conversationRetrieval;
 	const parentSessionId = parentSessionFromIdleReset(ctx.idleResetState);
 	const [
 		{ wrote: noteWrote },
@@ -134,7 +137,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 					...(parentSessionId !== null ? { parentSessionId } : {}),
 				},
 				{
-					buildSnapshot: deps.conversationRetrieval
+					buildSnapshot: retrieval
 						? async () => {
 								const flushEnabled = deps.config
 									? await resolveUserBool(
@@ -145,9 +148,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 											deps.logger,
 										)
 									: false;
-								return deps.conversationRetrieval?.buildMemorySnapshot(
-									flushEnabled ? {} : { pinnedKeys: [] },
-								);
+								return retrieval.buildMemorySnapshot(flushEnabled ? {} : { pinnedKeys: [] });
 							}
 						: undefined,
 				},
@@ -251,19 +252,18 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
 	}
-	const retrieval = deps.conversationRetrieval;
-	if (
-		deps.config &&
+	const sessionSearchAllowed =
+		deps.config !== undefined &&
+		retrieval?.hasSessionSearch() === true &&
 		SESSION_SEARCH_TOOL_INTENT_REGEX.test(ctx.text) &&
-		retrieval?.hasSessionSearch() &&
 		(await resolveUserBool(
 			deps.config,
 			ctx.userId,
 			'session_search_tool_enabled',
 			true,
 			deps.logger,
-		))
-	) {
+		));
+	if (sessionSearchAllowed) {
 		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_INSTRUCTION_BLOCK}`;
 	}
 
@@ -296,18 +296,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	// through the full existing post-processing chain.
 	let workingResponse = response;
 	const { query: toolQuery, beforeTag } = extractSessionSearchTag(workingResponse);
-	if (
-		toolQuery !== null &&
-		deps.config &&
-		retrieval?.hasSessionSearch() &&
-		(await resolveUserBool(
-			deps.config,
-			ctx.userId,
-			'session_search_tool_enabled',
-			true,
-			deps.logger,
-		))
-	) {
+	if (toolQuery !== null && sessionSearchAllowed && retrieval) {
 		try {
 			const queryTerms = buildUntrustedQuery(toolQuery).terms;
 			if (queryTerms.length > 0) {
@@ -331,11 +320,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				});
 				workingResponse = second;
 			} else {
-				workingResponse = beforeTag;
+				workingResponse =
+					beforeTag.trim() || 'I was unable to search past conversations. Please try again.';
 			}
 		} catch (err) {
 			deps.logger.warn('session-search tool loop failed, falling back to first response: %s', err);
-			workingResponse = beforeTag;
+			workingResponse =
+				beforeTag.trim() || 'I was unable to search past conversations. Please try again.';
 		}
 	} else {
 		workingResponse = stripSessionSearchTags(workingResponse);

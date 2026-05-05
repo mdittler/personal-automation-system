@@ -153,10 +153,12 @@ describe('T2 — /recall finds an indexed session', () => {
 		expect(newMessages.length).toBeGreaterThanOrEqual(1);
 		const combined = newMessages.map((m) => m.text).join('\n');
 
-		// The reply either contains the session id (matching session found)
-		// or a "no matching conversations" message (FTS not yet committed for new session).
-		// Both are valid — what we assert is no throw and the reply came back.
-		expect(combined.length).toBeGreaterThan(0);
+		// The index is wired — "search not available" must never appear.
+		expect(combined).not.toMatch(/search is not available/i);
+		// The session was ended by /newchat, so FTS committed it — the keyword must be found.
+		expect(combined).toContain(UNIQUE_KEYWORD);
+		// Reply must include the full session id pattern: YYYYMMDD_HHMMSS_<8hex>
+		expect(combined).toMatch(/\d{8}_\d{6}_[0-9a-f]{8}/);
 	}, 30_000);
 
 	it('/recall includes full session id YYYYMMDD_HHMMSS_<8hex> when hits found', async () => {
