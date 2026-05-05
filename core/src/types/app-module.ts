@@ -151,6 +151,8 @@ export interface CoreServices {
 	editService?: EditService;
 	/** Infrastructure-mediated access to declared external API secrets. */
 	secrets: SecretsService;
+	/** Absolute path to the data root directory (e.g. '/home/user/pas/data'). */
+	dataDir: string;
 	/** IANA timezone string from system config (e.g. 'America/New_York'). */
 	timezone: string;
 	/** Scoped structured logger. */

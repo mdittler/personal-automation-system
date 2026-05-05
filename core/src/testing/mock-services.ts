@@ -6,6 +6,7 @@
  * scenarios. Import from '@pas/core' or '@core/testing/mock-services'.
  */
 
+import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
 import type { AppKnowledgeBaseService } from '../types/app-knowledge.js';
 import type { AppMetadataService } from '../types/app-metadata.js';
@@ -228,6 +229,7 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		interactionContext: overrides?.interactionContext
 			? ({ record: vi.fn(), getRecent: vi.fn().mockReturnValue([]), ...overrides.interactionContext } as InteractionContextService)
 			: undefined,
+		dataDir: tmpdir(),
 		timezone: 'UTC',
 		logger,
 	};

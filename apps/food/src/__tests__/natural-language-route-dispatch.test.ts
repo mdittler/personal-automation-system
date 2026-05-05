@@ -28,13 +28,18 @@
  *   Group 4  — Household-missing path for household-gated intents
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { RouteInfo, ScopedDataStore } from '@pas/core/types';
 import { stringify } from 'yaml';
 import { init, handleMessage } from '../index.js';
 import type { Household } from '../types.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures

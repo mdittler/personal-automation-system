@@ -15,7 +15,7 @@
  *   D. End-to-end routing — message reaches handler and returns
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
@@ -24,6 +24,11 @@ import { isHostingIntent } from '../handlers/hosting.js';
 import { isHealthCorrelationIntent } from '../handlers/health.js';
 import { isNutritionViewIntent } from '../handlers/nutrition.js';
 import { handleMessage, init } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 

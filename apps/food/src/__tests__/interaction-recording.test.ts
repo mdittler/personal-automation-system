@@ -9,7 +9,7 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import {
 	handleMessage,
@@ -19,6 +19,11 @@ import {
 import { handlePhoto } from '../handlers/photo.js';
 import type { PhotoContext } from '@pas/core/types';
 import type { Household } from '../types.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Shared fixtures ────────────────────────────────────────────
 

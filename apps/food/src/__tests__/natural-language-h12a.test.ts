@@ -16,7 +16,7 @@
  *      and returns an appropriate response (correlation result or needs-more-data).
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
@@ -29,6 +29,11 @@ import {
 import { isHostingIntent } from '../handlers/hosting.js';
 import { isHealthCorrelationIntent } from '../handlers/health.js';
 import { handleMessage, init } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Section 1: isHealthCorrelationIntent — recognises health-correlation phrasings
 

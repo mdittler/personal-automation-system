@@ -2,11 +2,17 @@
  * Tests for the photo dispatch handler.
  */
 
+import { tmpdir } from 'node:os';
 import { formatConversationHistory } from '@pas/core/services/prompt-assembly';
 import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import { buildReceiptSummary, sanitizePhotoField } from '../handlers/photo-summary.js';
 import { handlePhoto } from '../handlers/photo.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 /** Matches SessionTurn shape used by formatConversationHistory. */
 type TurnLike = { role: 'user' | 'assistant'; content: string; timestamp: string };
@@ -66,6 +72,7 @@ function createMockServices(
 				forUser: vi.fn().mockReturnValue(createMockStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+		dataDir: tmpdir(),
 		} as unknown as CoreServices,
 		sharedStore,
 		spaceStore,
@@ -815,6 +822,7 @@ describe('Photo Handler', () => {
 				events: { on: vi.fn(), emit: vi.fn(), off: vi.fn() },
 				eventBus: { on: vi.fn(), emit: vi.fn(), off: vi.fn() },
 				config: { get: vi.fn().mockResolvedValue(undefined) },
+				dataDir: tmpdir(),
 			} as unknown as CoreServices;
 
 			await init(minimalServices);

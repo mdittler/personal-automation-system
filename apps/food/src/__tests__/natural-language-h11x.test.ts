@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 // Deep relative imports into core — `AppConfigServiceImpl` and
 // `requestContext` are not part of the public `@pas/core/*` subpath
@@ -46,6 +46,11 @@ import { requestContext } from '../../../../core/src/services/context/request-co
 import type { ManifestUserConfig } from '../../../../core/src/types/manifest.js';
 import { handleCommand, handleMessage, init } from '../index.js';
 import type { Household, MonthlyMacroLog, Recipe } from '../types.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+
+afterEach(() => {
+	__clearShadowDepsForTests();
+});
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
