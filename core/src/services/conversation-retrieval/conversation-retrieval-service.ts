@@ -176,9 +176,9 @@ export interface ConversationRetrievalDeps {
 	index?: ChatTranscriptIndex;
 	logger?: AppLogger;
 	/**
-	 * Operator system config (Hermes P6).
-	 * Chunk D reads `systemConfig.chat?.memory?.strict_durable_kinds` inside
-	 * `buildMemorySnapshot` to filter the memory snapshot to DURABLE_KINDS only.
+	 * Operator system config — when provided, `buildMemorySnapshot` reads
+	 * `chat.memory.strict_durable_kinds` to decide whether to exclude
+	 * untyped ContextStore entries from the durable memory snapshot.
 	 */
 	systemConfig?: SystemConfig;
 }

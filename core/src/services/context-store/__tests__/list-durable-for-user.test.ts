@@ -14,7 +14,7 @@
  * - User without household → throws HouseholdBoundaryError
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
@@ -70,7 +70,7 @@ describe('ContextStoreServiceImpl.listDurableForUser', () => {
 			const kindPath = join(dir, '.kinds.yaml');
 			let existing = '';
 			try {
-				existing = await (await import('node:fs/promises')).readFile(kindPath, 'utf-8');
+				existing = await readFile(kindPath, 'utf-8');
 			} catch {
 				// file doesn't exist yet
 			}
