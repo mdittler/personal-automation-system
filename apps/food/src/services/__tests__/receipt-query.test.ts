@@ -1,12 +1,5 @@
 /**
  * TDD Batch 6 — Codex polish: receipt-query service in isolation.
- *
- * RED:
- *   1. formatReceiptDetails with 50 long-name items returns a string exceeding
- *      4096 chars (Telegram limit) — no length guard exists yet.
- *
- * GREEN:
- *   1 → length guard truncates at 3500 chars with "…and N more items" marker.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -35,14 +28,12 @@ function makeBigReceipt(): Receipt {
 }
 
 describe('formatReceiptDetails', () => {
-	// RED: no length guard → string may exceed 4096. GREEN: guard truncates.
 	it('returns ≤ 4096 chars for a 50-item receipt with long item names', () => {
 		const receipt = makeBigReceipt();
 		const result = formatReceiptDetails(receipt, 'show me items');
 		expect(result.length).toBeLessThanOrEqual(4096);
 	});
 
-	// RED: same test confirming the truncation marker is present when truncated.
 	it('includes a truncation marker when items are omitted', () => {
 		const receipt = makeBigReceipt();
 		const result = formatReceiptDetails(receipt, 'show me items');

@@ -205,17 +205,6 @@ describe('classifyPASMessage', () => {
 	});
 });
 
-/**
- * TDD Batch 5 — Phase 4: deterministic data-query pre-filter.
- *
- * RED: LLM mock returns "YES" (not "YES_DATA") but the pre-filter phrases
- * present in the text mean dataQueryCandidate should still be true.
- * Currently false because there is no pre-filter → these tests fail.
- *
- * GREEN: pre-filter in classifyPASMessage returns
- * { pasRelated: true, dataQueryCandidate: true } before the LLM call
- * when the text matches the price/receipt/trip heuristic.
- */
 describe('classifyPASMessage pre-filter (deterministic price/receipt detection)', () => {
 	it('returns dataQueryCandidate=true for "cheapest" phrasing even when LLM says YES not YES_DATA (RC7)', async () => {
 		const services = createMockCoreServices();
@@ -226,7 +215,6 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 			appMetadata: services.appMetadata,
 			logger: services.logger,
 		});
-		// RED: false (no pre-filter). GREEN: true.
 		expect(result.dataQueryCandidate).toBe(true);
 	});
 

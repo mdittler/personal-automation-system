@@ -524,7 +524,6 @@ describe('price-store', () => {
 				mockStore as never,
 				receiptWithZeroPrice,
 			);
-			// RED: no warn call today; GREEN: warn added to the rejection path
 			expect(mockServices.logger.warn).toHaveBeenCalledWith(
 				expect.stringContaining('isValidPriceEntry'),
 				expect.any(String),

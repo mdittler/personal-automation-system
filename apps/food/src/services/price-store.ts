@@ -82,7 +82,7 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	if (fmMatch) {
 		const fmBlock = fmMatch[1] ?? '';
 		const storeMatch = fmBlock.match(/^store:\s*(.+)$/m);
-		if (storeMatch) store = storeMatch[1]?.trim();
+		if (storeMatch) store = storeMatch[1]?.trim() ?? store;
 		const dateMatch = fmBlock.match(/^last_updated:\s*"?(\d{4}-\d{2}-\d{2})"?$/m);
 		if (dateMatch) lastUpdated = dateMatch[1] ?? '';
 	}
@@ -93,13 +93,14 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	for (const line of raw.split('\n')) {
 		const deptMatch = line.match(/^##\s+(.+)$/);
 		if (deptMatch) {
-			currentDept = deptMatch[1]?.trim();
+			currentDept = deptMatch[1]?.trim() ?? 'Other';
 			continue;
 		}
 
 		const priceMatch = line.match(PRICE_LINE_RE);
 		if (priceMatch) {
-			const name = priceMatch[1]?.trim();
+			const name = priceMatch[1]?.trim() ?? '';
+			if (!name) continue;
 			items.push({
 				name,
 				price: Number.parseFloat(priceMatch[2] ?? '0'),
@@ -145,7 +146,7 @@ export function addOrUpdatePrice(data: StorePriceData, entry: PriceEntry): Store
 
 	const items = [...data.items];
 	if (idx >= 0) {
-		items[idx] = { ...entry, name: items[idx]?.name };
+		items[idx] = { ...entry, name: items[idx]?.name ?? entry.name };
 	} else {
 		items.push(entry);
 	}

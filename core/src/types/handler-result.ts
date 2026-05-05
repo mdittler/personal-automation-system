@@ -7,4 +7,4 @@
  *
  * Legacy apps that return void are treated as handled (no fallback).
  */
-export type HandlerResult = undefined | { handled: boolean };
+export type HandlerResult = void | { handled: boolean };

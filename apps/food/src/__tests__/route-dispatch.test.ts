@@ -74,9 +74,7 @@ function makeRoute(intent: string, overrides: Partial<RouteInfo> = {}): RouteInf
 
 /**
  * Assert that telegram.send was called, and the last call did NOT carry the
- * fallback help message.  This is the Group 1 RED/GREEN signal:
- *   - RED:   route ignored → help message sent → assertion FAILS
- *   - GREEN: route fires handler → handler message sent → assertion PASSES
+ * fallback help message.
  */
 function assertHandlerFired(sendMock: ReturnType<typeof vi.fn>): void {
 	expect(sendMock).toHaveBeenCalled();
@@ -168,9 +166,6 @@ describe('route-dispatch integration', () => {
 
 	// =========================================================================
 	// Group 1: Route wins for allowlist intents
-	//
-	// RED phase  → FAIL: route ignored, text misses regex, fallback help fires.
-	// GREEN phase → PASS: dispatchByRoute routes to correct handler, no help msg.
 	//
 	// Ambiguous texts are carefully chosen to NOT match any is*Intent regex so
 	// the only way the correct handler fires is through dispatchByRoute.
@@ -483,7 +478,7 @@ describe('route-dispatch integration', () => {
 	// Group 3: Deferred intents fall through to regex
 	//
 	// Intents NOT in ROUTE_HANDLERS at high confidence. dispatchByRoute returns
-	// false → regex cascade runs → handler fires. Both RED and GREEN: PASS.
+	// false → regex cascade runs → handler fires.
 	// =========================================================================
 
 	describe('Group 3: deferred intents fall through to regex (pass in RED and GREEN)', () => {

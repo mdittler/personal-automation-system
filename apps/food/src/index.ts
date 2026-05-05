@@ -3622,14 +3622,8 @@ async function handleReceiptQueryIfIntent(
 	const recentReceiptPaths = getRecentReceiptPaths(ctx.userId);
 	if (!force && !isReceiptQueryIntent(text, recentReceiptPaths.length > 0)) return false;
 
-	const hh = await requireHousehold(services, ctx.userId);
-	if (!hh) {
-		await services.telegram.send(
-			ctx.userId,
-			'Set up a household first with /household create <name>',
-		);
-		return true;
-	}
+	const hh = await requireHouseholdOrMessage(ctx);
+	if (!hh) return true;
 
 	const [recentReceipt, receipts] = await Promise.all([
 		loadRecentReceiptFromPaths(hh.sharedStore, recentReceiptPaths),
@@ -3656,14 +3650,8 @@ async function handlePriceLookupIfIntent(
 ): Promise<boolean> {
 	if (!force && !isPriceLookupIntent(text)) return false;
 
-	const hh = await requireHousehold(services, ctx.userId);
-	if (!hh) {
-		await services.telegram.send(
-			ctx.userId,
-			'Set up a household first with /household create <name>',
-		);
-		return true;
-	}
+	const hh = await requireHouseholdOrMessage(ctx);
+	if (!hh) return true;
 
 	const priceData = await loadAllStorePrices(hh.sharedStore);
 	if (priceData.length === 0) {
@@ -3709,14 +3697,8 @@ async function handleStoreSpendingIfIntent(
 ): Promise<boolean> {
 	if (!force && !isStoreSpendingIntent(text)) return false;
 
-	const hh = await requireHousehold(services, ctx.userId);
-	if (!hh) {
-		await services.telegram.send(
-			ctx.userId,
-			'Set up a household first with /household create <name>',
-		);
-		return true;
-	}
+	const hh = await requireHouseholdOrMessage(ctx);
+	if (!hh) return true;
 
 	const receipts = await loadReceipts(hh.sharedStore);
 	await services.telegram.send(ctx.userId, formatStoreSpendingAnswer(receipts));
@@ -3725,14 +3707,8 @@ async function handleStoreSpendingIfIntent(
 
 // H10: Handle price update intent
 async function handlePriceUpdateIntent(text: string, ctx: MessageContext): Promise<void> {
-	const hh = await requireHousehold(services, ctx.userId);
-	if (!hh) {
-		await services.telegram.send(
-			ctx.userId,
-			'Set up a household first with /household create <name>',
-		);
-		return;
-	}
+	const hh = await requireHouseholdOrMessage(ctx);
+	if (!hh) return;
 
 	const parsed = await parsePriceUpdateText(services, text);
 	if (!parsed) {

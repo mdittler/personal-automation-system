@@ -90,13 +90,6 @@ describe('formatDataAnswer', () => {
 		expect(logger.warn).toHaveBeenCalled();
 	});
 
-	/**
-	 * TDD Batch 5 — Phase 4: prompt extensions for price/receipt file types.
-	 *
-	 * RED: the current prompt has no price or receipt formatting guidance.
-	 * GREEN: guidance line added → tests pass.
-	 */
-
 	it('prompt includes price/receipt formatting guidance (RC7)', async () => {
 		const pricesResult: DataQueryResult = {
 			files: [
@@ -113,7 +106,6 @@ describe('formatDataAnswer', () => {
 		const llm = makeLLM('Blueberries at Costco are $7.69.');
 		await formatDataAnswer('how much are blueberries at Costco?', pricesResult, llm, logger);
 		const [prompt] = vi.mocked(llm.complete).mock.calls[0] as [string, ...unknown[]];
-		// RED: prompt lacks this guidance. GREEN: guidance line added to prompt.
 		expect(prompt).toContain('include specific amounts');
 	});
 
@@ -134,7 +126,6 @@ describe('formatDataAnswer', () => {
 		const llm = makeLLM('Your Costco receipt totaled $306.77.');
 		await formatDataAnswer('what was my last Costco receipt?', receiptResult, llm, logger);
 		const [prompt] = vi.mocked(llm.complete).mock.calls[0] as [string, ...unknown[]];
-		// RED: prompt lacks this guidance. GREEN: guidance line added to prompt.
 		expect(prompt).toContain('include the total');
 	});
 });

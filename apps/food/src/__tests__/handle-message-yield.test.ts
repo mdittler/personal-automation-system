@@ -1,9 +1,5 @@
 /**
  * TDD Batch 3 — Phase 2: food handleMessage HandlerResult contract.
- *
- * RED: handleMessage sends help text and returns void for unmatched messages.
- * GREEN: handleMessage returns {handled: false} for unmatched messages so the
- *        router can yield to the chatbot fallback instead of sending help text.
  */
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
@@ -39,14 +35,12 @@ describe('food handleMessage HandlerResult', () => {
 	it('returns {handled: false} for free text that matches no regex or handler', async () => {
 		const ctx = createTestMessageContext({ text: 'compare my Costco trips over the last month' });
 		const result = await handleMessage(ctx);
-		// RED: result is undefined (void); GREEN: result is {handled: false}
 		expect(result).toEqual({ handled: false });
 	});
 
 	it('does NOT send the canned help message when returning {handled: false}', async () => {
 		const ctx = createTestMessageContext({ text: 'compare my Costco trips over the last month' });
 		await handleMessage(ctx);
-		// RED: help text IS sent; GREEN: not sent (router forwards to chatbot instead)
 		expect(services.telegram.send).not.toHaveBeenCalledWith(
 			expect.any(String),
 			expect.stringContaining("I'm not sure what you'd like to do"),
@@ -73,11 +67,10 @@ describe('food handleMessage HandlerResult', () => {
 		// "show" triggers the isDataQuestion gate inside the DataQuery branch
 		const ctx = createTestMessageContext({ text: 'show me what I have in the fridge' });
 		const result = await handleMessage(ctx);
-		// RED: undefined (falls to help text); GREEN: {handled: false}
 		expect(result).toEqual({ handled: false });
 	});
 
-	// ── Regression guards (should pass in both RED and GREEN) ────────────────────
+	// ── Regression guards ───────────────────────────────────────────────────────
 
 	it('does NOT return {handled: false} for a receipt query (receipt handler runs)', async () => {
 		// "show me my last receipt" matches EXPLICIT_RECEIPT_RE — handler sends "no receipts yet"
