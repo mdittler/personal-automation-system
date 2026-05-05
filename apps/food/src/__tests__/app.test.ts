@@ -466,15 +466,15 @@ describe('Food App', () => {
 	});
 
 	describe('handleMessage — fallback', () => {
-		it('shows natural language examples in fallback', async () => {
+		it('returns {handled:false} and does not send help text for unrecognized input', async () => {
 			const ctx = createTestMessageContext({ text: 'hello', userId: 'user1' });
-			await handleMessage(ctx);
+			const result = await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
-			expect(msg).toContain('not sure');
-			expect(msg).toContain('spaghetti bolognese');
-			expect(msg).toContain('substitute');
-			expect(msg).toContain('/recipes');
+			expect(result).toEqual({ handled: false });
+			expect(services.telegram.send).not.toHaveBeenCalledWith(
+				expect.any(String),
+				expect.stringContaining("I'm not sure"),
+			);
 		});
 
 		it('ignores empty messages', async () => {
@@ -522,15 +522,16 @@ describe('Food App', () => {
 			);
 		});
 
-		it('falls through to intent detection when no cached results', async () => {
+		it('falls through with {handled:false} when no cached results and text does not match any intent', async () => {
 			const ctx = createTestMessageContext({
 				text: '1',
 				userId: 'user99',
 			});
-			await handleMessage(ctx);
+			const result = await handleMessage(ctx);
 
 			// Should fall through to fallback since "1" doesn't match any intent
-			expect(services.telegram.send).toHaveBeenCalledWith(
+			expect(result).toEqual({ handled: false });
+			expect(services.telegram.send).not.toHaveBeenCalledWith(
 				'user99',
 				expect.stringContaining('not sure'),
 			);
@@ -723,13 +724,15 @@ describe('Food App', () => {
 				text: 'show my household',
 				userId: 'user1',
 			});
-			await handleMessage(ctx);
+			const result = await handleMessage(ctx);
 
 			// "show my household" shouldn't match search (no "recipe" word, "show" + "for/me" isn't present in this form)
-			// It should fall through to fallback
-			const calls = vi.mocked(services.telegram.send).mock.calls;
-			const lastMsg = calls[calls.length - 1][1] as string;
-			expect(lastMsg).toContain('not sure');
+			// It should fall through to {handled: false} — router forwards to chatbot
+			expect(result).toEqual({ handled: false });
+			expect(services.telegram.send).not.toHaveBeenCalledWith(
+				expect.any(String),
+				expect.stringContaining('not sure'),
+			);
 		});
 	});
 
@@ -987,18 +990,19 @@ describe('Food App', () => {
 			];
 
 			for (const msg of fallbackMessages) {
-				it(`"${msg}" → falls through to helpful fallback`, async () => {
+				it(`"${msg}" → falls through with {handled:false} — router forwards to chatbot`, async () => {
 					const ctx = createTestMessageContext({ text: msg, userId: 'user1' });
-					await handleMessage(ctx);
+					const result = await handleMessage(ctx);
 
 					// No LLM call
 					expect(services.llm.complete).not.toHaveBeenCalled();
 
-					// Helpful fallback with examples
-					const response = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
-					expect(response).toContain('not sure');
-					expect(response).toContain('spaghetti bolognese');
-					expect(response).toContain('/recipes');
+					// Returns {handled:false} — router forwards to chatbot, no help text sent
+					expect(result).toEqual({ handled: false });
+					expect(services.telegram.send).not.toHaveBeenCalledWith(
+						expect.any(String),
+						expect.stringContaining('not sure'),
+					);
 				});
 			}
 		});
@@ -1092,20 +1096,26 @@ describe('Food App', () => {
 
 			it('"change the oven time" → NOT edit intent (no "recipe" word)', async () => {
 				const ctx = createTestMessageContext({ text: 'change the oven time', userId: 'user1' });
-				await handleMessage(ctx);
+				const result = await handleMessage(ctx);
 
-				// Should fall through to fallback, not trigger edit
-				const response = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
-				expect(response).toContain('not sure');
+				// Should fall through to {handled:false}, not trigger edit
+				expect(result).toEqual({ handled: false });
+				expect(services.telegram.send).not.toHaveBeenCalledWith(
+					expect.any(String),
+					expect.stringContaining('not sure'),
+				);
 			});
 
 			it('"replace the filter" → NOT food question (no "for" context)', async () => {
 				const ctx = createTestMessageContext({ text: 'replace the filter', userId: 'user1' });
-				await handleMessage(ctx);
+				const result = await handleMessage(ctx);
 
 				expect(services.llm.complete).not.toHaveBeenCalled();
-				const response = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
-				expect(response).toContain('not sure');
+				expect(result).toEqual({ handled: false });
+				expect(services.telegram.send).not.toHaveBeenCalledWith(
+					expect.any(String),
+					expect.stringContaining('not sure'),
+				);
 			});
 		});
 

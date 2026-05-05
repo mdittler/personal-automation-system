@@ -2,11 +2,11 @@
  * Tests for the photo dispatch handler.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { handlePhoto } from '../handlers/photo.js';
-import { buildReceiptSummary, sanitizePhotoField } from '../handlers/photo-summary.js';
 import { formatConversationHistory } from '@pas/core/services/prompt-assembly';
-import type { CoreServices, PhotoContext, ScopedDataStore, PhotoHandlerResult } from '@pas/core/types';
+import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildReceiptSummary, sanitizePhotoField } from '../handlers/photo-summary.js';
+import { handlePhoto } from '../handlers/photo.js';
 
 /** Matches SessionTurn shape used by formatConversationHistory. */
 type TurnLike = { role: 'user' | 'assistant'; content: string; timestamp: string };
@@ -105,9 +105,7 @@ const validReceiptJson = JSON.stringify({
 	total: 4.23,
 });
 
-const validPantryJson = JSON.stringify([
-	{ name: 'eggs', quantity: '12', category: 'dairy' },
-]);
+const validPantryJson = JSON.stringify([{ name: 'eggs', quantity: '12', category: 'dairy' }]);
 
 const validGroceryJson = JSON.stringify({
 	items: [{ name: 'bread', quantity: 1, unit: 'loaf' }],
@@ -168,7 +166,8 @@ describe('Photo Handler', () => {
 	describe('no caption — vision classification fallback', () => {
 		it('uses LLM vision to classify when no caption is provided', async () => {
 			// First call: classification. Second call: actual parsing.
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('recipe')
 				.mockResolvedValueOnce(validRecipeJson);
 			const { services } = createMockServices('');
@@ -267,7 +266,8 @@ describe('Photo Handler', () => {
 
 	describe('vision classification — unrecognized photo', () => {
 		it('asks user for caption when vision classification is unclear', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('I see a photo but I am not sure what category it falls into.');
 			const { services } = createMockServices('');
 			services.llm.complete = completeFn;
@@ -306,7 +306,8 @@ describe('Photo Handler', () => {
 
 			await handlePhoto(services, ctx);
 
-			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock
+				.calls[0]?.[0] as string;
 			expect(prompt).toContain('Whole Foods');
 		});
 
@@ -316,7 +317,8 @@ describe('Photo Handler', () => {
 
 			await handlePhoto(services, ctx);
 
-			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock
+				.calls[0]?.[0] as string;
 			expect(prompt).toContain('add these groceries to my list');
 		});
 	});
@@ -351,7 +353,8 @@ describe('Photo Handler', () => {
 				allergens: [],
 			});
 			// LLM: first call = recipe parse, subsequent = normalizer
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce(specialRecipe)
 				.mockResolvedValue('{"canonical":"flour","display":"Flour"}');
 			const { services } = createMockServices('');
@@ -364,7 +367,8 @@ describe('Photo Handler', () => {
 		});
 
 		it('does not use double-asterisk bold in recipe message', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce(validRecipeJson)
 				.mockResolvedValue('{"canonical":"flour","display":"Flour"}');
 			const { services } = createMockServices('');
@@ -378,7 +382,7 @@ describe('Photo Handler', () => {
 
 		it('escapes special chars in receipt store name', async () => {
 			const specialReceipt = JSON.stringify({
-				store: "Bob*s [Grocery] Store",
+				store: 'Bob*s [Grocery] Store',
 				date: RECEIPT_DATE,
 				lineItems: [{ name: 'Milk', quantity: 1, totalPrice: 3.99 }],
 				total: 3.99,
@@ -423,7 +427,7 @@ describe('Photo Handler', () => {
 		const validGroceryWithBadRecipe = JSON.stringify({
 			items: [{ name: 'bread', quantity: 1, unit: 'loaf' }],
 			isRecipe: true,
-			parsedRecipe: { title: '' },  // malformed: no ingredients/instructions
+			parsedRecipe: { title: '' }, // malformed: no ingredients/instructions
 		});
 
 		it('saves grocery items when parsedRecipe is malformed, skips recipe save with warning', async () => {
@@ -462,8 +466,9 @@ describe('Photo Handler', () => {
 				},
 			});
 			// Need LLM to handle both grocery parse and ingredient normalization
-			const completeFn = vi.fn()
-				.mockResolvedValueOnce(validBoth)                           // grocery parse
+			const completeFn = vi
+				.fn()
+				.mockResolvedValueOnce(validBoth) // grocery parse
 				.mockResolvedValue('{"canonical":"flour","display":"Flour"}'); // normalizer calls
 			const { services, sharedStore } = createMockServices('');
 			services.llm.complete = completeFn;
@@ -508,14 +513,16 @@ describe('Photo Handler', () => {
 
 		it('sends targeted error and does not send success message when saveGroceryList throws', async () => {
 			const { services, sharedStore } = createMockServices(validGroceryWithBadRecipe);
-			(sharedStore.write as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('EPERM: disk full'));
+			(sharedStore.write as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+				new Error('EPERM: disk full'),
+			);
 
 			await handlePhoto(services, createPhotoCtx('add to grocery list'));
 
 			const sentMessages = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls.map(
 				([, msg]) => msg as string,
 			);
-			expect(sentMessages.some((m) => m.includes('couldn\'t save the grocery list'))).toBe(true);
+			expect(sentMessages.some((m) => m.includes("couldn't save the grocery list"))).toBe(true);
 			expect(sentMessages.some((m) => m.includes('bread'))).toBe(false);
 		});
 	});
@@ -538,7 +545,9 @@ describe('Photo Handler', () => {
 
 		it('rejects photo from user who is not a household member and makes no LLM calls', async () => {
 			// household exists, but only 'other-user' is a member — not 'user-1'
-			const { services } = createMockServices(validRecipeJson, { householdMembers: ['other-user'] });
+			const { services } = createMockServices(validRecipeJson, {
+				householdMembers: ['other-user'],
+			});
 			const ctx = createPhotoCtx('save this recipe');
 
 			await handlePhoto(services, ctx);
@@ -551,7 +560,9 @@ describe('Photo Handler', () => {
 		});
 
 		it('does not write to shared store when user is not a household member', async () => {
-			const { services, sharedStore } = createMockServices(validRecipeJson, { householdMembers: null });
+			const { services, sharedStore } = createMockServices(validRecipeJson, {
+				householdMembers: null,
+			});
 			const ctx = createPhotoCtx('save this recipe');
 
 			await handlePhoto(services, ctx);
@@ -580,22 +591,67 @@ describe('Photo Handler', () => {
 			const { services, sharedStore } = createMockServices(validReceiptJson);
 			await handlePhoto(services, createPhotoCtx('receipt'));
 
-			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+				string,
+				string,
+			][];
 			const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
 			expect(receiptCall).toBeDefined();
-			expect(receiptCall![1]).toContain('type: receipt');
+			expect(receiptCall?.[1]).toContain('type: receipt');
 		});
 
 		it('writes entity_keys with lowercased store name in receipt frontmatter', async () => {
 			const { services, sharedStore } = createMockServices(validReceiptJson);
 			await handlePhoto(services, createPhotoCtx('receipt'));
 
-			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+				string,
+				string,
+			][];
 			const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
 			expect(receiptCall).toBeDefined();
 			// The store name "Grocery Store" should appear lowercased in entity_keys
-			expect(receiptCall![1]).toContain('entity_keys:');
-			expect(receiptCall![1]).toContain('grocery store');
+			expect(receiptCall?.[1]).toContain('entity_keys:');
+			expect(receiptCall?.[1]).toContain('grocery store');
+		});
+
+		it('persists per-item price update status on receipt after auto-updating prices', async () => {
+			const { services, sharedStore } = createMockServices(validReceiptJson);
+			vi.mocked(services.llm.complete)
+				.mockResolvedValueOnce(validReceiptJson)
+				.mockResolvedValueOnce(
+					JSON.stringify([
+						{
+							receiptName: 'Milk',
+							normalizedName: 'Milk (1 gal)',
+							department: 'Dairy',
+							unit: '1 gal',
+						},
+					]),
+				);
+
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+				string,
+				string,
+			][];
+			const receiptCalls = writeCalls.filter(([path]) => path.includes('receipts/'));
+			expect(receiptCalls).toHaveLength(2);
+
+			const latestReceiptCall = receiptCalls.at(-1)!;
+			const { parse: parseYAML } = await import('yaml');
+			const parts = latestReceiptCall[1].split('---\n');
+			const body = parseYAML(parts[2]!) as Record<string, unknown>;
+
+			expect(body.priceUpdates).toEqual([
+				expect.objectContaining({
+					receiptName: 'Milk',
+					normalizedName: 'Milk (1 gal)',
+					price: 3.99,
+					status: 'added',
+				}),
+			]);
 		});
 	});
 
@@ -622,23 +678,26 @@ describe('Photo Handler', () => {
 				(services as unknown as Record<string, unknown>).timezone = 'UTC';
 				await handlePhoto(services, createPhotoCtx('receipt'));
 
-				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+					string,
+					string,
+				][];
 				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
 				expect(receiptCall).toBeDefined();
 
 				// Filename should be derived from capturedAt (2026-04-29), not the rejected LLM date
-				expect(receiptCall![0]).toMatch(/^receipts\/2026-04-29-/);
+				expect(receiptCall?.[0]).toMatch(/^receipts\/2026-04-29-/);
 
 				// Parse the YAML body from the written content
 				const { parse: parseYAML } = await import('yaml');
-				const parts = receiptCall![1].split('---\n');
+				const parts = receiptCall?.[1].split('---\n');
 				// parts[0] = '', parts[1] = frontmatter, parts[2] = yaml body
 				const body = parseYAML(parts[2]!) as Record<string, unknown>;
 
 				// rawExtractedDate should be persisted (the rejected date)
-				expect(body['rawExtractedDate']).toBe('2025-01-27');
+				expect(body.rawExtractedDate).toBe('2025-01-27');
 				// display date is the fallback (today)
-				expect(body['date']).toBe('2026-04-29');
+				expect(body.date).toBe('2026-04-29');
 			} finally {
 				vi.useRealTimers();
 			}
@@ -661,15 +720,18 @@ describe('Photo Handler', () => {
 				(services as unknown as Record<string, unknown>).timezone = 'UTC';
 				await handlePhoto(services, createPhotoCtx('receipt'));
 
-				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+					string,
+					string,
+				][];
 				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
 				expect(receiptCall).toBeDefined();
 
 				const { parse: parseYAML } = await import('yaml');
-				const parts = receiptCall![1].split('---\n');
+				const parts = receiptCall?.[1].split('---\n');
 				const body = parseYAML(parts[2]!) as Record<string, unknown>;
 
-				expect(body['rawExtractedDate']).toBeUndefined();
+				expect(body.rawExtractedDate).toBeUndefined();
 			} finally {
 				vi.useRealTimers();
 			}
@@ -692,19 +754,22 @@ describe('Photo Handler', () => {
 				(services as unknown as Record<string, unknown>).timezone = 'UTC';
 				await handlePhoto(services, createPhotoCtx('receipt'));
 
-				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+				const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+					string,
+					string,
+				][];
 				const receiptCall = writeCalls.find(([path]) => path.includes('receipts/'));
 				expect(receiptCall).toBeDefined();
 
 				const { parse: parseYAML } = await import('yaml');
-				const parts = receiptCall![1].split('---\n');
+				const parts = receiptCall?.[1].split('---\n');
 				// parts[1] = frontmatter block (between the --- delimiters)
 				const fm = parseYAML(parts[1]!) as Record<string, unknown>;
 
 				// date in frontmatter = display/receipt date (parsed.date), NOT capturedAt-derived date
-				expect(fm['date']).toBe('2026-04-15');
+				expect(fm.date).toBe('2026-04-15');
 				// capturedAt in frontmatter = sort/storage authority (ISO instant from isoNow())
-				expect(fm['capturedAt']).toBe('2026-04-29T15:00:00.000Z');
+				expect(fm.capturedAt).toBe('2026-04-29T15:00:00.000Z');
 			} finally {
 				vi.useRealTimers();
 			}
@@ -755,7 +820,7 @@ describe('Photo Handler', () => {
 			await init(minimalServices);
 
 			const ctx = createPhotoCtx('receipt');
-			const result = await wrapperFn!(ctx);
+			const result = await wrapperFn?.(ctx);
 
 			expect(result).toEqual(fakeResult);
 			expect(result?.photoSummary?.userTurn).toBe('[Photo: receipt]');
@@ -790,7 +855,7 @@ describe('Photo Handler', () => {
 			expect(result?.photoSummary?.assistantTurn).toContain('$30.11');
 		});
 
-		it('caps top items at 10', async () => {
+		it('includes all items when count is 15 (≤30 threshold)', async () => {
 			const lineItems = Array.from({ length: 15 }, (_, i) => ({
 				name: `Item ${i}`,
 				quantity: 1,
@@ -808,8 +873,11 @@ describe('Photo Handler', () => {
 			const { services } = createMockServices(receiptJson);
 			const result = await handlePhoto(services, createPhotoCtx('receipt'));
 			const summary = result?.photoSummary?.assistantTurn ?? '';
-			expect(summary).toContain('Item 9');
-			expect(summary).not.toContain('Item 10');
+			// All 15 items should appear — cap is 30
+			for (let i = 0; i < 15; i++) {
+				expect(summary).toContain(`Item ${i}`);
+			}
+			expect(summary).not.toMatch(/and \d+ more/i);
 		});
 
 		it('returns receipt photoSummary with date in the assistantTurn', async () => {
@@ -870,7 +938,8 @@ describe('Photo Handler', () => {
 					allergens: [],
 				},
 			});
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce(groceryRecipeJson)
 				.mockResolvedValue('{"canonical":"flour","display":"Flour"}');
 			const { services } = createMockServices('');
@@ -980,9 +1049,7 @@ describe('Photo Handler', () => {
 				total: 1,
 				subtotal: 1,
 				tax: null,
-				lineItems: [
-					{ name: 'Salmon\x00\x1bdo evil', quantity: 1, unitPrice: 1, totalPrice: 1 },
-				],
+				lineItems: [{ name: 'Salmon\x00\x1bdo evil', quantity: 1, unitPrice: 1, totalPrice: 1 }],
 			});
 			// Newlines (\n) are valid structural separators in the summary — only non-newline
 			// control chars (NUL, ESC, etc.) must be absent.
@@ -997,9 +1064,7 @@ describe('Photo Handler', () => {
 				total: 1,
 				subtotal: 1,
 				tax: null,
-				lineItems: [
-					{ name: 'Ba‍na‌nas', quantity: 1, unitPrice: 1, totalPrice: 1 },
-				],
+				lineItems: [{ name: 'Ba‍na‌nas', quantity: 1, unitPrice: 1, totalPrice: 1 }],
 			});
 			expect(out.assistantTurn).not.toMatch(/[‌-‏]/);
 		});
@@ -1084,7 +1149,8 @@ describe('Photo Handler', () => {
 		});
 
 		it('accepts exact single-word "receipt"', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('receipt')
 				.mockResolvedValueOnce(validReceiptJson);
 			const { services } = createMockServices('');
@@ -1099,7 +1165,8 @@ describe('Photo Handler', () => {
 		});
 
 		it('accepts "Recipe" (capitalized)', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('Recipe')
 				.mockResolvedValueOnce(validRecipeJson);
 			const { services } = createMockServices('');
@@ -1114,7 +1181,8 @@ describe('Photo Handler', () => {
 		});
 
 		it('accepts "recipe." (with trailing punctuation)', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('recipe.')
 				.mockResolvedValueOnce(validRecipeJson);
 			const { services } = createMockServices('');

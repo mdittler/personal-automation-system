@@ -2,10 +2,10 @@
  * Tests for the shared data-answer-formatter utility.
  */
 
+import type { Logger } from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataQueryResult } from '../../types/data-query.js';
 import type { LLMService } from '../../types/llm.js';
-import type { Logger } from 'pino';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { formatDataAnswer } from '../data-answer-formatter.js';
 
 function makeLogger(): Logger {
@@ -22,9 +22,10 @@ function makeLogger(): Logger {
 
 function makeLLM(response: string | Error = 'Here is the answer'): LLMService {
 	return {
-		complete: response instanceof Error
-			? vi.fn().mockRejectedValue(response)
-			: vi.fn().mockResolvedValue(response),
+		complete:
+			response instanceof Error
+				? vi.fn().mockRejectedValue(response)
+				: vi.fn().mockResolvedValue(response),
 		classify: vi.fn(),
 		extractStructured: vi.fn(),
 	} as unknown as LLMService;
@@ -61,7 +62,12 @@ describe('formatDataAnswer', () => {
 
 	it('calls LLM with standard tier and includes the question', async () => {
 		const llm = makeLLM('You have a tacos recipe with beef and tortillas, serving 4.');
-		const result = await formatDataAnswer('what ingredients are in my tacos?', nonEmptyResult, llm, logger);
+		const result = await formatDataAnswer(
+			'what ingredients are in my tacos?',
+			nonEmptyResult,
+			llm,
+			logger,
+		);
 
 		expect(llm.complete).toHaveBeenCalledOnce();
 		const [prompt, opts] = vi.mocked(llm.complete).mock.calls[0] as [string, { tier?: string }];
@@ -82,5 +88,44 @@ describe('formatDataAnswer', () => {
 		const result = await formatDataAnswer('some question', nonEmptyResult, llm, logger);
 		expect(result).toBeNull();
 		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it('prompt includes price/receipt formatting guidance (RC7)', async () => {
+		const pricesResult: DataQueryResult = {
+			files: [
+				{
+					path: 'users/user1/food/prices/costco.md',
+					appId: 'food',
+					type: 'prices',
+					title: 'Costco Prices',
+					content: 'blueberries: $7.69\napples: $5.49',
+				},
+			],
+			empty: false,
+		};
+		const llm = makeLLM('Blueberries at Costco are $7.69.');
+		await formatDataAnswer('how much are blueberries at Costco?', pricesResult, llm, logger);
+		const [prompt] = vi.mocked(llm.complete).mock.calls[0] as [string, ...unknown[]];
+		expect(prompt).toContain('include specific amounts');
+	});
+
+	it('prompt includes receipt formatting guidance for receipt files (RC7)', async () => {
+		const receiptResult: DataQueryResult = {
+			files: [
+				{
+					path: 'users/user1/food/receipts/costco-2026-01-15.yaml',
+					appId: 'food',
+					type: 'receipt',
+					title: 'Costco Jan 15',
+					content:
+						'store: Costco\ntotal: 306.77\nlineItems:\n  - name: Blueberries\n    price: 7.69',
+				},
+			],
+			empty: false,
+		};
+		const llm = makeLLM('Your Costco receipt totaled $306.77.');
+		await formatDataAnswer('what was my last Costco receipt?', receiptResult, llm, logger);
+		const [prompt] = vi.mocked(llm.complete).mock.calls[0] as [string, ...unknown[]];
+		expect(prompt).toContain('include the total');
 	});
 });

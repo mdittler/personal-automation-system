@@ -158,7 +158,7 @@ describe('food app data query fallback', () => {
 		);
 	});
 
-	it('sends fallback help message without calling DataQueryService when no context or keywords', async () => {
+	it('returns {handled:false} without calling DataQueryService when no context or keywords', async () => {
 		const { services, mockDataQuery } = setupServices({
 			dataQueryResult: emptyResult,
 			recentEntries: [],
@@ -170,16 +170,17 @@ describe('food app data query fallback', () => {
 			userId: 'user1',
 		});
 
-		await handleMessage?.(ctx);
+		const result = await handleMessage?.(ctx);
 
 		expect(mockDataQuery.query).not.toHaveBeenCalled();
-		expect(vi.mocked(services.telegram.send)).toHaveBeenCalledWith(
+		expect(result).toEqual({ handled: false });
+		expect(vi.mocked(services.telegram.send)).not.toHaveBeenCalledWith(
 			'user1',
 			expect.stringContaining("I'm not sure what you'd like to do"),
 		);
 	});
 
-	it('sends fallback help message when DataQueryService returns empty result', async () => {
+	it('returns {handled:false} when DataQueryService returns empty result', async () => {
 		const { services } = setupServices({
 			dataQueryResult: emptyResult,
 			recentEntries: [makeFoodInteractionEntry()],
@@ -192,9 +193,10 @@ describe('food app data query fallback', () => {
 			userId: 'user1',
 		});
 
-		await handleMessage?.(ctx);
+		const result = await handleMessage?.(ctx);
 
-		expect(vi.mocked(services.telegram.send)).toHaveBeenCalledWith(
+		expect(result).toEqual({ handled: false });
+		expect(vi.mocked(services.telegram.send)).not.toHaveBeenCalledWith(
 			'user1',
 			expect.stringContaining("I'm not sure what you'd like to do"),
 		);
@@ -222,7 +224,7 @@ describe('food app data query fallback', () => {
 		);
 	});
 
-	it('does not throw and sends fallback when dataQuery service is not injected', async () => {
+	it('does not throw and returns {handled:false} when dataQuery service is not injected', async () => {
 		const { services } = setupServices({
 			dataQueryService: false,
 			recentEntries: [],
@@ -234,8 +236,9 @@ describe('food app data query fallback', () => {
 			userId: 'user1',
 		});
 
-		await expect(handleMessage?.(ctx)).resolves.not.toThrow();
-		expect(vi.mocked(services.telegram.send)).toHaveBeenCalledWith(
+		const result = await handleMessage?.(ctx);
+		expect(result).toEqual({ handled: false });
+		expect(vi.mocked(services.telegram.send)).not.toHaveBeenCalledWith(
 			'user1',
 			expect.stringContaining("I'm not sure what you'd like to do"),
 		);

@@ -28,7 +28,8 @@ export { isPriceUpdateIntent } from '../services/price-store.js';
 
 const BUDGET_KEYWORDS = /\b(budget|spend|spending|cost|costs|spent|expense)\b/i;
 const FOOD_CONTEXT = /\b(food|meal|grocery|week|month|year)\b/i;
-const HOW_MUCH = /\bhow much\b.{0,30}\b(spend|spent|cost)\b/i;
+const HOW_MUCH =
+	/\bhow much\b.{0,30}\b(spend|spent|cost|budget)\b.{0,20}\b(food|meal|grocery|groceries|recipe|recipes|restaurant)\b/i;
 
 /**
  * Detect budget-related queries like "how much did we spend on food",

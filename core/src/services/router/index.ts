@@ -12,11 +12,9 @@
 import { randomBytes } from 'node:crypto';
 import type { Logger } from 'pino';
 import { getCurrentHouseholdId, requestContext } from '../../services/context/request-context.js';
-import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
-import { buildSessionKey } from '../conversation-session/session-key.js';
+import type { PhotoHandlerResult } from '../../types/app-module.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { LLMService } from '../../types/llm.js';
-import type { PhotoHandlerResult } from '../../types/app-module.js';
 import type {
 	MessageContext,
 	PhotoContext,
@@ -29,17 +27,22 @@ import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import type { ChatSessionStore } from '../conversation-session/chat-session-store.js';
+import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
+import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { ConversationService } from '../conversation/conversation-service.js';
+import { runIdleResetHook } from '../conversation/idle-reset-hook.js';
+import type { IdleResetHookDeps, IdleResetState } from '../conversation/idle-reset-hook.js';
 import {
-	createPendingEntry,
 	type PendingSessionControlStore,
 	SC_NO,
 	SC_YES,
+	createPendingEntry,
 } from '../conversation/pending-session-control-store.js';
-import {
+import type {
+	SessionControlClassifierDeps,
+	SessionControlResult,
 	detectSessionControl,
-	type SessionControlClassifierDeps,
-	type SessionControlResult,
 } from '../conversation/session-control-classifier.js';
 import type { HouseholdService } from '../household/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
@@ -53,9 +56,6 @@ import {
 import type { SpaceService } from '../spaces/index.js';
 import type { UserManager } from '../user-manager/index.js';
 import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import { runIdleResetHook } from '../conversation/idle-reset-hook.js';
-import type { IdleResetHookDeps, IdleResetState } from '../conversation/idle-reset-hook.js';
-import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
@@ -663,13 +663,24 @@ export class Router {
 	 */
 	async dispatchMessage(app: RegisteredApp, ctx: MessageContext, route: RouteInfo): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
+		let result: Awaited<ReturnType<typeof app.module.handleMessage>>;
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId }, () =>
+			result = await requestContext.run({ userId: ctx.userId, householdId }, () =>
 				app.module.handleMessage({ ...ctx, route }),
 			);
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App message handler failed');
 			await this.trySend(ctx.userId, 'Something went wrong. Please try again later.');
+			return;
+		}
+		// HandlerResult: {handled: false} means the app did not handle the message — yield to chatbot.
+		if (result != null && !result.handled) {
+			this.logger.debug(
+				{ appId: app.manifest.app.id },
+				'App yielded to fallback (direct-dispatch-yielded)',
+			);
+			const enabledApps = this.findUser(ctx.userId)?.enabledApps ?? [];
+			await this.sendToFallback(ctx, enabledApps);
 		}
 	}
 
@@ -684,7 +695,12 @@ export class Router {
 	 * handler returns a photoSummary, it is appended to the chat transcript as a
 	 * user/assistant exchange (best-effort — failure is logged but never propagated).
 	 */
-	async dispatchPhoto(app: RegisteredApp, ctx: PhotoContext, route: RouteInfo, parentSessionId?: string | null): Promise<void> {
+	async dispatchPhoto(
+		app: RegisteredApp,
+		ctx: PhotoContext,
+		route: RouteInfo,
+		parentSessionId?: string | null,
+	): Promise<void> {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 
 		// Bind session BEFORE dispatch — a concurrent /newchat cannot redirect the append.
@@ -698,7 +714,7 @@ export class Router {
 			);
 		}
 
-		let result: void | PhotoHandlerResult;
+		let result: undefined | PhotoHandlerResult;
 		try {
 			result = await requestContext.run(
 				{ userId: ctx.userId, householdId, sessionId: sessionInfo?.sessionId },
@@ -768,7 +784,7 @@ export class Router {
 		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, () =>
-				this.conversationService!.handleMessage(enrichedCtx),
+				this.conversationService?.handleMessage(enrichedCtx),
 			);
 		} catch (error) {
 			this.logger.error({ error }, 'ConversationService handler failed');
@@ -796,12 +812,12 @@ export class Router {
 		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
 			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, async () => {
-				if (name === 'ask') await this.conversationService!.handleAsk(args, enrichedCtx);
-				else if (name === 'edit') await this.conversationService!.handleEdit(args, enrichedCtx);
+				if (name === 'ask') await this.conversationService?.handleAsk(args, enrichedCtx);
+				else if (name === 'edit') await this.conversationService?.handleEdit(args, enrichedCtx);
 				else if (name === 'newchat')
-					await this.conversationService!.handleNewChat(args, enrichedCtx);
-				else if (name === 'title') await this.conversationService!.handleTitle(args, enrichedCtx);
-				else await this.conversationService!.handleNotes(args, enrichedCtx);
+					await this.conversationService?.handleNewChat(args, enrichedCtx);
+				else if (name === 'title') await this.conversationService?.handleTitle(args, enrichedCtx);
+				else await this.conversationService?.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
 			this.logger.error({ command: name, error }, 'ConversationService command handler failed');

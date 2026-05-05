@@ -9,7 +9,7 @@
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter } from '@pas/core/utils/frontmatter';
-import type { PriceEntry, Receipt, StorePriceData } from '../types.js';
+import type { PriceEntry, Receipt, ReceiptPriceUpdate, StorePriceData } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 
 const PRICES_DIR = 'prices';
@@ -60,10 +60,11 @@ export function formatPriceFile(data: StorePriceData): string {
 		lines.push('');
 	}
 
-	return fm + '\n' + lines.join('\n');
+	return `${fm}\n${lines.join('\n')}`;
 }
 
-const PRICE_LINE_RE = /^- (.+?):\s*\$(\d+(?:\.\d+)?)\s*(?:<!--\s*updated:\s*(\d{4}-\d{2}-\d{2})\s*-->)?$/;
+const PRICE_LINE_RE =
+	/^- (.+?):\s*\$(\d+(?:\.\d+)?)\s*(?:<!--\s*updated:\s*(\d{4}-\d{2}-\d{2})\s*-->)?$/;
 
 function extractUnit(name: string): string {
 	const match = name.match(/\(([^)]+)\)\s*$/);
@@ -81,9 +82,9 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	if (fmMatch) {
 		const fmBlock = fmMatch[1] ?? '';
 		const storeMatch = fmBlock.match(/^store:\s*(.+)$/m);
-		if (storeMatch) store = storeMatch[1]!.trim();
+		if (storeMatch) store = storeMatch[1]?.trim() ?? store;
 		const dateMatch = fmBlock.match(/^last_updated:\s*"?(\d{4}-\d{2}-\d{2})"?$/m);
-		if (dateMatch) lastUpdated = dateMatch[1]!;
+		if (dateMatch) lastUpdated = dateMatch[1] ?? '';
 	}
 
 	const items: PriceEntry[] = [];
@@ -92,16 +93,17 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	for (const line of raw.split('\n')) {
 		const deptMatch = line.match(/^##\s+(.+)$/);
 		if (deptMatch) {
-			currentDept = deptMatch[1]!.trim();
+			currentDept = deptMatch[1]?.trim() ?? 'Other';
 			continue;
 		}
 
 		const priceMatch = line.match(PRICE_LINE_RE);
 		if (priceMatch) {
-			const name = priceMatch[1]!.trim();
+			const name = priceMatch[1]?.trim() ?? '';
+			if (!name) continue;
 			items.push({
 				name,
-				price: Number.parseFloat(priceMatch[2]!),
+				price: Number.parseFloat(priceMatch[2] ?? '0'),
 				unit: extractUnit(name),
 				department: currentDept,
 				updatedAt: priceMatch[3] ?? lastUpdated,
@@ -112,7 +114,10 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	return { store, slug, lastUpdated, items };
 }
 
-export async function loadStorePrices(store: ScopedDataStore, storeSlug: string): Promise<StorePriceData> {
+export async function loadStorePrices(
+	store: ScopedDataStore,
+	storeSlug: string,
+): Promise<StorePriceData> {
 	const raw = await store.read(`${PRICES_DIR}/${storeSlug}.md`);
 	if (!raw) return { store: storeSlug, slug: storeSlug, lastUpdated: '', items: [] };
 	return parsePriceFile(raw, storeSlug);
@@ -124,7 +129,14 @@ export async function saveStorePrices(store: ScopedDataStore, data: StorePriceDa
 }
 
 export function addOrUpdatePrice(data: StorePriceData, entry: PriceEntry): StorePriceData {
-	if (!isValidPriceEntry({ item: entry.name, price: entry.price, unit: entry.unit, department: entry.department })) {
+	if (
+		!isValidPriceEntry({
+			item: entry.name,
+			price: entry.price,
+			unit: entry.unit,
+			department: entry.department,
+		})
+	) {
 		// Log is unavailable here (pure function); caller should validate before calling
 		return data;
 	}
@@ -134,7 +146,7 @@ export function addOrUpdatePrice(data: StorePriceData, entry: PriceEntry): Store
 
 	const items = [...data.items];
 	if (idx >= 0) {
-		items[idx] = { ...entry, name: items[idx]!.name };
+		items[idx] = { ...entry, name: items[idx]?.name ?? entry.name };
 	} else {
 		items.push(entry);
 	}
@@ -155,7 +167,13 @@ function isValidPriceEntry(entry: {
 	department?: unknown;
 }): boolean {
 	if (typeof entry.item !== 'string' || entry.item.trim() === '') return false;
-	if (typeof entry.price !== 'number' || !Number.isFinite(entry.price) || entry.price <= 0 || entry.price > 9999) return false;
+	if (
+		typeof entry.price !== 'number' ||
+		!Number.isFinite(entry.price) ||
+		entry.price <= 0 ||
+		entry.price > 9999
+	)
+		return false;
 	if (entry.store !== undefined && typeof entry.store !== 'string') return false;
 	if (entry.unit !== undefined && typeof entry.unit !== 'string') return false;
 	if (entry.department !== undefined && typeof entry.department !== 'string') return false;
@@ -164,9 +182,7 @@ function isValidPriceEntry(entry: {
 
 export async function listStores(store: ScopedDataStore): Promise<string[]> {
 	const files = await store.list(PRICES_DIR);
-	return files
-		.filter((f) => f.endsWith('.md'))
-		.map((f) => f.replace(/\.md$/, ''));
+	return files.filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
 }
 
 // ─── Task 3: Receipt Auto-Update ─────────────────────────────────────────────
@@ -197,6 +213,7 @@ Rules:
 export interface ReceiptUpdateResult {
 	updatedCount: number;
 	addedCount: number;
+	items: ReceiptPriceUpdate[];
 	error?: string;
 }
 
@@ -206,7 +223,7 @@ export async function updatePricesFromReceipt(
 	receipt: Receipt,
 ): Promise<ReceiptUpdateResult> {
 	const validItems = receipt.lineItems.filter((li) => li.totalPrice > 0);
-	if (validItems.length === 0) return { updatedCount: 0, addedCount: 0 };
+	if (validItems.length === 0) return { updatedCount: 0, addedCount: 0, items: [] };
 
 	const slug = getStoreSlug(receipt.store);
 
@@ -217,11 +234,14 @@ export async function updatePricesFromReceipt(
 			`${NORMALIZE_PROMPT}\n\nReceipt items: [${itemList}]`,
 			{ tier: 'fast' },
 		);
-		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+		const cleaned = result
+			.replace(/^```(?:json)?\n?/, '')
+			.replace(/\n?```$/, '')
+			.trim();
 		normalized = JSON.parse(cleaned) as NormalizedItem[];
 	} catch (err) {
 		services.logger.error('Failed to normalize receipt items: %s', err);
-		return { updatedCount: 0, addedCount: 0, error: String(err) };
+		return { updatedCount: 0, addedCount: 0, items: [], error: String(err) };
 	}
 
 	const normalMap = new Map(normalized.map((n) => [n.receiptName, n]));
@@ -233,6 +253,7 @@ export async function updatePricesFromReceipt(
 
 	let updatedCount = 0;
 	let addedCount = 0;
+	const items: ReceiptPriceUpdate[] = [];
 
 	for (const li of validItems) {
 		const norm = normalMap.get(li.name);
@@ -245,14 +266,39 @@ export async function updatePricesFromReceipt(
 			department: norm.department,
 			updatedAt: receipt.capturedAt ? receipt.capturedAt.slice(0, 10) : receipt.date,
 		};
+		if (
+			!isValidPriceEntry({
+				item: entry.name,
+				price: entry.price,
+				unit: entry.unit,
+				department: entry.department,
+			})
+		) {
+			services.logger.warn('isValidPriceEntry rejected item from receipt', entry.name);
+			continue;
+		}
 
 		const existing = lookupPrice(priceData.items, norm.normalizedName);
 		priceData = addOrUpdatePrice(priceData, entry);
-		if (existing) { updatedCount++; } else { addedCount++; }
+		const status = existing ? 'updated' : 'added';
+		if (existing) {
+			updatedCount++;
+		} else {
+			addedCount++;
+		}
+		items.push({
+			receiptName: li.name,
+			normalizedName: norm.normalizedName,
+			price: li.totalPrice,
+			status,
+			department: norm.department,
+			unit: norm.unit,
+			updatedAt: entry.updatedAt,
+		});
 	}
 
 	await saveStorePrices(store, priceData);
-	return { updatedCount, addedCount };
+	return { updatedCount, addedCount, items };
 }
 
 // ─── Task 4: Text Intent Parsing ─────────────────────────────────────────────
@@ -304,7 +350,10 @@ export async function parsePriceUpdateText(
 			`${PARSE_PRICE_PROMPT}\n\nMessage: "${sanitizeInput(text, 200)}"`,
 			{ tier: 'fast' },
 		);
-		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+		const cleaned = result
+			.replace(/^```(?:json)?\n?/, '')
+			.replace(/\n?```$/, '')
+			.trim();
 		const parsed = JSON.parse(cleaned) as ParsedPriceUpdate;
 		if (!isValidPriceEntry(parsed)) return null;
 		return parsed;

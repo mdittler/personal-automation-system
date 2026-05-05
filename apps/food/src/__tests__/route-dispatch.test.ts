@@ -1,38 +1,32 @@
 /**
- * Route-dispatch integration tests (LLM Enhancement #2, Chunk A — Task A4).
- *
- * RED phase behaviour:
- * - handleMessage does NOT yet call dispatchByRoute.
- * - Group 1 tests: route is ignored, ambiguous text hits no regex, the fallback
- *   help message ("I'm not sure what you'd like to do") is sent.
- *   Assertions require the help message was NOT sent → tests FAIL in RED.
- * - Group 2 + Group 3: existing regex cascade fires → correct handler calls
- *   telegram.send → tests PASS in RED.
- *
- * After Task A5 wires dispatchByRoute into handleMessage:
- * - Group 1: route fires correct handler → non-help message → tests PASS (GREEN).
- * - Group 2 + Group 3: deferred/non-manifest intents still fall through to regex
- *   (dispatchByRoute returns false for intents not in ROUTE_HANDLERS) → PASS.
+ * Route-dispatch integration tests (LLM Enhancement #2, Chunk A).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { RouteInfo, ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import { init, handleMessage } from '../index.js';
-import type { Household, Recipe } from '../types.js';
-import { beginTargetsFlow, __resetTargetsFlowForTests, __setTargetsFlowAwaitingCustomInputForTests } from '../handlers/targets-flow.js';
-import { hasPendingCookRecipe, handleCookCommand, isCookModeActive } from '../handlers/cook-mode.js';
-import { createSession, endSession } from '../services/cook-session.js';
 import {
-    __setShadowDepsForTests,
-    __clearShadowDepsForTests,
-    __flushShadowForTests,
-    type ShadowClassifierInterface,
-    type ShadowLoggerInterface,
+	handleCookCommand,
+	hasPendingCookRecipe,
+	isCookModeActive,
+} from '../handlers/cook-mode.js';
+import {
+	__resetTargetsFlowForTests,
+	__setTargetsFlowAwaitingCustomInputForTests,
+} from '../handlers/targets-flow.js';
+import { handleMessage, init } from '../index.js';
+import {
+	type ShadowClassifierInterface,
+	type ShadowLoggerInterface,
+	__clearShadowDepsForTests,
+	__flushShadowForTests,
+	__setShadowDepsForTests,
 } from '../routing/shadow-integration.js';
 import type { ShadowLogEntry, ShadowResult } from '../routing/shadow-logger.js';
+import { createSession, endSession } from '../services/cook-session.js';
+import type { Household, Recipe } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -67,9 +61,7 @@ function makeRoute(intent: string, overrides: Partial<RouteInfo> = {}): RouteInf
 
 /**
  * Assert that telegram.send was called, and the last call did NOT carry the
- * fallback help message.  This is the Group 1 RED/GREEN signal:
- *   - RED:   route ignored → help message sent → assertion FAILS
- *   - GREEN: route fires handler → handler message sent → assertion PASSES
+ * fallback help message.
  */
 function assertHandlerFired(sendMock: ReturnType<typeof vi.fn>): void {
 	expect(sendMock).toHaveBeenCalled();
@@ -120,7 +112,9 @@ describe('route-dispatch integration', () => {
 		userStore = createMockScopedStore();
 		services = createMockCoreServices();
 
+		// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+		// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 		vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
 
 		// Default: household exists so handlers that require one proceed normally
@@ -131,29 +125,34 @@ describe('route-dispatch integration', () => {
 
 		// LLM defaults — handlers that call llm.complete get a safe stub response
 		vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
-		vi.mocked(services.llm.classify).mockResolvedValue({ category: 'save_recipe', confidence: 0.9 });
+		vi.mocked(services.llm.classify).mockResolvedValue({
+			category: 'save_recipe',
+			confidence: 0.9,
+		});
 		vi.mocked(services.llm.extractStructured).mockResolvedValue({});
 
 		await init(services);
 		vi.clearAllMocks();
 
 		// Re-install mocks after clearAllMocks (init side-effects are already done)
+		// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+		// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 		vi.mocked(services.data.forUser).mockReturnValue(userStore as any);
 		vi.mocked(sharedStore.read).mockImplementation(async (path: string) => {
 			if (path === 'household.yaml') return stringify(sampleHousehold);
 			return '';
 		});
 		vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
-		vi.mocked(services.llm.classify).mockResolvedValue({ category: 'save_recipe', confidence: 0.9 });
+		vi.mocked(services.llm.classify).mockResolvedValue({
+			category: 'save_recipe',
+			confidence: 0.9,
+		});
 		vi.mocked(services.llm.extractStructured).mockResolvedValue({});
 	});
 
 	// =========================================================================
 	// Group 1: Route wins for allowlist intents
-	//
-	// RED phase  → FAIL: route ignored, text misses regex, fallback help fires.
-	// GREEN phase → PASS: dispatchByRoute routes to correct handler, no help msg.
 	//
 	// Ambiguous texts are carefully chosen to NOT match any is*Intent regex so
 	// the only way the correct handler fires is through dispatchByRoute.
@@ -164,7 +163,7 @@ describe('route-dispatch integration', () => {
 	// =========================================================================
 
 	describe('Group 1: route wins for allowlist intents (RED until A5)', () => {
-		it("what's for dinner — \"what did you plan for tonight\" + route fires handler", async () => {
+		it('what\'s for dinner — "what did you plan for tonight" + route fires handler', async () => {
 			// Does not match isWhatsForDinnerIntent regex
 			const ctx = createTestMessageContext({
 				userId: 'user1',
@@ -220,7 +219,9 @@ describe('route-dispatch integration', () => {
 		it('macro adherence route reads nutrition targets from the user store after the shared household guard', async () => {
 			vi.mocked(sharedStore.read).mockImplementation(async (path: string) => {
 				if (path === 'household.yaml') return stringify(sampleHousehold);
-				throw new Error('adherence route must not read user nutrition data from shared household storage');
+				throw new Error(
+					'adherence route must not read user nutrition data from shared household storage',
+				);
 			});
 			vi.mocked(userStore.read).mockImplementation(async (path: string) => {
 				if (path === 'nutrition/targets.yaml') return 'calories: 2000\nprotein: 150';
@@ -229,7 +230,9 @@ describe('route-dispatch integration', () => {
 			const ctx = createTestMessageContext({
 				userId: 'user1',
 				text: 'am i doing ok with nutrition',
-				route: makeRoute('user wants to see how well they are hitting their macro targets over time'),
+				route: makeRoute(
+					'user wants to see how well they are hitting their macro targets over time',
+				),
 			});
 
 			await handleMessage(ctx);
@@ -243,7 +246,9 @@ describe('route-dispatch integration', () => {
 			const ctx = createTestMessageContext({
 				userId: 'user1',
 				text: 'am i doing ok with nutrition',
-				route: makeRoute('user wants to see how well they are hitting their macro targets over time'),
+				route: makeRoute(
+					'user wants to see how well they are hitting their macro targets over time',
+				),
 			});
 
 			await handleMessage(ctx);
@@ -256,7 +261,9 @@ describe('route-dispatch integration', () => {
 			const ctx = createTestMessageContext({
 				userId: 'user1',
 				text: 'connect my meals to my health',
-				route: makeRoute('user wants to understand how their diet is affecting their health or energy'),
+				route: makeRoute(
+					'user wants to understand how their diet is affecting their health or energy',
+				),
 			});
 
 			await handleMessage(ctx);
@@ -277,7 +284,7 @@ describe('route-dispatch integration', () => {
 			assertHandlerFired(vi.mocked(services.telegram.send));
 		});
 
-		it("hosting — \"i'm having company\" + route fires hosting handler", async () => {
+		it('hosting — "i\'m having company" + route fires hosting handler', async () => {
 			// Does not match isHostingIntent regex
 			const ctx = createTestMessageContext({
 				userId: 'user1',
@@ -290,7 +297,7 @@ describe('route-dispatch integration', () => {
 			assertHandlerFired(vi.mocked(services.telegram.send));
 		});
 
-		it("budget — \"what's the grocery bill\" + route fires budget handler", async () => {
+		it('budget — "what\'s the grocery bill" + route fires budget handler', async () => {
 			// Does not match isBudgetViewIntent regex
 			const ctx = createTestMessageContext({
 				userId: 'user1',
@@ -441,7 +448,7 @@ describe('route-dispatch integration', () => {
 		});
 
 		it('price update — "eggs are $3.50 at costco" with store-prices route → price-update fires', async () => {
-			// isPriceUpdateIntent matches; store-prices intent is NOT in ROUTE_HANDLERS
+			// Store-prices route now branches to the price-update handler for explicit $ updates.
 			const ctx = createTestMessageContext({
 				userId: 'user1',
 				text: 'eggs are $3.50 at costco',
@@ -458,7 +465,7 @@ describe('route-dispatch integration', () => {
 	// Group 3: Deferred intents fall through to regex
 	//
 	// Intents NOT in ROUTE_HANDLERS at high confidence. dispatchByRoute returns
-	// false → regex cascade runs → handler fires. Both RED and GREEN: PASS.
+	// false → regex cascade runs → handler fires.
 	// =========================================================================
 
 	describe('Group 3: deferred intents fall through to regex (pass in RED and GREEN)', () => {
@@ -512,7 +519,7 @@ describe('route-dispatch integration', () => {
 			// ctx.route carries a valid allowlisted intent at high confidence
 			const ctx = createTestMessageContext({
 				userId: 'user1',
-				text: '2000',  // a calorie value — processed by handleTargetsFlowReply
+				text: '2000', // a calorie value — processed by handleTargetsFlowReply
 				route: makeRoute("user wants to know what's for dinner", { confidence: 0.95 }),
 			});
 
@@ -524,10 +531,14 @@ describe('route-dispatch integration', () => {
 			expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
 			// The dinner handler sends text like "No meal plan yet" — verify it did NOT fire
 			const sendCalls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
-			const dinnerCall = sendCalls.find(([, msg]) =>
-				msg.includes('meal plan') || msg.includes('for dinner') || msg.includes('planned'),
+			const dinnerCall = sendCalls.find(
+				([, msg]) =>
+					msg.includes('meal plan') || msg.includes('for dinner') || msg.includes('planned'),
 			);
-			expect(dinnerCall, 'Dinner handler must not fire when targets flow is active').toBeUndefined();
+			expect(
+				dinnerCall,
+				'Dinner handler must not fire when targets flow is active',
+			).toBeUndefined();
 		});
 
 		it('active cook-mode pending recipe takes precedence over allowlist route', async () => {
@@ -545,6 +556,7 @@ describe('route-dispatch integration', () => {
 					return [];
 				}),
 			});
+			// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 
 			// Trigger handleCookCommand to establish a pending cook recipe for user1
@@ -573,10 +585,12 @@ describe('route-dispatch integration', () => {
 			// If dispatchByRoute ran first, it would call handleWhatsForDinner.
 			const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
 			// Cook mode sends step messages, not dinner/help messages
-			const dinnerCalls = calls.filter(([, msg]) =>
-				msg.includes('for dinner') || msg.includes('meal plan'),
+			const dinnerCalls = calls.filter(
+				([, msg]) => msg.includes('for dinner') || msg.includes('meal plan'),
 			);
-			expect(dinnerCalls, 'Dinner handler must not fire when cook recipe is pending').toHaveLength(0);
+			expect(dinnerCalls, 'Dinner handler must not fire when cook recipe is pending').toHaveLength(
+				0,
+			);
 		});
 	});
 
@@ -594,7 +608,9 @@ describe('route-dispatch integration', () => {
 
 		class CaptureShadowLogger implements ShadowLoggerInterface {
 			entries: ShadowLogEntry[] = [];
-			async log(entry: ShadowLogEntry): Promise<void> { this.entries.push(entry); }
+			async log(entry: ShadowLogEntry): Promise<void> {
+				this.entries.push(entry);
+			}
 		}
 
 		function makeNeverClassifier(): ShadowClassifierInterface & { callCount: number } {
@@ -619,7 +635,7 @@ describe('route-dispatch integration', () => {
 
 		afterEach(() => {
 			__clearShadowDepsForTests();
-			endSession('user1');  // clean up any active cook session created in this group
+			endSession('user1'); // clean up any active cook session created in this group
 		});
 
 		// ------------------------------------------------------------------
@@ -636,8 +652,11 @@ describe('route-dispatch integration', () => {
 			await handleMessage(ctx);
 			await __flushShadowForTests();
 
-			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(0);
+			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(
+				0,
+			);
 			expect(captureLogger.entries).toHaveLength(1);
+			// biome-ignore lint/style/noNonNullAssertion: test asserts non-null above
 			const entry = captureLogger.entries[0]!;
 			expect(entry.shadow).toMatchObject({ kind: 'skipped-pending-flow', flow: 'targets-set' });
 			expect(entry.pendingFlow).toBe('targets-set');
@@ -659,6 +678,7 @@ describe('route-dispatch integration', () => {
 					return [];
 				}),
 			});
+			// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 
 			const cookCtx = createTestMessageContext({ userId: 'user1', text: 'lasagna' });
@@ -679,8 +699,11 @@ describe('route-dispatch integration', () => {
 			await handleMessage(ctx);
 			await __flushShadowForTests();
 
-			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(0);
+			expect(neverClassifier.callCount, 'classifier must not be invoked on pending-flow path').toBe(
+				0,
+			);
 			expect(captureLogger.entries).toHaveLength(1);
+			// biome-ignore lint/style/noNonNullAssertion: test asserts non-null above
 			const entry = captureLogger.entries[0]!;
 			expect(entry.shadow).toMatchObject({ kind: 'skipped-pending-flow', flow: 'cook-servings' });
 			expect(entry.pendingFlow).toBe('cook-servings');
@@ -703,8 +726,12 @@ describe('route-dispatch integration', () => {
 			await handleMessage(ctx);
 			await __flushShadowForTests();
 
-			expect(neverClassifier.callCount, 'classifier must not be invoked during active cook mode').toBe(0);
+			expect(
+				neverClassifier.callCount,
+				'classifier must not be invoked during active cook mode',
+			).toBe(0);
 			expect(captureLogger.entries).toHaveLength(1);
+			// biome-ignore lint/style/noNonNullAssertion: test asserts non-null above
 			const entry = captureLogger.entries[0]!;
 			expect(entry.shadow).toMatchObject({ kind: 'skipped-cook-mode' });
 			expect(entry.verdict).toBe('skipped');
@@ -723,6 +750,7 @@ describe('route-dispatch integration', () => {
 				}),
 				list: vi.fn().mockResolvedValue(['lasagna-001.yaml']),
 			});
+			// biome-ignore lint/suspicious/noExplicitAny: test mock type cast
 			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 
 			const searchCtx = createTestMessageContext({ userId: 'user1', text: 'search for lasagna' });
@@ -743,8 +771,12 @@ describe('route-dispatch integration', () => {
 			await handleMessage(ctx);
 			await __flushShadowForTests();
 
-			expect(freshClassifier.callCount, 'classifier must not be invoked on number-select path').toBe(0);
+			expect(
+				freshClassifier.callCount,
+				'classifier must not be invoked on number-select path',
+			).toBe(0);
 			expect(captureLogger.entries).toHaveLength(1);
+			// biome-ignore lint/style/noNonNullAssertion: test asserts non-null above
 			const entry = captureLogger.entries[0]!;
 			expect(entry.shadow).toMatchObject({ kind: 'skipped-number-select' });
 			expect(entry.verdict).toBe('skipped');
