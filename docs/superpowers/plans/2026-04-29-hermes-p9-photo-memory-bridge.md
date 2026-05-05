@@ -30,7 +30,7 @@
 | 6 | "Purchase breakdown of that" → Food help fallback | (Track C) | operational |
 
 **Track C — operational, no code in this plan:**
-- Shadow-classifier production flip (`routing_primary: shadow` in `config/pas.yaml`) — gated on `pnpm analyze-shadow-log` ≥95% over ≥1 week (`docs/open-items.md:55`).
+- Shadow-classifier production flip (change `default: regex` → `default: shadow` in the `routing_primary` user_config block of `apps/food/manifest.yaml` ~line 364) — gated on `pnpm analyze-shadow-log` ≥95% over ≥1 week (`docs/open-items.md`).
 - LLM Enhancement #4 (DataQuery keyword-gate removal) — already on the LLM Enhancement plan.
 
 ---
