@@ -10,8 +10,13 @@ import type { AppConfigService } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import { coerceUserConfigValue } from '../config/coerce-user-config.js';
-import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
 import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from './control-tags/session-search-instruction.js';
+import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
+export {
+	MEMORY_KIND_INTENT_REGEX,
+	MEMORY_KIND_SET_INSTRUCTION_BLOCK,
+	processMemoryKindSetTags,
+} from './control-tags/memory-kind-set.js';
 
 export const normalizeResponse = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
 

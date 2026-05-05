@@ -45,10 +45,13 @@ import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
 	MEMORY_FLUSH_INTENT_REGEX,
+	MEMORY_KIND_INTENT_REGEX,
+	MEMORY_KIND_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
 	SWITCH_MODEL_TAG_REGEX,
 	normalizeResponse,
 	processConfigSetTags,
+	processMemoryKindSetTags,
 } from './control-tags.js';
 import {
 	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
@@ -252,6 +255,9 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
 	}
+	if (deps.contextStore && MEMORY_KIND_INTENT_REGEX.test(ctx.text)) {
+		systemPrompt = `${systemPrompt}\n\n${MEMORY_KIND_SET_INSTRUCTION_BLOCK}`;
+	}
 	const sessionSearchAllowed =
 		deps.config !== undefined &&
 		retrieval?.hasSessionSearch() === true &&
@@ -343,24 +349,47 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const afterSwitchStrip = afterJournal.replace(SWITCH_MODEL_TAG_REGEX, '');
 
 	let finalResponse: string;
+	const allConfirmations: string[] = [];
 	if (deps.config) {
-		const { cleanedResponse: afterConfigSet, confirmations } = await processConfigSetTags(
-			afterSwitchStrip,
-			{
+		const { cleanedResponse: afterConfigSet, confirmations: configConfirmations } =
+			await processConfigSetTags(afterSwitchStrip, {
 				userId: ctx.userId,
 				userMessage: ctx.text,
 				config: deps.config,
 				manifest: CONVERSATION_USER_CONFIG,
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
-			},
-		);
-		finalResponse =
-			confirmations.length > 0
-				? normalizeResponse(`${afterConfigSet}\n\n${confirmations.join('\n')}`)
-				: normalizeResponse(afterConfigSet);
+			});
+		allConfirmations.push(...configConfirmations);
+		if (deps.contextStore) {
+			const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
+				await processMemoryKindSetTags(afterConfigSet, {
+					userId: ctx.userId,
+					userMessage: ctx.text,
+					contextStore: deps.contextStore,
+					logger: deps.logger,
+				});
+			allConfirmations.push(...kindConfirmations);
+			finalResponse = afterKindSet;
+		} else {
+			finalResponse = afterConfigSet;
+		}
+	} else if (deps.contextStore) {
+		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
+			await processMemoryKindSetTags(afterSwitchStrip, {
+				userId: ctx.userId,
+				userMessage: ctx.text,
+				contextStore: deps.contextStore,
+				logger: deps.logger,
+			});
+		allConfirmations.push(...kindConfirmations);
+		finalResponse = afterKindSet;
 	} else {
 		finalResponse = normalizeResponse(afterSwitchStrip);
+	}
+
+	if (allConfirmations.length > 0) {
+		finalResponse = normalizeResponse(`${finalResponse}\n\n${allConfirmations.join('\n')}`);
 	}
 
 	await sendSplitResponse(ctx.userId, finalResponse, deps);

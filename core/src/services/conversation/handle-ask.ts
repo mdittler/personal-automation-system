@@ -41,9 +41,12 @@ import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
 	MEMORY_FLUSH_INTENT_REGEX,
+	MEMORY_KIND_INTENT_REGEX,
+	MEMORY_KIND_SET_INSTRUCTION_BLOCK,
 	NOTES_INTENT_REGEX,
 	normalizeResponse,
 	processConfigSetTags,
+	processMemoryKindSetTags,
 	processModelSwitchTags,
 } from './control-tags.js';
 import {
@@ -258,6 +261,9 @@ export async function handleAsk(
 	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
 	}
+	if (deps.contextStore && MEMORY_KIND_INTENT_REGEX.test(question)) {
+		systemPrompt = `${systemPrompt}\n\n${MEMORY_KIND_SET_INSTRUCTION_BLOCK}`;
+	}
 	const sessionSearchAllowed =
 		deps.config !== undefined &&
 		retrieval?.hasSessionSearch() === true &&
@@ -364,8 +370,19 @@ export async function handleAsk(
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});
-		finalResponse = afterConfigSet;
 		allConfirmations.push(...configConfirmations);
+		finalResponse = afterConfigSet;
+	}
+	if (deps.contextStore) {
+		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
+			await processMemoryKindSetTags(finalResponse, {
+				userId: ctx.userId,
+				userMessage: question,
+				contextStore: deps.contextStore,
+				logger: deps.logger,
+			});
+		allConfirmations.push(...kindConfirmations);
+		finalResponse = afterKindSet;
 	}
 
 	const responseWithConfirmations =
