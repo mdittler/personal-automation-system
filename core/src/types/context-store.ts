@@ -18,10 +18,7 @@ export const CONTEXT_ENTRY_KINDS = [
 
 export type ContextEntryKind = (typeof CONTEXT_ENTRY_KINDS)[number];
 
-/**
- * Kinds that represent durable, long-lived memory (as opposed to transient
- * or unclassified entries). Used in Chunk C/D to narrow the memory snapshot.
- */
+/** Kinds that represent durable, long-lived memory used by `listDurableForUser` to narrow the memory snapshot. */
 export const DURABLE_KINDS: readonly ContextEntryKind[] = [
 	'user-preference',
 	'communication-preference',

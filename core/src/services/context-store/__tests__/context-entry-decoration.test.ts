@@ -51,11 +51,12 @@ describe('ContextEntry kind decoration', () => {
 			expect(homeEntry?.kind).toBe('environment-fact');
 		});
 
-		it('defaults to untyped when entry has no sidecar entry', async () => {
+		it('defaults to untyped when sidecar exists but entry slug is not in it', async () => {
 			const userCtxDir = join(tempDir, 'users', 'user1', 'context');
 			await mkdir(userCtxDir, { recursive: true });
 			await writeFile(join(userCtxDir, 'notes.md'), 'Some notes\n');
-			// No .kinds.yaml
+			// .kinds.yaml exists but does not include 'notes'
+			await writeFile(join(userCtxDir, '.kinds.yaml'), 'other-entry: user-preference\n');
 
 			const results = await store.listForUser('user1', CONTEXT_INTERNAL_BYPASS);
 

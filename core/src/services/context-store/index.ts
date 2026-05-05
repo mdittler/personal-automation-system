@@ -347,7 +347,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 	private async searchDir(
 		dir: string,
 		query: string,
-		kindsMap?: Map<string, ContextEntryKind>,
+		kindsMap: Map<string, ContextEntryKind>,
 	): Promise<ContextEntry[]> {
 		const queryWords = extractKeywords(query);
 		if (queryWords.length === 0) return [];
@@ -383,7 +383,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 						key,
 						content,
 						lastUpdated: fileStat.mtime,
-						kind: kindsMap?.get(key) ?? 'untyped',
+						kind: kindsMap.get(key) ?? 'untyped',
 						_score: matchCount,
 					});
 				}
@@ -399,7 +399,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 
 	private async listDir(
 		dir: string,
-		kindsMap?: Map<string, ContextEntryKind>,
+		kindsMap: Map<string, ContextEntryKind>,
 	): Promise<ContextEntry[]> {
 		const results: ContextEntry[] = [];
 
@@ -426,7 +426,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 					key,
 					content,
 					lastUpdated: fileStat.mtime,
-					kind: kindsMap?.get(key) ?? 'untyped',
+					kind: kindsMap.get(key) ?? 'untyped',
 				});
 			} catch (error) {
 				this.logger.warn({ file, error }, 'Failed to read context file during list');
