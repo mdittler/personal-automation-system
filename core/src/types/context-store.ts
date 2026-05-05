@@ -73,8 +73,16 @@ export interface ContextStoreService {
 	/**
 	 * Save a context entry for a user.
 	 * Creates the file if it doesn't exist, overwrites if it does.
+	 *
+	 * @param opts.kind - Semantic kind to record in the sidecar (defaults to 'untyped').
+	 * @param opts.bypass - Pass `CONTEXT_INTERNAL_BYPASS` to skip the actor-vs-target check.
 	 */
-	save(userId: string, key: string, content: string): Promise<void>;
+	save(
+		userId: string,
+		key: string,
+		content: string,
+		opts?: { kind?: ContextEntryKind; bypass?: symbol },
+	): Promise<void>;
 
 	/**
 	 * Remove a context entry for a user.

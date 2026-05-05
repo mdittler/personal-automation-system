@@ -19,7 +19,9 @@ import type {
 import { atomicWrite } from '../../utils/file.js';
 import { getCurrentUserId } from '../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
-import { loadKindsMap } from './kinds-sidecar.js';
+import { scanForThreats } from '../prompt-assembly/threat-scan.js';
+import { ContextStoreThreatError } from './errors.js';
+import { loadKindsMap, setKind } from './kinds-sidecar.js';
 
 /**
  * Private capability token for bypassing the actor-vs-target check in
@@ -263,14 +265,30 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		return this.listDir(dir, kindsMap);
 	}
 
-	async save(userId: string, key: string, content: string, _bypass?: symbol): Promise<void> {
+	async save(
+		userId: string,
+		key: string,
+		content: string,
+		opts?: { kind?: ContextEntryKind; bypass?: symbol },
+	): Promise<void> {
 		if (!USER_ID_PATTERN.test(userId)) {
 			throw new Error('Invalid userId format');
 		}
-		this.checkActor(userId, _bypass);
+		this.checkActor(userId, opts?.bypass);
 		const slug = slugifyKey(key);
 		if (!slug || !SLUG_PATTERN.test(slug)) {
 			throw new Error('Invalid name — must contain at least one letter or number');
+		}
+
+		// Threat scan — reject hostile content before writing to disk.
+		// Log only pattern name + userId; never log the matched substring (PII redaction).
+		const scanResult = scanForThreats(content);
+		if (scanResult.hit) {
+			this.logger.warn(
+				{ pattern: scanResult.pattern, userId },
+				'Context entry rejected by threat scan',
+			);
+			throw new ContextStoreThreatError(scanResult.pattern);
 		}
 
 		const dir = this.userDir(userId);
@@ -285,6 +303,16 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 
 		await atomicWrite(filePath, content);
 		this.logger.info({ userId, key: slug }, 'Context entry saved');
+
+		// Best-effort sidecar update — failure is logged but never re-thrown.
+		try {
+			await setKind(dir, slug, opts?.kind ?? 'untyped', this.logger);
+		} catch (error) {
+			this.logger.error(
+				{ userId, key: slug, error },
+				'Context store: sidecar kind update failed (best-effort)',
+			);
+		}
 	}
 
 	async remove(userId: string, key: string, _bypass?: symbol): Promise<void> {

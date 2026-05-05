@@ -1015,7 +1015,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	// These closures capture CONTEXT_INTERNAL_BYPASS so the hook never imports it directly.
 	const flushSave: MemoryFlushSave = (uid, key, content) =>
-		contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+		contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
 	const flushRemove: MemoryFlushRemove = (uid, key) =>
 		contextStore.remove(uid, key, CONTEXT_INTERNAL_BYPASS);
 	const flushLogger = createChildLogger(logger, { service: 'memory-flush' });

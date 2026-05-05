@@ -152,7 +152,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 			householdService,
 		});
 		const flushSave = (uid: string, key: string, content: string) =>
-			contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+			contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
 
 		const mintTime = new Date('2026-05-01T10:00:00.000Z');
 		const { store } = makeStore(() => mintTime);
@@ -200,7 +200,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 			logger: pino({ level: 'silent' }),
 		});
 		const flushSave = (uid: string, key: string, content: string) =>
-			contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+			contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
 
 		const mintTime = new Date('2026-05-01T10:00:00.000Z');
 		const { store } = makeStore(() => mintTime);
@@ -240,7 +240,7 @@ describe('idle-reset integration — real ChatSessionStore', () => {
 			logger: pino({ level: 'silent' }),
 		});
 		const flushSave = (uid: string, key: string, content: string) =>
-			contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+			contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
 
 		const hookNow = new Date('2026-05-01T12:00:01.000Z');
 		const logger = pino({ level: 'silent' }) as Pick<Logger, 'warn'>;

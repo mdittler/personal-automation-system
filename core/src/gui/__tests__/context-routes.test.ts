@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -307,7 +307,12 @@ describe('Context GUI Routes', () => {
 
 	describe('security', () => {
 		it('escapes HTML in entry content display', async () => {
-			await contextStore.save('123', 'xss-test', '<script>alert("xss")</script>');
+			// Write directly to the filesystem to simulate a legacy entry that pre-dates
+			// threat scanning (save() now rejects <script> content via ContextStoreThreatError).
+			// This test verifies the GUI layer escapes XSS content regardless of how it arrived.
+			const ctxDir = join(tempDir, 'users', '123', 'context');
+			await mkdir(ctxDir, { recursive: true });
+			await writeFile(join(ctxDir, 'xss-test.md'), '<script>alert("xss")</script>');
 			const res = await authenticatedGet(app, '/gui/context/123');
 			expect(res.statusCode).toBe(200);
 			expect(res.body).not.toContain('<script>');

@@ -40,7 +40,7 @@ function makeContextStore() {
 
 function makeFlushSave(contextStore: ContextStoreServiceImpl) {
 	return (uid: string, key: string, content: string) =>
-		contextStore.save(uid, key, content, CONTEXT_INTERNAL_BYPASS);
+		contextStore.save(uid, key, content, { bypass: CONTEXT_INTERNAL_BYPASS });
 }
 
 function makeRetrieval(contextStore: ContextStoreServiceImpl) {
@@ -87,8 +87,8 @@ describe('S4 — Next-session recall: pinned entry precedes alphabetical entries
 		const logger = { warn: vi.fn() };
 
 		// Write an alphabetically-earlier entry
-		await contextStore.save('alice', 'apple-facts', 'Alice loves apples.', CONTEXT_INTERNAL_BYPASS);
-		await contextStore.save('alice', 'banana-notes', 'Banana is her snack.', CONTEXT_INTERNAL_BYPASS);
+		await contextStore.save('alice', 'apple-facts', 'Alice loves apples.', { bypass: CONTEXT_INTERNAL_BYPASS });
+		await contextStore.save('alice', 'banana-notes', 'Banana is her snack.', { bypass: CONTEXT_INTERNAL_BYPASS });
 
 		// Write the pinned summary (sorts after 'b' alphabetically but must come first)
 		await flushMemoryToContextStore('alice', 'Alice prefers tea over coffee.', {
@@ -123,7 +123,7 @@ describe('S4 — Next-session recall: pinned entry precedes alphabetical entries
 				'alice',
 				`aaa-entry-${i}`,
 				'x'.repeat(900),
-				CONTEXT_INTERNAL_BYPASS,
+				{ bypass: CONTEXT_INTERNAL_BYPASS },
 			);
 		}
 
