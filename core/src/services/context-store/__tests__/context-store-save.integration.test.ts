@@ -1,5 +1,5 @@
 /**
- * Integration tests for ContextStoreServiceImpl.save() — Hermes P6 Chunk B.
+ * Integration tests for ContextStoreServiceImpl.save().
  *
  * Tests:
  * T1 — Threat content throws ContextStoreThreatError; .md NOT written; sidecar NOT updated.
