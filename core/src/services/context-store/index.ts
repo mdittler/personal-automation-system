@@ -11,10 +11,15 @@
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import type { Logger } from 'pino';
-import type { ContextEntry, ContextStoreService } from '../../types/context-store.js';
+import type {
+	ContextEntry,
+	ContextEntryKind,
+	ContextStoreService,
+} from '../../types/context-store.js';
 import { atomicWrite } from '../../utils/file.js';
 import { getCurrentUserId } from '../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
+import { loadKindsMap } from './kinds-sidecar.js';
 
 /**
  * Private capability token for bypassing the actor-vs-target check in
@@ -213,15 +218,22 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 	}
 
 	async search(query: string): Promise<ContextEntry[]> {
-		return this.searchDir(this.systemDir, query);
+		const kindsMap = await loadKindsMap(this.systemDir, this.logger);
+		return this.searchDir(this.systemDir, query, kindsMap);
 	}
 
 	async searchForUser(query: string, userId: string, _bypass?: symbol): Promise<ContextEntry[]> {
 		if (!USER_ID_PATTERN.test(userId)) return [];
 		this.checkActor(userId, _bypass);
 
-		const userEntries = await this.searchDir(this.userDir(userId), query);
-		const systemEntries = await this.searchDir(this.systemDir, query);
+		const userDir = this.userDir(userId);
+		const [userKindsMap, systemKindsMap] = await Promise.all([
+			loadKindsMap(userDir, this.logger),
+			loadKindsMap(this.systemDir, this.logger),
+		]);
+
+		const userEntries = await this.searchDir(userDir, query, userKindsMap);
+		const systemEntries = await this.searchDir(this.systemDir, query, systemKindsMap);
 
 		// Dedup: user entries win over system entries with same key
 		const seen = new Set(userEntries.map((e) => e.key));
@@ -246,7 +258,9 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 	async listForUser(userId: string, _bypass?: symbol): Promise<ContextEntry[]> {
 		if (!USER_ID_PATTERN.test(userId)) return [];
 		this.checkActor(userId, _bypass);
-		return this.listDir(this.userDir(userId));
+		const dir = this.userDir(userId);
+		const kindsMap = await loadKindsMap(dir, this.logger);
+		return this.listDir(dir, kindsMap);
 	}
 
 	async save(userId: string, key: string, content: string, _bypass?: symbol): Promise<void> {
@@ -330,7 +344,11 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		}
 	}
 
-	private async searchDir(dir: string, query: string): Promise<ContextEntry[]> {
+	private async searchDir(
+		dir: string,
+		query: string,
+		kindsMap?: Map<string, ContextEntryKind>,
+	): Promise<ContextEntry[]> {
 		const queryWords = extractKeywords(query);
 		if (queryWords.length === 0) return [];
 
@@ -365,6 +383,7 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 						key,
 						content,
 						lastUpdated: fileStat.mtime,
+						kind: kindsMap?.get(key) ?? 'untyped',
 						_score: matchCount,
 					});
 				}
@@ -378,7 +397,10 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		return scored.map(({ _score, ...entry }) => entry);
 	}
 
-	private async listDir(dir: string): Promise<ContextEntry[]> {
+	private async listDir(
+		dir: string,
+		kindsMap?: Map<string, ContextEntryKind>,
+	): Promise<ContextEntry[]> {
 		const results: ContextEntry[] = [];
 
 		let files: string[];
@@ -399,10 +421,12 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 			try {
 				const content = await readFile(filePath, 'utf-8');
 				const fileStat = await stat(filePath);
+				const key = file.slice(0, -3);
 				results.push({
-					key: file.slice(0, -3),
+					key,
 					content,
 					lastUpdated: fileStat.mtime,
+					kind: kindsMap?.get(key) ?? 'untyped',
 				});
 			} catch (error) {
 				this.logger.warn({ file, error }, 'Failed to read context file during list');

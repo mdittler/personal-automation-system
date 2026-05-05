@@ -301,8 +301,8 @@ describe('collectSection — app-data (directory)', () => {
 describe('collectSection — context', () => {
 	it('collects matching context entries', async () => {
 		const contextStore = makeContextStore([
-			{ key: 'preferences-coffee', content: 'Dark roast, no sugar', lastUpdated: new Date() },
-			{ key: 'preferences-food', content: 'Vegetarian', lastUpdated: new Date() },
+			{ key: 'preferences-coffee', content: 'Dark roast, no sugar', lastUpdated: new Date(), kind: 'untyped' },
+			{ key: 'preferences-food', content: 'Vegetarian', lastUpdated: new Date(), kind: 'untyped' },
 		]);
 
 		const deps = makeDeps({ contextStore });

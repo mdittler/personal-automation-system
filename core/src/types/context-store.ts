@@ -6,6 +6,30 @@
  * priority over system entries when keys collide.
  */
 
+/** All valid semantic kinds for a context entry. */
+export const CONTEXT_ENTRY_KINDS = [
+	'user-preference',
+	'communication-preference',
+	'environment-fact',
+	'project-convention',
+	'household-policy',
+	'untyped',
+] as const;
+
+export type ContextEntryKind = (typeof CONTEXT_ENTRY_KINDS)[number];
+
+/**
+ * Kinds that represent durable, long-lived memory (as opposed to transient
+ * or unclassified entries). Used in Chunk C/D to narrow the memory snapshot.
+ */
+export const DURABLE_KINDS: readonly ContextEntryKind[] = [
+	'user-preference',
+	'communication-preference',
+	'environment-fact',
+	'project-convention',
+	'household-policy',
+];
+
 /** A single context store entry. */
 export interface ContextEntry {
 	/** Topic key (matches the filename, e.g. "food-preferences"). */
@@ -14,6 +38,8 @@ export interface ContextEntry {
 	content: string;
 	/** When this entry was last modified. */
 	lastUpdated: Date;
+	/** Semantic kind of this entry. Defaults to 'untyped' when not set in sidecar. */
+	kind: ContextEntryKind;
 }
 
 /** Context store service provided to apps via CoreServices. */

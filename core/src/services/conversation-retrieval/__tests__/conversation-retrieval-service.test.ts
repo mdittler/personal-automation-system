@@ -337,7 +337,7 @@ describe('ConversationRetrievalServiceImpl — searchData', () => {
 
 describe('ConversationRetrievalServiceImpl — listContextEntries', () => {
 	const mockEntries: ContextEntry[] = [
-		{ key: 'food-prefs', content: 'I like pasta', lastUpdated: new Date() },
+		{ key: 'food-prefs', content: 'I like pasta', lastUpdated: new Date(), kind: 'untyped' },
 	];
 	const mockContextStore = {
 		listForUser: vi.fn().mockResolvedValue(mockEntries),
@@ -797,10 +797,10 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 
 		// User1's context store returns specific data
 		const user1Entries: ContextEntry[] = [
-			{ key: 'u1-key', content: 'user1 content', lastUpdated: new Date() },
+			{ key: 'u1-key', content: 'user1 content', lastUpdated: new Date(), kind: 'untyped' },
 		];
 		const user2Entries: ContextEntry[] = [
-			{ key: 'u2-key', content: 'user2 content', lastUpdated: new Date() },
+			{ key: 'u2-key', content: 'user2 content', lastUpdated: new Date(), kind: 'untyped' },
 		];
 		deps1.contextStore.listForUser.mockResolvedValue(user1Entries);
 		deps2.contextStore.listForUser.mockResolvedValue(user2Entries);
@@ -840,7 +840,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 
 describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	function makeEntry(key: string, content: string): ContextEntry {
-		return { key, content, lastUpdated: new Date('2026-01-01') };
+		return { key, content, lastUpdated: new Date('2026-01-01'), kind: 'untyped' as const };
 	}
 
 	it('returns status:empty when ContextStore has no entries', async () => {
