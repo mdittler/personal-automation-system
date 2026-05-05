@@ -175,9 +175,10 @@ function monthWindow(today: string, targetMonth: number): { start: string; end: 
 function christmasWindow(today: string): { start: string; end: string } {
 	const year = Number(today.slice(0, 4));
 	const targetYear = `${year}-12-25` > today ? year - 1 : year;
+	const rawEnd = `${targetYear}-12-27`;
 	return {
 		start: `${targetYear}-12-23`,
-		end: `${targetYear}-12-27`,
+		end: rawEnd > today ? today : rawEnd,
 	};
 }
 
@@ -225,8 +226,8 @@ function buildExamples(today: string): string {
 	const novIdx = 10; // November = index 10 (0-based)
 	const novName = MONTH_NAMES[novIdx] ?? 'November';
 	const nov = monthWindow(today, novIdx + 1); // 1-indexed = 11
-	const lastSaturday = findLastWeekday(today, 6);
-	const lastSunday = findLastWeekday(today, 0);
+	const lastSundayOfWeekend = findLastWeekday(today, 0);
+	const lastSaturdayOfWeekend = subtractDays(lastSundayOfWeekend, 1);
 
 	return (
 		`\nExamples (today = ${today}, ${dayName}):\n` +
@@ -247,7 +248,7 @@ function buildExamples(today: string): string {
 		`- "during ${priorMonthName}" → window ${priorMonth.start} to ${priorMonth.end}\n` +
 		`- "a couple weeks ago" → window ${coupleWeeksAfter} to ${coupleWeeksBefore}\n` +
 		`- "around Christmas" → window ${xmas.start} to ${xmas.end}\n` +
-		`- "last weekend" → window ${lastSaturday} to ${lastSunday}\n` +
+		`- "last weekend" → window ${lastSaturdayOfWeekend} to ${lastSundayOfWeekend}\n` +
 		`- "three weeks ago" → window ${threeWeeksAfter} to ${threeWeeksBefore}\n` +
 		`- "in ${novName}" → window ${nov.start} to ${nov.end}\n` +
 		`</phrasing reference>`
