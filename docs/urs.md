@@ -3917,12 +3917,199 @@ When an active session has a snapshot with `status: 'ok'`, ContextStore entries 
 
 ### REQ-CONV-MEMORY-012: Byte-stable prompt prefix (prefix-cache invariant)
 
-**Phase:** Hermes P4 | **Status:** Implemented
+**Phase:** Hermes P4 | **Status:** Implemented (amended by REQ-CONV-MEMORY-022)
 
-The static base prompt (Layer 1) concatenated with the frozen snapshot block (Layer 2) SHALL be byte-identical across consecutive turns within a session, given identical snapshot content and identical static prompt components. This enables the LLM's prefix cache to hit on every turn after the first.
+The static base prompt (Layer 1) concatenated with the frozen snapshot block (Layer 2) SHALL be byte-identical across consecutive turns within a session **between explicit `/refreshmemory` events**, given identical snapshot content and identical static prompt components. This enables the LLM's prefix cache to hit on every turn after the first.
 
 **Standard tests** (`prompt-builder.test.ts`):
 - Two consecutive `buildSystemPrompt` calls with identical snapshot + inputs → byte-identical Layer 1+2 prefix (substring comparison)
+
+---
+
+## Hermes P6.next — NL Temporal Precision + Mid-Session Snapshot Rebuild
+
+### REQ-CONV-TEMPORAL-007 — Classifier prompt SHALL include a `<phrasing reference>` block with ≥10 computed example dates
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+`buildClassifierPrompt(today)` in `recall-classifier.ts` MUST append a `<phrasing reference>` block listing ≥10 NL relative-date forms with example dates computed deterministically from `today`. Helpers `findLastWeekday`, `firstOfMonth`, `firstOfPriorMonth` produce all dates.
+
+**Standard tests** (`build-classifier-prompt-nl.test.ts`):
+- `renders <phrasing reference> with computed dates for today=2026-05-05`
+- Prompt contains exact strings for all 10 new phrases
+
+---
+
+### REQ-CONV-TEMPORAL-008 — `buildExamples` date helpers SHALL be deterministic functions of `today`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+`findLastWeekday(today, dow)`, `firstOfMonth(today)`, `firstOfPriorMonth(today)` are pure deterministic functions. No `new Date()` calls; all computations are anchored to the injected `today` string.
+
+**Standard tests** (`build-classifier-prompt-nl.test.ts`):
+- Edge cases: today=Friday for "last Friday" → today-7d; today=first-of-month; named-month-future wraps to prior year
+
+---
+
+### REQ-CONV-TEMPORAL-009 — The rendered classifier prompt SHALL fit within 4000 characters
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+`buildClassifierPrompt` with the full phrasing reference block MUST produce a string ≤4000 chars for any valid `today` input.
+
+**Standard tests** (`build-classifier-prompt-nl.test.ts`):
+- `fits within 4000-char budget`
+
+---
+
+### REQ-CONV-TEMPORAL-010 — Pre-existing classifier examples and 365d cap SHALL remain unchanged
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+P6 examples ("last Tuesday", "yesterday", "two weeks ago") MUST remain verbatim in the prompt. `validateTimeAnchor` 365d cap MUST not change.
+
+**Standard tests** (`build-classifier-prompt-nl.test.ts`):
+- `preserves pre-existing examples (regression)`
+
+---
+
+### REQ-CONV-TEMPORAL-011 — `findLastWeekday` MUST return today minus 7 when today matches target DOW
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+When `today` is DOW `W` and `targetDow === W`, the function MUST return `today - 7`, not `today`.
+
+**Edge case tests** (`build-classifier-prompt-nl.test.ts`):
+- `today=Friday: "last Friday" → today-7 (not today)`
+
+---
+
+### REQ-CONV-TEMPORAL-012 — Named-month example SHALL produce current-month window when month equals current month; prior full month when month is prior
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+"in May" with today=2026-05-05 → window `2026-05-01` to `2026-05-05`. "in November" with today=2026-05-05 (future if same year) → wraps to `2025-11-01`–`2025-11-30`.
+
+**Edge case tests** (`build-classifier-prompt-nl.test.ts`):
+- `named month = current month → window from 1st to today`
+- `named month = future if interpreted same year → prior year`
+
+---
+
+### REQ-CONV-MEMORY-013 — `/refreshmemory` and `/refresh-memory` SHALL be Router built-ins dispatching to `handleRefreshMemory`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+Both `/refreshmemory` and `/refresh-memory` are registered in `BUILTIN_COMMAND_NAMES` and handled in the Router's `handleCommand` built-in chain, before app dispatch. They bypass `AppToggleStore` like `/recall` and `/title`.
+
+**Standard tests** (`router-refresh-memory.test.ts`):
+- `/refreshmemory` dispatches
+- `/refresh-memory` dispatches
+
+---
+
+### REQ-CONV-MEMORY-014 — `/refreshmemory@<botname>` and `/refresh-memory@<botname>` SHALL dispatch correctly
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+Telegram bot-name suffix is stripped by the existing `parseCommand` before command matching, so `/refreshmemory@PASBot` and `/refresh-memory@PASBot` dispatch identically to their bare forms.
+
+**Standard tests** (`router-refresh-memory.test.ts`):
+- `/refreshmemory@PASBot` dispatches
+- `/refresh-memory@PASBot` dispatches
+
+---
+
+### REQ-CONV-MEMORY-015 — `handleRefreshMemory` with no active session SHALL respond `"No active session to refresh."`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+When `rebuildMemorySnapshot` throws `NoActiveSessionError`, `handleRefreshMemory` catches it and sends the exact string `'No active session to refresh.'` via `telegram.send(ctx.userId, ...)`.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`, `refresh-memory.persona.test.ts`):
+- `throws NoActiveSessionError when no active session`
+- PR3: no-active-session → exact message
+
+---
+
+### REQ-CONV-MEMORY-016 — `rebuildMemorySnapshot` SHALL accept `expectedSessionId` and abort if the active session changes
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+When `opts.expectedSessionId` is provided and does not match the active session resolved from the index, `rebuildMemorySnapshot` throws `SessionCasMismatchError` without writing. The handler surfaces this as `"Memory refresh deferred — try again later."`.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`):
+- `throws SessionCasMismatchError when expectedSessionId mismatches active session`
+- `does not write when expectedSessionId mismatches`
+
+---
+
+### REQ-CONV-MEMORY-017 — `rebuildMemorySnapshot` SHALL re-read the active-sessions index after acquiring transcript lock and verify match before writing
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+The implementation uses `withMultiFileLock([index, transcript])` (alphabetical lock ordering to prevent deadlock with `endActive`). Inside the combined lock, the index is re-read and the active session is CAS-checked against `sessionId` before writing. If the index has changed (session ended by a concurrent call), the rebuild aborts without writing.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`):
+- `CAS recheck inside multi-lock: aborts if active session changes during buildSnapshot`
+
+---
+
+### REQ-CONV-MEMORY-018 — `handleRefreshMemory` SHALL build the snapshot via the same `buildSnapshot` callback pattern as `handleMessage`/`handleAsk`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+The `buildSnapshot` callback inside `handleRefreshMemory` gates `pinnedKeys` on `flush_memory_on_idle_reset` via `resolveUserBool`, identical to the pattern in `handle-message.ts` and `handle-ask.ts`. When `flush_memory_on_idle_reset` is `true`, `buildMemorySnapshot({})` is called (uses default pins); when `false`, `buildMemorySnapshot({ pinnedKeys: [] })` is called.
+
+**Standard tests** (`refresh-memory.persona.test.ts`):
+- `pinnedKeys gate: flush_memory_on_idle_reset=false → buildMemorySnapshot called with {pinnedKeys:[]}`
+- `pinnedKeys gate: flush_memory_on_idle_reset=true → buildMemorySnapshot called with {}`
+
+---
+
+### REQ-CONV-MEMORY-019 — On `buildSnapshot()` throw, the existing `memory_snapshot` SHALL be preserved; user receives `"Memory refresh deferred — try again later."`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+`buildSnapshot()` is called outside all file locks. If it throws, the exception propagates out of `rebuildMemorySnapshot` before any write occurs; no partial write is possible. The handler's outer `catch` sends the deferred message.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`):
+- `buildSnapshot throw: original memory_snapshot preserved (no write occurred)`
+- `buildSnapshot throw: deferred message sent`
+
+---
+
+### REQ-CONV-MEMORY-020 — A successful rebuild SHALL always persist; `built_at` SHALL reflect the rebuild time even when snapshot content is identical
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+The implementation always writes the updated frontmatter on a successful `buildSnapshot()` call. `last_activity_at` (and the snapshot's `builtAt`) is always updated to `this.now().toISOString()`.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`):
+- `always-persist: second rebuild with identical content still updates last_activity_at`
+
+---
+
+### REQ-CONV-MEMORY-021 — The handler SHALL send confirmation via `telegram.send(ctx.userId, ...)`
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+All `telegram.send` calls in `handleRefreshMemory` use `ctx.userId` as the first argument, never `ctx.chatId` or any other field.
+
+**Standard tests** (`refresh-memory.persona.test.ts`):
+- All PR1–PR11 scenarios assert `telegram.send` is called with `userId`
+
+---
+
+### REQ-CONV-MEMORY-022 — REQ-CONV-MEMORY-012 (prefix-cache stability) is amended: byte-stability holds between explicit `/refreshmemory` events
+
+**Phase:** Hermes P6.next | **Status:** Implemented
+
+This amendment documents the intentional relaxation: a `/refreshmemory` event WILL change the Layer 2 content and therefore invalidate the prefix cache for the next turn. This is expected and correct. Between rebuilds, the invariant from REQ-CONV-MEMORY-012 continues to hold.
+
+**Standard tests** (`rebuild-memory-snapshot.test.ts`):
+- `byte-stability: two turns without rebuild → Layer 1+2 prefix is identical`
+- `byte-difference: turn after rebuild → Layer 1+2 prefix changes`
 
 ---
 
@@ -5328,6 +5515,42 @@ The re-prompt driver runs immediately after the first LLM call's error-handling 
 - `formatTurnTimestamp: date-only string (no T) → "unknown time"`
 - `formatTurnTimestamp: invalid ISO → "unknown time"`
 - `formatTurnTimestamp: NaN date → "unknown time"`
+
+---
+
+### REQ-CONV-TEMPORAL-007 — Classifier prompt SHALL include a `<phrasing reference>` block with ≥10 computed example dates
+
+*(Full text above in "Hermes P6.next" section)*
+
+---
+
+### REQ-CONV-TEMPORAL-008 — `buildExamples` date helpers SHALL be deterministic functions of `today`
+
+*(Full text above in "Hermes P6.next" section)*
+
+---
+
+### REQ-CONV-TEMPORAL-009 — The rendered classifier prompt SHALL fit within 4000 characters
+
+*(Full text above in "Hermes P6.next" section)*
+
+---
+
+### REQ-CONV-TEMPORAL-010 — Pre-existing classifier examples and 365d cap SHALL remain unchanged
+
+*(Full text above in "Hermes P6.next" section)*
+
+---
+
+### REQ-CONV-TEMPORAL-011 — `findLastWeekday` MUST return today minus 7 when today matches target DOW
+
+*(Full text above in "Hermes P6.next" section)*
+
+---
+
+### REQ-CONV-TEMPORAL-012 — Named-month example SHALL produce current-month or prior-year window depending on month vs. today
+
+*(Full text above in "Hermes P6.next" section)*
 
 ---
 
@@ -8731,5 +8954,21 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-TEMPORAL-004 | session-search-tag.attr.test.ts | 4 | 5 | Implemented |
 | REQ-CONV-TEMPORAL-005 | recall-reply.test.ts, session-search-tag.attr.test.ts | 2 | 0 | Implemented |
 | REQ-CONV-TEMPORAL-006 | recall-reply.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-TEMPORAL-007 | build-classifier-prompt-nl.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TEMPORAL-008 | build-classifier-prompt-nl.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-TEMPORAL-009 | build-classifier-prompt-nl.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TEMPORAL-010 | build-classifier-prompt-nl.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-TEMPORAL-011 | build-classifier-prompt-nl.test.ts | 0 | 1 | Implemented |
+| REQ-CONV-TEMPORAL-012 | build-classifier-prompt-nl.test.ts | 0 | 2 | Implemented |
+| REQ-CONV-MEMORY-013 | router-refresh-memory.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-MEMORY-014 | router-refresh-memory.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-MEMORY-015 | rebuild-memory-snapshot.test.ts, refresh-memory.persona.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-MEMORY-016 | rebuild-memory-snapshot.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-MEMORY-017 | rebuild-memory-snapshot.test.ts | 0 | 1 | Implemented |
+| REQ-CONV-MEMORY-018 | refresh-memory.persona.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-MEMORY-019 | rebuild-memory-snapshot.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-MEMORY-020 | rebuild-memory-snapshot.test.ts | 1 | 0 | Implemented |
+| REQ-CONV-MEMORY-021 | refresh-memory.persona.test.ts | 29 | 0 | Implemented |
+| REQ-CONV-MEMORY-022 | rebuild-memory-snapshot.test.ts | 2 | 0 | Implemented |
 
-| **Totals** | **222 test files** | **1698** | **1896** | **3594 tests** |
+| **Totals** | **240 test files** | **1751** | **1903** | **3654 tests** |

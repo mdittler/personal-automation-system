@@ -267,6 +267,23 @@ user_config:
     options: ["light", "dark", "auto"]
 ```
 
+## Platform Built-in Commands
+
+These commands are handled by the Router and do not need to be declared in app manifests. They are always available to users regardless of which apps are installed or toggled.
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/ask` | — | App-aware LLM assistant; answers questions using app knowledge + user context |
+| `/newchat`, `/reset` | — | End the active session and start a fresh one |
+| `/title` | — | Display or set the title of the active session |
+| `/recall` | — | Full-text search across conversation transcripts |
+| `/refreshmemory` | `/refresh-memory` | Rebuild the active session's memory snapshot from current ContextStore |
+| `/edit` | — | Propose and confirm edits to app data |
+| `/notes` | — | Toggle whether the chatbot logs to daily notes |
+| `/help` | — | List available commands |
+
+---
+
 ## Complete Example
 
 ```yaml

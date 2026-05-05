@@ -2959,6 +2959,30 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 ---
 
+## Hermes P6.next — NL Temporal Precision Broadening + Mid-Session Snapshot Rebuild (2026-05-05)
+
+**Delivered**: Extended recall classifier prompt with a `<phrasing reference>` block of 10+ computed NL relative-date examples; new `/refreshmemory` and `/refresh-memory` built-in commands for mid-session memory snapshot rebuild with double-CAS safety.
+
+**Chunk A — NL Temporal Precision Broadening (prompt-only)**
+- `recall-classifier.ts`: added `findLastWeekday`, `firstOfMonth`, `firstOfPriorMonth` date helpers; `buildExamples(today)` appends `<phrasing reference>` block with 10 NL forms and exact computed dates
+- No changes to `parseRecallVerdict`, `validateTimeAnchor`, 365d cap, or `sanitizeInput`
+- URS REQ-CONV-TEMPORAL-007..012
+
+**Chunk B — Mid-Session Snapshot Rebuild**
+- `conversation-session/errors.ts`: `NoActiveSessionError` + `SessionCasMismatchError`
+- `chat-session-store.ts`: `rebuildMemorySnapshot(ctx, opts)` on interface + `DefaultChatSessionStore`; double-CAS with `withMultiFileLock([index, transcript])` (alphabetical order prevents deadlock vs `endActive`); `buildSnapshot()` called outside all locks; always-persist policy
+- `handle-refresh-memory.ts`: new handler; reuses `buildSnapshot` callback pattern from `handle-message.ts`/`handle-ask.ts`; gates `pinnedKeys` on `flush_memory_on_idle_reset`; all sends to `ctx.userId`
+- `conversation-service.ts`: `handleRefreshMemory` method wired to core handler
+- `router/index.ts`: `/refreshmemory` + `/refresh-memory` in built-in chain, help text, `BUILTIN_COMMAND_NAMES`
+- Mock-update sweep: all typed `ChatSessionStore` mocks in test files updated with `rebuildMemorySnapshot` stub
+- URS REQ-CONV-MEMORY-013..022
+
+**Tests**: 440 test files / 9758 tests passing / 10 skipped / 1 todo (net +168 tests / +8 test files vs P6 baseline). New test files: `build-classifier-prompt-nl.test.ts` (11 tests), `recall-classifier-sanitize.test.ts` (3 tests), `recall-temporal-nl.persona.test.ts` (15 tests), `rebuild-memory-snapshot.test.ts` (18 tests), `rebuild-memory-snapshot.integration.test.ts` (3 tests), `refresh-memory.persona.test.ts` (29 tests), `router-refresh-memory.test.ts` (21 tests).
+
+**URS requirements**: REQ-CONV-TEMPORAL-007..012, REQ-CONV-MEMORY-013..022 (16 new requirements). REQ-CONV-MEMORY-012 amended by REQ-CONV-MEMORY-022.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
