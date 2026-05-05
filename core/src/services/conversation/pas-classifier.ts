@@ -101,12 +101,25 @@ export interface PASClassification {
  * @param deps           Required LLM service plus optional appMetadata/logger.
  * @param recentContext  Optional summary of recent user interactions.
  */
+/**
+ * Deterministic pre-filter that flags price/receipt/trip queries as data-query
+ * candidates before the LLM call. Covers patterns the LLM classifier may miss
+ * (e.g., it might respond "YES" instead of "YES_DATA"). RC7.
+ */
+const DATA_QUERY_PREFILTER =
+	/\b(cheapest|cheaper|lowest price|last trip|last visit|last shop|previous receipt|spent at)\b|how much.{0,50}\bat\b|\bprice.{0,30}(changed|change|difference|increased|decreased)\b/i;
+
 export async function classifyPASMessage(
 	text: string,
 	deps: { llm: LLMService; appMetadata?: AppMetadataService; logger?: AppLogger },
 	recentContext?: string,
 ): Promise<PASClassification> {
 	if (!text.trim()) return { pasRelated: false };
+
+	// Deterministic short-circuit for price/receipt/trip queries — no LLM call needed.
+	if (DATA_QUERY_PREFILTER.test(text)) {
+		return { pasRelated: true, dataQueryCandidate: true };
+	}
 
 	// Build compact classifier prompt — no large app metadata.
 	// Use installed (not just enabled) apps for classification — user may ask

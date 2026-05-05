@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { classifyPASMessage, isPasRelevant } from '../pas-classifier.js';
 
@@ -202,6 +202,66 @@ describe('classifyPASMessage', () => {
 		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
 		const systemPrompt = callArgs?.[1]?.systemPrompt ?? '';
 		expect(systemPrompt).not.toContain('```');
+	});
+});
+
+/**
+ * TDD Batch 5 — Phase 4: deterministic data-query pre-filter.
+ *
+ * RED: LLM mock returns "YES" (not "YES_DATA") but the pre-filter phrases
+ * present in the text mean dataQueryCandidate should still be true.
+ * Currently false because there is no pre-filter → these tests fail.
+ *
+ * GREEN: pre-filter in classifyPASMessage returns
+ * { pasRelated: true, dataQueryCandidate: true } before the LLM call
+ * when the text matches the price/receipt/trip heuristic.
+ */
+describe('classifyPASMessage pre-filter (deterministic price/receipt detection)', () => {
+	it('returns dataQueryCandidate=true for "cheapest" phrasing even when LLM says YES not YES_DATA (RC7)', async () => {
+		const services = createMockCoreServices();
+		// LLM would NOT return YES_DATA — pre-filter must fire first
+		vi.mocked(services.llm.complete).mockResolvedValue('YES');
+		const result = await classifyPASMessage('cheapest place to buy blueberries', {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			logger: services.logger,
+		});
+		// RED: false (no pre-filter). GREEN: true.
+		expect(result.dataQueryCandidate).toBe(true);
+	});
+
+	it('returns dataQueryCandidate=true for "last trip" phrasing (RC7)', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('YES');
+		const result = await classifyPASMessage('my last trip to Costco', {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			logger: services.logger,
+		});
+		expect(result.dataQueryCandidate).toBe(true);
+	});
+
+	it('returns dataQueryCandidate=true for price-change phrasing (RC7)', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('YES');
+		const result = await classifyPASMessage('has the price of bananas changed', {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			logger: services.logger,
+		});
+		expect(result.dataQueryCandidate).toBe(true);
+	});
+
+	it('does NOT pre-filter unrelated questions (no false positives)', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('YES');
+		const result = await classifyPASMessage('how do I turn on the lights', {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			logger: services.logger,
+		});
+		// Regression guard — must NOT be a data query candidate
+		expect(result.dataQueryCandidate).toBeFalsy();
 	});
 });
 
