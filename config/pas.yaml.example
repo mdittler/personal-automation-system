@@ -24,6 +24,10 @@ users:
 # Per-user override via /notes or GUI always wins.
 chat:
   log_to_notes: false   # System-wide default: append messages to daily-notes files (default OFF)
+  # Memory snapshot settings (Hermes P6).
+  # When true, exclude untyped ContextStore entries from the durable memory snapshot.
+  # memory:
+  #   strict_durable_kinds: false
   # Transcript retention (opt-in). Default: disabled.
   # WARNING: auto_prune: true PERMANENTLY deletes Markdown transcript files.
   # These are canonical data — pnpm chat-index-rebuild cannot restore pruned sessions.

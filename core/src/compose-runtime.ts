@@ -980,6 +980,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		alertService,
 		index: chatTranscriptIndex,
 		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
+		systemConfig: config,
 	});
 	logger.info('ConversationRetrievalService: initialized');
 

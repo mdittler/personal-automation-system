@@ -16,6 +16,7 @@ import type {
 	ContextEntryKind,
 	ContextStoreService,
 } from '../../types/context-store.js';
+import { DURABLE_KINDS } from '../../types/context-store.js';
 import { atomicWrite } from '../../utils/file.js';
 import { getCurrentUserId } from '../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../household/index.js';
@@ -263,6 +264,41 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		const dir = this.userDir(userId);
 		const kindsMap = await loadKindsMap(dir, this.logger);
 		return this.listDir(dir, kindsMap);
+	}
+
+	async listDurableForUser(
+		userId: string,
+		opts?: { kinds?: ContextEntryKind[]; bypass?: symbol },
+	): Promise<ContextEntry[]> {
+		if (!USER_ID_PATTERN.test(userId)) return [];
+		this.checkActor(userId, opts?.bypass);
+
+		// Resolve the user directory — HouseholdBoundaryError bubbles (fail-closed).
+		const userDir = this.userDir(userId);
+		const allowedKinds = new Set<ContextEntryKind>(opts?.kinds ?? DURABLE_KINDS);
+
+		// Load both directories in parallel; user dir may not exist (fail-open).
+		const [userKindsMap, systemKindsMap] = await Promise.all([
+			loadKindsMap(userDir, this.logger),
+			loadKindsMap(this.systemDir, this.logger),
+		]);
+
+		const [userEntries, systemEntries] = await Promise.all([
+			this.listDir(userDir, userKindsMap),
+			this.listDir(this.systemDir, systemKindsMap),
+		]);
+
+		// Merge with user-precedence on key collision (same pattern as searchForUser).
+		const seen = new Set(userEntries.map((e) => e.key));
+		const merged = [...userEntries];
+		for (const entry of systemEntries) {
+			if (!seen.has(entry.key)) {
+				merged.push(entry);
+			}
+		}
+
+		// Filter to allowed kinds.
+		return merged.filter((e) => allowedKinds.has(e.kind));
 	}
 
 	async save(

@@ -88,4 +88,22 @@ export interface ContextStoreService {
 	 * Remove a context entry for a user.
 	 */
 	remove(userId: string, key: string): Promise<void>;
+
+	/**
+	 * List all durable context entries for a user, merging user-scoped and
+	 * system-scoped entries (user takes precedence on key collision).
+	 *
+	 * Only entries whose kind is in DURABLE_KINDS are returned by default.
+	 * Pass `opts.kinds` to narrow to a specific subset.
+	 *
+	 * Fail-open: if the user directory is missing, returns the system-only set.
+	 * HouseholdBoundaryError from the user-dir resolution is allowed to bubble.
+	 *
+	 * @param opts.kinds - Filter to these kinds only (defaults to DURABLE_KINDS).
+	 * @param opts.bypass - Pass `CONTEXT_INTERNAL_BYPASS` to skip the actor-vs-target check.
+	 */
+	listDurableForUser(
+		userId: string,
+		opts?: { kinds?: ContextEntryKind[]; bypass?: symbol },
+	): Promise<ContextEntry[]>;
 }

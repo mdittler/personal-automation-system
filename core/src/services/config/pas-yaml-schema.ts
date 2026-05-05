@@ -138,6 +138,12 @@ export const PasYamlConfigSchema = z
 		chat: z
 			.object({
 				log_to_notes: z.boolean().optional(),
+				memory: z
+					.object({
+						strict_durable_kinds: z.boolean().optional(),
+					})
+					.passthrough()
+					.optional(),
 				sessions: z
 					.object({
 						auto_prune: z.boolean().optional(),

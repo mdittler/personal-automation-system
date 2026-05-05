@@ -142,6 +142,7 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		searchForUser: vi.fn().mockResolvedValue([]),
 		getForUser: vi.fn().mockResolvedValue(null),
 		listForUser: vi.fn().mockResolvedValue([]),
+		listDurableForUser: vi.fn().mockResolvedValue([]),
 		save: vi.fn().mockResolvedValue(undefined),
 		remove: vi.fn().mockResolvedValue(undefined),
 		...overrides?.contextStore,

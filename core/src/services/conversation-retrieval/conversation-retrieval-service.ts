@@ -14,6 +14,7 @@ import type { AppKnowledgeBaseService, KnowledgeEntry } from '../../types/app-kn
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
 import type { ContextEntry, ContextStoreService } from '../../types/context-store.js';
+import type { SystemConfig } from '../../types/config.js';
 import type { DataQueryResult } from '../../types/data-query.js';
 import type { DataQueryService } from '../../types/data-query.js';
 import type { ReportDefinition } from '../../types/report.js';
@@ -174,6 +175,12 @@ export interface ConversationRetrievalDeps {
 	/** Optional FTS5 transcript index (Hermes P5). Absent → searchSessions returns { hits: [] }. */
 	index?: ChatTranscriptIndex;
 	logger?: AppLogger;
+	/**
+	 * Operator system config (Hermes P6).
+	 * Chunk D reads `systemConfig.chat?.memory?.strict_durable_kinds` inside
+	 * `buildMemorySnapshot` to filter the memory snapshot to DURABLE_KINDS only.
+	 */
+	systemConfig?: SystemConfig;
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
