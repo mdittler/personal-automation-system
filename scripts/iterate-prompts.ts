@@ -35,7 +35,17 @@ interface OracleResult {
 	reason: string;
 }
 
+interface TestCaseMeta {
+	id: string;
+	bucket: 'chatbot' | 'chatbot-or-routing';
+	oracleKind: 'structural' | 'rubric';
+	expectedRoute: string;
+	seedPointer: string;
+	coversFiles: string[];
+}
+
 interface TestCase {
+	meta: TestCaseMeta;
 	prompt: string;
 	oracle: (reply: string) => OracleResult;
 }
@@ -172,6 +182,17 @@ function countCostcoItems(reply: string): number {
 const TEST_CASES: TestCase[] = [
 	{
 		// Case 1 — break out all 21 item prices
+		meta: {
+			id: 'chatbot-costco-21-items',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt:
 			'Can you break out the price of each of the 21 items from my Costco receipt and indicate what is new?',
 		oracle(reply) {
@@ -188,6 +209,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 2 — last Costco trip date + total
+		meta: {
+			id: 'chatbot-last-costco-trip',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'When was my last trip to Costco? How much did it cost?',
 		oracle(reply) {
 			const hasDate = /2026-05-01|May\s+1/i.test(reply);
@@ -198,7 +230,18 @@ const TEST_CASES: TestCase[] = [
 		},
 	},
 	{
-		// Case 3 — receipt query should NOT claim there is no meal plan or ask to generate one
+		// Case 3 — receipt query must NOT deflect to meal-plan generation (routing guard)
+		meta: {
+			id: 'chatbot-or-routing-meal-plan-vs-receipt',
+			bucket: 'chatbot-or-routing',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/index.ts',
+				'apps/food/src/services/receipt-query.ts',
+			],
+		},
 		prompt: 'Meal plan? I want to know about the receipt I just sent you.',
 		oracle(reply) {
 			const lower = reply.toLowerCase();
@@ -216,6 +259,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 4 — items + total from Costco receipt
+		meta: {
+			id: 'chatbot-receipt-items-and-total',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'Can you send me those items? How much was the total?',
 		oracle(reply) {
 			const itemCount = countCostcoItems(reply);
@@ -228,6 +282,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 5 — price comparison for blueberries
+		meta: {
+			id: 'chatbot-cheapest-blueberries',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-price-lookup',
+			seedPointer: 'scripts/iterate-prompts.ts:TJ_PRICES_MD',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'Can you tell me the cheapest spot to buy blueberries?',
 		oracle(reply) {
 			const hasTJ = /trader\s*joe/i.test(reply);
@@ -239,6 +304,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 6 — spending by store
+		meta: {
+			id: 'chatbot-store-spending',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-store-spending',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'How much do I typically spend at each grocery store?',
 		oracle(reply) {
 			const lower = reply.toLowerCase();
@@ -254,7 +330,17 @@ const TEST_CASES: TestCase[] = [
 		},
 	},
 	{
-		// Case 7 — grocery list query (regression guard — should not error)
+		// Case 7 — grocery list query must not error (routing guard)
+		meta: {
+			id: 'chatbot-or-routing-grocery-list',
+			bucket: 'chatbot-or-routing',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-grocery-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'Is there anything on the grocery list?',
 		oracle(reply) {
 			if (/\berror\b/i.test(reply)) {
@@ -265,6 +351,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 8 — Costco blueberry price
+		meta: {
+			id: 'chatbot-blueberries-at-costco',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-price-lookup',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_PRICES_MD',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'How much are blueberries at Costco?',
 		oracle(reply) {
 			const hasCostco = /costco/i.test(reply);
@@ -276,6 +373,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 9 — what did I buy at Costco last time
+		meta: {
+			id: 'chatbot-costco-last-items',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'What did I buy at Costco last time?',
 		oracle(reply) {
 			const itemCount = countCostcoItems(reply);
@@ -287,6 +395,17 @@ const TEST_CASES: TestCase[] = [
 	},
 	{
 		// Case 10 — new items from last receipt
+		meta: {
+			id: 'chatbot-new-receipt-items',
+			bucket: 'chatbot',
+			oracleKind: 'structural',
+			expectedRoute: 'free-text-receipt-query',
+			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
+			coversFiles: [
+				'apps/food/src/services/receipt-query.ts',
+				'apps/food/src/index.ts',
+			],
+		},
 		prompt: 'What is new from my last receipt?',
 		oracle(reply) {
 			const lower = reply.toLowerCase();
@@ -325,8 +444,8 @@ function truncate(s: string, maxLen: number): string {
 // Write seed data into the data directory
 // ---------------------------------------------------------------------------
 
-async function writeSeedData(dataDir: string): Promise<void> {
-	const sharedFood = join(dataDir, 'users', 'shared', 'food');
+async function writeSeedData(dataDir: string, householdId: string): Promise<void> {
+	const sharedFood = join(dataDir, 'households', householdId, 'shared', 'food');
 
 	const receiptsDir = join(sharedFood, 'receipts');
 	const pricesDir = join(sharedFood, 'prices');
@@ -424,8 +543,8 @@ async function main(): Promise<void> {
 
 		const dataDir = join(stableTempDir, 'data');
 
-		// Write food app seed data
-		await writeSeedData(dataDir);
+		// Write food app seed data into the household-shared path that forShared() reads
+		await writeSeedData(dataDir, user.householdId);
 
 		// Patch config to use real Anthropic provider instead of stub
 		const anthropicRef = { provider: 'anthropic', model: 'claude-sonnet-4-6' };
