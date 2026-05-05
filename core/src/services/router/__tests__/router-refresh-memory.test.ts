@@ -338,7 +338,7 @@ describe('PR9 — /refreshmemory in /help (REQ-CONV-MEMORY-013)', () => {
 		const calls = (telegram.send as ReturnType<typeof vi.fn>).mock.calls;
 		const helpText = calls.map(([, text]) => text as string).join('\n');
 		const occurrences = (helpText.match(/\/refreshmemory/g) ?? []).length;
-		expect(occurrences).toBeGreaterThanOrEqual(1);
+		expect(occurrences).toBe(1);
 	});
 });
 
