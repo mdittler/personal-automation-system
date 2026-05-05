@@ -19,6 +19,7 @@ import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
+import { buildUntrustedQuery } from '../chat-transcript-index/index.js';
 import type { SearchHit } from '../chat-transcript-index/index.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
@@ -45,6 +46,16 @@ import {
 	processConfigSetTags,
 	processModelSwitchTags,
 } from './control-tags.js';
+import {
+	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
+	SESSION_SEARCH_INSTRUCTION_BLOCK,
+	SESSION_SEARCH_TOOL_INTENT_REGEX,
+	SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
+} from './control-tags/session-search-instruction.js';
+import {
+	extractSessionSearchTag,
+	stripSessionSearchTags,
+} from './control-tags/session-search-tag.js';
 import { appendDailyNote } from './daily-notes.js';
 import {
 	extractRecentFilePaths,
@@ -53,6 +64,7 @@ import {
 } from './data-query-context.js';
 import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
+import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
 import { runRecallPipeline } from './recall-pipeline.js';
 import { resolveUserBool } from './settings-resolver.js';
@@ -157,7 +169,7 @@ export async function handleAsk(
 											deps.logger,
 										)
 									: false;
-								return deps.conversationRetrieval!.buildMemorySnapshot(
+								return deps.conversationRetrieval?.buildMemorySnapshot(
 									flushEnabled ? {} : { pinnedKeys: [] },
 								);
 							}
@@ -241,6 +253,24 @@ export async function handleAsk(
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${FLUSH_MEMORY_INSTRUCTION_BLOCK}`;
 	}
+	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(question)) {
+		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
+	}
+	const retrieval = deps.conversationRetrieval;
+	if (
+		deps.config &&
+		SESSION_SEARCH_TOOL_INTENT_REGEX.test(question) &&
+		retrieval?.hasSessionSearch() &&
+		(await resolveUserBool(
+			deps.config,
+			ctx.userId,
+			'session_search_tool_enabled',
+			true,
+			deps.logger,
+		))
+	) {
+		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_INSTRUCTION_BLOCK}`;
+	}
 
 	let response: string;
 	try {
@@ -265,8 +295,60 @@ export async function handleAsk(
 		return;
 	}
 
+	// ── Session-search pseudo-tool re-prompt driver ───────────────────────────
+	// Runs before journal/switch-model/config-set so the second response flows
+	// through the full existing post-processing chain.
+	let workingResponse = response;
+	const { query: toolQuery, beforeTag } = extractSessionSearchTag(workingResponse);
+	if (
+		toolQuery !== null &&
+		deps.config &&
+		retrieval?.hasSessionSearch() &&
+		(await resolveUserBool(
+			deps.config,
+			ctx.userId,
+			'session_search_tool_enabled',
+			true,
+			deps.logger,
+		))
+	) {
+		try {
+			const queryTerms = buildUntrustedQuery(toolQuery).terms;
+			if (queryTerms.length > 0) {
+				const search = await retrieval.searchSessions({
+					queryTerms,
+					limitSessions: 5,
+					limitMessagesPerSession: 3,
+					excludeSessionIds: ensuredSessionId ? [ensuredSessionId] : [],
+				});
+				const continuationPrompt = buildToolContinuationPrompt({
+					userMessage: question,
+					assistantPreTag: beforeTag,
+					toolQuery,
+					toolResult: search.hits,
+				});
+				const second = await deps.llm.complete(continuationPrompt, {
+					tier: 'standard',
+					systemPrompt,
+					maxTokens: 2048,
+					temperature: 0.7,
+				});
+				workingResponse = second;
+			} else {
+				workingResponse = beforeTag;
+			}
+		} catch (err) {
+			deps.logger.warn('session-search tool loop failed, falling back to first response: %s', err);
+			workingResponse = beforeTag;
+		}
+	} else {
+		workingResponse = stripSessionSearchTags(workingResponse);
+	}
+	// Final strip — removes any straggler tag emitted by the second response (recursion cap).
+	workingResponse = stripSessionSearchTags(workingResponse);
+
 	const { cleanedResponse: afterJournal, entries: journalEntries } =
-		extractJournalEntries(response);
+		extractJournalEntries(workingResponse);
 	if (deps.modelJournal) {
 		await writeJournalEntries(deps.modelJournal, modelSlug, journalEntries, deps.logger);
 	}

@@ -20,20 +20,20 @@ import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
-import type { TitleService } from '../conversation-titling/title-service.js';
-import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
 import { classifyLLMError } from '../../utils/llm-errors.js';
 import { slugifyModelId } from '../../utils/slugify.js';
-import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
-import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
-import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import { buildUntrustedQuery } from '../chat-transcript-index/index.js';
+import type { SearchHit } from '../chat-transcript-index/index.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
 import type {
 	ConversationContextSnapshot,
 	ConversationRetrievalService,
 } from '../conversation-retrieval/index.js';
-import type { SearchHit } from '../chat-transcript-index/index.js';
-import { runRecallPipeline } from './recall-pipeline.js';
+import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
+import { parentSessionFromIdleReset } from '../conversation-session/parent-session-from-idle-reset.js';
+import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import { scheduleTitleAfterFirstExchange } from '../conversation-titling/auto-title-hook.js';
+import type { TitleService } from '../conversation-titling/title-service.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import {
 	extractJournalEntries,
@@ -50,16 +50,28 @@ import {
 	normalizeResponse,
 	processConfigSetTags,
 } from './control-tags.js';
+import {
+	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
+	SESSION_SEARCH_INSTRUCTION_BLOCK,
+	SESSION_SEARCH_TOOL_INTENT_REGEX,
+	SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
+} from './control-tags/session-search-instruction.js';
+import {
+	extractSessionSearchTag,
+	stripSessionSearchTags,
+} from './control-tags/session-search-tag.js';
 import { appendDailyNote } from './daily-notes.js';
 import {
 	extractRecentFilePaths,
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { resolveUserBool } from './settings-resolver.js';
 import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
+import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt, buildSystemPrompt } from './prompt-builder.js';
+import { runRecallPipeline } from './recall-pipeline.js';
+import { resolveUserBool } from './settings-resolver.js';
 import { sendSplitResponse } from './telegram-format.js';
 import { buildUserContext } from './user-context.js';
 
@@ -94,7 +106,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
 	const parentSessionId = parentSessionFromIdleReset(ctx.idleResetState);
-	const [{ wrote: noteWrote }, turns, { sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot }, autoDetect, userCtx] = await Promise.all([
+	const [
+		{ wrote: noteWrote },
+		turns,
+		{ sessionId: ensuredSessionId, isNew: sessionIsNew, snapshot: memSnapshot },
+		autoDetect,
+		userCtx,
+	] = await Promise.all([
 		appendDailyNote(ctx, {
 			data: deps.data,
 			logger: deps.logger,
@@ -102,31 +120,45 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			config: deps.config,
 			systemDefault: deps.chatLogToNotesDefault ?? false,
 		}),
-		deps.chatSessions.loadRecentTurns({ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() }, { maxTurns: 20 }),
-		deps.chatSessions.ensureActiveSession(
-			{
-				userId: ctx.userId,
-				sessionKey,
-				model: modelId,
-				householdId: getCurrentHouseholdId(),
-				...(parentSessionId !== null ? { parentSessionId } : {}),
-			},
-			{
-				buildSnapshot: deps.conversationRetrieval
-					? async () => {
-							const flushEnabled = deps.config
-								? await resolveUserBool(deps.config, ctx.userId, 'flush_memory_on_idle_reset', false, deps.logger)
-								: false;
-							return deps.conversationRetrieval!.buildMemorySnapshot(
-								flushEnabled ? {} : { pinnedKeys: [] },
-							);
-						}
-					: undefined,
-			},
-		).catch((err: unknown) => {
-			deps.logger.warn('ensureActiveSession failed; continuing without session persistence: %s', err);
-			return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
-		}),
+		deps.chatSessions.loadRecentTurns(
+			{ userId: ctx.userId, sessionKey, householdId: getCurrentHouseholdId() },
+			{ maxTurns: 20 },
+		),
+		deps.chatSessions
+			.ensureActiveSession(
+				{
+					userId: ctx.userId,
+					sessionKey,
+					model: modelId,
+					householdId: getCurrentHouseholdId(),
+					...(parentSessionId !== null ? { parentSessionId } : {}),
+				},
+				{
+					buildSnapshot: deps.conversationRetrieval
+						? async () => {
+								const flushEnabled = deps.config
+									? await resolveUserBool(
+											deps.config,
+											ctx.userId,
+											'flush_memory_on_idle_reset',
+											false,
+											deps.logger,
+										)
+									: false;
+								return deps.conversationRetrieval?.buildMemorySnapshot(
+									flushEnabled ? {} : { pinnedKeys: [] },
+								);
+							}
+						: undefined,
+				},
+			)
+			.catch((err: unknown) => {
+				deps.logger.warn(
+					'ensureActiveSession failed; continuing without session persistence: %s',
+					err,
+				);
+				return { sessionId: undefined as string | undefined, isNew: false, snapshot: undefined };
+			}),
 		getAutoDetectSetting(ctx.userId, deps),
 		buildUserContext(ctx, deps),
 	]);
@@ -162,14 +194,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 				} catch (error) {
 					deps.logger.warn('ConversationRetrievalService.buildContextSnapshot failed: %s', error);
 				}
-				systemPrompt = await buildAppAwareSystemPrompt(
-					ctx.text,
-					ctx.userId,
-					[],
-					turns,
-					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: snapshot, memorySnapshot: memSnapshot, recalledSessions },
-				);
+				systemPrompt = await buildAppAwareSystemPrompt(ctx.text, ctx.userId, [], turns, deps, {
+					modelSlug,
+					userCtx,
+					dataContextOrSnapshot: snapshot,
+					memorySnapshot: memSnapshot,
+					recalledSessions,
+				});
 			} else {
 				let dataContext = '';
 				if (classification.dataQueryCandidate && deps.dataQuery) {
@@ -186,20 +217,29 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 						deps.logger.warn('DataQueryService call failed: %s', error);
 					}
 				}
-				systemPrompt = await buildAppAwareSystemPrompt(
-					ctx.text,
-					ctx.userId,
-					[],
-					turns,
-					deps,
-					{ modelSlug, userCtx, dataContextOrSnapshot: dataContext, memorySnapshot: memSnapshot, recalledSessions },
-				);
+				systemPrompt = await buildAppAwareSystemPrompt(ctx.text, ctx.userId, [], turns, deps, {
+					modelSlug,
+					userCtx,
+					dataContextOrSnapshot: dataContext,
+					memorySnapshot: memSnapshot,
+					recalledSessions,
+				});
 			}
 		} else {
-			systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
+			systemPrompt = await buildSystemPrompt([], turns, deps, {
+				modelSlug,
+				userCtx,
+				memorySnapshot: memSnapshot,
+				recalledSessions,
+			});
 		}
 	} else {
-		systemPrompt = await buildSystemPrompt([], turns, deps, { modelSlug, userCtx, memorySnapshot: memSnapshot, recalledSessions });
+		systemPrompt = await buildSystemPrompt([], turns, deps, {
+			modelSlug,
+			userCtx,
+			memorySnapshot: memSnapshot,
+			recalledSessions,
+		});
 	}
 
 	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
@@ -207,6 +247,24 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	}
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${FLUSH_MEMORY_INSTRUCTION_BLOCK}`;
+	}
+	if (deps.config && SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX.test(ctx.text)) {
+		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK}`;
+	}
+	const retrieval = deps.conversationRetrieval;
+	if (
+		deps.config &&
+		SESSION_SEARCH_TOOL_INTENT_REGEX.test(ctx.text) &&
+		retrieval?.hasSessionSearch() &&
+		(await resolveUserBool(
+			deps.config,
+			ctx.userId,
+			'session_search_tool_enabled',
+			true,
+			deps.logger,
+		))
+	) {
+		systemPrompt = `${systemPrompt}\n\n${SESSION_SEARCH_INSTRUCTION_BLOCK}`;
 	}
 
 	let response: string;
@@ -220,12 +278,11 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	} catch (error) {
 		// If we minted a fresh session this turn, end it so it doesn't persist as an empty shell.
 		if (sessionIsNew && ensuredSessionId) {
-			await deps.chatSessions.endActive(
-				{ userId: ctx.userId, sessionKey },
-				'system',
-			).catch((rollbackErr: unknown) => {
-				deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
-			});
+			await deps.chatSessions
+				.endActive({ userId: ctx.userId, sessionKey }, 'system')
+				.catch((rollbackErr: unknown) => {
+					deps.logger.warn('Failed to roll back empty session after LLM failure: %s', rollbackErr);
+				});
 		}
 		deps.logger.error('Chatbot LLM call failed: %s', error);
 		const { userMessage } = classifyLLMError(error);
@@ -234,8 +291,60 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		return;
 	}
 
+	// ── Session-search pseudo-tool re-prompt driver ───────────────────────────
+	// Runs before journal/switch-model/config-set so the second response flows
+	// through the full existing post-processing chain.
+	let workingResponse = response;
+	const { query: toolQuery, beforeTag } = extractSessionSearchTag(workingResponse);
+	if (
+		toolQuery !== null &&
+		deps.config &&
+		retrieval?.hasSessionSearch() &&
+		(await resolveUserBool(
+			deps.config,
+			ctx.userId,
+			'session_search_tool_enabled',
+			true,
+			deps.logger,
+		))
+	) {
+		try {
+			const queryTerms = buildUntrustedQuery(toolQuery).terms;
+			if (queryTerms.length > 0) {
+				const search = await retrieval.searchSessions({
+					queryTerms,
+					limitSessions: 5,
+					limitMessagesPerSession: 3,
+					excludeSessionIds: ensuredSessionId ? [ensuredSessionId] : [],
+				});
+				const continuationPrompt = buildToolContinuationPrompt({
+					userMessage: ctx.text,
+					assistantPreTag: beforeTag,
+					toolQuery,
+					toolResult: search.hits,
+				});
+				const second = await deps.llm.complete(continuationPrompt, {
+					tier: 'standard',
+					systemPrompt,
+					maxTokens: 2048,
+					temperature: 0.7,
+				});
+				workingResponse = second;
+			} else {
+				workingResponse = beforeTag;
+			}
+		} catch (err) {
+			deps.logger.warn('session-search tool loop failed, falling back to first response: %s', err);
+			workingResponse = beforeTag;
+		}
+	} else {
+		workingResponse = stripSessionSearchTags(workingResponse);
+	}
+	// Final strip — removes any straggler tag emitted by the second response (recursion cap).
+	workingResponse = stripSessionSearchTags(workingResponse);
+
 	const { cleanedResponse: afterJournal, entries: journalEntries } =
-		extractJournalEntries(response);
+		extractJournalEntries(workingResponse);
 	if (deps.modelJournal) {
 		await writeJournalEntries(deps.modelJournal, modelSlug, journalEntries, deps.logger);
 	}
@@ -288,7 +397,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		deps.logger.warn('Failed to save conversation history: %s', error);
 	}
 
-	if (appendSucceeded && deps.titleService && sessionIsNew && turns.length === 0 && ensuredSessionId) {
+	if (
+		appendSucceeded &&
+		deps.titleService &&
+		sessionIsNew &&
+		turns.length === 0 &&
+		ensuredSessionId
+	) {
 		scheduleTitleAfterFirstExchange(
 			{
 				userId: ctx.userId,

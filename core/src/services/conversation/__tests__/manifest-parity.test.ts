@@ -50,20 +50,26 @@ describe('Virtual chatbot manifest — full structural contract (post-Chunk-D)',
 		});
 	});
 
-	test('user_config exposes auto_detect_pas, log_to_notes, and flush_memory_on_idle_reset', () => {
+	test('user_config exposes auto_detect_pas, log_to_notes, flush_memory_on_idle_reset, and session_search_tool_enabled', () => {
 		expect(manifest.user_config?.map((c) => c.key)).toEqual([
 			'auto_detect_pas',
 			'log_to_notes',
 			'flush_memory_on_idle_reset',
+			'session_search_tool_enabled',
 		]);
 
 		const autoDetect = manifest.user_config?.find((c) => c.key === 'auto_detect_pas');
 		const logToNotes = manifest.user_config?.find((c) => c.key === 'log_to_notes');
 		const flush = manifest.user_config?.find((c) => c.key === 'flush_memory_on_idle_reset');
+		const sessionSearch = manifest.user_config?.find(
+			(c) => c.key === 'session_search_tool_enabled',
+		);
 		expect(autoDetect?.default).toBe(true);
 		expect(logToNotes?.default).toBe(false);
 		expect(flush?.type).toBe('boolean');
 		expect(flush?.default).toBe(false);
+		expect(sessionSearch?.type).toBe('boolean');
+		expect(sessionSearch?.default).toBe(true);
 		expect(manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
 	});
 });
