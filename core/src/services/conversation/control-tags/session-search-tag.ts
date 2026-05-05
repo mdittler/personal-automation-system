@@ -43,7 +43,7 @@ const SESSION_SEARCH_OPEN_REGEX = /<session-search\b[^<>]*>/gi;
 // U+202A-U+202E: LRE, RLE, PDF, LRO, RLO
 // U+2066-U+2069: LRI, RLI, FSI, PDI
 // U+FEFF: BOM / zero-width no-break space
-const BIDI_ZERO_WIDTH_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
+const BIDI_ZERO_WIDTH_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
 
 export interface SessionSearchTagResult {
 	/** Sanitized query extracted from the tag; null if no valid tag found. */
