@@ -54,6 +54,7 @@ import {
 	normalizeResponse,
 	processConfigSetTags,
 	processMemoryKindSetTags,
+	stripConfigSetTags,
 } from './control-tags.js';
 import {
 	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
@@ -398,8 +399,10 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			finalResponse = afterConfigSet;
 		}
 	} else if (deps.contextStore) {
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		const afterConfigSetStrip = stripConfigSetTags(afterSwitchStrip);
 		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
-			await processMemoryKindSetTags(afterSwitchStrip, {
+			await processMemoryKindSetTags(afterConfigSetStrip, {
 				userId: ctx.userId,
 				userMessage: ctx.text,
 				contextStore: deps.contextStore,
@@ -408,7 +411,8 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		allConfirmations.push(...kindConfirmations);
 		finalResponse = afterKindSet;
 	} else {
-		finalResponse = normalizeResponse(afterSwitchStrip);
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		finalResponse = stripConfigSetTags(afterSwitchStrip);
 	}
 
 	if (allConfirmations.length > 0) {

@@ -640,7 +640,7 @@ describe('SettingsReader.buildCatalog', () => {
     expect(catalog).toContain('## Your settings');
   });
 
-  it('formats each setting as a dash-prefixed line', async () => {
+  it('formats each setting as a dash-prefixed line with qualified key in parentheses', async () => {
     const reg = new SettingsRegistry();
     reg.register({
       key: 'log_to_notes',
@@ -665,6 +665,171 @@ describe('SettingsReader.buildCatalog', () => {
     });
 
     const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
-    expect(catalog).toMatch(/^- Daily notes logging: OFF$/m);
+    // Format: - <label> (<appId>.<key>): <value>
+    expect(catalog).toMatch(/^- Daily notes logging \(chatbot\.log_to_notes\): OFF$/m);
+  });
+
+  it('catalog line includes both the label and qualified key', async () => {
+    const reg = new SettingsRegistry();
+    reg.register({
+      key: 'seasonal_nudges',
+      appId: 'food',
+      category: 'food',
+      label: 'Seasonal recipe suggestions',
+      help: 'h',
+      type: 'boolean',
+      default: true,
+      adminOnly: false,
+      dangerous: false,
+      hidden: false,
+      scope: 'per-user',
+      nlSafe: true,
+      nlIntentRegex: /seasonal/i,
+    });
+
+    const reader = new SettingsReader({
+      registry: reg,
+      appConfigResolver: () => makeAppConfig(null),
+      logger: makeLogger(),
+    });
+
+    const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(catalog).toContain('Seasonal recipe suggestions (food.seasonal_nudges)');
+    expect(catalog).toContain('ON');
+  });
+
+  // ── Fix 2: trustedInstructions length cap ────────────────────────────────
+
+  it('trustedInstructions is truncated when it exceeds 3000 chars', async () => {
+    const reg = new SettingsRegistry();
+    // Register enough nlSafe keys to push instructions over 3000 chars.
+    // Each key line is ~28 chars + newline = ~29 chars.
+    // Header text is ~200 chars. To exceed 3000: need ~97+ keys.
+    // Use 120 to be well above the threshold.
+    for (let i = 0; i < 120; i++) {
+      const key = `key_${String(i).padStart(3, '0')}`;
+      reg.register({
+        key,
+        appId: 'chatbot',
+        category: 'notes',
+        label: `Setting ${i}`,
+        help: `Help text for setting ${i}.`,
+        type: 'boolean',
+        default: false,
+        adminOnly: false,
+        dangerous: false,
+        hidden: false,
+        scope: 'per-user',
+        nlSafe: true,
+        nlIntentRegex: /setting/i,
+      });
+    }
+
+    const reader = new SettingsReader({
+      registry: reg,
+      appConfigResolver: () => makeAppConfig(null),
+      logger: makeLogger(),
+    });
+
+    const { trustedInstructions } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(trustedInstructions).toContain('... (instructions truncated)');
+    // The output should be capped: 3000 (body) + newline + truncation marker
+    expect(trustedInstructions.length).toBeLessThanOrEqual(3_000 + '\n... (instructions truncated)'.length);
+  });
+
+  // ── Fix 6: string boolean coercion ───────────────────────────────────────
+
+  it('coerces string "true" override to ON for boolean settings', async () => {
+    const reg = new SettingsRegistry();
+    reg.register({
+      key: 'log_to_notes',
+      appId: 'chatbot',
+      category: 'notes',
+      label: 'Daily notes logging',
+      help: 'h',
+      type: 'boolean',
+      default: false,
+      adminOnly: false,
+      dangerous: false,
+      hidden: false,
+      scope: 'per-user',
+      nlSafe: true,
+      nlIntentRegex: /daily notes/i,
+    });
+
+    const reader = new SettingsReader({
+      registry: reg,
+      // YAML manual edit may produce string 'true' instead of boolean true
+      appConfigResolver: () => makeAppConfig({ log_to_notes: 'true' }),
+      logger: makeLogger(),
+    });
+
+    const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(catalog).toContain('ON');
+    expect(catalog).not.toContain('"true"');
+    expect(catalog).not.toContain("'true'");
+  });
+
+  it('coerces string "false" override to OFF for boolean settings', async () => {
+    const reg = new SettingsRegistry();
+    reg.register({
+      key: 'log_to_notes',
+      appId: 'chatbot',
+      category: 'notes',
+      label: 'Daily notes logging',
+      help: 'h',
+      type: 'boolean',
+      default: true,
+      adminOnly: false,
+      dangerous: false,
+      hidden: false,
+      scope: 'per-user',
+      nlSafe: true,
+      nlIntentRegex: /daily notes/i,
+    });
+
+    const reader = new SettingsReader({
+      registry: reg,
+      appConfigResolver: () => makeAppConfig({ log_to_notes: 'false' }),
+      logger: makeLogger(),
+    });
+
+    const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(catalog).toContain('OFF');
+  });
+
+  it('coerces string "on"/"off" overrides correctly for boolean settings', async () => {
+    const reg = new SettingsRegistry();
+    reg.register({
+      key: 'log_to_notes',
+      appId: 'chatbot',
+      category: 'notes',
+      label: 'Daily notes logging',
+      help: 'h',
+      type: 'boolean',
+      default: false,
+      adminOnly: false,
+      dangerous: false,
+      hidden: false,
+      scope: 'per-user',
+      nlSafe: true,
+      nlIntentRegex: /daily notes/i,
+    });
+
+    const readerOn = new SettingsReader({
+      registry: reg,
+      appConfigResolver: () => makeAppConfig({ log_to_notes: 'on' }),
+      logger: makeLogger(),
+    });
+    const { catalog: onCatalog } = await readerOn.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(onCatalog).toContain('ON');
+
+    const readerOff = new SettingsReader({
+      registry: reg,
+      appConfigResolver: () => makeAppConfig({ log_to_notes: 'off' }),
+      logger: makeLogger(),
+    });
+    const { catalog: offCatalog } = await readerOff.buildCatalog({ userId: 'u1', isAdmin: false });
+    expect(offCatalog).toContain('OFF');
   });
 });

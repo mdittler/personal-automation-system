@@ -50,6 +50,7 @@ import {
 	processConfigSetTags,
 	processMemoryKindSetTags,
 	processModelSwitchTags,
+	stripConfigSetTags,
 } from './control-tags.js';
 import {
 	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
@@ -395,6 +396,9 @@ export async function handleAsk(
 			});
 		allConfirmations.push(...configConfirmations);
 		finalResponse = afterConfigSet;
+	} else {
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		finalResponse = stripConfigSetTags(afterModelSwitch);
 	}
 	if (deps.contextStore) {
 		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =

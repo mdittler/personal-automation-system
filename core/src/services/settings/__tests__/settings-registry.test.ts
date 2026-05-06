@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SettingsRegistry, type SettingDef } from '../settings-registry.js';
 
 function makeDef(overrides: Partial<SettingDef> = {}): SettingDef {
@@ -126,6 +126,28 @@ describe('getForUser admin/hidden filtering', () => {
     reg.register(makeDef({ key: 'pseudo', hidden: true }));
     expect(reg.getForUser(false).map((d) => d.key)).toEqual(['public']);
     expect(reg.getForUser(true).map((d) => d.key)).toEqual(['public']);
+  });
+});
+
+describe('register immutability (Fix 5)', () => {
+  it('mutating the original SettingDef after register does not affect the stored def', () => {
+    const reg = new SettingsRegistry();
+    const def = makeDef({ nlSafe: false });
+    reg.register(def);
+    // Attempt mutation after registration
+    (def as Record<string, unknown>).nlSafe = true;
+    const stored = reg.getByQualifiedKey('chatbot.log_to_notes')!;
+    expect(stored.nlSafe).toBe(false); // original value preserved
+  });
+
+  it('getAll returns a copy of the array — pushing to it does not affect the registry', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({ key: 'a_key', appId: 'chatbot' }));
+    const copy = reg.getAll();
+    // Mutate the returned array
+    // @ts-expect-error — deliberately pushing a partial object to test array isolation
+    copy.push({ key: 'injected' });
+    expect(reg.getAll().length).toBe(1); // registry unaffected
   });
 });
 

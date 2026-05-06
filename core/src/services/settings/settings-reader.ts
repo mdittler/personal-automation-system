@@ -14,8 +14,10 @@
  */
 import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService } from '../../types/config.js';
+import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
 import { sanitizeContextContent } from '../prompt-assembly/memory-context.js';
 import type { SettingDef, SettingsCategory, SettingsRegistry } from './settings-registry.js';
+import { qualifiedKey } from './settings-registry.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -47,6 +49,16 @@ export interface CatalogOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum character length for the trusted instructions block.
+ * Prevents unbounded context injection when many nlSafe keys are registered.
+ */
+const MAX_TRUSTED_INSTRUCTIONS_CHARS = 3_000;
+
+// ---------------------------------------------------------------------------
 // Category display order
 // ---------------------------------------------------------------------------
 
@@ -68,6 +80,12 @@ function displayValue(def: SettingDef, raw: unknown): string {
 	if (def.type === 'boolean') {
 		if (raw === true) return 'ON';
 		if (raw === false) return 'OFF';
+		// Coerce string booleans from YAML manual edits (e.g. 'true', 'on', '1')
+		if (typeof raw === 'string') {
+			const lower = raw.toLowerCase();
+			if (BOOLEAN_TRUTHY.has(lower)) return 'ON';
+			if (BOOLEAN_FALSY.has(lower)) return 'OFF';
+		}
 		// Unexpected type — fall through to default
 		return raw == null ? 'OFF' : String(raw);
 	}
@@ -144,7 +162,7 @@ export class SettingsReader {
 				const rawValue = Object.prototype.hasOwnProperty.call(overrides, def.key)
 					? overrides[def.key]
 					: def.default;
-				lines.push(`- ${def.label}: ${displayValue(def, rawValue)}`);
+				lines.push(`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${displayValue(def, rawValue)}`);
 			}
 		}
 
@@ -155,8 +173,12 @@ export class SettingsReader {
 		// the caller's buildMemoryContextBlock will apply the final size cap.
 		const catalog = sanitizeContextContent(rawCatalog, Number.MAX_SAFE_INTEGER, '');
 
-		// Build trusted instruction block (nlSafe keys only).
-		const trustedInstructions = this.buildTrustedInstructions();
+		// Build trusted instruction block (nlSafe keys only), capped at MAX_TRUSTED_INSTRUCTIONS_CHARS.
+		const rawInstructions = this.buildTrustedInstructions();
+		const trustedInstructions =
+			rawInstructions.length > MAX_TRUSTED_INSTRUCTIONS_CHARS
+				? `${rawInstructions.slice(0, MAX_TRUSTED_INSTRUCTIONS_CHARS)}\n... (instructions truncated)`
+				: rawInstructions;
 
 		return { catalog, trustedInstructions };
 	}

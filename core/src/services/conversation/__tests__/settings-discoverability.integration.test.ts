@@ -287,10 +287,10 @@ describe('settings integration — real AppConfigServiceImpl (Task 3.9)', () => 
 		// Build catalog and verify both values are reflected.
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 
-		// Chatbot log_to_notes=true → ON
-		expect(catalog).toContain('Daily notes logging: ON');
+		// Chatbot log_to_notes=true → ON (format: "- <label> (<appId>.<key>): <value>")
+		expect(catalog).toContain('Daily notes logging (chatbot.log_to_notes): ON');
 		// Food seasonal_nudges=false → OFF
-		expect(catalog).toContain('Seasonal recipe suggestions: OFF');
+		expect(catalog).toContain('Seasonal recipe suggestions (food.seasonal_nudges): OFF');
 	});
 
 	// ── Test 4 ────────────────────────────────────────────────────────────────

@@ -380,16 +380,10 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 		}
 		const userId = this.assertRequestContext('buildSettingsCatalog');
 		const isAdmin = this.deps.systemInfo?.isUserAdmin(userId) ?? false;
-		try {
-			return await this.deps.settingsReader.buildCatalog({ userId, isAdmin });
-		} catch (err) {
-			this.deps.logger?.warn(
-				'buildSettingsCatalog: SettingsReader.buildCatalog failed for userId=%s err=%s',
-				userId,
-				err instanceof Error ? err.message : String(err),
-			);
-			return { catalog: '', trustedInstructions: '' };
-		}
+		// Let errors propagate — buildContextSnapshot uses Promise.allSettled so a throw
+		// here becomes a rejected promise that pushes 'settings' to snapshot.failures.
+		// Direct callers (outside buildContextSnapshot) still catch via their own try/catch.
+		return this.deps.settingsReader.buildCatalog({ userId, isAdmin });
 	}
 
 	async buildMemorySnapshot(
@@ -571,12 +565,17 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			snapshot.failures.push('alerts');
 		}
 
-		// Settings catalog — always available (stub returns empty strings when no reader wired).
+		// Settings catalog — reader absent → push 'settings' to failures (consistent with other sources).
+		// When reader is present, wrap in a rejecting promise so allSettled catches throws.
 		if (selected.has('settings')) {
-			tasks.push({
-				category: 'settings',
-				promise: this.buildSettingsCatalog(),
-			});
+			if (!this.deps.settingsReader) {
+				snapshot.failures.push('settings');
+			} else {
+				tasks.push({
+					category: 'settings',
+					promise: this.buildSettingsCatalog(),
+				});
+			}
 		}
 
 		// Await all tasks with partial-failure tolerance

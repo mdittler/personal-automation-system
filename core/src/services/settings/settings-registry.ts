@@ -59,8 +59,9 @@ export class SettingsRegistry {
     if (this.byQualified.has(qid)) {
       throw new Error(`SettingsRegistry: duplicate key '${qid}'`);
     }
-    this.defs.push(def);
-    this.byQualified.set(qid, def);
+    const frozen = Object.freeze({ ...def });
+    this.defs.push(frozen);
+    this.byQualified.set(qid, frozen);
   }
 
   getAll(): SettingDef[] {

@@ -527,12 +527,12 @@ describe('Category 2: SettingsReader.buildCatalog', () => {
 
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 
-		// log_to_notes=true → ON
-		expect(catalog).toContain('Daily notes logging: ON');
+		// log_to_notes=true → ON (format: "- <label> (<appId>.<key>): <value>")
+		expect(catalog).toContain('Daily notes logging (chatbot.log_to_notes): ON');
 		// default_store override
-		expect(catalog).toContain('Default store: Whole Foods');
+		expect(catalog).toContain('Default store (food.default_store): Whole Foods');
 		// seasonal_nudges=false → OFF
-		expect(catalog).toContain('Seasonal recipe suggestions: OFF');
+		expect(catalog).toContain('Seasonal recipe suggestions (food.seasonal_nudges): OFF');
 	});
 
 	it('C2-06: boolean true → ON, boolean false → OFF', async () => {
@@ -543,8 +543,8 @@ describe('Category 2: SettingsReader.buildCatalog', () => {
 
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 
-		expect(catalog).toContain('Daily notes logging: OFF');
-		expect(catalog).toContain('Seasonal recipe suggestions: ON');
+		expect(catalog).toContain('Daily notes logging (chatbot.log_to_notes): OFF');
+		expect(catalog).toContain('Seasonal recipe suggestions (food.seasonal_nudges): ON');
 		// Must not expose raw booleans
 		expect(catalog).not.toContain(': true');
 		expect(catalog).not.toContain(': false');
@@ -558,7 +558,7 @@ describe('Category 2: SettingsReader.buildCatalog', () => {
 
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 
-		expect(catalog).toContain('Default store: (not set)');
+		expect(catalog).toContain('Default store (food.default_store): (not set)');
 	});
 
 	it('C2-08: trustedInstructions lists only nlSafe qualified keys', async () => {
@@ -828,7 +828,7 @@ describe('Category 4: End-to-end scenarios', () => {
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 
 		// default_store default is '' → (not set)
-		expect(catalog).toContain('Default store: (not set)');
+		expect(catalog).toContain('Default store (food.default_store): (not set)');
 	});
 
 	it('E2E-02: Change → re-ask reflects new value in catalog', async () => {
@@ -848,13 +848,13 @@ describe('Category 4: End-to-end scenarios', () => {
 		// Step 1: initial catalog shows (not set) for default_store
 		const reader1 = makeReader(registry, chatbotCfg, foodCfg);
 		const { catalog: catalog1 } = await reader1.buildCatalog({ userId: 'u1', isAdmin: false });
-		expect(catalog1).toContain('Default store: (not set)');
+		expect(catalog1).toContain('Default store (food.default_store): (not set)');
 
 		// Step 2: simulate config change (mock returns new value on next call)
 		foodGetOverrides.mockResolvedValueOnce({ default_store: 'Walmart' });
 		const reader2 = makeReader(registry, chatbotCfg, foodCfg);
 		const { catalog: catalog2 } = await reader2.buildCatalog({ userId: 'u1', isAdmin: false });
-		expect(catalog2).toContain('Default store: Walmart');
+		expect(catalog2).toContain('Default store (food.default_store): Walmart');
 	});
 
 	it('E2E-03: Admin-only filtering — admin sees more, non-admin sees less', async () => {

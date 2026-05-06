@@ -103,6 +103,21 @@ export async function processModelSwitchTags(
 const CONFIG_SET_TAG_REGEX = /<config-set\s+key="([^"]+)"\s+value="([^"]+)"\s*\/>/g;
 
 /**
+ * Strip all well-formed <config-set .../> tags from a response string without
+ * processing them. Also sweeps for malformed/reordered/extra-attr remnants.
+ *
+ * Use this when the writer is absent — prevents model-emitted tags leaking to the user.
+ */
+export function stripConfigSetTags(response: string): string {
+	if (!response.includes('<config-set')) return response;
+	return normalizeResponse(
+		response
+			.replace(CONFIG_SET_TAG_REGEX, '')
+			.replace(/<config-set\b[^>]*\/?>/g, ''),
+	);
+}
+
+/**
  * Bidirectional detector for user intent to toggle daily-notes logging.
  *
  * First alt:  action verb → notes concept (normal order).
