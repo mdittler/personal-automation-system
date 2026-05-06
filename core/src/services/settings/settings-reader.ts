@@ -16,6 +16,7 @@ import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService } from '../../types/config.js';
 import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
 import { sanitizeContextContent } from '../prompt-assembly/memory-context.js';
+import { CATEGORY_ORDER } from './categories.js';
 import type { SettingDef, SettingsCategory, SettingsRegistry } from './settings-registry.js';
 import { qualifiedKey } from './settings-registry.js';
 
@@ -57,20 +58,6 @@ export interface CatalogOutput {
  * Prevents unbounded context injection when many nlSafe keys are registered.
  */
 const MAX_TRUSTED_INSTRUCTIONS_CHARS = 3_000;
-
-// ---------------------------------------------------------------------------
-// Category display order
-// ---------------------------------------------------------------------------
-
-const CATEGORY_ORDER: SettingsCategory[] = [
-	'personal',
-	'food',
-	'notes',
-	'memory-sessions',
-	'notifications',
-	'system',
-	'dangerous',
-];
 
 // ---------------------------------------------------------------------------
 // Value display helpers
