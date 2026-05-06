@@ -122,6 +122,7 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
+		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 	const { settingsRegistry, settingsWriter } = makeChatbotSettingsServices(config as any);
 	const deps: ConversationServiceDeps = {

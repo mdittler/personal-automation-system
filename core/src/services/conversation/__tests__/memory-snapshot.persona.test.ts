@@ -50,6 +50,7 @@ function makeChatSessionsWithSnapshot(snapshot: MemorySnapshot | undefined, opts
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId, isNew: true, snapshot }),
 		peekSnapshot: vi.fn().mockResolvedValue(snapshot),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
+		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 }
 
