@@ -30,6 +30,8 @@ import { CONTEXT_INTERNAL_BYPASS } from '../context-store/index.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
 import type { SettingsReader } from '../settings/settings-reader.js';
+import { formatDataQueryContext } from '../conversation/data-query-context.js';
+import { formatAlertLines, formatReportLines } from '../conversation/reports-alerts-format.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
 import { chooseSources } from './source-selection.js';
@@ -588,7 +590,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			if (!result) continue;
 
 			if (result.status === 'rejected') {
-				snapshot.failures.push(task.category);
+				if (selected.has(task.category)) snapshot.failures.push(task.category);
 				if (task.category === 'user-app-data') {
 					// Also mark the other DataQuery scope categories as failed
 					for (const cat of [
@@ -613,7 +615,7 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			if (catBudget <= 0) {
 				// Budget exhausted — mark remaining fulfilled tasks as failed.
 				// DataQuery tasks represent 4 categories under one task key; mark all.
-				snapshot.failures.push(task.category);
+				if (selected.has(task.category)) snapshot.failures.push(task.category);
 				if (task.category === 'user-app-data') {
 					for (const cat of [
 						'household-shared-data',
@@ -675,39 +677,49 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'user-app-data': {
 					// This task key represents all four DataQuery scope categories.
-					// Enforce catBudget by truncating file content in order — first files
-					// get their full content; later ones are truncated or dropped.
+					// Truncate by rendered (formatted) size so the 6 KB catBudget actually holds.
+					// formatDataQueryContext renders `[header]\n${content}` per file joined with `\n\n`.
 					const result = value as DataQueryResult;
 					let remaining = catBudget;
 					const truncatedFiles: DataQueryResult['files'] = [];
-					for (const file of result.files) {
-						if (remaining <= 0) break;
-						const content = file.content.slice(0, remaining);
-						remaining -= content.length;
+					for (let i = 0; i < result.files.length; i++) {
+						const file = result.files[i];
+						const headerOverhead =
+							`[${[file.appId, file.type, file.title].filter(Boolean).join(' / ')}]\n`.length;
+						const separatorOverhead = i > 0 ? 2 : 0;
+						const overhead = headerOverhead + separatorOverhead;
+						if (remaining <= overhead) break;
+						const contentBudget = remaining - overhead;
+						const content = file.content.slice(0, contentBudget);
+						remaining -= overhead + content.length;
 						truncatedFiles.push({ ...file, content });
 					}
 					snapshot.dataQueryResult = { files: truncatedFiles, empty: truncatedFiles.length === 0 };
-					charsUsed += catBudget - remaining;
+					charsUsed += formatDataQueryContext(snapshot.dataQueryResult).length;
 					break;
 				}
 				case 'reports': {
 					const reports = value as ReportDefinition[];
-					const reportSizeMap = new Map<ReportDefinition, number>(
-						reports.map((r) => [r, JSON.stringify(r).length]),
+					// Size by rendered line length (+1 for the '\n' separator between lines).
+					const truncated = truncateArray(
+						reports,
+						catBudget,
+						(r) => formatReportLines([r]).length + 1,
 					);
-					const truncated = truncateArray(reports, catBudget, (r) => reportSizeMap.get(r) ?? 0);
 					snapshot.reports = truncated;
-					charsUsed += truncated.reduce((sum, r) => sum + (reportSizeMap.get(r) ?? 0), 0);
+					charsUsed += formatReportLines(truncated).length;
 					break;
 				}
 				case 'alerts': {
 					const alerts = value as AlertDefinition[];
-					const alertSizeMap = new Map<AlertDefinition, number>(
-						alerts.map((a) => [a, JSON.stringify(a).length]),
+					// Size by rendered line length (+1 for the '\n' separator between lines).
+					const truncated = truncateArray(
+						alerts,
+						catBudget,
+						(a) => formatAlertLines([a]).length + 1,
 					);
-					const truncated = truncateArray(alerts, catBudget, (a) => alertSizeMap.get(a) ?? 0);
 					snapshot.alerts = truncated;
-					charsUsed += truncated.reduce((sum, a) => sum + (alertSizeMap.get(a) ?? 0), 0);
+					charsUsed += formatAlertLines(truncated).length;
 					break;
 				}
 				case 'settings': {

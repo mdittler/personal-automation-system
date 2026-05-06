@@ -159,6 +159,64 @@ describe('ConversationRetrievalServiceImpl integration — admin gate', () => {
 	});
 });
 
+// ─── M-4: system-info fan-out gated on keywords, not ask-mode ────────────────
+
+describe('ConversationRetrievalServiceImpl integration — M-4 system-info fan-out', () => {
+	function makeMinimalSystemInfo() {
+		return {
+			getTierAssignments: vi.fn().mockReturnValue([]),
+			getProviders: vi.fn().mockReturnValue([]),
+			getAvailableModels: vi.fn().mockResolvedValue([]),
+			getModelPricing: vi.fn().mockReturnValue(null),
+			getCostSummary: vi.fn().mockReturnValue(null),
+			getScheduledJobs: vi.fn().mockReturnValue([]),
+			getSystemStatus: vi.fn().mockReturnValue({
+				uptimeSeconds: 0,
+				appCount: 0,
+				cronJobCount: 0,
+				timezone: 'UTC',
+			}),
+			getSafeguardDefaults: vi.fn().mockReturnValue(null),
+			isUserAdmin: vi.fn().mockReturnValue(false),
+		};
+	}
+
+	it('ask mode with non-system question does NOT invoke the system-info reader', async () => {
+		const systemInfo = makeMinimalSystemInfo();
+		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
+
+		await requestContext.run({ userId: 'alice' }, () =>
+			service.buildContextSnapshot({
+				question: 'hello',
+				mode: 'ask',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+			}),
+		);
+
+		// system-info not in selected — reader never runs, isUserAdmin never reached
+		expect(systemInfo.isUserAdmin).not.toHaveBeenCalled();
+	});
+
+	it('ask mode with system keyword DOES invoke the system-info reader', async () => {
+		const systemInfo = makeMinimalSystemInfo();
+		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
+
+		await requestContext.run({ userId: 'alice' }, () =>
+			service.buildContextSnapshot({
+				question: 'what model is running?',
+				mode: 'ask',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+			}),
+		);
+
+		// system-info in selected (llm keyword) — reader runs past categorization,
+		// isUserAdmin is called before gatherSystemData
+		expect(systemInfo.isUserAdmin).toHaveBeenCalled();
+	});
+});
+
 // ─── Missing dep graceful handling ────────────────────────────────────────────
 
 describe('ConversationRetrievalServiceImpl integration — missing dep graceful handling', () => {

@@ -9,6 +9,7 @@ import {
 	assertNoMemoryContextBlock,
 } from './helpers/prompt-assertions.js';
 import { PHOTO_SUMMARY_GUIDANCE, buildAppAwareSystemPrompt, buildSystemPrompt } from '../prompt-builder.js';
+import { formatAlertLines, formatReportLines } from '../reports-alerts-format.js';
 
 function makeDeps(overrides?: object) {
 	const services = createMockCoreServices();
@@ -717,5 +718,109 @@ describe('recalled-session prompt ordering', () => {
 		expect(recallPos).toBeGreaterThan(-1);
 		expect(journalPos).toBeGreaterThan(-1);
 		expect(recallPos).toBeLessThan(journalPos);
+	});
+});
+
+// ─── M-3: prompt-builder uses formatReportLines / formatAlertLines helpers ───
+
+describe('M-3: prompt-builder reports/alerts blocks use format helpers', () => {
+	let services: ReturnType<typeof createMockCoreServices>;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+		vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
+		vi.mocked(services.modelJournal.read).mockResolvedValue('');
+	});
+
+	function makeDepsM3() {
+		return {
+			llm: services.llm,
+			appMetadata: services.appMetadata,
+			modelJournal: services.modelJournal,
+			logger: services.logger,
+		};
+	}
+
+	it('reports block renders via formatReportLines helper', async () => {
+		const reports = [
+			{
+				id: 'r1',
+				name: 'Daily Summary',
+				enabled: true,
+				schedule: '0 0 * * *',
+				delivery: [],
+				sections: [],
+				llm: { enabled: false },
+			},
+		] as never;
+
+		const snapshot = { failures: [], reports } as never;
+		const prompt = await buildAppAwareSystemPrompt(
+			'show my reports',
+			'user1',
+			[],
+			[],
+			makeDepsM3(),
+			{ dataContextOrSnapshot: snapshot },
+		);
+
+		const expected = formatReportLines(reports);
+		expect(prompt).toContain(expected);
+		// Spot-check the exact format
+		expect(prompt).toContain('- Daily Summary (0 0 * * *)');
+	});
+
+	it('alerts block renders via formatAlertLines helper', async () => {
+		const alerts = [
+			{
+				id: 'a1',
+				name: 'Price Alert',
+				enabled: true,
+				conditions: [],
+				actions: [],
+				trigger: { type: 'scheduled', schedule: '0 * * * *' },
+			},
+		] as never;
+
+		const snapshot = { failures: [], alerts } as never;
+		const prompt = await buildAppAwareSystemPrompt(
+			'show my alerts',
+			'user1',
+			[],
+			[],
+			makeDepsM3(),
+			{ dataContextOrSnapshot: snapshot },
+		);
+
+		const expected = formatAlertLines(alerts);
+		expect(prompt).toContain(expected);
+		// Spot-check the exact format
+		expect(prompt).toContain('- Price Alert');
+	});
+
+	it('report with missing schedule falls back to "manual"', async () => {
+		const reports = [
+			{
+				id: 'r1',
+				name: 'Manual Report',
+				enabled: true,
+				schedule: undefined, // runtime undefined — triggers ?? 'manual'
+				delivery: [],
+				sections: [],
+				llm: { enabled: false },
+			},
+		] as never;
+
+		const snapshot = { failures: [], reports } as never;
+		const prompt = await buildAppAwareSystemPrompt(
+			'show my reports',
+			'user1',
+			[],
+			[],
+			makeDepsM3(),
+			{ dataContextOrSnapshot: snapshot },
+		);
+
+		expect(prompt).toContain('- Manual Report (manual)');
 	});
 });

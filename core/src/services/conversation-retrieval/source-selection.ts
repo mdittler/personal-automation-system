@@ -40,9 +40,8 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 		selected.add('app-knowledge');
 	}
 
-	// System info: any non-data system category, or ask mode
+	// System info: any non-data system category (keyword-gated in both modes)
 	if (
-		opts.mode === 'ask' ||
 		categories.has('llm') ||
 		categories.has('costs') ||
 		categories.has('scheduling') ||

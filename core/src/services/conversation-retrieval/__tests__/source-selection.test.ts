@@ -109,8 +109,13 @@ describe('chooseSources — ask mode widens baseline', () => {
 		expect(selected.has('app-knowledge')).toBe(true);
 	});
 
-	it('ask mode always includes system-info', () => {
+	it('ask mode without system keywords does NOT include system-info', () => {
 		const selected = chooseSources(makeOpts({ mode: 'ask', question: 'hello' }));
+		expect(selected.has('system-info')).toBe(false);
+	});
+
+	it('ask mode with system keyword includes system-info', () => {
+		const selected = chooseSources(makeOpts({ mode: 'ask', question: 'what model is running?' }));
 		expect(selected.has('system-info')).toBe(true);
 	});
 
