@@ -10,7 +10,7 @@ import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js'
 import { chatbotMessage } from '../../../testing/fixtures/messages.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
-import { CONVERSATION_USER_CONFIG } from '../manifest.js';
+import { CONVERSATION_USER_CONFIG_MANIFEST } from '../manifest.js';
 import { VIRTUAL_CHATBOT_PATH } from '../virtual-app.js';
 
 describe('virtual chatbot registry entry — when real app is absent', () => {
@@ -47,11 +47,9 @@ describe('virtual chatbot registry entry — when real app is absent', () => {
 		const app = runtime.services.registry.getApp('chatbot');
 		expect(app).toBeDefined();
 		expect(app?.appDir).toBe(VIRTUAL_CHATBOT_PATH);
-		// manifest.user_config is the plain ManifestUserConfig shape (no RegExp fields);
-		// CONVERSATION_USER_CONFIG is the richer internal type. Verify key/type/default parity.
-		expect(app?.manifest.user_config?.map((c) => ({ key: c.key, type: c.type, default: c.default }))).toEqual(
-			CONVERSATION_USER_CONFIG.map((c) => ({ key: c.key, type: c.type, default: c.default })),
-		);
+		// manifest.user_config must round-trip all fields (label, help, category, nlSafe, etc.)
+		// through the strip-map — not just key/type/default.
+		expect(app?.manifest.user_config).toEqual(CONVERSATION_USER_CONFIG_MANIFEST);
 	});
 
 	it('virtual chatbot module.handleMessage throws (regression tripwire)', async () => {
