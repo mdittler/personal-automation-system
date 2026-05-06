@@ -22,10 +22,21 @@ import { getModelPricing } from '../services/llm/model-pricing.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { askMessage, chatbotMessage } from '../testing/fixtures/messages.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
-import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
+import {
+	StubProvider,
+	type StubProviderOptions,
+	createStubProviderRegistry,
+} from '../testing/fixtures/stub-llm-provider.js';
 
-describe('composeRuntime smoke', () => {
-	let tempDir: string;
+const SMOKE_TEST_TIMEOUT_MS = 20_000;
+const SMOKE_STUB_OPTIONS = {
+	p50Ms: 1,
+	p95Ms: 2,
+	capMs: 5,
+} satisfies StubProviderOptions;
+
+describe.sequential('composeRuntime smoke', { timeout: SMOKE_TEST_TIMEOUT_MS }, () => {
+	let tempDir = '';
 	let runtime: Awaited<ReturnType<typeof composeRuntime>>;
 
 	beforeAll(async () => {
@@ -43,7 +54,7 @@ describe('composeRuntime smoke', () => {
 			dataDir: join(tempDir, 'data'),
 			configPath: seed.configPath,
 			config: seed.config,
-			providerRegistry: createStubProviderRegistry(tempCostTracker, logger),
+			providerRegistry: createStubProviderRegistry(tempCostTracker, logger, SMOKE_STUB_OPTIONS),
 			telegramService: fakeTelegramService(),
 			logger,
 		});
@@ -51,13 +62,25 @@ describe('composeRuntime smoke', () => {
 		// Re-register the stub using the runtime's own costTracker so that all
 		// completeWithUsage() calls record to the instance under test.
 		const realCostTracker = runtime.services.costTracker as CostTracker;
-		runtime.services.providerRegistry.register(new StubProvider(realCostTracker, logger));
-	});
+		runtime.services.providerRegistry.register(
+			new StubProvider(realCostTracker, logger, SMOKE_STUB_OPTIONS),
+		);
+	}, SMOKE_TEST_TIMEOUT_MS);
 
 	afterAll(async () => {
-		if (runtime) await runtime.dispose();
-		await rm(tempDir, { recursive: true, force: true });
-	});
+		if (runtime) {
+			await (runtime.services.costTracker as CostTracker).drainWrites();
+			await runtime.dispose();
+		}
+		if (tempDir) {
+			await rm(tempDir, {
+				recursive: true,
+				force: true,
+				maxRetries: 10,
+				retryDelay: 100,
+			});
+		}
+	}, SMOKE_TEST_TIMEOUT_MS);
 
 	it('constructs a fully wired runtime without starting Telegraf, Fastify, or scheduler', () => {
 		expect(runtime.services.router).toBeDefined();
@@ -73,33 +96,37 @@ describe('composeRuntime smoke', () => {
 		const jobKey = `system:${jobId}`;
 		const failingHandler = vi.fn().mockRejectedValue(new Error('boom'));
 
-		runtime.services.scheduler.cron.register(
-			{
-				id: jobId,
-				appId: 'system',
-				cron: '*/5 * * * *',
-				handler: 'persist-disabled-state',
-				description: 'Persist disabled jobs in composeRuntime',
-				userScope: 'system',
-			},
-			() => failingHandler,
-		);
+		try {
+			runtime.services.scheduler.cron.register(
+				{
+					id: jobId,
+					appId: 'system',
+					cron: '*/5 * * * *',
+					handler: 'persist-disabled-state',
+					description: 'Persist disabled jobs in composeRuntime',
+					userScope: 'system',
+				},
+				() => failingHandler,
+			);
 
-		const cronCallback = createTaskSpy.mock.calls.at(-1)?.[1] as (() => Promise<void>) | undefined;
-		expect(cronCallback).toBeDefined();
+			const cronCallback = createTaskSpy.mock.calls.at(-1)?.[1] as
+				| (() => Promise<void>)
+				| undefined;
+			expect(cronCallback).toBeDefined();
 
-		for (let i = 0; i < 5; i++) {
-			await cronCallback?.();
+			for (let i = 0; i < 5; i++) {
+				await cronCallback?.();
+			}
+
+			const persisted = await readFile(
+				join(tempDir, 'data', 'system', 'disabled-jobs.yaml'),
+				'utf-8',
+			);
+			expect(persisted).toContain(jobKey);
+		} finally {
+			runtime.services.scheduler.cron.unregister(jobKey);
+			createTaskSpy.mockRestore();
 		}
-
-		const persisted = await readFile(
-			join(tempDir, 'data', 'system', 'disabled-jobs.yaml'),
-			'utf-8',
-		);
-		expect(persisted).toContain(jobKey);
-
-		runtime.services.scheduler.cron.unregister(jobKey);
-		createTaskSpy.mockRestore();
 	});
 
 	it('uses live tier pricing when reserving estimated LLM cost', async () => {
