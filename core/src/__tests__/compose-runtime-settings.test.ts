@@ -1,10 +1,10 @@
 /**
- * compose-runtime settings registry wiring (Task 1.6 + Task 3.7).
+ * compose-runtime settings registry wiring.
  *
  * Verifies that composeRuntime() exposes a SettingsRegistry on the returned
  * services bag and that it contains the chatbot virtual keys without
  * double-registering them. Also verifies that SettingsReader is wired and
- * produces a non-empty catalog for the chatbot virtual keys (Task 3.7).
+ * produces a non-empty catalog for the chatbot virtual keys.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -90,7 +90,7 @@ describe('compose-runtime settings registry wiring', () => {
 		expect(result.ok).toBe(false);
 	});
 
-	it('SettingsReader is wired and buildSettingsCatalog returns non-empty catalog (Task 3.7)', async () => {
+	it('SettingsReader is wired and buildSettingsCatalog returns non-empty catalog', async () => {
 		// The retrieval service is exposed on services via the index signature.
 		const retrieval = runtime.services
 			.conversationRetrievalService as ConversationRetrievalService;

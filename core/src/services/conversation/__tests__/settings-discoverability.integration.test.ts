@@ -1,7 +1,7 @@
 /**
  * Integration tests — real AppConfigServiceImpl backed by temp-dir filesystem.
  *
- * Task 3.9: Proves cross-write isolation and live catalog reads using real disk I/O.
+ * Proves cross-write isolation and live catalog reads using real disk I/O.
  *
  * These tests do NOT mock AppConfigServiceImpl. Every write goes to a real
  * temp directory; every read comes back from the same directory.

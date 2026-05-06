@@ -1,7 +1,7 @@
 /**
  * Persona tests — settings discoverability + change flow + admin filter + sanitization.
  *
- * Task 3.8: Persona tests for the settings pipeline. Tests the handler-specific
+ * Persona tests for the settings pipeline. Tests the handler-specific
  * behavior of SettingsRegistry, SettingsReader, SettingsWriter, and
  * processConfigSetTags — NOT just that telegram.send was called.
  *

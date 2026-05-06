@@ -1,5 +1,5 @@
 /**
- * settings-reader.test.ts — TDD for SettingsReader (Task 3.2)
+ * settings-reader.test.ts — unit tests for SettingsReader.
  *
  * Covers:
  * - Renders all visible per-user settings grouped by category
