@@ -12,3 +12,8 @@ export {
   type WriteResult,
   type SettingsWriterDeps,
 } from './settings-writer.js';
+export {
+  SettingsReader,
+  type CatalogOutput,
+  type SettingsReaderDeps,
+} from './settings-reader.js';
