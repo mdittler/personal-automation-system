@@ -96,6 +96,62 @@ describe('classifyPASMessage', () => {
 		expect(result.pasRelated).toBe(true);
 	});
 
+	// ── Task 3.4: YES_SETTINGS / NO_SETTINGS prompt and parser ───────────────
+
+	it('prompt contains YES_SETTINGS and NO_SETTINGS instruction text', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES_PAS YES_SETTINGS NO_DATA');
+		await classifyPASMessage('how do I turn off auto-reset?', services);
+		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
+		const systemPrompt = callArgs?.[1]?.systemPrompt ?? '';
+		expect(systemPrompt).toContain('YES_SETTINGS');
+		expect(systemPrompt).toContain('NO_SETTINGS');
+	});
+
+	it('returns settingsCandidate=true when LLM emits YES_SETTINGS token', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES_PAS YES_SETTINGS NO_DATA');
+		const result = await classifyPASMessage(
+			'how do I change the auto-reset idle timeout?',
+			services,
+		);
+		expect(result.pasRelated).toBe(true);
+		expect(result.settingsCandidate).toBe(true);
+	});
+
+	it('returns settingsCandidate=false when LLM emits NO_SETTINGS token', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES_PAS NO_SETTINGS YES_DATA');
+		const result = await classifyPASMessage('what are my Costco prices', services);
+		expect(result.pasRelated).toBe(true);
+		expect(result.settingsCandidate).toBe(false);
+	});
+
+	it('fail-open: returns settingsCandidate=false when LLM throws', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM down'));
+		const result = await classifyPASMessage('can I change my memory setting?', services);
+		expect(result.pasRelated).toBe(true);
+		expect(result.settingsCandidate).toBe(false);
+	});
+
+	it('backward-compat: legacy YES token still sets pasRelated=true, settingsCandidate=false', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES');
+		const result = await classifyPASMessage('what apps do I have', services);
+		expect(result.pasRelated).toBe(true);
+		expect(result.settingsCandidate).toBeFalsy();
+	});
+
+	it('backward-compat: legacy YES_DATA token sets dataQueryCandidate=true, settingsCandidate=false', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('YES_DATA');
+		const result = await classifyPASMessage('what are my Costco prices', services);
+		expect(result.pasRelated).toBe(true);
+		expect(result.dataQueryCandidate).toBe(true);
+		expect(result.settingsCandidate).toBeFalsy();
+	});
+
 	it('passes recentContext into the classifier system prompt when provided', async () => {
 		const services = createMockCoreServices();
 		vi.mocked(services.llm.complete).mockResolvedValue('YES');

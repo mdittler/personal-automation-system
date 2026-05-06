@@ -195,8 +195,8 @@ export async function classifyPASMessage(
 		return parsePASClassifierOutput(response);
 	} catch (error) {
 		deps.logger?.warn('PAS classification failed, defaulting to app-aware context: %s', error);
-		// Fail-open for PAS detection, fail-safe for data queries
-		return { pasRelated: true };
+		// Fail-open for PAS detection; fail-safe (false) for data/settings queries
+		return { pasRelated: true, dataQueryCandidate: false, settingsCandidate: false };
 	}
 }
 
