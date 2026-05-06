@@ -694,7 +694,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		expect(dataQueryFails.length).toBeGreaterThan(0);
 	});
 
-	it('ask mode always includes app-knowledge and system-info, but not reports/alerts for plain questions', async () => {
+	it('ask mode includes app-knowledge but not reports/alerts or system-info for plain questions', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
 		await withUserId('user1', () =>
@@ -709,10 +709,8 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		// reports/alerts NOT added by ask mode alone — requires scheduling keyword or explicit mention
 		expect(deps.reportService.listForUser).not.toHaveBeenCalled();
 		expect(deps.alertService.listForUser).not.toHaveBeenCalled();
-		// In ask mode, system-info is selected even for questions without system keywords.
-		// buildSystemDataBlock IS called, but gatherSystemData returns '' for 'hello'
-		// (no matching categories), so getSystemStatus is never invoked.
-		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled(); // no system keywords → no system category
+		// system-info NOT selected without system keywords (keyword-gated in both modes after M-4)
+		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled();
 	});
 
 	it('one category throws: failures includes that category; others still present', async () => {
