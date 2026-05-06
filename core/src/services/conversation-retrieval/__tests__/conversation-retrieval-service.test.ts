@@ -940,20 +940,41 @@ describe('ConversationRetrievalServiceImpl — I-1 phantom DataQuery failures', 
 // ─── M-3: reports/alerts budget uses rendered line, not JSON ─────────────────
 
 describe('ConversationRetrievalServiceImpl — M-3 reports/alerts rendered-size budget', () => {
-	it('reports budget sizing uses rendered line, not JSON size', async () => {
-		// 50 reports each with a tiny rendered line (~22 chars) but a massive sections blob
-		// (~10 KB) that inflates JSON.stringify to >10 000 chars.
-		// Under JSON sizing, 0 reports fit in the 6 000-char catBudget.
-		// Under rendered sizing, all 50 fit (~22 chars × 50 = ~1 100 chars).
-		const reports = Array.from({ length: 50 }, (_, i) => ({
-			id: `r${i}`,
+	function makeReport(overrides: Partial<ReportDefinition> = {}): ReportDefinition {
+		return {
+			id: 'r1',
 			name: 'Daily',
 			enabled: true,
 			schedule: '0 8 * * *',
 			delivery: [],
-			sections: [{ data: 'x'.repeat(10_000) }],
-			llm: { enabled: false },
-		})) as ReportDefinition[];
+			sections: [],
+			llm: { enabled: false } as ReportDefinition['llm'],
+			...overrides,
+		} as ReportDefinition;
+	}
+
+	function makeAlert(overrides: Partial<AlertDefinition> = {}): AlertDefinition {
+		return {
+			id: 'a1',
+			name: 'Price Alert',
+			enabled: true,
+			schedule: '0 * * * *',
+			condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [] },
+			actions: [],
+			delivery: [],
+			cooldown: '1 hour',
+			...overrides,
+		} as AlertDefinition;
+	}
+
+	it('reports budget sizing uses rendered line, not JSON size', async () => {
+		// 50 reports each with a tiny rendered line (~19 chars) but a massive sections blob
+		// (~10 KB) that inflates JSON.stringify to >10 000 chars.
+		// Under JSON sizing, 0 reports fit in the 6 000-char catBudget.
+		// Under rendered sizing, all 50 fit (~19 chars × 50 ≈ 999 chars).
+		const reports = Array.from({ length: 50 }, (_, i) =>
+			makeReport({ id: `r${i}`, sections: [{ data: 'x'.repeat(10_000) }] as never }),
+		);
 
 		const mockReportService = { listForUser: vi.fn().mockResolvedValue(reports) };
 		const service = new ConversationRetrievalServiceImpl({
@@ -979,15 +1000,17 @@ describe('ConversationRetrievalServiceImpl — M-3 reports/alerts rendered-size 
 	});
 
 	it('alerts budget sizing uses rendered line, not JSON size', async () => {
-		// Same logic as reports: tiny name, massive conditions/actions payload.
-		const alerts = Array.from({ length: 50 }, (_, i) => ({
-			id: `a${i}`,
-			name: 'Price Alert',
-			enabled: true,
-			conditions: [{ data: 'x'.repeat(10_000) }],
-			actions: [{ type: 'telegram_message', data: 'x'.repeat(10_000) }],
-			trigger: { type: 'scheduled', schedule: '0 * * * *' },
-		})) as AlertDefinition[];
+		// Same logic as reports: tiny name, massive data_sources payload.
+		const alerts = Array.from({ length: 50 }, (_, i) =>
+			makeAlert({
+				id: `a${i}`,
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'food', path: 'x'.repeat(10_000) }],
+				},
+			}),
+		);
 
 		const mockAlertService = { listForUser: vi.fn().mockResolvedValue(alerts) };
 		const service = new ConversationRetrievalServiceImpl({
@@ -1010,6 +1033,93 @@ describe('ConversationRetrievalServiceImpl — M-3 reports/alerts rendered-size 
 		);
 
 		expect(snapshot.alerts?.length).toBe(50);
+	});
+
+	it('single report that exactly fills catBudget is included (not dropped by off-by-one)', async () => {
+		const r = makeReport({ name: 'Daily', schedule: '0 8 * * *' });
+		// Rendered: '- Daily (0 8 * * *)' = 19 chars
+		const exactBudget = '- Daily (0 8 * * *)'.length;
+
+		const mockReportService = { listForUser: vi.fn().mockResolvedValue([r]) };
+		const service = new ConversationRetrievalServiceImpl({
+			reportService: mockReportService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my reports',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: exactBudget,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					reports: true,
+				},
+			}),
+		);
+
+		expect(snapshot.reports?.length).toBe(1);
+	});
+
+	it('two reports that together exactly fill catBudget are both included', async () => {
+		const r = makeReport({ name: 'Daily', schedule: '0 8 * * *' });
+		// Two items rendered: '- Daily (0 8 * * *)\n- Daily (0 8 * * *)' = 39 chars
+		const twoItemSize = '- Daily (0 8 * * *)\n- Daily (0 8 * * *)'.length;
+
+		const mockReportService = { listForUser: vi.fn().mockResolvedValue([r, r]) };
+		const service = new ConversationRetrievalServiceImpl({
+			reportService: mockReportService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my reports',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: twoItemSize,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					reports: true,
+				},
+			}),
+		);
+
+		expect(snapshot.reports?.length).toBe(2);
+	});
+
+	it('single alert that exactly fills catBudget is included (not dropped by off-by-one)', async () => {
+		const a = makeAlert({ name: 'Price Alert' });
+		// Rendered: '- Price Alert' = 13 chars
+		const exactBudget = '- Price Alert'.length;
+
+		const mockAlertService = { listForUser: vi.fn().mockResolvedValue([a]) };
+		const service = new ConversationRetrievalServiceImpl({
+			alertService: mockAlertService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my alerts',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: exactBudget,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					alerts: true,
+				},
+			}),
+		);
+
+		expect(snapshot.alerts?.length).toBe(1);
 	});
 });
 

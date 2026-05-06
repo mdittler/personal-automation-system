@@ -700,26 +700,24 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 				}
 				case 'reports': {
 					const reports = value as ReportDefinition[];
-					// Size by rendered line length (+1 for the '\n' separator between lines).
-					const truncated = truncateArray(
-						reports,
-						catBudget,
-						(r) => formatReportLines([r]).length + 1,
-					);
-					snapshot.reports = truncated;
-					charsUsed += formatReportLines(truncated).length;
+					const accepted: ReportDefinition[] = [];
+					for (const r of reports) {
+						if (formatReportLines([...accepted, r]).length > catBudget) break;
+						accepted.push(r);
+					}
+					snapshot.reports = accepted;
+					charsUsed += formatReportLines(accepted).length;
 					break;
 				}
 				case 'alerts': {
 					const alerts = value as AlertDefinition[];
-					// Size by rendered line length (+1 for the '\n' separator between lines).
-					const truncated = truncateArray(
-						alerts,
-						catBudget,
-						(a) => formatAlertLines([a]).length + 1,
-					);
-					snapshot.alerts = truncated;
-					charsUsed += formatAlertLines(truncated).length;
+					const accepted: AlertDefinition[] = [];
+					for (const a of alerts) {
+						if (formatAlertLines([...accepted, a]).length > catBudget) break;
+						accepted.push(a);
+					}
+					snapshot.alerts = accepted;
+					charsUsed += formatAlertLines(accepted).length;
 					break;
 				}
 				case 'settings': {

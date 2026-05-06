@@ -776,9 +776,11 @@ describe('M-3: prompt-builder reports/alerts blocks use format helpers', () => {
 				id: 'a1',
 				name: 'Price Alert',
 				enabled: true,
-				conditions: [],
+				schedule: '0 * * * *',
+				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [] },
 				actions: [],
-				trigger: { type: 'scheduled', schedule: '0 * * * *' },
+				delivery: [],
+				cooldown: '1 hour',
 			},
 		] as never;
 
