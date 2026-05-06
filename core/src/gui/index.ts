@@ -47,6 +47,7 @@ import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
+import { registerSettingsRoutes } from './routes/settings.js';
 import { registerViewLocals } from './view-locals.js';
 
 export interface GuiOptions {
@@ -258,6 +259,15 @@ export async function registerGuiRoutes(
 			if (apiKeyService) {
 				registerApiKeyRoutes(gui, {
 					apiKeyService,
+					logger,
+				});
+			}
+			// Settings-B: /gui/settings page
+			if (options.settingsRegistry && options.settingsWriter && options.settingsAppConfigResolver) {
+				registerSettingsRoutes(gui, {
+					settingsRegistry: options.settingsRegistry,
+					settingsWriter: options.settingsWriter,
+					appConfigResolver: options.settingsAppConfigResolver,
 					logger,
 				});
 			}

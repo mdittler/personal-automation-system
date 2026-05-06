@@ -1,0 +1,107 @@
+<div class="page-header">
+  <h1>Settings</h1>
+  <p><small>Your personal settings, grouped by category. Changes take effect immediately after saving.</small></p>
+</div>
+
+<% if (it.saved) { %>
+<div role="alert" class="alert-banner success" style="background:var(--pico-ins-color);color:#fff;padding:0.75rem 1rem;border-radius:4px;margin-bottom:1rem">
+  Settings saved successfully.
+</div>
+<% } %>
+
+<% if (it.failed && it.failed.length > 0) { %>
+<div role="alert" class="alert-banner error" style="background:var(--pico-del-color);color:#fff;padding:0.75rem 1rem;border-radius:4px;margin-bottom:1rem">
+  Some settings could not be saved:
+  <% for (const app of it.failed) { %><strong><%= app %></strong> <% } %>
+  — other changes were applied.
+</div>
+<% } %>
+
+<form method="post" action="/gui/settings">
+  <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+
+  <% for (const cat of it.categoryOrder) { %>
+    <% const defs = it.byCategory[cat]; %>
+    <% if (!defs || defs.length === 0) { continue; } %>
+    <% const visibleCats = ['personal', 'food', 'notes', 'memory-sessions', 'notifications']; %>
+    <% if (!visibleCats.includes(cat)) { continue; } %>
+
+    <details <%= cat === 'personal' ? 'open' : '' %> style="margin-bottom:1rem">
+      <summary><strong><%= it.categoryLabels[cat] %></strong></summary>
+      <div style="padding:0.5rem 0">
+
+        <% for (const def of defs) { %>
+          <% const qk = def.appId + '.' + def.key; %>
+          <% const fname = def.appId + '__' + def.key; %>
+          <% const pname = def.appId + '__' + def.key + '__present'; %>
+          <% const currentValue = it.currentValues[qk]; %>
+          <% const errorMsg = it.errors[qk]; %>
+          <% const rawValue = it.rawValues[qk]; %>
+
+          <div class="setting-row" data-app="<%= def.appId %>" data-key="<%= def.key %>">
+            <div class="setting-label">
+              <% if (def.type !== 'boolean') { %>
+              <label for="sf-<%= fname %>"><strong><%= def.label %></strong></label>
+              <% } %>
+              <small class="setting-help" style="display:block;color:var(--pico-muted-color)"><%= def.help %></small>
+              <% if (errorMsg) { %>
+              <small class="setting-error" style="color:var(--pico-del-color)"><%= errorMsg %></small>
+              <% } %>
+            </div>
+            <div class="setting-widget" style="margin:0.5rem 0">
+
+              <% if (def.type === 'boolean') { %>
+                <label>
+                  <input type="hidden" name="<%= pname %>" value="1" />
+                  <input type="checkbox" name="<%= fname %>" role="switch"
+                    <%= Boolean(currentValue) ? 'checked' : '' %> />
+                  <%= def.label %>
+                </label>
+
+              <% } else if (def.type === 'number') { %>
+                <input
+                  type="number"
+                  id="sf-<%= fname %>"
+                  name="<%= fname %>"
+                  value="<%= rawValue !== undefined ? rawValue : (currentValue !== undefined ? currentValue : '') %>"
+                />
+
+              <% } else if (def.type === 'select') { %>
+                <select id="sf-<%= fname %>" name="<%= fname %>">
+                  <% for (const opt of (def.options || [])) { %>
+                    <option value="<%= opt %>" <%= String(currentValue) === opt ? 'selected' : '' %>><%= opt %></option>
+                  <% } %>
+                </select>
+
+              <% } else { %>
+                <input
+                  type="text"
+                  id="sf-<%= fname %>"
+                  name="<%= fname %>"
+                  value="<%= rawValue !== undefined ? rawValue : (currentValue !== undefined ? currentValue : '') %>"
+                />
+              <% } %>
+
+            </div>
+            <div class="setting-actions">
+              <button
+                type="button"
+                class="outline secondary"
+                style="font-size:0.8rem;padding:0.2rem 0.5rem"
+                hx-post="/gui/settings/<%= def.appId %>/<%= def.key %>/reset"
+                hx-target="closest .setting-row"
+                hx-swap="outerHTML"
+              >Reset</button>
+            </div>
+          </div>
+          <hr style="margin:0.5rem 0;opacity:0.2" />
+        <% } %>
+
+      </div>
+    </details>
+  <% } %>
+
+  <div style="margin-top:1.5rem">
+    <button type="submit">Save Settings</button>
+  </div>
+</form>

@@ -148,6 +148,30 @@ export class SettingsWriter {
   }
 
   /**
+   * Fire registered post-write hooks for a specific qualified key.
+   * Used by the Reset endpoint to trigger side-effects (e.g. disableFlushAndCleanup)
+   * without going through writeBatch. Errors are logged and swallowed.
+   */
+  async runHooksForKey(
+    qKey: string,
+    ctx: { userId: string; appId: string; key: string; prevValue: unknown; newValue: unknown },
+  ): Promise<void> {
+    const hooks = this.hooks.get(qKey) ?? [];
+    for (const hook of hooks) {
+      try {
+        await hook(ctx);
+      } catch (hookErr) {
+        this.deps.logger.warn(
+          'SettingsWriter: post-write hook threw for %s userId=%s: %s',
+          qKey,
+          ctx.userId,
+          hookErr instanceof Error ? hookErr.message : String(hookErr),
+        );
+      }
+    }
+  }
+
+  /**
    * Batch write — validation-atomic, per-app atomic on persist.
    *
    * Phase 1: validate ALL items (pure, no I/O). If any fails, returns
