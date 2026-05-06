@@ -182,6 +182,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	});
 
 	let systemPrompt: string;
+	let settingsTrustedInjected = false;
 	if (autoDetect) {
 		const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 		const recentContextSummary = formatInteractionContextSummary(recentEntries);
@@ -203,6 +204,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 						settingsCandidate: classification.settingsCandidate ?? false,
 						recentFilePaths,
 					});
+					if (snapshot?.settingsTrustedInstructions) settingsTrustedInjected = true;
 				} catch (error) {
 					deps.logger.warn('ConversationRetrievalService.buildContextSnapshot failed: %s', error);
 				}
@@ -254,7 +256,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		});
 	}
 
-	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
+	if (deps.config && !settingsTrustedInjected && NOTES_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(ctx.text)) {

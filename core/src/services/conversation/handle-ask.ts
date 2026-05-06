@@ -212,6 +212,7 @@ export async function handleAsk(
 	);
 
 	let systemPrompt: string;
+	let settingsTrustedInjected = false;
 	if (deps.conversationRetrieval) {
 		let snapshot: ConversationContextSnapshot | null = null;
 		try {
@@ -222,6 +223,7 @@ export async function handleAsk(
 				settingsCandidate: askClassification.settingsCandidate ?? false,
 				recentFilePaths,
 			});
+			if (snapshot?.settingsTrustedInstructions) settingsTrustedInjected = true;
 		} catch (error) {
 			deps.logger.warn(
 				'ConversationRetrievalService.buildContextSnapshot failed in /ask: %s',
@@ -260,7 +262,7 @@ export async function handleAsk(
 		});
 	}
 
-	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
+	if (deps.config && !settingsTrustedInjected && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(question)) {
