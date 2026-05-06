@@ -1,0 +1,72 @@
+/**
+ * compose-runtime settings registry wiring (Task 1.6).
+ *
+ * Verifies that composeRuntime() exposes a SettingsRegistry on the returned
+ * services bag and that it contains the chatbot virtual keys without
+ * double-registering them.
+ */
+
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { composeRuntime } from '../compose-runtime.js';
+import { CostTracker } from '../services/llm/cost-tracker.js';
+import { SettingsRegistry } from '../services/settings/index.js';
+import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
+import { seedUsers } from '../testing/fixtures/seed-users.js';
+import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
+
+describe('compose-runtime settings registry wiring', () => {
+	let tempDir: string;
+	let runtime: Awaited<ReturnType<typeof composeRuntime>>;
+
+	beforeAll(async () => {
+		tempDir = await mkdtemp(join(tmpdir(), 'pas-compose-settings-'));
+		const logger = pino({ level: 'silent' });
+		const seed = await seedUsers({ dataDir: tempDir, users: 2, households: 1 });
+
+		const tempCostTracker = new CostTracker(join(tempDir, 'data'), logger);
+
+		runtime = await composeRuntime({
+			dataDir: join(tempDir, 'data'),
+			configPath: seed.configPath,
+			config: seed.config,
+			providerRegistry: createStubProviderRegistry(tempCostTracker, logger),
+			telegramService: fakeTelegramService(),
+			logger,
+		});
+
+		const realCostTracker = runtime.services.costTracker as CostTracker;
+		runtime.services.providerRegistry.register(new StubProvider(realCostTracker, logger));
+	});
+
+	afterAll(async () => {
+		if (runtime) await runtime.dispose();
+		await rm(tempDir, { recursive: true, force: true });
+	});
+
+	it('SettingsRegistry is exposed on runtime.services', () => {
+		expect(runtime.services.settingsRegistry).toBeDefined();
+		expect(runtime.services.settingsRegistry).toBeInstanceOf(SettingsRegistry);
+	});
+
+	it('SettingsRegistry includes chatbot virtual keys', () => {
+		const reg = runtime.services.settingsRegistry as SettingsRegistry;
+		expect(reg.getByAppKey('chatbot', 'log_to_notes')).toBeDefined();
+		expect(reg.getByAppKey('chatbot', 'session_search_tool_enabled')).toBeDefined();
+	});
+
+	it('SettingsRegistry does not double-register chatbot keys', () => {
+		const reg = runtime.services.settingsRegistry as SettingsRegistry;
+		const all = reg.getAll();
+		const logToNotesDefs = all.filter((d) => d.appId === 'chatbot' && d.key === 'log_to_notes');
+		expect(logToNotesDefs.length).toBe(1);
+
+		const searchDefs = all.filter(
+			(d) => d.appId === 'chatbot' && d.key === 'session_search_tool_enabled',
+		);
+		expect(searchDefs.length).toBe(1);
+	});
+});

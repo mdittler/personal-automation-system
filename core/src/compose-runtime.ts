@@ -119,6 +119,8 @@ import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
+import { buildSettingsRegistry } from './services/settings/index.js';
+import type { SettingsRegistry } from './services/settings/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
 import type { LLMSafeguardsConfig, SystemConfig } from './types/config.js';
@@ -178,6 +180,7 @@ export interface RuntimeServices {
 		defaultReservationUsd?: number;
 		reservationExpiryMs?: number;
 	};
+	settingsRegistry: SettingsRegistry;
 	[key: string]: unknown;
 }
 
@@ -1002,6 +1005,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		defaults: CONVERSATION_USER_CONFIG_MANIFEST,
 	});
 
+	// Build SettingsRegistry from installed app manifests + chatbot virtual manifest.
+	// Installed apps with appId === 'chatbot' are filtered inside buildSettingsRegistry
+	// to prevent double-registration.
+	const settingsRegistry = buildSettingsRegistry({
+		installedApps: registry.getAll().map((r) => r.manifest),
+	});
+
 	const chatSessions = composeChatSessionStore({
 		data: conversationDataStore,
 		logger: createChildLogger(logger, { service: 'conversation-session' }),
@@ -1521,6 +1531,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		llm,
 		providerRegistry,
 		safeguardsConfig,
+		settingsRegistry,
 	};
 
 	return {
