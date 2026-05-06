@@ -256,4 +256,11 @@ export interface AppConfigService {
 	 * Safe to call concurrently; serialised by a per-file lock.
 	 */
 	updateOverrides(userId: string, partial: Record<string, unknown>): Promise<void>;
+
+	/**
+	 * Locked removal of a single override key.
+	 * Idempotent: no-op when the key has no override (key not present).
+	 * Safe to call concurrently; serialised by a per-file lock.
+	 */
+	removeOverride(userId: string, key: string): Promise<void>;
 }

@@ -204,7 +204,7 @@ export class SettingsWriter {
         continue;
       }
 
-      const userId = appItems[0].req.userId;
+      const userId = appItems[0]!.req.userId;
 
       // Capture prev values for hooks before writing (best-effort; TOCTOU acceptable)
       let prevOverrides: Record<string, unknown> = {};

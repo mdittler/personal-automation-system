@@ -154,6 +154,7 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		getOverrides: vi.fn().mockResolvedValue(null),
 		setAll: vi.fn().mockResolvedValue(undefined),
 		updateOverrides: vi.fn().mockResolvedValue(undefined),
+		removeOverride: vi.fn().mockResolvedValue(undefined),
 		...overrides?.config,
 	};
 
