@@ -27,7 +27,9 @@ import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
-import type { LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
+import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
+import type { SettingsRegistry } from '../services/settings/settings-registry.js';
+import type { SettingsWriter } from '../services/settings/settings-writer.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
@@ -85,6 +87,12 @@ export interface GuiOptions {
 	llmSafeguards?: LLMSafeguardsConfig;
 	/** P8b: Called when flush_memory_on_idle_reset is toggled OFF via the GUI. */
 	disableFlushAndCleanup?: (userId: string) => Promise<void>;
+	/** Settings-B: Shared SettingsRegistry for /gui/settings page. */
+	settingsRegistry?: SettingsRegistry;
+	/** Settings-B: SettingsWriter for /gui/settings save + reset flows. */
+	settingsWriter?: SettingsWriter;
+	/** Settings-B: Resolves AppConfigService by appId for /gui/settings reads + resets. */
+	settingsAppConfigResolver?: (appId: string) => AppConfigService | undefined;
 }
 
 /**
