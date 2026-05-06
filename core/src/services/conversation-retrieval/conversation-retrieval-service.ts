@@ -29,6 +29,7 @@ import type { ChatTranscriptIndex, SearchResult } from '../chat-transcript-index
 import { CONTEXT_INTERNAL_BYPASS } from '../context-store/index.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
+import type { SettingsReader } from '../settings/settings-reader.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
 import { chooseSources } from './source-selection.js';
@@ -222,6 +223,12 @@ export interface ConversationRetrievalDeps {
 	 * untyped ContextStore entries from the durable memory snapshot.
 	 */
 	systemConfig?: SystemConfig;
+	/**
+	 * Optional SettingsReader — when provided, `buildSettingsCatalog` returns
+	 * real per-user catalog + trusted instruction block from the registry.
+	 * Absent → buildSettingsCatalog returns empty strings (degraded, not an error).
+	 */
+	settingsReader?: SettingsReader;
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
@@ -368,11 +375,21 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 	}
 
 	async buildSettingsCatalog(): Promise<{ catalog: string; trustedInstructions: string }> {
-		// Stub — returns empty strings until Task 3.7 wires a real SettingsReader.
-		// The 'settings' source category is registered and chooseSources() selects it
-		// when settingsCandidate is true or mode='ask'. The full implementation is
-		// added in compose-runtime (Task 3.7) when settingsReader is injected.
-		return { catalog: '', trustedInstructions: '' };
+		if (!this.deps.settingsReader) {
+			return { catalog: '', trustedInstructions: '' };
+		}
+		const userId = this.assertRequestContext('buildSettingsCatalog');
+		const isAdmin = this.deps.systemInfo?.isUserAdmin(userId) ?? false;
+		try {
+			return await this.deps.settingsReader.buildCatalog({ userId, isAdmin });
+		} catch (err) {
+			this.deps.logger?.warn(
+				'buildSettingsCatalog: SettingsReader.buildCatalog failed for userId=%s err=%s',
+				userId,
+				err instanceof Error ? err.message : String(err),
+			);
+			return { catalog: '', trustedInstructions: '' };
+		}
 	}
 
 	async buildMemorySnapshot(

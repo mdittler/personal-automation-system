@@ -121,6 +121,7 @@ import { UserMutationService } from './services/user-manager/user-mutation-servi
 import { VaultService } from './services/vault/index.js';
 import {
 	buildSettingsRegistry,
+	SettingsReader,
 	SettingsWriter,
 	type SettingsRegistry,
 } from './services/settings/index.js';
@@ -975,22 +976,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		});
 	}
 
-	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
-	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
-		dataQuery: dataQueryAdapter,
-		contextStore,
-		interactionContext: interactionContextService,
-		appMetadata,
-		appKnowledge,
-		systemInfo: systemInfoService,
-		reportService,
-		alertService,
-		index: chatTranscriptIndex,
-		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
-		systemConfig: config,
-	});
-	logger.info('ConversationRetrievalService: initialized');
-
 	// 9c. ConversationService — always present; provides free-text fallback dispatch.
 	const conversationDataStore = new DataStoreServiceImpl({
 		dataDir: config.dataDir,
@@ -1016,26 +1001,59 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		installedApps: registry.getAll().map((r) => r.manifest),
 	});
 
-	// Build SettingsWriter: partial wiring (chatbot + installed apps).
-	// The chatbot's 3 existing nlSafe keys (log_to_notes, flush_memory_on_idle_reset,
-	// session_search_tool_enabled) are restored by this wiring so <config-set> processing
-	// works in production. Task 3.7 will add the full multi-app resolver.
-	const settingsAppConfigResolver = (appId: string) => {
-		if (appId === 'chatbot') return conversationAppConfig;
-		// TODO(Task 3.7): add per-app AppConfigService instances here
-		return undefined;
-	};
+	// Build per-app AppConfigService instances — one per installed app + chatbot.
+	// Used by SettingsReader (catalog reads) and SettingsWriter (writes).
+	const appConfigByAppId = new Map<string, AppConfigServiceImpl>();
+	appConfigByAppId.set('chatbot', conversationAppConfig);
+	for (const entry of registry.getAll()) {
+		const appId = entry.manifest.app.id;
+		if (appId === 'chatbot') continue;
+		appConfigByAppId.set(
+			appId,
+			new AppConfigServiceImpl({
+				dataDir: config.dataDir,
+				appId,
+				defaults: entry.manifest.user_config ?? [],
+			}),
+		);
+	}
+	const settingsAppConfigResolver = (appId: string): AppConfigServiceImpl | undefined =>
+		appConfigByAppId.get(appId);
+
 	const settingsManifestResolver = (appId: string) => {
 		if (appId === 'chatbot') return CONVERSATION_USER_CONFIG_MANIFEST;
-		const appManifest = registry.getAll().find((r) => r.manifest.app.id === appId)?.manifest;
-		return appManifest?.user_config;
+		return registry.getAll().find((r) => r.manifest.app.id === appId)?.manifest.user_config;
 	};
+
+	const settingsReader = new SettingsReader({
+		registry: settingsRegistry,
+		appConfigResolver: settingsAppConfigResolver,
+		logger: logger.child({ component: 'settings-reader' }),
+	});
+
 	const settingsWriter = new SettingsWriter({
 		registry: settingsRegistry,
 		appConfigResolver: settingsAppConfigResolver,
 		manifestResolver: settingsManifestResolver,
 		logger: createChildLogger(logger, { service: 'settings-writer' }),
 	});
+
+	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
+	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
+		dataQuery: dataQueryAdapter,
+		contextStore,
+		interactionContext: interactionContextService,
+		appMetadata,
+		appKnowledge,
+		systemInfo: systemInfoService,
+		reportService,
+		alertService,
+		index: chatTranscriptIndex,
+		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
+		systemConfig: config,
+		settingsReader,
+	});
+	logger.info('ConversationRetrievalService: initialized');
 
 	const chatSessions = composeChatSessionStore({
 		data: conversationDataStore,
@@ -1560,6 +1578,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		safeguardsConfig,
 		settingsRegistry,
 		settingsWriter,
+		conversationRetrievalService,
 	};
 
 	return {

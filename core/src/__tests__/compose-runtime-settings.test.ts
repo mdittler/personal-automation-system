@@ -1,9 +1,10 @@
 /**
- * compose-runtime settings registry wiring (Task 1.6).
+ * compose-runtime settings registry wiring (Task 1.6 + Task 3.7).
  *
  * Verifies that composeRuntime() exposes a SettingsRegistry on the returned
  * services bag and that it contains the chatbot virtual keys without
- * double-registering them.
+ * double-registering them. Also verifies that SettingsReader is wired and
+ * produces a non-empty catalog for the chatbot virtual keys (Task 3.7).
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -13,7 +14,9 @@ import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { composeRuntime } from '../compose-runtime.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
+import type { ConversationRetrievalService } from '../services/conversation-retrieval/conversation-retrieval-service.js';
 import { SettingsRegistry, SettingsWriter } from '../services/settings/index.js';
+import { requestContext } from '../services/context/request-context.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
 import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
@@ -85,5 +88,28 @@ describe('compose-runtime settings registry wiring', () => {
 			source: 'nl',
 		});
 		expect(result.ok).toBe(false);
+	});
+
+	it('SettingsReader is wired and buildSettingsCatalog returns non-empty catalog (Task 3.7)', async () => {
+		// The retrieval service is exposed on services via the index signature.
+		const retrieval = runtime.services
+			.conversationRetrievalService as ConversationRetrievalService;
+		expect(retrieval).toBeDefined();
+
+		// buildSettingsCatalog requires a requestContext with a userId.
+		// user-0 is the admin user seeded by seedUsers({ users: 2, households: 1 }).
+		const { catalog, trustedInstructions } = await requestContext.run(
+			{ userId: 'user-0' },
+			() => retrieval.buildSettingsCatalog(),
+		);
+
+		// The chatbot virtual manifest contributes at least log_to_notes,
+		// flush_memory_on_idle_reset, and session_search_tool_enabled — so the
+		// catalog must be non-empty.
+		expect(catalog).toMatch(/## Your settings/);
+		expect(catalog.length).toBeGreaterThan(0);
+
+		// trustedInstructions should list the nlSafe keys with <config-set> syntax.
+		expect(trustedInstructions).toMatch(/<config-set/);
 	});
 });
