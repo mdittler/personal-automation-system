@@ -68,6 +68,7 @@ export type { HandleMessageDeps } from './handle-message.js';
 
 export {
 	CONVERSATION_USER_CONFIG,
+	CONVERSATION_USER_CONFIG_MANIFEST,
 	CONVERSATION_LLM_SAFEGUARDS,
 	CONVERSATION_DATA_SCOPES,
 } from './manifest.js';

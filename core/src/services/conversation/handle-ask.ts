@@ -65,7 +65,7 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { CONVERSATION_USER_CONFIG } from './manifest.js';
+import { CONVERSATION_USER_CONFIG_MANIFEST } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
@@ -383,7 +383,7 @@ export async function handleAsk(
 				userId: ctx.userId,
 				userMessage: question,
 				config: deps.config,
-				manifest: CONVERSATION_USER_CONFIG,
+				manifest: CONVERSATION_USER_CONFIG_MANIFEST,
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});

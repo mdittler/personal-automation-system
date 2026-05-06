@@ -47,7 +47,11 @@ describe('virtual chatbot registry entry — when real app is absent', () => {
 		const app = runtime.services.registry.getApp('chatbot');
 		expect(app).toBeDefined();
 		expect(app?.appDir).toBe(VIRTUAL_CHATBOT_PATH);
-		expect(app?.manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
+		// manifest.user_config is the plain ManifestUserConfig shape (no RegExp fields);
+		// CONVERSATION_USER_CONFIG is the richer internal type. Verify key/type/default parity.
+		expect(app?.manifest.user_config?.map((c) => ({ key: c.key, type: c.type, default: c.default }))).toEqual(
+			CONVERSATION_USER_CONFIG.map((c) => ({ key: c.key, type: c.type, default: c.default })),
+		);
 	});
 
 	it('virtual chatbot module.handleMessage throws (regression tripwire)', async () => {

@@ -51,7 +51,7 @@ import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js'
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
-	CONVERSATION_USER_CONFIG,
+	CONVERSATION_USER_CONFIG_MANIFEST,
 	ConversationService,
 } from './services/conversation/index.js';
 import {
@@ -999,7 +999,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const conversationAppConfig = new AppConfigServiceImpl({
 		dataDir: config.dataDir,
 		appId: 'chatbot',
-		defaults: CONVERSATION_USER_CONFIG,
+		defaults: CONVERSATION_USER_CONFIG_MANIFEST,
 	});
 
 	const chatSessions = composeChatSessionStore({

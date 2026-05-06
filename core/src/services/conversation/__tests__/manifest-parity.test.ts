@@ -70,6 +70,10 @@ describe('Virtual chatbot manifest — full structural contract (post-Chunk-D)',
 		expect(flush?.default).toBe(false);
 		expect(sessionSearch?.type).toBe('boolean');
 		expect(sessionSearch?.default).toBe(true);
-		expect(manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
+		// manifest.user_config uses the plain ManifestUserConfig shape (no RegExp fields);
+		// CONVERSATION_USER_CONFIG is the richer internal type. Verify key/type/default parity.
+		expect(manifest.user_config?.map((c) => ({ key: c.key, type: c.type, default: c.default }))).toEqual(
+			CONVERSATION_USER_CONFIG.map((c) => ({ key: c.key, type: c.type, default: c.default })),
+		);
 	});
 });
