@@ -12,6 +12,8 @@ import {
 	expectPromptIncludesSystemData,
 	expectPromptOmitsSystemData,
 } from './helpers/prompt-assertions.js';
+import { SettingsRegistry } from '../../settings/settings-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
 
 function makeChatSessions(): ChatSessionStore {
 	return {
@@ -934,5 +936,111 @@ describe('handleAsk — P8c lineage forwarding', () => {
 			expect.anything(),
 			expect.anything(),
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Task 3.6 — /ask regression: food.seasonal_nudges <config-set> processed
+// Proves the end-to-end path works through /ask when settingsRegistry +
+// settingsWriter are wired (silent-failure regression guard).
+// ---------------------------------------------------------------------------
+
+describe('handleAsk — settingsCandidate + food config-set regression (Task 3.6)', () => {
+	it('food.seasonal_nudges <config-set> in /ask response calls food updateOverrides', async () => {
+		const { services, chatSessions } = (() => {
+			const s = createMockCoreServices();
+			const sessions: ChatSessionStore = {
+				peekActive: vi.fn().mockResolvedValue(undefined),
+				appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+				loadRecentTurns: vi.fn().mockResolvedValue([]),
+				endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+				readSession: vi.fn().mockResolvedValue(undefined),
+				ensureActiveSession: vi.fn().mockResolvedValue({
+					sessionId: 'sess',
+					isNew: true,
+					snapshot: undefined,
+				}),
+				peekSnapshot: vi.fn().mockResolvedValue(undefined),
+				setTitle: vi.fn().mockResolvedValue({ updated: false }),
+			};
+			return { services: s, chatSessions: sessions };
+		})();
+
+		// Build a minimal registry with food.seasonal_nudges as nlSafe
+		const registry = new SettingsRegistry();
+		registry.register({
+			key: 'seasonal_nudges',
+			appId: 'food',
+			category: 'food',
+			label: 'Seasonal nudges',
+			help: 'Receive seasonal recipe suggestions.',
+			type: 'boolean',
+			default: true,
+			adminOnly: false,
+			dangerous: false,
+			hidden: false,
+			scope: 'per-user',
+			nlSafe: true,
+			nlIntentRegex:
+				/(turn|switch|enable|disable|stop|start).*(seasonal|season).*(nudge|suggestion)|seasonal.*(nudge|suggestion).*(on|off|enable|disable)/i,
+		});
+
+		const mockFoodConfig = {
+			updateOverrides: vi.fn().mockResolvedValue(undefined),
+			getOverrides: vi.fn().mockResolvedValue({}),
+			getAll: vi.fn(),
+			setAll: vi.fn(),
+			get: vi.fn(),
+		};
+
+		const writer = new SettingsWriter({
+			registry,
+			appConfigResolver: (appId) =>
+				appId === 'food' ? (mockFoodConfig as never) : undefined,
+			manifestResolver: (_appId) => [
+				{
+					key: 'seasonal_nudges',
+					type: 'boolean' as const,
+					default: true,
+					description: 'Seasonal nudges',
+					label: 'Seasonal nudges',
+					help: 'Receive seasonal recipe suggestions.',
+				},
+			],
+			logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+		});
+
+		// The classifier returns NO (fast-tier), and the main answer includes the config-set tag.
+		// The userMessage matches seasonal_nudges nlIntentRegex.
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('NO') // classifier
+			.mockResolvedValueOnce(
+				'Turning off seasonal nudges now. <config-set key="food.seasonal_nudges" value="false"/>',
+			);
+
+		const ctx = createTestMessageContext({
+			text: '/ask please turn off seasonal nudges',
+		});
+
+		await requestContext.run({ userId: ctx.userId }, () =>
+			handleAsk(['please', 'turn', 'off', 'seasonal', 'nudges'], ctx, {
+				llm: services.llm,
+				telegram: services.telegram,
+				data: services.data,
+				logger: services.logger,
+				timezone: 'UTC',
+				chatSessions,
+				settingsRegistry: registry,
+				settingsWriter: writer,
+			}),
+		);
+
+		expect(mockFoodConfig.updateOverrides).toHaveBeenCalledWith(ctx.userId, {
+			seasonal_nudges: false,
+		});
+
+		// Confirm the tag is stripped from the user-visible response
+		const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
+		expect(sentText).not.toContain('<config-set');
 	});
 });

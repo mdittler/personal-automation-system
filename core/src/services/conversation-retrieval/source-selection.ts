@@ -71,6 +71,12 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 		selected.add('alerts');
 	}
 
+	// Settings: always in ask mode (user may be exploring their config);
+	// in free-text mode only when the PAS classifier signalled YES_SETTINGS.
+	if (opts.mode === 'ask' || opts.settingsCandidate) {
+		selected.add('settings');
+	}
+
 	// Apply explicit include overrides last (force-on or force-off)
 	if (opts.include) {
 		for (const [cat, val] of Object.entries(opts.include) as [AllowedSourceCategory, boolean][]) {

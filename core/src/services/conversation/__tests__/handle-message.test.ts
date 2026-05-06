@@ -550,3 +550,111 @@ describe('handle-message <config-set> regression — existing 3 nlSafe keys (Tas
 		expect(cleanedResponse).not.toContain('<config-set');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Task 3.6 — settingsCandidate forwarding into buildContextSnapshot
+// ---------------------------------------------------------------------------
+
+describe('handleMessage — settingsCandidate forwarded to buildContextSnapshot', () => {
+	let services: ReturnType<typeof createMockCoreServices>;
+	let chatSessions: ChatSessionStore;
+
+	beforeEach(() => {
+		services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValue('OK');
+		chatSessions = {
+			peekActive: vi.fn().mockResolvedValue(undefined),
+			appendExchange: vi.fn().mockResolvedValue({ sessionId: 'session-1' }),
+			loadRecentTurns: vi.fn().mockResolvedValue([]),
+			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
+			readSession: vi.fn().mockResolvedValue(undefined),
+			ensureActiveSession: vi.fn().mockResolvedValue({
+				sessionId: 'sess',
+				isNew: true,
+				snapshot: undefined,
+			}),
+			peekSnapshot: vi.fn().mockResolvedValue(undefined),
+			setTitle: vi.fn().mockResolvedValue({ updated: false }),
+		};
+	});
+
+	function makeRetrieval() {
+		return {
+			buildContextSnapshot: vi.fn().mockResolvedValue({ failures: [] }),
+			buildMemorySnapshot: vi.fn().mockResolvedValue({
+				content: '',
+				status: 'empty',
+				builtAt: '',
+				entryCount: 0,
+			}),
+			buildSettingsCatalog: vi.fn().mockResolvedValue({ catalog: '', trustedInstructions: '' }),
+			searchSessions: vi.fn().mockResolvedValue({ hits: [] }),
+			hasSessionSearch: vi.fn().mockReturnValue(false),
+		};
+	}
+
+	function makeConfigWithAutoDetect(autoDetect: boolean) {
+		return {
+			getAll: vi.fn().mockResolvedValue({ auto_detect_pas: autoDetect }),
+			getOverrides: vi.fn().mockResolvedValue({}),
+			updateOverrides: vi.fn().mockResolvedValue(undefined),
+		} as never;
+	}
+
+	it('passes settingsCandidate=true when PAS classifier returns YES_SETTINGS', async () => {
+		// auto_detect_pas ON so classifyPASMessage is called
+		const config = makeConfigWithAutoDetect(true);
+		const retrieval = makeRetrieval();
+
+		// classifyPASMessage: first LLM call (fast tier) returns YES_SETTINGS
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('YES_SETTINGS YES') // classifier
+			.mockResolvedValueOnce('OK'); // main LLM answer
+
+		const ctx = createTestMessageContext({
+			text: 'how do I change my seasonal nudges setting?',
+		});
+
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			config,
+			conversationRetrieval: retrieval as never,
+		});
+
+		expect(retrieval.buildContextSnapshot).toHaveBeenCalledWith(
+			expect.objectContaining({ settingsCandidate: true }),
+		);
+	});
+
+	it('passes settingsCandidate=false when PAS classifier returns NO_SETTINGS', async () => {
+		const config = makeConfigWithAutoDetect(true);
+		const retrieval = makeRetrieval();
+
+		// classifyPASMessage: YES without YES_SETTINGS — pasRelated=true, settingsCandidate=false
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('YES') // classifier — no YES_SETTINGS token
+			.mockResolvedValueOnce('OK');
+
+		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
+
+		await handleMessage(ctx, {
+			llm: services.llm,
+			telegram: services.telegram,
+			data: services.data,
+			logger: services.logger,
+			timezone: 'UTC',
+			chatSessions,
+			config,
+			conversationRetrieval: retrieval as never,
+		});
+
+		expect(retrieval.buildContextSnapshot).toHaveBeenCalledWith(
+			expect.objectContaining({ settingsCandidate: false }),
+		);
+	});
+});

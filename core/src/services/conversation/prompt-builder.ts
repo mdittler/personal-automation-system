@@ -241,6 +241,21 @@ export async function buildAppAwareSystemPrompt(
 		if (block) parts.push(block);
 	}
 
+	// Settings catalog — injected after durable memory, before per-turn context.
+	// The catalog goes inside a <memory-context> fence (untrusted reference data);
+	// the trustedInstructions go outside any fence (safe action vocabulary).
+	if (ctxSnapshot?.settingsCatalog) {
+		const block = buildMemoryContextBlock(ctxSnapshot.settingsCatalog, {
+			label: 'settings-catalog',
+			maxChars: 4_000,
+			marker: '... (settings catalog truncated)',
+		});
+		if (block) parts.push(block);
+	}
+	if (ctxSnapshot?.settingsTrustedInstructions) {
+		parts.push(ctxSnapshot.settingsTrustedInstructions);
+	}
+
 	appendUserContextSection(parts, userCtx);
 
 	const categories = categorizeQuestion(question);

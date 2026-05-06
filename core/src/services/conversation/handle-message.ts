@@ -199,6 +199,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 						question: ctx.text,
 						mode: 'free-text',
 						dataQueryCandidate: classification.dataQueryCandidate ?? false,
+						settingsCandidate: classification.settingsCandidate ?? false,
 						recentFilePaths,
 					});
 				} catch (error) {

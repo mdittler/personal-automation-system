@@ -218,6 +218,7 @@ export async function handleAsk(
 				question,
 				mode: 'ask',
 				dataQueryCandidate: askClassification.dataQueryCandidate ?? false,
+				settingsCandidate: askClassification.settingsCandidate ?? false,
 				recentFilePaths,
 			});
 		} catch (error) {
