@@ -119,7 +119,11 @@ import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
-import { buildSettingsRegistry, type SettingsRegistry } from './services/settings/index.js';
+import {
+	buildSettingsRegistry,
+	SettingsWriter,
+	type SettingsRegistry,
+} from './services/settings/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
 import type { LLMSafeguardsConfig, SystemConfig } from './types/config.js';
@@ -180,6 +184,7 @@ export interface RuntimeServices {
 		reservationExpiryMs?: number;
 	};
 	settingsRegistry: SettingsRegistry;
+	settingsWriter: SettingsWriter;
 	[key: string]: unknown;
 }
 
@@ -1011,6 +1016,27 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		installedApps: registry.getAll().map((r) => r.manifest),
 	});
 
+	// Build SettingsWriter: partial wiring (chatbot + installed apps).
+	// The chatbot's 3 existing nlSafe keys (log_to_notes, flush_memory_on_idle_reset,
+	// session_search_tool_enabled) are restored by this wiring so <config-set> processing
+	// works in production. Task 3.7 will add the full multi-app resolver.
+	const settingsAppConfigResolver = (appId: string) => {
+		if (appId === 'chatbot') return conversationAppConfig;
+		// TODO(Task 3.7): add per-app AppConfigService instances here
+		return undefined;
+	};
+	const settingsManifestResolver = (appId: string) => {
+		if (appId === 'chatbot') return CONVERSATION_USER_CONFIG_MANIFEST;
+		const appManifest = registry.getAll().find((r) => r.manifest.app.id === appId)?.manifest;
+		return appManifest?.user_config;
+	};
+	const settingsWriter = new SettingsWriter({
+		registry: settingsRegistry,
+		appConfigResolver: settingsAppConfigResolver,
+		manifestResolver: settingsManifestResolver,
+		logger: createChildLogger(logger, { service: 'settings-writer' }),
+	});
+
 	const chatSessions = composeChatSessionStore({
 		data: conversationDataStore,
 		logger: createChildLogger(logger, { service: 'conversation-session' }),
@@ -1059,6 +1085,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		conversationRetrieval: conversationRetrievalService,
 		titleService,
 		disableFlushAndCleanup: onDisableFlush,
+		settingsRegistry,
+		settingsWriter,
 	});
 	logger.info('ConversationService: initialized');
 
@@ -1531,6 +1559,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		providerRegistry,
 		safeguardsConfig,
 		settingsRegistry,
+		settingsWriter,
 	};
 
 	return {

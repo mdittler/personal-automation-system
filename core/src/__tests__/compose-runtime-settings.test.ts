@@ -13,7 +13,7 @@ import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { composeRuntime } from '../compose-runtime.js';
 import { CostTracker } from '../services/llm/cost-tracker.js';
-import { SettingsRegistry } from '../services/settings/index.js';
+import { SettingsRegistry, SettingsWriter } from '../services/settings/index.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
 import { StubProvider, createStubProviderRegistry } from '../testing/fixtures/stub-llm-provider.js';
@@ -68,5 +68,22 @@ describe('compose-runtime settings registry wiring', () => {
 			(d) => d.appId === 'chatbot' && d.key === 'session_search_tool_enabled',
 		);
 		expect(searchDefs.length).toBe(1);
+	});
+
+	it('SettingsWriter is exposed on runtime.services', () => {
+		expect(runtime.services.settingsWriter).toBeDefined();
+		expect(runtime.services.settingsWriter).toBeInstanceOf(SettingsWriter);
+	});
+
+	it('SettingsWriter rejects unknown chatbot key', async () => {
+		const writer = runtime.services.settingsWriter as SettingsWriter;
+		const result = await writer.write({
+			userId: 'u1',
+			appId: 'chatbot',
+			key: 'nonexistent_key',
+			rawValue: 'true',
+			source: 'nl',
+		});
+		expect(result.ok).toBe(false);
 	});
 });
