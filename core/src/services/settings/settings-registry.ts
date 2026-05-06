@@ -37,8 +37,30 @@ export class SettingsRegistry {
   private readonly byQualified = new Map<string, SettingDef>();
 
   register(def: SettingDef): void {
-    // Validation deferred to Task 1.2 — just store for now.
+    if (!def.help || !def.help.trim()) {
+      throw new Error(
+        `SettingsRegistry: 'help' must be a non-empty string for key '${def.key}' (app '${def.appId}')`,
+      );
+    }
+    if (def.nlSafe && !def.nlIntentRegex) {
+      throw new Error(
+        `SettingsRegistry: 'nlIntentRegex' is required when nlSafe=true (key '${def.appId}.${def.key}')`,
+      );
+    }
+    if (def.type === 'select' && (!def.options || def.options.length === 0)) {
+      throw new Error(
+        `SettingsRegistry: 'options' is required and must be non-empty for select type (key '${def.appId}.${def.key}')`,
+      );
+    }
+    if (def.dangerous && !def.dangerConfirmPrompt) {
+      throw new Error(
+        `SettingsRegistry: 'dangerConfirmPrompt' is required when dangerous=true (key '${def.appId}.${def.key}')`,
+      );
+    }
     const qid = qualifiedKey(def.appId, def.key);
+    if (this.byQualified.has(qid)) {
+      throw new Error(`SettingsRegistry: duplicate key '${qid}'`);
+    }
     this.defs.push(def);
     this.byQualified.set(qid, def);
   }

@@ -45,3 +45,140 @@ describe('SettingsRegistry', () => {
     });
   });
 });
+
+describe('register validation (REQ-SETTINGS-006/008)', () => {
+  it('throws when help is empty', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({ help: '' }))).toThrow(/help.*non-empty/i);
+  });
+
+  it('throws when help is whitespace only', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({ help: '   \n  ' }))).toThrow(/help.*non-empty/i);
+  });
+
+  it('throws when nlSafe=true and nlIntentRegex is absent', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({ nlSafe: true }))).toThrow(/nlIntentRegex.*required.*nlSafe/i);
+  });
+
+  it('throws when type=select and options is empty', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({ type: 'select', options: [] }))).toThrow(/options.*required.*select/i);
+  });
+
+  it('throws when type=select and options is absent', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({ type: 'select' }))).toThrow(/options.*required.*select/i);
+  });
+
+  it('throws when dangerous=true and dangerConfirmPrompt is absent', () => {
+    const reg = new SettingsRegistry();
+    expect(() =>
+      reg.register(makeDef({ dangerous: true, adminOnly: true })),
+    ).toThrow(/dangerConfirmPrompt.*required.*dangerous/i);
+  });
+
+  it('rejects duplicate qualified key', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({ appId: 'chatbot', key: 'log_to_notes' }));
+    expect(() =>
+      reg.register(makeDef({ appId: 'chatbot', key: 'log_to_notes' })),
+    ).toThrow(/duplicate.*chatbot\.log_to_notes/i);
+  });
+
+  it('allows the same key in two different apps', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({ appId: 'food', key: 'default_store' }));
+    expect(() =>
+      reg.register(makeDef({ appId: 'shopping', key: 'default_store' })),
+    ).not.toThrow();
+  });
+
+  it('accepts all-required-fields valid def', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef())).not.toThrow();
+  });
+
+  it('accepts nlSafe=false without nlIntentRegex', () => {
+    const reg = new SettingsRegistry();
+    expect(() =>
+      reg.register(makeDef({ nlSafe: false, nlIntentRegex: undefined })),
+    ).not.toThrow();
+  });
+});
+
+describe('getForUser admin/hidden filtering', () => {
+  it('hides adminOnly from non-admins; admins see adminOnly', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({ key: 'public', adminOnly: false, hidden: false }));
+    reg.register(makeDef({
+      key: 'admin_only', adminOnly: true, dangerous: true,
+      dangerConfirmPrompt: 'Type "I understand" to confirm',
+    }));
+    expect(reg.getForUser(false).map((d) => d.key)).toEqual(['public']);
+    expect(reg.getForUser(true).map((d) => d.key).sort()).toEqual(['admin_only', 'public']);
+  });
+
+  it('hidden is unconditional — excluded from BOTH admin and non-admin views', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({ key: 'public', hidden: false }));
+    reg.register(makeDef({ key: 'pseudo', hidden: true }));
+    expect(reg.getForUser(false).map((d) => d.key)).toEqual(['public']);
+    expect(reg.getForUser(true).map((d) => d.key)).toEqual(['public']);
+  });
+});
+
+describe('getNlSafeQualifiedKeys (defense in depth)', () => {
+  it('returns only nlSafe qualified keys', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({
+      appId: 'chatbot', key: 'log_to_notes',
+      nlSafe: true, nlIntentRegex: /\b(log|notes)\b/i,
+    }));
+    reg.register(makeDef({ appId: 'chatbot', key: 'auto_detect_pas', nlSafe: false }));
+    expect(reg.getNlSafeQualifiedKeys()).toEqual(new Set(['chatbot.log_to_notes']));
+  });
+
+  it('excludes adminOnly even if nlSafe=true', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({
+      appId: 'system', key: 'rogue', adminOnly: true,
+      nlSafe: true, nlIntentRegex: /\brogue\b/i,
+    }));
+    expect(reg.getNlSafeQualifiedKeys().size).toBe(0);
+  });
+
+  it('excludes dangerous even if nlSafe=true', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({
+      appId: 'system', key: 'auto_prune',
+      dangerous: true, dangerConfirmPrompt: 'confirm',
+      nlSafe: true, nlIntentRegex: /\bprune\b/i,
+    }));
+    expect(reg.getNlSafeQualifiedKeys().size).toBe(0);
+  });
+
+  it('excludes hidden even if nlSafe=true', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({
+      appId: 'food', key: 'guest_profiles_info',
+      hidden: true,
+      nlSafe: true, nlIntentRegex: /\bguest\b/i,
+    }));
+    expect(reg.getNlSafeQualifiedKeys().size).toBe(0);
+  });
+
+  it('excludes non-per-user scope (household / system) even if nlSafe=true', () => {
+    const reg = new SettingsRegistry();
+    reg.register(makeDef({
+      appId: 'food', key: 'shared_pref', scope: 'per-household',
+      nlSafe: true, nlIntentRegex: /\bshared\b/i,
+    }));
+    reg.register(makeDef({
+      appId: 'system', key: 'sys_pref', scope: 'system',
+      nlSafe: true, nlIntentRegex: /\bsys\b/i,
+    }));
+    expect(reg.getNlSafeQualifiedKeys().size).toBe(0);
+  });
+});
