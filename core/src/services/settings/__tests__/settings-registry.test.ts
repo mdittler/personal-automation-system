@@ -149,6 +149,16 @@ describe('getForUser admin/hidden filtering', () => {
 });
 
 describe('register immutability (Fix 5)', () => {
+  it('mutating original options array after register does not affect stored def', () => {
+    const reg = new SettingsRegistry();
+    const options = ['a', 'b', 'c'];
+    reg.register(makeDef({ type: 'select', options }));
+    options.push('d'); // mutate original
+    const stored = reg.getByQualifiedKey('chatbot.log_to_notes')!;
+    expect(stored.options).toEqual(['a', 'b', 'c']); // frozen copy
+    expect(stored.options!.length).toBe(3);
+  });
+
   it('mutating the original SettingDef after register does not affect the stored def', () => {
     const reg = new SettingsRegistry();
     const def = makeDef({ nlSafe: false });

@@ -64,7 +64,11 @@ export class SettingsRegistry {
     if (this.byQualified.has(qid)) {
       throw new Error(`SettingsRegistry: duplicate key '${qid}'`);
     }
-    const frozen = Object.freeze({ ...def });
+    const frozen = Object.freeze({
+      ...def,
+      options: def.options ? Object.freeze([...def.options]) : undefined,
+      nlIntentRegex: def.nlIntentRegex, // RegExp is already immutable
+    });
     this.defs.push(frozen);
     this.byQualified.set(qid, frozen);
   }

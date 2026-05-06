@@ -18,6 +18,9 @@ const NL_SAFE_KEYS = [
   'new_recipe_ratio',
   'macro_target_calories',
   'macro_target_protein',
+  'macro_target_carbs',
+  'macro_target_fat',
+  'macro_target_fiber',
   'dietary_preferences',
   'dietary_restrictions',
   'default_store',
@@ -147,6 +150,45 @@ const FOOD_REGEX_BEHAVIOR = [
       'update my protein goal',
     ],
     negatives: ['what foods are high in protein', 'add chicken to my list'],
+  },
+  {
+    key: 'macro_target_carbs',
+    // Manifest regex: (set|change|update|my).*(carb.target|target.carb|carb.goal)|carb.target.*(set|change|update|to)
+    positives: [
+      'set my carb target to 220g',
+      'change my carb goal to 150',
+      'update my carb target',
+    ],
+    negatives: [
+      'how many carbs are in this recipe',
+      'what foods are low in carbs',
+    ],
+  },
+  {
+    key: 'macro_target_fat',
+    // Manifest regex: (set|change|update|my).*(fat.target|target.fat|fat.goal)|fat.target.*(set|change|update|to)
+    positives: [
+      'set my fat target to 60g',
+      'change my fat goal to 70',
+      'update my macro fat target',
+    ],
+    negatives: [
+      'what foods are high in fat',
+      'this recipe has too much fat',
+    ],
+  },
+  {
+    key: 'macro_target_fiber',
+    // Manifest regex: (set|change|update|my).*(fiber.target|target.fiber|fiber.goal)|fiber.target.*(set|change|update|to)
+    positives: [
+      'set my fiber target to 30g',
+      'change my fiber goal to 25',
+      'update my macro fiber target',
+    ],
+    negatives: [
+      'this recipe is high in fiber',
+      'what foods have the most fiber',
+    ],
   },
   {
     key: 'dietary_preferences',
