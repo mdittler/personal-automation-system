@@ -456,6 +456,14 @@
 					"minItems": 1,
 					"description": "Required when type is 'select'."
 				},
+				"min": {
+					"type": "number",
+					"description": "Minimum value for type: 'number'."
+				},
+				"max": {
+					"type": "number",
+					"description": "Maximum value for type: 'number'."
+				},
 				"label": {
 					"type": "string",
 					"minLength": 1,

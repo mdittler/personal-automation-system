@@ -248,8 +248,31 @@ export async function processConfigSetTags(
 		.replace(CONFIG_SET_TAG_REGEX, '')
 		.replace(/<config-set\b[^>]*\/?>/g, '');
 
+	// Enforce at-most-one policy: count the tags that would pass Guards 1+2, warn
+	// if more than one, then keep only the first. The limit applies after security
+	// filtering so that a blocked tag does not "count" against the limit.
+	const passesPolicy = (tag: { appId: string; key: string }): boolean => {
+		const d = options.settingsRegistry.getByAppKey(tag.appId, tag.key);
+		return !!d && d.nlSafe && !d.adminOnly && !d.dangerous && !d.hidden;
+	};
+	const eligible = parsedTags.filter(passesPolicy);
+	if (eligible.length > 1) {
+		options.logger.warn(
+			'processConfigSetTags: %d config-set tags found in response, processing only the first (userId=%s)',
+			eligible.length,
+			options.userId,
+		);
+		eligible.splice(1);
+	}
+	// Reconstruct the iteration list: rejected tags (for warn logging) + the
+	// single eligible survivor. Rejected tags will be warned and skipped in-loop.
+	const toProcess = [
+		...parsedTags.filter((t) => !passesPolicy(t)),
+		...eligible,
+	];
+
 	// Process surviving tags
-	for (const { appId, key, value } of parsedTags) {
+	for (const { appId, key, value } of toProcess) {
 		// Guard 1+2: registry lookup + NL safety policy
 		const def = options.settingsRegistry.getByAppKey(appId, key);
 		if (!def) {

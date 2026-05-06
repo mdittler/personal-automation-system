@@ -597,12 +597,12 @@ describe('processConfigSetTags — co-existence: notes intent does NOT toggle fl
 		expect(updateOverrides).not.toHaveBeenCalled();
 	});
 
-	it('message matching both intents processes both tags independently', async () => {
+	it('message matching both intents processes only the first tag (at-most-one policy)', async () => {
 		const { config, updateOverrides } = makeConfig();
 		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'<config-set key="log_to_notes" value="true"/> <config-set key="flush_memory_on_idle_reset" value="true"/>';
-		// Craft a message that matches BOTH regexes
+		// Craft a message that matches BOTH regexes — only the first tag is processed
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn on daily notes and enable session memory',
@@ -611,6 +611,6 @@ describe('processConfigSetTags — co-existence: notes intent does NOT toggle fl
 			logger: makeLogger(),
 		});
 
-		expect(updateOverrides).toHaveBeenCalledTimes(2);
+		expect(updateOverrides).toHaveBeenCalledTimes(1);
 	});
 });

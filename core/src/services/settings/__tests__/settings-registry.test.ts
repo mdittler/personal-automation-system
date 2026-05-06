@@ -79,6 +79,25 @@ describe('register validation (REQ-SETTINGS-006/008)', () => {
     ).toThrow(/dangerConfirmPrompt.*required.*dangerous/i);
   });
 
+  it('throws when dangerous=true but adminOnly=false', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({
+      key: 'risky_setting',
+      dangerous: true,
+      dangerConfirmPrompt: 'Are you sure?',
+      adminOnly: false,
+    }))).toThrow(/dangerous.*must.*adminOnly/i);
+  });
+
+  it('accepts dangerous=true with adminOnly=true', () => {
+    const reg = new SettingsRegistry();
+    expect(() => reg.register(makeDef({
+      dangerous: true,
+      dangerConfirmPrompt: 'confirm',
+      adminOnly: true,
+    }))).not.toThrow();
+  });
+
   it('rejects duplicate qualified key', () => {
     const reg = new SettingsRegistry();
     reg.register(makeDef({ appId: 'chatbot', key: 'log_to_notes' }));
@@ -175,7 +194,7 @@ describe('getNlSafeQualifiedKeys (defense in depth)', () => {
     const reg = new SettingsRegistry();
     reg.register(makeDef({
       appId: 'system', key: 'auto_prune',
-      dangerous: true, dangerConfirmPrompt: 'confirm',
+      adminOnly: true, dangerous: true, dangerConfirmPrompt: 'confirm',
       nlSafe: true, nlIntentRegex: /\bprune\b/i,
     }));
     expect(reg.getNlSafeQualifiedKeys().size).toBe(0);

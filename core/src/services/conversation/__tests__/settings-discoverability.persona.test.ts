@@ -902,13 +902,14 @@ describe('Category 4: End-to-end scenarios', () => {
 		expect(result.confirmations.some((c) => c.toLowerCase().includes('seasonal'))).toBe(true);
 	});
 
-	it('E2E-05: Two different apps change in one turn', async () => {
+	it('E2E-05: Two different apps emit tags in one turn — only the first is processed (at-most-one policy)', async () => {
 		const { cfg: chatbotCfg, updateOverrides: chatbotUpdate } = makeAppConfig();
 		const { cfg: foodCfg, updateOverrides: foodUpdate } = makeAppConfig();
 		const registry = makeRegistry();
 		const writer = makeWriter(registry, chatbotCfg, foodCfg);
 
-		// A user message that matches NOTES_INTENT_REGEX and food.default_store intent
+		// A user message that matches NOTES_INTENT_REGEX and food.default_store intent.
+		// At-most-one policy: only the first eligible tag (log_to_notes) is processed.
 		await processConfigSetTags(
 			'<config-set key="log_to_notes" value="true"/> <config-set key="food.default_store" value="Costco"/>',
 			{
@@ -921,7 +922,7 @@ describe('Category 4: End-to-end scenarios', () => {
 		);
 
 		expect(chatbotUpdate).toHaveBeenCalledWith('u1', { log_to_notes: true });
-		expect(foodUpdate).toHaveBeenCalledWith('u1', { default_store: 'Costco' });
+		expect(foodUpdate).not.toHaveBeenCalled();
 	});
 });
 

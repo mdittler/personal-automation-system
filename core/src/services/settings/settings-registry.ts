@@ -55,6 +55,11 @@ export class SettingsRegistry {
         `SettingsRegistry: 'dangerConfirmPrompt' is required when dangerous=true (key '${def.appId}.${def.key}')`,
       );
     }
+    if (def.dangerous && !def.adminOnly) {
+      throw new Error(
+        `SettingsRegistry: setting '${def.appId}.${def.key}' has dangerous=true but adminOnly=false — dangerous settings must also be adminOnly`,
+      );
+    }
     const qid = qualifiedKey(def.appId, def.key);
     if (this.byQualified.has(qid)) {
       throw new Error(`SettingsRegistry: duplicate key '${qid}'`);

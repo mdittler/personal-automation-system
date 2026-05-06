@@ -206,6 +206,34 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		expect(result.confirmations.some((c) => c.includes('Seasonal nudges'))).toBe(true);
 	});
 
+	it('processes only the first config-set tag when multiple eligible tags are present, logs warning', async () => {
+		const logger = makeLogger();
+		const reg = makeRegistry();
+		const chatbotCfg = makeAppConfig();
+		const foodCfg = makeAppConfig();
+		const writer = makeWriter(reg, chatbotCfg, foodCfg);
+
+		await processConfigSetTags(
+			'<config-set key="log_to_notes" value="true"/> some text <config-set key="food.seasonal_nudges" value="false"/>',
+			{
+				userId: 'u1',
+				userMessage: 'please turn on daily notes and also turn off seasonal nudges',
+				logger,
+				settingsRegistry: reg,
+				settingsWriter: writer,
+			},
+		);
+
+		// Only the first eligible tag (log_to_notes) was processed
+		expect(chatbotCfg.updateOverrides).toHaveBeenCalledTimes(1);
+		expect(foodCfg.updateOverrides).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining('config-set tags found'),
+			expect.any(Number),
+			'u1',
+		);
+	});
+
 	it('key not in registry is rejected with warn', async () => {
 		const reg = makeRegistry();
 		const chatbotCfg = makeAppConfig();

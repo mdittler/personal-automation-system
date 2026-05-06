@@ -258,6 +258,8 @@ user_config:
   - key: meal_plan_dinners
     type: number
     default: 5
+    min: 1
+    max: 7
     description: "Number of dinners to plan per week"
     label: "Dinners per week"
     help: "How many dinners to include in your weekly meal plan."
@@ -267,6 +269,8 @@ user_config:
   - key: new_recipe_ratio
     type: number
     default: 40
+    min: 0
+    max: 100
     description: "Percentage of meals that should be new recipes (0-100)"
     label: "New recipe ratio (%)"
     help: "Percentage of planned meals that should introduce a new recipe (0–100)."
@@ -395,6 +399,8 @@ user_config:
   - key: macro_target_calories
     type: number
     default: 0
+    min: 0
+    max: 10000
     description: "Daily calorie target (0 = not set)"
     label: "Daily calorie target"
     help: "Your daily calorie goal used for nutrition tracking and meal planning (0 = not set)."
@@ -404,6 +410,8 @@ user_config:
   - key: macro_target_protein
     type: number
     default: 0
+    min: 0
+    max: 1000
     description: "Daily protein target in grams (0 = not set)"
     label: "Daily protein target (g)"
     help: "Your daily protein goal in grams used for nutrition tracking (0 = not set)."
@@ -413,6 +421,8 @@ user_config:
   - key: macro_target_carbs
     type: number
     default: 0
+    min: 0
+    max: 2000
     description: "Daily carbs target in grams (0 = not set)"
     label: "Daily carbs target (g)"
     help: "Your daily carbohydrate goal in grams used for nutrition tracking (0 = not set)."
@@ -422,6 +432,8 @@ user_config:
   - key: macro_target_fat
     type: number
     default: 0
+    min: 0
+    max: 1000
     description: "Daily fat target in grams (0 = not set)"
     label: "Daily fat target (g)"
     help: "Your daily fat goal in grams used for nutrition tracking (0 = not set)."
@@ -431,6 +443,8 @@ user_config:
   - key: macro_target_fiber
     type: number
     default: 0
+    min: 0
+    max: 200
     description: "Daily fiber target in grams (0 = not set)"
     label: "Daily fiber target (g)"
     help: "Your daily fiber goal in grams used for nutrition tracking (0 = not set)."
