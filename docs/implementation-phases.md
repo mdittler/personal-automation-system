@@ -2983,6 +2983,58 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 ---
 
+## Unified Settings Surface — Chunks A + E + F (2026-05-05)
+
+**Delivered**: `SettingsRegistry` composing chatbot virtual manifest + installed app manifests; `SettingsWriter` for coerced per-app writes with 3-layer NL safety; `SettingsReader` injecting a per-turn settings catalog and trusted `<config-set>` instruction block into the chatbot prompt.
+
+- `core/src/services/settings/settings-registry.ts`: `SettingsRegistry` with `register()`, `getAll()`, `getByAppKey()`, `getNlSafeQualifiedKeys()`; qualified key format `appId.key`
+- `core/src/services/settings/settings-writer.ts`: `SettingsWriter` with `write(req)`; NL safety gate (adminOnly/dangerous/hidden/non-nlSafe/non-per-user blocked); per-app `AppConfigService` routing; `coerceUserConfigValue` shared coercion
+- `core/src/services/settings/settings-reader.ts`: `SettingsReader` with `buildSettingsCatalog()` + `buildConfigSetInstruction()`; split into `memory-context` (catalog) vs plain text (trusted instruction block); `'settings'` source in `ConversationRetrievalService`
+- `core/src/services/conversation/manifest.ts`: `CONVERSATION_USER_CONFIG` virtual manifest — chatbot's own settings (14 entries: `log_to_notes`, `flush_memory_on_idle_reset`, `auto_reset_idle_minutes`, etc.)
+- Food manifest: 12 nlSafe keys, 2 hidden pseudo-fields, 3 adminOnly+dangerous shadow controls; `nlIntentRegex` on all writable keys
+- PAS classifier: `settingsCandidate` flag gates settings injection in free-text mode; default-on in `/ask`
+- Legacy `CONFIG_SET_INSTRUCTION_BLOCK` gated on `!settingsTrustedInjected`
+- `compose-runtime.ts`: `settingsRegistry`, `settingsWriter`, `appConfigByAppId` wired; `settingsReader` constructed and injected into retrieval service
+
+**Tests**: 452 test files / 10,054 tests passing. New test files: `settings-registry.test.ts`, `settings-writer.test.ts`, `settings-reader.test.ts`, `settings-reader-integration.test.ts`, `settings-nl-safety.test.ts`, `settings-manifest-parity.test.ts`, food manifest parity tests.
+
+**URS requirements**: REQ-SETTINGS-001, 006, 007, 008, 011, 012 (6 new requirements).
+
+---
+
+## Unified Settings Surface — Chunk B: /gui/settings page (2026-05-06)
+
+**Delivered**: Single `/gui/settings` web UI page exposing all per-user settings in collapsible category accordions, with a page-level Save (PRG pattern) and per-row Reset (htmx outerHTML swap). `SettingsWriter` extended with batch validation and atomic per-app persistence.
+
+**API extensions:**
+- `core/src/services/settings/settings-writer.ts`: `validate(req)` (pure, synchronous), `writeBatch(items)` (validation-atomic, per-app-atomic persist, cross-app best-effort), `registerPostWriteHook(qKey, fn)`, `runHooksForKey(qKey, ctx)`; `write()` now fires post-write hooks; `writeBatch` rejects mixed-userId batches
+- `core/src/services/config/app-config-service.ts`: `removeOverride(userId, key)` — locked single-key removal via `withFileLock`; idempotent
+- `core/src/types/config.ts`: `AppConfigService` interface extended with `removeOverride`
+- `core/src/services/settings/categories.ts`: new module — shared `CATEGORY_ORDER` + `CATEGORY_LABELS`
+
+**Routes and views:**
+- `core/src/gui/routes/settings.ts`: `registerSettingsRoutes` — `GET /settings` (full accordion render), `POST /settings` (validate-atomic + per-app-atomic save, diff against current effective values), `POST /settings/:appId/:key/reset` (locked removal + hook fire + partial HTML response)
+- `core/src/gui/views/settings.eta`: single `<form>` wrapping `<details>` accordions; `personal` open by default; correct widgets per type (checkbox+hidden for boolean, number, text, select)
+- `core/src/gui/views/partials/setting-row.eta`: per-row partial reused by reset response (layout disabled)
+- `core/src/gui/views/layout.eta`: "Settings" nav link added
+- `core/src/gui/index.ts`: `GuiOptions` extended; `registerSettingsRoutes` mounted at `/gui`
+
+**Wiring:**
+- `core/src/compose-runtime.ts`: `settingsRegistry`, `settingsWriter`, `appConfigByAppId` forwarded to `registerGuiRoutes`; `flush_memory_on_idle_reset` post-write hook registered (true→false triggers `disableFlushAndCleanup`)
+
+**Post-merge simplify pass (Codex corrections):**
+- rawValues preserved for ALL submitted fields on validation re-render (not just invalid ones)
+- Partial failures redirect with `?partial=1`, not `?saved=1`; success banner gated on `!it.partial`
+- `writeBatch` rejects mixed-userId batches with explicit error
+- `write()` fires post-write hooks (parity with `writeBatch` + reset path)
+- Concurrency tests: YAML validity proven by direct file read + `yaml.parse`; exact value assertions
+
+**Tests**: 458 test files / 10,159 tests passing. New test files: `settings-writer-batch.test.ts` (Slice 0), `app-config-service-remove.test.ts` (Slice 0), `settings.test.ts` (Slices 1–5, 8), `settings.security.test.ts` (Slice 6), `settings.concurrency.test.ts` (Slice 7), `settings.integration.test.ts` (Slice 9).
+
+**URS requirements**: REQ-SETTINGS-002, 003, 004, 005, 014, 015, 016, 017, 018, 019, 020 (11 new requirements).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
