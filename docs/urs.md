@@ -8675,6 +8675,229 @@ On startup, `loadFromDisk()` is awaited before Telegram handlers register. It re
 
 ---
 
+### REQ-SETTINGS-002 — `/gui/settings` MUST render every per-user setting visible to the current user, grouped by category in `CATEGORY_ORDER`
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`GET /gui/settings` calls `getVisibleDefs(registry)`, which filters the registry to non-hidden, non-adminOnly, per-user-scoped settings in `VISIBLE_CATEGORIES`. Defs are grouped by category and passed to the Eta template. The template iterates `categoryOrder` and renders a `<details>` accordion per category containing that category's defs. System-scoped, dangerous, and adminOnly settings are never included. Iteration is over registry definitions, not posted form fields, preventing prototype-pollution attacks.
+
+**Standard tests** (`settings.test.ts`, `settings.integration.test.ts`):
+- `GET /gui/settings with auth cookie → 200, body contains Settings`
+- `page contains personal accordion and memory-sessions accordion`
+- `page contains log_to_notes and dietary_preferences settings`
+- `page does NOT contain hidden setting food.internal_tracking_id`
+- `page does NOT contain adminOnly setting food.routing_primary`
+- `full login → GET settings → 200 with settings content`
+
+**Edge case tests** (`settings.test.ts`):
+- `page does NOT contain system or dangerous accordion headers`
+- `page does NOT contain any adminOnly setting regardless of admin status`
+- `POST /gui/settings with __proto__ body field is silently ignored`
+
+---
+
+### REQ-SETTINGS-003 — Each setting MUST use the appropriate widget for its `type`
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+Boolean settings render `<input type="checkbox">` plus a companion `<input type="hidden" name="…__present" value="1">` sentinel. Number settings render `<input type="number">`. String settings render `<input type="text">`. Select settings render `<select>` with all `options` as `<option>` elements. The `__present` sentinel ensures unchecked checkboxes (which browsers omit from POST) are distinguishable from fields that were never on the form. Scoped to `/gui/settings`; `app-detail.eta` select-as-text bug is a separate open-item.
+
+**Standard tests** (`settings.test.ts`):
+- `boolean renders <input type="checkbox"> plus __present hidden field`
+- `number renders <input type="number"> with correct name`
+- `string renders <input type="text"> with correct name`
+- `select renders <select> with all options`
+
+**Edge case tests** (`settings.test.ts`):
+- `boolean checked state reflects current value (true → checked)`
+- `boolean unchecked reflects false default`
+- `number value pre-filled from override`
+- `select pre-filled from override`
+
+---
+
+### REQ-SETTINGS-004 — Each setting MUST display `label`, `help`, and current effective value; all MUST be HTML-escaped
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`buildSettingRowHtml` and `settings.eta` both apply `escapeHtml()` to `label`, `help`, and all user-controlled strings (current values, option text, raw error echoes, `appId`, `key`). The Eta template uses `<%= %>` auto-escape for static strings and `escapeHtml()` manually for strings embedded in HTML attributes. Current effective values are read via `cfg.getAll(userId)` per app, returning the merge of override and manifest default.
+
+**Standard tests** (`settings.test.ts`, `settings.security.test.ts`):
+- `each setting row contains its label and help text`
+- `string/number pre-fill reflects current effective override`
+- `pre-fill reflects manifest default when no override present`
+
+**Edge case tests** (`settings.security.test.ts`):
+- `hostile label <script>alert(1)</script> is escaped to &lt;script&gt;`
+- `hostile help <img onerror=alert(1)> is escaped`
+- `hostile select option <svg onload=alert(1)> is escaped`
+- `hostile override value in text input is escaped`
+
+---
+
+### REQ-SETTINGS-005 — Each setting MUST have a per-row Reset button that removes any override via locked `removeOverride` and returns a layout-less partial
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+Each row renders a `<button type="button" hx-post="/gui/settings/:appId/:key/reset" hx-target="closest .setting-row" hx-swap="outerHTML">`. `type="button"` prevents accidental form submission. The reset endpoint validates `appId`/`key` against `^[a-zA-Z0-9_-]+$`, resolves the `SettingDef`, enforces the visibility gate, calls `cfg.removeOverride(userId, key)` (locked, idempotent), fires registered post-write hooks, reads the post-reset effective value, and returns a `text/html` partial built by `buildSettingRowHtml`. The response MUST NOT contain an `<html>` shell.
+
+**Standard tests** (`settings.test.ts`, `settings.integration.test.ts`):
+- `POST .../reset with existing override → 200 partial, override removed from getOverrides`
+- `reset response does NOT contain <html>`
+- `reset response contains .setting-row markup`
+- `reset for key with no override → 200, no error (idempotent)`
+- `reset preserves other overrides for the same app`
+- `reset response shows manifest default value`
+- `reset flow → 200 partial + override removed`
+
+**Edge case tests** (`settings.test.ts`, `settings.security.test.ts`):
+- `POST /gui/settings/unknown-app/foo/reset → 404`
+- `POST /gui/settings/chatbot/unknown-key/reset → 404`
+- `POST /gui/settings/chatbot/<hidden-key>/reset → 403`
+- `POST .../../../etc/passwd/key/reset → 404 (regex rejects)`
+- `POST /gui/settings/chatbot/log_to_notes%20extra/reset → 404`
+
+---
+
+### REQ-SETTINGS-014 — Save MUST go through `SettingsWriter.validate` + `SettingsWriter.writeBatch`; post-write hooks MUST fire for every changed value
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+The POST /settings handler iterates visible registry definitions (not posted fields), builds a `WriteRequest[]` batch for submitted fields that differ from current effective values, runs a dry-run validate pass via `settingsWriter.validate()`, then calls `settingsWriter.writeBatch(items)`. The route MUST NOT call `AppConfigService.updateOverrides` directly. Post-write hooks registered via `settingsWriter.registerPostWriteHook` fire inside `writeBatch` after each successful per-app persist.
+
+**Standard tests** (`settings.test.ts`, `settings.integration.test.ts`, `settings-writer-batch.test.ts`):
+- `POST one boolean change → 302 saved=1; getOverrides reflects new value`
+- `POST cross-app: 3 fields across 2 apps → both configs updated`
+- `flush_memory_on_idle_reset hook fires via save when toggled true→false`
+- `all-valid batch with 2 fields in 1 app → 1 file write per app`
+- `all-valid batch across 2 apps → 2 file writes`
+
+**Edge case tests** (`settings.test.ts`, `settings.integration.test.ts`, `settings-writer-batch.test.ts`):
+- `POST with field for hidden/adminOnly/system/dangerous setting → silently ignored`
+- `per-app persist failure → other app's write succeeds (best-effort cross-app)`
+- `hook that throws → logged and swallowed; persist still reported ok`
+- `prevValue reflects pre-write override, newValue reflects coerced value`
+- `flush hook fires when toggled OFF via reset`
+
+---
+
+### REQ-SETTINGS-015 — Save MUST be validation-atomic (no persist on any error) and per-app-atomic on persist
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`writeBatch` runs `validate()` on every item before any I/O. If any item fails validation, no item is persisted and the route re-renders with per-field error messages. Each app's persist is a single locked `updateOverrides` call (`withFileLock`). Cross-app atomicity is best-effort: if app B's persist fails, app A's write stays; the response banner lists failed apps. The route surfaces `failed=<appIds>` in the redirect for partial failures.
+
+**Standard tests** (`settings.test.ts`, `settings-writer-batch.test.ts`):
+- `POST with invalid number field → 400 re-render; no persist for any field`
+- `POST one valid + one invalid → neither persisted (validation-atomic)`
+- `POST with valid + simulate per-app failure → other app persisted; banner lists failed app`
+- `mixed valid/invalid → returns after validate-all; ZERO file writes`
+
+**Edge case tests** (`settings.test.ts`, `settings-writer-batch.test.ts`):
+- `error response preserves user's typed value (value="abc" in re-rendered form)`
+- `NaN/Infinity/empty string edge cases never crash; coercion result is asserted`
+- `empty batch → {} perApp, {} perField (no I/O)`
+- `per-app persist failure perApp entry ok: false; other app ok: true`
+
+---
+
+### REQ-SETTINGS-016 — All POST endpoints MUST require auth and MUST be CSRF-protected; auth MUST run before CSRF
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`registerAuth` runs in `onRequest` before `registerCsrfProtection` (which runs in `preHandler`). Unauthenticated POSTs hit the auth check first and receive `302 /gui/login` without ever reaching the CSRF gate. Authenticated POSTs without `pas_csrf` cookie receive `403`. Authenticated POSTs with the CSRF cookie but no `_csrf` body field receive `403`. Mismatched token receives `403`. Both `/gui/settings` and `/gui/settings/:appId/:key/reset` enforce this.
+
+**Standard tests** (`settings.test.ts`, `settings.security.test.ts`):
+- `GET /gui/settings without auth → 302 /gui/login`
+- `POST /gui/settings without auth → 302 /gui/login`
+- `POST /gui/settings without pas_csrf cookie → 403`
+- `POST /gui/settings with cookie but no _csrf token → 403`
+- `POST /gui/settings with mismatched _csrf → 403`
+- `reset POST without CSRF cookie → 403`
+
+**Edge case tests** (`settings.security.test.ts`):
+- `unauthenticated POST without CSRF → 302, NOT 403; body does NOT contain "CSRF"`
+- `POST /gui/settings/:appId/:key/reset without auth → 302`
+
+---
+
+### REQ-SETTINGS-017 — All user-controlled strings MUST be HTML-escaped in rendered HTML and htmx partials
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`escapeHtml()` is applied to every caller-controlled string: `label`, `help`, current value (in widget `value` attributes), `select` option text, error messages that echo raw input, `appId` and `key` in `data-*` attributes and `hx-post` URL fragments, and any query parameter values rendered into HTML. The Eta template uses `<%= %>` for auto-escaping in its static rendering; `buildSettingRowHtml` applies `escapeHtml()` explicitly. The renderer MUST NOT use unescaped `<%~ %>` on any caller-controlled string.
+
+**Standard tests** (`settings.security.test.ts`, `settings.integration.test.ts`):
+- `hostile label &lt;script&gt; appears, <script> does not`
+- `hostile help is escaped`
+- `hostile select option &lt;svg is in output, <svg is not`
+- `hostile string value in input value attribute is escaped`
+- `hostile input echoed in error message is escaped`
+- `reset response data-app="chatbot" and data-key are present and escaped`
+
+**Edge case tests** (`settings.security.test.ts`, `settings.integration.test.ts`):
+- `hostile string override renders safely in full page (XSS smoke)`
+- `hostile override in text input does not contain raw </textarea><script>`
+
+---
+
+### REQ-SETTINGS-018 — Concurrent saves/resets to the same key MUST be serialized via `withFileLock`; final state MUST be valid YAML
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`AppConfigServiceImpl.updateOverrides` and `removeOverride` both use `withFileLock(overrideFile, ...)` to serialize concurrent access. `writeBatch` groups items by app and calls `updateOverrides` once per app under the lock. After any sequence of concurrent writes, the override file must be a valid YAML document with no torn writes; the final value must be one of the submitted values.
+
+**Standard tests** (`settings.concurrency.test.ts`, `app-config-service-remove.test.ts`):
+- `concurrent POSTs to same key: both succeed; final value is boolean; YAML valid`
+- `concurrent POST save + reset: final value is one of {saved, default}; YAML valid`
+- `concurrent different-field saves to same app: all complete; both files valid`
+- `10 concurrent saves to two apps: both files have parseable values`
+- `concurrent resets: key excluded, file valid`
+
+**Edge case tests** (`settings.concurrency.test.ts`, `app-config-service-remove.test.ts`):
+- `concurrent removeOverride + updateOverrides: no torn write`
+- `removeOverride with no existing override: no error, file unchanged`
+- `other overrides preserved after removeOverride`
+
+---
+
+### REQ-SETTINGS-019 — `SettingsWriter` MUST support a post-write hook registry keyed by qualified key; hooks MUST receive `{ userId, appId, key, prevValue, newValue }` and fire after successful persist
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+`SettingsWriter.registerPostWriteHook(qualifiedKey, fn)` appends `fn` to the hook list for that key. `writeBatch` fires hooks after each successful per-app write. `runHooksForKey` fires hooks directly (used by the reset endpoint). Hooks that throw are caught, logged at `warn`, and swallowed; other hooks for the same key continue to fire. `prevValue` is read from the pre-write override (or manifest default if no override); `newValue` is the coerced value.
+
+**Standard tests** (`settings-writer-batch.test.ts`, `settings.test.ts`, `settings.integration.test.ts`):
+- `hook fires with correct { userId, appId, key, prevValue, newValue }`
+- `flush_memory_on_idle_reset hook fires when toggled OFF via save`
+- `flush_memory_on_idle_reset hook fires when toggled OFF via reset`
+- `hook does NOT fire when value stays false (no-op skipped by diff)`
+
+**Edge case tests** (`settings-writer-batch.test.ts`, `settings.integration.test.ts`):
+- `hook that throws → logged and swallowed; persist still reported ok; other hooks fire`
+- `prevValue reflects pre-write override (not manifest default) when override exists`
+- `multiple hooks for same key all fire`
+
+---
+
+### REQ-SETTINGS-020 — Save MUST diff submitted values against current effective values; only changed fields are batched; zero changes → zero file writes
+
+**Phase:** Unified Settings Chunk B | **Status:** Implemented
+
+Before building the `WriteRequest[]` batch, the route reads current effective values via `readCurrentValues` and JSON-stringifies each coerced submitted value against the stored value. Items where `JSON.stringify(coerced) === JSON.stringify(current)` are dropped from the batch. If the resulting batch is empty the route redirects to `?saved=1` without calling `writeBatch`. This prevents the "first Save pins all manifest defaults as overrides" bug and ensures hooks do not fire for no-op saves.
+
+**Standard tests** (`settings.test.ts`, `settings-writer-batch.test.ts`):
+- `POST with all fields at current values → 302 saved=1; zero file writes`
+- `POST with unchecked checkbox (false) when already false → not batched`
+- `POST absent boolean (accordion not submitted) → field skipped; existing override untouched`
+- `empty batch → {} perApp, {} perField; no I/O`
+
+**Edge case tests** (`settings.test.ts`):
+- `numeric override = 0 (falsy but valid) is persisted and round-trips`
+- `Save → Reset → Save: round-trip works; final value is second Save's value`
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -9094,5 +9317,16 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SETTINGS-008 | settings-registry.test.ts, build-registry.test.ts | 2 | 2 | Implemented |
 | REQ-SETTINGS-011 | settings-discoverability.persona.test.ts | 10 | 8 | Implemented |
 | REQ-SETTINGS-012 | settings-reader.test.ts, settings-discoverability.integration.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-002 | settings.test.ts, settings.integration.test.ts | 6 | 3 | Implemented |
+| REQ-SETTINGS-003 | settings.test.ts | 4 | 4 | Implemented |
+| REQ-SETTINGS-004 | settings.test.ts, settings.security.test.ts | 3 | 4 | Implemented |
+| REQ-SETTINGS-005 | settings.test.ts, settings.integration.test.ts, settings.security.test.ts | 7 | 5 | Implemented |
+| REQ-SETTINGS-014 | settings.test.ts, settings.integration.test.ts, settings-writer-batch.test.ts | 5 | 5 | Implemented |
+| REQ-SETTINGS-015 | settings.test.ts, settings-writer-batch.test.ts | 4 | 4 | Implemented |
+| REQ-SETTINGS-016 | settings.test.ts, settings.security.test.ts | 6 | 2 | Implemented |
+| REQ-SETTINGS-017 | settings.security.test.ts, settings.integration.test.ts | 6 | 2 | Implemented |
+| REQ-SETTINGS-018 | settings.concurrency.test.ts, app-config-service-remove.test.ts | 5 | 3 | Implemented |
+| REQ-SETTINGS-019 | settings-writer-batch.test.ts, settings.test.ts, settings.integration.test.ts | 4 | 3 | Implemented |
+| REQ-SETTINGS-020 | settings.test.ts, settings-writer-batch.test.ts | 4 | 2 | Implemented |
 
-| **Totals** | **240 test files** | **1774** | **1924** | **3698 tests** |
+| **Totals** | **246 test files** | **1837** | **1966** | **3803 tests** |
