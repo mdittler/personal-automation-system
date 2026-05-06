@@ -35,7 +35,7 @@ export class SettingsRegistry {
   private readonly byQualified = new Map<string, SettingDef>();
 
   register(def: SettingDef): void {
-    if (!def.help || !def.help.trim()) {
+    if (!def.hidden && (!def.help || !def.help.trim())) {
       throw new Error(
         `SettingsRegistry: 'help' must be a non-empty string for key '${def.key}' (app '${def.appId}')`,
       );

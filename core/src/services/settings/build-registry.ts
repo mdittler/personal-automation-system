@@ -57,12 +57,19 @@ function entryToDef(entry: ManifestUserConfig, appId: string): SettingDef {
     }
   }
 
+  const isHidden = entry.hidden === true;
+  if (!isHidden && (!entry.help || !entry.help.trim())) {
+    throw new Error(
+      `buildSettingsRegistry: 'help' is required for non-hidden manifest entry '${appId}.${entry.key}' (REQ-SETTINGS-006)`,
+    );
+  }
+
   return {
     key: entry.key,
     appId,
     category: (entry.category as SettingsCategory) ?? defaultCategoryForApp(appId),
     label: entry.label ?? entry.key,
-    help: entry.help ?? entry.description,
+    help: entry.help ?? '',
     helpDetail: entry.helpDetail,
     type: entry.type,
     options: entry.options,

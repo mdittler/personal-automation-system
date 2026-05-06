@@ -295,14 +295,23 @@ user_config:
     type: number
     default: 12
     description: "Hours household members have to vote on meal plans"
+    label: "Voting window (hours)"
+    help: "How many hours household members have to vote on a proposed meal plan before it is finalized."
+    category: food
   - key: rating_reminder_delay
     type: number
     default: 120
     description: "Minutes after expected cook time to ask for ratings"
+    label: "Rating reminder delay (minutes)"
+    help: "How many minutes after the expected cook time to send a rating prompt for the meal."
+    category: food
   - key: preferred_stores
     type: string
     default: ""
     description: "Comma-separated list of stores for price comparison"
+    label: "Preferred stores"
+    help: "Comma-separated list of grocery stores used for price comparison (e.g., Trader Joe's, Whole Foods)."
+    category: food
   - key: default_store
     type: string
     default: ""
@@ -325,14 +334,23 @@ user_config:
     type: string
     default: "salt,pepper,olive oil,butter,garlic"
     description: "Comma-separated items assumed to be on hand"
+    label: "Staple items"
+    help: "Comma-separated pantry staples assumed to always be on hand, so they are excluded from grocery lists."
+    category: food
   - key: shopping_followup_hours
     type: number
     default: 24
     description: "Hours after shopping mode to send follow-up"
+    label: "Shopping follow-up delay (hours)"
+    help: "How many hours after completing a shopping session to send a follow-up check-in message."
+    category: food
   - key: location
     type: string
     default: "Raleigh, NC"
     description: "Your location for seasonal produce awareness (e.g., 'Boston, MA', 'Portland, OR')"
+    label: "Location"
+    help: "Your city and state used for seasonal produce awareness and region-specific recipe suggestions (e.g., Boston, MA)."
+    category: food
   - key: seasonal_nudges
     type: boolean
     default: true
@@ -355,10 +373,16 @@ user_config:
     type: number
     default: 3
     description: "Days to wait between introducing new allergens for babies"
+    label: "Allergen wait period (days)"
+    help: "Number of days to wait between introducing each new allergenic food to a baby or young child."
+    category: food
   - key: cooking_speaker_device
     type: string
     default: ""
     description: "Chromecast/Google Home device name for hands-free cooking. Leave empty for system default."
+    label: "Cooking speaker device"
+    help: "Name of the Chromecast or Google Home device to use for hands-free cooking audio. Leave empty to use the system default."
+    category: food
   - key: hands_free_default
     type: boolean
     default: false
@@ -390,14 +414,29 @@ user_config:
     type: number
     default: 0
     description: "Daily carbs target in grams (0 = not set)"
+    label: "Daily carbs target (g)"
+    help: "Your daily carbohydrate goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(carb.target|target.carb|carb.goal)|carb.target.*(set|change|update|to)"
   - key: macro_target_fat
     type: number
     default: 0
     description: "Daily fat target in grams (0 = not set)"
+    label: "Daily fat target (g)"
+    help: "Your daily fat goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(fat.target|target.fat|fat.goal)|fat.target.*(set|change|update|to)"
   - key: macro_target_fiber
     type: number
     default: 0
     description: "Daily fiber target in grams (0 = not set)"
+    label: "Daily fiber target (g)"
+    help: "Your daily fiber goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(fiber.target|target.fiber|fiber.goal)|fiber.target.*(set|change|update|to)"
   - key: guest_profiles_info
     type: string
     default: "Edit via /hosting guests add|remove|list"

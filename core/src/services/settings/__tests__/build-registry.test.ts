@@ -88,4 +88,39 @@ describe('buildSettingsRegistry', () => {
 		const reg = buildSettingsRegistry({ installedApps: [noConfig] });
 		expect(reg.getAll().every((d) => d.appId !== 'echo')).toBe(true);
 	});
+
+	it('throws when a non-hidden manifest entry lacks help', () => {
+		const manifest: AppManifest = {
+			app: { id: 'myapp', name: 'MyApp', version: '1.0.0', description: 'd', author: 'a' },
+			user_config: [
+				{
+					key: 'my_setting',
+					type: 'boolean',
+					default: false,
+					description: 'This is the description but no help field',
+					// no help field
+				},
+			],
+		} as unknown as AppManifest;
+		expect(() => buildSettingsRegistry({ installedApps: [manifest] })).toThrow(
+			/help.*required.*non-hidden.*myapp\.my_setting/i,
+		);
+	});
+
+	it('allows hidden manifest entries without help', () => {
+		const manifest: AppManifest = {
+			app: { id: 'myapp', name: 'MyApp', version: '1.0.0', description: 'd', author: 'a' },
+			user_config: [
+				{
+					key: 'pseudo_field',
+					type: 'string',
+					default: '',
+					description: 'Internal display only',
+					hidden: true,
+					// no help — should be OK for hidden entries
+				},
+			],
+		} as unknown as AppManifest;
+		expect(() => buildSettingsRegistry({ installedApps: [manifest] })).not.toThrow();
+	});
 });
