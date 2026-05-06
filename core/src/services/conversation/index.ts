@@ -40,6 +40,7 @@ export {
 	PAS_KEYWORDS,
 	classifyPASMessage,
 	isPasRelevant,
+	parsePASClassifierOutput,
 } from './pas-classifier.js';
 export type { PASClassification } from './pas-classifier.js';
 

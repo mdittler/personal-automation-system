@@ -86,6 +86,41 @@ export interface PASClassification {
 	 * classifier). When true, DataQueryService is called.
 	 */
 	dataQueryCandidate?: boolean;
+	/**
+	 * Whether the message is asking about or requesting a change to a PAS
+	 * setting (YES_SETTINGS from classifier). When true, SettingsReader is
+	 * called to inject the relevant settings catalog into the prompt.
+	 */
+	settingsCandidate?: boolean;
+}
+
+/**
+ * Parse the raw string output from the PAS classifier LLM into a
+ * `PASClassification` object.
+ *
+ * Token protocol (space-separated, any order):
+ *   YES_PAS / NO_PAS     — PAS relevance (new form)
+ *   YES_DATA / NO_DATA   — data-query signal
+ *   YES_SETTINGS / NO_SETTINGS — settings-query signal
+ *   YES / NO             — legacy bare tokens (backward-compat: YES → pasRelated)
+ *
+ * Input is uppercased before matching so lowercase LLM output is tolerated.
+ * Unknown tokens are silently ignored.
+ * Empty / garbage input returns all-false.
+ */
+export function parsePASClassifierOutput(raw: string): PASClassification {
+	const upper = raw.toUpperCase();
+	// Match word tokens composed of uppercase letters and underscores.
+	// This handles tokens embedded in punctuation like "YES_PAS", "YES_SETTINGS".
+	const tokens = new Set(upper.match(/[A-Z_]+/g) ?? []);
+
+	// Legacy bare YES/NO are recognized for backward compat.
+	// YES_DATA also implies pasRelated (legacy: firstWord.startsWith('yes')).
+	const dataQueryCandidate = tokens.has('YES_DATA');
+	const pasRelated = tokens.has('YES_PAS') || tokens.has('YES') || dataQueryCandidate;
+	const settingsCandidate = tokens.has('YES_SETTINGS');
+
+	return { pasRelated, dataQueryCandidate, settingsCandidate };
 }
 
 /**
@@ -139,8 +174,14 @@ export async function classifyPASMessage(
 	const systemPrompt =
 		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
 		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
-		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.${appHint}` +
-		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).` +
+		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.` +
+		` SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint}` +
+		` Reply with space-separated tokens (any order). Examples:\n` +
+		`  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n` +
+		`  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n` +
+		`  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n` +
+		`  NO_PAS                        — not PAS-related\n` +
+		`Backward-compat: bare YES/NO/YES_DATA tokens are also accepted.` +
 		contextHint;
 
 	try {
@@ -151,11 +192,7 @@ export async function classifyPASMessage(
 			temperature: 0,
 		});
 
-		// Extract first word — handles "YES_DATA - this is a data query", "YES.", "NO.", etc.
-		const firstWord = (response.trim().split(/\s/)[0] ?? '').toLowerCase().replace(/[^a-z_]/g, '');
-		const pasRelated = firstWord.startsWith('yes');
-		const dataQueryCandidate = firstWord === 'yes_data';
-		return { pasRelated, dataQueryCandidate };
+		return parsePASClassifierOutput(response);
 	} catch (error) {
 		deps.logger?.warn('PAS classification failed, defaulting to app-aware context: %s', error);
 		// Fail-open for PAS detection, fail-safe for data queries
