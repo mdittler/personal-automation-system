@@ -3,6 +3,10 @@ import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import { buildSettingsRegistry } from '../../settings/build-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
+import { processConfigSetTags } from '../control-tags.js';
+import { CONVERSATION_USER_CONFIG_MANIFEST } from '../manifest.js';
 import { handleMessage } from '../handle-message.js';
 
 function makeChatSessions(): ChatSessionStore {
@@ -442,5 +446,107 @@ describe('handleMessage — P8c lineage forwarding', () => {
 			expect.anything(),
 			expect.anything(),
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Task 2.5 — Backward-compat regression: existing 3 nlSafe keys still work
+// through the registry-derived allowlist + SettingsWriter path.
+// ---------------------------------------------------------------------------
+
+describe('handle-message <config-set> regression — existing 3 nlSafe keys (Task 2.5)', () => {
+	/**
+	 * Build a real SettingsRegistry (chatbot virtual keys only — no installed apps)
+	 * and a real SettingsWriter backed by a mock AppConfigService.
+	 * Returns both so tests can assert on updateOverrides calls.
+	 */
+	function makeRegistryAndWriter() {
+		const registry = buildSettingsRegistry({ installedApps: [] });
+
+		const mockChatbotConfig = {
+			updateOverrides: vi.fn().mockResolvedValue(undefined),
+			getOverrides: vi.fn().mockResolvedValue({}),
+			getAll: vi.fn(),
+			setAll: vi.fn(),
+			get: vi.fn(),
+		};
+
+		const writer = new SettingsWriter({
+			registry,
+			appConfigResolver: (appId) => (appId === 'chatbot' ? (mockChatbotConfig as never) : undefined),
+			manifestResolver: (appId) =>
+				appId === 'chatbot' ? CONVERSATION_USER_CONFIG_MANIFEST : undefined,
+			logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+		});
+
+		return { registry, writer, mockChatbotConfig };
+	}
+
+	function makeLogger() {
+		return { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
+	}
+
+	it('log_to_notes bare key: tag processed, updateOverrides called with true, tag stripped', async () => {
+		const { registry, writer, mockChatbotConfig } = makeRegistryAndWriter();
+
+		// User message must match NOTES_INTENT_REGEX (action verb + notes concept)
+		const userMessage = 'enable daily notes logging';
+		const llmResponse = 'Sure, I have enabled daily notes. <config-set key="log_to_notes" value="true"/>';
+
+		const { cleanedResponse } = await processConfigSetTags(llmResponse, {
+			userId: 'userId',
+			userMessage,
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
+
+		// Bare key "log_to_notes" → parseConfigSetKey → appId='chatbot', key='log_to_notes'
+		expect(mockChatbotConfig.updateOverrides).toHaveBeenCalledWith('userId', { log_to_notes: true });
+		expect(cleanedResponse).not.toContain('<config-set');
+	});
+
+	it('flush_memory_on_idle_reset bare key: tag processed, updateOverrides called with true, tag stripped', async () => {
+		const { registry, writer, mockChatbotConfig } = makeRegistryAndWriter();
+
+		// User message must match MEMORY_FLUSH_INTENT_REGEX
+		const userMessage = 'enable session memory so summaries are saved on reset';
+		const llmResponse =
+			'Great, session memory is now enabled. <config-set key="flush_memory_on_idle_reset" value="true"/>';
+
+		const { cleanedResponse } = await processConfigSetTags(llmResponse, {
+			userId: 'userId',
+			userMessage,
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
+
+		expect(mockChatbotConfig.updateOverrides).toHaveBeenCalledWith('userId', {
+			flush_memory_on_idle_reset: true,
+		});
+		expect(cleanedResponse).not.toContain('<config-set');
+	});
+
+	it('session_search_tool_enabled bare key: tag processed, updateOverrides called with false, tag stripped', async () => {
+		const { registry, writer, mockChatbotConfig } = makeRegistryAndWriter();
+
+		// User message must match SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX
+		const userMessage = 'disable session search please';
+		const llmResponse =
+			'Understood, I have disabled session search. <config-set key="session_search_tool_enabled" value="false"/>';
+
+		const { cleanedResponse } = await processConfigSetTags(llmResponse, {
+			userId: 'userId',
+			userMessage,
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
+
+		expect(mockChatbotConfig.updateOverrides).toHaveBeenCalledWith('userId', {
+			session_search_tool_enabled: false,
+		});
+		expect(cleanedResponse).not.toContain('<config-set');
 	});
 });
