@@ -9,6 +9,18 @@
             "command": "bash .claude/hooks/require-feature-branch.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/tsc-nocheck.sh",
+            "if": "Bash(git merge *)",
+            "timeout": 120,
+            "statusMessage": "Checking TypeScript before merge..."
+          }
+        ]
       }
     ],
     "PostToolUse": [
