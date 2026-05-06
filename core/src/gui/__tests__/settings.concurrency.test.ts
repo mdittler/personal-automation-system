@@ -5,7 +5,7 @@
  * REQ-SETTINGS-018
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
+import { parse as parseYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
 import { CredentialService } from '../../services/credentials/index.js';
@@ -272,9 +273,12 @@ describe('Settings Concurrency — Slice 7', () => {
 		expect(resA.statusCode).toBeLessThanOrEqual(302);
 		expect(resB.statusCode).toBeLessThanOrEqual(302);
 
-		// File must be valid (getAll must not throw)
-		const all = await srv.chatbotCfg.getAll(TEST_USER_ID);
-		expect(typeof all.log_to_notes).toBe('boolean');
+		// Read the override file directly and parse to prove real YAML validity
+		// (getAll() swallows parse errors and returns defaults — insufficient)
+		const overridePath = join(srv.tempDir, 'system', 'app-config', 'chatbot', `${TEST_USER_ID}.yaml`);
+		const raw = await readFile(overridePath, 'utf-8');
+		const parsed = parseYaml(raw) as Record<string, unknown>;
+		expect(typeof parsed.log_to_notes).toBe('boolean');
 	});
 
 	it('concurrent POST save + reset on same key: final value is one of {saved, default}', async () => {
@@ -331,13 +335,11 @@ describe('Settings Concurrency — Slice 7', () => {
 			}),
 		]);
 
-		// Each field should have been written (order doesn't matter since fields are independent)
-		// Note: concurrent writes to same file might result in only one being stored (lock serializes)
-		// We just verify the file is valid YAML after concurrent writes
+		// Both fields should have been written. updateOverrides is a locked RMW that merges,
+		// so concurrent writes to different keys are both preserved.
 		const all = await srv.foodCfg.getAll(TEST_USER_ID);
-		// Values should be parseable
-		expect(typeof all.macro_target_calories).toBe('number');
-		expect(typeof all.dietary_preferences).toBe('string');
+		expect(all.macro_target_calories).toBe(1800);
+		expect(all.dietary_preferences).toBe('vegan');
 	});
 
 	it('10 concurrent saves to different apps: both files valid after', async () => {

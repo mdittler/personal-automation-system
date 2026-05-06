@@ -88,8 +88,26 @@ export class SettingsWriter {
       return { ok: false, reason: `coercion failed: ${coerced.reason}` };
     }
 
+    // Capture prev value for hook context before writing
+    let prevValue: unknown = entry.default;
+    try {
+      const overrides = await cfg.getOverrides(req.userId);
+      if (overrides !== null && Object.prototype.hasOwnProperty.call(overrides, req.key)) {
+        prevValue = overrides[req.key];
+      }
+    } catch {
+      // Non-fatal — hooks will see manifest default as prevValue
+    }
+
     try {
       await cfg.updateOverrides(req.userId, { [req.key]: coerced.coerced });
+      await this.runHooksForKey(qualifiedKey(req.appId, req.key), {
+        userId: req.userId,
+        appId: req.appId,
+        key: req.key,
+        prevValue,
+        newValue: coerced.coerced,
+      });
       return { ok: true, coerced: coerced.coerced };
     } catch (err) {
       this.deps.logger.warn(
@@ -188,6 +206,14 @@ export class SettingsWriter {
     const perApp = new Map<string, BatchAppResult>();
 
     if (items.length === 0) return { perField, perApp };
+
+    // Reject mixed-userId batches: all items must be for the same user.
+    const firstUserId = items[0]!.userId;
+    for (const item of items) {
+      if (item.userId !== firstUserId) {
+        throw new Error('writeBatch: mixed userIds in batch — all items must have the same userId');
+      }
+    }
 
     // Phase 1: validate all (pure — no I/O)
     const validItems: Array<{ req: WriteRequest; coerced: unknown }> = [];

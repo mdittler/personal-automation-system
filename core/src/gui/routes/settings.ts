@@ -19,7 +19,7 @@ import type { SettingDef, SettingsCategory } from '../../services/settings/setti
 import { qualifiedKey } from '../../services/settings/settings-registry.js';
 import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import type { SettingsWriter, WriteRequest } from '../../services/settings/settings-writer.js';
-import { escapeHtml } from './llm-usage.js';
+import { escapeHtml } from '../../utils/escape-html.js';
 
 const VISIBLE_CATEGORIES: readonly SettingsCategory[] = [
 	'personal',
@@ -179,6 +179,7 @@ export function registerSettingsRoutes(
 		const byCategory = groupByCategory(visibleDefs);
 
 		const savedParam = (request.query as Record<string, string>).saved;
+		const partialParam = (request.query as Record<string, string>).partial;
 		const failedParam = (request.query as Record<string, string>).failed;
 
 		return reply.viewAsync('settings', {
@@ -189,6 +190,7 @@ export function registerSettingsRoutes(
 			categoryOrder: CATEGORY_ORDER,
 			categoryLabels: CATEGORY_LABELS,
 			saved: savedParam === '1',
+			partial: partialParam === '1',
 			failed: failedParam
 				? failedParam
 						.split(',')
@@ -249,8 +251,12 @@ export function registerSettingsRoutes(
 
 		// Validation-atomic phase (pure, no I/O)
 		const errors: Record<string, string> = {};
+		// Preserve every submitted raw value so the re-render shows what the user typed,
+		// not the disk value — applies to both invalid fields and valid-but-changed fields.
 		const rawValues: Record<string, string> = {};
 		for (const item of items) {
+			const qk = qualifiedKey(item.appId, item.key);
+			rawValues[qk] = item.rawValue;
 			const result = settingsWriter.validate({
 				userId: item.userId,
 				appId: item.appId,
@@ -259,23 +265,21 @@ export function registerSettingsRoutes(
 				source: 'admin-confirmed',
 			});
 			if (!result.ok) {
-				const qk = qualifiedKey(item.appId, item.key);
 				errors[qk] = result.reason;
-				rawValues[qk] = item.rawValue;
 			}
 		}
 
 		if (Object.keys(errors).length > 0) {
-			const currentValues = await readCurrentValues(visibleDefs, userId, appConfigResolver);
 			const byCategory = groupByCategory(visibleDefs);
 			return reply.status(400).viewAsync('settings', {
 				title: 'Settings — PAS',
 				activePage: 'settings',
 				byCategory,
-				currentValues,
+				currentValues: currentEffective,
 				categoryOrder: CATEGORY_ORDER,
 				categoryLabels: CATEGORY_LABELS,
 				saved: false,
+				partial: false,
 				failed: [],
 				errors,
 				rawValues,
@@ -295,7 +299,7 @@ export function registerSettingsRoutes(
 
 		if (failedApps.length > 0) {
 			return reply.redirect(
-				`/gui/settings?saved=1&failed=${encodeURIComponent(failedApps.join(','))}`,
+				`/gui/settings?partial=1&failed=${encodeURIComponent(failedApps.join(','))}`,
 			);
 		}
 

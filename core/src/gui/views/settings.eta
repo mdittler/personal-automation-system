@@ -3,13 +3,18 @@
   <p><small>Your personal settings, grouped by category. Changes take effect immediately after saving.</small></p>
 </div>
 
-<% if (it.saved) { %>
+<% if (it.saved && !it.partial) { %>
 <div role="alert" class="alert-banner success" style="background:var(--pico-ins-color);color:#fff;padding:0.75rem 1rem;border-radius:4px;margin-bottom:1rem">
   Settings saved successfully.
 </div>
 <% } %>
 
-<% if (it.failed && it.failed.length > 0) { %>
+<% if (it.partial) { %>
+<div role="alert" class="alert-banner warning" style="background:var(--pico-color-amber-500,#f59e0b);color:#fff;padding:0.75rem 1rem;border-radius:4px;margin-bottom:1rem">
+  Settings partially saved — some apps could not be updated:
+  <% for (const app of it.failed) { %><strong><%= app %></strong> <% } %>
+</div>
+<% } else if (it.failed && it.failed.length > 0) { %>
 <div role="alert" class="alert-banner error" style="background:var(--pico-del-color);color:#fff;padding:0.75rem 1rem;border-radius:4px;margin-bottom:1rem">
   Some settings could not be saved:
   <% for (const app of it.failed) { %><strong><%= app %></strong> <% } %>
