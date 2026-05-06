@@ -2,15 +2,13 @@
  * Control tag processors for LLM response post-processing.
  *
  * <switch-model>: admin-only model switching (pre-existing).
- * <config-set>:   per-user config writes (Chunk C, allowlisted + intent-gated).
+ * <config-set>:   per-user config writes (Chunk C, registry-derived allowlist + intent-gated).
  */
 
 import type { AppLogger } from '../../types/app-module.js';
-import type { AppConfigService } from '../../types/config.js';
-import type { ManifestUserConfig } from '../../types/manifest.js';
 import type { SystemInfoService } from '../../types/system-info.js';
-import { coerceUserConfigValue } from '../config/coerce-user-config.js';
-import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from './control-tags/session-search-instruction.js';
+import type { SettingsRegistry } from '../settings/settings-registry.js';
+import type { SettingsWriter } from '../settings/settings-writer.js';
 import { MODEL_SWITCH_INTENT_REGEX } from './pas-classifier.js';
 export {
 	MEMORY_KIND_INTENT_REGEX,
@@ -104,12 +102,6 @@ export async function processModelSwitchTags(
 
 const CONFIG_SET_TAG_REGEX = /<config-set\s+key="([^"]+)"\s+value="([^"]+)"\s*\/>/g;
 
-const ALLOWED_CONFIG_KEYS: ReadonlySet<string> = new Set([
-	'log_to_notes',
-	'flush_memory_on_idle_reset',
-	'session_search_tool_enabled',
-]);
-
 /**
  * Bidirectional detector for user intent to toggle daily-notes logging.
  *
@@ -132,13 +124,6 @@ export const NOTES_INTENT_REGEX =
 export const MEMORY_FLUSH_INTENT_REGEX =
 	/\b(?:on|off|enable|disable|stop|start|turn|don'?t|do\s+not)\b[^.?!]{0,40}\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b|\b(?:session\s+memory|session\s+summar(?:y|ies)|automatic\s+idle\s+summar(?:y|ies)|idle\s+summar(?:y|ies))\b[^.?!]{0,40}\b(?:on|off|enable|disable|stop|start|turn)\b/i;
 
-/** Per-key intent gates — each allowlisted key requires its own intent signal. */
-const INTENT_GATES: Record<string, RegExp> = {
-	log_to_notes: NOTES_INTENT_REGEX,
-	flush_memory_on_idle_reset: MEMORY_FLUSH_INTENT_REGEX,
-	session_search_tool_enabled: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
-};
-
 /**
  * Instruction appended to the system prompt when the user message matches
  * NOTES_INTENT_REGEX. Tells the LLM how to request a config change.
@@ -159,39 +144,70 @@ When the user wants to enable or disable session memory (saving a summary of the
   To disable: <config-set key="flush_memory_on_idle_reset" value="false"/>
 Only emit this tag when the user explicitly requests a change. Do not emit it to report the current state.`.trim();
 
-function confirmationFor(key: string, coerced: unknown): string | null {
-	if (key === 'log_to_notes') {
-		return coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.';
+/**
+ * Parse a raw config-set key into (appId, key).
+ *
+ * Qualified form: "food.seasonal_nudges" → { appId: 'food', key: 'seasonal_nudges' }
+ * Bare form:      "log_to_notes"         → { appId: 'chatbot', key: 'log_to_notes' }
+ *
+ * The first dot is the delimiter; dots within the key portion are preserved.
+ */
+function parseConfigSetKey(raw: string): { appId: string; key: string } {
+	const dot = raw.indexOf('.');
+	if (dot < 0) return { appId: 'chatbot', key: raw };
+	return { appId: raw.slice(0, dot), key: raw.slice(dot + 1) };
+}
+
+/**
+ * Return a human-readable confirmation string for a successful config write.
+ *
+ * Chatbot keys use specific phrasing that matches existing UX copy.
+ * All other keys fall back to the registry label.
+ */
+function confirmationFor(
+	appId: string,
+	key: string,
+	coerced: unknown,
+	registry: SettingsRegistry,
+): string | null {
+	if (appId === 'chatbot') {
+		if (key === 'log_to_notes') {
+			return coerced ? 'Daily notes logging turned ON.' : 'Daily notes logging turned OFF.';
+		}
+		if (key === 'flush_memory_on_idle_reset') {
+			return coerced
+				? "Session memory turned ON — I'll save a short summary when our chats time out."
+				: 'Session memory turned OFF. The most recent saved summary has been deleted.';
+		}
+		if (key === 'session_search_tool_enabled') {
+			return coerced ? 'Session-search tool turned ON.' : 'Session-search tool turned OFF.';
+		}
 	}
-	if (key === 'flush_memory_on_idle_reset') {
-		return coerced
-			? "Session memory turned ON — I'll save a short summary when our chats time out."
-			: 'Session memory turned OFF. The most recent saved summary has been deleted.';
-	}
-	if (key === 'session_search_tool_enabled') {
-		return coerced ? 'Session-search tool turned ON.' : 'Session-search tool turned OFF.';
-	}
-	return null;
+	// Generic fallback: use registry label
+	const def = registry.getByAppKey(appId, key);
+	if (!def) return null;
+	return `Setting "${def.label}" updated.`;
 }
 
 export interface ProcessConfigSetTagsOptions {
 	userId: string;
 	userMessage: string;
-	config: AppConfigService;
-	manifest: ManifestUserConfig[];
 	logger: AppLogger;
-	/** Called when flush_memory_on_idle_reset is turned OFF, to delete the prior summary. */
+	settingsRegistry: SettingsRegistry;
+	settingsWriter: SettingsWriter;
+	/** Called when chatbot.flush_memory_on_idle_reset is turned OFF, to delete the prior summary. */
 	disableFlushAndCleanup?: (userId: string) => Promise<void>;
 }
 
 /**
  * Process <config-set> tags emitted by the LLM.
  *
- * Security guards (in order):
- * 1. Keys not in ALLOWED_CONFIG_KEYS → strip and warn.
- * 2. Per-key: user message lacks the key's intent gate → skip that tag.
- * 3. Coercion failure → strip and warn (no user-facing message).
- * 4. Otherwise → updateOverrides with only the changed key (raw overrides only).
+ * Security guards (in order — registry-derived, replacing hardcoded ALLOWED_CONFIG_KEYS):
+ * 1. Key not in registry → strip and warn.
+ * 2. def.nlSafe === false OR def.adminOnly OR def.dangerous OR def.hidden → strip and warn.
+ * 3. Per-key: user message lacks def.nlIntentRegex → skip that tag.
+ * 4. Route through SettingsWriter (coercion + persistence).
+ * 5. On chatbot.flush_memory_on_idle_reset=false → call disableFlushAndCleanup.
  */
 export async function processConfigSetTags(
 	response: string,
@@ -203,52 +219,68 @@ export async function processConfigSetTags(
 		return { cleanedResponse: response, confirmations };
 	}
 
-	// Collect all tags, validating the allowlist
-	const allowedTags: Array<{ key: string; value: string }> = [];
+	// Collect all well-formed tags
+	const parsedTags: Array<{ appId: string; key: string; value: string }> = [];
 	for (const match of response.matchAll(CONFIG_SET_TAG_REGEX)) {
-		const key = match[1] ?? '';
+		const rawKey = match[1] ?? '';
 		const value = match[2] ?? '';
-		if (!ALLOWED_CONFIG_KEYS.has(key)) {
-			options.logger.warn('<config-set> rejected key not in allowlist: %s (userId=%s)', key, options.userId);
-			continue;
-		}
-		allowedTags.push({ key, value });
+		const { appId, key } = parseConfigSetKey(rawKey);
+		parsedTags.push({ appId, key, value });
 	}
 
 	// Strip all well-formed tags; sweep for malformed/reordered/extra-attr remnants
-	const stripped = response.replace(CONFIG_SET_TAG_REGEX, '').replace(/<config-set\b[^>]*\/?>/g, '');
+	const stripped = response
+		.replace(CONFIG_SET_TAG_REGEX, '')
+		.replace(/<config-set\b[^>]*\/?>/g, '');
 
-	// Process surviving tags — each key has its own per-key intent gate
-	for (const { key, value } of allowedTags) {
-		const intentGate = INTENT_GATES[key];
-		if (!intentGate || !intentGate.test(options.userMessage)) {
+	// Process surviving tags
+	for (const { appId, key, value } of parsedTags) {
+		// Guard 1+2: registry lookup + NL safety policy
+		const def = options.settingsRegistry.getByAppKey(appId, key);
+		if (!def) {
+			options.logger.warn(
+				'<config-set> rejected key not in registry: %s.%s (userId=%s)',
+				appId,
+				key,
+				options.userId,
+			);
+			continue;
+		}
+		if (!def.nlSafe || def.adminOnly || def.dangerous || def.hidden) {
+			options.logger.warn(
+				'<config-set> rejected non-NL-safe key: %s.%s (userId=%s)',
+				appId,
+				key,
+				options.userId,
+			);
 			continue;
 		}
 
-		const entry = options.manifest.find((e) => e.key === key);
-		if (!entry) {
-			options.logger.warn('<config-set> key not in manifest: %s', key);
+		// Guard 3: per-key intent gate
+		if (!def.nlIntentRegex || !def.nlIntentRegex.test(options.userMessage)) {
 			continue;
 		}
 
-		const result = coerceUserConfigValue(entry, value);
+		// Guard 4: route through SettingsWriter (coercion + persistence)
+		const result = await options.settingsWriter.write({
+			userId: options.userId,
+			appId,
+			key,
+			rawValue: value,
+			source: 'nl',
+		});
+
 		if (!result.ok) {
-			options.logger.warn('<config-set> coercion failed for key %s: %s', key, result.reason);
+			options.logger.warn('<config-set> write failed for %s.%s: %s', appId, key, result.reason);
 			continue;
 		}
 
-		// Write only raw override keys (never manifest defaults)
-		try {
-			await options.config.updateOverrides(options.userId, { [key]: result.coerced });
-			const confirmation = confirmationFor(key, result.coerced);
-			if (confirmation) confirmations.push(confirmation);
+		const confirmation = confirmationFor(appId, key, result.coerced, options.settingsRegistry);
+		if (confirmation) confirmations.push(confirmation);
 
-			// On disable, delete prior summary so toggle semantics match the name
-			if (key === 'flush_memory_on_idle_reset' && result.coerced === false) {
-				await options.disableFlushAndCleanup?.(options.userId);
-			}
-		} catch (err) {
-			options.logger.warn('<config-set> failed to persist %s: %s', key, err);
+		// Guard 5: on disable, delete prior summary so toggle semantics match the name
+		if (appId === 'chatbot' && key === 'flush_memory_on_idle_reset' && result.coerced === false) {
+			await options.disableFlushAndCleanup?.(options.userId);
 		}
 	}
 

@@ -63,6 +63,12 @@ export class ConversationService {
 			...(this.deps.disableFlushAndCleanup !== undefined
 				? { disableFlushAndCleanup: this.deps.disableFlushAndCleanup }
 				: {}),
+			...(this.deps.settingsRegistry !== undefined
+				? { settingsRegistry: this.deps.settingsRegistry }
+				: {}),
+			...(this.deps.settingsWriter !== undefined
+				? { settingsWriter: this.deps.settingsWriter }
+				: {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);

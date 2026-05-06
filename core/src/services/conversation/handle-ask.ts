@@ -37,6 +37,8 @@ import {
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
+import type { SettingsRegistry } from '../settings/settings-registry.js';
+import type { SettingsWriter } from '../settings/settings-writer.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
@@ -65,7 +67,6 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { CONVERSATION_USER_CONFIG_MANIFEST } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
@@ -97,6 +98,10 @@ export interface HandleAskDeps {
 	titleService?: TitleService;
 	/** Called when flush_memory_on_idle_reset is turned OFF via <config-set> tag. */
 	disableFlushAndCleanup?: (userId: string) => Promise<void>;
+	/** SettingsRegistry — when present, enables <config-set> tag processing via registry allowlist. */
+	settingsRegistry?: SettingsRegistry;
+	/** SettingsWriter — when present, routes <config-set> writes through registry-aware writer. */
+	settingsWriter?: SettingsWriter;
 }
 
 export async function handleAsk(
@@ -377,13 +382,13 @@ export async function handleAsk(
 
 	let finalResponse = afterModelSwitch;
 	const allConfirmations = [...switchConfirmations];
-	if (deps.config) {
+	if (deps.settingsRegistry && deps.settingsWriter) {
 		const { cleanedResponse: afterConfigSet, confirmations: configConfirmations } =
 			await processConfigSetTags(afterModelSwitch, {
 				userId: ctx.userId,
 				userMessage: question,
-				config: deps.config,
-				manifest: CONVERSATION_USER_CONFIG_MANIFEST,
+				settingsRegistry: deps.settingsRegistry,
+				settingsWriter: deps.settingsWriter,
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});

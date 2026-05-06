@@ -1,19 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppConfigService } from '../../../types/config.js';
-import type { ManifestUserConfig } from '../../../types/manifest.js';
+import { SettingsRegistry } from '../../settings/settings-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
 import {
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
 	MEMORY_FLUSH_INTENT_REGEX,
 	NOTES_INTENT_REGEX,
 	processConfigSetTags,
 } from '../control-tags.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
 
-const LOG_TO_NOTES_ENTRY: ManifestUserConfig = {
-	key: 'log_to_notes',
-	type: 'boolean',
-	default: false,
-	description: 'Log to notes',
-};
+// ─── Test helpers ─────────────────────────────────────────────────────────
 
 function makeConfig(): { config: AppConfigService; updateOverrides: ReturnType<typeof vi.fn> } {
 	const updateOverrides = vi.fn().mockResolvedValue(undefined);
@@ -29,6 +26,79 @@ function makeConfig(): { config: AppConfigService; updateOverrides: ReturnType<t
 
 function makeLogger() {
 	return { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as any;
+}
+
+/**
+ * Build a SettingsRegistry + SettingsWriter that wire the standard chatbot keys.
+ */
+function makeChatbotRegistryAndWriter(chatbotCfg: AppConfigService): {
+	settingsRegistry: SettingsRegistry;
+	settingsWriter: SettingsWriter;
+} {
+	const settingsRegistry = new SettingsRegistry();
+	settingsRegistry.register({
+		key: 'log_to_notes',
+		appId: 'chatbot',
+		category: 'personal',
+		label: 'Daily notes logging',
+		help: 'Save every chat message to your daily notes file.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: NOTES_INTENT_REGEX,
+	});
+	settingsRegistry.register({
+		key: 'flush_memory_on_idle_reset',
+		appId: 'chatbot',
+		category: 'memory-sessions',
+		label: 'Memory flush on session reset',
+		help: 'Summarize the session to memory when the chat auto-resets.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: MEMORY_FLUSH_INTENT_REGEX,
+	});
+	settingsRegistry.register({
+		key: 'session_search_tool_enabled',
+		appId: 'chatbot',
+		category: 'memory-sessions',
+		label: 'Session search tool',
+		help: 'Allow the chatbot to search your past conversations mid-reply.',
+		type: 'boolean',
+		default: true,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
+	});
+
+	const settingsWriter = new SettingsWriter({
+		registry: settingsRegistry,
+		appConfigResolver: (id) => (id === 'chatbot' ? chatbotCfg : undefined),
+		manifestResolver: (id) => {
+			if (id === 'chatbot') {
+				return [
+					{ key: 'log_to_notes', type: 'boolean', default: false, description: 'Log to notes' },
+					{ key: 'flush_memory_on_idle_reset', type: 'boolean', default: false, description: 'Flush memory' },
+					{ key: 'session_search_tool_enabled', type: 'boolean', default: true, description: 'Session search' },
+				];
+			}
+			return [];
+		},
+		logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+	});
+
+	return { settingsRegistry, settingsWriter };
 }
 
 // ─── NOTES_INTENT_REGEX table-driven tests ────────────────────────────────
@@ -81,12 +151,13 @@ describe('NOTES_INTENT_REGEX — negative (should NOT match)', () => {
 describe('processConfigSetTags — happy path', () => {
 	it('processes turn-on intent: writes true, strips tag, appends confirmation', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = 'Sure! <config-set key="log_to_notes" value="true"/> Done.';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -100,12 +171,13 @@ describe('processConfigSetTags — happy path', () => {
 
 	it('processes turn-off intent: writes false, strips tag', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = 'OK! <config-set key="log_to_notes" value="false"/> Disabled.';
 		await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'please stop saving all my messages to daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -114,12 +186,13 @@ describe('processConfigSetTags — happy path', () => {
 
 	it('bidirectional phrasing: "daily notes please turn on" also fires', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = '<config-set key="log_to_notes" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'daily notes please turn on',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 		expect(updateOverrides).toHaveBeenCalledOnce();
@@ -127,15 +200,16 @@ describe('processConfigSetTags — happy path', () => {
 });
 
 describe('processConfigSetTags — security: allowlist', () => {
-	it('rejects key not in allowlist, logs warn, no write', async () => {
+	it('rejects key not in registry, logs warn, no write', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const logger = makeLogger();
 		const response = '<config-set key="users[0].is_admin" value="true"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger,
 		});
 
@@ -146,13 +220,14 @@ describe('processConfigSetTags — security: allowlist', () => {
 
 	it('cross-user impossible: userId always comes from options, never the tag', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		// The tag has no userId field — we always write to options.userId
 		const response = '<config-set key="log_to_notes" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 		expect(updateOverrides).toHaveBeenCalledWith('alice', { log_to_notes: true });
@@ -164,12 +239,13 @@ describe('processConfigSetTags — security: allowlist', () => {
 describe('processConfigSetTags — security: intent gate', () => {
 	it('strips all tags when user message has no notes intent, no write', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = 'Here you go! <config-set key="log_to_notes" value="true"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: "what's the weather like today?",
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -180,13 +256,14 @@ describe('processConfigSetTags — security: intent gate', () => {
 
 	it('intent gate reads options.userMessage, not history or assistant text', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		// User message has no intent; assistant text contains intent phrasing (should not matter)
 		const response = 'Turn on daily notes! <config-set key="log_to_notes" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'what time is it?',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 		expect(updateOverrides).not.toHaveBeenCalled();
@@ -196,13 +273,14 @@ describe('processConfigSetTags — security: intent gate', () => {
 describe('processConfigSetTags — coercion failure', () => {
 	it('rejects bad value, no write, tag stripped', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const logger = makeLogger();
 		const response = '<config-set key="log_to_notes" value="banana"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger,
 		});
 
@@ -215,13 +293,14 @@ describe('processConfigSetTags — coercion failure', () => {
 describe('processConfigSetTags — mixed allowed/disallowed tags', () => {
 	it('only processes allowed+coerce-ok tags; strips others', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'<config-set key="users[0].is_admin" value="true"/> <config-set key="log_to_notes" value="true"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -235,12 +314,13 @@ describe('processConfigSetTags — mixed allowed/disallowed tags', () => {
 describe('processConfigSetTags — raw-overrides invariant', () => {
 	it('updateOverrides call contains exactly one key (no manifest defaults)', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = '<config-set key="log_to_notes" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -255,12 +335,13 @@ describe('processConfigSetTags — raw-overrides invariant', () => {
 describe('processConfigSetTags — no tags', () => {
 	it('returns response unchanged when no config-set tags present', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = 'Just a normal response.';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -273,13 +354,14 @@ describe('processConfigSetTags — no tags', () => {
 describe('processConfigSetTags — malformed tag sanitization', () => {
 	it('strips reordered-attribute tag: value before key', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		// Regex requires key then value; reordered tag is not parsed but must still be stripped
 		const response = 'OK! <config-set value="true" key="log_to_notes"/> Done.';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 		// Not parsed (reordered), so no write
@@ -290,12 +372,13 @@ describe('processConfigSetTags — malformed tag sanitization', () => {
 
 	it('strips tag with extra attributes', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = 'OK! <config-set key="log_to_notes" value="true" userId="bob"/> Done.';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 		// Extra-attr form is not matched by the strict regex — no write
@@ -316,12 +399,14 @@ describe('processConfigSetTags — write failure resilience', () => {
 			updateOverrides: vi.fn().mockRejectedValue(new Error('disk full')),
 		} as unknown as AppConfigService;
 
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(failingConfig);
+
 		const response = 'Here you go! <config-set key="log_to_notes" value="true"/> Saved.';
 		const result = await processConfigSetTags(response, {
 			userId: 'user1',
 			userMessage: 'turn on daily notes',
-			config: failingConfig,
-			manifest: [LOG_TO_NOTES_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger,
 		});
 
@@ -336,13 +421,6 @@ describe('processConfigSetTags — write failure resilience', () => {
 });
 
 // ─── MEMORY_FLUSH_INTENT_REGEX table-driven tests ─────────────────────────
-
-const FLUSH_MEMORY_ENTRY: ManifestUserConfig = {
-	key: 'flush_memory_on_idle_reset',
-	type: 'boolean',
-	default: false,
-	description: 'Save session summary on idle reset',
-};
 
 describe('MEMORY_FLUSH_INTENT_REGEX — positive matches', () => {
 	it.each([
@@ -397,13 +475,14 @@ describe('FLUSH_MEMORY_INSTRUCTION_BLOCK export', () => {
 describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
 	it('persists true when MEMORY_FLUSH_INTENT_REGEX matches', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'Sure! <config-set key="flush_memory_on_idle_reset" value="true"/> Done.';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'enable session memory',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -415,13 +494,14 @@ describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
 
 	it('strips tag and does not write when MEMORY_FLUSH_INTENT_REGEX does not match', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'Here you go! <config-set key="flush_memory_on_idle_reset" value="true"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: "what's the weather like today?",
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -434,14 +514,15 @@ describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
 describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup', () => {
 	it('persists false and calls disableFlushAndCleanup when intent matches disable phrasing', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const cleanup = vi.fn().mockResolvedValue(undefined);
 		const response =
 			'OK! <config-set key="flush_memory_on_idle_reset" value="false"/> Disabled.';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn off session memory',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 			disableFlushAndCleanup: cleanup,
 		});
@@ -453,12 +534,13 @@ describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup'
 
 	it('disable confirm message mentions session memory turned off', async () => {
 		const { config } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = '<config-set key="flush_memory_on_idle_reset" value="false"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn off session memory',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 			disableFlushAndCleanup: vi.fn().mockResolvedValue(undefined),
 		});
@@ -468,14 +550,15 @@ describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup'
 
 	it('does not call disableFlushAndCleanup when not provided', async () => {
 		const { config } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		// Just verify it doesn't throw when the option is absent
 		const response = '<config-set key="flush_memory_on_idle_reset" value="false"/>';
 		await expect(
 			processConfigSetTags(response, {
 				userId: 'alice',
 				userMessage: 'turn off session memory',
-				config,
-				manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+				settingsRegistry,
+				settingsWriter,
 				logger: makeLogger(),
 			}),
 		).resolves.toBeDefined();
@@ -485,13 +568,14 @@ describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup'
 describe('processConfigSetTags — co-existence: notes intent does NOT toggle flush', () => {
 	it('notes-only message does not process flush_memory_on_idle_reset tag', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'<config-set key="flush_memory_on_idle_reset" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn on daily notes',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -500,12 +584,13 @@ describe('processConfigSetTags — co-existence: notes intent does NOT toggle fl
 
 	it('flush-only message does not process log_to_notes tag', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response = '<config-set key="log_to_notes" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'enable session memory',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
@@ -514,14 +599,15 @@ describe('processConfigSetTags — co-existence: notes intent does NOT toggle fl
 
 	it('message matching both intents processes both tags independently', async () => {
 		const { config, updateOverrides } = makeConfig();
+		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const response =
 			'<config-set key="log_to_notes" value="true"/> <config-set key="flush_memory_on_idle_reset" value="true"/>';
 		// Craft a message that matches BOTH regexes
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn on daily notes and enable session memory',
-			config,
-			manifest: [LOG_TO_NOTES_ENTRY, FLUSH_MEMORY_ENTRY],
+			settingsRegistry,
+			settingsWriter,
 			logger: makeLogger(),
 		});
 
