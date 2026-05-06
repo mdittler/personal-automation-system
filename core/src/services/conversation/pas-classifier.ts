@@ -152,7 +152,7 @@ export function parsePASClassifierOutput(raw: string): PASClassification {
 			break;
 		}
 
-		if (KNOWN_TOKENS.has(parts[0])) {
+		if (parts[0] !== undefined && KNOWN_TOKENS.has(parts[0])) {
 			// Token-first line: model put its answer at the start, then prose.
 			// Collect the leading run of known tokens before the first unknown one.
 			const leading: string[] = [];

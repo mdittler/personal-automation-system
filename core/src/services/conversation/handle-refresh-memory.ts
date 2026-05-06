@@ -26,7 +26,7 @@ export async function handleRefreshMemory(
 	const sessionKey = resolveOrDefaultSessionKey(ctx);
 
 	if (!deps.conversationRetrieval) {
-		deps.logger.warn({ userId }, 'refresh-memory: conversationRetrieval not available');
+		deps.logger.warn(`refresh-memory: conversationRetrieval not available userId=${userId}`);
 		await deps.telegram.send(userId, 'Memory refresh deferred — try again later.');
 		return;
 	}
@@ -54,7 +54,7 @@ export async function handleRefreshMemory(
 			await deps.telegram.send(userId, 'No active session to refresh.');
 			return;
 		}
-		deps.logger.warn({ err, userId, sessionId: ctx.sessionId }, 'refresh-memory failed');
+		deps.logger.warn(`refresh-memory failed userId=${userId} sessionId=${ctx.sessionId ?? 'none'}: ${String(err)}`);
 		await deps.telegram.send(userId, 'Memory refresh deferred — try again later.');
 	}
 }
