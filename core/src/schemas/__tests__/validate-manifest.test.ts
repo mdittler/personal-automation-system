@@ -624,4 +624,90 @@ describe('validateManifest', () => {
 			}
 		});
 	});
+
+	describe('user_config metadata extension', () => {
+		it('accepts entries with new metadata fields', () => {
+			const manifest = {
+				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
+				user_config: [
+					{
+						key: 'seasonal_nudges',
+						type: 'boolean',
+						default: true,
+						description: 'Send seasonal produce suggestions',
+						label: 'Seasonal recipe suggestions',
+						help: 'Send weekly suggestions based on local seasonal produce.',
+						helpDetail: 'Tooltip text',
+						category: 'food',
+						adminOnly: false,
+						dangerous: false,
+						hidden: false,
+						nlSafe: true,
+						nlIntentRegex:
+							'(turn|switch|enable|disable).*(seasonal|season).*(nudge|suggestion)',
+					},
+				],
+			};
+			expect(validateManifest(manifest).valid).toBe(true);
+		});
+
+		it('accepts entries with only legacy fields (no new metadata)', () => {
+			const manifest = {
+				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
+				user_config: [
+					{ key: 'meal_plan_dinners', type: 'number', default: 5, description: 'x' },
+				],
+			};
+			expect(validateManifest(manifest).valid).toBe(true);
+		});
+
+		it('rejects unknown extra fields', () => {
+			const manifest = {
+				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
+				user_config: [
+					{
+						key: 'x',
+						type: 'boolean',
+						default: false,
+						description: 'x',
+						rogue_field: 'fail',
+					},
+				],
+			};
+			expect(validateManifest(manifest).valid).toBe(false);
+		});
+
+		it('accepts dangerConfirmPrompt alongside dangerous: true', () => {
+			const manifest = {
+				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
+				user_config: [
+					{
+						key: 'nuke_data',
+						type: 'boolean',
+						default: false,
+						description: 'Delete all food data',
+						dangerous: true,
+						dangerConfirmPrompt: 'This will delete all food data. Are you sure?',
+					},
+				],
+			};
+			expect(validateManifest(manifest).valid).toBe(true);
+		});
+
+		it('rejects invalid category value', () => {
+			const manifest = {
+				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
+				user_config: [
+					{
+						key: 'some_setting',
+						type: 'boolean',
+						default: false,
+						description: 'x',
+						category: 'invalid-category',
+					},
+				],
+			};
+			expect(validateManifest(manifest).valid).toBe(false);
+		});
+	});
 });

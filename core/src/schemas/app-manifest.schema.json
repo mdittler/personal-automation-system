@@ -455,6 +455,52 @@
 					},
 					"minItems": 1,
 					"description": "Required when type is 'select'."
+				},
+				"label": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Short display label shown in GUI/settings list. Falls back to description if absent."
+				},
+				"help": {
+					"type": "string",
+					"minLength": 1,
+					"description": "One-sentence help text shown beneath the control."
+				},
+				"helpDetail": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Extended tooltip / detail text shown on hover or expand."
+				},
+				"category": {
+					"type": "string",
+					"enum": ["personal", "food", "notes", "memory-sessions", "notifications", "system", "dangerous"],
+					"description": "Setting category for grouping in the settings UI."
+				},
+				"adminOnly": {
+					"type": "boolean",
+					"description": "If true, setting is only visible to platform admins."
+				},
+				"dangerous": {
+					"type": "boolean",
+					"description": "If true, a confirmation prompt is shown before applying."
+				},
+				"dangerConfirmPrompt": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Confirmation prompt text shown when dangerous is true."
+				},
+				"hidden": {
+					"type": "boolean",
+					"description": "If true, setting is hidden from all UI surfaces (but still settable via NL or API)."
+				},
+				"nlSafe": {
+					"type": "boolean",
+					"description": "If true, the chatbot may change this setting via natural language."
+				},
+				"nlIntentRegex": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Regex source string (compiled with /i flag) used to detect NL intent to change this setting."
 				}
 			},
 			"if": {
