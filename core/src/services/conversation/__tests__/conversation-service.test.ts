@@ -22,6 +22,9 @@ function makeNullChatSessions(): ChatSessionStore {
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: false, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 }
 

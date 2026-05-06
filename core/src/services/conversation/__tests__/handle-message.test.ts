@@ -19,6 +19,9 @@ function makeChatSessions(): ChatSessionStore {
 		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 }
 
@@ -575,6 +578,9 @@ describe('handleMessage — settingsCandidate forwarded to buildContextSnapshot'
 			}),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 			setTitle: vi.fn().mockResolvedValue({ updated: false }),
+			rebuildMemorySnapshot: vi
+				.fn()
+				.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 		};
 	});
 

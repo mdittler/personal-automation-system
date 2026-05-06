@@ -85,6 +85,9 @@ function makeDeps(opts: {
 			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 			setTitle: vi.fn().mockResolvedValue({ updated: false }),
+			rebuildMemorySnapshot: vi
+				.fn()
+				.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 		} as any,
 	};
 	return Object.assign(deps, {

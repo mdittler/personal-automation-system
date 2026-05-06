@@ -86,6 +86,9 @@ describe('model journal integration', () => {
 			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 			setTitle: vi.fn().mockResolvedValue({ updated: false }),
+			rebuildMemorySnapshot: vi
+				.fn()
+				.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 		};
 		const ctx = createTestMessageContext({ text: 'question' });
 
