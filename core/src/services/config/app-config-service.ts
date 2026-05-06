@@ -108,6 +108,21 @@ export class AppConfigServiceImpl implements AppConfigService {
 		});
 	}
 
+	/** Locked removal of a single override key. Idempotent: no-op when the key has no override. */
+	async removeOverride(userId: string, key: string): Promise<void> {
+		if (!/^[a-zA-Z0-9_-]+$/.test(userId)) throw new Error(`Invalid userId: ${userId}`);
+
+		const overridePath = join(this.dataDir, 'system', 'app-config', this.appId, `${userId}.yaml`);
+
+		await withFileLock(overridePath, async () => {
+			const existing = (await readYamlFile<Record<string, unknown>>(overridePath)) ?? {};
+			if (!(key in existing)) return;
+			const updated = { ...existing };
+			delete updated[key];
+			await writeYamlFile(overridePath, updated);
+		});
+	}
+
 	/**
 	 * Resolve the userId for an override lookup.
 	 *

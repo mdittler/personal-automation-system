@@ -1038,6 +1038,18 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'settings-writer' }),
 	});
 
+	// Settings-B: fire disableFlushAndCleanup when flush_memory_on_idle_reset is toggled OFF
+	// via the /gui/settings save or reset flows. The existing config.ts route keeps its own
+	// direct call for backward compat; cleanup is idempotent so dual-trigger is safe.
+	settingsWriter.registerPostWriteHook(
+		'chatbot.flush_memory_on_idle_reset',
+		async ({ userId, prevValue, newValue }) => {
+			if (prevValue === true && newValue === false) {
+				await onDisableFlush(userId);
+			}
+		},
+	);
+
 	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
 	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
 		dataQuery: dataQueryAdapter,
@@ -1450,6 +1462,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		messageRateTracker,
 		llmSafeguards: safeguardsConfig,
 		disableFlushAndCleanup: onDisableFlush,
+		settingsRegistry,
+		settingsWriter,
+		settingsAppConfigResolver,
 	});
 
 	// 13b. External Data API (optional)
