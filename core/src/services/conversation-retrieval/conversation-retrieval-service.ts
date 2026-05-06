@@ -682,17 +682,18 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 					const result = value as DataQueryResult;
 					let remaining = catBudget;
 					const truncatedFiles: DataQueryResult['files'] = [];
-					for (let i = 0; i < result.files.length; i++) {
-						const file = result.files[i];
+					let fileIndex = 0;
+					for (const file of result.files) {
 						const headerOverhead =
 							`[${[file.appId, file.type, file.title].filter(Boolean).join(' / ')}]\n`.length;
-						const separatorOverhead = i > 0 ? 2 : 0;
+						const separatorOverhead = fileIndex > 0 ? 2 : 0;
 						const overhead = headerOverhead + separatorOverhead;
 						if (remaining <= overhead) break;
 						const contentBudget = remaining - overhead;
 						const content = file.content.slice(0, contentBudget);
 						remaining -= overhead + content.length;
 						truncatedFiles.push({ ...file, content });
+						fileIndex++;
 					}
 					snapshot.dataQueryResult = { files: truncatedFiles, empty: truncatedFiles.length === 0 };
 					charsUsed += formatDataQueryContext(snapshot.dataQueryResult).length;
