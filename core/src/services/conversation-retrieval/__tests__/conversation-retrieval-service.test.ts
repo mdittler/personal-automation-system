@@ -15,6 +15,7 @@ import type { AppInfo } from '../../../types/app-metadata.js';
 import type { ContextEntry } from '../../../types/context-store.js';
 import type { DataQueryResult } from '../../../types/data-query.js';
 import type { ReportDefinition } from '../../../types/report.js';
+import { formatDataQueryContext } from '../../conversation/data-query-context.js';
 import { requestContext } from '../../context/request-context.js';
 import type { InteractionEntry } from '../../interaction-context/index.js';
 import {
@@ -693,7 +694,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		expect(dataQueryFails.length).toBeGreaterThan(0);
 	});
 
-	it('ask mode always includes app-knowledge and system-info, but not reports/alerts for plain questions', async () => {
+	it('ask mode includes app-knowledge but not reports/alerts or system-info for plain questions', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
 		await withUserId('user1', () =>
@@ -708,10 +709,8 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		// reports/alerts NOT added by ask mode alone — requires scheduling keyword or explicit mention
 		expect(deps.reportService.listForUser).not.toHaveBeenCalled();
 		expect(deps.alertService.listForUser).not.toHaveBeenCalled();
-		// In ask mode, system-info is selected even for questions without system keywords.
-		// buildSystemDataBlock IS called, but gatherSystemData returns '' for 'hello'
-		// (no matching categories), so getSystemStatus is never invoked.
-		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled(); // no system keywords → no system category
+		// system-info NOT selected without system keywords (keyword-gated in both modes after M-4)
+		expect(deps.systemInfo.getSystemStatus).not.toHaveBeenCalled();
 	});
 
 	it('one category throws: failures includes that category; others still present', async () => {
@@ -833,6 +832,387 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		// Ensure they didn't receive each other's data
 		expect(snap1.contextStore).not.toStrictEqual(user2Entries);
 		expect(snap2.contextStore).not.toStrictEqual(user1Entries);
+	});
+});
+
+// ─── I-1: DataQuery failure filter (rejected + budget-exhausted) ──────────────
+
+describe('ConversationRetrievalServiceImpl — I-1 phantom DataQuery failures', () => {
+	const DATA_QUERY_CATS = ['user-app-data', 'household-shared-data', 'space-data', 'collaboration-data'];
+
+	/** Minimal deps: dataQuery rejects, all baseline readers force-offed. */
+	function makeRejectingDeps() {
+		return {
+			dataQuery: {
+				query: vi.fn().mockRejectedValue(new Error('data source down')),
+			},
+		};
+	}
+
+	it('rejected DataQuery task does not push representative key when it is not in selected', async () => {
+		const deps = makeRejectingDeps();
+		const service = new ConversationRetrievalServiceImpl(deps as never);
+
+		// Only 'space-data' selected (via include force-on); all baseline readers and
+		// the other three DataQuery categories are force-offed.
+		const snapshot = await withUserAndHousehold('user1', 'hh1', () =>
+			service.buildContextSnapshot({
+				question: 'hello',
+				mode: 'free-text',
+				dataQueryCandidate: false, // chooseSources won't auto-add DataQuery cats
+				recentFilePaths: [],
+				include: {
+					'space-data': true,
+					'user-app-data': false,
+					'household-shared-data': false,
+					'collaboration-data': false,
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+				},
+			}),
+		);
+
+		// Representative key 'user-app-data' must NOT appear — it was not selected
+		expect(snapshot.failures).not.toContain('user-app-data');
+		// 'space-data' IS selected and the task rejected — it must appear
+		expect(snapshot.failures).toContain('space-data');
+		// Other DataQuery cats were force-offed — must not appear
+		expect(snapshot.failures).not.toContain('household-shared-data');
+		expect(snapshot.failures).not.toContain('collaboration-data');
+	});
+
+	it('budget-exhausted DataQuery task does not push representative key when it is not in selected', async () => {
+		const deps = makeRejectingDeps();
+		// Make query resolve so we hit the budget-exhausted path, not the rejected path.
+		deps.dataQuery.query = vi.fn().mockResolvedValue({ files: [], empty: true });
+		const service = new ConversationRetrievalServiceImpl(deps as never);
+
+		const snapshot = await withUserAndHousehold('user1', 'hh1', () =>
+			service.buildContextSnapshot({
+				question: 'hello',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: 0, // force budget exhaustion immediately
+				include: {
+					'space-data': true,
+					'user-app-data': false,
+					'household-shared-data': false,
+					'collaboration-data': false,
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+				},
+			}),
+		);
+
+		const dataQueryFails = snapshot.failures.filter((f) => DATA_QUERY_CATS.includes(f));
+		// Only 'space-data' should be in DataQuery failures — not 'user-app-data'
+		expect(dataQueryFails).toEqual(['space-data']);
+	});
+
+	it('rejected DataQuery task pushes all four categories when all four are selected', async () => {
+		const deps = makeRejectingDeps();
+		const service = new ConversationRetrievalServiceImpl(deps as never);
+
+		const snapshot = await withUserAndHousehold('user1', 'hh1', () =>
+			service.buildContextSnapshot({
+				question: 'show my data',
+				mode: 'free-text',
+				dataQueryCandidate: true, // all four DataQuery cats selected
+				recentFilePaths: [],
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+				},
+			}),
+		);
+
+		// All four must appear when all four were selected and the task rejected
+		for (const cat of DATA_QUERY_CATS) {
+			expect(snapshot.failures).toContain(cat);
+		}
+	});
+});
+
+// ─── M-3: reports/alerts budget uses rendered line, not JSON ─────────────────
+
+describe('ConversationRetrievalServiceImpl — M-3 reports/alerts rendered-size budget', () => {
+	function makeReport(overrides: Partial<ReportDefinition> = {}): ReportDefinition {
+		return {
+			id: 'r1',
+			name: 'Daily',
+			enabled: true,
+			schedule: '0 8 * * *',
+			delivery: [],
+			sections: [],
+			llm: { enabled: false } as ReportDefinition['llm'],
+			...overrides,
+		} as ReportDefinition;
+	}
+
+	function makeAlert(overrides: Partial<AlertDefinition> = {}): AlertDefinition {
+		return {
+			id: 'a1',
+			name: 'Price Alert',
+			enabled: true,
+			schedule: '0 * * * *',
+			condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [] },
+			actions: [],
+			delivery: [],
+			cooldown: '1 hour',
+			...overrides,
+		} as AlertDefinition;
+	}
+
+	it('reports budget sizing uses rendered line, not JSON size', async () => {
+		// 50 reports each with a tiny rendered line (~19 chars) but a massive sections blob
+		// (~10 KB) that inflates JSON.stringify to >10 000 chars.
+		// Under JSON sizing, 0 reports fit in the 6 000-char catBudget.
+		// Under rendered sizing, all 50 fit (~19 chars × 50 ≈ 999 chars).
+		const reports = Array.from({ length: 50 }, (_, i) =>
+			makeReport({ id: `r${i}`, sections: [{ data: 'x'.repeat(10_000) }] as never }),
+		);
+
+		const mockReportService = { listForUser: vi.fn().mockResolvedValue(reports) };
+		const service = new ConversationRetrievalServiceImpl({
+			reportService: mockReportService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my reports',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					reports: true,
+				},
+			}),
+		);
+
+		expect(snapshot.reports?.length).toBe(50);
+	});
+
+	it('alerts budget sizing uses rendered line, not JSON size', async () => {
+		// Same logic as reports: tiny name, massive data_sources payload.
+		const alerts = Array.from({ length: 50 }, (_, i) =>
+			makeAlert({
+				id: `a${i}`,
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'food', path: 'x'.repeat(10_000) }],
+				},
+			}),
+		);
+
+		const mockAlertService = { listForUser: vi.fn().mockResolvedValue(alerts) };
+		const service = new ConversationRetrievalServiceImpl({
+			alertService: mockAlertService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my alerts',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					alerts: true,
+				},
+			}),
+		);
+
+		expect(snapshot.alerts?.length).toBe(50);
+	});
+
+	it('single report that exactly fills catBudget is included (not dropped by off-by-one)', async () => {
+		const r = makeReport({ name: 'Daily', schedule: '0 8 * * *' });
+		// Rendered: '- Daily (0 8 * * *)' = 19 chars
+		const exactBudget = '- Daily (0 8 * * *)'.length;
+
+		const mockReportService = { listForUser: vi.fn().mockResolvedValue([r]) };
+		const service = new ConversationRetrievalServiceImpl({
+			reportService: mockReportService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my reports',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: exactBudget,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					reports: true,
+				},
+			}),
+		);
+
+		expect(snapshot.reports?.length).toBe(1);
+	});
+
+	it('two reports that together exactly fill catBudget are both included', async () => {
+		const r = makeReport({ name: 'Daily', schedule: '0 8 * * *' });
+		// Two items rendered: '- Daily (0 8 * * *)\n- Daily (0 8 * * *)' = 39 chars
+		const twoItemSize = '- Daily (0 8 * * *)\n- Daily (0 8 * * *)'.length;
+
+		const mockReportService = { listForUser: vi.fn().mockResolvedValue([r, r]) };
+		const service = new ConversationRetrievalServiceImpl({
+			reportService: mockReportService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my reports',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: twoItemSize,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					reports: true,
+				},
+			}),
+		);
+
+		expect(snapshot.reports?.length).toBe(2);
+	});
+
+	it('single alert that exactly fills catBudget is included (not dropped by off-by-one)', async () => {
+		const a = makeAlert({ name: 'Price Alert' });
+		// Rendered: '- Price Alert' = 13 chars
+		const exactBudget = '- Price Alert'.length;
+
+		const mockAlertService = { listForUser: vi.fn().mockResolvedValue([a]) };
+		const service = new ConversationRetrievalServiceImpl({
+			alertService: mockAlertService as never,
+		});
+
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my alerts',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				characterBudget: exactBudget,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					alerts: true,
+				},
+			}),
+		);
+
+		expect(snapshot.alerts?.length).toBe(1);
+	});
+});
+
+// ─── I-2: DataQuery budget uses formatted size ────────────────────────────────
+
+describe('ConversationRetrievalServiceImpl — I-2 DataQuery formatted-size accounting', () => {
+	it('dataQuery budget accounting uses formatted size, not raw content size', async () => {
+		// File has a 100-char appId; formatDataQueryContext renders as `[${appId}]\n${content}`.
+		// Header overhead = 1 + 100 + 1 + 1 = 103 chars. Content = 50 chars.
+		// Formatted size = 153 chars. Raw content = 50 chars.
+		//
+		// We set characterBudget = 153 so that:
+		//   - raw accounting: charsUsed=50, budget=103 left → settings proceeds (not in failures)
+		//   - formatted accounting: charsUsed=153, budget=0 → settings budget-exhausted (in failures)
+		const fileContent = 'x'.repeat(50);
+		const appId = 'A'.repeat(100);
+		const formattedSize = `[${appId}]\n${fileContent}`.length; // 153
+
+		const mockDataQuery = {
+			query: vi.fn().mockResolvedValue({
+				files: [{ appId, type: null, title: null, path: 'users/u1/food/r.md', content: fileContent }],
+				empty: false,
+			}),
+		};
+		const mockSettingsReader = {
+			buildCatalog: vi.fn().mockResolvedValue({ catalog: 'S'.repeat(10), trustedInstructions: '' }),
+		};
+		const mockSystemInfo = { isUserAdmin: vi.fn().mockReturnValue(false) };
+
+		const service = new ConversationRetrievalServiceImpl({
+			dataQuery: mockDataQuery as never,
+			settingsReader: mockSettingsReader as never,
+			systemInfo: mockSystemInfo as never,
+		});
+
+		const snapshot = await withUserAndHousehold('user1', 'hh1', () =>
+			service.buildContextSnapshot({
+				question: 'show my data',
+				mode: 'free-text',
+				dataQueryCandidate: true,
+				recentFilePaths: [],
+				characterBudget: formattedSize,
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+					settings: true,
+				},
+			}),
+		);
+
+		// Under correct formatted accounting, budget exhausted after DataQuery.
+		// Settings arrives with catBudget = 0 and is dropped to failures.
+		expect(snapshot.failures).toContain('settings');
+	});
+
+	it('dataQuery formatted output stays within 6000-char catBudget', async () => {
+		// 10 files with a 200-char appId and 600-char content. Without the fix, the truncation
+		// loop only subtracts raw content from `remaining`, ignoring header overhead.
+		// formatDataQueryContext on the (untruncated) result ≈ 8138 chars — well above 6000.
+		// With the fix, header overhead is accounted during slicing and the output stays ≤ 6000.
+		const files = Array.from({ length: 10 }, (_, i) => ({
+			appId: 'A'.repeat(200),
+			type: null,
+			title: `file-${i}`,
+			path: `users/u1/food/file-${i}.md`,
+			content: 'x'.repeat(600),
+		}));
+
+		const mockDataQuery = {
+			query: vi.fn().mockResolvedValue({ files, empty: false }),
+		};
+
+		const service = new ConversationRetrievalServiceImpl({
+			dataQuery: mockDataQuery as never,
+		});
+
+		const snapshot = await withUserAndHousehold('user1', 'hh1', () =>
+			service.buildContextSnapshot({
+				question: 'show my data',
+				mode: 'free-text',
+				dataQueryCandidate: true,
+				recentFilePaths: [],
+				include: {
+					'context-store': false,
+					'interaction-context': false,
+					'app-metadata': false,
+				},
+			}),
+		);
+
+		const rendered = formatDataQueryContext(snapshot.dataQueryResult ?? { files: [], empty: true });
+		expect(rendered.length).toBeLessThanOrEqual(6000);
 	});
 });
 
