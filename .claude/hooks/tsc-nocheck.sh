@@ -24,9 +24,8 @@ if [ "$1" != "git-hook" ]; then
     });
   " 2>/dev/null <<< "$INPUT" || echo "")
 
-  # Only gate on git merge commands
-  [[ "$COMMAND" =~ git[[:space:]]+(merge|checkout[[:space:]].*&&.*merge) ]] || \
-  [[ "$COMMAND" =~ git[[:space:]]+merge ]] || exit 0
+  # Only gate on git merge and git push commands
+  [[ "$COMMAND" =~ git[[:space:]]+(merge|push) ]] || exit 0
 fi
 
 # ------------------------------------------------------------------

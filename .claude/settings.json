@@ -16,7 +16,7 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/tsc-nocheck.sh",
-            "if": "Bash(git merge *)",
+            "if": "Bash(git merge *)|Bash(git push *)",
             "timeout": 120,
             "statusMessage": "Checking TypeScript before merge..."
           }
