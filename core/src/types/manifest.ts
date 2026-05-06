@@ -200,6 +200,10 @@ export interface ManifestUserConfig {
 	description: string;
 	/** Options for type: 'select'. */
 	options?: string[];
+	/** Minimum value for type: 'number'. */
+	min?: number;
+	/** Maximum value for type: 'number'. */
+	max?: number;
 	/** Short display label shown in GUI/settings list. Falls back to description if absent. */
 	label?: string;
 	/** One-sentence help text shown beneath the control. */
