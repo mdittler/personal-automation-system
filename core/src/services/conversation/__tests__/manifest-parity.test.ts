@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
-	CONVERSATION_USER_CONFIG,
+	CONVERSATION_USER_CONFIG_MANIFEST,
 } from '../manifest.js';
 import { buildVirtualChatbotApp } from '../virtual-app.js';
 
@@ -50,26 +50,7 @@ describe('Virtual chatbot manifest — full structural contract (post-Chunk-D)',
 		});
 	});
 
-	test('user_config exposes auto_detect_pas, log_to_notes, flush_memory_on_idle_reset, and session_search_tool_enabled', () => {
-		expect(manifest.user_config?.map((c) => c.key)).toEqual([
-			'auto_detect_pas',
-			'log_to_notes',
-			'flush_memory_on_idle_reset',
-			'session_search_tool_enabled',
-		]);
-
-		const autoDetect = manifest.user_config?.find((c) => c.key === 'auto_detect_pas');
-		const logToNotes = manifest.user_config?.find((c) => c.key === 'log_to_notes');
-		const flush = manifest.user_config?.find((c) => c.key === 'flush_memory_on_idle_reset');
-		const sessionSearch = manifest.user_config?.find(
-			(c) => c.key === 'session_search_tool_enabled',
-		);
-		expect(autoDetect?.default).toBe(true);
-		expect(logToNotes?.default).toBe(false);
-		expect(flush?.type).toBe('boolean');
-		expect(flush?.default).toBe(false);
-		expect(sessionSearch?.type).toBe('boolean');
-		expect(sessionSearch?.default).toBe(true);
-		expect(manifest.user_config).toEqual(CONVERSATION_USER_CONFIG);
+	test('user_config round-trips all fields through the strip-map (full CONVERSATION_USER_CONFIG_MANIFEST parity)', () => {
+		expect(manifest.user_config).toEqual(CONVERSATION_USER_CONFIG_MANIFEST);
 	});
 });

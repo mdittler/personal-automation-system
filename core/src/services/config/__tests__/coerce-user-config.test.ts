@@ -140,6 +140,70 @@ describe('coerceUserConfigValue — select', () => {
 	});
 });
 
+describe('coerceUserConfigValue — number bounds (Fix 3)', () => {
+	it('rejects number below min', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		const result = coerceUserConfigValue(e, 0);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toContain('below minimum');
+	});
+
+	it('rejects number above max', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		const result = coerceUserConfigValue(e, 10);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toContain('exceeds maximum');
+	});
+
+	it('accepts number within bounds', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		expect(coerceUserConfigValue(e, 5)).toEqual({ ok: true, coerced: 5 });
+	});
+
+	it('accepts number equal to min boundary', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		expect(coerceUserConfigValue(e, 1)).toEqual({ ok: true, coerced: 1 });
+	});
+
+	it('accepts number equal to max boundary', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		expect(coerceUserConfigValue(e, 7)).toEqual({ ok: true, coerced: 7 });
+	});
+
+	it('accepts any finite number when no bounds defined', () => {
+		const e = entry({ type: 'number' });
+		expect(coerceUserConfigValue(e, -9999)).toEqual({ ok: true, coerced: -9999 });
+	});
+
+	it('applies bounds check to string-coerced numbers', () => {
+		const e = entry({ type: 'number', min: 1, max: 7 });
+		expect(coerceUserConfigValue(e, '0').ok).toBe(false);
+		expect(coerceUserConfigValue(e, '5')).toEqual({ ok: true, coerced: 5 });
+	});
+});
+
+describe('coerceUserConfigValue — string clearable (Fix 4)', () => {
+	it('allows clearing a string setting whose default is empty string', () => {
+		const e = entry({ type: 'string', default: '' });
+		expect(coerceUserConfigValue(e, '')).toEqual({ ok: true, coerced: '' });
+	});
+
+	it('allows clearing via whitespace-only input when default is empty string', () => {
+		const e = entry({ type: 'string', default: '' });
+		expect(coerceUserConfigValue(e, '   ')).toEqual({ ok: true, coerced: '' });
+	});
+
+	it('rejects empty string for a string setting whose default is non-empty', () => {
+		const e = entry({ type: 'string', default: 'some value' });
+		expect(coerceUserConfigValue(e, '').ok).toBe(false);
+	});
+
+	it('rejects empty string when default is null (not intentionally clearable)', () => {
+		const e = entry({ type: 'string', default: null });
+		expect(coerceUserConfigValue(e, '').ok).toBe(false);
+	});
+});
+
 describe('coerceUserConfigValue — null/undefined guard (all types)', () => {
 	it.each(['boolean', 'number', 'string', 'select'] as const)('rejects null for type %s', (type) => {
 		expect(coerceUserConfigValue(entry({ type }), null).ok).toBe(false);

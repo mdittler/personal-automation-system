@@ -47,3 +47,6 @@ user_config:
     type: number
     default: 10
     description: "Number of notes to show when listing"
+    label: "Notes per page"
+    help: "How many notes to display when you list your recent notes."
+    category: notes

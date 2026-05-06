@@ -200,4 +200,28 @@ export interface ManifestUserConfig {
 	description: string;
 	/** Options for type: 'select'. */
 	options?: string[];
+	/** Minimum value for type: 'number'. */
+	min?: number;
+	/** Maximum value for type: 'number'. */
+	max?: number;
+	/** Short display label shown in GUI/settings list. Falls back to description if absent. */
+	label?: string;
+	/** One-sentence help text shown beneath the control. */
+	help?: string;
+	/** Extended tooltip / detail text shown on hover or expand. */
+	helpDetail?: string;
+	/** Setting category for grouping in the settings UI. */
+	category?: 'personal' | 'food' | 'notes' | 'memory-sessions' | 'notifications' | 'system' | 'dangerous';
+	/** If true, setting is only visible to platform admins. */
+	adminOnly?: boolean;
+	/** If true, a confirmation prompt is shown before applying. */
+	dangerous?: boolean;
+	/** Confirmation prompt text shown when dangerous is true. */
+	dangerConfirmPrompt?: string;
+	/** If true, setting is hidden from all UI surfaces (but still settable via NL or API). */
+	hidden?: boolean;
+	/** If true, the chatbot may change this setting via natural language. */
+	nlSafe?: boolean;
+	/** Regex source string. Compiled to RegExp with /i flag at registry build time. */
+	nlIntentRegex?: string;
 }

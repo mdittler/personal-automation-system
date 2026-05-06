@@ -40,6 +40,8 @@ import {
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
+import type { SettingsRegistry } from '../settings/settings-registry.js';
+import type { SettingsWriter } from '../settings/settings-writer.js';
 import { getAutoDetectSetting } from './auto-detect.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
@@ -52,6 +54,7 @@ import {
 	normalizeResponse,
 	processConfigSetTags,
 	processMemoryKindSetTags,
+	stripConfigSetTags,
 } from './control-tags.js';
 import {
 	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
@@ -69,7 +72,6 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt, buildSystemPrompt } from './prompt-builder.js';
@@ -101,6 +103,10 @@ export interface HandleMessageDeps {
 	titleService?: TitleService;
 	/** Called when flush_memory_on_idle_reset is turned OFF via <config-set> tag. */
 	disableFlushAndCleanup?: (userId: string) => Promise<void>;
+	/** SettingsRegistry — when present, enables <config-set> tag processing via registry allowlist. */
+	settingsRegistry?: SettingsRegistry;
+	/** SettingsWriter — when present, routes <config-set> writes through registry-aware writer. */
+	settingsWriter?: SettingsWriter;
 }
 
 export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps): Promise<void> {
@@ -176,6 +182,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	});
 
 	let systemPrompt: string;
+	let settingsTrustedInjected = false;
 	if (autoDetect) {
 		const recentEntries = deps.interactionContext?.getRecent(ctx.userId) ?? [];
 		const recentContextSummary = formatInteractionContextSummary(recentEntries);
@@ -194,8 +201,10 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 						question: ctx.text,
 						mode: 'free-text',
 						dataQueryCandidate: classification.dataQueryCandidate ?? false,
+						settingsCandidate: classification.settingsCandidate ?? false,
 						recentFilePaths,
 					});
+					if (snapshot?.settingsTrustedInstructions) settingsTrustedInjected = true;
 				} catch (error) {
 					deps.logger.warn('ConversationRetrievalService.buildContextSnapshot failed: %s', error);
 				}
@@ -247,7 +256,7 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		});
 	}
 
-	if (deps.config && NOTES_INTENT_REGEX.test(ctx.text)) {
+	if (deps.config && !settingsTrustedInjected && NOTES_INTENT_REGEX.test(ctx.text)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(ctx.text)) {
@@ -367,13 +376,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 
 	let finalResponse: string;
 	const allConfirmations: string[] = [];
-	if (deps.config) {
+	if (deps.settingsRegistry && deps.settingsWriter) {
 		const { cleanedResponse: afterConfigSet, confirmations: configConfirmations } =
 			await processConfigSetTags(afterSwitchStrip, {
 				userId: ctx.userId,
 				userMessage: ctx.text,
-				config: deps.config,
-				manifest: CONVERSATION_USER_CONFIG,
+				settingsRegistry: deps.settingsRegistry,
+				settingsWriter: deps.settingsWriter,
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});
@@ -392,8 +401,10 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 			finalResponse = afterConfigSet;
 		}
 	} else if (deps.contextStore) {
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		const afterConfigSetStrip = stripConfigSetTags(afterSwitchStrip);
 		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =
-			await processMemoryKindSetTags(afterSwitchStrip, {
+			await processMemoryKindSetTags(afterConfigSetStrip, {
 				userId: ctx.userId,
 				userMessage: ctx.text,
 				contextStore: deps.contextStore,
@@ -402,7 +413,8 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 		allConfirmations.push(...kindConfirmations);
 		finalResponse = afterKindSet;
 	} else {
-		finalResponse = normalizeResponse(afterSwitchStrip);
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		finalResponse = stripConfigSetTags(afterSwitchStrip);
 	}
 
 	if (allConfirmations.length > 0) {

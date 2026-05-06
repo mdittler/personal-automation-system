@@ -29,6 +29,7 @@ import type { ChatTranscriptIndex, SearchResult } from '../chat-transcript-index
 import { CONTEXT_INTERNAL_BYPASS } from '../context-store/index.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import type { InteractionContextService, InteractionEntry } from '../interaction-context/index.js';
+import type { SettingsReader } from '../settings/settings-reader.js';
 import { ConversationSystemInfoReader } from './conversation-system-info-reader.js';
 import type { AllowedSourceCategory } from './source-policy.js';
 import { chooseSources } from './source-selection.js';
@@ -68,6 +69,13 @@ export interface ContextSnapshotOptions {
 	question: string;
 	mode: 'free-text' | 'ask';
 	dataQueryCandidate: boolean;
+	/**
+	 * Whether the PAS classifier emitted YES_SETTINGS — signals that the user is
+	 * asking about configuring their personal settings. When true, `chooseSources`
+	 * includes the 'settings' source in free-text mode (always included in ask mode).
+	 * Defaults to false when absent.
+	 */
+	settingsCandidate?: boolean;
 	recentFilePaths: string[];
 	include?: { [K in AllowedSourceCategory]?: boolean };
 	characterBudget?: number;
@@ -98,6 +106,17 @@ export interface ConversationContextSnapshot {
 	reports?: ReportDefinition[];
 	/** Alerts scoped to the current user. */
 	alerts?: AlertDefinition[];
+	/**
+	 * Sanitized settings catalog string — rendered inside a `<memory-context>` fence
+	 * in the system prompt. Contains nlSafe key descriptions from SettingsReader.
+	 */
+	settingsCatalog?: string;
+	/**
+	 * Trusted instruction block — rendered as plain text in the system prompt,
+	 * outside any `<memory-context>` fence. Contains safe LLM instructions from
+	 * SettingsReader (e.g., "To change X, say 'set X to Y'").
+	 */
+	settingsTrustedInstructions?: string;
 	/** Categories that failed to load (partial-failure tolerance). */
 	failures: AllowedSourceCategory[];
 }
@@ -150,6 +169,12 @@ export interface ConversationRetrievalService {
 	 * Returns { hits: [] } if no index is injected.
 	 */
 	searchSessions(opts: SessionSearchOpts): Promise<SearchResult>;
+	/**
+	 * Build the settings catalog and trusted instruction block.
+	 * Returns `{ catalog, trustedInstructions }` — or empty strings when no settings
+	 * service is wired. Requires a userId in the current requestContext.
+	 */
+	buildSettingsCatalog(): Promise<{ catalog: string; trustedInstructions: string }>;
 	/** Compose a full context snapshot for LLM injection. */
 	buildContextSnapshot(opts: ContextSnapshotOptions): Promise<ConversationContextSnapshot>;
 	/**
@@ -198,6 +223,12 @@ export interface ConversationRetrievalDeps {
 	 * untyped ContextStore entries from the durable memory snapshot.
 	 */
 	systemConfig?: SystemConfig;
+	/**
+	 * Optional SettingsReader — when provided, `buildSettingsCatalog` returns
+	 * real per-user catalog + trusted instruction block from the registry.
+	 * Absent → buildSettingsCatalog returns empty strings (degraded, not an error).
+	 */
+	settingsReader?: SettingsReader;
 }
 
 // ─── Implementation ───────────────────────────────────────────────────────────
@@ -341,6 +372,18 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			messageBefore: opts.messageBefore,
 			excludeSessionIds: opts.excludeSessionIds,
 		});
+	}
+
+	async buildSettingsCatalog(): Promise<{ catalog: string; trustedInstructions: string }> {
+		if (!this.deps.settingsReader) {
+			return { catalog: '', trustedInstructions: '' };
+		}
+		const userId = this.assertRequestContext('buildSettingsCatalog');
+		const isAdmin = this.deps.systemInfo?.isUserAdmin(userId) ?? false;
+		// Let errors propagate — buildContextSnapshot uses Promise.allSettled so a throw
+		// here becomes a rejected promise that pushes 'settings' to snapshot.failures.
+		// Direct callers (outside buildContextSnapshot) still catch via their own try/catch.
+		return this.deps.settingsReader.buildCatalog({ userId, isAdmin });
 	}
 
 	async buildMemorySnapshot(
@@ -522,6 +565,19 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			snapshot.failures.push('alerts');
 		}
 
+		// Settings catalog — reader absent → push 'settings' to failures (consistent with other sources).
+		// When reader is present, wrap in a rejecting promise so allSettled catches throws.
+		if (selected.has('settings')) {
+			if (!this.deps.settingsReader) {
+				snapshot.failures.push('settings');
+			} else {
+				tasks.push({
+					category: 'settings',
+					promise: this.buildSettingsCatalog(),
+				});
+			}
+		}
+
 		// Await all tasks with partial-failure tolerance
 		const settled = await Promise.allSettled(tasks.map((t) => t.promise));
 
@@ -652,6 +708,22 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 					const truncated = truncateArray(alerts, catBudget, (a) => alertSizeMap.get(a) ?? 0);
 					snapshot.alerts = truncated;
 					charsUsed += truncated.reduce((sum, a) => sum + (alertSizeMap.get(a) ?? 0), 0);
+					break;
+				}
+				case 'settings': {
+					const { catalog, trustedInstructions } = value as {
+						catalog: string;
+						trustedInstructions: string;
+					};
+					if (catalog) {
+						snapshot.settingsCatalog = catalog;
+						charsUsed += catalog.length;
+					}
+					if (trustedInstructions) {
+						snapshot.settingsTrustedInstructions = trustedInstructions;
+						// trustedInstructions does not count toward the memory budget —
+						// it is rendered outside any <memory-context> fence.
+					}
 					break;
 				}
 				default:

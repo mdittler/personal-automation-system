@@ -86,6 +86,108 @@ export interface PASClassification {
 	 * classifier). When true, DataQueryService is called.
 	 */
 	dataQueryCandidate?: boolean;
+	/**
+	 * Whether the message is asking about or requesting a change to a PAS
+	 * setting (YES_SETTINGS from classifier). When true, SettingsReader is
+	 * called to inject the relevant settings catalog into the prompt.
+	 */
+	settingsCandidate?: boolean;
+}
+
+/**
+ * Parse the raw string output from the PAS classifier LLM into a
+ * `PASClassification` object.
+ *
+ * Token protocol (space-separated, any order):
+ *   YES_PAS / NO_PAS     — PAS relevance (new form)
+ *   YES_DATA / NO_DATA   — data-query signal
+ *   YES_SETTINGS / NO_SETTINGS — settings-query signal
+ *   YES / NO             — legacy bare tokens (backward-compat: YES → pasRelated)
+ *
+ * Algorithm:
+ *   1. Scan lines top-to-bottom. For each non-empty line, extract all uppercase
+ *      token sequences (/[A-Z_]+/g) and check them against KNOWN_TOKENS.
+ *      - "Pure token line": ALL extracted tokens are known → use all tokens.
+ *      - "Token-first line": the FIRST token is known (model answer at start,
+ *        explanation after) → use only the leading run of known tokens before
+ *        the first unknown token.
+ *      - Lines whose first token is unknown (prose containing token names) are
+ *        skipped entirely.
+ *   2. Decisions are parsed from the first qualifying line only. Tokens in
+ *      subsequent prose or explanatory text are ignored, preventing false
+ *      positives from quoted tokens or model reasoning.
+ *   3. NO_* tokens dominate YES_* tokens when both appear.
+ *   4. settingsCandidate is only set to true when pasRelated is also true.
+ *   5. Fail-open: if no qualifying line is found but the input has content,
+ *      return pasRelated=true so users still get a useful response.
+ *   6. Empty input returns all-false.
+ *
+ * Input is uppercased before matching so lowercase LLM output is tolerated.
+ */
+export function parsePASClassifierOutput(raw: string): PASClassification {
+	const KNOWN_TOKENS = new Set([
+		'YES',
+		'NO',
+		'YES_PAS',
+		'NO_PAS',
+		'YES_DATA',
+		'NO_DATA',
+		'YES_SETTINGS',
+		'NO_SETTINGS',
+	]);
+
+	const lines = raw.split('\n');
+	let resolvedTokens: Set<string> | undefined;
+
+	for (const line of lines) {
+		const trimmed = line.trim().toUpperCase();
+		if (!trimmed) continue;
+
+		const parts = trimmed.match(/[A-Z_]+/g) ?? [];
+		if (parts.length === 0) continue;
+
+		if (parts.every((p) => KNOWN_TOKENS.has(p))) {
+			// Pure token line: all extracted tokens are known → use all of them.
+			resolvedTokens = new Set(parts);
+			break;
+		}
+
+		if (KNOWN_TOKENS.has(parts[0])) {
+			// Token-first line: model put its answer at the start, then prose.
+			// Collect the leading run of known tokens before the first unknown one.
+			const leading: string[] = [];
+			for (const p of parts) {
+				if (!KNOWN_TOKENS.has(p)) break;
+				leading.push(p);
+			}
+			resolvedTokens = new Set(leading);
+			break;
+		}
+
+		// First token is unknown (prose containing quoted token names) → skip line.
+	}
+
+	if (resolvedTokens === undefined) {
+		// Fail-open when there is content but no qualifying line found.
+		// Empty / whitespace-only input returns all-false.
+		const hasContent = lines.some((l) => l.trim().length > 0);
+		return hasContent
+			? { pasRelated: true, dataQueryCandidate: false, settingsCandidate: false }
+			: { pasRelated: false, dataQueryCandidate: false, settingsCandidate: false };
+	}
+
+	const tokens = resolvedTokens;
+
+	// NO_* tokens dominate YES_* tokens when both appear.
+	const dataQueryCandidate = tokens.has('YES_DATA') && !tokens.has('NO_DATA');
+	// Legacy bare YES implies pasRelated; YES_DATA also implies pasRelated.
+	const pasRelated =
+		(tokens.has('YES_PAS') || tokens.has('YES') || dataQueryCandidate) &&
+		!tokens.has('NO_PAS');
+	// settingsCandidate is only meaningful when the message is PAS-related.
+	const settingsCandidate = pasRelated && tokens.has('YES_SETTINGS') && !tokens.has('NO_SETTINGS');
+
+	return { pasRelated, dataQueryCandidate, settingsCandidate };
 }
 
 /**
@@ -139,8 +241,14 @@ export async function classifyPASMessage(
 	const systemPrompt =
 		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
 		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
-		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.${appHint}` +
-		` Reply with exactly: YES_DATA (data query about stored information), YES (PAS-related but not a data query), or NO (unrelated).` +
+		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.` +
+		` SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint}` +
+		` Reply with space-separated tokens (any order). Examples:\n` +
+		`  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n` +
+		`  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n` +
+		`  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n` +
+		`  NO_PAS                        — not PAS-related\n` +
+		`Backward-compat: bare YES/NO/YES_DATA tokens are also accepted.` +
 		contextHint;
 
 	try {
@@ -151,15 +259,11 @@ export async function classifyPASMessage(
 			temperature: 0,
 		});
 
-		// Extract first word — handles "YES_DATA - this is a data query", "YES.", "NO.", etc.
-		const firstWord = (response.trim().split(/\s/)[0] ?? '').toLowerCase().replace(/[^a-z_]/g, '');
-		const pasRelated = firstWord.startsWith('yes');
-		const dataQueryCandidate = firstWord === 'yes_data';
-		return { pasRelated, dataQueryCandidate };
+		return parsePASClassifierOutput(response);
 	} catch (error) {
 		deps.logger?.warn('PAS classification failed, defaulting to app-aware context: %s', error);
-		// Fail-open for PAS detection, fail-safe for data queries
-		return { pasRelated: true };
+		// Fail-open for PAS detection; fail-safe (false) for data/settings queries
+		return { pasRelated: true, dataQueryCandidate: false, settingsCandidate: false };
 	}
 }
 

@@ -3,7 +3,7 @@ import type { AppModule } from '../../types/app-module.js';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
-	CONVERSATION_USER_CONFIG,
+	CONVERSATION_USER_CONFIG_MANIFEST,
 } from './manifest.js';
 
 export const VIRTUAL_CHATBOT_PATH = '<virtual:chatbot>';
@@ -50,7 +50,7 @@ export function buildVirtualChatbotApp(): { manifest: AppManifest; module: AppMo
 				monthly_cost_cap: CONVERSATION_LLM_SAFEGUARDS.monthly_cost_cap,
 			},
 		},
-		user_config: CONVERSATION_USER_CONFIG,
+		user_config: CONVERSATION_USER_CONFIG_MANIFEST,
 	} satisfies AppManifest;
 
 	const module: AppModule = {

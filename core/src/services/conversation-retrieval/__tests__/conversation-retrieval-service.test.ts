@@ -1014,3 +1014,70 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 		expect(noPinning.content).toContain('## recent-session-summary'); // still present alphabetically (only entry)
 	});
 });
+
+// ─── buildContextSnapshot: settings failure tracking (Fix 4) ─────────────────
+
+describe('ConversationRetrievalServiceImpl — buildContextSnapshot settings failures', () => {
+	it('pushes "settings" to failures when settingsReader is absent', async () => {
+		// No settingsReader wired — should appear in failures, not silently degrade
+		const service = new ConversationRetrievalServiceImpl({});
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my settings',
+				mode: 'ask',
+				dataQueryCandidate: false,
+				settingsCandidate: true,
+				recentFilePaths: [],
+				include: { settings: true },
+			}),
+		);
+		expect(snapshot.failures).toContain('settings');
+	});
+
+	it('pushes "settings" to failures when settingsReader.buildCatalog throws', async () => {
+		const throwingReader = {
+			buildCatalog: vi.fn().mockRejectedValue(new Error('disk I/O error')),
+		} as never;
+		const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as never;
+		const service = new ConversationRetrievalServiceImpl({
+			settingsReader: throwingReader,
+			logger,
+		});
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my settings',
+				mode: 'ask',
+				dataQueryCandidate: false,
+				settingsCandidate: true,
+				recentFilePaths: [],
+				include: { settings: true },
+			}),
+		);
+		expect(snapshot.failures).toContain('settings');
+	});
+
+	it('does NOT push "settings" to failures when reader succeeds', async () => {
+		const successReader = {
+			buildCatalog: vi.fn().mockResolvedValue({ catalog: '## Your settings\n- Foo (a.b): ON', trustedInstructions: '' }),
+		} as never;
+		const systemInfo = {
+			isUserAdmin: vi.fn().mockReturnValue(false),
+		} as never;
+		const service = new ConversationRetrievalServiceImpl({
+			settingsReader: successReader,
+			systemInfo,
+		});
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'show my settings',
+				mode: 'ask',
+				dataQueryCandidate: false,
+				settingsCandidate: true,
+				recentFilePaths: [],
+				include: { settings: true },
+			}),
+		);
+		expect(snapshot.failures).not.toContain('settings');
+		expect(snapshot.settingsCatalog).toContain('Foo');
+	});
+});

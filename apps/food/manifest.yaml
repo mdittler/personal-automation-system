@@ -258,113 +258,246 @@ user_config:
   - key: meal_plan_dinners
     type: number
     default: 5
+    min: 1
+    max: 7
     description: "Number of dinners to plan per week"
+    label: "Dinners per week"
+    help: "How many dinners to include in your weekly meal plan."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|how many).*(dinner|meal.plan)|(dinner|meal.plan).*(per week|in my plan|per night)"
   - key: new_recipe_ratio
     type: number
     default: 40
+    min: 0
+    max: 100
     description: "Percentage of meals that should be new recipes (0-100)"
+    label: "New recipe ratio (%)"
+    help: "Percentage of planned meals that should introduce a new recipe (0–100)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|lower|raise|increase|decrease).*(new.recipe|recipe.ratio|recipe.percent)|(new.recipe|recipe.ratio).*(set|change|update|lower|raise)"
   - key: dietary_preferences
     type: string
     default: ""
     description: "Comma-separated dietary preferences (e.g., healthy, easy)"
+    label: "Dietary preferences"
+    help: "Your general food preferences used when generating meal plans (e.g., healthy, easy, vegetarian)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(update|change|set|add|remove).*(dietary.preference|food.preference)|(dietary.preference|food.preference).*(update|change|set)"
   - key: dietary_restrictions
     type: string
     default: ""
     description: "Comma-separated dietary restrictions (e.g., no red meat on weekdays)"
+    label: "Dietary restrictions"
+    help: "Hard restrictions applied to all meal planning (e.g., gluten-free, no red meat on weekdays)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(update|change|set|add|remove).*(dietary.restriction|food.restriction)|(dietary.restriction|food.restriction).*(update|change|set)"
   - key: voting_window_hours
     type: number
     default: 12
     description: "Hours household members have to vote on meal plans"
+    label: "Voting window (hours)"
+    help: "How many hours household members have to vote on a proposed meal plan before it is finalized."
+    category: food
   - key: rating_reminder_delay
     type: number
     default: 120
     description: "Minutes after expected cook time to ask for ratings"
+    label: "Rating reminder delay (minutes)"
+    help: "How many minutes after the expected cook time to send a rating prompt for the meal."
+    category: food
   - key: preferred_stores
     type: string
     default: ""
     description: "Comma-separated list of stores for price comparison"
+    label: "Preferred stores"
+    help: "Comma-separated list of grocery stores used for price comparison (e.g., Trader Joe's, Whole Foods)."
+    category: food
   - key: default_store
     type: string
     default: ""
     description: "Default store for price estimates"
+    label: "Default grocery store"
+    help: "Your preferred store used when generating price estimates and grocery suggestions."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(default.store|default.grocery|grocery.store)|(default.store|default.grocery).*(set|change|update|to)"
   - key: show_price_estimates
     type: boolean
     default: false
     description: "Show estimated prices on grocery lists"
+    label: "Show price estimates"
+    help: "Display estimated item costs on grocery lists based on your price history."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(show|hide|enable|disable|stop|turn).*(price.estimate|cost.estimate|pricing)|(price.estimate|cost.estimate|pricing).*(on|off|enable|disable)"
   - key: staple_items
     type: string
     default: "salt,pepper,olive oil,butter,garlic"
     description: "Comma-separated items assumed to be on hand"
+    label: "Staple items"
+    help: "Comma-separated pantry staples assumed to always be on hand, so they are excluded from grocery lists."
+    category: food
   - key: shopping_followup_hours
     type: number
     default: 24
     description: "Hours after shopping mode to send follow-up"
+    label: "Shopping follow-up delay (hours)"
+    help: "How many hours after completing a shopping session to send a follow-up check-in message."
+    category: food
   - key: location
     type: string
     default: "Raleigh, NC"
     description: "Your location for seasonal produce awareness (e.g., 'Boston, MA', 'Portland, OR')"
+    label: "Location"
+    help: "Your city and state used for seasonal produce awareness and region-specific recipe suggestions (e.g., Boston, MA)."
+    category: food
   - key: seasonal_nudges
     type: boolean
     default: true
     description: "Send seasonal produce suggestions"
+    label: "Seasonal nudges"
+    help: "Receive bi-monthly recipe suggestions featuring in-season produce for your region."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(turn|switch|enable|disable|stop|start).*(seasonal|season).*(nudge|suggestion)|seasonal.*(nudge|suggestion).*(on|off|enable|disable)"
   - key: child_meal_adaptation
     type: boolean
     default: true
     description: "Auto-suggest kid-friendly recipe adaptations"
+    label: "Kid meal adaptation"
+    help: "Automatically suggest child-friendly versions of recipes when kid profiles are set up."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(turn|enable|disable|toggle).*(kid|child|children|toddler).*(meal|adapt|adjust)|(kid|child|children|toddler).*(meal|adapt|adjust).*(on|off)"
   - key: allergen_wait_days
     type: number
     default: 3
     description: "Days to wait between introducing new allergens for babies"
+    label: "Allergen wait period (days)"
+    help: "Number of days to wait between introducing each new allergenic food to a baby or young child."
+    category: food
   - key: cooking_speaker_device
     type: string
     default: ""
     description: "Chromecast/Google Home device name for hands-free cooking. Leave empty for system default."
+    label: "Cooking speaker device"
+    help: "Name of the Chromecast or Google Home device to use for hands-free cooking audio. Leave empty to use the system default."
+    category: food
   - key: hands_free_default
     type: boolean
     default: false
     description: "Automatically enable voice output when starting cook mode (skip the prompt)."
+    label: "Hands-free default"
+    help: "Start cook mode in hands-free (voice) mode automatically without asking each time."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(turn|enable|disable|set).*(hands.free|handsfree)|(hands.free|handsfree).*(on|off|enable|disable|default)"
   - key: macro_target_calories
     type: number
     default: 0
+    min: 0
+    max: 10000
     description: "Daily calorie target (0 = not set)"
+    label: "Daily calorie target"
+    help: "Your daily calorie goal used for nutrition tracking and meal planning (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(calorie.target|target.calorie|calorie.goal)|calorie.target.*(set|change|update|to)"
   - key: macro_target_protein
     type: number
     default: 0
+    min: 0
+    max: 1000
     description: "Daily protein target in grams (0 = not set)"
+    label: "Daily protein target (g)"
+    help: "Your daily protein goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(protein.target|target.protein|protein.goal)|protein.target.*(set|change|update|to)"
   - key: macro_target_carbs
     type: number
     default: 0
+    min: 0
+    max: 2000
     description: "Daily carbs target in grams (0 = not set)"
+    label: "Daily carbs target (g)"
+    help: "Your daily carbohydrate goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(carb.target|target.carb|carb.goal)|carb.target.*(set|change|update|to)"
   - key: macro_target_fat
     type: number
     default: 0
+    min: 0
+    max: 1000
     description: "Daily fat target in grams (0 = not set)"
+    label: "Daily fat target (g)"
+    help: "Your daily fat goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(fat.target|target.fat|fat.goal)|fat.target.*(set|change|update|to)"
   - key: macro_target_fiber
     type: number
     default: 0
+    min: 0
+    max: 200
     description: "Daily fiber target in grams (0 = not set)"
+    label: "Daily fiber target (g)"
+    help: "Your daily fiber goal in grams used for nutrition tracking (0 = not set)."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(set|change|update|my).*(fiber.target|target.fiber|fiber.goal)|fiber.target.*(set|change|update|to)"
   - key: guest_profiles_info
     type: string
     default: "Edit via /hosting guests add|remove|list"
     description: "Guest profiles are managed via the /hosting command (not editable here)"
+    hidden: true
   - key: cultural_calendar
     type: boolean
     default: true
     description: "Send weekly recipe suggestions for upcoming cultural holidays and celebrations (does not affect on-demand queries)"
+    label: "Cultural calendar suggestions"
+    help: "Receive weekly recipe suggestions tied to upcoming cultural holidays and celebrations."
+    category: food
+    nlSafe: true
+    nlIntentRegex: "(turn|enable|disable|toggle).*(cultural.calendar|cultural calendar)|(cultural.calendar|cultural calendar).*(on|off|enable|disable)"
   - key: schedule_overrides_info
     type: string
     default: "Edit the seasonal-nudge and weekly-nutrition-summary cron schedules via the GUI Scheduler page"
     description: "Schedule cron expressions are managed via the GUI Scheduler page, not here"
+    hidden: true
   - key: shadow_sample_rate
     type: number
     default: 1
     description: "Fraction of text messages to send to the shadow LLM classifier (0 = off, 1 = all). Used for telemetry before classifier switchover."
+    label: "Shadow classifier sample rate"
+    help: "Fraction of messages routed through the shadow LLM classifier for telemetry (0 = off, 1 = all)."
+    category: dangerous
+    adminOnly: true
+    dangerous: true
+    dangerConfirmPrompt: "Changing the shadow sample rate affects LLM cost and telemetry coverage. Are you sure?"
   - key: routing_primary
     type: select
     default: regex
     description: "Primary routing strategy: 'regex' (Chunk C behavior) or 'shadow' (LLM-classified dispatch). Flip to 'shadow' only after the shadow-classifier log shows ≥95% agreement. Setting 'shadow' with shadow_sample_rate<1 produces inconsistent routing — a warning is logged at init."
     options: [regex, shadow]
+    label: "Primary routing strategy"
+    help: "Controls whether food message routing uses regex rules or the LLM shadow classifier."
+    category: dangerous
+    adminOnly: true
+    dangerous: true
+    dangerConfirmPrompt: "Switching routing_primary to 'shadow' changes how all food messages are dispatched. Only do this after reviewing the shadow classifier log (≥95% agreement). Are you sure?"
   - key: shadow_min_confidence
     type: number
     default: 0.7
     description: "Confidence floor for shadow-primary dispatch. Shadow outputs below this threshold fall through to the regex cascade. Ignored when routing_primary=regex."
+    label: "Shadow classifier confidence floor"
+    help: "Minimum confidence required for the shadow classifier to override regex routing (ignored when routing_primary=regex)."
+    category: dangerous
+    adminOnly: true
+    dangerous: true
+    dangerConfirmPrompt: "Lowering the confidence floor may cause incorrect message routing. Are you sure?"

@@ -5,13 +5,44 @@
  * conversation app from core without re-reading the YAML.
  */
 
-import type { ManifestDataScope } from '../../types/manifest.js';
+import type { ManifestDataScope, ManifestUserConfig } from '../../types/manifest.js';
+import type { SettingsCategory } from '../settings/settings-registry.js';
+import {
+	MEMORY_FLUSH_INTENT_REGEX,
+	NOTES_INTENT_REGEX,
+} from './control-tags.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from './control-tags/session-search-instruction.js';
 
+/**
+ * Internal TypeScript representation of a chatbot user-config entry.
+ *
+ * Extends the YAML-serializable ManifestUserConfig shape with:
+ *  - `nlIntentRegex`: a compiled RegExp (not a string source) used at runtime
+ *    for intent-gating NL config changes. The adapter in manifest-settings.ts
+ *    forwards this directly to SettingDef without re-compilation.
+ *  - Rich metadata fields (`label`, `help`, `helpDetail`, `category`, etc.)
+ *    for SettingsRegistry registration.
+ *
+ * Note: CONVERSATION_USER_CONFIG is NOT directly assignable to ManifestUserConfig[]
+ * because nlIntentRegex is RegExp here vs. string in the YAML schema. virtual-app.ts
+ * maps entries to the plain ManifestUserConfig shape when building the AppManifest.
+ */
 export interface ConversationUserConfigEntry {
 	key: string;
 	type: 'boolean';
 	default: boolean;
 	description: string;
+	label?: string;
+	help?: string;
+	helpDetail?: string;
+	category?: SettingsCategory;
+	adminOnly?: boolean;
+	dangerous?: boolean;
+	dangerConfirmPrompt?: string;
+	hidden?: boolean;
+	nlSafe?: boolean;
+	/** Compiled RegExp (not a string source) — used directly by SettingsRegistry. */
+	nlIntentRegex?: RegExp;
 }
 
 export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
@@ -20,13 +51,22 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		type: 'boolean',
 		default: true,
 		description:
-			'Automatically detect PAS-related questions and include app info in responses (uses LLM classification; disable to use basic conversational mode)',
+			'Automatically detect PAS-related questions (uses LLM classification; disable to use basic conversational mode)',
+		label: 'Smart chat detection',
+		help: 'Detect when questions are PAS-related to inject app context.',
+		category: 'personal',
+		nlSafe: false,
 	},
 	{
 		key: 'log_to_notes',
 		type: 'boolean',
 		default: false,
 		description: 'Append every message to a daily-notes file (per-user opt-in, default OFF)',
+		label: 'Daily notes logging',
+		help: 'Save every chat message to your daily notes file.',
+		category: 'personal',
+		nlSafe: true,
+		nlIntentRegex: NOTES_INTENT_REGEX,
 	},
 	{
 		key: 'flush_memory_on_idle_reset',
@@ -34,6 +74,11 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		default: false,
 		description:
 			'When an idle session auto-resets, save a short summary of the conversation to your durable memory so the next session can refer back to it. (Per-user opt-in, default OFF. Turning OFF also deletes the most recent saved summary.)',
+		label: 'Memory flush on session reset',
+		help: 'Summarize the session to memory when the chat auto-resets.',
+		category: 'memory-sessions',
+		nlSafe: true,
+		nlIntentRegex: MEMORY_FLUSH_INTENT_REGEX,
 	},
 	{
 		key: 'session_search_tool_enabled',
@@ -41,8 +86,25 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		default: true,
 		description:
 			'Allow the chatbot to search your past conversations mid-reply when the model decides extra context is needed. (Per-user opt-in, default ON.)',
+		label: 'Session search tool',
+		help: 'Allow the chatbot to search your past conversations mid-reply.',
+		category: 'memory-sessions',
+		nlSafe: true,
+		nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
 	},
 ];
+
+/**
+ * Plain ManifestUserConfig[] form of CONVERSATION_USER_CONFIG.
+ *
+ * Use this wherever ManifestUserConfig[] is required (AppConfigServiceImpl,
+ * processConfigSetTags, AppManifest.user_config). The nlIntentRegex RegExp
+ * fields are stripped because ManifestUserConfig.nlIntentRegex is a string
+ * source (for YAML serialisation).
+ */
+export const CONVERSATION_USER_CONFIG_MANIFEST: ManifestUserConfig[] = CONVERSATION_USER_CONFIG.map(
+	({ nlIntentRegex: _regex, ...rest }) => rest,
+);
 
 export interface ConversationLLMSafeguards {
 	tier: 'standard';

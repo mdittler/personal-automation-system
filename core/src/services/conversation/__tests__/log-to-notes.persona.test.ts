@@ -19,12 +19,59 @@ import { requestContext } from '../../context/request-context.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 import { ConversationService } from '../conversation-service.js';
-import { CONFIG_SET_INSTRUCTION_BLOCK } from '../control-tags.js';
+import { CONFIG_SET_INSTRUCTION_BLOCK, NOTES_INTENT_REGEX, MEMORY_FLUSH_INTENT_REGEX } from '../control-tags.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import { SettingsRegistry } from '../../settings/settings-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
+import type { AppConfigService } from '../../../types/config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Build a SettingsRegistry + SettingsWriter wired to the given chatbot AppConfigService. */
+function makeChatbotSettingsServices(chatbotCfg: AppConfigService): {
+	settingsRegistry: SettingsRegistry;
+	settingsWriter: SettingsWriter;
+} {
+	const settingsRegistry = new SettingsRegistry();
+	settingsRegistry.register({
+		key: 'log_to_notes', appId: 'chatbot', category: 'personal',
+		label: 'Daily notes logging', help: 'Save every chat message to your daily notes file.',
+		type: 'boolean', default: false,
+		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
+		nlSafe: true, nlIntentRegex: NOTES_INTENT_REGEX,
+	});
+	settingsRegistry.register({
+		key: 'flush_memory_on_idle_reset', appId: 'chatbot', category: 'memory-sessions',
+		label: 'Memory flush on session reset', help: 'Summarize the session to memory when the chat auto-resets.',
+		type: 'boolean', default: false,
+		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
+		nlSafe: true, nlIntentRegex: MEMORY_FLUSH_INTENT_REGEX,
+	});
+	settingsRegistry.register({
+		key: 'session_search_tool_enabled', appId: 'chatbot', category: 'memory-sessions',
+		label: 'Session search tool', help: 'Allow the chatbot to search your past conversations mid-reply.',
+		type: 'boolean', default: true,
+		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
+		nlSafe: true, nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
+	});
+	const settingsWriter = new SettingsWriter({
+		registry: settingsRegistry,
+		appConfigResolver: (id) => (id === 'chatbot' ? chatbotCfg : undefined),
+		manifestResolver: (id) => {
+			if (id !== 'chatbot') return [];
+			return [
+				{ key: 'log_to_notes', type: 'boolean', default: false, description: 'd' },
+				{ key: 'flush_memory_on_idle_reset', type: 'boolean', default: false, description: 'd' },
+				{ key: 'session_search_tool_enabled', type: 'boolean', default: true, description: 'd' },
+			];
+		},
+		logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+	});
+	return { settingsRegistry, settingsWriter };
+}
 
 function makeUserStore() {
 	return {
@@ -76,6 +123,7 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 	};
+	const { settingsRegistry, settingsWriter } = makeChatbotSettingsServices(config as any);
 	const deps: ConversationServiceDeps = {
 		llm: {
 			complete,
@@ -94,6 +142,8 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		config: config as any,
 		chatLogToNotesDefault: opts.systemDefault ?? false,
 		chatSessions,
+		settingsRegistry,
+		settingsWriter,
 	};
 	return Object.assign(deps, {
 		_userStore: userStore,

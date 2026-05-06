@@ -45,6 +45,12 @@ export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): 
 			if (!Number.isFinite(n)) {
 				return { ok: false, reason: `expected finite number, got ${n}` };
 			}
+			if (entry.min !== undefined && n < entry.min) {
+				return { ok: false, reason: `${n} is below minimum ${entry.min}` };
+			}
+			if (entry.max !== undefined && n > entry.max) {
+				return { ok: false, reason: `${n} exceeds maximum ${entry.max}` };
+			}
 			return { ok: true, coerced: n };
 		}
 
@@ -53,8 +59,8 @@ export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): 
 				return { ok: false, reason: `expected string, got ${typeof raw}` };
 			}
 			const trimmed = raw.trim();
-			if (trimmed === '') {
-				return { ok: false, reason: `string value must not be empty` };
+			if (trimmed === '' && entry.default !== '') {
+				return { ok: false, reason: `empty string not accepted for this setting` };
 			}
 			return { ok: true, coerced: trimmed };
 		}

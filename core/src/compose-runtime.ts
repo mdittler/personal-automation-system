@@ -51,7 +51,7 @@ import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js'
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
-	CONVERSATION_USER_CONFIG,
+	CONVERSATION_USER_CONFIG_MANIFEST,
 	ConversationService,
 } from './services/conversation/index.js';
 import {
@@ -119,6 +119,12 @@ import { UserManager } from './services/user-manager/index.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
+import {
+	buildSettingsRegistry,
+	SettingsReader,
+	SettingsWriter,
+	type SettingsRegistry,
+} from './services/settings/index.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
 import type { LLMSafeguardsConfig, SystemConfig } from './types/config.js';
@@ -178,6 +184,8 @@ export interface RuntimeServices {
 		defaultReservationUsd?: number;
 		reservationExpiryMs?: number;
 	};
+	settingsRegistry: SettingsRegistry;
+	settingsWriter: SettingsWriter;
 	[key: string]: unknown;
 }
 
@@ -968,22 +976,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		});
 	}
 
-	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
-	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
-		dataQuery: dataQueryAdapter,
-		contextStore,
-		interactionContext: interactionContextService,
-		appMetadata,
-		appKnowledge,
-		systemInfo: systemInfoService,
-		reportService,
-		alertService,
-		index: chatTranscriptIndex,
-		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
-		systemConfig: config,
-	});
-	logger.info('ConversationRetrievalService: initialized');
-
 	// 9c. ConversationService — always present; provides free-text fallback dispatch.
 	const conversationDataStore = new DataStoreServiceImpl({
 		dataDir: config.dataDir,
@@ -999,8 +991,69 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const conversationAppConfig = new AppConfigServiceImpl({
 		dataDir: config.dataDir,
 		appId: 'chatbot',
-		defaults: CONVERSATION_USER_CONFIG,
+		defaults: CONVERSATION_USER_CONFIG_MANIFEST,
 	});
+
+	// Build SettingsRegistry from installed app manifests + chatbot virtual manifest.
+	// Installed apps with appId === 'chatbot' are filtered inside buildSettingsRegistry
+	// to prevent double-registration.
+	const settingsRegistry = buildSettingsRegistry({
+		installedApps: registry.getAll().map((r) => r.manifest),
+	});
+
+	// Build per-app AppConfigService instances — one per installed app + chatbot.
+	// Used by SettingsReader (catalog reads) and SettingsWriter (writes).
+	const appConfigByAppId = new Map<string, AppConfigServiceImpl>();
+	appConfigByAppId.set('chatbot', conversationAppConfig);
+	for (const entry of registry.getAll()) {
+		const appId = entry.manifest.app.id;
+		if (appId === 'chatbot') continue;
+		appConfigByAppId.set(
+			appId,
+			new AppConfigServiceImpl({
+				dataDir: config.dataDir,
+				appId,
+				defaults: entry.manifest.user_config ?? [],
+			}),
+		);
+	}
+	const settingsAppConfigResolver = (appId: string): AppConfigServiceImpl | undefined =>
+		appConfigByAppId.get(appId);
+
+	const settingsManifestResolver = (appId: string) => {
+		if (appId === 'chatbot') return CONVERSATION_USER_CONFIG_MANIFEST;
+		return registry.getAll().find((r) => r.manifest.app.id === appId)?.manifest.user_config;
+	};
+
+	const settingsReader = new SettingsReader({
+		registry: settingsRegistry,
+		appConfigResolver: settingsAppConfigResolver,
+		logger: logger.child({ component: 'settings-reader' }),
+	});
+
+	const settingsWriter = new SettingsWriter({
+		registry: settingsRegistry,
+		appConfigResolver: settingsAppConfigResolver,
+		manifestResolver: settingsManifestResolver,
+		logger: createChildLogger(logger, { service: 'settings-writer' }),
+	});
+
+	// 9c-pre. ConversationRetrievalService — wired here (Chunk A), handlers use it in Chunk D.
+	const conversationRetrievalService = new ConversationRetrievalServiceImpl({
+		dataQuery: dataQueryAdapter,
+		contextStore,
+		interactionContext: interactionContextService,
+		appMetadata,
+		appKnowledge,
+		systemInfo: systemInfoService,
+		reportService,
+		alertService,
+		index: chatTranscriptIndex,
+		logger: createChildLogger(logger, { service: 'conversation-retrieval' }),
+		systemConfig: config,
+		settingsReader,
+	});
+	logger.info('ConversationRetrievalService: initialized');
 
 	const chatSessions = composeChatSessionStore({
 		data: conversationDataStore,
@@ -1050,6 +1103,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		conversationRetrieval: conversationRetrievalService,
 		titleService,
 		disableFlushAndCleanup: onDisableFlush,
+		settingsRegistry,
+		settingsWriter,
 	});
 	logger.info('ConversationService: initialized');
 
@@ -1521,6 +1576,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		llm,
 		providerRegistry,
 		safeguardsConfig,
+		settingsRegistry,
+		settingsWriter,
+		conversationRetrievalService,
 	};
 
 	return {

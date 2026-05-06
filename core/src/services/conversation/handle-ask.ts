@@ -37,6 +37,8 @@ import {
 	sanitizeInput,
 	writeJournalEntries,
 } from '../prompt-assembly/index.js';
+import type { SettingsRegistry } from '../settings/settings-registry.js';
+import type { SettingsWriter } from '../settings/settings-writer.js';
 import {
 	CONFIG_SET_INSTRUCTION_BLOCK,
 	FLUSH_MEMORY_INSTRUCTION_BLOCK,
@@ -48,6 +50,7 @@ import {
 	processConfigSetTags,
 	processMemoryKindSetTags,
 	processModelSwitchTags,
+	stripConfigSetTags,
 } from './control-tags.js';
 import {
 	SESSION_SEARCH_CONFIG_INSTRUCTION_BLOCK,
@@ -65,7 +68,6 @@ import {
 	formatDataQueryContext,
 	formatInteractionContextSummary,
 } from './data-query-context.js';
-import { CONVERSATION_USER_CONFIG } from './manifest.js';
 import { classifyPASMessage } from './pas-classifier.js';
 import { buildToolContinuationPrompt } from './prompt-assembly/tool-continuation-prompt.js';
 import { buildAppAwareSystemPrompt } from './prompt-builder.js';
@@ -97,6 +99,10 @@ export interface HandleAskDeps {
 	titleService?: TitleService;
 	/** Called when flush_memory_on_idle_reset is turned OFF via <config-set> tag. */
 	disableFlushAndCleanup?: (userId: string) => Promise<void>;
+	/** SettingsRegistry — when present, enables <config-set> tag processing via registry allowlist. */
+	settingsRegistry?: SettingsRegistry;
+	/** SettingsWriter — when present, routes <config-set> writes through registry-aware writer. */
+	settingsWriter?: SettingsWriter;
 }
 
 export async function handleAsk(
@@ -206,6 +212,7 @@ export async function handleAsk(
 	);
 
 	let systemPrompt: string;
+	let settingsTrustedInjected = false;
 	if (deps.conversationRetrieval) {
 		let snapshot: ConversationContextSnapshot | null = null;
 		try {
@@ -213,8 +220,10 @@ export async function handleAsk(
 				question,
 				mode: 'ask',
 				dataQueryCandidate: askClassification.dataQueryCandidate ?? false,
+				settingsCandidate: askClassification.settingsCandidate ?? false,
 				recentFilePaths,
 			});
+			if (snapshot?.settingsTrustedInstructions) settingsTrustedInjected = true;
 		} catch (error) {
 			deps.logger.warn(
 				'ConversationRetrievalService.buildContextSnapshot failed in /ask: %s',
@@ -253,7 +262,7 @@ export async function handleAsk(
 		});
 	}
 
-	if (deps.config && NOTES_INTENT_REGEX.test(question)) {
+	if (deps.config && !settingsTrustedInjected && NOTES_INTENT_REGEX.test(question)) {
 		systemPrompt = `${systemPrompt}\n\n${CONFIG_SET_INSTRUCTION_BLOCK}`;
 	}
 	if (deps.config && MEMORY_FLUSH_INTENT_REGEX.test(question)) {
@@ -377,18 +386,21 @@ export async function handleAsk(
 
 	let finalResponse = afterModelSwitch;
 	const allConfirmations = [...switchConfirmations];
-	if (deps.config) {
+	if (deps.settingsRegistry && deps.settingsWriter) {
 		const { cleanedResponse: afterConfigSet, confirmations: configConfirmations } =
 			await processConfigSetTags(afterModelSwitch, {
 				userId: ctx.userId,
 				userMessage: question,
-				config: deps.config,
-				manifest: CONVERSATION_USER_CONFIG,
+				settingsRegistry: deps.settingsRegistry,
+				settingsWriter: deps.settingsWriter,
 				logger: deps.logger,
 				disableFlushAndCleanup: deps.disableFlushAndCleanup,
 			});
 		allConfirmations.push(...configConfirmations);
 		finalResponse = afterConfigSet;
+	} else {
+		// Writer absent — strip config-set tags unconditionally so they don't leak to the user.
+		finalResponse = stripConfigSetTags(afterModelSwitch);
 	}
 	if (deps.contextStore) {
 		const { cleanedResponse: afterKindSet, confirmations: kindConfirmations } =

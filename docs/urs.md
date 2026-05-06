@@ -8557,6 +8557,124 @@ On startup, `loadFromDisk()` is awaited before Telegram handlers register. It re
 
 ---
 
+## Settings Surface (Unified Settings)
+
+### REQ-SETTINGS-001 — `SettingsRegistry` MUST compose settings from every installed app's manifest and the chatbot virtual manifest at startup, keyed by `(appId, key)`
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`buildSettingsRegistry({ installedApps })` iterates all installed `AppManifest` entries and registers each `user_config` entry under its `appId`. The chatbot virtual manifest is always registered first. Each entry is keyed by the qualified id `"<appId>.<key>"`. Apps with no `user_config` array are silently skipped. An app whose `app.id` collides with `"chatbot"` has its entries filtered out (no double-registration). Duplicate qualified keys across non-chatbot sources throw immediately.
+
+**Standard tests** (`build-registry.test.ts`):
+- `includes chatbot virtual manifest and installed app manifests`
+- `compiles nlIntentRegex strings to RegExp`
+- `skips apps with no user_config`
+
+**Edge case tests** (`build-registry.test.ts`):
+- `does NOT double-register when an installed app declares appId="chatbot"`
+- `throws on duplicate qualified key across non-chatbot sources`
+- `FAILS FAST on invalid nlIntentRegex (no silent downgrade)`
+
+---
+
+### REQ-SETTINGS-006 — Every setting MUST have a non-empty `help` string; the registry MUST throw a configuration error if `help` is absent
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`SettingsRegistry.register()` validates the incoming `SettingDef` before inserting it. If `help` is absent, empty, or whitespace-only the method throws synchronously with a message matching `/help.*non-empty/i`. This prevents misconfigured settings from reaching runtime.
+
+**Standard tests** (`settings-registry.test.ts`):
+- `accepts all-required-fields valid def`
+
+**Edge case tests** (`settings-registry.test.ts`):
+- `throws when help is empty`
+- `throws when help is whitespace only`
+
+---
+
+### REQ-SETTINGS-007 — The `<config-set>` NL allowlist MUST be derived from `SettingsRegistry.getNlSafeKeys()` at startup; hardcoded allowlist constants MUST be removed. Writes MUST be routed to the correct app's `AppConfigService` via `SettingsWriter`
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`processConfigSetTags` resolves each `<config-set key="..." value="..."/>` tag through `SettingsRegistry` — first checking for a qualified key (`appId.key`), then falling back to a bare key lookup across all registered `nlSafe` entries. The resolved `appId` is passed to `SettingsWriter`, which calls the correct `AppConfigService.updateOverrides(userId, { [key]: coercedValue })`. Writes to other apps' config services are never triggered. The old hardcoded `ALLOWED_CONFIG_KEYS` set is removed; the allowlist is now `registry.getNlSafeQualifiedKeys()`.
+
+**Standard tests** (`settings-writer.test.ts`, `control-tags-registry.test.ts`):
+- `routes a chatbot write to the chatbot AppConfigService`
+- `routes a food write to the food AppConfigService`
+- `legacy bare key "log_to_notes" routes to chatbot AppConfigService`
+- `qualified key "food.seasonal_nudges" routes to food AppConfigService`
+- `qualified key with generic label shows "Setting X updated." confirmation`
+
+**Edge case tests** (`settings-writer.test.ts`, `control-tags-registry.test.ts`):
+- `rejects hidden key even if nlSafe were true`
+- `rejects when intent regex does not match user message (per-key gate)`
+- `rejects admin-only keys`
+- `strips both well-formed and malformed config-set tags`
+- `key not in registry is rejected with warn`
+
+---
+
+### REQ-SETTINGS-008 — `nlSafe: true` settings MUST provide an `nlIntentRegex`; the registry MUST throw if `nlIntentRegex` is absent or malformed when `nlSafe: true`
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`SettingsRegistry.register()` validates the `nlIntentRegex` field when `nlSafe: true`. If `nlIntentRegex` is absent the method throws with a message matching `/nlIntentRegex.*required.*nlSafe/i`. `buildSettingsRegistry` additionally compiles string-form `nlIntentRegex` values from manifests to `RegExp` and throws on compile failure with a message matching `/invalid.*nlIntentRegex.*<appId>\.<key>/i`. Silent downgrade is explicitly rejected.
+
+**Standard tests** (`settings-registry.test.ts`, `build-registry.test.ts`):
+- `accepts nlSafe=false without nlIntentRegex`
+- `compiles nlIntentRegex strings to RegExp`
+
+**Edge case tests** (`settings-registry.test.ts`, `build-registry.test.ts`):
+- `throws when nlSafe=true and nlIntentRegex is absent`
+- `FAILS FAST on invalid nlIntentRegex (no silent downgrade)`
+
+---
+
+### REQ-SETTINGS-011 — The chatbot MUST be able to answer questions about setting names, current values, and how to change them via the `<config-set>` mechanism. This phase advertises only currently-implemented surfaces
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`SettingsReader.buildCatalog({ userId, isAdmin })` produces two strings: `catalog` (a `## Your settings` block listing each visible setting with its current value rendered as `ON`/`OFF`/`(not set)`/raw-string) and `trustedInstructions` (a plain-text block listing only `nlSafe` qualified keys and the `<config-set>` syntax). `catalog` is injected into the chatbot system prompt inside a `<memory-context>` fence; `trustedInstructions` is injected as a plain trusted block. Admin-only settings are excluded from non-admin catalogs; hidden settings are excluded from all catalogs. The catalog does not reference `/settings` or `/gui/settings`.
+
+**Standard tests** (`settings-discoverability.persona.test.ts`):
+- `C2-01: all visible settings appear in catalog for non-admin user`
+- `C2-03: admin-only settings shown to admin user`
+- `C2-05: catalog shows live override values, not just defaults`
+- `C2-08: trustedInstructions lists only nlSafe qualified keys`
+- `C2-09: trustedInstructions includes <config-set> syntax`
+- `C2-10: catalog uses ## Your settings header`
+- `E2E-01: Ask → catalog contains current value as (not set) when no override`
+- `E2E-02: Change → re-ask reflects new value in catalog`
+- `E2E-03: Admin-only filtering — admin sees more, non-admin sees less`
+- `E2E-04: NL change fires → writes to correct appId, confirmation emitted`
+
+**Edge case tests** (`settings-discoverability.persona.test.ts`):
+- `C2-02: admin-only settings excluded from non-admin catalog`
+- `C2-04: hidden settings excluded from all catalogs`
+- `C2-06: boolean true → ON, boolean false → OFF`
+- `C2-07: empty string value → (not set)`
+- `E2E-05: Two different apps change in one turn`
+- `C3-01: LLM emits food.seasonal_nudges but user asked about weather → no write`
+- `C3-02: LLM emits log_to_notes but user asked about recipes → no write`
+- `C3-03: LLM emits key not in registry → no write, tag stripped`
+
+---
+
+### REQ-SETTINGS-012 — The settings catalog injected into the chatbot system prompt MUST reflect current values at the time of the request, not cached at session mint
+
+**Phase:** Unified Settings | **Status:** Implemented
+
+`SettingsReader.buildCatalog` calls `AppConfigService.getOverrides(userId)` for each app's settings on every invocation. There is no session-level cache — each call reads the live YAML on disk (or from the service's in-memory layer). The `catalog` string is built fresh per request. This is verified by the integration test that writes overrides directly and immediately calls `buildCatalog`, confirming the new values appear.
+
+**Standard tests** (`settings-reader.test.ts`, `settings-discoverability.integration.test.ts`):
+- `reflects per-user override values, not just defaults`
+- `catalog reflects both live writes after direct updateOverrides (REQ-SETTINGS-012)`
+
+**Edge case tests** (`settings-reader.test.ts`):
+- `shows default values when override returns null`
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -8970,5 +9088,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-MEMORY-020 | rebuild-memory-snapshot.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-MEMORY-021 | refresh-memory.persona.test.ts | 29 | 0 | Implemented |
 | REQ-CONV-MEMORY-022 | rebuild-memory-snapshot.test.ts | 2 | 0 | Implemented |
+| REQ-SETTINGS-001 | build-registry.test.ts | 3 | 3 | Implemented |
+| REQ-SETTINGS-006 | settings-registry.test.ts | 1 | 2 | Implemented |
+| REQ-SETTINGS-007 | settings-writer.test.ts, control-tags-registry.test.ts | 5 | 5 | Implemented |
+| REQ-SETTINGS-008 | settings-registry.test.ts, build-registry.test.ts | 2 | 2 | Implemented |
+| REQ-SETTINGS-011 | settings-discoverability.persona.test.ts | 10 | 8 | Implemented |
+| REQ-SETTINGS-012 | settings-reader.test.ts, settings-discoverability.integration.test.ts | 2 | 1 | Implemented |
 
-| **Totals** | **240 test files** | **1751** | **1903** | **3654 tests** |
+| **Totals** | **240 test files** | **1774** | **1924** | **3698 tests** |
