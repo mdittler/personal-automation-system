@@ -66,8 +66,6 @@ function entryToDef(entry: ManifestUserConfig, appId: string): SettingDef {
     helpDetail: entry.helpDetail,
     type: entry.type,
     options: entry.options,
-    min: entry.min,
-    max: entry.max,
     default: entry.default,
     adminOnly: entry.adminOnly ?? false,
     dangerous: entry.dangerous ?? false,

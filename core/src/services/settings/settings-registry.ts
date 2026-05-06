@@ -16,8 +16,6 @@ export interface SettingDef {
   helpDetail?: string;
   type: 'boolean' | 'number' | 'string' | 'select';
   options?: string[];
-  min?: number;
-  max?: number;
   default: unknown;
   adminOnly: boolean;
   dangerous: boolean;

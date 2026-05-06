@@ -160,6 +160,7 @@ Ideas that are not yet approved. Each has a stated trigger condition.
 
 Documented decisions to live with known imperfections.
 
+- **Settings resolver AppConfigService instance sharing (2026-05-05):** `compose-runtime.ts` creates a second `AppConfigServiceImpl` instance per installed app for the settings `appConfigResolver`, separate from the instance used by `CoreServices.config`. Both write to the same YAML files (currently correct behavior), but would silently desynchronize if `AppConfigServiceImpl` ever adds in-memory caching. Refactor: populate `appConfigByAppId` from the same instances the serviceFactory hands to each app. Prerequisite: expose app config service instances from the service factory.
 - **D40** — `getActiveSpace()` fire-and-forget persist. Acceptable: self-healing on next request.
 - **D42** — Conversation history anti-instruction framing removed. Accepted: continuity > theoretical injection risk.
 - **Callback space semantics — originating scope** — Inline keyboard callbacks resolve space context at tap-time, not button-generation-time. Encoding the originating scope into every callback data string is a large change with low practical impact (buttons are tapped promptly). Accepted as designed.

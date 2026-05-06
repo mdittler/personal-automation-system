@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AppLogger } from '../../../types/app-module.js';
 import { processConfigSetTags } from '../control-tags.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
@@ -59,12 +60,20 @@ function makeWriter(
 			];
 			return [];
 		},
-		logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+		logger: makeLogger(),
 	});
 }
 
-function makeLogger() {
-	return { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
+function makeLogger(): AppLogger {
+	return {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
+	};
 }
 
 describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)', () => {

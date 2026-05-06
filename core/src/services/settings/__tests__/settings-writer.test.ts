@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AppLogger } from '../../../types/app-module.js';
 import { SettingsRegistry } from '../settings-registry.js';
 import { SettingsWriter } from '../settings-writer.js';
+
+function makeLogger(): AppLogger {
+  return {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  };
+}
 
 function makeRegistry() {
   const reg = new SettingsRegistry();
@@ -39,7 +52,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       manifestResolver: (id) => (id === 'chatbot'
         ? [{ key: 'log_to_notes', type: 'boolean', default: false, description: 'd' }]
         : []),
-      logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({
       userId: 'u1', appId: 'chatbot', key: 'log_to_notes', rawValue: 'true', source: 'nl',
@@ -58,7 +71,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       manifestResolver: (id) => (id === 'food'
         ? [{ key: 'default_store', type: 'string', default: '', description: 'd' }]
         : []),
-      logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({
       userId: 'u1', appId: 'food', key: 'default_store', rawValue: 'Walmart', source: 'nl',
@@ -73,7 +86,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       registry: makeRegistry(),
       appConfigResolver: () => makeAppConfig(),
       manifestResolver: () => [],
-      logger: { warn: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({ userId: 'u1', appId: 'food', key: 'unknown', rawValue: 'x', source: 'nl' });
     expect(r.ok).toBe(false);
@@ -85,7 +98,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       registry: makeRegistry(),
       appConfigResolver: () => undefined,
       manifestResolver: () => [{ key: 'default_store', type: 'string', default: '', description: 'd' }],
-      logger: { warn: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({ userId: 'u1', appId: 'food', key: 'default_store', rawValue: 'x', source: 'nl' });
     expect(r.ok).toBe(false);
@@ -97,7 +110,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       registry: makeRegistry(),
       appConfigResolver: () => makeAppConfig(),
       manifestResolver: () => [],
-      logger: { warn: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({ userId: 'u1', appId: 'food', key: 'default_store', rawValue: 'x', source: 'nl' });
     expect(r.ok).toBe(false);
@@ -109,7 +122,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       registry: makeRegistry(),
       appConfigResolver: () => makeAppConfig(),
       manifestResolver: () => [{ key: 'log_to_notes', type: 'boolean', default: false, description: 'd' }],
-      logger: { warn: vi.fn() } as never,
+      logger: makeLogger(),
     });
     const r = await writer.write({ userId: 'u1', appId: 'chatbot', key: 'log_to_notes', rawValue: 'maybe', source: 'nl' });
     expect(r.ok).toBe(false);
@@ -130,7 +143,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
         registry: reg,
         appConfigResolver: () => cfg,
         manifestResolver: () => [{ key: 'rogue', type: 'boolean', default: false, description: 'd' }],
-        logger: { warn: vi.fn() } as never,
+        logger: makeLogger(),
       });
       const r = await writer.write({ userId: 'u1', appId: 'system', key: 'rogue', rawValue: 'true', source: 'nl' });
       expect(r.ok).toBe(false);
@@ -151,7 +164,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       const writer = new SettingsWriter({
         registry: reg, appConfigResolver: () => cfg,
         manifestResolver: () => [{ key: 'auto_prune', type: 'boolean', default: false, description: 'd' }],
-        logger: { warn: vi.fn() } as never,
+        logger: makeLogger(),
       });
       const r = await writer.write({
         userId: 'u1', appId: 'system', key: 'auto_prune', rawValue: 'true', source: 'nl',
@@ -172,7 +185,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       const writer = new SettingsWriter({
         registry: reg, appConfigResolver: () => cfg,
         manifestResolver: () => [{ key: 'guests', type: 'string', default: '', description: 'd' }],
-        logger: { warn: vi.fn() } as never,
+        logger: makeLogger(),
       });
       const r = await writer.write({ userId: 'u1', appId: 'food', key: 'guests', rawValue: 'x', source: 'nl' });
       expect(r.ok).toBe(false);
@@ -190,7 +203,7 @@ describe('SettingsWriter (REQ-SETTINGS-007)', () => {
       const writer = new SettingsWriter({
         registry: reg, appConfigResolver: () => cfg,
         manifestResolver: () => [{ key: 'rogue', type: 'boolean', default: false, description: 'd' }],
-        logger: { warn: vi.fn() } as never,
+        logger: makeLogger(),
       });
       const r = await writer.write({
         userId: 'admin', appId: 'system', key: 'rogue', rawValue: 'true', source: 'admin-confirmed',
