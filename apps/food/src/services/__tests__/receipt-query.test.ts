@@ -1,10 +1,11 @@
 /**
  * TDD Batch 6 — Codex polish: receipt-query service in isolation.
+ * TDD Batch 4 — formatCheapestPriceAnswer wording (REQ-FOOD-PRICE-002).
  */
 
 import { describe, expect, it } from 'vitest';
-import type { Receipt } from '../../types.js';
-import { formatReceiptDetails } from '../receipt-query.js';
+import type { Receipt, StorePriceData } from '../../types.js';
+import { formatCheapestPriceAnswer, formatReceiptDetails } from '../receipt-query.js';
 
 function makeBigReceipt(): Receipt {
 	const name = (i: number) =>
@@ -64,5 +65,158 @@ describe('formatReceiptDetails', () => {
 		expect(result).toContain('Bananas');
 		expect(result).toContain('Apples');
 		expect(result).not.toMatch(/…and \d+ more items/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// REQ-FOOD-PRICE-002 — formatCheapestPriceAnswer wording
+// ---------------------------------------------------------------------------
+
+function makeStore(
+	store: string,
+	slug: string,
+	items: Array<{ name: string; price: number; updatedAt?: string }>,
+): StorePriceData {
+	return {
+		store,
+		slug,
+		lastUpdated: '2026-05-01',
+		items: items.map((i) => ({
+			name: i.name,
+			price: i.price,
+			unit: '1 unit',
+			department: 'Produce',
+			updatedAt: i.updatedAt ?? '2026-05-01',
+		})),
+	};
+}
+
+describe('formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)', () => {
+	// U1 — exact one-line output, multi-store happy path
+	it('returns exact wording for cheapest item across stores', () => {
+		const data: StorePriceData[] = [
+			makeStore('Trader Joes', 'trader-joes', [
+				{ name: 'Wild Blueberries', price: 6.49, updatedAt: '2026-04-15' },
+			]),
+			makeStore('Costco', 'costco', [
+				{ name: 'KS Blueberry', price: 9.29, updatedAt: '2026-04-15' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'blueberries');
+		expect(result).toBe(
+			'Lowest saved package price for blueberries: Wild Blueberries at $6.49 at Trader Joes (updated 2026-04-15).',
+		);
+		// REQ-FOOD-PRICE-002: single-line answer
+		expect(result).not.toContain('\n');
+	});
+
+	// U2 — lowest price wins regardless of array order
+	it('selects lowest-price entry regardless of input order', () => {
+		const data: StorePriceData[] = [
+			makeStore('Costco', 'costco', [
+				{ name: 'KS Blueberry', price: 9.29, updatedAt: '2026-04-15' },
+			]),
+			makeStore('Trader Joes', 'trader-joes', [
+				{ name: 'Wild Blueberries', price: 6.49, updatedAt: '2026-04-15' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'blueberries');
+		expect(result).toContain('Wild Blueberries');
+		expect(result).toContain('$6.49');
+		expect(result).toContain('Trader Joes');
+	});
+
+	// U3 — single store
+	it('formats correctly for a single store', () => {
+		const data: StorePriceData[] = [
+			makeStore('Aldi', 'aldi', [
+				{ name: 'Aldi Blueberries', price: 5.99, updatedAt: '2026-05-01' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'blueberries');
+		expect(result).toBe(
+			'Lowest saved package price for blueberries: Aldi Blueberries at $5.99 at Aldi (updated 2026-05-01).',
+		);
+	});
+
+	// U4 — empty updatedAt omits the "(updated …)" suffix
+	it('omits (updated ...) suffix when updatedAt is empty string', () => {
+		const data: StorePriceData[] = [
+			makeStore('Aldi', 'aldi', [{ name: 'Aldi Blueberries', price: 5.99, updatedAt: '' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'blueberries');
+		expect(result).toContain('Aldi Blueberries at $5.99 at Aldi.');
+		expect(result).not.toMatch(/\(updated\b/);
+	});
+
+	// U5 — old wording must be absent (regression guard)
+	it('does not use the old "is cheapest for" phrasing', () => {
+		const data: StorePriceData[] = [
+			makeStore('Trader Joes', 'trader-joes', [
+				{ name: 'Wild Blueberries', price: 6.49, updatedAt: '2026-04-15' },
+			]),
+		];
+		expect(formatCheapestPriceAnswer(data, 'blueberries')).not.toContain('is cheapest for');
+	});
+
+	// U6 — output must not contain a newline
+	it('returns a single-line string (no newline)', () => {
+		const data: StorePriceData[] = [
+			makeStore('Trader Joes', 'trader-joes', [
+				{ name: 'Wild Blueberries', price: 6.49, updatedAt: '2026-04-15' },
+			]),
+		];
+		expect(formatCheapestPriceAnswer(data, 'blueberries')).not.toContain('\n');
+	});
+
+	// U7 — no price data
+	it('returns no-saved-prices message when priceData is empty', () => {
+		expect(formatCheapestPriceAnswer([], 'blueberries')).toBe(
+			'I do not have saved prices for blueberries yet.',
+		);
+	});
+
+	// U8 — query has no matching item
+	it('returns no-saved-prices message when no items match the query', () => {
+		const data: StorePriceData[] = [
+			makeStore('Costco', 'costco', [{ name: 'Apples', price: 3.99, updatedAt: '2026-05-01' }]),
+		];
+		expect(formatCheapestPriceAnswer(data, 'blueberries')).toBe(
+			'I do not have saved prices for blueberries yet.',
+		);
+	});
+
+	// U9 — markdown escape: store name with *
+	it('escapes * in store name', () => {
+		const data: StorePriceData[] = [
+			makeStore("Joe*s Market", 'joes', [{ name: 'Plain Blueberries', price: 4.99, updatedAt: '2026-05-01' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'blueberries');
+		expect(result).toContain('Joe\\*s Market');
+		// no unescaped * in output
+		expect(result).not.toMatch(/(?<!\\)\*/);
+	});
+
+	// U10 — markdown escape: item query and entry name with _
+	it('escapes _ in item query and entry name', () => {
+		const data: StorePriceData[] = [
+			makeStore('Costco', 'costco', [
+				{ name: 'Frozen_Beans', price: 2.99, updatedAt: '2026-05-01' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'green_beans');
+		expect(result).toContain('green\\_beans');
+		expect(result).toContain('Frozen\\_Beans');
+		// no unescaped _ in output
+		expect(result).not.toMatch(/(?<!\\)_/);
+	});
+
+	// U11 — markdown escape in the no-match (empty-state) branch
+	it('escapes _ in item query for the no-saved-prices response', () => {
+		const data: StorePriceData[] = [
+			makeStore('Costco', 'costco', [{ name: 'Apples', price: 3.99, updatedAt: '2026-05-01' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'green_beans');
+		expect(result).toBe('I do not have saved prices for green\\_beans yet.');
 	});
 });

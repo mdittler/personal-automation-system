@@ -3067,9 +3067,18 @@ Three items from `docs/open-items.md` (lines 19, 33, 136) closed in a single bra
 - **New files:** `handle-flush-memory.ts`, `router/__tests__/router-flush-memory.test.ts`, `__tests__/flush-memory.persona.test.ts`
 - **Modified:** `memory-flush.ts` (widen return type), `idle-reset-hook.ts` (update call site), `conversation-service.ts` (shim + ConversationServiceDeps), `conversation/index.ts` (barrel), `router/index.ts` (dispatch + BUILTIN_COMMAND_NAMES + help text), `compose-runtime.ts` (pass summarizer + flushSave)
 
-### Batch 4 — Food micro-fixes (`apps/food/`)
-- `formatCheapestPriceAnswer` reword — one-line phrasing fix in `apps/food/src/services/receipt-query.ts` ("lowest saved package price" stopgap)
-- Energy/mood field removal — delete `energyLevel`/`mood` from `HealthDailyMetricsPayload` and the correlator table columns
+### Batch 4 — Food micro-fixes (`apps/food/`) ✓ Complete (2026-05-07)
+
+Two items from `docs/open-items.md` closed in a single branch (`codex/batch4-food-micro-fixes`). 2 new URS requirements (REQ-FOOD-PRICE-002, REQ-FOOD-HEALTH-NEG-001). 13 new tests (11 unit + 2 compile-time/smoke); 3 existing persona test phrasings added; 1 existing integration test strengthened. Zero behavior change for Item 2 (type-level removal predates this batch).
+
+**Item 1 — `formatCheapestPriceAnswer` wording (REQ-FOOD-PRICE-002)**
+Changed `"… is cheapest for …"` to `"Lowest saved package price for {item}: {name} at {price} at {store}[ (updated {date})]."` at `apps/food/src/services/receipt-query.ts:377`. Honest stopgap acknowledging that the comparison is package-level, not unit-level. Unit-price normalization (path b) remains as a separate open item.
+- **Modified:** `apps/food/src/services/receipt-query.ts` (one line), `apps/food/src/__tests__/receipt-prompt-loop.test.ts` (strengthened P1 + added P2/P3/P4)
+- **Extended:** `apps/food/src/services/__tests__/receipt-query.test.ts` (11 unit tests U1–U11: exact wording, sort correctness, single-store, no-updatedAt suffix, old-wording regression guard, single-line guard, empty-state, no-match, markdown escape ×3)
+
+**Item 2 — Energy/mood field removal closure (REQ-FOOD-HEALTH-NEG-001)**
+`energyLevel` and `mood` were already removed from `HealthDailyMetricsPayload.metrics` before this batch. The open-item entry was stale. Compile-time regression guard added: `_AssertNoForbiddenMetrics` type assertion in `health-payload-shape.test.ts` causes `pnpm build` to fail with TS2322 if either key is re-added. `docs/open-items.md` entry closed.
+- **New file:** `apps/food/src/__tests__/health-payload-shape.test.ts` (2 tests)
 
 ### Batch 5 — Test-only additions
 - P4 end-to-end freeze integration test — real temp-backed stores, full snapshot freeze workflow

@@ -5717,6 +5717,45 @@ When the user asks about the price of an item at a specific store (e.g. "How muc
 
 ---
 
+### REQ-FOOD-PRICE-002 — `formatCheapestPriceAnswer` MUST use "Lowest saved package price" wording
+
+**Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
+
+`formatCheapestPriceAnswer(priceData, itemQuery)` SHALL return a single-line answer using the exact phrasing template `"Lowest saved package price for {itemQuery}: {entry.name} at {price} at {store}{updatedAt-suffix}."` where `{updatedAt-suffix}` is ` (updated {entry.updatedAt})` when `entry.updatedAt` is truthy, otherwise the empty string. Store, item query, and entry name SHALL be Telegram-Markdown-escaped via `escapeMarkdown`. The entry selected SHALL be the one with the lowest `entry.price` across all matches. When no match exists, the function SHALL return `"I do not have saved prices for {itemQuery} yet."` (with itemQuery escaped). The output MUST NOT contain a newline. The old phrasing `"is cheapest for"` MUST NOT appear in any output.
+
+This requirement is the path-(a) stopgap for the known limitation that `formatCheapestPriceAnswer` compares raw package prices, not unit prices. The honest wording "lowest saved package price" signals to users that the comparison is package-level. Path (b) (unit-price normalization) is tracked separately in `docs/open-items.md`.
+
+**Standard tests:**
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > returns exact wording for cheapest item across stores (U1)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > selects lowest-price entry regardless of input order (U2)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > formats correctly for a single store (U3)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > omits (updated ...) suffix when updatedAt is empty string (U4)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > does not use the old "is cheapest for" phrasing (U5)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > returns a single-line string (no newline) (U6)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > returns no-saved-prices message when priceData is empty (U7)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > returns no-saved-prices message when no items match the query (U8)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > escapes * in store name (U9)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > escapes _ in item query and entry name (U10)
+- `receipt-query.test.ts` > `formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)` > escapes _ in item query for the no-saved-prices response (U11)
+- `receipt-prompt-loop.test.ts` > Food receipt prompt loop > compares stores for cheapest item price questions (P1, strengthened)
+- `receipt-prompt-loop.test.ts` > Food receipt prompt loop > cheapest price: "What's the cheapest place to buy blueberries?" (P2)
+- `receipt-prompt-loop.test.ts` > Food receipt prompt loop > cheapest price fallthrough: "How much are blueberries?" (P3)
+- `receipt-prompt-loop.test.ts` > Food receipt prompt loop > cheapest price fallthrough: "Price for blueberries?" (P4)
+
+---
+
+### REQ-FOOD-HEALTH-NEG-001 — `HealthDailyMetricsPayload.metrics` MUST NOT contain `energyLevel` or `mood` fields
+
+**Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
+
+`HealthDailyMetricsPayload.metrics` (defined in `apps/food/src/events/types.ts`) SHALL NOT declare `energyLevel` or `mood` as fields. Subjective signals (energy, mood, wellbeing) are out of scope for the food app; they belong in a future fitness/health app. The type-level removal was completed during an earlier phase; this requirement documents the contract and provides a compile-time regression guard. If `energyLevel` or `mood` is re-added to the interface, the `_AssertNoForbiddenMetrics` type assertion in `health-payload-shape.test.ts` resolves to `never` and `pnpm build` fails with TS2322.
+
+**Standard tests:**
+- `health-payload-shape.test.ts` > `HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)` > compile-time guard is active (sanity check)
+- `health-payload-shape.test.ts` > `HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)` > a well-formed payload without forbidden keys conforms to the public type
+
+---
+
 ### REQ-FOOD-SPEND-001 — Per-store spending Q&A MUST route through `handleStoreSpendingIfIntent`
 
 **Phase:** Hermes P8c Codex polish (TDD Batch 6) | **Status:** Implemented
@@ -9376,6 +9415,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-TOOL-SEARCH-012 | handle-message-session-search-tool.test.ts | 0 | 4 | Implemented |
 | REQ-FOOD-RECEIPT-003 | receipt-query.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
+| REQ-FOOD-PRICE-002 | receipt-query.test.ts, receipt-prompt-loop.test.ts | 11 | 4 | Implemented |
+| REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts | 2 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
