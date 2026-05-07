@@ -194,7 +194,7 @@ interface NormalizedItem {
 	unit: string;
 }
 
-const NORMALIZE_PROMPT = `You are a grocery item normalizer. Given receipt line items, normalize each name to a clean, readable format with package size in parentheses.
+export const NORMALIZE_PROMPT = `You are a grocery item normalizer. Given receipt line items, normalize each name to a clean, readable format with package size in parentheses.
 
 Return ONLY a JSON array with this structure (no markdown, no explanation):
 [
@@ -208,7 +208,11 @@ Rules:
 - Include package size/quantity in parentheses
 - Use title case for item names
 - department should be the grocery department
-- unit is the package size (e.g., "60ct", "1 gal", "5 lb")`;
+- unit is the package size and MUST be a parseable size token using one of these recognized units:
+  - mass: g, kg, oz, lb (e.g. "12 oz", "5 lb", "1 kg", "100 g")
+  - volume: ml, l, fl oz, gal (e.g. "750 ml", "1.5 L", "12 fl oz", "1 gal")
+  - count: ct, count, pack, pk, dozen (e.g. "60 ct", "1 pack", "2 dozen")
+- Examples of parseable unit values: "12 oz", "1 gal", "60 ct", "1.5 L", "5 lb", "750 ml"`;
 
 export interface ReceiptUpdateResult {
 	updatedCount: number;
@@ -259,10 +263,18 @@ export async function updatePricesFromReceipt(
 		const norm = normalMap.get(li.name);
 		if (!norm) continue;
 
+		// Prefer the LLM-emitted packageSize from the line item when present and non-empty,
+		// otherwise fall back to the normalizer's unit.
+		const packageSizeFromLine =
+			typeof li.packageSize === 'string' && li.packageSize.trim() !== ''
+				? li.packageSize.trim()
+				: null;
+		const resolvedUnit = packageSizeFromLine ?? norm.unit;
+
 		const entry: PriceEntry = {
 			name: norm.normalizedName,
 			price: li.totalPrice,
-			unit: norm.unit,
+			unit: resolvedUnit,
 			department: norm.department,
 			updatedAt: receipt.capturedAt ? receipt.capturedAt.slice(0, 10) : receipt.date,
 		};
@@ -292,7 +304,7 @@ export async function updatePricesFromReceipt(
 			price: li.totalPrice,
 			status,
 			department: norm.department,
-			unit: norm.unit,
+			unit: resolvedUnit,
 			updatedAt: entry.updatedAt,
 		});
 	}
@@ -338,7 +350,11 @@ Rules:
 - item: normalized name with package size in parentheses
 - price: the dollar amount mentioned
 - store: the store mentioned, or "Unknown" if not specified
-- unit: package size
+- unit: package size; MUST be a parseable size token using one of these recognized units:
+  - mass: g, kg, oz, lb (e.g. "12 oz", "5 lb", "1 kg", "100 g")
+  - volume: ml, l, fl oz, gal (e.g. "750 ml", "1.5 L", "12 fl oz", "1 gal")
+  - count: ct, count, pack, pk, dozen (e.g. "60 ct", "1 pack", "2 dozen")
+- Examples of parseable unit values: "12 oz", "1 gal", "60 ct", "1.5 L", "5 lb", "750 ml"
 - department: one of Dairy, Produce, Meat, Seafood, Bakery, Pantry, Frozen, Beverages, Snacks, Other`;
 
 export async function parsePriceUpdateText(

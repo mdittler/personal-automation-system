@@ -203,10 +203,17 @@ describe('Food receipt prompt loop', () => {
 	});
 
 	// Helper: find the send call that contains the cheapest-price response
+	// (matches both unit-price and package-price wording).
 	function findCheapestReply(): string | undefined {
-		const call = vi.mocked(services.telegram.send).mock.calls.find(
-			([userId, text]) => userId === 'matt' && typeof text === 'string' && (text as string).includes('Lowest saved package price'),
-		);
+		const call = vi
+			.mocked(services.telegram.send)
+			.mock.calls.find(
+				([userId, text]) =>
+					userId === 'matt' &&
+					typeof text === 'string' &&
+					((text as string).includes('Lowest saved package price') ||
+						(text as string).includes('Lowest saved unit price')),
+			);
 		return call?.[1] as string | undefined;
 	}
 
@@ -337,5 +344,238 @@ describe('Food receipt prompt loop', () => {
 			'matt',
 			expect.stringContaining('meal plan'),
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// REQ-FOOD-PRICE-003 — Unit-price comparison persona tests (P5/P6)
+// ---------------------------------------------------------------------------
+
+describe('Food cheapest-price unit normalization (REQ-FOOD-PRICE-003)', () => {
+	let services: CoreServices;
+
+	async function bootServices(sharedStore: ReturnType<typeof createMemoryStore>): Promise<void> {
+		services = createMockCoreServices({
+			data: {
+				forShared: vi.fn().mockReturnValue(sharedStore),
+				forUser: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(sharedStore),
+			},
+			interactionContext: {
+				getRecent: vi.fn().mockReturnValue([]),
+			},
+			config: {
+				get: vi.fn(async (key: string) => {
+					if (key === 'shadow_sample_rate') return 0;
+					if (key === 'routing_primary') return 'regex';
+					return undefined;
+				}),
+			},
+		});
+		await init(services);
+		__clearShadowDepsForTests();
+	}
+
+	function findReplyContaining(snippet: string): string | undefined {
+		const call = vi
+			.mocked(services.telegram.send)
+			.mock.calls.find(
+				([userId, text]) =>
+					userId === 'matt' && typeof text === 'string' && (text as string).includes(snippet),
+			);
+		return call?.[1] as string | undefined;
+	}
+
+	function findUnitOrPackageReply(): string | undefined {
+		const call = vi
+			.mocked(services.telegram.send)
+			.mock.calls.find(
+				([userId, text]) =>
+					userId === 'matt' &&
+					typeof text === 'string' &&
+					((text as string).includes('Lowest saved unit price') ||
+						(text as string).includes('Lowest saved package price')),
+			);
+		return call?.[1] as string | undefined;
+	}
+
+	// Phrasings — Package A (smaller) has lower package price; Package B (larger) has lower unit price.
+	// All phrasings are chosen to flow through the existing routing pipeline
+	// (PRICE_LOOKUP_RE + extractPriceItem) so the cheapest-price branch is reached.
+	const P5_PHRASINGS: Array<{ label: string; text: string; item: string }> = [
+		{ label: 'P5.1', text: 'cheapest spot to buy milk', item: 'milk' },
+		{ label: 'P5.2', text: 'price for flour', item: 'flour' },
+		{ label: 'P5.3', text: 'what is the price of rice', item: 'rice' },
+		{ label: 'P5.4', text: 'where do i get the best price for sugar', item: 'sugar' },
+		{ label: 'P5.5', text: 'cost of pasta', item: 'pasta' },
+	];
+
+	for (const { label, text, item } of P5_PHRASINGS) {
+		it(`${label}: "${text}" — unit-price wins, output contains /100g and Costco`, async () => {
+			// Smaller @ TJ: 6 oz @ $4.99 = ~$2.93/100g
+			// Larger @ Costco: 12 oz @ $7.99 = ~$2.35/100g — winner per unit
+			// We name the entries so the query 'item' loosely matches 'pack' tokens via tokenizeItem.
+			// Use items based on the phrasing word.
+			const tjUnit = '6 oz';
+			const costcoUnit = '12 oz';
+			const sharedStore = createMemoryStore({
+				'household.yaml': stringify(household),
+				'prices/trader-joes.md': [
+					'---',
+					'store: Trader Joes',
+					'slug: trader-joes',
+					'last_updated: 2026-05-04',
+					'type: price-list',
+					'entity_keys:',
+					'  - trader joes',
+					'---',
+					'',
+					'## Pantry',
+					`- ${item} pack A (${tjUnit}): $4.99 <!-- updated: 2026-05-04 -->`,
+				].join('\n'),
+				'prices/costco.md': [
+					'---',
+					'store: Costco',
+					'slug: costco',
+					'last_updated: 2026-05-04',
+					'type: price-list',
+					'entity_keys:',
+					'  - costco',
+					'---',
+					'',
+					'## Pantry',
+					`- ${item} pack B (${costcoUnit}): $7.99 <!-- updated: 2026-05-04 -->`,
+				].join('\n'),
+			});
+			await bootServices(sharedStore);
+
+			await handleMessage(
+				createTestMessageContext({
+					userId: 'matt',
+					text,
+				}),
+			);
+
+			const sent = findUnitOrPackageReply();
+			expect(sent).toBeDefined();
+			expect(sent).toContain('Lowest saved unit price');
+			expect(sent).toContain('Costco');
+			expect(sent).toContain('/100g');
+			expect(sent).not.toContain('Lowest saved package price');
+		});
+	}
+
+	// P6 — package-mode fallback: mixed-base entries.
+	const P6_PHRASINGS: Array<{ label: string; text: string; item: string }> = [
+		{ label: 'P6.1', text: 'cheapest spot to buy milk', item: 'milk' },
+		{ label: 'P6.2', text: 'price for pasta', item: 'pasta' },
+		{ label: 'P6.3', text: 'best price for coffee', item: 'coffee' },
+	];
+
+	for (const { label, text, item } of P6_PHRASINGS) {
+		it(`${label}: "${text}" — mixed bases fall back to package-price`, async () => {
+			const sharedStore = createMemoryStore({
+				'household.yaml': stringify(household),
+				'prices/trader-joes.md': [
+					'---',
+					'store: Trader Joes',
+					'slug: trader-joes',
+					'last_updated: 2026-05-04',
+					'type: price-list',
+					'entity_keys:',
+					'  - trader joes',
+					'---',
+					'',
+					'## Pantry',
+					`- ${item} pack A (12 oz): $4.99 <!-- updated: 2026-05-04 -->`,
+				].join('\n'),
+				'prices/costco.md': [
+					'---',
+					'store: Costco',
+					'slug: costco',
+					'last_updated: 2026-05-04',
+					'type: price-list',
+					'entity_keys:',
+					'  - costco',
+					'---',
+					'',
+					'## Pantry',
+					`- ${item} pack B (1 L): $7.99 <!-- updated: 2026-05-04 -->`,
+				].join('\n'),
+			});
+			await bootServices(sharedStore);
+
+			await handleMessage(
+				createTestMessageContext({
+					userId: 'matt',
+					text,
+				}),
+			);
+
+			const sent = findUnitOrPackageReply();
+			expect(sent).toBeDefined();
+			expect(sent).toContain('Lowest saved package price');
+			expect(sent).not.toContain('/100g');
+			expect(sent).not.toContain('/100ml');
+		});
+	}
+
+	// Negative — should NOT match price-lookup intent.
+	it('does NOT trigger price-lookup for "the milk in the fridge expired"', async () => {
+		const sharedStore = createMemoryStore({
+			'household.yaml': stringify(household),
+			'prices/trader-joes.md': [
+				'---',
+				'store: Trader Joes',
+				'slug: trader-joes',
+				'last_updated: 2026-05-04',
+				'---',
+				'',
+				'## Dairy',
+				'- Milk (1 gal): $3.99 <!-- updated: 2026-05-04 -->',
+			].join('\n'),
+		});
+		await bootServices(sharedStore);
+
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: 'the milk in the fridge expired',
+			}),
+		);
+
+		// Must NOT route to cheapest-price reply.
+		expect(findReplyContaining('Lowest saved unit price')).toBeUndefined();
+		expect(findReplyContaining('Lowest saved package price')).toBeUndefined();
+	});
+
+	// Negative — "cheapest milk receipt" should not yield a cheapest-price reply
+	// (either it's a receipt-query intent or it doesn't match price-lookup at all
+	// because PRICE_LOOKUP_EXCLUDE_RE includes "receipt").
+	it('does NOT route "cheapest milk receipt" to cheapest-price branch', async () => {
+		const sharedStore = createMemoryStore({
+			'household.yaml': stringify(household),
+			'prices/trader-joes.md': [
+				'---',
+				'store: Trader Joes',
+				'slug: trader-joes',
+				'last_updated: 2026-05-04',
+				'---',
+				'',
+				'## Dairy',
+				'- Milk (1 gal): $3.99 <!-- updated: 2026-05-04 -->',
+			].join('\n'),
+		});
+		await bootServices(sharedStore);
+
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: 'cheapest milk receipt',
+			}),
+		);
+
+		expect(findReplyContaining('Lowest saved unit price')).toBeUndefined();
+		expect(findReplyContaining('Lowest saved package price')).toBeUndefined();
 	});
 });

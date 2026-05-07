@@ -36,15 +36,31 @@ export function isValidGroceryPhotoItem(
 	return true;
 }
 
-/** Guard for receipt line items. Rejects missing/non-string names and invalid totalPrice. */
-export function isValidReceiptLineItem(
-	item: unknown,
-): item is { name: string; quantity?: number | null; unitPrice?: number | null; totalPrice: number } {
+/**
+ * Guard for receipt line items. Rejects missing/non-string names and invalid totalPrice.
+ * `packageSize` is optional: a non-empty string is preserved; anything else (number,
+ * boolean, missing, empty) is coerced to null at the call site by checking the field
+ * explicitly. The guard itself does not reject items lacking packageSize.
+ */
+export function isValidReceiptLineItem(item: unknown): item is {
+	name: string;
+	quantity?: number | null;
+	unitPrice?: number | null;
+	totalPrice: number;
+	packageSize?: string | null;
+} {
 	if (!item || typeof item !== 'object') return false;
 	const record = item as Record<string, unknown>;
 	if (typeof record['name'] !== 'string' || record['name'].trim() === '') return false;
 	const price = record['totalPrice'];
 	if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) return false;
+	// Coerce packageSize: non-empty string passes through; anything else becomes null.
+	const ps = record['packageSize'];
+	if (typeof ps === 'string' && ps.trim() !== '') {
+		record['packageSize'] = ps.trim();
+	} else {
+		record['packageSize'] = null;
+	}
 	return true;
 }
 

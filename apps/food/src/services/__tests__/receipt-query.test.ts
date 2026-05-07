@@ -220,3 +220,240 @@ describe('formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)', () => {
 		expect(result).toBe('I do not have saved prices for green\\_beans yet.');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// REQ-FOOD-PRICE-003 — formatCheapestPriceAnswer unit-price comparison
+// ---------------------------------------------------------------------------
+
+import { parseSizeString } from '../unit-normalizer.js';
+
+function makeStoreWithUnit(
+	store: string,
+	slug: string,
+	items: Array<{ name: string; price: number; unit: string; updatedAt?: string }>,
+): StorePriceData {
+	return {
+		store,
+		slug,
+		lastUpdated: '2026-05-01',
+		items: items.map((i) => ({
+			name: i.name,
+			price: i.price,
+			unit: i.unit,
+			department: 'Produce',
+			updatedAt: i.updatedAt ?? '2026-05-01',
+		})),
+	};
+}
+
+describe('formatCheapestPriceAnswer — unit-price comparison (REQ-FOOD-PRICE-003)', () => {
+	// U12 — Smaller package wins on package price but larger package wins on unit price.
+	it('U12: returns larger-package entry by unit price when smaller has lower package price', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('Trader Joes', 'trader-joes', [
+				{ name: 'Flour A', price: 4.99, unit: '6 oz' },
+			]),
+			makeStoreWithUnit('Costco', 'costco', [
+				{ name: 'Flour B', price: 7.99, unit: '12 oz' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'flour');
+		// 6 oz @ $4.99 = ~$2.93/100g; 12 oz @ $7.99 = ~$2.35/100g
+		// 12 oz wins on unit price.
+		expect(result).toContain('Lowest saved unit price for flour');
+		expect(result).toContain('Flour B');
+		expect(result).toContain('Costco');
+		expect(result).toContain('/100g');
+		expect(result).not.toContain('Lowest saved package price');
+	});
+
+	// U13 — Three entries same base; lowest unit price wins.
+	it('U13: picks lowest-unit-price entry among three same-base entries', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [{ name: 'Rice 8oz', price: 3.0, unit: '8 oz' }]),
+			makeStoreWithUnit('B', 'b', [{ name: 'Rice 16oz', price: 4.5, unit: '16 oz' }]),
+			makeStoreWithUnit('C', 'c', [{ name: 'Rice 32oz', price: 7.0, unit: '32 oz' }]),
+		];
+		// 8oz @ $3 → $1.32/100g
+		// 16oz @ $4.50 → $0.99/100g
+		// 32oz @ $7 → $0.77/100g — winner
+		const result = formatCheapestPriceAnswer(data, 'rice');
+		expect(result).toContain('Lowest saved unit price for rice');
+		expect(result).toContain('Rice 32oz');
+		expect(result).toContain('/100g');
+	});
+
+	// U14 — Mixed bases: mass + volume → not all same base → package mode.
+	it('U14: mixed mass+volume entries fall back to package-price mode', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [
+				{ name: 'Item 12oz', price: 4.0, unit: '12 oz' },
+				{ name: 'Item 16oz', price: 5.0, unit: '16 oz' },
+			]),
+			makeStoreWithUnit('B', 'b', [
+				{ name: 'Item 1L', price: 3.0, unit: '1 L' },
+				{ name: 'Item 750ml', price: 2.5, unit: '750 ml' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'item');
+		expect(result).toContain('Lowest saved package price');
+		expect(result).not.toMatch(/\/100g|\/100ml/);
+	});
+
+	// U15 — One unparseable unit → not all entries parse → package mode.
+	it('U15: presence of unparseable unit forces package-price mode', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [{ name: 'Item 12oz', price: 4.0, unit: '12 oz' }]),
+			makeStoreWithUnit('B', 'b', [{ name: 'Item 16oz', price: 5.0, unit: '16 oz' }]),
+			makeStoreWithUnit('C', 'c', [{ name: 'Item large', price: 3.0, unit: 'large' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'item');
+		expect(result).toContain('Lowest saved package price');
+		expect(result).not.toMatch(/\/100g|\/100ml/);
+	});
+
+	// U16 — Two same-base + one different-base → not all same base → package mode.
+	it('U16: parseable but mixed-base entries fall back to package-price mode', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [{ name: 'Item 12oz', price: 4.0, unit: '12 oz' }]),
+			makeStoreWithUnit('B', 'b', [{ name: 'Item 16oz', price: 5.0, unit: '16 oz' }]),
+			makeStoreWithUnit('C', 'c', [{ name: 'Item 12ct', price: 3.0, unit: '12 ct' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'item');
+		expect(result).toContain('Lowest saved package price');
+		expect(result).not.toMatch(/\/100g|\/100ml|\/ct\b/);
+	});
+
+	// U17 — All entries unparseable → package mode.
+	it('U17: all unparseable entries fall back to package-price mode', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [{ name: 'Item large', price: 4.0, unit: 'large' }]),
+			makeStoreWithUnit('B', 'b', [{ name: 'Item small', price: 3.0, unit: 'small' }]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'item');
+		expect(result).toContain('Lowest saved package price');
+		expect(result).not.toMatch(/\/100g|\/100ml/);
+	});
+
+	// U18 — Tied unit prices: alphabetical tiebreak by name.
+	it('U18: ties on unit price break alphabetically by store name', () => {
+		// Two 12oz @ same price → identical unit price.
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('Zebra Mart', 'zebra-mart', [
+				{ name: 'Sugar 12oz', price: 4.0, unit: '12 oz' },
+			]),
+			makeStoreWithUnit('Acme', 'acme', [
+				{ name: 'Sugar 12oz', price: 4.0, unit: '12 oz' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'sugar');
+		expect(result).toContain('Lowest saved unit price for sugar');
+		expect(result).toContain('Acme');
+		expect(result).not.toMatch(/Zebra/);
+	});
+
+	// U19 — No entries → "no saved prices" wording.
+	it('U19: zero entries returns no-saved-prices wording', () => {
+		expect(formatCheapestPriceAnswer([], 'flour')).toBe(
+			'I do not have saved prices for flour yet.',
+		);
+	});
+
+	// U20 — Single parseable entry → package mode (need ≥2 for unit-price).
+	it('U20: a single parseable entry falls back to package-price mode', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('Aldi', 'aldi', [
+				{ name: 'Flour 5lb', price: 4.99, unit: '5 lb' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'flour');
+		expect(result).toContain('Lowest saved package price for flour');
+		expect(result).not.toMatch(/\/100g|\/100ml/);
+	});
+
+	// U21 — All malformed prices filtered → no-saved-prices wording.
+	it('U21: all entries with invalid price fields fall through to no-saved-prices', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [
+				{ name: 'Bad NaN', price: Number.NaN, unit: '12 oz' },
+				{ name: 'Bad Inf', price: Number.POSITIVE_INFINITY, unit: '12 oz' },
+				{ name: 'Bad Neg', price: -1, unit: '12 oz' },
+				{ name: 'Bad Zero', price: 0, unit: '12 oz' },
+			]),
+		];
+		// Note: lookupPriceMatches matches by tokens; ensure the query matches "bad"
+		const result = formatCheapestPriceAnswer(data, 'bad');
+		expect(result).toBe('I do not have saved prices for bad yet.');
+	});
+
+	// U22 — Bad prices excluded; valid entries still compete in their mode.
+	it('U22: invalid-price entries are excluded; valid entries compete normally', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('A', 'a', [
+				{ name: 'Apple Bad', price: Number.NaN, unit: '6 oz' },
+				{ name: 'Apple Good A', price: 4.99, unit: '6 oz' },
+			]),
+			makeStoreWithUnit('B', 'b', [
+				{ name: 'Apple Good B', price: 7.99, unit: '12 oz' },
+			]),
+		];
+		// After filter: 6 oz @ $4.99 vs 12 oz @ $7.99 → unit-price mode; 12 oz wins
+		const result = formatCheapestPriceAnswer(data, 'apple');
+		expect(result).toContain('Lowest saved unit price for apple');
+		expect(result).toContain('Apple Good B');
+		expect(result).toContain('/100g');
+	});
+
+	// U23 — Idempotency / normalization-at-comparison-time test.
+	it('U23: pre-populating sizeValue/sizeBase yields the same winner as auto-derivation', () => {
+		const dataA: StorePriceData[] = [
+			makeStoreWithUnit('Trader Joes', 'tj', [
+				{ name: 'Flour A', price: 4.99, unit: '6 oz' },
+			]),
+			makeStoreWithUnit('Costco', 'costco', [
+				{ name: 'Flour B', price: 7.99, unit: '12 oz' },
+			]),
+		];
+		// Pre-populated copy
+		const dataB: StorePriceData[] = dataA.map((store) => ({
+			...store,
+			items: store.items.map((it) => {
+				const parsed = parseSizeString(it.unit);
+				return parsed ? { ...it, sizeValue: parsed.value, sizeBase: parsed.base } : { ...it };
+			}),
+		}));
+
+		const resultA = formatCheapestPriceAnswer(dataA, 'flour');
+		const resultB = formatCheapestPriceAnswer(dataB, 'flour');
+		expect(resultA).toBe(resultB);
+	});
+
+	// U24 — Contract test: one (and only one) of the two reply forms.
+	it('U24: every reply with ≥1 valid entry is exactly one of unit-price or package-price wording', () => {
+		const cases: StorePriceData[][] = [
+			[makeStoreWithUnit('A', 'a', [{ name: 'Apple 6oz', price: 4.99, unit: '6 oz' }, { name: 'Apple 12oz', price: 7.99, unit: '12 oz' }])],
+			[makeStoreWithUnit('A', 'a', [{ name: 'Apple', price: 4.99, unit: 'large' }])],
+			[makeStoreWithUnit('A', 'a', [{ name: 'Apple', price: 4.99, unit: '5 lb' }, { name: 'Bread', price: 3.0, unit: '1 L' }])],
+		];
+		for (const data of cases) {
+			const r = formatCheapestPriceAnswer(data, 'apple');
+			const isUnit = r.includes('Lowest saved unit price for');
+			const isPkg = r.includes('Lowest saved package price for');
+			expect(isUnit !== isPkg).toBe(true);
+		}
+	});
+
+	// U25 — $4.99 / 5 lb flour single entry → package mode (single entry).
+	it('U25: a single 5 lb flour entry uses package-price wording (no unit token)', () => {
+		const data: StorePriceData[] = [
+			makeStoreWithUnit('Aldi', 'aldi', [
+				{ name: 'Flour 5lb', price: 4.99, unit: '5 lb' },
+			]),
+		];
+		const result = formatCheapestPriceAnswer(data, 'flour');
+		expect(result).toContain('Lowest saved package price');
+		expect(result).not.toContain('/100g');
+		expect(result).not.toContain('/100ml');
+		expect(result).not.toContain('/ct');
+	});
+});
