@@ -17,22 +17,26 @@ export interface MemoryFlushDisableDeps {
 	logger: { warn(obj: unknown, msg?: string): void };
 }
 
+export type MemoryFlushResult =
+	| { status: 'written'; persistedLength: number }
+	| { status: 'failed' };
+
 export async function flushMemoryToContextStore(
 	userId: string,
 	summary: string,
 	deps: MemoryFlushDeps,
-): Promise<'written' | 'failed'> {
+): Promise<MemoryFlushResult> {
 	// Defense-in-depth: re-sanitize regardless of caller — guarantees safe prompt content
 	// even if a future caller bypasses session-summarizer.
 	const cleaned = sanitizeSummaryOutput(summary)?.trim() ?? '';
-	if (!cleaned) return 'failed';
+	if (!cleaned) return { status: 'failed' };
 
 	try {
 		await deps.flushSave(userId, RECENT_SESSION_SUMMARY_KEY, cleaned);
-		return 'written';
+		return { status: 'written', persistedLength: cleaned.length };
 	} catch (err) {
 		deps.logger.warn({ err, userId }, 'memory-flush: ContextStore.save failed');
-		return 'failed';
+		return { status: 'failed' };
 	}
 }
 

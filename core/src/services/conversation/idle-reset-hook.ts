@@ -158,10 +158,11 @@ async function runFlushWithTimeout(
 		}
 		if (summary === null) return 'skipped';
 
-		return flushMemoryToContextStore(userId, summary, {
+		const result = await flushMemoryToContextStore(userId, summary, {
 			flushSave,
 			logger: deps.logger,
 		});
+		return result.status;
 	})();
 
 	try {

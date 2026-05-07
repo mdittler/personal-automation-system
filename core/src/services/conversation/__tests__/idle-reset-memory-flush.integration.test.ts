@@ -172,7 +172,7 @@ describe('S5 — Hostile LLM output: sanitization strips tags and backticks befo
 		// Even if summarizer returned something, flush defense-in-depth also sanitizes
 		if (summary !== null) {
 			const result = await flushMemoryToContextStore('alice', summary, { flushSave, logger });
-			expect(result).toBe('written');
+			expect(result).toMatchObject({ status: 'written' });
 
 			const filePath = join(
 				tempDir,
@@ -203,7 +203,7 @@ describe('S5 — Hostile LLM output: sanitization strips tags and backticks befo
 			flushSave,
 			logger,
 		});
-		expect(result).toBe('written');
+		expect(result).toMatchObject({ status: 'written' });
 
 		const filePath = join(tempDir, 'users', 'alice', 'context', `${RECENT_SESSION_SUMMARY_KEY}.md`);
 		const onDisk = await readFile(filePath, 'utf-8');
