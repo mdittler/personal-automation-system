@@ -16,6 +16,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -34,6 +36,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -54,6 +58,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -72,6 +78,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -97,6 +105,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -118,6 +128,8 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'start new chat',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		store.attach('user1', entry);
@@ -137,12 +149,16 @@ describe('PendingSessionControlStore', () => {
 			userId: 'user1',
 			messageText: 'first message',
 			expiresAt: 6000,
+			id: 'nonce1',
+			createdAtMs: 1000,
 		};
 
 		const entry2: PendingSessionControlEntry = {
 			userId: 'user1',
 			messageText: 'second message',
 			expiresAt: 7000,
+			id: 'nonce2',
+			createdAtMs: 2000,
 		};
 
 		store.attach('user1', entry1);
@@ -157,10 +173,16 @@ describe('PendingSessionControlStore', () => {
 		const clock = () => 1000;
 		const ttlMs = 5000;
 
-		const entry = createPendingEntry('user1', 'test message', { clock, ttlMs });
+		const entry = createPendingEntry('user1', 'test message', { clock, ttlMs, id: 'nonce1' });
 
 		expect(entry.userId).toBe('user1');
 		expect(entry.messageText).toBe('test message');
 		expect(entry.expiresAt).toBe(6000); // 1000 + 5000
+	});
+
+	it('createPendingEntry sets createdAtMs from clock', () => {
+		const clock = () => 2500;
+		const entry = createPendingEntry('user1', 'hello', { clock, id: 'nonce2' });
+		expect(entry.createdAtMs).toBe(2500);
 	});
 });

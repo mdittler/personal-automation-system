@@ -98,6 +98,7 @@ import {
 	SC_NO,
 	SC_YES,
 } from './services/conversation/pending-session-control-store.js';
+import { handleSessionControlCallback } from './services/conversation/handle-session-control-callback.js';
 import { detectSessionControl } from './services/conversation/session-control-classifier.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
@@ -1336,28 +1337,31 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 						return;
 					}
 
-					if (isYes) {
-						const entry = pendingSessionControl.get(userId); // consume-once
-						if (!entry) {
-							// Entry expired between peek and get (very unlikely race)
-							await ctx.reply('That confirmation has expired. Please try again.');
-							return;
-						}
-						// Build a minimal MessageContext for handleNewChat.
-						// handleNewChat sends its own confirmation — no extra reply needed (Fix 5b).
-						const scCtx = {
-							userId,
-							text: entry.messageText,
-							timestamp: new Date(),
-							chatId: ctx.callbackQuery.message?.chat.id ?? 0,
-							messageId: ctx.callbackQuery.message?.message_id ?? 0,
-						};
-						await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
-							await conversationService.handleNewChat([], scCtx);
-						});
-					} else {
-						// sc:no — nonce verified above; remove the pending entry
-						pendingSessionControl.remove(userId);
+					// Build a minimal MessageContext for the callback helper.
+					// handleNewChat sends its own confirmation — no extra reply needed for sc:yes (Fix 5b).
+					const scCtx = {
+						userId,
+						text: peeked.messageText,
+						timestamp: new Date(),
+						chatId: ctx.callbackQuery.message?.chat.id ?? 0,
+						messageId: ctx.callbackQuery.message?.message_id ?? 0,
+					};
+
+					await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
+						await handleSessionControlCallback(
+							isYes ? SC_YES : SC_NO,
+							entryId,
+							scCtx,
+							{
+								pendingStore: pendingSessionControl,
+								handleNewChat: (msgCtx) => conversationService.handleNewChat([], msgCtx),
+								sessionControlLogger: undefined, // wired in Task 2.3
+								logger,
+							},
+						);
+					});
+
+					if (!isYes) {
 						await ctx.reply('OK, continuing your current conversation.');
 					}
 					return;
