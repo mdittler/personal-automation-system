@@ -3047,10 +3047,24 @@ Reference index for the smaller pending items in `docs/open-items.md`, grouped b
 - `isPasRelevant()` removal — deprecated keyword heuristic, zero production callers; delete function + tests + URS entries
 - *Originally bundled here:* `MODEL_SWITCH_INTENT_REGEX` route-first conversion. **Descoped after Codex review (2026-05-06)** — see `docs/open-items.md` for the multi-component design surface (router classifier-branch chatbot special case, `handleMessage` switch processing, prompt-builder route-aware instructions, manifest parity test). Will be planned as its own phase.
 
-### Batch 3 — Conversation router built-ins + recall config
-- P8b `/flushmemory` Router built-in — follows the `/refreshmemory` pattern from Hermes P6.next
-- P7 `SessionControlClassifier` telemetry — structured log writes (shadow-classifier log pattern)
-- P6.next 365d cap relaxation — add `chat.recall.max_window_days` system config key + one guard in `validateTimeAnchor`
+### Batch 3 — Conversation router built-ins + recall config ✓ Complete (2026-05-07)
+
+Three items from `docs/open-items.md` (lines 19, 33, 136) closed in a single branch (`codex/batch3-router-recall-cleanup`). Zero behavior change for default-configured installs. 13 new URS requirements (REQ-CONV-FLUSH-013..018, REQ-CONV-NEWCHAT-009..012, REQ-CONV-TEMPORAL-013..015).
+
+**Item 3 — P6.next 365d cap relaxation (REQ-CONV-TEMPORAL-013..015)**
+`chat.recall.max_window_days` zod-validated config key (`[1, 3650]`, default 365). Threads through `RecallPipelineDeps` → `ClassifyRecallDeps` → `buildClassifierPrompt(today, maxWindowDays)` → `parseRecallVerdict`. All existing 365-day tests still pass; new tests cover rejection boundary, prompt interpolation, and the loader default.
+- **New files:** `core/src/services/config/__tests__/pas-yaml-schema.test.ts` (7 new rejection cases + 2 default tests)
+- **Modified:** `core/src/services/config/pas-yaml-schema.ts`, `core/src/types/config.ts`, `core/src/services/config/index.ts`, `core/src/services/conversation-retrieval/recall-classifier.ts`, `core/src/services/conversation/recall-pipeline.ts`, `core/src/services/conversation/handle-message.ts`, `core/src/services/conversation/handle-ask.ts`, `core/src/services/conversation/conversation-service.ts`
+
+**Item 2 — P7 SessionControlClassifier telemetry (REQ-CONV-NEWCHAT-009..012)**
+`SessionControlLogger` markdown structured log (mirrors `FoodShadowLogger`). Two-event design: classification entries (zone, entryId, latency, sanitized message ≤200 code points; `</script>`, backticks, bidi controls stripped) + confirmation entries (linked by entryId, elapsedMs from `createdAtMs`). Pre-generated `entryId` for grey-zone ensures the log entry and `PendingSessionControlStore` entry share the same nonce. Fail-open (errors → `logger.warn`). `pnpm analyze-session-control-log` CLI with round-trip parser test. `handleSessionControlCallback` extracted from inline `compose-runtime.ts` sc:yes/sc:no block for unit testability; `createdAtMs: number` added to `PendingSessionControlEntry`.
+- **New files:** `session-control-logger.ts`, `handle-session-control-callback.ts`, `scripts/analyze-session-control-log.ts`, plus corresponding test files
+- **Modified:** `compose-runtime.ts` (instantiate logger, extract callback), `router/index.ts` (telemetry in `handleSessionControlHook`), `pending-session-control-store.ts` (`createdAtMs`)
+
+**Item 1 — P8b `/flushmemory` Router built-in (REQ-CONV-FLUSH-013..018)**
+`/flushmemory` and `/flush-memory` Router built-ins following the `/refreshmemory` pattern. `handleFlushMemory`: reads active session turns → races summarizer against 8-second `Promise.race` + `AbortController` → late-resolve guard (`if (timedOut || controller.signal.aborted) return { status: 'failed' }`) prevents writing after timeout. `flushMemoryToContextStore` return type widened from `'written' | 'failed'` to `{ status: 'written'; persistedLength: number } | { status: 'failed' }` for accurate `Memory flushed: N chars saved.` reply. Manifest shadowing prevented via `BUILTIN_COMMAND_NAMES`. 22 Router tests + 17 handler unit tests + 14 persona tests.
+- **New files:** `handle-flush-memory.ts`, `router/__tests__/router-flush-memory.test.ts`, `__tests__/flush-memory.persona.test.ts`
+- **Modified:** `memory-flush.ts` (widen return type), `idle-reset-hook.ts` (update call site), `conversation-service.ts` (shim + ConversationServiceDeps), `conversation/index.ts` (barrel), `router/index.ts` (dispatch + BUILTIN_COMMAND_NAMES + help text), `compose-runtime.ts` (pass summarizer + flushSave)
 
 ### Batch 4 — Food micro-fixes (`apps/food/`)
 - `formatCheapestPriceAnswer` reword — one-line phrasing fix in `apps/food/src/services/receipt-query.ts` ("lowest saved package price" stopgap)
