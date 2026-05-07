@@ -6,7 +6,11 @@ import { getCurrentUserId } from '@pas/core/services/context/request-context';
 import type { CoreServices } from '@pas/core/types';
 import type { ReceiptLineItem } from '../types.js';
 import { todayDate } from '../utils/date.js';
-import { isValidReceiptAmount, isValidReceiptLineItem } from '../utils/photo-validators.js';
+import {
+	isValidReceiptAmount,
+	isValidReceiptLineItem,
+	normalizeReceiptLineItem,
+} from '../utils/photo-validators.js';
 import { fenceCaption } from '../utils/sanitize.js';
 import { parseJsonResponse } from './recipe-parser.js';
 
@@ -22,9 +26,9 @@ export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
 	if (typeof value !== 'string') return false;
 	const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 	if (!m) return false;
-	const y = Number(m[1]),
-		mo = Number(m[2]),
-		d = Number(m[3]);
+	const y = Number(m[1]);
+	const mo = Number(m[2]);
+	const d = Number(m[3]);
 	if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return false;
 	if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
 
@@ -122,7 +126,9 @@ export async function parseReceiptFromPhoto(
 	}
 
 	const lineItems = Array.isArray(parsed.lineItems)
-		? ((parsed.lineItems as unknown[]).filter(isValidReceiptLineItem) as ReceiptLineItem[])
+		? ((parsed.lineItems as unknown[])
+				.filter(isValidReceiptLineItem)
+				.map(normalizeReceiptLineItem) as ReceiptLineItem[])
 		: [];
 
 	let date = todayISO;
