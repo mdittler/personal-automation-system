@@ -1,13 +1,16 @@
 import type { MessageContext } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import type { SessionTurn } from '../conversation-session/chat-session-store.js';
 import type { EditService } from '../edit/index.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
+import { handleFlushMemory as coreHandleFlushMemory } from './handle-flush-memory.js';
 import { type HandleMessageDeps, handleMessage as coreHandleMessage } from './handle-message.js';
 import { handleNotes as coreHandleNotes } from './handle-notes.js';
 import { handleRecall as coreHandleRecall } from './handle-recall.js';
 import { handleRefreshMemory as coreHandleRefreshMemory } from './handle-refresh-memory.js';
+import type { MemoryFlushSave } from './memory-flush.js';
 import { pendingEdits } from './pending-edits.js';
 
 /**
@@ -20,6 +23,10 @@ import { pendingEdits } from './pending-edits.js';
  */
 export type ConversationServiceDeps = HandleMessageDeps & {
 	editService?: EditService;
+	/** Session summarizer — when present, enables /flushmemory. */
+	summarizer?: (turns: SessionTurn[], signal?: AbortSignal) => Promise<string | null>;
+	/** Context-store saver — when present, enables /flushmemory. */
+	flushSave?: MemoryFlushSave;
 };
 
 /**
@@ -167,6 +174,23 @@ export class ConversationService {
 			chatSessions: this.deps.chatSessions,
 			conversationRetrieval: this.deps.conversationRetrieval,
 			config: this.deps.config,
+			logger: this.deps.logger,
+		});
+	}
+
+	async handleFlushMemory(args: string[], ctx: MessageContext): Promise<void> {
+		if (!this.deps.summarizer || !this.deps.flushSave) {
+			await this.deps.telegram.send(
+				ctx.userId,
+				escapeMarkdown('Memory flush deferred — try again later.'),
+			);
+			return;
+		}
+		return coreHandleFlushMemory(args.join(' ').trim(), ctx, {
+			telegram: this.deps.telegram,
+			chatSessions: this.deps.chatSessions,
+			summarizer: this.deps.summarizer,
+			flushSave: this.deps.flushSave,
 			logger: this.deps.logger,
 		});
 	}

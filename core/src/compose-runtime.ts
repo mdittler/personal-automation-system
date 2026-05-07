@@ -1120,6 +1120,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsRegistry,
 		settingsWriter,
 		recallMaxWindowDays: config.chat?.recall?.max_window_days ?? 365,
+		summarizer: sessionSummarizer,
+		flushSave,
 	});
 	logger.info('ConversationService: initialized');
 

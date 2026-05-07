@@ -79,3 +79,6 @@ export type {
 
 export { ConversationService } from './conversation-service.js';
 export type { ConversationServiceDeps } from './conversation-service.js';
+
+export { handleFlushMemory } from './handle-flush-memory.js';
+export type { HandleFlushMemoryDeps } from './handle-flush-memory.js';
