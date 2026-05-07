@@ -267,9 +267,20 @@ describe('F1 — freeze + rebuild (happy path + state transition)', () => {
 
 describe('F2 — empty context store produces no durable-memory block', () => {
 	it('no <memory-context label="durable-memory"> block when context store is empty', async () => {
-		// userB has no seeded entries at this point (F2 runs before any seeding for userB)
 		const { id: userId, householdId } = userB;
+		const contextStore = runtime.services.contextStore;
 		const router = getRouter();
+
+		// Defensive cleanup: remove any keys that other tests might have seeded for userB,
+		// regardless of test execution order. remove() is idempotent — resolves void for
+		// non-existent keys, so no try/catch needed.
+		for (const key of ['temperature-pref', 'removal-test', 'reset-test', 'concurrent-entry', 'secret-marker-b', 'concurrency-pref', 'isolation-marker', 'failopen-test']) {
+			await contextStore.remove(userId, key);
+		}
+		// Start a fresh session so the snapshot is minted from the now-empty store
+		await requestContext.run({ userId, householdId }, () =>
+			router.routeMessage({ userId, text: '/newchat', chatId: 9010, messageId: 9, timestamp: new Date() }),
+		);
 
 		const startIdx = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
@@ -365,6 +376,11 @@ describe('F4 — /reset parity: new session picks up mutations', () => {
 		// First session should contain pre-reset value
 		const prompt1 = getChatbotPrompt(recorder, startIdx1);
 		expect(prompt1).toBeDefined();
+		// Pre-reset session must contain the value seeded before the session was minted
+		const block1 = extractDurableMemoryBlock(prompt1!);
+		expect(block1).not.toBeNull();
+		expect(block1).toContain('Value before reset.');
+		expect(block1).not.toContain('Value after reset.');
 
 		// Mutate before /reset
 		await contextStore.save(userId, 'reset-test-pref', 'Value after reset.', {
