@@ -3090,9 +3090,30 @@ Changed `"… is cheapest for …"` to `"Lowest saved package price for {item}: 
 - **C3 (P2):** Added runtime metric key stripping in `apps/food/src/events/subscribers.ts` before `upsertDailyHealth` — `Object.fromEntries(...filter(...))` removes `energyLevel` and `mood` regardless of caller type discipline.
 - **C4 (process):** Documented `PasYamlConfig.recall` fix as Batch 3 carry-forward in this phase note.
 
-### Batch 5 — Test-only additions
-- P4 end-to-end freeze integration test — real temp-backed stores, full snapshot freeze workflow
-- `interactionContext` unused in prompt-builder (add rendering or remove fetch)
+### Batch 5 — P4 freeze integration coverage + `interactionContext` cleanup ✓ Complete (2026-05-07)
+
+Two items from `docs/open-items.md` closed in a single branch (`codex/batch5-test-coverage`). Item 1 adds integration coverage; Item 2 removes production dead code. 1 new test file (`memory-snapshot-freeze.integration.test.ts`), 9 integration scenarios (F1–F9), 2 regression-guard tests. URS REQ-CONV-MEMORY-{001, 002, 005, 006, 007, 009, 010, 011} and REQ-CONV-RETRIEVAL-014 extended with integration test references.
+
+**Item 1 — P4 freeze integration test**
+`core/src/services/conversation/__tests__/memory-snapshot-freeze.integration.test.ts` — 9 scenarios covering all 7 testing-standards categories:
+- **F1** (happy path + state transition, REQ-CONV-MEMORY-001/007/010/011): `composeRuntime` + `RecordingStubProvider`; seed `temperature-pref = Celsius`; turn 1 block contains Celsius; mutate to Fahrenheit; turn 2 still frozen (Fahrenheit absent from whole prompt); `/newchat`; turn 3 block contains Fahrenheit. Exact oracle via `extractDurableMemoryBlock` helper scoped to Layer 2 payload.
+- **F2** (edge — empty store, REQ-CONV-MEMORY-005): no durable entries → `extractDurableMemoryBlock` returns `null`.
+- **F3** (state transition — remove mid-session, REQ-CONV-MEMORY-001/010): seed → turn 1 → `contextStore.remove` → turn 2 in same session → block still contains original entry (frozen).
+- **F4** (state transition — `/reset` parity, REQ-CONV-MEMORY-001): seed → mutate → `/reset` → turn 2 block contains mutated value.
+- **F5** (persistence round-trip, REQ-CONV-MEMORY-002): after turn 1, read active transcript YAML frontmatter; compare `memory_snapshot.content` to extracted durable-memory block payload; assert `status=ok`, `entry_count=1`, `built_at` ISO parseable.
+- **F6** (error handling — fail-open, REQ-CONV-MEMORY-005/006): monkeypatch `listDurableForUser` to throw; `routeMessage`; `extractDurableMemoryBlock` returns `null`; frontmatter `memory_snapshot.status=degraded`; warning logged; telegram reply still sent.
+- **F7** (security — fence/bidi, REQ-CONV-MEMORY-009): seed entry containing `</memory-context>` + bidi RLO `‮`; block payload contains `&lt;/memory-context>` (escaped); `‮` absent; exactly one outer block.
+- **F8** (concurrency, REQ-CONV-MEMORY-001): `Promise.all([routeMessage(turn1), routeMessage(turn2)])`; both prompts have a durable-memory block; both payloads byte-identical.
+- **F9** (user isolation, REQ-CONV-MEMORY-001): two users; seed `A-MARKER` for user A, `B-MARKER` for user B; A's block contains only A-MARKER; B's block contains only B-MARKER.
+
+**Item 2 — `interactionContext` snapshot fetch removal**
+- **Modified:** `core/src/services/conversation-retrieval/conversation-retrieval-service.ts` — removed `interactionContext?` field from `ConversationContextSnapshot` type, removed `interaction-context` fan-out task (lines 481–489), removed `case 'interaction-context':` assignment (lines 646–654). `ConversationRetrievalServiceDeps.interactionContext` and `getRecentInteractions()` retained for REQ-CONV-RETRIEVAL-007.
+- **Modified:** `core/src/services/conversation-retrieval/source-selection.ts` — removed `selected.add('interaction-context')` at line 27; comment updated to "two cheap scoped readers".
+- **Modified:** `core/src/services/conversation-retrieval/__tests__/conversation-retrieval-service.test.ts` — removed `interactionContext: { getRecent: vi.fn() }` wiring from `buildContextSnapshot` test cases; removed `expect(snapshot.interactionContext).toBeDefined()`; added 2 regression-guard tests; updated stale "3 cheap readers" test title to "2 cheap readers".
+- **Modified:** `core/src/services/conversation-retrieval/__tests__/conversation-retrieval-service.integration.test.ts` — removed `interactionContext wired: snapshot.interactionContext includes recent entries` test.
+- **Modified:** `core/src/services/conversation-retrieval/__tests__/source-selection.test.ts` — updated always-included set assertion to expect `context-store` + `app-metadata` only.
+
+470 test files / 10,368 tests passing (full suite).
 
 ### Standalone single-file changes
 - P1 Chunk A simplify pass — scope via `git diff` to Chunk A files only
