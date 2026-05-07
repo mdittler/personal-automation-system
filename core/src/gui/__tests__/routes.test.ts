@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -446,6 +446,210 @@ describe('GUI Routes', () => {
 			expect(res.body).toContain('value="true" selected');
 			// The "false" option must NOT be selected
 			expect(res.body).not.toContain('value="false" selected');
+		});
+	});
+
+	describe('GET /gui/apps/:appId — type=select widget rendering', () => {
+		async function buildFoodSelectApp(
+			selectTempDir: string,
+			userConfigDefs: RegisteredApp['manifest']['user_config'],
+		) {
+			const foodApp: RegisteredApp = {
+				manifest: {
+					app: { id: 'food', name: 'Food', version: '1.0.0', description: 'Food test' },
+					capabilities: { messages: { intents: [] } },
+					requirements: { services: [] },
+					user_config: userConfigDefs,
+				} as RegisteredApp['manifest'],
+				module: { init: async () => {}, handleMessage: async () => {} },
+				appDir: '/tmp/apps/food',
+			};
+			const reg = {
+				getAll: () => [foodApp],
+				getApp: (id: string) => (id === 'food' ? foodApp : undefined),
+				getLoadedAppIds: () => ['food'],
+				getManifestCache: () => ({}) as ReturnType<AppRegistry['getManifestCache']>,
+			} as unknown as AppRegistry;
+			const cfg = { ...createMockConfig(), dataDir: selectTempDir };
+			const toggle = new AppToggleStore({ dataDir: selectTempDir });
+			const server = Fastify({ logger: false });
+			await server.register(fastifyCookie, { secret: AUTH_TOKEN });
+			const etaInst = new Eta();
+			await server.register(fastifyView, {
+				engine: { eta: etaInst },
+				root: viewsDir,
+				viewExt: 'eta',
+				layout: 'layout',
+			});
+			const credSvc = new CredentialService({ dataDir: selectTempDir });
+			await credSvc.setPassword(TEST_USER_ID, TEST_PASSWORD);
+			const uMgr = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+			const hhSvc = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+				{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+			]);
+			await server.register(
+				async (gui) => {
+					await registerAuth(gui, {
+						authToken: AUTH_TOKEN,
+						credentialService: credSvc,
+						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
+						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
+					});
+					await registerCsrfProtection(gui);
+					registerAppsRoutes(gui, { registry: reg, config: cfg, appToggle: toggle, dataDir: selectTempDir, logger });
+				},
+				{ prefix: '/gui' },
+			);
+			return server;
+		}
+
+		it('renders <select> with one <option> per options[] entry (default selected)', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-sel-'));
+			const server = await buildFoodSelectApp(tempDir, [
+				{
+					key: 'routing_primary',
+					type: 'select',
+					default: 'regex',
+					options: ['regex', 'shadow'],
+					description: 'Primary routing strategy',
+				},
+			]);
+			try {
+				const loginRes = await server.inject({
+					method: 'POST',
+					url: '/gui/login',
+					payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+				});
+				const cookies = collectCookies(loginRes);
+				const res = await server.inject({ method: 'GET', url: '/gui/apps/food', cookies });
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toMatch(/<select[^>]*name="routing_primary"[^>]*>/);
+				expect(res.body).not.toMatch(/<input[^>]*type="text"[^>]*name="routing_primary"/);
+				expect(res.body).not.toMatch(/<input[^>]*name="routing_primary"[^>]*type="text"/);
+				expect(res.body).toContain('<option value="regex"');
+				expect(res.body).toContain('<option value="shadow"');
+				expect(res.body).toMatch(/<option value="regex" selected>/);
+				expect(res.body).not.toMatch(/<option value="shadow" selected>/);
+			} finally {
+				await server.close();
+				await rm(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it('renders override value as selected when one exists', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-sel-'));
+			const server = await buildFoodSelectApp(tempDir, [
+				{
+					key: 'routing_primary',
+					type: 'select',
+					default: 'regex',
+					options: ['regex', 'shadow'],
+					description: 'Primary routing strategy',
+				},
+			]);
+			try {
+				const overrideDir = join(tempDir, 'system', 'app-config', 'food');
+				await mkdir(overrideDir, { recursive: true });
+				await writeFile(join(overrideDir, `${TEST_USER_ID}.yaml`), 'routing_primary: shadow\n');
+				const loginRes = await server.inject({
+					method: 'POST',
+					url: '/gui/login',
+					payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+				});
+				const cookies = collectCookies(loginRes);
+				const res = await server.inject({ method: 'GET', url: '/gui/apps/food', cookies });
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toMatch(/<option value="shadow" selected>/);
+				expect(res.body).not.toMatch(/<option value="regex" selected>/);
+			} finally {
+				await server.close();
+				await rm(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it('renders single-option select correctly', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-sel-'));
+			const server = await buildFoodSelectApp(tempDir, [
+				{ key: 'mode', type: 'select', default: 'only', options: ['only'], description: 'Mode' },
+			]);
+			try {
+				const loginRes = await server.inject({
+					method: 'POST',
+					url: '/gui/login',
+					payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+				});
+				const cookies = collectCookies(loginRes);
+				const res = await server.inject({ method: 'GET', url: '/gui/apps/food', cookies });
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toMatch(/<select[^>]*name="mode"[^>]*>/);
+				expect(res.body).toMatch(/<option value="only" selected>only<\/option>/);
+			} finally {
+				await server.close();
+				await rm(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it('renders <select> with no <option> children when options[] is empty (defensive)', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-sel-'));
+			const server = await buildFoodSelectApp(tempDir, [
+				{ key: 'empty_sel', type: 'select', default: '', options: [], description: 'Empty' },
+			]);
+			try {
+				const loginRes = await server.inject({
+					method: 'POST',
+					url: '/gui/login',
+					payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+				});
+				const cookies = collectCookies(loginRes);
+				const res = await server.inject({ method: 'GET', url: '/gui/apps/food', cookies });
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toMatch(/<select[^>]*name="empty_sel"[^>]*>/);
+				// No <option> elements inside this select
+				const afterOpen = res.body.split(/name="empty_sel"[^>]*>/)[1] ?? '';
+				const beforeClose = afterOpen.split('</select>')[0] ?? '';
+				expect(beforeClose).not.toMatch(/<option/);
+			} finally {
+				await server.close();
+				await rm(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it('renders <select> alongside boolean fields without breaking either widget', async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), 'pas-sel-'));
+			const server = await buildFoodSelectApp(tempDir, [
+				{
+					key: 'routing_primary',
+					type: 'select',
+					default: 'regex',
+					options: ['regex', 'shadow'],
+					description: 'Routing strategy',
+				},
+				{ key: 'enabled', type: 'boolean', default: false, description: 'Enabled' },
+			]);
+			try {
+				const loginRes = await server.inject({
+					method: 'POST',
+					url: '/gui/login',
+					payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+				});
+				const cookies = collectCookies(loginRes);
+				const res = await server.inject({ method: 'GET', url: '/gui/apps/food', cookies });
+				expect(res.statusCode).toBe(200);
+				// Select widget for routing_primary
+				expect(res.body).toMatch(/<select[^>]*name="routing_primary"[^>]*>/);
+				expect(res.body).toContain('<option value="regex"');
+				expect(res.body).toContain('<option value="shadow"');
+				// Boolean widget for enabled (also renders as <select> with true/false)
+				expect(res.body).toMatch(/<select[^>]*name="enabled"[^>]*>/);
+				expect(res.body).toContain('<option value="true"');
+				expect(res.body).toContain('<option value="false"');
+				// No text inputs for these fields
+				expect(res.body).not.toMatch(/<input[^>]*type="text"[^>]*name="routing_primary"/);
+				expect(res.body).not.toMatch(/<input[^>]*name="routing_primary"[^>]*type="text"/);
+			} finally {
+				await server.close();
+				await rm(tempDir, { recursive: true, force: true });
+			}
 		});
 	});
 
