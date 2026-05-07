@@ -5078,8 +5078,8 @@ On a successful flush, the reply is `Memory flushed: ${persistedLength} chars sa
 
 | ID | Requirement | Priority |
 |---|---|---|
-| REQ-CONV-NEWCHAT-009 | `SessionControlClassifier` invocations MUST emit a structured classification log entry containing: timestamp, userId, message text (sanitized to ≤200 code points; `</script>`, backticks, bidi controls stripped), preFilter outcome, llm result OR `'skipped'`, derived zone, `entryId` (when grey-zone), latency. | MUST |
-| REQ-CONV-NEWCHAT-010 | `sc:yes` and `sc:no` callback handlers MUST emit a structured confirmation log entry linked to the classification by `entryId`, carrying outcome (`confirmed`/`declined`/`expired-or-stale`) and `elapsedMs` (callback time minus `createdAtMs`). | MUST |
+| REQ-CONV-NEWCHAT-009 | Successful `SessionControlClassifier` invocations MUST emit a structured classification log entry containing: timestamp, userId, message text (sanitized to ≤200 code points; opening/closing `<script>`/`<style>` tags, backticks, bidi controls stripped), preFilter outcome, llm result OR `'skipped'`, derived zone, `entryId` (when grey-zone), latency. Invocations that throw MUST NOT emit a log entry. | MUST |
+| REQ-CONV-NEWCHAT-010 | `sc:yes` and `sc:no` callback handlers MUST emit a structured confirmation log entry linked to the classification by `entryId`, carrying outcome (`confirmed`/`declined`/`expired-or-stale`/`failed`) and `elapsedMs` (callback time minus `createdAtMs`). | MUST |
 | REQ-CONV-NEWCHAT-011 | All `SessionControlLogger` writes MUST fail-open: errors logged via `logger.warn` and the call returns; classifier behavior unaffected. | MUST |
 | REQ-CONV-NEWCHAT-012 | `pnpm analyze-session-control-log` MUST parse the log and print: total entries, per-zone counts, confirmation-rate (%) for grey-zone entries, top-N declined messages. | MUST |
 

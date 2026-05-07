@@ -77,7 +77,7 @@ describe('handleSessionControlCallback — confirmed (sc:yes)', () => {
 		);
 	});
 
-	it('logs confirmed even when handleNewChat throws (fail-open)', async () => {
+	it('logs "failed" outcome (not "confirmed") when handleNewChat throws (fail-open)', async () => {
 		const store = createPendingSessionControlStore({ clock: () => 2000 });
 		store.attach('u1', makeEntry('u1', 'abc123', 2000));
 
@@ -96,7 +96,7 @@ describe('handleSessionControlCallback — confirmed (sc:yes)', () => {
 		await expect(handleSessionControlCallback(SC_YES, 'abc123', makeCtx(), deps)).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('session store failure'));
 		expect(logConfirmation).toHaveBeenCalledWith(
-			expect.objectContaining({ outcome: 'confirmed' }),
+			expect.objectContaining({ outcome: 'failed' }),
 		);
 	});
 });

@@ -41,7 +41,7 @@ export async function handleSessionControlCallback(
 	const now = deps.clock?.() ?? Date.now();
 	const entry = deps.pendingStore.get(ctx.userId); // consume-once (nonce pre-verified by caller)
 
-	let outcome: 'confirmed' | 'declined' | 'expired-or-stale';
+	let outcome: 'confirmed' | 'declined' | 'expired-or-stale' | 'failed';
 	let elapsedMs = 0;
 
 	if (!entry || entry.id !== entryId) {
@@ -50,11 +50,12 @@ export async function handleSessionControlCallback(
 	} else {
 		elapsedMs = now - entry.createdAtMs;
 		if (callbackData === 'sc:yes') {
-			outcome = 'confirmed';
 			try {
 				await deps.handleNewChat(ctx);
+				outcome = 'confirmed';
 			} catch (err) {
 				deps.logger.warn(`session-control sc:yes handleNewChat failed: ${String(err)}`);
+				outcome = 'failed';
 			}
 		} else {
 			outcome = 'declined';

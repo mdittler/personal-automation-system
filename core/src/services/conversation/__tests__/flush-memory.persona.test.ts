@@ -1,11 +1,13 @@
 /**
- * Persona tests — Batch 3 Item 1: /flushmemory handler.
+ * Handler persona coverage — Batch 3 Item 1: /flushmemory handler.
  *
- * Slim suite targeting risk surface unique to real wiring — lifecycle,
- * exact reply strings, security, NL negatives, race guard.
+ * Slim suite targeting risk surface of the handleFlushMemory function:
+ * lifecycle, exact reply strings, security, NL argument inertness, race guard.
+ * All dependencies are mocked. Production wiring (Router dispatch, real stores)
+ * is covered by router-flush-memory.test.ts and handle-flush-memory.test.ts.
  *
  * Per feedback_persona_test_scoping.md: unit-duplicate coverage is omitted;
- * only the 14 high-value tests that validate production wiring are included.
+ * only the 14 high-value tests that validate handler behavior are included.
  *
  * REQ-CONV-FLUSH-013..018
  */

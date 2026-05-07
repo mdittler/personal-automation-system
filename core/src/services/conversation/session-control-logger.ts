@@ -35,7 +35,7 @@ export interface SessionControlConfirmationEntry {
 	timestamp: Date;
 	userId: string;
 	entryId: string;
-	outcome: 'confirmed' | 'declined' | 'expired-or-stale';
+	outcome: 'confirmed' | 'declined' | 'expired-or-stale' | 'failed';
 	elapsedMs: number;
 }
 
@@ -70,7 +70,9 @@ function fmtTs(d: Date): string {
 function safeForLog(raw: string, maxCodePoints: number): string {
 	const noBidi = raw.replace(BIDI_CC_RE, '[bidi]');
 	const noTags = noBidi
+		.replace(/<script/gi, '[script')
 		.replace(/<\/script>/gi, '[/script]')
+		.replace(/<style/gi, '[style')
 		.replace(/<\/style>/gi, '[/style]');
 	const noTicks = noTags.replace(/`/g, "'");
 	const oneLine = noTicks.replace(/[\r\n]+/g, ' ');

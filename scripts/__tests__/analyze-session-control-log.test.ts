@@ -120,6 +120,20 @@ describe('parseSessionControlLogEntry', () => {
 		expect(entry.entryId).toBeUndefined();
 	});
 
+	it('decodes messageText without surrounding quotes (P3-4)', () => {
+		const block = makeClassificationBlock({ message: 'start fresh' });
+		const entry = parseSessionControlLogEntry(block) as ParsedClassificationEntry;
+		expect(entry.messageText).toBe('start fresh');
+		expect(entry.messageText).not.toMatch(/^"/);
+	});
+
+	it('decodes messageText containing JSON-escaped double quotes', () => {
+		// The logger JSON-escapes quotes inside the string; the parser must reverse this
+		const block = `## 2026-05-07 10:00:00\n\n- **Kind**: classification\n- **User**: u1\n- **Message**: "hello \\"world\\""\n- **Pre-filter**: unmatched\n- **LLM**: skipped\n- **Zone**: grey-zone\n- **Latency**: 10ms\n\n`;
+		const entry = parseSessionControlLogEntry(block) as ParsedClassificationEntry;
+		expect(entry.messageText).toBe('hello "world"');
+	});
+
 	it('parses high-confidence zone', () => {
 		const block = makeClassificationBlock({ zone: 'high-confidence' });
 		const entry = parseSessionControlLogEntry(block) as ParsedClassificationEntry;
@@ -199,15 +213,32 @@ describe('analyzeSessionControlLog', () => {
 		expect(stats.zoneCounts['below-threshold']).toBe(1);
 	});
 
-	it('computes grey-zone confirmation rate', () => {
+	it('computes grey-zone confirmation rate from grey-zone-linked entries only', () => {
 		const md =
 			FRONTMATTER +
+			makeClassificationBlock({ entryId: 'e1', zone: 'grey-zone' }) +
+			makeClassificationBlock({ entryId: 'e2', zone: 'grey-zone' }) +
+			makeClassificationBlock({ entryId: 'e3', zone: 'grey-zone' }) +
 			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e1' }) +
 			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e2' }) +
 			makeConfirmationBlock({ outcome: 'declined', entryId: 'e3' });
 		const stats = analyzeSessionControlLog(parseSessionControlLog(md));
 		// 2 confirmed / (2 confirmed + 1 declined) = 2/3
 		expect(stats.greyZoneConfirmationRate).toBeCloseTo(2 / 3);
+	});
+
+	it('excludes confirmations not linked to grey-zone classifications from rate', () => {
+		const md =
+			FRONTMATTER +
+			// High-confidence classification (not grey-zone)
+			makeClassificationBlock({ entryId: 'e_high', zone: 'high-confidence' }) +
+			// Confirmation linked to a non-grey-zone classification
+			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e_high' }) +
+			// Orphan confirmation (no matching classification at all)
+			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e_orphan' });
+		const stats = analyzeSessionControlLog(parseSessionControlLog(md));
+		// No grey-zone classifications → grey-zone entryId set empty → rate is NaN
+		expect(isNaN(stats.greyZoneConfirmationRate)).toBe(true);
 	});
 
 	it('returns NaN confirmation rate when no confirmations', () => {

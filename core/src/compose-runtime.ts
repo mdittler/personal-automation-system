@@ -1341,6 +1341,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 					// Peek first to check the nonce without consuming
 					const peeked = pendingSessionControl.peek(userId);
 					if (!peeked || peeked.id !== entryId) {
+						sessionControlLogger?.logConfirmation({
+							timestamp: new Date(),
+							userId,
+							entryId: entryId ?? '',
+							outcome: 'expired-or-stale',
+							elapsedMs: 0,
+						}).catch(() => undefined);
 						await ctx.reply('That confirmation has expired. Please try again.');
 						return;
 					}

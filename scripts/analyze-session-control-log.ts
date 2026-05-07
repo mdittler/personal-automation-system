@@ -77,11 +77,16 @@ export function parseSessionControlLogEntry(block: string): ParsedEntry | null {
 	if (kind === 'classification') {
 		const latencyRaw = kv.get('Latency');
 		const latencyMs = latencyRaw ? parseInt(latencyRaw, 10) : undefined;
+		const rawMessage = kv.get('Message') ?? '';
+		let messageText = rawMessage;
+		if (rawMessage.startsWith('"') && rawMessage.endsWith('"') && rawMessage.length >= 2) {
+			try { messageText = JSON.parse(rawMessage) as string; } catch { /* keep raw */ }
+		}
 		return {
 			kind: 'classification',
 			timestamp,
 			userId: kv.get('User') ?? '',
-			messageText: kv.get('Message') ?? '',
+			messageText,
 			preFilter: kv.get('Pre-filter') ?? '',
 			llm: kv.get('LLM') ?? '',
 			zone: kv.get('Zone') ?? '',
@@ -136,9 +141,16 @@ export function analyzeSessionControlLog(entries: ParsedEntry[]): SessionControl
 		outcomeCounts[e.outcome] = (outcomeCounts[e.outcome] ?? 0) + 1;
 	}
 
-	// Grey-zone confirmation rate — confirmed / (confirmed + declined)
-	const greyZoneConfirmed = outcomeCounts['confirmed'] ?? 0;
-	const greyZoneDeclined = outcomeCounts['declined'] ?? 0;
+	// Grey-zone confirmation rate — only count confirmations linked to grey-zone classifications
+	const greyZoneEntryIds = new Set(
+		classifications.filter((e) => e.zone === 'grey-zone' && e.entryId).map((e) => e.entryId!),
+	);
+	const greyZoneConfirmed = confirmations.filter(
+		(e) => e.outcome === 'confirmed' && e.entryId && greyZoneEntryIds.has(e.entryId),
+	).length;
+	const greyZoneDeclined = confirmations.filter(
+		(e) => e.outcome === 'declined' && e.entryId && greyZoneEntryIds.has(e.entryId),
+	).length;
 	const greyZoneDenominator = greyZoneConfirmed + greyZoneDeclined;
 	const greyZoneConfirmationRate =
 		greyZoneDenominator > 0 ? greyZoneConfirmed / greyZoneDenominator : NaN;
