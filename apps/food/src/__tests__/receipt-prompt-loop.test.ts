@@ -210,6 +210,15 @@ describe('Food receipt prompt loop', () => {
 		return call?.[1] as string | undefined;
 	}
 
+	// Helper: assert the standard REQ-FOOD-PRICE-002 expectations on a cheapest-reply string
+	function assertCheapestBlueberryReply(sent: string | undefined): void {
+		expect(sent).toBeDefined();
+		expect(sent).toContain('Lowest saved package price for blueberr');
+		expect(sent).toContain('Trader Joes');
+		expect(sent).toContain('$6.49');
+		expect(sent).not.toContain('is cheapest for');
+	}
+
 	// P1 — existing phrasing: "cheapest spot to buy X" → cheapest branch (explicit cheapest keyword)
 	it('compares stores for cheapest item price questions', async () => {
 		await handleMessage(
@@ -220,11 +229,7 @@ describe('Food receipt prompt loop', () => {
 		);
 
 		const sent = findCheapestReply();
-		expect(sent).toBeDefined();
-		expect(sent).toContain('Lowest saved package price for blueberr');
-		expect(sent).toContain('Trader Joes');
-		expect(sent).toContain('$6.49');
-		expect(sent).not.toContain('is cheapest for');
+		assertCheapestBlueberryReply(sent);
 		expect(sent).not.toContain('\n');
 	});
 
@@ -237,12 +242,7 @@ describe('Food receipt prompt loop', () => {
 			}),
 		);
 
-		const sent = findCheapestReply();
-		expect(sent).toBeDefined();
-		expect(sent).toContain('Lowest saved package price for blueberr');
-		expect(sent).toContain('Trader Joes');
-		expect(sent).toContain('$6.49');
-		expect(sent).not.toContain('is cheapest for');
+		assertCheapestBlueberryReply(findCheapestReply());
 	});
 
 	// P3 — "How much are X?" phrasing → no cheapest keyword, no store → fallthrough to formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)
@@ -254,12 +254,7 @@ describe('Food receipt prompt loop', () => {
 			}),
 		);
 
-		const sent = findCheapestReply();
-		expect(sent).toBeDefined();
-		expect(sent).toContain('Lowest saved package price for blueberr');
-		expect(sent).toContain('Trader Joes');
-		expect(sent).toContain('$6.49');
-		expect(sent).not.toContain('is cheapest for');
+		assertCheapestBlueberryReply(findCheapestReply());
 	});
 
 	// P4 — "Price for X?" phrasing → no cheapest keyword, no store → fallthrough to formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)
@@ -271,12 +266,7 @@ describe('Food receipt prompt loop', () => {
 			}),
 		);
 
-		const sent = findCheapestReply();
-		expect(sent).toBeDefined();
-		expect(sent).toContain('Lowest saved package price for blueberr');
-		expect(sent).toContain('Trader Joes');
-		expect(sent).toContain('$6.49');
-		expect(sent).not.toContain('is cheapest for');
+		assertCheapestBlueberryReply(findCheapestReply());
 	});
 
 	it('answers grocery-store spending questions from receipt history instead of meal-plan budget', async () => {

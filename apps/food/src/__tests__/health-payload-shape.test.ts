@@ -11,10 +11,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HealthDailyMetricsPayload } from '../events/types.js';
 
-// Compile-time assertion (REQ-FOOD-HEALTH-NEG-001).
-// If `energyLevel` or `mood` is added back to HealthDailyMetricsPayload['metrics'],
-// _AssertNoForbiddenMetrics resolves to `never` and the assignment below becomes
-// a TS2322 build error. `pnpm build` (tsc --build) therefore fails visibly.
 type ForbiddenMetricKeys = 'energyLevel' | 'mood';
 type _AssertNoForbiddenMetrics =
 	ForbiddenMetricKeys extends keyof HealthDailyMetricsPayload['metrics'] ? never : true;
@@ -22,7 +18,6 @@ const _assertNoForbiddenMetrics: _AssertNoForbiddenMetrics = true;
 
 describe('HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)', () => {
 	it('compile-time guard is active (sanity check)', () => {
-		// If this test reaches runtime, the type assertion above compiled without error.
 		expect(_assertNoForbiddenMetrics).toBe(true);
 	});
 
