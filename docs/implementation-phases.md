@@ -2130,7 +2130,7 @@ User testing revealed the chatbot felt disconnected — it didn't know who it wa
 
 ### Files Touched
 
-- **Modified:** `apps/chatbot/src/index.ts` — `classifyPASMessage()`, `buildUserContext()`, `splitTelegramMessage()` added and wired into `handleMessage()` / `handleCommand()`. `isPasRelevant()` deprecated (not removed).
+- **Modified:** `apps/chatbot/src/index.ts` — `classifyPASMessage()`, `buildUserContext()`, `splitTelegramMessage()` added and wired into `handleMessage()` / `handleCommand()`. `isPasRelevant()` deprecated (not removed). (Removed entirely 2026-05-06 — see "Open-Items Cleanup Batches" entry.)
 - **Modified:** `apps/chatbot/manifest.yaml` — `auto_detect_pas` default: `false` → `true`.
 - **New:** `apps/chatbot/src/__tests__/pas-classifier.test.ts` — 14 tests for classifier (happy, edge, error, security).
 - **New:** `apps/chatbot/src/__tests__/user-context.test.ts` — 7 tests for user context (happy, edge, security).
@@ -2148,7 +2148,7 @@ User testing revealed the chatbot felt disconnected — it didn't know who it wa
 ### Consequences
 
 - Auto-detect now uses a fast-tier LLM call per non-PAS message (adds one LLM call when `auto_detect_pas` is true and message is general). Cost is minimal (maxTokens: 5).
-- `isPasRelevant()` is deprecated. Its tests remain for backward compat. Remove in a future cleanup once no callers remain.
+- `isPasRelevant()` is deprecated. Its tests remain for backward compat. Remove in a future cleanup once no callers remain. (Removed entirely 2026-05-06 — see "Open-Items Cleanup Batches" entry.)
 - `dataQueryCandidate` field on `PASClassification` is the D2 hook — currently always `undefined`.
 
 ---
@@ -3032,6 +3032,39 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 **Tests**: 458 test files / 10,159 tests passing. New test files: `settings-writer-batch.test.ts` (Slice 0), `app-config-service-remove.test.ts` (Slice 0), `settings.test.ts` (Slices 1–5, 8), `settings.security.test.ts` (Slice 6), `settings.concurrency.test.ts` (Slice 7), `settings.integration.test.ts` (Slice 9).
 
 **URS requirements**: REQ-SETTINGS-002, 003, 004, 005, 014, 015, 016, 017, 018, 019, 020 (11 new requirements).
+
+---
+
+## Open-Items Cleanup Batches (2026-05-06)
+
+Reference index for the smaller pending items in `docs/open-items.md`, grouped by file area so several can be closed in a single session. Sizes follow the S/M/L/XL key in `~/.claude/projects/.../memory/project_pending_item_sizes.md`.
+
+### Batch 1 — GUI cleanup (`core/src/gui/`)
+- `app-detail.eta` select-as-text bug — swap `<input type="text">` → `<select>` for select-typed settings
+- `routes/config.ts` → SettingsWriter migration — migrate the `flush_memory_on_idle_reset` write so the post-write hook is the single source of truth
+
+### Batch 2 — Chatbot cleanup (`core/src/services/conversation/`)
+- `isPasRelevant()` removal — deprecated keyword heuristic, zero production callers; delete function + tests + URS entries
+- *Originally bundled here:* `MODEL_SWITCH_INTENT_REGEX` route-first conversion. **Descoped after Codex review (2026-05-06)** — see `docs/open-items.md` for the multi-component design surface (router classifier-branch chatbot special case, `handleMessage` switch processing, prompt-builder route-aware instructions, manifest parity test). Will be planned as its own phase.
+
+### Batch 3 — Conversation router built-ins + recall config
+- P8b `/flushmemory` Router built-in — follows the `/refreshmemory` pattern from Hermes P6.next
+- P7 `SessionControlClassifier` telemetry — structured log writes (shadow-classifier log pattern)
+- P6.next 365d cap relaxation — add `chat.recall.max_window_days` system config key + one guard in `validateTimeAnchor`
+
+### Batch 4 — Food micro-fixes (`apps/food/`)
+- `formatCheapestPriceAnswer` reword — one-line phrasing fix in `apps/food/src/services/receipt-query.ts` ("lowest saved package price" stopgap)
+- Energy/mood field removal — delete `energyLevel`/`mood` from `HealthDailyMetricsPayload` and the correlator table columns
+
+### Batch 5 — Test-only additions
+- P4 end-to-end freeze integration test — real temp-backed stores, full snapshot freeze workflow
+- `interactionContext` unused in prompt-builder (add rendering or remove fetch)
+
+### Standalone single-file changes
+- P1 Chunk A simplify pass — scope via `git diff` to Chunk A files only
+- D5c-review `revokeLastCheckCommit` concurrency note — comment or convert to per-commit handle (low urgency)
+
+**Recommended order:** Batch 2 (`isPasRelevant` only — lowest risk) → Batch 1 (GUI) → Batch 3 (conversation commands). Batches 4 and 5 in any order. The deferred MODEL_SWITCH_INTENT_REGEX route-first conversion is its own future phase.
 
 ---
 
