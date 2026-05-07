@@ -3069,16 +3069,26 @@ Three items from `docs/open-items.md` (lines 19, 33, 136) closed in a single bra
 
 ### Batch 4 — Food micro-fixes (`apps/food/`) ✓ Complete (2026-05-07)
 
-Two items from `docs/open-items.md` closed in a single branch (`codex/batch4-food-micro-fixes`). 2 new URS requirements (REQ-FOOD-PRICE-002, REQ-FOOD-HEALTH-NEG-001). 13 new tests (11 unit + 2 compile-time/smoke); 3 existing persona test phrasings added; 1 existing integration test strengthened. Zero behavior change for Item 2 (type-level removal predates this batch).
+Two items from `docs/open-items.md` closed in a single branch (`codex/batch4-food-micro-fixes`). 2 new URS requirements (REQ-FOOD-PRICE-002, REQ-FOOD-HEALTH-NEG-001). Post-Codex corrections also applied (see below). Zero behavior change for Item 2 outside of added runtime stripping.
 
 **Item 1 — `formatCheapestPriceAnswer` wording (REQ-FOOD-PRICE-002)**
 Changed `"… is cheapest for …"` to `"Lowest saved package price for {item}: {name} at {price} at {store}[ (updated {date})]."` at `apps/food/src/services/receipt-query.ts:377`. Honest stopgap acknowledging that the comparison is package-level, not unit-level. Unit-price normalization (path b) remains as a separate open item.
-- **Modified:** `apps/food/src/services/receipt-query.ts` (one line), `apps/food/src/__tests__/receipt-prompt-loop.test.ts` (strengthened P1 + added P2/P3/P4)
+- **Modified:** `apps/food/src/services/receipt-query.ts` (one line), `apps/food/src/__tests__/receipt-prompt-loop.test.ts` (strengthened P1 + added P2/P3/P4; `assertCheapestBlueberryReply` helper extracted from P2–P4 in simplify pass)
 - **Extended:** `apps/food/src/services/__tests__/receipt-query.test.ts` (11 unit tests U1–U11: exact wording, sort correctness, single-store, no-updatedAt suffix, old-wording regression guard, single-line guard, empty-state, no-match, markdown escape ×3)
 
 **Item 2 — Energy/mood field removal closure (REQ-FOOD-HEALTH-NEG-001)**
-`energyLevel` and `mood` were already removed from `HealthDailyMetricsPayload.metrics` before this batch. The open-item entry was stale. Compile-time regression guard added: `_AssertNoForbiddenMetrics` type assertion in `health-payload-shape.test.ts` causes `pnpm build` to fail with TS2322 if either key is re-added. `docs/open-items.md` entry closed.
-- **New file:** `apps/food/src/__tests__/health-payload-shape.test.ts` (2 tests)
+`energyLevel` and `mood` were already removed from `HealthDailyMetricsPayload.metrics` before this batch. Compile-time regression guard in build-included source file + runtime stripping in subscriber added (see Codex corrections below).
+- **New files:** `apps/food/src/events/health-metric-guards.ts` (type assertion included in `pnpm build`), `apps/food/src/__tests__/health-payload-shape.test.ts` (2 tests)
+- **Extended:** `apps/food/src/__tests__/events-subscribers.test.ts` (1 new test for runtime stripping)
+
+**Carry-forward build fix — `PasYamlConfig.recall` type (Batch 3)**
+`core/src/services/config/index.ts` was missing the `recall?: { max_window_days?: number }` field in the `PasYamlConfig` YAML-shape interface. This caused `pnpm build` to fail on `chat?.recall?.max_window_days` (TS2339). Added in this branch as a Batch 3 carry-forward; the config access was correct, only the raw-YAML shape type was incomplete.
+
+**Post-Codex corrections**
+- **C1 (P1):** Moved type assertion from `health-payload-shape.test.ts` (excluded by tsconfig) to `health-metric-guards.ts` (build-included source file). `pnpm build` now actually enforces REQ-FOOD-HEALTH-NEG-001 at compile time.
+- **C2 (P1):** Switched assertion conditional from `ForbiddenKeys extends keyof metrics ? never : true` to `Extract<keyof metrics, ForbiddenKeys> extends never ? true : never`. The `Extract<...>` form catches single-key reintroductions; the previous form only caught when the full union was present simultaneously.
+- **C3 (P2):** Added runtime metric key stripping in `apps/food/src/events/subscribers.ts` before `upsertDailyHealth` — `Object.fromEntries(...filter(...))` removes `energyLevel` and `mood` regardless of caller type discipline.
+- **C4 (process):** Documented `PasYamlConfig.recall` fix as Batch 3 carry-forward in this phase note.
 
 ### Batch 5 — Test-only additions
 - P4 end-to-end freeze integration test — real temp-backed stores, full snapshot freeze workflow

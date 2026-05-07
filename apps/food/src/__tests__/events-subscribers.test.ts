@@ -141,6 +141,23 @@ describe('registerHealthSubscribers', () => {
 		expect(userStore.write).not.toHaveBeenCalled();
 	});
 
+	it('strips energyLevel and mood from metrics before persisting (REQ-FOOD-HEALTH-NEG-001)', async () => {
+		const callHandler = captureSubscriberHandler(services);
+		registerHealthSubscribers(services);
+
+		await callHandler({
+			userId: 'alice',
+			date: '2026-05-07',
+			source: 'untyped-caller',
+			metrics: { sleepHours: 7, energyLevel: 8, mood: 'calm' },
+		});
+
+		const written = vi.mocked(userStore.write).mock.calls[0]![1] as string;
+		expect(written).not.toContain('energyLevel');
+		expect(written).not.toContain('mood');
+		expect(written).toContain('sleepHours');
+	});
+
 	it('does not throw when the store write fails', async () => {
 		userStore.write.mockRejectedValue(new Error('disk full'));
 		const callHandler = captureSubscriberHandler(services);

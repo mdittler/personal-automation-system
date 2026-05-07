@@ -2,23 +2,19 @@
  * REQ-FOOD-HEALTH-NEG-001 — HealthDailyMetricsPayload.metrics MUST NOT contain
  * `energyLevel` or `mood` fields.
  *
- * Enforcement is compile-time via the type assertion below. If either forbidden
- * key is re-added to the interface, `pnpm build` will fail with TS2322 on
- * `_assertNoForbiddenMetrics`. The runtime test is a smoke-check that the
- * compile-time guard file is included in the build.
+ * The compile-time enforcement lives in apps/food/src/events/health-metric-guards.ts,
+ * a source file included by pnpm build (not excluded like test files). This test
+ * smoke-checks that the guard compiled and imports the exported const to prove the
+ * file was processed by tsc.
  */
 
 import { describe, expect, it } from 'vitest';
+import { _assertNoForbiddenHealthMetrics } from '../events/health-metric-guards.js';
 import type { HealthDailyMetricsPayload } from '../events/types.js';
 
-type ForbiddenMetricKeys = 'energyLevel' | 'mood';
-type _AssertNoForbiddenMetrics =
-	ForbiddenMetricKeys extends keyof HealthDailyMetricsPayload['metrics'] ? never : true;
-const _assertNoForbiddenMetrics: _AssertNoForbiddenMetrics = true;
-
 describe('HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)', () => {
-	it('compile-time guard is active (sanity check)', () => {
-		expect(_assertNoForbiddenMetrics).toBe(true);
+	it('compile-time guard in health-metric-guards.ts compiled without error', () => {
+		expect(_assertNoForbiddenHealthMetrics).toBe(true);
 	});
 
 	it('a well-formed payload without forbidden keys conforms to the public type', () => {

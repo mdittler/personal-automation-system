@@ -5748,11 +5748,16 @@ This requirement is the path-(a) stopgap for the known limitation that `formatCh
 
 **Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
 
-`HealthDailyMetricsPayload.metrics` (defined in `apps/food/src/events/types.ts`) SHALL NOT declare `energyLevel` or `mood` as fields. Subjective signals (energy, mood, wellbeing) are out of scope for the food app; they belong in a future fitness/health app. The type-level removal was completed during an earlier phase; this requirement documents the contract and provides a compile-time regression guard. If `energyLevel` or `mood` is re-added to the interface, the `_AssertNoForbiddenMetrics` type assertion in `health-payload-shape.test.ts` resolves to `never` and `pnpm build` fails with TS2322.
+`HealthDailyMetricsPayload.metrics` (defined in `apps/food/src/events/types.ts`) SHALL NOT declare `energyLevel` or `mood` as fields. Subjective signals (energy, mood, wellbeing) are out of scope for the food app; they belong in a future fitness/health app. Enforcement is at two levels:
+
+**Compile-time:** `apps/food/src/events/health-metric-guards.ts` (a non-test source file included by `pnpm build`) exports `_assertNoForbiddenHealthMetrics` whose declared type is `Extract<keyof HealthDailyMetricsPayload['metrics'], 'energyLevel' | 'mood'> extends never ? true : never`. The `Extract<...>` form catches reintroduction of either key individually (not just the full union). If either key is re-added, the declared type resolves to `never`, the `= true` initialiser causes TS2322, and `pnpm build` fails.
+
+**Runtime:** `apps/food/src/events/subscribers.ts` strips `energyLevel` and `mood` from `payload.metrics` via `Object.fromEntries(...filter(...))` before passing to `upsertDailyHealth`, so untyped callers cannot persist these fields even if they bypass the TypeScript interface.
 
 **Standard tests:**
-- `health-payload-shape.test.ts` > `HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)` > compile-time guard is active (sanity check)
+- `health-payload-shape.test.ts` > `HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)` > compile-time guard in health-metric-guards.ts compiled without error
 - `health-payload-shape.test.ts` > `HealthDailyMetricsPayload shape (REQ-FOOD-HEALTH-NEG-001)` > a well-formed payload without forbidden keys conforms to the public type
+- `events-subscribers.test.ts` > `registerHealthSubscribers` > strips energyLevel and mood from metrics before persisting (REQ-FOOD-HEALTH-NEG-001)
 
 ---
 
@@ -9416,7 +9421,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-RECEIPT-003 | receipt-query.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-PRICE-002 | receipt-query.test.ts, receipt-prompt-loop.test.ts | 11 | 4 | Implemented |
-| REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts | 2 | 0 | Implemented |
+| REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
