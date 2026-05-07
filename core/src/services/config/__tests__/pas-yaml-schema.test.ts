@@ -151,6 +151,31 @@ describe('chat.sessions.auto_reset_idle_minutes', () => {
 		).toThrow());
 });
 
+describe('chat.recall.max_window_days — zod rejection', () => {
+	it.each([
+		['zero', 0],
+		['negative', -1],
+		['above 3650', 3651],
+		['non-integer 0.5', 0.5],
+		['non-integer 1.5', 1.5],
+		['string', '365'],
+		['NaN', Number.NaN],
+		['Infinity', Number.POSITIVE_INFINITY],
+	])('rejects %s', (_label, value) => {
+		expect(() =>
+			PasYamlConfigSchema.parse({ chat: { recall: { max_window_days: value } } }),
+		).toThrow();
+	});
+
+	it('accepts integers in [1, 3650]', () => {
+		for (const v of [1, 365, 3650]) {
+			expect(() =>
+				PasYamlConfigSchema.parse({ chat: { recall: { max_window_days: v } } }),
+			).not.toThrow();
+		}
+	});
+});
+
 describe('parsePasYamlConfig()', () => {
 	it('returns parsed config for valid input', () => {
 		const config = parsePasYamlConfig({ users: [{ id: '123', name: 'Alice' }] });

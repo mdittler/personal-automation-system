@@ -103,6 +103,8 @@ export interface HandleAskDeps {
 	settingsRegistry?: SettingsRegistry;
 	/** SettingsWriter — when present, routes <config-set> writes through registry-aware writer. */
 	settingsWriter?: SettingsWriter;
+	/** Maximum recall window in days. Default 365. Wired from SystemConfig.chat.recall.max_window_days. */
+	recallMaxWindowDays?: number;
 }
 
 export async function handleAsk(
@@ -203,6 +205,7 @@ export async function handleAsk(
 		logger: deps.logger,
 		conversationRetrieval: deps.conversationRetrieval,
 		timezone: deps.timezone,
+		maxWindowDays: deps.recallMaxWindowDays ?? 365,
 	});
 
 	const askClassification = await classifyPASMessage(

@@ -280,6 +280,9 @@ export async function loadSystemConfig(options?: {
 				retention_days: yamlConfig?.chat?.sessions?.retention_days ?? 90,
 				auto_reset_idle_minutes: yamlConfig?.chat?.sessions?.auto_reset_idle_minutes ?? null,
 			},
+			recall: {
+				max_window_days: yamlConfig?.chat?.recall?.max_window_days ?? 365,
+			},
 		},
 	};
 

@@ -14,14 +14,15 @@ describe('flushMemoryToContextStore', () => {
 			flushSave,
 			logger: { warn: vi.fn() },
 		});
-		expect(result).toBe('written');
+		expect(result).toMatchObject({ status: 'written' });
+		expect((result as { persistedLength: number }).persistedLength).toBeGreaterThan(0);
 		expect(flushSave).toHaveBeenCalledWith('alice', RECENT_SESSION_SUMMARY_KEY, 'durable text');
 	});
 
 	it('returns "failed" and does not throw when save throws', async () => {
 		const flushSave: MemoryFlushSave = vi.fn().mockRejectedValue(new Error('disk full'));
 		const logger = { warn: vi.fn() };
-		expect(await flushMemoryToContextStore('alice', 'x', { flushSave, logger })).toBe('failed');
+		expect(await flushMemoryToContextStore('alice', 'x', { flushSave, logger })).toMatchObject({ status: 'failed' });
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
@@ -29,7 +30,7 @@ describe('flushMemoryToContextStore', () => {
 		const flushSave: MemoryFlushSave = vi.fn().mockResolvedValue(undefined);
 		expect(
 			await flushMemoryToContextStore('alice', '   ', { flushSave, logger: { warn: vi.fn() } }),
-		).toBe('failed');
+		).toMatchObject({ status: 'failed' });
 		expect(flushSave).not.toHaveBeenCalled();
 	});
 
@@ -68,7 +69,7 @@ describe('flushMemoryToContextStore', () => {
 				flushSave,
 				logger: { warn: vi.fn() },
 			}),
-		).resolves.toBe('failed');
+		).resolves.toMatchObject({ status: 'failed' });
 		expect(flushSave).not.toHaveBeenCalled();
 	});
 });

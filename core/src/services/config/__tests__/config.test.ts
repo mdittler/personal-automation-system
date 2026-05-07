@@ -905,4 +905,16 @@ describe('loadSystemConfig', () => {
 
 		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBeNull();
 	});
+
+	it('materializes chat.recall.max_window_days = 365 when key is absent', async () => {
+		const config = await loadConfigFromYamlObj({});
+		expect(config.chat?.recall?.max_window_days).toBe(365);
+	});
+
+	it('materializes chat.recall.max_window_days from yaml', async () => {
+		const config = await loadConfigFromYamlObj({
+			chat: { recall: { max_window_days: 30 } },
+		});
+		expect(config.chat?.recall?.max_window_days).toBe(30);
+	});
 });

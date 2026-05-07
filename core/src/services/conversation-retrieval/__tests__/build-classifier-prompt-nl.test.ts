@@ -102,9 +102,15 @@ describe('buildClassifierPrompt — regression guard (REQ-CONV-TEMPORAL-010)', (
 		expect(prompt).toContain('timeAnchor');
 	});
 
-	it('still references 365-day cap rule', () => {
+	it('interpolates default 365-day cap into the prompt (REQ-CONV-TEMPORAL-013)', () => {
 		const prompt = buildClassifierPrompt('2026-05-05');
 		expect(prompt).toContain('365');
+	});
+
+	it('interpolates a configured maxWindowDays override into the prompt (REQ-CONV-TEMPORAL-013)', () => {
+		const prompt = buildClassifierPrompt('2026-05-05', 30);
+		expect(prompt).toContain('30');
+		expect(prompt).not.toContain('365 days');
 	});
 });
 

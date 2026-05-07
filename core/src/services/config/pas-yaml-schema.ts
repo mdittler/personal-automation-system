@@ -163,6 +163,17 @@ export const PasYamlConfigSchema = z
 					})
 					.passthrough()
 					.optional(),
+				recall: z
+					.object({
+						max_window_days: z
+							.number()
+							.int('chat.recall.max_window_days must be an integer')
+							.min(1, 'chat.recall.max_window_days must be at least 1')
+							.max(3650, 'chat.recall.max_window_days must be at most 3650 (10 years)')
+							.optional(),
+					})
+					.passthrough()
+					.optional(),
 			})
 			.passthrough()
 			.optional(),

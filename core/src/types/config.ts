@@ -190,6 +190,11 @@ export interface SystemConfig {
 			 */
 			strict_durable_kinds?: boolean;
 		};
+		/** Recall window settings (REQ-CONV-TEMPORAL-013). */
+		recall?: {
+			/** Maximum allowed temporal-window age/span in days. Materialized default: 365. */
+			max_window_days: number;
+		};
 		/** Transcript retention settings. */
 		sessions?: {
 			/**

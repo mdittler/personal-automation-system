@@ -55,6 +55,8 @@ export interface RecallPipelineDeps {
 	conversationRetrieval: ConversationRetrievalService | undefined;
 	/** IANA timezone; used to compute today's local date for the classifier. Default: system. */
 	timezone?: string;
+	/** Maximum allowed temporal-window age/span in days. Default 365. REQ-CONV-TEMPORAL-013. */
+	maxWindowDays?: number;
 }
 
 /**
@@ -88,6 +90,7 @@ export async function runRecallPipeline(
 			llm: deps.llm,
 			logger: deps.logger,
 			today,
+			maxWindowDays: deps.maxWindowDays ?? 365,
 		});
 		if (!verdict.shouldRecall || !verdict.query) return [];
 

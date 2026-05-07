@@ -4999,6 +4999,126 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## Batch 3 — Conversation Router Built-ins + Recall Config
+
+### REQ-CONV-FLUSH-013 — `/flushmemory` and `/flush-memory` MUST trigger an immediate session-summary flush
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+`/flushmemory` and `/flush-memory` are Router built-ins registered in `BUILTIN_COMMAND_NAMES`. They trigger an immediate session-summary flush regardless of the `flush_memory_on_idle_reset` setting (explicit user command > automatic idle path). Both aliases are handled before app dispatch and bypass `AppToggleStore`.
+
+**Standard tests:**
+- `router-flush-memory.test.ts` > dispatch > /flushmemory dispatches to handleFlushMemory
+- `router-flush-memory.test.ts` > dispatch > /flush-memory dispatches to handleFlushMemory (alias)
+- `flush-memory.persona.test.ts` > PF9 — flush_memory_on_idle_reset toggle is irrelevant to /flushmemory
+
+---
+
+### REQ-CONV-FLUSH-014 — When no active session exists, `/flushmemory` MUST reply "No active session — start chatting first." and MUST NOT call summarizer or `flushSave`
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+When `chatSessions.peekActive` returns `undefined`, `handleFlushMemory` sends exactly `No active session — start chatting first.` and returns immediately without calling the summarizer or `flushSave`.
+
+**Standard tests:**
+- `handle-flush-memory.test.ts` > no active session > replies "No active session" when peekActive returns undefined
+- `flush-memory.persona.test.ts` > PF5 — Exact reply: No active session
+
+---
+
+### REQ-CONV-FLUSH-015 — When the active session has fewer than 2 turns, `/flushmemory` MUST reply "Not enough conversation to summarize yet." and MUST NOT call summarizer or `flushSave`
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+When `readSession` returns a session with 0 or 1 turns (or `undefined`), `handleFlushMemory` sends exactly `Not enough conversation to summarize yet.` and returns without calling summarizer or `flushSave`.
+
+**Standard tests:**
+- `handle-flush-memory.test.ts` > insufficient turns > replies "Not enough conversation" for 0/1-turn sessions
+- `flush-memory.persona.test.ts` > PF6 — Exact reply: Not enough conversation
+
+---
+
+### REQ-CONV-FLUSH-016 — `/flushmemory` MUST enforce an 8-second timeout; on timeout or late-resolve, reply "Memory flush deferred — try again later." and MUST NOT call `flushSave`
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+`handleFlushMemory` races `deps.summarizer(...)` against an 8-second timer via `Promise.race` + `AbortController`. On timeout, and via a **late-resolve guard** (`if (timedOut || controller.signal.aborted) return { status: 'failed' }` evaluated after the summarizer's promise settles), `flushSave` is guaranteed not to be called even if the summarizer resolves after the timer fires.
+
+**Standard tests:**
+- `handle-flush-memory.test.ts` > late-resolve guard > summarizer resolves AFTER 8s timeout → flushSave NOT called
+- `flush-memory.persona.test.ts` > PF8 — Timeout guard
+
+---
+
+### REQ-CONV-FLUSH-017 — On success, `/flushmemory` reply MUST include the persisted character count
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+On a successful flush, the reply is `Memory flushed: ${persistedLength} chars saved.` where `persistedLength` is the count returned by `flushMemoryToContextStore` after final sanitization via `sanitizeSummaryOutput`. This required widening `flushMemoryToContextStore`'s return type from `'written' | 'failed'` to `{ status: 'written'; persistedLength: number } | { status: 'failed' }`.
+
+**Standard tests:**
+- `handle-flush-memory.test.ts` > happy path > reply contains actual persistedLength
+- `flush-memory.persona.test.ts` > PF4 — Exact reply matches /^Memory flushed: \d+ chars saved\.$
+
+---
+
+### REQ-CONV-FLUSH-018 — `/flushmemory` MUST sanitize the summary via `sanitizeSummaryOutput` before persisting
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+`flushMemoryToContextStore` re-sanitizes the summary via `sanitizeSummaryOutput` as defense-in-depth before calling `flushSave`. This guarantees safe prompt content even if a future caller bypasses the session-summarizer's own sanitization.
+
+**Standard tests:**
+- `handle-flush-memory.test.ts` > security > hostile summary with `<script>` tags is sanitized before flushSave
+- `flush-memory.persona.test.ts` > PF10 — Security: hostile summary stripped before ContextStore write
+
+---
+
+### REQ-CONV-NEWCHAT: SessionControl Telemetry (Batch 3)
+
+| ID | Requirement | Priority |
+|---|---|---|
+| REQ-CONV-NEWCHAT-009 | Successful `SessionControlClassifier` invocations MUST emit a structured classification log entry containing: timestamp, userId, message text (sanitized to ≤200 code points; opening/closing `<script>`/`<style>` tags, backticks, bidi controls stripped), preFilter outcome, llm result OR `'skipped'`, derived zone, `entryId` (when grey-zone), latency. Invocations that throw MUST NOT emit a log entry. | MUST |
+| REQ-CONV-NEWCHAT-010 | `sc:yes` and `sc:no` callback handlers MUST emit a structured confirmation log entry linked to the classification by `entryId`, carrying outcome (`confirmed`/`declined`/`expired-or-stale`/`failed`) and `elapsedMs` (callback time minus `createdAtMs`). | MUST |
+| REQ-CONV-NEWCHAT-011 | All `SessionControlLogger` writes MUST fail-open: errors logged via `logger.warn` and the call returns; classifier behavior unaffected. | MUST |
+| REQ-CONV-NEWCHAT-012 | `pnpm analyze-session-control-log` MUST parse the log and print: total entries, per-zone counts, confirmation-rate (%) for grey-zone entries, top-N declined messages. | MUST |
+
+---
+
+### REQ-CONV-TEMPORAL-013 — `chat.recall.max_window_days` system-config key MUST control the maximum allowed temporal-window age and span
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+The system-config key `chat.recall.max_window_days` controls the maximum allowed temporal-window age and span used by `parseRecallVerdict` and the `'%d days'` literal in the classifier prompt (`buildClassifierPrompt`). Default is 365. The value threads through `RecallPipelineDeps` → `ClassifyRecallDeps` → `buildClassifierPrompt(today, maxWindowDays)` → `parseRecallVerdict(parsed, { today, maxWindowDays })`.
+
+**Standard tests:**
+- `build-classifier-prompt-nl.test.ts` > interpolates the configured maxWindowDays into the cap rule
+- `parse-recall-verdict.test.ts` > configurable maxWindowDays > lower cap 30 rejects a 60-day window
+
+---
+
+### REQ-CONV-TEMPORAL-014 — Invalid `chat.recall.max_window_days` values MUST cause zod parse failure at startup
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+Values outside the valid range `[1, 3650]` (non-integer, negative, zero, above 3650, NaN, Infinity, string) cause the zod schema to throw at parse time, preventing startup with an invalid configuration.
+
+**Configuration tests:**
+- `pas-yaml-schema.test.ts` > chat.recall.max_window_days — zod rejection > rejects 0, -1, 3651, 0.5, '365', NaN, Infinity
+
+---
+
+### REQ-CONV-TEMPORAL-015 — When `chat.recall.max_window_days` is omitted from `pas.yaml`, the materialized value MUST be 365
+
+**Phase:** Batch 3 | **Status:** Implemented
+
+The config materializer defaults `chat.recall.max_window_days` to `365` when the key is absent from `pas.yaml`. This preserves existing behavior for all unconfigured installations.
+
+**Standard tests:**
+- `pas-yaml-schema.test.ts` > materializes chat.recall.max_window_days = 365 when key is absent
+
+---
+
 ## Track C — `/recall` Command + `<session-search>` Pseudo-Tool (Hermes P5 Carry-Forwards)
 
 ### REQ-CONV-RECALL-001 — `/recall` MUST be a Router built-in that bypasses AppToggleStore
@@ -9292,5 +9412,19 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SETTINGS-018 | settings.concurrency.test.ts, app-config-service-remove.test.ts | 5 | 3 | Implemented |
 | REQ-SETTINGS-019 | settings-writer-batch.test.ts, settings.test.ts, settings.integration.test.ts | 4 | 3 | Implemented |
 | REQ-SETTINGS-020 | settings.test.ts, settings-writer-batch.test.ts | 4 | 2 | Implemented |
+
+| REQ-CONV-FLUSH-013 | router-flush-memory.test.ts, flush-memory.persona.test.ts | 6 | 1 | Implemented |
+| REQ-CONV-FLUSH-014 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-015 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-FLUSH-016 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-017 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-018 | handle-flush-memory.test.ts, flush-memory.persona.test.ts, memory-flush.test.ts | 2 | 2 | Implemented |
+| REQ-CONV-NEWCHAT-009 | router-session-control-telemetry.test.ts, session-control-logger.test.ts | 4 | 3 | Implemented |
+| REQ-CONV-NEWCHAT-010 | handle-session-control-callback.test.ts, analyze-session-control-log.test.ts | 3 | 2 | Implemented |
+| REQ-CONV-NEWCHAT-011 | session-control-logger.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-NEWCHAT-012 | analyze-session-control-log.test.ts | 3 | 3 | Implemented |
+| REQ-CONV-TEMPORAL-013 | build-classifier-prompt-nl.test.ts, parse-recall-verdict.test.ts, recall-pipeline.test.ts | 4 | 4 | Implemented |
+| REQ-CONV-TEMPORAL-014 | pas-yaml-schema.test.ts | 7 | 0 | Implemented |
+| REQ-CONV-TEMPORAL-015 | pas-yaml-schema.test.ts | 1 | 0 | Implemented |
 
 | **Totals** | **246 test files** | **1837** | **1966** | **3803 tests** |

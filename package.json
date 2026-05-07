@@ -23,6 +23,7 @@
 		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts",
 		"load-test": "tsx scripts/load-test.ts",
 		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts",
+		"analyze-session-control-log": "tsx scripts/analyze-session-control-log.ts",
 		"chat-index-rebuild": "tsx scripts/chat-index-rebuild.ts",
 		"chat-index-prune": "tsx scripts/chat-index-prune.ts",
 		"prepare": "cp .claude/hooks/tsc-nocheck.sh .git/hooks/pre-push && cp .claude/hooks/tsc-nocheck.sh .git/hooks/pre-merge-commit && chmod +x .git/hooks/pre-push .git/hooks/pre-merge-commit"

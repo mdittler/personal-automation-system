@@ -350,3 +350,66 @@ describe('parseRecallVerdict — top-level field validation', () => {
 		expect(parse([{ shouldRecall: false }])).toEqual(RECALL_SAFE_DEFAULT);
 	});
 });
+
+// ── Configurable maxWindowDays ───────────────────────────────────────────────
+
+describe('parseRecallVerdict — configurable maxWindowDays', () => {
+	const TODAY_7 = '2026-05-07';
+
+	function parseWithCap(obj: unknown, maxWindowDays: number) {
+		return parseRecallVerdict(obj, { today: TODAY_7, maxWindowDays });
+	}
+
+	it('default cap 365 (when undefined): 365-day-old absolute accepts', () => {
+		// 2025-05-07 is exactly 365 days before 2026-05-07
+		const result = parseRecallVerdict(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-05-07' }, reason: 'r' },
+			{ today: TODAY_7 },
+		);
+		expect(result).not.toEqual(RECALL_SAFE_DEFAULT);
+		expect(result.shouldRecall).toBe(true);
+	});
+
+	it('default cap 365 (when undefined): 366-day-old absolute rejects', () => {
+		// 2025-05-06 is 366 days before 2026-05-07
+		const result = parseRecallVerdict(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-05-06' }, reason: 'r' },
+			{ today: TODAY_7 },
+		);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
+	it('lower cap 30 rejects a 60-day window', () => {
+		// 2026-03-01 is ~67 days before 2026-05-07
+		const result = parseWithCap(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'window', after: '2026-03-01', before: '2026-05-07' }, reason: 'r' },
+			30,
+		);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
+	it('higher cap 730 accepts a 500-day-old absolute', () => {
+		// 2024-12-15 is 509 days before 2026-05-07
+		const result = parseWithCap(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2024-12-15' }, reason: 'r' },
+			730,
+		);
+		expect(result.shouldRecall).toBe(true);
+	});
+
+	it('cap 1: 1-day-old absolute accepts', () => {
+		const result = parseWithCap(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2026-05-06' }, reason: 'r' },
+			1,
+		);
+		expect(result.shouldRecall).toBe(true);
+	});
+
+	it('cap 1: 2-day-old absolute rejects', () => {
+		const result = parseWithCap(
+			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2026-05-05' }, reason: 'r' },
+			1,
+		);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+	});
+});

@@ -61,6 +61,7 @@ import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
 import type { RouteVerifier, VerifyAction } from './route-verifier.js';
+import type { SessionControlLogger, SessionControlClassificationEntry } from '../conversation/session-control-logger.js';
 
 /** Default confidence threshold for intent classification. */
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
@@ -194,6 +195,8 @@ export interface RouterOptions {
 	pendingSessionControl?: PendingSessionControlStore;
 	/** Optional — when present, enables idle session auto-reset at the top of routeMessage/routePhoto. */
 	idleResetDeps?: IdleResetHookDeps;
+	/** Optional — when present, writes structured telemetry for each session-control classification + confirmation. */
+	sessionControlLogger?: SessionControlLogger;
 }
 
 export class Router {
@@ -221,6 +224,7 @@ export class Router {
 	private readonly sessionControlClassifier?: typeof detectSessionControl;
 	private readonly pendingSessionControl?: PendingSessionControlStore;
 	private readonly idleResetDeps?: IdleResetHookDeps;
+	private readonly sessionControlLogger?: SessionControlLogger;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -249,6 +253,7 @@ export class Router {
 		this.sessionControlClassifier = options.sessionControlClassifier;
 		this.pendingSessionControl = options.pendingSessionControl;
 		this.idleResetDeps = options.idleResetDeps;
+		this.sessionControlLogger = options.sessionControlLogger;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -613,6 +618,10 @@ export class Router {
 				await this.dispatchConversationCommand('refresh-memory', parsed.args, ctx);
 				return;
 			}
+			if (parsed.command === '/flushmemory' || parsed.command === '/flush-memory') {
+				await this.dispatchConversationCommand('flush-memory', parsed.args, ctx);
+				return;
+			}
 		}
 
 		const result = lookupCommand(parsed, this.commandMap);
@@ -809,7 +818,7 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory',
+		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory' | 'flush-memory',
 		args: string[],
 		ctx: MessageContext,
 	): Promise<void> {
@@ -828,6 +837,8 @@ export class Router {
 				else if (name === 'recall') await this.conversationService?.handleRecall(args, enrichedCtx);
 				else if (name === 'refresh-memory')
 					await this.conversationService?.handleRefreshMemory(args, enrichedCtx);
+				else if (name === 'flush-memory')
+					await this.conversationService?.handleFlushMemory(args, enrichedCtx);
 				else await this.conversationService?.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -871,6 +882,7 @@ export class Router {
 			lines.push('  /title [title] — Show or set the current session title');
 			lines.push('  /recall <query> — Search your past conversations');
 			lines.push('  /refreshmemory — Rebuild memory snapshot for the active session');
+			lines.push('  /flushmemory — Save a summary of the current chat to long-term memory');
 			lines.push('');
 		}
 
@@ -886,6 +898,8 @@ export class Router {
 			'/recall',
 			'/refreshmemory',
 			'/refresh-memory',
+			'/flushmemory',
+			'/flush-memory',
 		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
@@ -1440,6 +1454,7 @@ export class Router {
 			logger: this.logger,
 		};
 
+		const startedAt = Date.now();
 		let result: SessionControlResult;
 		try {
 			result = await this.sessionControlClassifier(ctx.text, deps);
@@ -1448,7 +1463,7 @@ export class Router {
 			return false;
 		}
 
-		if (result.intent !== 'new_session') return false;
+		const latencyMs = Date.now() - startedAt;
 
 		const isHighConfidence =
 			result.confidence >= this.verificationUpperBound || result.source === 'prefilter';
@@ -1456,18 +1471,48 @@ export class Router {
 			result.confidence >= this.confidenceThreshold &&
 			result.confidence < this.verificationUpperBound;
 
-		if (isHighConfidence) {
+		let zone: SessionControlClassificationEntry['zone'];
+		if (result.intent !== 'new_session') zone = 'wrong-intent';
+		else if (isHighConfidence) zone = 'high-confidence';
+		else if (isGreyZone) zone = 'grey-zone';
+		else zone = 'below-threshold';
+
+		// Pre-generate entryId so classification and pending entry share the same nonce.
+		const entryId = zone === 'grey-zone' ? randomBytes(4).toString('hex') : undefined;
+
+		this.sessionControlLogger
+			?.logClassification({
+				timestamp: new Date(),
+				userId: ctx.userId,
+				messageText: ctx.text,
+				preFilter: result.source === 'prefilter' ? 'matched' : 'unmatched',
+				llm:
+					result.source === 'prefilter'
+						? 'skipped'
+						: {
+								intent: result.intent,
+								confidence: result.confidence,
+								reason: result.reason,
+								source: 'llm',
+							},
+				zone,
+				entryId,
+				latencyMs,
+			})
+			.catch(() => undefined);
+
+		if (zone === 'wrong-intent' || zone === 'below-threshold') return false;
+
+		if (zone === 'high-confidence') {
 			// Start new session immediately — handleNewChat confirms internally (Fix 5a)
 			await this.dispatchConversationCommand('newchat', [], ctx);
 			return true;
 		}
 
-		if (isGreyZone) {
-			// Generate a nonce so stale inline-keyboard buttons cannot consume a newer entry.
-			const entryId = randomBytes(4).toString('hex');
+		if (zone === 'grey-zone') {
 			const entry = createPendingEntry(ctx.userId, ctx.text, {
 				clock: Date.now,
-				id: entryId,
+				id: entryId!,
 			});
 			this.pendingSessionControl.attach(ctx.userId, entry);
 			try {

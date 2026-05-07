@@ -20,6 +20,8 @@ export interface PendingSessionControlEntry {
 	expiresAt: number; // Date.now() ms timestamp
 	/** Nonce to prevent stale-button attacks. Each grey-zone prompt gets a unique id. */
 	id: string;
+	/** Wall-clock ms at creation — used to compute elapsedMs in confirmation telemetry. */
+	createdAtMs: number;
 }
 
 export interface PendingSessionControlStore {
@@ -52,11 +54,13 @@ export function createPendingEntry(
 	messageText: string,
 	deps: { clock: () => number; id: string; ttlMs?: number },
 ): PendingSessionControlEntry {
+	const now = deps.clock();
 	return {
 		userId,
 		messageText,
-		expiresAt: deps.clock() + (deps.ttlMs ?? SC_TTL_MS),
+		expiresAt: now + (deps.ttlMs ?? SC_TTL_MS),
 		id: deps.id,
+		createdAtMs: now,
 	};
 }
 
