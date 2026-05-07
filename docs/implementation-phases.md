@@ -3039,9 +3039,10 @@ Full-text search across chat session transcripts, auto-injected as recalled cont
 
 Reference index for the smaller pending items in `docs/open-items.md`, grouped by file area so several can be closed in a single session. Sizes follow the S/M/L/XL key in `~/.claude/projects/.../memory/project_pending_item_sizes.md`.
 
-### Batch 1 — GUI cleanup (`core/src/gui/`)
-- `app-detail.eta` select-as-text bug — swap `<input type="text">` → `<select>` for select-typed settings
-- `routes/config.ts` → SettingsWriter migration — migrate the `flush_memory_on_idle_reset` write so the post-write hook is the single source of truth
+### Batch 1 — GUI cleanup (`core/src/gui/`) — **closed 2026-05-06**
+
+- `app-detail.eta` select-as-text bug — added `else if (def.type === 'select')` branch matching the `/gui/settings` widget pattern (`routes/settings.ts:89-97`). Coercion at `coerce-user-config.ts:68-84` was already correct; render-side fix only.
+- `routes/config.ts` → SettingsWriter migration — `chatbot.flush_memory_on_idle_reset` now writes through `SettingsWriter.writeBatch({ source: 'admin-confirmed' })`; the post-write hook registered at `compose-runtime.ts:1044-1051` is the single source of truth. `disableFlushAndCleanup` plumbing removed from `ConfigOptions`, `gui/index.ts`, and `compose-runtime.ts`. Mixed-body chatbot writes batched into one `updateOverrides` call (latent `setAll` vs. `updateOverrides` data-loss bug fixed). CL: `batch1-gui-cleanup`.
 
 ### Batch 2 — Chatbot cleanup (`core/src/services/conversation/`)
 - `isPasRelevant()` removal — deprecated keyword heuristic, zero production callers; delete function + tests + URS entries

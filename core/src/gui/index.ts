@@ -24,12 +24,12 @@ import type { ProviderRegistry } from '../services/llm/providers/provider-regist
 import type { MessageRateTracker } from '../services/metrics/message-rate-tracker.js';
 import type { ReportService } from '../services/reports/index.js';
 import type { SchedulerServiceImpl } from '../services/scheduler/index.js';
+import type { SettingsRegistry } from '../services/settings/settings-registry.js';
+import type { SettingsWriter } from '../services/settings/settings-writer.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
 import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
-import type { SettingsRegistry } from '../services/settings/settings-registry.js';
-import type { SettingsWriter } from '../services/settings/settings-writer.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
@@ -45,9 +45,9 @@ import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
+import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
-import { registerSettingsRoutes } from './routes/settings.js';
 import { registerViewLocals } from './view-locals.js';
 
 export interface GuiOptions {
@@ -86,12 +86,10 @@ export interface GuiOptions {
 	messageRateTracker?: MessageRateTracker;
 	/** D5c-D: LLM safeguards config for per-household cap display. */
 	llmSafeguards?: LLMSafeguardsConfig;
-	/** P8b: Called when flush_memory_on_idle_reset is toggled OFF via the GUI. */
-	disableFlushAndCleanup?: (userId: string) => Promise<void>;
-	/** Settings-B: Shared SettingsRegistry for /gui/settings page. */
-	settingsRegistry?: SettingsRegistry;
-	/** Settings-B: SettingsWriter for /gui/settings save + reset flows. */
-	settingsWriter?: SettingsWriter;
+	/** Settings-B: Shared SettingsRegistry for /gui/settings page and config routes. */
+	settingsRegistry: SettingsRegistry;
+	/** Settings-B: SettingsWriter for /gui/settings save + reset flows and config routes. */
+	settingsWriter: SettingsWriter;
 	/** Settings-B: Resolves AppConfigService by appId for /gui/settings reads + resets. */
 	settingsAppConfigResolver?: (appId: string) => AppConfigService | undefined;
 }
@@ -164,12 +162,13 @@ export async function registerGuiRoutes(
 				spaceService: spaceService ?? undefined,
 			});
 			registerConfigRoutes(gui, {
-					registry,
-					config,
-					dataDir,
-					logger,
-					disableFlushAndCleanup: options.disableFlushAndCleanup,
-				});
+				registry,
+				config,
+				dataDir,
+				logger,
+				settingsWriter: options.settingsWriter,
+				settingsRegistry: options.settingsRegistry,
+			});
 			if (contextStore) {
 				if (!options.householdService) {
 					throw new Error(

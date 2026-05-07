@@ -119,6 +119,16 @@
                 <option value="true" <%= curVal === true || curVal === 'true' ? 'selected' : '' %>>true</option>
                 <option value="false" <%= curVal === false || curVal === 'false' || curVal === undefined ? 'selected' : '' %>>false</option>
               </select>
+            <% } else if (def.type === 'select') { %>
+              <% const selCurVal = userCfg.values[def.key] !== undefined ? userCfg.values[def.key] : def.default; %>
+              <select
+                id="<%= it.app.id %>-<%= userCfg.userId %>-<%= def.key %>"
+                name="<%= def.key %>"
+              >
+                <% for (const opt of (def.options ?? [])) { %>
+                  <option value="<%= opt %>" <%= String(selCurVal) === opt ? 'selected' : '' %>><%= opt %></option>
+                <% } %>
+              </select>
             <% } else { %>
               <input
                 type="text"
