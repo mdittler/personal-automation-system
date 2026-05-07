@@ -94,8 +94,6 @@ const DEFAULT_CATEGORY_BUDGET_CHARS = 6_000;
 export interface ConversationContextSnapshot {
 	/** Context store entries for the current user. */
 	contextStore?: ContextEntry[];
-	/** Recent interaction entries for the current user (newest-first). */
-	interactionContext?: InteractionEntry[];
 	/** Apps enabled for the current user. */
 	enabledApps?: AppInfo[];
 	/** App knowledge search results. */
@@ -478,16 +476,6 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 			snapshot.failures.push('context-store');
 		}
 
-		if (selected.has('interaction-context') && this.deps.interactionContext) {
-			tasks.push({
-				category: 'interaction-context',
-				// sync method, wrapped for uniform Promise.allSettled handling
-				promise: Promise.resolve(this.deps.interactionContext.getRecent(userId)),
-			});
-		} else if (selected.has('interaction-context')) {
-			snapshot.failures.push('interaction-context');
-		}
-
 		if (selected.has('app-metadata') && this.deps.appMetadata) {
 			tasks.push({
 				category: 'app-metadata',
@@ -641,16 +629,6 @@ export class ConversationRetrievalServiceImpl implements ConversationRetrievalSe
 					);
 					snapshot.contextStore = truncated;
 					charsUsed += truncated.reduce((sum, e) => sum + e.content.length + e.key.length, 0);
-					break;
-				}
-				case 'interaction-context': {
-					const entries = value as InteractionEntry[];
-					const sizeMap = new Map<InteractionEntry, number>(
-						entries.map((e) => [e, JSON.stringify(e).length]),
-					);
-					const truncated = truncateArray(entries, catBudget, (e) => sizeMap.get(e) ?? 0);
-					snapshot.interactionContext = truncated;
-					charsUsed += truncated.reduce((sum, e) => sum + (sizeMap.get(e) ?? 0), 0);
 					break;
 				}
 				case 'app-metadata': {

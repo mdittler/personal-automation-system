@@ -588,7 +588,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		return {
 			dataQuery: { query: vi.fn().mockResolvedValue({ files: [], empty: true }) },
 			contextStore: { listForUser: vi.fn().mockResolvedValue([]) },
-			interactionContext: { getRecent: vi.fn().mockReturnValue([]) },
 			appMetadata: { getEnabledApps: vi.fn().mockResolvedValue([]) },
 			appKnowledge: { search: vi.fn().mockResolvedValue([]) },
 			systemInfo: {
@@ -619,7 +618,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		};
 	}
 
-	it('free-text with no keywords: only 3 cheap readers called', async () => {
+	it('free-text with no keywords: only 2 cheap readers called', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
 		const snapshot = await withUserId('user1', () =>
@@ -632,7 +631,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		);
 		expect(snapshot.failures).toEqual([]);
 		expect(deps.contextStore.listForUser).toHaveBeenCalledWith('user1');
-		expect(deps.interactionContext.getRecent).toHaveBeenCalledWith('user1');
 		expect(deps.appMetadata.getEnabledApps).toHaveBeenCalledWith('user1');
 		// DataQuery, reports, alerts not called for plain free-text
 		expect(deps.dataQuery.query).not.toHaveBeenCalled();
@@ -727,7 +725,6 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		);
 		expect(snapshot.failures).toContain('context-store');
 		// Other readers still populated (returned empty arrays)
-		expect(snapshot.interactionContext).toBeDefined();
 		expect(snapshot.enabledApps).toBeDefined();
 	});
 
@@ -788,6 +785,30 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 			}),
 		);
 		expect(Array.isArray(snapshot.failures)).toBe(true);
+	});
+
+	it('does not call interactionContext.getRecent during buildContextSnapshot', async () => {
+		const getRecentSpy = vi.fn().mockReturnValue([]);
+		const service = new ConversationRetrievalServiceImpl({ interactionContext: { getRecent: getRecentSpy } } as never);
+		await withUserId('user1', () => service.buildContextSnapshot({ question: 'hi', mode: 'free-text', dataQueryCandidate: false, recentFilePaths: [] }));
+		expect(getRecentSpy).not.toHaveBeenCalled();
+	});
+
+	it('ignores forced interaction-context inclusion in buildContextSnapshot', async () => {
+		const getRecentSpy = vi.fn().mockReturnValue([]);
+		const service = new ConversationRetrievalServiceImpl({ interactionContext: { getRecent: getRecentSpy } } as never);
+		const snapshot = await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'hi',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+				include: { 'interaction-context': true },
+			})
+		);
+		expect(getRecentSpy).not.toHaveBeenCalled();
+		expect('interactionContext' in snapshot).toBe(false);
+		expect(snapshot.failures).not.toContain('interaction-context');
 	});
 
 	it('two parallel calls for different users do not cross-contaminate', async () => {

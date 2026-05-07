@@ -3,8 +3,7 @@
  *
  * Determines which AllowedSourceCategories to read for a given
  * ContextSnapshotOptions. Strategy:
- *   - Always include the three cheap scoped readers (context-store,
- *     interaction-context, app-metadata).
+ *   - Always include the two cheap scoped readers (context-store, app-metadata).
  *   - Add app-knowledge when question looks like "how do I / how to / system"
  *     flavored, or when mode is 'ask'.
  *   - Add system-info when question touches system categories (llm, costs,
@@ -22,9 +21,8 @@ import type { AllowedSourceCategory } from './source-policy.js';
 export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCategory> {
 	const selected = new Set<AllowedSourceCategory>();
 
-	// Always include the three cheap scoped readers
+	// Always include the two cheap scoped readers
 	selected.add('context-store');
-	selected.add('interaction-context');
 	selected.add('app-metadata');
 
 	const categories = categorizeQuestion(opts.question);
@@ -76,7 +74,11 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 		selected.add('settings');
 	}
 
-	// Apply explicit include overrides last (force-on or force-off)
+	// Apply explicit include overrides last (force-on or force-off).
+	// Note: 'interaction-context' is in AllowedSourceCategory (for the public getRecentInteractions()
+	// method), so passing include: { 'interaction-context': true } is type-valid. However,
+	// buildContextSnapshot removed the interaction-context fan-out task in Batch 5, so adding it
+	// to `selected` here is a no-op — the snapshot will never populate snapshot.interactionContext.
 	if (opts.include) {
 		for (const [cat, val] of Object.entries(opts.include) as [AllowedSourceCategory, boolean][]) {
 			if (val) {

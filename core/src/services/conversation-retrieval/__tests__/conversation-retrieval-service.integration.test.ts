@@ -4,7 +4,6 @@
  * Uses real service implementations backed by a temp dir (real filesystem).
  * Verifies end-to-end wiring with:
  *   - ContextStoreServiceImpl (real I/O)
- *   - InteractionContextServiceImpl (in-memory)
  *   - requestContext ALS for userId isolation
  */
 
@@ -15,7 +14,6 @@ import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../../context-store/index.js';
 import { requestContext } from '../../context/request-context.js';
-import { InteractionContextServiceImpl } from '../../interaction-context/index.js';
 import {
 	ConversationRetrievalServiceImpl,
 	MissingRequestContextError,
@@ -249,20 +247,15 @@ describe('ConversationRetrievalServiceImpl integration — missing dep graceful 
 describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot partial fill', () => {
 	let tempDir: string;
 	let contextStore: ContextStoreServiceImpl;
-	let interactionContext: InteractionContextServiceImpl;
 
 	beforeEach(async () => {
 		tempDir = join(tmpdir(), `pas-crs-snap-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		await mkdir(tempDir, { recursive: true });
 
 		contextStore = new ContextStoreServiceImpl({ dataDir: tempDir, logger: makeLogger() });
-		interactionContext = new InteractionContextServiceImpl();
 
 		// Seed a context entry for alice
 		await contextStore.save('alice', 'diet-pref', 'vegetarian', { bypass: CONTEXT_INTERNAL_BYPASS });
-
-		// Seed a recent interaction for alice
-		interactionContext.record('alice', { appId: 'food', action: 'view-recipe' });
 	});
 
 	afterEach(async () => {
@@ -272,7 +265,6 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 	it('contextStore wired + dataQuery unwired: snapshot.contextStore is populated; data-query categories in failures', async () => {
 		const service = new ConversationRetrievalServiceImpl({
 			contextStore,
-			interactionContext,
 			// dataQuery intentionally omitted
 		});
 
@@ -296,22 +288,4 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 		expect(dataQueryFailures.length).toBeGreaterThan(0);
 	});
 
-	it('interactionContext wired: snapshot.interactionContext includes recent entries', async () => {
-		const service = new ConversationRetrievalServiceImpl({
-			contextStore,
-			interactionContext,
-		});
-
-		const snapshot = await requestContext.run({ userId: 'alice' }, () =>
-			service.buildContextSnapshot({
-				question: 'hello',
-				mode: 'free-text',
-				dataQueryCandidate: false,
-				recentFilePaths: [],
-			}),
-		);
-
-		expect(snapshot.interactionContext).toBeDefined();
-		expect(snapshot.interactionContext?.some((e) => e.appId === 'food')).toBe(true);
-	});
 });
