@@ -1,8 +1,8 @@
 /**
  * In-memory pending edit proposals (userId → proposal).
  *
- * Single module-level Map shared by all callers so that the chatbot shim
- * and any future core call site see the same pending-edit slot per user.
+ * Single module-level Map shared by all callers so that all conversation
+ * handlers see the same pending-edit slot per user.
  *
  * One pending edit per user. A new /edit call replaces any in-progress proposal;
  * the Confirm/Cancel flow re-fetches at confirm time to pick up whichever proposal

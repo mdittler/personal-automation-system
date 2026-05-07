@@ -9,9 +9,6 @@ import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
 
-/** Max context entries to include in system prompt. */
-export const MAX_CONTEXT_ENTRIES = 3;
-
 /** Max knowledge base entries to include in system prompt. */
 export const MAX_KNOWLEDGE_ENTRIES = 5;
 
@@ -63,19 +60,4 @@ export function formatAppMetadata(apps: AppInfo[]): string {
 		if (app.hasSchedules) lines.push('  Has scheduled tasks');
 	}
 	return lines.join('\n');
-}
-
-/**
- * Placeholder for volatile per-turn context gathering.
- * ContextStore entries are no longer fetched here — they are frozen at session
- * start via `ChatSessionStore.ensureActiveSession` and injected as the Layer 2
- * durable memory snapshot. This function returns an empty array so existing
- * call sites remain valid while the wiring migrates to the snapshot path.
- */
-export async function gatherContext(
-	_text: string,
-	_userId: string,
-	_deps: { logger?: AppLogger },
-): Promise<string[]> {
-	return [];
 }

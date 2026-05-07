@@ -58,7 +58,7 @@ export function splitTelegramMessage(text: string, maxLength = 3800): string[] {
 }
 
 /**
- * Strip legacy Markdown formatting markers to produce plain text.
+ * Strip Telegram Markdown formatting markers to produce plain text.
  * Used as a fallback when Telegram rejects a message due to malformed
  * Markdown parse errors (e.g. an unmatched code fence from a split).
  */

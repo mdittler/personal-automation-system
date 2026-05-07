@@ -1,8 +1,9 @@
 /**
- * Manifest constants for the conversation app.
+ * Manifest constants for the conversation service.
  *
- * Mirrors apps/chatbot/manifest.yaml so a future Chunk B can register the
- * conversation app from core without re-reading the YAML.
+ * Provides the CONVERSATION_USER_CONFIG, LLM safeguards, and data-scope
+ * declarations used to register the chatbot as a core service with the
+ * settings registry, app-config service, and LLM guard.
  */
 
 import type { ManifestDataScope, ManifestUserConfig } from '../../types/manifest.js';

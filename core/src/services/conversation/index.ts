@@ -1,9 +1,8 @@
 /**
- * Core conversation service — pure helpers used by the chatbot shim.
+ * Core conversation service — pure helpers used by the conversation handlers.
  *
  * Each export takes its dependencies explicitly so it can be unit-tested
- * without a CoreServices closure. The chatbot shim wires up its captured
- * `services` reference to these helpers.
+ * without a CoreServices closure.
  */
 
 export { pendingEdits } from './pending-edits.js';
@@ -19,10 +18,8 @@ export {
 export { appendDailyNote } from './daily-notes.js';
 
 export {
-	MAX_CONTEXT_ENTRIES,
 	MAX_KNOWLEDGE_ENTRIES,
 	formatAppMetadata,
-	gatherContext,
 	getEnabledAppInfos,
 	searchKnowledge,
 } from './app-data.js';
@@ -74,7 +71,6 @@ export {
 export type {
 	ConversationUserConfigEntry,
 	ConversationLLMSafeguards,
-	ConversationDataScope,
 } from './manifest.js';
 
 export { ConversationService } from './conversation-service.js';
