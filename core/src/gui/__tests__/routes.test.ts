@@ -68,7 +68,17 @@ function makeNoopSettingsWriter(): SettingsWriter {
 	return {
 		write: vi.fn(async () => ({ ok: true, coerced: undefined }) as WriteResult),
 		validate: vi.fn(() => ({ ok: true, coerced: undefined }) as WriteResult),
-		writeBatch: vi.fn(async () => ({ perApp: new Map(), perField: new Map() }) as BatchResult),
+		writeBatch: vi.fn(async (items: WriteRequest[]) => {
+			// Return success for each submitted appId so callers don't 500 on writeBatch.
+			const perApp = new Map<string, BatchAppResult>();
+			for (const item of items) {
+				if (!perApp.has(item.appId)) {
+					perApp.set(item.appId, { ok: true, written: [] });
+				}
+				(perApp.get(item.appId) as BatchAppResult).written.push(item.key);
+			}
+			return { perApp, perField: new Map() } as BatchResult;
+		}),
 		registerPostWriteHook: vi.fn(),
 		runHooksForKey: vi.fn(async () => {}),
 	} as unknown as SettingsWriter;
@@ -533,7 +543,9 @@ describe('GUI Routes', () => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: credSvc,
+						// biome-ignore format: inline import() type must stay on one line for esbuild compat
 						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
+						// biome-ignore format: inline import() type must stay on one line for esbuild compat
 						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
 					});
 					await registerCsrfProtection(gui);
@@ -1236,7 +1248,9 @@ describe('GUI Routes', () => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: credSvc,
+						// biome-ignore format: inline import() type must stay on one line for esbuild compat
 						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
+						// biome-ignore format: inline import() type must stay on one line for esbuild compat
 						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
 					});
 					await registerCsrfProtection(gui);
@@ -1387,7 +1401,7 @@ describe('GUI Routes', () => {
 			expect(res.statusCode).toBe(500);
 		});
 
-		it('handles two concurrent POSTs — both succeed; final on-disk state valid', async () => {
+		it('two concurrent POSTs both delegate to writeBatch (both return 302)', async () => {
 			const { allCookies, csrfToken } = await flushLogin();
 
 			const [r1, r2] = await Promise.all([
@@ -1407,7 +1421,8 @@ describe('GUI Routes', () => {
 
 			expect(r1!.statusCode).toBe(302);
 			expect(r2!.statusCode).toBe(302);
-			// Both calls delegated to writeBatch — no call count assertion on race outcome.
+			// Both requests delegate to writeBatch. Race resolution lives in the lock layer;
+			// this test pins only the delegation contract, not final on-disk state.
 			expect(writeBatchSpy).toHaveBeenCalled();
 		});
 	});

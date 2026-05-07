@@ -90,10 +90,12 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 		const configDefs = app.manifest.user_config ?? [];
 		const knownKeys = new Set(configDefs.map((d) => d.key));
 
-		// Partition into writer-routed (registry-eligible chatbot keys) and legacy-routed.
-		// Writer-routed keys go through SettingsWriter.writeBatch (updateOverrides merge,
-		// post-write hooks fire). All other keys keep the existing appConfig.setAll path.
-		// Scoped to appId === 'chatbot' so the migration doesn't affect other apps.
+		// Partition into writer-routed (chatbot) and legacy-routed (all other apps).
+		// All chatbot keys go through SettingsWriter.writeBatch (updateOverrides/merge semantics,
+		// post-write hooks fire). Mixing writeBatch with appConfig.setAll on the same override
+		// file would cause setAll to erase the writer's updateOverrides changes, so chatbot
+		// keys that are absent from the registry are treated as a wiring error.
+		// Non-chatbot apps use the existing appConfig.setAll path unchanged.
 		const writerItems: WriteRequest[] = [];
 		const legacyValidated: Record<string, unknown> = {};
 		const coercionFailures: string[] = [];
@@ -105,9 +107,14 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 				continue;
 			}
 
-			const inRegistry =
-				appId === 'chatbot' && settingsRegistry.getByAppKey(appId, key) !== undefined;
-			if (inRegistry) {
+			if (appId === 'chatbot') {
+				if (settingsRegistry.getByAppKey(appId, key) === undefined) {
+					logger.error(
+						{ appId, userId, key },
+						'Chatbot key not in SettingsRegistry — refusing mixed setAll/writeBatch write',
+					);
+					return reply.status(500).send('Internal configuration error');
+				}
 				writerItems.push({ userId, appId, key, rawValue, source: 'admin-confirmed' });
 			} else {
 				const def = configDefs.find((d) => d.key === key)!;
@@ -155,8 +162,7 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 			}
 		}
 
-		// Persist legacy keys via setAll (rewrite semantics — only for non-chatbot apps today,
-		// or chatbot keys that are not yet registry-eligible).
+		// Persist legacy keys via setAll (rewrite semantics — non-chatbot apps only).
 		if (Object.keys(legacyValidated).length > 0) {
 			const appConfig = getAppConfigService(appId, configDefs);
 			try {

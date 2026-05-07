@@ -21,11 +21,19 @@ import { parse as parseYaml } from 'yaml';
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import { AppToggleStore } from '../../services/app-toggle/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
+import {
+	CONTEXT_INTERNAL_BYPASS,
+	ContextStoreServiceImpl,
+} from '../../services/context-store/index.js';
 import { conversationManifestToSettingDefs } from '../../services/conversation/manifest-settings.js';
 import {
 	CONVERSATION_USER_CONFIG,
 	CONVERSATION_USER_CONFIG_MANIFEST,
 } from '../../services/conversation/manifest.js';
+import {
+	RECENT_SESSION_SUMMARY_KEY,
+	disableFlushAndCleanup,
+} from '../../services/conversation/memory-flush.js';
 import {
 	VIRTUAL_CHATBOT_PATH,
 	buildVirtualChatbotApp,
@@ -135,7 +143,9 @@ describe('GUI — virtual chatbot registry entry (REQ-CONV-013)', () => {
 				await registerAuth(gui, {
 					authToken: AUTH_TOKEN,
 					credentialService: credService,
+					// biome-ignore format: inline import() type must stay on one line for esbuild compat
 					userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
+					// biome-ignore format: inline import() type must stay on one line for esbuild compat
 					householdService: makeHouseholdService() as unknown as import('../../services/household/index.js').HouseholdService,
 				});
 				await registerCsrfProtection(gui);
@@ -262,5 +272,64 @@ describe('GUI — virtual chatbot registry entry (REQ-CONV-013)', () => {
 		// Cleanup helper must have been invoked exactly once with the userId.
 		expect(cleanupSpy).toHaveBeenCalledTimes(1);
 		expect(cleanupSpy).toHaveBeenCalledWith(TEST_USER_ID);
+	});
+
+	it('REQ-CONV-FLUSH-011 end-to-end: toggle-off via legacy route deletes recent-session-summary from ContextStore', async () => {
+		// Build a real ContextStore in the temp dir.
+		const contextStore = new ContextStoreServiceImpl({
+			dataDir: tempDir,
+			logger: pino({ level: 'silent' }),
+		});
+
+		// Register the real cleanup on the settingsWriter hook.
+		const flushLogger = pino({ level: 'silent' });
+		settingsWriter.registerPostWriteHook(
+			'chatbot.flush_memory_on_idle_reset',
+			async ({ userId, prevValue, newValue }) => {
+				if (prevValue === true && newValue === false) {
+					await disableFlushAndCleanup(userId, {
+						flushRemove: (uid, key) => contextStore.remove(uid, key, CONTEXT_INTERNAL_BYPASS),
+						logger: flushLogger,
+					});
+				}
+			},
+		);
+
+		// Pre-populate the config override (flush=true) and the context entry.
+		const overrideDir = join(tempDir, 'system', 'app-config', 'chatbot');
+		await mkdir(overrideDir, { recursive: true });
+		await writeFile(
+			join(overrideDir, `${TEST_USER_ID}.yaml`),
+			'flush_memory_on_idle_reset: true\n',
+		);
+		await contextStore.save(TEST_USER_ID, RECENT_SESSION_SUMMARY_KEY, 'test summary', {
+			kind: 'environment-fact',
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
+
+		// Confirm the entry exists before the POST.
+		const before = await contextStore.getForUser(
+			RECENT_SESSION_SUMMARY_KEY,
+			TEST_USER_ID,
+			CONTEXT_INTERNAL_BYPASS,
+		);
+		expect(before).toBeTruthy();
+
+		const { allCookies, csrfToken } = await loginAndGetCookies();
+		const postRes = await fastifyApp.inject({
+			method: 'POST',
+			url: `/gui/config/chatbot/${TEST_USER_ID}`,
+			payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false' },
+			cookies: allCookies,
+		});
+		expect(postRes.statusCode).toBe(302);
+
+		// Entry must be gone from the ContextStore.
+		const after = await contextStore.getForUser(
+			RECENT_SESSION_SUMMARY_KEY,
+			TEST_USER_ID,
+			CONTEXT_INTERNAL_BYPASS,
+		);
+		expect(after).toBeNull();
 	});
 });

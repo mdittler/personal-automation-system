@@ -86,10 +86,10 @@ export interface GuiOptions {
 	messageRateTracker?: MessageRateTracker;
 	/** D5c-D: LLM safeguards config for per-household cap display. */
 	llmSafeguards?: LLMSafeguardsConfig;
-	/** Settings-B: Shared SettingsRegistry for /gui/settings page. */
-	settingsRegistry?: SettingsRegistry;
-	/** Settings-B: SettingsWriter for /gui/settings save + reset flows. */
-	settingsWriter?: SettingsWriter;
+	/** Settings-B: Shared SettingsRegistry for /gui/settings page and config routes. */
+	settingsRegistry: SettingsRegistry;
+	/** Settings-B: SettingsWriter for /gui/settings save + reset flows and config routes. */
+	settingsWriter: SettingsWriter;
 	/** Settings-B: Resolves AppConfigService by appId for /gui/settings reads + resets. */
 	settingsAppConfigResolver?: (appId: string) => AppConfigService | undefined;
 }
@@ -161,12 +161,6 @@ export async function registerGuiRoutes(
 				householdService: options.householdService,
 				spaceService: spaceService ?? undefined,
 			});
-			if (!options.settingsWriter || !options.settingsRegistry) {
-				throw new Error(
-					'registerConfigRoutes requires settingsWriter and settingsRegistry — refusing to register ' +
-						'/gui/config routes without writer-routed flush handling',
-				);
-			}
 			registerConfigRoutes(gui, {
 				registry,
 				config,
