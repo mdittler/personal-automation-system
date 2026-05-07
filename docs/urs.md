@@ -4803,14 +4803,24 @@ Every I/O boundary in the flush path is wrapped in a try/catch that logs a warni
 
 **Phase:** Hermes P8b | **Status:** Implemented
 
-`disableFlushAndCleanup` calls `flushRemove(userId, RECENT_SESSION_SUMMARY_KEY)` and swallows any errors (so the toggle still flips even if the remove fails). It is invoked both by `processConfigSetTags` (when `<config-set key="flush_memory_on_idle_reset" value="false"/>` is processed) and by the GUI POST handler in `config.ts` (when the prior value was `true` and the new value is `false`). This ensures on/off semantics match the toggle name.
+`disableFlushAndCleanup` calls `flushRemove(userId, RECENT_SESSION_SUMMARY_KEY)` and swallows any errors (so the toggle still flips even if the remove fails). It is invoked by `processConfigSetTags` (when `<config-set key="flush_memory_on_idle_reset" value="false"/>` is processed) and via the SettingsWriter post-write hook registered at `compose-runtime.ts:1044-1051` (single source of truth for both the `/gui/settings` and legacy `/gui/config/chatbot/:userId` GUI flows). This ensures on/off semantics match the toggle name.
 
 **Standard tests:**
 - `memory-flush.test.ts` > disableFlushAndCleanup > removes the rolling key on disable
 - `control-tags.config-set.test.ts` > \<config-set key="flush_memory_on_idle_reset"\> > persists false on disable intent AND calls disableFlushAndCleanup
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > toggling flush_memory_on_idle_reset routes the write through writeBatch with source=admin-confirmed
+- `chatbot-virtual-config.integration.test.ts` > GUI — virtual chatbot registry entry (REQ-CONV-013) > REQ-CONV-FLUSH-011 carry-forward: legacy /gui/config/chatbot/:userId toggle-off invokes the cleanup helper via the SettingsWriter post-write hook
 
 **Edge case tests:**
 - `memory-flush.test.ts` > disableFlushAndCleanup > swallows errors so the toggle still flips off
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > mixed body batches BOTH chatbot keys into ONE writeBatch call (data-loss regression guard)
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > returns 400 on validation failure without persisting
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > returns 500 when writeBatch throws
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > returns 500 when writeBatch reports perApp.ok=false (soft persist failure)
+- `routes.test.ts` > POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter > handles two concurrent POSTs — both succeed; final on-disk state valid
+
+**Fixes:**
+- **Batch1 (2026-05-06):** Migrated legacy `/gui/config/chatbot/:userId` flush write through `SettingsWriter.writeBatch` so the registered post-write hook is the single source of truth. Removed `disableFlushAndCleanup` plumbing from `ConfigOptions`, `gui/index.ts`, and `compose-runtime.ts`. Mixed-body chatbot writes batched into one `updateOverrides` call (latent `setAll` vs. `updateOverrides` data-loss bug fixed). CL: batch1-gui-cleanup.
 
 ---
 
@@ -9214,7 +9224,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-FLUSH-008 | idle-reset-hook.test.ts | 1 | 0 | Implemented |
 | REQ-CONV-FLUSH-009 | idle-reset-hook.test.ts, idle-reset-integration.test.ts, idle-reset.persona.test.ts | 0 | 5 | Implemented |
 | REQ-CONV-FLUSH-010 | control-tags.config-set.test.ts, handle-message.test.ts | 4 | 11 | Implemented |
-| REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-FLUSH-011 | memory-flush.test.ts, control-tags.config-set.test.ts, routes.test.ts, chatbot-virtual-config.integration.test.ts | 4 | 6 | Implemented |
 | REQ-CONV-FLUSH-012 | conversation-retrieval-service.test.ts | 2 | 2 | Implemented |
 | REQ-CONV-LINEAGE-001 | idle-reset-integration.test.ts, dispatch-photo-transcript.test.ts, handle-message.test.ts, handle-ask.test.ts | 1 | 5 | Implemented |
 | REQ-CONV-LINEAGE-002 | idle-reset-integration.test.ts | 1 | 0 | Implemented |
@@ -9293,4 +9303,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SETTINGS-019 | settings-writer-batch.test.ts, settings.test.ts, settings.integration.test.ts | 4 | 3 | Implemented |
 | REQ-SETTINGS-020 | settings.test.ts, settings-writer-batch.test.ts | 4 | 2 | Implemented |
 
-| **Totals** | **246 test files** | **1837** | **1966** | **3803 tests** |
+| **Totals** | **248 test files** | **1839** | **1971** | **3810 tests** |
