@@ -1,42 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
-import { classifyPASMessage, isPasRelevant } from '../pas-classifier.js';
-
-describe('isPasRelevant', () => {
-	it('returns true for PAS keyword messages (happy path)', () => {
-		expect(isPasRelevant('what apps do I have?')).toBe(true);
-		expect(isPasRelevant('how does scheduling work')).toBe(true);
-	});
-
-	it('returns false for off-topic messages', () => {
-		expect(isPasRelevant("what's the weather like today?")).toBe(false);
-	});
-
-	it('returns false for empty/whitespace', () => {
-		expect(isPasRelevant('')).toBe(false);
-		expect(isPasRelevant('   ')).toBe(false);
-	});
-
-	it('detects installed app names via deps.appMetadata', () => {
-		const services = createMockCoreServices();
-		vi.mocked(services.appMetadata.getInstalledApps).mockReturnValue([
-			{
-				id: 'weather',
-				name: 'Weather',
-				description: 'Weather app',
-				version: '1.0.0',
-				commands: [{ name: '/weather', description: 'Get weather' }],
-				intents: [],
-				hasSchedules: false,
-				hasEvents: false,
-				acceptsPhotos: false,
-			},
-		]);
-		expect(
-			isPasRelevant('tell me about the Weather app', { appMetadata: services.appMetadata }),
-		).toBe(true);
-	});
-});
+import { classifyPASMessage } from '../pas-classifier.js';
 
 describe('classifyPASMessage', () => {
 	it('returns pasRelated=false without LLM call for empty text', async () => {
@@ -309,49 +273,3 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 	});
 });
 
-describe('isPasRelevant — additional cases', () => {
-	it('detects "what commands are available"', () => {
-		expect(isPasRelevant('what commands can I use?')).toBe(true);
-	});
-
-	it('detects command names from installed apps', () => {
-		const services = createMockCoreServices();
-		vi.mocked(services.appMetadata.getInstalledApps).mockReturnValue([
-			{
-				id: 'echo',
-				name: 'Echo',
-				description: 'Echo app',
-				version: '1.0.0',
-				commands: [{ name: '/echo', description: 'Echo' }],
-				intents: [],
-				hasSchedules: false,
-				hasEvents: false,
-				acceptsPhotos: false,
-			},
-		]);
-		expect(isPasRelevant('how do I use echo?', { appMetadata: services.appMetadata })).toBe(true);
-	});
-
-	it('is case insensitive', () => {
-		expect(isPasRelevant('WHAT APPS DO I HAVE')).toBe(true);
-		expect(isPasRelevant('How Does Scheduling Work?')).toBe(true);
-	});
-});
-
-describe('isPasRelevant with system keywords', () => {
-	it('detects model-related questions', () => {
-		expect(isPasRelevant('what model is being used?')).toBe(true);
-	});
-
-	it('detects cost-related questions', () => {
-		expect(isPasRelevant('how much does it cost?')).toBe(true);
-	});
-
-	it('detects usage questions', () => {
-		expect(isPasRelevant('what is my token usage?')).toBe(true);
-	});
-
-	it('detects uptime questions', () => {
-		expect(isPasRelevant('what is the uptime?')).toBe(true);
-	});
-});
