@@ -357,9 +357,5 @@ describe('SessionControlLogger — classification+confirmation linkage', () => {
 	});
 });
 
-// ─── Round-trip with parser (todo until analyze-session-control-log.ts lands) ─
-
-describe('SessionControlLogger — round-trip with parser', () => {
-	it.todo('classification entry written by the logger parses back identically');
-	it.todo('confirmation entry written by the logger parses back identically');
-});
+// Round-trip tests live in scripts/__tests__/analyze-session-control-log.test.ts
+// which imports SessionControlLogger from core and parseSessionControlLog from scripts.

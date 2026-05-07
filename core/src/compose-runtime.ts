@@ -99,6 +99,7 @@ import {
 	SC_YES,
 } from './services/conversation/pending-session-control-store.js';
 import { handleSessionControlCallback } from './services/conversation/handle-session-control-callback.js';
+import { SessionControlLogger } from './services/conversation/session-control-logger.js';
 import { detectSessionControl } from './services/conversation/session-control-classifier.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
@@ -1147,6 +1148,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	// 10. Router
 	const messageRateTracker = new MessageRateTracker();
 	const pendingSessionControl = createPendingSessionControlStore();
+	const sessionControlLogger = new SessionControlLogger(
+		resolve(config.dataDir, 'system', 'conversation'),
+		createChildLogger(logger, { service: 'session-control' }),
+	);
 
 	const router = new Router({
 		registry,
@@ -1168,6 +1173,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		messageRateTracker,
 		sessionControlClassifier: detectSessionControl,
 		pendingSessionControl,
+		sessionControlLogger,
 		idleResetDeps: {
 			idleMinutes: config.chat?.sessions?.auto_reset_idle_minutes ?? null,
 			chatSessions,
@@ -1355,7 +1361,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 							{
 								pendingStore: pendingSessionControl,
 								handleNewChat: (msgCtx) => conversationService.handleNewChat([], msgCtx),
-								sessionControlLogger: undefined, // wired in Task 2.3
+								sessionControlLogger,
 								logger,
 							},
 						);
