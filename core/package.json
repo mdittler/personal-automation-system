@@ -73,7 +73,8 @@
 		"dev": "tsx watch src/bootstrap.ts",
 		"test": "vitest run",
 		"test:watch": "vitest watch",
-		"clean": "rm -rf dist tsconfig.tsbuildinfo"
+		"clean": "rm -rf dist tsconfig.tsbuildinfo",
+		"typecheck:fixtures": "tsc --noEmit -p tsconfig.typecheck.json"
 	},
 	"devDependencies": {
 		"@types/better-sqlite3": "^7.6.13",

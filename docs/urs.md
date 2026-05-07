@@ -6244,6 +6244,19 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `shutdown.test.ts` > performTeardown > is idempotent — second call is a no-op
 - `shutdown.test.ts` > performTeardown > returns without throwing if registerServices was never called
 
+### REQ-COMPOSE-001: configPath required when config is overridden
+
+**Phase:** P1-sprightly-brooks | **Status:** Implemented
+
+`composeRuntime` must reject any call that passes a `config` override without a `configPath`. The type signature enforces the pairing at compile time (discriminated union — the second branch requires both `config: SystemConfig` and `configPath: string`; the first branch requires `config?: undefined`). A runtime guard throws `'composeRuntime: configPath is required when config is provided'` before any service is constructed, catching JS callers that bypass TypeScript's type system.
+
+**Standard tests:**
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime guard tests > C1 — composes and shuts down cleanly with config + configPath pairing
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime guard tests > C2 — throws when config is provided without configPath
+
+**Typecheck fixture:**
+- `core/src/typecheck/compose-runtime-types.typecheck.ts` — `@ts-expect-error` on `{ config: cfg }` (missing `configPath`); `{ config: cfg, configPath: '...' }` compiles without error
+
 ### REQ-LLM-030: 40-user load-test harness
 
 **Phase:** D5c | **Status:** Implemented
