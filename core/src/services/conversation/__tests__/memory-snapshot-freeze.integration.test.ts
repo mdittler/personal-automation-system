@@ -100,11 +100,11 @@ function getChatbotPrompt(recorder: RecordingStubProvider, startIdx: number): st
 // Helper — find sessions directory for a user in the household layout
 // ---------------------------------------------------------------------------
 
-async function findSessionsDir(
+function findSessionsDir(
 	dataDir: string,
 	householdId: string,
 	userId: string,
-): Promise<string> {
+): string {
 	return join(dataDir, 'households', householdId, 'users', userId, 'chatbot', 'conversation', 'sessions');
 }
 
@@ -443,7 +443,7 @@ describe('F5 — frontmatter persistence', () => {
 		expect(block).not.toBeNull();
 
 		// Find the newest session file on disk
-		const sessionsDir = await findSessionsDir(join(tempDir, 'data'), householdId, userId);
+		const sessionsDir = findSessionsDir(join(tempDir, 'data'), householdId, userId);
 		const sessionFilePath = await getNewestSessionFile(sessionsDir);
 		expect(sessionFilePath).not.toBeNull();
 
@@ -514,7 +514,7 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 			expect(extractDurableMemoryBlock(prompt!)).toBeNull();
 
 			// Find the newest session file on disk and check frontmatter status is degraded
-			const sessionsDir = await findSessionsDir(join(tempDir, 'data'), householdId, userId);
+			const sessionsDir = findSessionsDir(join(tempDir, 'data'), householdId, userId);
 			const sessionFilePath = await getNewestSessionFile(sessionsDir);
 			expect(sessionFilePath).not.toBeNull();
 			const raw = await readFile(sessionFilePath!, 'utf-8');

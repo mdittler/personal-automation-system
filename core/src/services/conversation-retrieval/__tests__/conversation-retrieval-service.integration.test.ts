@@ -4,7 +4,6 @@
  * Uses real service implementations backed by a temp dir (real filesystem).
  * Verifies end-to-end wiring with:
  *   - ContextStoreServiceImpl (real I/O)
- *   - InteractionContextServiceImpl (in-memory)
  *   - requestContext ALS for userId isolation
  */
 
