@@ -2708,7 +2708,7 @@ The chatbot extracts `<switch-model>` tags from LLM responses, validates paramet
 
 **Phase:** D1 | **Status:** Implemented
 
-The `classifyPASMessage()` function replaces the static `isPasRelevant()` keyword list. It uses a compact fast-tier LLM call to determine whether a message is PAS-related (home automation, installed apps, scheduling, data queries, system status, model/cost info). Returns an extensible `PASClassification { pasRelated: boolean, dataQueryCandidate?: boolean }` object for D2 wiring. Sanitizes user input and app names before LLM injection. Fails open (`pasRelated: true`) on LLM error so users with auto-detect on always get helpful responses. Short-circuits on empty/whitespace input without an LLM call. Only invoked when `auto_detect_pas` is enabled; `/ask` is always app-aware.
+The `classifyPASMessage()` function uses a compact fast-tier LLM call to determine whether a message is PAS-related (home automation, installed apps, scheduling, data queries, system status, model/cost info). Returns an extensible `PASClassification { pasRelated: boolean, dataQueryCandidate?: boolean }` object for D2 wiring. Sanitizes user input and app names before LLM injection. Fails open (`pasRelated: true`) on LLM error so users with auto-detect on always get helpful responses. Short-circuits on empty/whitespace input without an LLM call. Only invoked when `auto_detect_pas` is enabled; `/ask` is always app-aware.
 
 **Standard tests:**
 - `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: true when LLM responds YES
