@@ -3049,7 +3049,7 @@ Reference index for the smaller pending items in `docs/open-items.md`, grouped b
 
 ### Batch 3 — Conversation router built-ins + recall config ✓ Complete (2026-05-07)
 
-Three items from `docs/open-items.md` (lines 19, 33, 136) closed in a single branch (`codex/batch3-router-recall-cleanup`). Zero behavior change for default-configured installs. 13 new URS requirements (REQ-CONV-FLUSH-013..018, REQ-CONV-NEWCHAT-009..012, REQ-CONV-TEMPORAL-013..015).
+Three items from `docs/open-items.md` (lines 19, 33, 136) closed in a single branch (`codex/batch3-router-recall-cleanup`). Zero behavior change for default-configured installs. 13 new URS requirements (REQ-CONV-FLUSH-013..018, REQ-CONV-NEWCHAT-009..012, REQ-CONV-TEMPORAL-013..015). Post-merge Codex corrections (`fix(batch3)` commit): P2-1 — stale-callback `logConfirmation(expired-or-stale)` in compose-runtime; P2-2 — `outcome='failed'` (not `'confirmed'`) when `handleNewChat` throws; P2-3 — grey-zone confirmation rate scoped to grey-zone entryIds via Set; P3-4 — Message field JSON-decoded in log parser (strips surrounding quotes); P3-5 — `safeForLog` replaces opening `<script>`/`<style>` tags; P3-6 — REQ-CONV-NEWCHAT-009 URS narrowed to successful invocations; P3-7 — persona test docblock reworded; P3-8 — `maxWindowDays` NL prompt interpolation test added. 467 test files / 10,324 tests passing.
 
 **Item 3 — P6.next 365d cap relaxation (REQ-CONV-TEMPORAL-013..015)**
 `chat.recall.max_window_days` zod-validated config key (`[1, 3650]`, default 365). Threads through `RecallPipelineDeps` → `ClassifyRecallDeps` → `buildClassifierPrompt(today, maxWindowDays)` → `parseRecallVerdict`. All existing 365-day tests still pass; new tests cover rejection boundary, prompt interpolation, and the loader default.
