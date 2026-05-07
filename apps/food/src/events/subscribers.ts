@@ -23,9 +23,16 @@ export function registerHealthSubscribers(services: CoreServices): void {
 			const payload = raw as HealthDailyMetricsPayload;
 			const userStore = services.data.forUser(payload.userId);
 
+			// strip subjective-signal keys that untyped callers could inject at runtime
+			const metrics = Object.fromEntries(
+				Object.entries(payload.metrics as Record<string, unknown>).filter(
+					([k]) => k !== 'energyLevel' && k !== 'mood',
+				),
+			) as HealthDailyMetricsPayload['metrics'];
+
 			await upsertDailyHealth(userStore, payload.userId, {
 				date: payload.date,
-				metrics: payload.metrics,
+				metrics,
 				source: payload.source,
 			});
 		} catch (err) {

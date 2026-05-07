@@ -374,7 +374,7 @@ export function formatCheapestPriceAnswer(
 	if (!cheapest) {
 		return `I do not have saved prices for ${escapeMarkdown(itemQuery)} yet.`;
 	}
-	return `${escapeMarkdown(cheapest.store)} is cheapest for ${escapeMarkdown(itemQuery)}: ${escapeMarkdown(cheapest.entry.name)} at ${formatMoney(cheapest.entry.price)}${cheapest.entry.updatedAt ? ` (updated ${cheapest.entry.updatedAt})` : ''}.`;
+	return `Lowest saved package price for ${escapeMarkdown(itemQuery)}: ${escapeMarkdown(cheapest.entry.name)} at ${formatMoney(cheapest.entry.price)} at ${escapeMarkdown(cheapest.store)}${cheapest.entry.updatedAt ? ` (updated ${cheapest.entry.updatedAt})` : ''}.`;
 }
 
 export function formatStoreSpendingAnswer(receipts: readonly Receipt[]): string {

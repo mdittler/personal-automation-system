@@ -105,6 +105,9 @@ interface PasYamlConfig {
 			retention_days?: number;
 			auto_reset_idle_minutes?: number | null;
 		};
+		recall?: {
+			max_window_days?: number;
+		};
 	};
 }
 

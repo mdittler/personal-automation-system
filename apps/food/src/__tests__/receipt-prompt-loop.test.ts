@@ -202,6 +202,24 @@ describe('Food receipt prompt loop', () => {
 		);
 	});
 
+	// Helper: find the send call that contains the cheapest-price response
+	function findCheapestReply(): string | undefined {
+		const call = vi.mocked(services.telegram.send).mock.calls.find(
+			([userId, text]) => userId === 'matt' && typeof text === 'string' && (text as string).includes('Lowest saved package price'),
+		);
+		return call?.[1] as string | undefined;
+	}
+
+	// Helper: assert the standard REQ-FOOD-PRICE-002 expectations on a cheapest-reply string
+	function assertCheapestBlueberryReply(sent: string | undefined): void {
+		expect(sent).toBeDefined();
+		expect(sent).toContain('Lowest saved package price for blueberr');
+		expect(sent).toContain('Trader Joes');
+		expect(sent).toContain('$6.49');
+		expect(sent).not.toContain('is cheapest for');
+	}
+
+	// P1 — existing phrasing: "cheapest spot to buy X" → cheapest branch (explicit cheapest keyword)
 	it('compares stores for cheapest item price questions', async () => {
 		await handleMessage(
 			createTestMessageContext({
@@ -210,11 +228,45 @@ describe('Food receipt prompt loop', () => {
 			}),
 		);
 
-		expect(services.telegram.send).toHaveBeenCalledWith(
-			'matt',
-			expect.stringContaining('Trader Joes'),
+		const sent = findCheapestReply();
+		assertCheapestBlueberryReply(sent);
+		expect(sent).not.toContain('\n');
+	});
+
+	// P2 — alternate phrasing with explicit "cheapest ... buy" → cheapest branch (REQ-FOOD-PRICE-002)
+	it('cheapest price: "What\'s the cheapest place to buy blueberries?" (P2)', async () => {
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: "What's the cheapest place to buy blueberries?",
+			}),
 		);
-		expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('$6.49'));
+
+		assertCheapestBlueberryReply(findCheapestReply());
+	});
+
+	// P3 — "How much are X?" phrasing → no cheapest keyword, no store → fallthrough to formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)
+	it('cheapest price fallthrough: "How much are blueberries?" (P3)', async () => {
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: 'How much are blueberries?',
+			}),
+		);
+
+		assertCheapestBlueberryReply(findCheapestReply());
+	});
+
+	// P4 — "Price for X?" phrasing → no cheapest keyword, no store → fallthrough to formatCheapestPriceAnswer (REQ-FOOD-PRICE-002)
+	it('cheapest price fallthrough: "Price for blueberries?" (P4)', async () => {
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: 'Price for blueberries?',
+			}),
+		);
+
+		assertCheapestBlueberryReply(findCheapestReply());
 	});
 
 	it('answers grocery-store spending questions from receipt history instead of meal-plan budget', async () => {
