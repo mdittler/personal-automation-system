@@ -11,6 +11,12 @@ import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js
 import type { AppRegistry } from '../../services/app-registry/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
 import { coerceUserConfigValue } from '../../services/config/coerce-user-config.js';
+import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
+import type {
+	BatchResult,
+	SettingsWriter,
+	WriteRequest,
+} from '../../services/settings/settings-writer.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
 
@@ -19,12 +25,16 @@ export interface ConfigOptions {
 	config: SystemConfig;
 	dataDir: string;
 	logger: Logger;
-	/** Called when flush_memory_on_idle_reset is toggled OFF via the GUI. */
-	disableFlushAndCleanup?: (userId: string) => Promise<void>;
+	/**
+	 * Routes registry-eligible chatbot keys through SettingsWriter.writeBatch so
+	 * the registered post-write hook is the single source of truth for side-effects.
+	 */
+	settingsWriter: SettingsWriter;
+	settingsRegistry: SettingsRegistry;
 }
 
 export function registerConfigRoutes(server: FastifyInstance, options: ConfigOptions): void {
-	const { registry, config, dataDir, logger, disableFlushAndCleanup } = options;
+	const { registry, config, dataDir, logger, settingsWriter, settingsRegistry } = options;
 
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
@@ -80,23 +90,41 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 		const configDefs = app.manifest.user_config ?? [];
 		const knownKeys = new Set(configDefs.map((d) => d.key));
 
-		// Filter to only known keys and coerce types based on manifest definitions
-		const validated: Record<string, unknown> = {};
+		// Partition into writer-routed (registry-eligible chatbot keys) and legacy-routed.
+		// Writer-routed keys go through SettingsWriter.writeBatch (updateOverrides merge,
+		// post-write hooks fire). All other keys keep the existing appConfig.setAll path.
+		// Scoped to appId === 'chatbot' so the migration doesn't affect other apps.
+		const writerItems: WriteRequest[] = [];
+		const legacyValidated: Record<string, unknown> = {};
 		const coercionFailures: string[] = [];
+
 		for (const [key, rawValue] of Object.entries(body)) {
-			// Skip CSRF token field and unknown keys
 			if (key === '_csrf') continue;
 			if (!knownKeys.has(key)) {
 				logger.warn({ appId, userId, key }, 'Unknown config key submitted, ignoring');
 				continue;
 			}
 
-			const def = configDefs.find((d) => d.key === key)!;
-			const result = coerceUserConfigValue(def, rawValue);
-			if (!result.ok) {
-				coercionFailures.push(`${key}: ${result.reason}`);
+			const inRegistry =
+				appId === 'chatbot' && settingsRegistry.getByAppKey(appId, key) !== undefined;
+			if (inRegistry) {
+				writerItems.push({ userId, appId, key, rawValue, source: 'admin-confirmed' });
 			} else {
-				validated[key] = result.coerced;
+				const def = configDefs.find((d) => d.key === key)!;
+				const result = coerceUserConfigValue(def, rawValue);
+				if (!result.ok) {
+					coercionFailures.push(`${key}: ${result.reason}`);
+				} else {
+					legacyValidated[key] = result.coerced;
+				}
+			}
+		}
+
+		// Validate writer items (sync, no I/O) before any persistence.
+		for (const item of writerItems) {
+			const v = settingsWriter.validate(item);
+			if (!v.ok) {
+				coercionFailures.push(`${item.key}: ${v.reason}`);
 			}
 		}
 
@@ -108,41 +136,38 @@ export function registerConfigRoutes(server: FastifyInstance, options: ConfigOpt
 			return reply.status(400).send(`Invalid config values: ${coercionFailures.join('; ')}`);
 		}
 
-		const appConfig = getAppConfigService(appId, configDefs);
-
-		let prevFlushEnabled: boolean | undefined;
-		if (appId === 'chatbot' && disableFlushAndCleanup) {
+		// Persist writer items first (merge semantics via updateOverrides).
+		if (writerItems.length > 0) {
+			let batchResult: BatchResult;
 			try {
-				const prev = await appConfig.getOverrides(userId);
-				const raw = prev?.flush_memory_on_idle_reset;
-				prevFlushEnabled = typeof raw === 'boolean' ? raw : undefined;
-			} catch {
-				// Non-fatal; proceed with write
-			}
-		}
-
-		try {
-			await appConfig.setAll(userId, validated);
-			logger.info({ appId, userId }, 'App config updated via GUI');
-		} catch (err) {
-			logger.error({ appId, userId, error: err }, 'Failed to update app config');
-			return reply.status(500).send('Failed to update config');
-		}
-
-		// If flush_memory_on_idle_reset was turned off, delete prior summary
-		if (
-			appId === 'chatbot' &&
-			disableFlushAndCleanup &&
-			prevFlushEnabled === true &&
-			validated.flush_memory_on_idle_reset === false
-		) {
-			try {
-				await disableFlushAndCleanup(userId);
+				batchResult = await settingsWriter.writeBatch(writerItems);
 			} catch (err) {
-				logger.error({ userId, err }, 'GUI config: disableFlushAndCleanup failed');
+				logger.error({ appId, userId, err }, 'SettingsWriter.writeBatch threw');
+				return reply.status(500).send('Failed to update config');
+			}
+			const appResult = batchResult.perApp.get(appId);
+			if (!appResult || !appResult.ok) {
+				logger.error(
+					{ appId, userId, reason: appResult?.reason },
+					'SettingsWriter.writeBatch reported failure',
+				);
+				return reply.status(500).send('Failed to update config');
 			}
 		}
 
+		// Persist legacy keys via setAll (rewrite semantics — only for non-chatbot apps today,
+		// or chatbot keys that are not yet registry-eligible).
+		if (Object.keys(legacyValidated).length > 0) {
+			const appConfig = getAppConfigService(appId, configDefs);
+			try {
+				await appConfig.setAll(userId, legacyValidated);
+			} catch (err) {
+				logger.error({ appId, userId, error: err }, 'Failed to update app config');
+				return reply.status(500).send('Failed to update config');
+			}
+		}
+
+		logger.info({ appId, userId }, 'App config updated via GUI');
 		return reply.redirect(`/gui/apps/${appId}`);
 	});
 }

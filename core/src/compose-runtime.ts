@@ -1038,9 +1038,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'settings-writer' }),
 	});
 
-	// Settings-B: fire disableFlushAndCleanup when flush_memory_on_idle_reset is toggled OFF
-	// via the /gui/settings save or reset flows. The existing config.ts route keeps its own
-	// direct call for backward compat; cleanup is idempotent so dual-trigger is safe.
+	// Settings-B/Batch1: fire onDisableFlush when flush_memory_on_idle_reset is toggled OFF.
+	// This hook is the single source of truth for cleanup — both the /gui/settings flow
+	// and the legacy /gui/config/chatbot/:userId flow write through SettingsWriter.writeBatch.
 	settingsWriter.registerPostWriteHook(
 		'chatbot.flush_memory_on_idle_reset',
 		async ({ userId, prevValue, newValue }) => {
@@ -1461,7 +1461,6 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		costTracker,
 		messageRateTracker,
 		llmSafeguards: safeguardsConfig,
-		disableFlushAndCleanup: onDisableFlush,
 		settingsRegistry,
 		settingsWriter,
 		settingsAppConfigResolver,

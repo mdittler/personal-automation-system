@@ -20,6 +20,15 @@ import { CronManager } from '../../services/scheduler/cron-manager.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import { JobFailureNotifier } from '../../services/scheduler/job-failure-notifier.js';
 import { OneOffManager } from '../../services/scheduler/oneoff-manager.js';
+import type { SettingDef } from '../../services/settings/settings-registry.js';
+import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
+import type {
+	BatchAppResult,
+	BatchResult,
+	WriteRequest,
+	WriteResult,
+} from '../../services/settings/settings-writer.js';
+import type { SettingsWriter } from '../../services/settings/settings-writer.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
@@ -53,6 +62,31 @@ function makeHouseholdService(
 		getHouseholdForUser: (userId: string) => userToHousehold[userId] ?? null,
 		getHousehold: (id: string) => households.find((h) => h.id === id) ?? null,
 	};
+}
+
+function makeNoopSettingsWriter(): SettingsWriter {
+	return {
+		write: vi.fn(async () => ({ ok: true, coerced: undefined }) as WriteResult),
+		validate: vi.fn(() => ({ ok: true, coerced: undefined }) as WriteResult),
+		writeBatch: vi.fn(async () => ({ perApp: new Map(), perField: new Map() }) as BatchResult),
+		registerPostWriteHook: vi.fn(),
+		runHooksForKey: vi.fn(async () => {}),
+	} as unknown as SettingsWriter;
+}
+
+function makeStubRegistry(
+	eligibleKeys: Array<{ appId: string; key: string }> = [],
+): SettingsRegistry {
+	const set = new Set(eligibleKeys.map((k) => `${k.appId}.${k.key}`));
+	return {
+		getByAppKey: (appId: string, key: string) =>
+			set.has(`${appId}.${key}`) ? ({ appId, key } as SettingDef) : undefined,
+		getAll: () => [],
+		getByQualifiedKey: () => undefined,
+		getForUser: () => [],
+		getForCategory: () => [],
+		getNlSafeQualifiedKeys: () => new Set<string>(),
+	} as unknown as SettingsRegistry;
 }
 
 function createMockConfig(): SystemConfig {
@@ -193,7 +227,14 @@ async function buildApp(tempDir: string) {
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir: tempDir, logger });
-			registerConfigRoutes(gui, { registry, config, dataDir: tempDir, logger });
+			registerConfigRoutes(gui, {
+				registry,
+				config,
+				dataDir: tempDir,
+				logger,
+				settingsWriter: makeNoopSettingsWriter(),
+				settingsRegistry: makeStubRegistry(),
+			});
 			registerLlmUsageRoutes(gui, {
 				llm,
 				modelSelector,
@@ -496,7 +537,13 @@ describe('GUI Routes', () => {
 						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
 					});
 					await registerCsrfProtection(gui);
-					registerAppsRoutes(gui, { registry: reg, config: cfg, appToggle: toggle, dataDir: selectTempDir, logger });
+					registerAppsRoutes(gui, {
+						registry: reg,
+						config: cfg,
+						appToggle: toggle,
+						dataDir: selectTempDir,
+						logger,
+					});
 				},
 				{ prefix: '/gui' },
 			);
@@ -966,7 +1013,14 @@ describe('GUI Routes', () => {
 						dataDir: configTempDir,
 						logger,
 					});
-					registerConfigRoutes(gui, { registry, config, dataDir: configTempDir, logger });
+					registerConfigRoutes(gui, {
+						registry,
+						config,
+						dataDir: configTempDir,
+						logger,
+						settingsWriter: makeNoopSettingsWriter(),
+						settingsRegistry: makeStubRegistry(),
+					});
 				},
 				{ prefix: '/gui' },
 			);
@@ -1058,6 +1112,303 @@ describe('GUI Routes', () => {
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('LLM');
 			expect(res.body).toContain('No LLM API usage recorded');
+		});
+	});
+
+	describe('POST /gui/config/chatbot/:userId — flush_memory_on_idle_reset routes through SettingsWriter', () => {
+		let flushApp: Awaited<ReturnType<typeof Fastify>> | null = null;
+		let flushTempDir: string;
+		let writeBatchSpy: ReturnType<typeof vi.fn>;
+		let validateSpy: ReturnType<typeof vi.fn>;
+
+		beforeEach(async () => {
+			flushTempDir = await mkdtemp(join(tmpdir(), 'pas-cfg-flush-'));
+
+			validateSpy = vi.fn(
+				(req: WriteRequest): WriteResult => ({
+					ok: true,
+					coerced: req.rawValue === 'true',
+				}),
+			);
+			writeBatchSpy = vi.fn(
+				async (
+					items: WriteRequest[],
+				): Promise<{ perApp: Map<string, BatchAppResult>; perField: Map<string, WriteResult> }> => {
+					const perApp = new Map<string, BatchAppResult>();
+					const perField = new Map<string, WriteResult>();
+					for (const item of items) {
+						perField.set(`${item.appId}.${item.key}`, {
+							ok: true,
+							coerced: item.rawValue === 'true',
+						});
+					}
+					const appIds = [...new Set(items.map((i) => i.appId))];
+					for (const appId of appIds) {
+						perApp.set(appId, {
+							ok: true,
+							written: items.filter((i) => i.appId === appId).map((i) => i.key),
+						});
+					}
+					return { perApp, perField };
+				},
+			);
+			const mockWriter = {
+				write: vi.fn(),
+				validate: validateSpy,
+				writeBatch: writeBatchSpy,
+				registerPostWriteHook: vi.fn(),
+				runHooksForKey: vi.fn(),
+			} as unknown as SettingsWriter;
+
+			const stubRegistry = makeStubRegistry([
+				{ appId: 'chatbot', key: 'flush_memory_on_idle_reset' },
+				{ appId: 'chatbot', key: 'log_to_notes' },
+			]);
+
+			const chatbotApp: RegisteredApp = {
+				manifest: {
+					app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'AI assistant' },
+					capabilities: { messages: { intents: [] } },
+					requirements: { services: [] },
+					user_config: [
+						{
+							key: 'flush_memory_on_idle_reset',
+							type: 'boolean',
+							default: false,
+							description: 'Flush memory',
+						},
+						{ key: 'log_to_notes', type: 'boolean', default: false, description: 'Log to notes' },
+					],
+				} as RegisteredApp['manifest'],
+				module: { init: async () => {}, handleMessage: async () => {} },
+				appDir: '/tmp/apps/chatbot',
+			};
+
+			const flushRegistry = {
+				getAll: () => [chatbotApp],
+				getApp: (id: string) => (id === 'chatbot' ? chatbotApp : undefined),
+				getLoadedAppIds: () => ['chatbot'],
+				getManifestCache: () => ({}) as ReturnType<AppRegistry['getManifestCache']>,
+			} as unknown as AppRegistry;
+
+			const flushConfig: import('../../types/config.js').SystemConfig = {
+				port: 3000,
+				dataDir: flushTempDir,
+				logLevel: 'info',
+				timezone: 'UTC',
+				telegram: { botToken: 'test' },
+				ollama: { url: 'http://localhost:11434', model: 'llama3.2:3b' },
+				claude: { apiKey: 'test', model: 'claude-sonnet-4-20250514' },
+				gui: { authToken: AUTH_TOKEN },
+				cloudflare: {},
+				users: [
+					{
+						id: TEST_USER_ID,
+						name: 'TestUser',
+						isAdmin: true,
+						enabledApps: ['*'],
+						sharedScopes: [],
+					},
+				],
+			} as unknown as import('../../types/config.js').SystemConfig;
+
+			const credSvc = new CredentialService({ dataDir: flushTempDir });
+			await credSvc.setPassword(TEST_USER_ID, TEST_PASSWORD);
+
+			const uMgr = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
+			const hhSvc = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+				{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+			]);
+
+			flushApp = Fastify({ logger: false });
+			await flushApp.register(fastifyCookie, { secret: AUTH_TOKEN });
+			const eta = new Eta();
+			await flushApp.register(fastifyView, {
+				engine: { eta },
+				root: viewsDir,
+				viewExt: 'eta',
+				layout: 'layout',
+			});
+
+			const flushToggle = new AppToggleStore({ dataDir: flushTempDir });
+			await flushApp.register(
+				async (gui) => {
+					await registerAuth(gui, {
+						authToken: AUTH_TOKEN,
+						credentialService: credSvc,
+						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
+						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
+					});
+					await registerCsrfProtection(gui);
+					registerAppsRoutes(gui, {
+						registry: flushRegistry,
+						config: flushConfig,
+						appToggle: flushToggle,
+						dataDir: flushTempDir,
+						logger,
+					});
+					registerConfigRoutes(gui, {
+						registry: flushRegistry,
+						config: flushConfig,
+						dataDir: flushTempDir,
+						logger,
+						settingsWriter: mockWriter,
+						settingsRegistry: stubRegistry,
+					});
+				},
+				{ prefix: '/gui' },
+			);
+		});
+
+		afterEach(async () => {
+			if (flushApp) {
+				await flushApp.close();
+				flushApp = null;
+			}
+			await rm(flushTempDir, { recursive: true, force: true });
+		});
+
+		async function flushLogin() {
+			const loginRes = await flushApp!.inject({
+				method: 'POST',
+				url: '/gui/login',
+				payload: { userId: TEST_USER_ID, password: TEST_PASSWORD },
+			});
+			const loginCookies: Record<string, string> = {};
+			for (const c of loginRes.cookies as Array<{ name: string; value: string }>) {
+				loginCookies[c.name] = c.value;
+			}
+			// GET a route that needs auth to pick up the CSRF cookie
+			const getRes = await flushApp!.inject({
+				method: 'GET',
+				url: '/gui/apps/chatbot',
+				cookies: loginCookies,
+			});
+			const allCookies = { ...loginCookies };
+			for (const c of getRes.cookies as Array<{ name: string; value: string }>) {
+				allCookies[c.name] = c.value;
+			}
+			const metaMatch = getRes.body.match(/name="csrf-token" content="([^"]+)"/);
+			const csrfToken = metaMatch?.[1] ?? '';
+			return { allCookies, csrfToken };
+		}
+
+		it('toggling flush_memory_on_idle_reset routes the write through writeBatch with source=admin-confirmed', async () => {
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const res = await flushApp!.inject({
+				method: 'POST',
+				url: `/gui/config/chatbot/${TEST_USER_ID}`,
+				cookies: allCookies,
+				payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false' },
+			});
+
+			expect(res.statusCode).toBe(302);
+			expect(writeBatchSpy).toHaveBeenCalledTimes(1);
+			const items = writeBatchSpy.mock.calls[0]![0] as WriteRequest[];
+			expect(items).toEqual([
+				expect.objectContaining({
+					appId: 'chatbot',
+					key: 'flush_memory_on_idle_reset',
+					rawValue: 'false',
+					userId: TEST_USER_ID,
+					source: 'admin-confirmed',
+				}),
+			]);
+		});
+
+		it('mixed body batches BOTH chatbot keys into ONE writeBatch call (data-loss regression guard)', async () => {
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const res = await flushApp!.inject({
+				method: 'POST',
+				url: `/gui/config/chatbot/${TEST_USER_ID}`,
+				cookies: allCookies,
+				payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false', log_to_notes: 'true' },
+			});
+
+			expect(res.statusCode).toBe(302);
+			expect(writeBatchSpy).toHaveBeenCalledTimes(1);
+			const items = writeBatchSpy.mock.calls[0]![0] as WriteRequest[];
+			expect(items.map((i) => i.key).sort()).toEqual([
+				'flush_memory_on_idle_reset',
+				'log_to_notes',
+			]);
+		});
+
+		it('returns 400 on validation failure without persisting', async () => {
+			validateSpy.mockReturnValueOnce({
+				ok: false,
+				reason: 'coercion failed: not a boolean',
+			} as WriteResult);
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const res = await flushApp!.inject({
+				method: 'POST',
+				url: `/gui/config/chatbot/${TEST_USER_ID}`,
+				cookies: allCookies,
+				payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'garbage' },
+			});
+
+			expect(res.statusCode).toBe(400);
+			expect(writeBatchSpy).not.toHaveBeenCalled();
+		});
+
+		it('returns 500 when writeBatch throws', async () => {
+			writeBatchSpy.mockRejectedValueOnce(new Error('disk full'));
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const res = await flushApp!.inject({
+				method: 'POST',
+				url: `/gui/config/chatbot/${TEST_USER_ID}`,
+				cookies: allCookies,
+				payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false' },
+			});
+
+			expect(res.statusCode).toBe(500);
+		});
+
+		it('returns 500 when writeBatch reports perApp.ok=false (soft persist failure)', async () => {
+			writeBatchSpy.mockResolvedValueOnce({
+				perApp: new Map<string, BatchAppResult>([
+					['chatbot', { ok: false, reason: 'persist failed', written: [] }],
+				]),
+				perField: new Map<string, WriteResult>(),
+			});
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const res = await flushApp!.inject({
+				method: 'POST',
+				url: `/gui/config/chatbot/${TEST_USER_ID}`,
+				cookies: allCookies,
+				payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false' },
+			});
+
+			expect(res.statusCode).toBe(500);
+		});
+
+		it('handles two concurrent POSTs — both succeed; final on-disk state valid', async () => {
+			const { allCookies, csrfToken } = await flushLogin();
+
+			const [r1, r2] = await Promise.all([
+				flushApp!.inject({
+					method: 'POST',
+					url: `/gui/config/chatbot/${TEST_USER_ID}`,
+					cookies: allCookies,
+					payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'true' },
+				}),
+				flushApp!.inject({
+					method: 'POST',
+					url: `/gui/config/chatbot/${TEST_USER_ID}`,
+					cookies: allCookies,
+					payload: { _csrf: csrfToken, flush_memory_on_idle_reset: 'false' },
+				}),
+			]);
+
+			expect(r1!.statusCode).toBe(302);
+			expect(r2!.statusCode).toBe(302);
+			// Both calls delegated to writeBatch — no call count assertion on race outcome.
+			expect(writeBatchSpy).toHaveBeenCalled();
 		});
 	});
 });

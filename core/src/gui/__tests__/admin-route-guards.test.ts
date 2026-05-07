@@ -8,8 +8,8 @@ import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppRegistry, RegisteredApp } from '../../services/app-registry/index.js';
 import type { AlertService } from '../../services/alerts/index.js';
+import type { AppRegistry, RegisteredApp } from '../../services/app-registry/index.js';
 import { AppToggleStore } from '../../services/app-toggle/index.js';
 import type { ContextStoreServiceImpl } from '../../services/context-store/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
@@ -20,6 +20,9 @@ import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
+import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
+import type { BatchResult, WriteResult } from '../../services/settings/settings-writer.js';
+import type { SettingsWriter } from '../../services/settings/settings-writer.js';
 import { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
@@ -41,6 +44,27 @@ const AUTH_TOKEN = 'test-token';
 const ADMIN_PASS = 'admin-password';
 const MEMBER_PASS = 'member-password';
 const logger = pino({ level: 'silent' });
+
+function makeNoopSettingsWriter(): SettingsWriter {
+	return {
+		write: vi.fn(async () => ({ ok: true, coerced: undefined }) as WriteResult),
+		validate: vi.fn(() => ({ ok: true, coerced: undefined }) as WriteResult),
+		writeBatch: vi.fn(async () => ({ perApp: new Map(), perField: new Map() }) as BatchResult),
+		registerPostWriteHook: vi.fn(),
+		runHooksForKey: vi.fn(async () => {}),
+	} as unknown as SettingsWriter;
+}
+
+function makeStubRegistry(): SettingsRegistry {
+	return {
+		getByAppKey: () => undefined,
+		getAll: () => [],
+		getByQualifiedKey: () => undefined,
+		getForUser: () => [],
+		getForCategory: () => [],
+		getNlSafeQualifiedKeys: () => new Set<string>(),
+	} as unknown as SettingsRegistry;
+}
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
 
@@ -71,7 +95,9 @@ function makeUserManager(): UserManager {
 function makeHouseholdService(): Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> {
 	return {
 		getHouseholdForUser: vi.fn().mockReturnValue('hh-1'),
-		getHousehold: vi.fn().mockReturnValue({ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }),
+		getHousehold: vi
+			.fn()
+			.mockReturnValue({ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }),
 	};
 }
 
@@ -235,9 +261,20 @@ async function buildApp(tempDir: string) {
 			});
 			await registerCsrfProtection(gui);
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
-			registerSchedulerRoutes(gui, { scheduler: makeScheduler(), timezone: config.timezone, logger });
+			registerSchedulerRoutes(gui, {
+				scheduler: makeScheduler(),
+				timezone: config.timezone,
+				logger,
+			});
 			registerLogsRoutes(gui, { dataDir: tempDir, logger });
-			registerConfigRoutes(gui, { registry, config, dataDir: tempDir, logger });
+			registerConfigRoutes(gui, {
+				registry,
+				config,
+				dataDir: tempDir,
+				logger,
+				settingsWriter: makeNoopSettingsWriter(),
+				settingsRegistry: makeStubRegistry(),
+			});
 			registerLlmUsageRoutes(gui, {
 				llm: makeLlm(),
 				modelSelector: makeModelSelector(),
