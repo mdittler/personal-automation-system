@@ -100,7 +100,7 @@ These gaps validate the roadmap staging order. Stages 2 through 6 should stay fo
 
 - `REQ-GUI-006` is duplicated for two different features.
 - `REQ-API-007` through `REQ-API-013` are still called out in `docs/open-items.md` as placeholder descriptions.
-- `REQ-CHATBOT-006` still documents `isPasRelevant`, while `docs/open-items.md` already marks that behavior as deprecated and slated for removal once callers are gone.
+- `REQ-CHATBOT-006` documented `isPasRelevant` — removed 2026-05-06 along with the function, its tests, and REQ-CHATBOT-010. No longer a traceability issue.
 
 This means later stages should treat the URS as partially authoritative, but confirm the exact current behavior against the newer specs/plans and the open-items list before calling a test obsolete or missing.
 
@@ -111,7 +111,7 @@ This means later stages should treat the URS as partially authoritative, but con
 
 ## Likely Obsolete, Transitional, Or High-Risk Review Areas
 
-- `isPasRelevant` requirements/tests are transitional rather than clearly permanent.
+- `isPasRelevant` requirements/tests were transitional — function, tests, and URS entries removed 2026-05-06.
 - Prompt-copy-sensitive chatbot tests are already called out in `docs/open-items.md` as brittle and should be reviewed with extra care in Stage 5.
 - Accepted risk `D42` in `docs/open-items.md` means reviewers should not assume every earlier anti-instruction hardening note is still an intended runtime contract.
 - Provider integration expectations are partially blocked on real API keys, so reviewers should distinguish missing offline coverage from intentionally deferred live-provider integration tests.

@@ -6,10 +6,6 @@
  *   app-aware and basic prompts and decide whether to call DataQueryService.
  *   Fail-open: returns `pasRelated: true` on any LLM error so users with
  *   auto_detect_pas on still get useful responses.
- * - `isPasRelevant` is the legacy keyword heuristic. Kept for backward
- *   compatibility (and exported by the chatbot shim) but classifyPASMessage
- *   should be preferred.
- *
  * All exports are pure functions taking explicit dependencies — no module-level
  * services closure.
  */
@@ -23,59 +19,6 @@ import { sanitizeInput } from '../prompt-assembly/index.js';
 export const MODEL_SWITCH_INTENT_REGEX =
 	/\b(switch|change|set|use|update)\b.*\b(model|tier|fast|standard|reasoning)\b/i;
 
-/** Static keywords that suggest a PAS-related question. */
-export const PAS_KEYWORDS = [
-	'pas',
-	'app',
-	'apps',
-	'command',
-	'commands',
-	'schedule',
-	'scheduling',
-	'automation',
-	'install',
-	'how do i',
-	'how does',
-	'what can',
-	'what apps',
-	'help me with',
-	'what is',
-	'context store',
-	'data store',
-	'daily notes',
-	'daily diff',
-	'telegram',
-	'routing',
-	'model',
-	'models',
-	'provider',
-	'providers',
-	'cost',
-	'costs',
-	'spending',
-	'usage',
-	'tokens',
-	'pricing',
-	'price',
-	'rate limit',
-	'tier',
-	'tiers',
-	'uptime',
-	'status',
-	'cron',
-	'jobs',
-	'cost cap',
-	'switch',
-	'change model',
-	'budget',
-	'my data',
-	'my notes',
-	'my files',
-	'what did i',
-	'what have i',
-	'recent activity',
-	'recent changes',
-];
 
 /** Classification result from LLM-based PAS relevance check. */
 export interface PASClassification {
@@ -193,7 +136,7 @@ export function parsePASClassifierOutput(raw: string): PASClassification {
 /**
  * Classify a message as PAS-related using a fast-tier LLM call.
  *
- * Replaces the static PAS_KEYWORDS heuristic. Returns fail-open
+ * Returns fail-open
  * (pasRelated: true) on LLM error so users with auto_detect_pas on still get
  * helpful responses.
  *
@@ -265,37 +208,4 @@ export async function classifyPASMessage(
 		// Fail-open for PAS detection; fail-safe (false) for data/settings queries
 		return { pasRelated: true, dataQueryCandidate: false, settingsCandidate: false };
 	}
-}
-
-/**
- * Check if a message text is likely PAS-related using keyword heuristics.
- * No LLM cost. Prefer `classifyPASMessage` for LLM-based classification.
- *
- * @deprecated Use classifyPASMessage() for LLM-based classification.
- */
-export function isPasRelevant(
-	text: string,
-	deps: { appMetadata?: AppMetadataService } = {},
-): boolean {
-	if (!text.trim()) return false;
-	const lower = text.toLowerCase();
-
-	// Check static keywords
-	for (const keyword of PAS_KEYWORDS) {
-		if (lower.includes(keyword)) return true;
-	}
-
-	// Check dynamic: installed app names and command names
-	if (deps.appMetadata) {
-		const apps = deps.appMetadata.getInstalledApps();
-		for (const app of apps) {
-			if (lower.includes(app.name.toLowerCase())) return true;
-			if (lower.includes(app.id)) return true;
-			for (const cmd of app.commands) {
-				if (lower.includes(cmd.name.replace('/', ''))) return true;
-			}
-		}
-	}
-
-	return false;
 }

@@ -2591,26 +2591,6 @@ When the per-user `auto_detect_pas` config is enabled, the chatbot uses an LLM c
 
 **Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/auto-detect.test.ts`.
 
-### REQ-CHATBOT-006: Legacy PAS relevance compatibility (`isPasRelevant`)
-
-**Phase:** 18 | **Status:** Implemented (legacy compatibility only; deprecated in D1)
-
-The legacy `isPasRelevant()` helper determines if a message is PAS-related using keyword heuristics: static keywords (pas, app, command, schedule, etc.) and dynamic lookups (installed app names, IDs, command names from AppMetadataService). Case-insensitive. No LLM cost. This is not part of the preferred current product path. It remains documented only because backward-compatibility code and tests still exist until the helper is fully removed. The active PAS-aware routing contract is `classifyPASMessage()` (REQ-CHATBOT-012).
-
-**Standard tests:**
-- `pas-classifier.test.ts` > isPasRelevant > detects "what apps do I have"
-- `pas-classifier.test.ts` > isPasRelevant > detects "how do i schedule"
-- `pas-classifier.test.ts` > isPasRelevant > detects "what commands are available"
-- `pas-classifier.test.ts` > isPasRelevant > detects installed app names
-- `pas-classifier.test.ts` > isPasRelevant > detects command names from installed apps
-
-**Edge case tests:**
-- `pas-classifier.test.ts` > isPasRelevant > returns false for general questions
-- `pas-classifier.test.ts` > isPasRelevant > returns false for empty text
-- `pas-classifier.test.ts` > isPasRelevant > is case insensitive
-
-**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/pas-classifier.test.ts`.
-
 ### REQ-CHATBOT-007: App-aware system prompt construction
 
 **Phase:** 18 | **Status:** Implemented
@@ -2724,25 +2704,11 @@ The chatbot extracts `<switch-model>` tags from LLM responses, validates paramet
 
 **Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/control-tags.test.ts`.
 
-### REQ-CHATBOT-010: isPasRelevant system keyword detection
-
-**Phase:** Post-19 | **Status:** Implemented (deprecated in D1)
-
-The `isPasRelevant()` function detects system-related keywords (model, cost, usage, uptime) in addition to app-related keywords, ensuring auto-detect mode routes system questions to the app-aware prompt. **Deprecated in D1** — superseded by `classifyPASMessage()` (REQ-CHATBOT-012).
-
-**Standard tests:**
-- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects model-related questions
-- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects cost-related questions
-- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects usage questions
-- `pas-classifier.test.ts` > isPasRelevant with system keywords > detects uptime questions
-
-**Note (Chunk D.2):** Tests migrated from `apps/chatbot/src/__tests__/chatbot.test.ts` to `core/src/services/conversation/__tests__/pas-classifier.test.ts`.
-
 ### REQ-CHATBOT-012: LLM-based PAS message classification
 
 **Phase:** D1 | **Status:** Implemented
 
-The `classifyPASMessage()` function replaces the static `isPasRelevant()` keyword list. It uses a compact fast-tier LLM call to determine whether a message is PAS-related (home automation, installed apps, scheduling, data queries, system status, model/cost info). Returns an extensible `PASClassification { pasRelated: boolean, dataQueryCandidate?: boolean }` object for D2 wiring. Sanitizes user input and app names before LLM injection. Fails open (`pasRelated: true`) on LLM error so users with auto-detect on always get helpful responses. Short-circuits on empty/whitespace input without an LLM call. Only invoked when `auto_detect_pas` is enabled; `/ask` is always app-aware.
+The `classifyPASMessage()` function uses a compact fast-tier LLM call to determine whether a message is PAS-related (home automation, installed apps, scheduling, data queries, system status, model/cost info). Returns an extensible `PASClassification { pasRelated: boolean, dataQueryCandidate?: boolean }` object for D2 wiring. Sanitizes user input and app names before LLM injection. Fails open (`pasRelated: true`) on LLM error so users with auto-detect on always get helpful responses. Short-circuits on empty/whitespace input without an LLM call. Only invoked when `auto_detect_pas` is enabled; `/ask` is always app-aware.
 
 **Standard tests:**
 - `pas-classifier.test.ts` > classifyPASMessage > returns pasRelated: true when LLM responds YES
@@ -9027,7 +8993,6 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CHATBOT-003 | conversation-service.test.ts | 1 | 1 | Implemented |
 | REQ-CHATBOT-004 | handle-ask.test.ts | 4 | 7 | Implemented |
 | REQ-CHATBOT-005 | auto-detect.test.ts | 3 | 2 | Implemented |
-| REQ-CHATBOT-006 | pas-classifier.test.ts | 5 | 3 | Implemented (legacy compatibility only) |
 | REQ-CHATBOT-007 | prompt-builder.test.ts | 5 | 0 | Implemented |
 | REQ-APPMETA-001 | app-metadata.test.ts | 8 | 9 | Implemented |
 | REQ-APPKNOW-001 | app-knowledge.test.ts | 9 | 9 | Implemented |
@@ -9054,7 +9019,6 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SYSINFO-001 | system-info.test.ts | 12 | 11 | Implemented |
 | REQ-CHATBOT-008 | system-data.test.ts, handle-ask.test.ts | 10 | 12 | Implemented |
 | REQ-CHATBOT-009 | control-tags.test.ts | 2 | 4 | Implemented |
-| REQ-CHATBOT-010 | pas-classifier.test.ts | 4 | 0 | Implemented |
 | REQ-SECRETS-001 | secrets.test.ts | 3 | 5 | Implemented |
 | REQ-REPORT-001 | report-validator.test.ts | 8 | 33 | Implemented |
 | REQ-REPORT-002 | section-collector.test.ts | 10 | 12 | Implemented |
