@@ -3440,13 +3440,13 @@ Fully complete in D.4. `SystemConfig.fallback`, `SystemConfig._legacyKeys`, `Sys
 
 **Phase:** Hermes P2 Chunk C | **Status:** Implemented
 
-`buildContextSnapshot(opts)` calls `chooseSources(opts)` to determine which readers to invoke, fans out to all selected readers concurrently, and returns a `ContextSnapshot` with named fields for each result. When one reader throws, that category is recorded in `snapshot.failures` and the remaining readers' results are still returned. The snapshot always includes a `failures` array (empty on full success). When `dataQueryCandidate` is true, `DataQueryService` is called with `recentFilePaths` forwarded; when false, `DataQueryService` is never called. In `ask` mode, `appKnowledge`, `reportService`, and `alertService` are always called. The `include` override map is forwarded to `chooseSources`. Two parallel calls for different users do not cross-contaminate each other's snapshot fields.
+`buildContextSnapshot(opts)` calls `chooseSources(opts)` to determine which readers to invoke, fans out to all selected readers concurrently, and returns a `ContextSnapshot` with named fields for each result. When one reader throws, that category is recorded in `snapshot.failures` and the remaining readers' results are still returned. The snapshot always includes a `failures` array (empty on full success). When `dataQueryCandidate` is true, `DataQueryService` is called with `recentFilePaths` forwarded; when false, `DataQueryService` is never called. In `ask` mode, `appKnowledge` is always called; `reportService` and `alertService` are added only when the question contains scheduling/report/alert keywords. The `include` override map is forwarded to `chooseSources`. Two parallel calls for different users do not cross-contaminate each other's snapshot fields.
 
 **Standard tests** (`conversation-retrieval-service.test.ts`):
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `free-text with no keywords: only 2 cheap readers called`
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `dataQueryCandidate: true causes DataQueryService to be called`
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `recentFilePaths forwarded to DataQueryService`
-- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `ask mode always includes system-info, app-knowledge, reports, alerts`
+- `ConversationRetrievalServiceImpl — buildContextSnapshot` > `ask mode includes app-knowledge but not reports/alerts or system-info for plain questions`
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `include override force-off removes a normally-selected category`
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `include override force-on adds a normally-unselected category`
 - `ConversationRetrievalServiceImpl — buildContextSnapshot` > `does not call DataQueryService when dataQueryCandidate is false even with data keywords in question`

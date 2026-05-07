@@ -17,24 +17,24 @@
  * F9 — User isolation
  */
 
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { composeRuntime } from '../../../compose-runtime.js';
+import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../../../testing/fixtures/seed-users.js';
 import {
 	StubProvider,
 	createStubProviderRegistry,
-	type StubProviderOptions,
 } from '../../../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
+import type { LLMCompletionOptions, LLMCompletionResult } from '../../../types/llm.js';
+import { CONTEXT_INTERNAL_BYPASS } from '../../context-store/index.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
-import { CONTEXT_INTERNAL_BYPASS } from '../../context-store/index.js';
-import type { LLMCompletionOptions, LLMCompletionResult } from '../../../types/llm.js';
+import type { Router } from '../../router/index.js';
 
 // ---------------------------------------------------------------------------
 // RecordingStubProvider — captures systemPrompts for assertion
@@ -42,10 +42,6 @@ import type { LLMCompletionOptions, LLMCompletionResult } from '../../../types/l
 
 class RecordingStubProvider extends StubProvider {
 	readonly systemPrompts: string[] = [];
-
-	constructor(costTracker: CostTracker, logger: ReturnType<typeof pino>, opts?: StubProviderOptions) {
-		super(costTracker, logger, opts);
-	}
 
 	protected override async doComplete(
 		prompt: string,
@@ -100,26 +96,41 @@ function getChatbotPrompt(recorder: RecordingStubProvider, startIdx: number): st
 // Helper — find sessions directory for a user in the household layout
 // ---------------------------------------------------------------------------
 
-function findSessionsDir(
+function findSessionsDir(dataDir: string, householdId: string, userId: string): string {
+	return join(
+		dataDir,
+		'households',
+		householdId,
+		'users',
+		userId,
+		'chatbot',
+		'conversation',
+		'sessions',
+	);
+}
+
+// Returns the active session file path for a user by reading active-sessions.yaml (deterministic).
+// The Router builds session keys as `agent:main:telegram:dm:{userId}` (userId is the chatId param
+// in buildSessionKey for DM flows — see router/index.ts resolveSession).
+async function getSessionFileByKey(
 	dataDir: string,
 	householdId: string,
 	userId: string,
-): string {
-	return join(dataDir, 'households', householdId, 'users', userId, 'chatbot', 'conversation', 'sessions');
-}
-
-async function getNewestSessionFile(sessionsDir: string): Promise<string | null> {
-	let files: string[];
+): Promise<string | null> {
+	const sessionKey = `agent:main:telegram:dm:${userId}`;
+	const sessionsDir = findSessionsDir(dataDir, householdId, userId);
+	const indexPath = join(sessionsDir, '..', 'active-sessions.yaml');
+	let raw: string;
 	try {
-		files = await readdir(sessionsDir);
+		raw = await readFile(indexPath, 'utf-8');
 	} catch {
 		return null;
 	}
-	const mdFiles = files.filter((f) => f.endsWith('.md'));
-	if (mdFiles.length === 0) return null;
-	// Session IDs are YYYYMMDD_HHMMSS_<8hex> — sort lexicographically to get newest
-	mdFiles.sort();
-	return join(sessionsDir, mdFiles[mdFiles.length - 1]!);
+	const map = parseYaml(raw) as Record<string, { id: string } | undefined> | null;
+	if (!map) return null;
+	const entry = map[sessionKey];
+	if (!entry?.id) return null;
+	return join(sessionsDir, `${entry.id}.md`);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,11 +181,9 @@ beforeAll(async () => {
 	});
 
 	// Register RecordingStubProvider after runtime so we can wire the real CostTracker
-	recorder = new RecordingStubProvider(
-		runtime.services.costTracker as CostTracker,
-		logger,
-		{ completionText: 'STUB_ASSISTANT_REPLY' },
-	);
+	recorder = new RecordingStubProvider(runtime.services.costTracker as CostTracker, logger, {
+		completionText: 'STUB_ASSISTANT_REPLY',
+	});
 	runtime.services.providerRegistry.register(recorder);
 }, 60_000);
 
@@ -183,8 +192,8 @@ afterAll(async () => {
 	await rm(tempDir, { recursive: true, force: true });
 });
 
-function getRouter() {
-	return runtime.services.router as any;
+function getRouter(): Router {
+	return runtime.services.router;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +216,13 @@ describe('F1 — freeze + rebuild (happy path + state transition)', () => {
 		// Turn 1 — first message mints the session
 		const startIdx1 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'hi', chatId: 9001, messageId: 1, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'hi',
+				chatId: 9001,
+				messageId: 1,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt1 = getChatbotPrompt(recorder, startIdx1);
@@ -225,7 +240,13 @@ describe('F1 — freeze + rebuild (happy path + state transition)', () => {
 		// Turn 2 — same session, should still see frozen snapshot
 		const startIdx2 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'hi again', chatId: 9001, messageId: 2, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'hi again',
+				chatId: 9001,
+				messageId: 2,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt2 = getChatbotPrompt(recorder, startIdx2);
@@ -238,17 +259,29 @@ describe('F1 — freeze + rebuild (happy path + state transition)', () => {
 		expect(prompt2).not.toContain('Fahrenheit');
 		// Only one durable-memory block per prompt (MEMORY-011: no per-turn re-injection)
 		const open = '<memory-context label="durable-memory">';
-		expect((prompt2!.split(open).length - 1)).toBe(1);
+		expect(prompt2!.split(open).length - 1).toBe(1);
 
 		// Turn 3 — /newchat ends the session
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9001, messageId: 3, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9001,
+				messageId: 3,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Turn 4 — first message in new session should pick up the mutated value
 		const startIdx4 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'after newchat', chatId: 9001, messageId: 4, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'after newchat',
+				chatId: 9001,
+				messageId: 4,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt4 = getChatbotPrompt(recorder, startIdx4);
@@ -274,17 +307,38 @@ describe('F2 — empty context store produces no durable-memory block', () => {
 		// Defensive cleanup: remove any keys that other tests might have seeded for userB,
 		// regardless of test execution order. remove() is idempotent — resolves void for
 		// non-existent keys, so no try/catch needed.
-		for (const key of ['temperature-pref', 'removal-test', 'reset-test', 'concurrent-entry', 'secret-marker-b', 'concurrency-pref', 'isolation-marker', 'failopen-test']) {
+		for (const key of [
+			'temperature-pref',
+			'removal-test',
+			'reset-test',
+			'concurrent-entry',
+			'secret-marker-b',
+			'concurrency-pref',
+			'isolation-marker',
+			'failopen-test',
+		]) {
 			await contextStore.remove(userId, key);
 		}
 		// Start a fresh session so the snapshot is minted from the now-empty store
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9010, messageId: 9, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9010,
+				messageId: 9,
+				timestamp: new Date(),
+			}),
 		);
 
 		const startIdx = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'hello empty store', chatId: 9010, messageId: 10, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'hello empty store',
+				chatId: 9010,
+				messageId: 10,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt = getChatbotPrompt(recorder, startIdx);
@@ -306,7 +360,13 @@ describe('F3 — entry removed mid-session stays frozen', () => {
 
 		// End any existing session for userA
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9020, messageId: 20, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9020,
+				messageId: 20,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed a new entry
@@ -318,7 +378,13 @@ describe('F3 — entry removed mid-session stays frozen', () => {
 		// Turn 1 — mint session with the entry present
 		const startIdx1 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'first message', chatId: 9020, messageId: 21, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'first message',
+				chatId: 9020,
+				messageId: 21,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt1 = getChatbotPrompt(recorder, startIdx1);
@@ -333,7 +399,13 @@ describe('F3 — entry removed mid-session stays frozen', () => {
 		// Turn 2 — same session, snapshot should still show the entry (frozen)
 		const startIdx2 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'second message', chatId: 9020, messageId: 22, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'second message',
+				chatId: 9020,
+				messageId: 22,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt2 = getChatbotPrompt(recorder, startIdx2);
@@ -358,7 +430,13 @@ describe('F4 — /reset parity: new session picks up mutations', () => {
 
 		// Ensure clean state
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9030, messageId: 30, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9030,
+				messageId: 30,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed entry
@@ -370,7 +448,13 @@ describe('F4 — /reset parity: new session picks up mutations', () => {
 		// Turn 1 — establish session
 		const startIdx1 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'session before reset', chatId: 9030, messageId: 31, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'session before reset',
+				chatId: 9030,
+				messageId: 31,
+				timestamp: new Date(),
+			}),
 		);
 
 		// First session should contain pre-reset value
@@ -390,13 +474,25 @@ describe('F4 — /reset parity: new session picks up mutations', () => {
 
 		// /reset
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/reset', chatId: 9030, messageId: 32, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/reset',
+				chatId: 9030,
+				messageId: 32,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Turn 2 — new session after reset
 		const startIdx2 = recorder.systemPrompts.length;
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'session after reset', chatId: 9030, messageId: 33, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'session after reset',
+				chatId: 9030,
+				messageId: 33,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt2 = getChatbotPrompt(recorder, startIdx2);
@@ -421,7 +517,13 @@ describe('F5 — frontmatter persistence', () => {
 
 		// Clean session
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9040, messageId: 40, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9040,
+				messageId: 40,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed one known entry
@@ -434,33 +536,44 @@ describe('F5 — frontmatter persistence', () => {
 
 		// Turn 1 — mint session
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'test message', chatId: 9040, messageId: 41, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'test message',
+				chatId: 9040,
+				messageId: 41,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt = getChatbotPrompt(recorder, startIdx);
 		expect(prompt).toBeDefined();
 		const block = extractDurableMemoryBlock(prompt!);
 		expect(block).not.toBeNull();
+		// Block injected into prompt must contain the seeded entry (store → prompt path)
+		expect(block).toContain('frontmatter-test');
+		expect(block).toContain('Value for frontmatter check.');
 
-		// Find the newest session file on disk
-		const sessionsDir = findSessionsDir(join(tempDir, 'data'), householdId, userId);
-		const sessionFilePath = await getNewestSessionFile(sessionsDir);
+		// Find the session file using the active-sessions index (deterministic)
+		const sessionFilePath = await getSessionFileByKey(join(tempDir, 'data'), householdId, userId);
 		expect(sessionFilePath).not.toBeNull();
 
 		const raw = await readFile(sessionFilePath!, 'utf-8');
 		const frontmatter = parseFrontmatter(raw);
 
-		const memSnap = frontmatter['memory_snapshot'] as Record<string, unknown> | undefined;
+		const memSnap = frontmatter.memory_snapshot as Record<string, unknown> | undefined;
 		expect(memSnap).toBeDefined();
-		expect(memSnap!['status']).toBe('ok');
-		expect(typeof memSnap!['entry_count']).toBe('number');
-		expect((memSnap!['entry_count'] as number)).toBeGreaterThanOrEqual(1);
-		expect(typeof memSnap!['built_at']).toBe('string');
-		expect((memSnap!['built_at'] as string).length).toBeGreaterThan(0);
-		// The content on disk should contain the seeded key and value
-		const memContent = memSnap!['content'] as string;
+		expect(memSnap?.status).toBe('ok');
+		expect(typeof memSnap?.entry_count).toBe('number');
+		expect(memSnap?.entry_count as number).toBeGreaterThanOrEqual(1);
+		expect(typeof memSnap?.built_at).toBe('string');
+		expect((memSnap?.built_at as string).length).toBeGreaterThan(0);
+		// Frontmatter content must contain the seeded entry
+		const memContent = memSnap?.content as string;
 		expect(memContent).toContain('frontmatter-test');
 		expect(memContent).toContain('Value for frontmatter check.');
+		// Cross-check: the block payload injected into the prompt must match frontmatter content
+		// (proves the snapshot round-trips through disk unchanged)
+		expect(block).toContain(memContent);
 	}, 30_000);
 });
 
@@ -477,7 +590,13 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 
 		// Clean session for userB
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9050, messageId: 50, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9050,
+				messageId: 50,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed an entry so the store is non-empty
@@ -487,8 +606,10 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 		});
 
 		// Patch listDurableForUser to throw when failLookup is true
+		// biome-ignore lint/suspicious/noExplicitAny: monkey-patching internal method for test isolation
 		const realListDurable = (contextStore as any).listDurableForUser.bind(contextStore);
 		let failLookup = false;
+		// biome-ignore lint/suspicious/noExplicitAny: monkey-patching internal method for test isolation
 		(contextStore as any).listDurableForUser = async (...args: unknown[]) => {
 			if (failLookup) throw new Error('simulated listDurableForUser failure');
 			return realListDurable(...args);
@@ -500,7 +621,13 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 			const sentBefore = telegram.sent.length;
 
 			await requestContext.run({ userId, householdId }, () =>
-				router.routeMessage({ userId, text: 'hello with broken store', chatId: 9050, messageId: 51, timestamp: new Date() }),
+				router.routeMessage({
+					userId,
+					text: 'hello with broken store',
+					chatId: 9050,
+					messageId: 51,
+					timestamp: new Date(),
+				}),
 			);
 
 			// Telegram should have sent a reply (handler didn't crash)
@@ -513,18 +640,17 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 			// No durable-memory block — degraded
 			expect(extractDurableMemoryBlock(prompt!)).toBeNull();
 
-			// Find the newest session file on disk and check frontmatter status is degraded
-			const sessionsDir = findSessionsDir(join(tempDir, 'data'), householdId, userId);
-			const sessionFilePath = await getNewestSessionFile(sessionsDir);
+			// Find the session file and check frontmatter status is degraded
+			const sessionFilePath = await getSessionFileByKey(join(tempDir, 'data'), householdId, userId);
 			expect(sessionFilePath).not.toBeNull();
 			const raw = await readFile(sessionFilePath!, 'utf-8');
 			const frontmatter = parseFrontmatter(raw);
-			const memSnap = frontmatter['memory_snapshot'] as Record<string, unknown> | undefined;
+			const memSnap = frontmatter.memory_snapshot as Record<string, unknown> | undefined;
 			expect(memSnap).toBeDefined();
-			expect(memSnap!['status']).toBe('degraded');
+			expect(memSnap?.status).toBe('degraded');
 		} finally {
 			failLookup = false;
-			// Restore original
+			// biome-ignore lint/suspicious/noExplicitAny: restore monkey-patched internal method
 			(contextStore as any).listDurableForUser = realListDurable;
 		}
 	}, 30_000);
@@ -547,7 +673,13 @@ describe('F7 — sanitizer strips hostile content from snapshot payload', () => 
 
 		// Clean session
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9060, messageId: 60, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9060,
+				messageId: 60,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Hostile content: closing tag injection + bidi RLO (no <script> to avoid threat-scan)
@@ -562,7 +694,13 @@ describe('F7 — sanitizer strips hostile content from snapshot payload', () => 
 		const startIdx = recorder.systemPrompts.length;
 
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: 'test sanitizer', chatId: 9060, messageId: 61, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: 'test sanitizer',
+				chatId: 9060,
+				messageId: 61,
+				timestamp: new Date(),
+			}),
 		);
 
 		const prompt = getChatbotPrompt(recorder, startIdx);
@@ -572,6 +710,10 @@ describe('F7 — sanitizer strips hostile content from snapshot payload', () => 
 		// (the literal </memory-context> in the payload did NOT prematurely close the wrapper)
 		const block = extractDurableMemoryBlock(prompt!);
 		expect(block).not.toBeNull();
+
+		// Exactly one outer block — hostile closing tag did not split the wrapper into two blocks
+		const openTag = '<memory-context label="durable-memory">';
+		expect(prompt!.split(openTag).length - 1).toBe(1);
 
 		// The payload should contain the escaped form (sanitizer ran on the closing tag)
 		expect(block).toContain('&lt;/memory-context>');
@@ -594,7 +736,13 @@ describe('F8 — concurrent first turns produce byte-identical frozen snapshots'
 
 		// Ensure clean slate for userB
 		await requestContext.run({ userId, householdId }, () =>
-			router.routeMessage({ userId, text: '/newchat', chatId: 9100, messageId: 100, timestamp: new Date() }),
+			router.routeMessage({
+				userId,
+				text: '/newchat',
+				chatId: 9100,
+				messageId: 100,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed entry for userB
@@ -608,10 +756,22 @@ describe('F8 — concurrent first turns produce byte-identical frozen snapshots'
 		// Fire two messages concurrently
 		await Promise.all([
 			requestContext.run({ userId, householdId }, () =>
-				router.routeMessage({ userId, text: 'hello A', chatId: 9100, messageId: 101, timestamp: new Date() }),
+				router.routeMessage({
+					userId,
+					text: 'hello A',
+					chatId: 9100,
+					messageId: 101,
+					timestamp: new Date(),
+				}),
 			),
 			requestContext.run({ userId, householdId }, () =>
-				router.routeMessage({ userId, text: 'hello B', chatId: 9100, messageId: 102, timestamp: new Date() }),
+				router.routeMessage({
+					userId,
+					text: 'hello B',
+					chatId: 9100,
+					messageId: 102,
+					timestamp: new Date(),
+				}),
 			),
 		]);
 
@@ -647,10 +807,22 @@ describe('F9 — user isolation: snapshots do not cross user boundaries', () => 
 
 		// Clean both users
 		await requestContext.run({ userId: userA.id, householdId: userA.householdId }, () =>
-			router.routeMessage({ userId: userA.id, text: '/newchat', chatId: 9200, messageId: 200, timestamp: new Date() }),
+			router.routeMessage({
+				userId: userA.id,
+				text: '/newchat',
+				chatId: 9200,
+				messageId: 200,
+				timestamp: new Date(),
+			}),
 		);
 		await requestContext.run({ userId: userB.id, householdId: userB.householdId }, () =>
-			router.routeMessage({ userId: userB.id, text: '/newchat', chatId: 9201, messageId: 210, timestamp: new Date() }),
+			router.routeMessage({
+				userId: userB.id,
+				text: '/newchat',
+				chatId: 9201,
+				messageId: 210,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Seed distinct markers per user
@@ -666,13 +838,25 @@ describe('F9 — user isolation: snapshots do not cross user boundaries', () => 
 		// Message as user A
 		const startA = recorder.systemPrompts.length;
 		await requestContext.run({ userId: userA.id, householdId: userA.householdId }, () =>
-			router.routeMessage({ userId: userA.id, text: 'isolation check A', chatId: 9200, messageId: 201, timestamp: new Date() }),
+			router.routeMessage({
+				userId: userA.id,
+				text: 'isolation check A',
+				chatId: 9200,
+				messageId: 201,
+				timestamp: new Date(),
+			}),
 		);
 
 		// Message as user B
 		const startB = recorder.systemPrompts.length;
 		await requestContext.run({ userId: userB.id, householdId: userB.householdId }, () =>
-			router.routeMessage({ userId: userB.id, text: 'isolation check B', chatId: 9201, messageId: 211, timestamp: new Date() }),
+			router.routeMessage({
+				userId: userB.id,
+				text: 'isolation check B',
+				chatId: 9201,
+				messageId: 211,
+				timestamp: new Date(),
+			}),
 		);
 
 		const promptA = getChatbotPrompt(recorder, startA);

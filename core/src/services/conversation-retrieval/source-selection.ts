@@ -74,7 +74,11 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 		selected.add('settings');
 	}
 
-	// Apply explicit include overrides last (force-on or force-off)
+	// Apply explicit include overrides last (force-on or force-off).
+	// Note: 'interaction-context' is in AllowedSourceCategory (for the public getRecentInteractions()
+	// method), so passing include: { 'interaction-context': true } is type-valid. However,
+	// buildContextSnapshot removed the interaction-context fan-out task in Batch 5, so adding it
+	// to `selected` here is a no-op — the snapshot will never populate snapshot.interactionContext.
 	if (opts.include) {
 		for (const [cat, val] of Object.entries(opts.include) as [AllowedSourceCategory, boolean][]) {
 			if (val) {
