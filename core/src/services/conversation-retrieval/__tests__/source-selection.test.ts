@@ -20,11 +20,15 @@ function makeOpts(overrides: Partial<ContextSnapshotOptions> = {}): ContextSnaps
 }
 
 describe('chooseSources — baseline (free-text, no keywords)', () => {
-	it('always includes context-store, interaction-context, app-metadata', () => {
+	it('always includes context-store and app-metadata', () => {
 		const selected = chooseSources(makeOpts());
 		expect(selected.has('context-store')).toBe(true);
-		expect(selected.has('interaction-context')).toBe(true);
 		expect(selected.has('app-metadata')).toBe(true);
+	});
+
+	it('does not include interaction-context in the baseline set', () => {
+		const selected = chooseSources(makeOpts());
+		expect(selected.has('interaction-context')).toBe(false);
 	});
 
 	it('does not include data-query categories when dataQueryCandidate is false', () => {

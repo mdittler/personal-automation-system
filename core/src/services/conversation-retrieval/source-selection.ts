@@ -3,8 +3,7 @@
  *
  * Determines which AllowedSourceCategories to read for a given
  * ContextSnapshotOptions. Strategy:
- *   - Always include the three cheap scoped readers (context-store,
- *     interaction-context, app-metadata).
+ *   - Always include the two cheap scoped readers (context-store, app-metadata).
  *   - Add app-knowledge when question looks like "how do I / how to / system"
  *     flavored, or when mode is 'ask'.
  *   - Add system-info when question touches system categories (llm, costs,
@@ -22,9 +21,8 @@ import type { AllowedSourceCategory } from './source-policy.js';
 export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCategory> {
 	const selected = new Set<AllowedSourceCategory>();
 
-	// Always include the three cheap scoped readers
+	// Always include the two cheap scoped readers
 	selected.add('context-store');
-	selected.add('interaction-context');
 	selected.add('app-metadata');
 
 	const categories = categorizeQuestion(opts.question);
