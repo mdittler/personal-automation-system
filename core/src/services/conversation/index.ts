@@ -37,7 +37,6 @@ export { buildUserContext } from './user-context.js';
 
 export {
 	MODEL_SWITCH_INTENT_REGEX,
-	PAS_KEYWORDS,
 	classifyPASMessage,
 	parsePASClassifierOutput,
 } from './pas-classifier.js';

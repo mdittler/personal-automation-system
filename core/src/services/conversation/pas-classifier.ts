@@ -19,59 +19,6 @@ import { sanitizeInput } from '../prompt-assembly/index.js';
 export const MODEL_SWITCH_INTENT_REGEX =
 	/\b(switch|change|set|use|update)\b.*\b(model|tier|fast|standard|reasoning)\b/i;
 
-/** Static keywords that suggest a PAS-related question. */
-export const PAS_KEYWORDS = [
-	'pas',
-	'app',
-	'apps',
-	'command',
-	'commands',
-	'schedule',
-	'scheduling',
-	'automation',
-	'install',
-	'how do i',
-	'how does',
-	'what can',
-	'what apps',
-	'help me with',
-	'what is',
-	'context store',
-	'data store',
-	'daily notes',
-	'daily diff',
-	'telegram',
-	'routing',
-	'model',
-	'models',
-	'provider',
-	'providers',
-	'cost',
-	'costs',
-	'spending',
-	'usage',
-	'tokens',
-	'pricing',
-	'price',
-	'rate limit',
-	'tier',
-	'tiers',
-	'uptime',
-	'status',
-	'cron',
-	'jobs',
-	'cost cap',
-	'switch',
-	'change model',
-	'budget',
-	'my data',
-	'my notes',
-	'my files',
-	'what did i',
-	'what have i',
-	'recent activity',
-	'recent changes',
-];
 
 /** Classification result from LLM-based PAS relevance check. */
 export interface PASClassification {
@@ -189,7 +136,7 @@ export function parsePASClassifierOutput(raw: string): PASClassification {
 /**
  * Classify a message as PAS-related using a fast-tier LLM call.
  *
- * Replaces the static PAS_KEYWORDS heuristic. Returns fail-open
+ * Returns fail-open
  * (pasRelated: true) on LLM error so users with auto_detect_pas on still get
  * helpful responses.
  *
