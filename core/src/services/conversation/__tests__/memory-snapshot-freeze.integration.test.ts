@@ -83,6 +83,9 @@ function extractDurableMemoryBlock(prompt: string): string | null {
 //
 // We identify the chatbot system prompt by looking for the distinctive chatbot
 // prompt prefix — "You are a helpful". This is unique to the chatbot completion.
+// The prefix originates from `buildSystemPrompt` / `buildAppAwareSystemPrompt`
+// in `core/src/services/conversation/prompt-builder.ts` (lines ~145 and ~227).
+// If this marker ever stops matching, check those two functions first.
 // ---------------------------------------------------------------------------
 
 const CHATBOT_PROMPT_MARKER = 'You are a helpful';
@@ -497,14 +500,12 @@ describe('F6 — fail-open when listDurableForUser throws', () => {
 			// Find the newest session file on disk and check frontmatter status is degraded
 			const sessionsDir = await findSessionsDir(join(tempDir, 'data'), householdId, userId);
 			const sessionFilePath = await getNewestSessionFile(sessionsDir);
-			if (sessionFilePath) {
-				const raw = await readFile(sessionFilePath, 'utf-8');
-				const frontmatter = parseFrontmatter(raw);
-				const memSnap = frontmatter['memory_snapshot'] as Record<string, unknown> | undefined;
-				if (memSnap) {
-					expect(memSnap['status']).toBe('degraded');
-				}
-			}
+			expect(sessionFilePath).not.toBeNull();
+			const raw = await readFile(sessionFilePath!, 'utf-8');
+			const frontmatter = parseFrontmatter(raw);
+			const memSnap = frontmatter['memory_snapshot'] as Record<string, unknown> | undefined;
+			expect(memSnap).toBeDefined();
+			expect(memSnap!['status']).toBe('degraded');
 		} finally {
 			failLookup = false;
 			// Restore original
