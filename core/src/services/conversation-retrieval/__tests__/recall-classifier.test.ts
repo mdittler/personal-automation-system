@@ -8,6 +8,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+	RECALL_SAFE_DEFAULT,
+	buildClassifierPrompt,
 	classifyRecallIntent,
 	recallPreFilter,
 } from '../recall-classifier.js';
@@ -268,5 +270,64 @@ describe('classifyRecallIntent — happy path', () => {
 		const deps = makeDeps(raw);
 		const result = await classifyRecallIntent('just chatting here ok?', deps);
 		expect(result.reason.length).toBeLessThanOrEqual(100);
+	});
+});
+
+// ─── buildClassifierPrompt — maxWindowDays interpolation ─────────────────────
+
+describe('buildClassifierPrompt — maxWindowDays', () => {
+	it('default (no second arg) includes 365 days reference', () => {
+		const prompt = buildClassifierPrompt('2026-05-07');
+		expect(prompt).toContain('365 days');
+	});
+
+	it('custom maxWindowDays=30 interpolates 30 into the prompt', () => {
+		const prompt = buildClassifierPrompt('2026-05-07', 30);
+		expect(prompt).toContain('30 days');
+		expect(prompt).not.toContain('365 days');
+	});
+
+	it('custom maxWindowDays=730 interpolates 730 into the prompt', () => {
+		const prompt = buildClassifierPrompt('2026-05-07', 730);
+		expect(prompt).toContain('730 days');
+		expect(prompt).not.toContain('365 days');
+	});
+});
+
+// ─── classifyRecallIntent — maxWindowDays threading ──────────────────────────
+
+describe('classifyRecallIntent — maxWindowDays threading', () => {
+	const TODAY_7 = '2026-05-07';
+
+	it('threads deps.maxWindowDays=30 into parseRecallVerdict — rejects 401-day-old anchor', async () => {
+		// 2025-04-01 is 401 days before 2026-05-07; cap=30 → rejected
+		const deps = {
+			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-04-01' }, reason: 'r' })),
+			today: TODAY_7,
+			maxWindowDays: 30,
+		};
+		const result = await classifyRecallIntent('test', deps);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+	});
+
+	it('uses default 365 when maxWindowDays is omitted (back-compat)', async () => {
+		// 2025-12-01 is 157 days before 2026-05-07; default 365 → accepted
+		const deps = {
+			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-12-01' }, reason: 'r' })),
+			today: TODAY_7,
+		};
+		const result = await classifyRecallIntent('test', deps);
+		expect(result.shouldRecall).toBe(true);
+	});
+
+	it('accepts beyond-365 windows when cap is higher (maxWindowDays=730)', async () => {
+		// 2024-08-01 is 645 days before 2026-05-07; cap=730 → accepted
+		const deps = {
+			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'window', after: '2024-08-01', before: '2026-04-01' }, reason: 'r' })),
+			today: TODAY_7,
+			maxWindowDays: 730,
+		};
+		const result = await classifyRecallIntent('test', deps);
+		expect(result.shouldRecall).toBe(true);
 	});
 });

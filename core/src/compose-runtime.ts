@@ -1117,6 +1117,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		disableFlushAndCleanup: onDisableFlush,
 		settingsRegistry,
 		settingsWriter,
+		recallMaxWindowDays: config.chat?.recall?.max_window_days ?? 365,
 	});
 	logger.info('ConversationService: initialized');
 

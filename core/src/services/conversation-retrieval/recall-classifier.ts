@@ -266,8 +266,12 @@ function buildExamples(today: string): string {
 }
 
 /** Build the classifier system prompt with today's date and dynamic date examples. */
-export function buildClassifierPrompt(today: string): string {
-	return CLASSIFIER_SYSTEM_PROMPT_BASE.replace('<today>', today) + buildExamples(today);
+export function buildClassifierPrompt(today: string, maxWindowDays = 365): string {
+	const base = CLASSIFIER_SYSTEM_PROMPT_BASE.replace('<today>', today).replace(
+		'365 days before today',
+		`${maxWindowDays} days before today`,
+	);
+	return base + buildExamples(today);
 }
 
 // ─── Output validation ────────────────────────────────────────────────────────
@@ -410,13 +414,16 @@ export async function classifyRecallIntent(
 		logger: { warn(...args: unknown[]): void };
 		today: string; // 'YYYY-MM-DD' local date
 		timezone?: string; // IANA TZ; default = system
+		/** Maximum allowed temporal-window age/span in days. Default 365. REQ-CONV-TEMPORAL-013. */
+		maxWindowDays?: number;
 	},
 ): Promise<RecallVerdict> {
 	if (!deps.today) {
 		throw new Error('classifyRecallIntent: deps.today is required');
 	}
 
-	const systemPrompt = buildClassifierPrompt(deps.today);
+	const maxWindowDays = deps.maxWindowDays ?? 365;
+	const systemPrompt = buildClassifierPrompt(deps.today, maxWindowDays);
 
 	let raw: string;
 	try {
@@ -445,5 +452,5 @@ export async function classifyRecallIntent(
 		return RECALL_SAFE_DEFAULT;
 	}
 
-	return parseRecallVerdict(parsed, { today: deps.today });
+	return parseRecallVerdict(parsed, { today: deps.today, maxWindowDays });
 }

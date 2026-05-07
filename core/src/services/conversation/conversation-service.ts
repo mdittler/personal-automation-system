@@ -69,6 +69,9 @@ export class ConversationService {
 			...(this.deps.settingsWriter !== undefined
 				? { settingsWriter: this.deps.settingsWriter }
 				: {}),
+			...(this.deps.recallMaxWindowDays !== undefined
+				? { recallMaxWindowDays: this.deps.recallMaxWindowDays }
+				: {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);
