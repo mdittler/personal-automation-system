@@ -618,7 +618,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 		};
 	}
 
-	it('free-text with no keywords: only 3 cheap readers called', async () => {
+	it('free-text with no keywords: only 2 cheap readers called', async () => {
 		const deps = makeFullDeps();
 		const service = new ConversationRetrievalServiceImpl(deps as never);
 		const snapshot = await withUserId('user1', () =>
