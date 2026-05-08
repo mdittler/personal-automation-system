@@ -9352,6 +9352,59 @@ Before validation, the settings save route iterates submitted keys and returns 4
 
 ---
 
+### REQ-SETTINGS-009 — The system MUST provide a `/settings` Telegram command supporting `/settings`, `/settings <category>`, `/settings <category> <key>`, `/settings <category> <key> <value...>`, `/settings reset <category> <key>`, and `/settings confirm <phrase>`. AdminOnly settings MUST be hidden from non-admin callers across every sub-form. Hidden settings MUST be inaccessible via direct qualified-key lookup for both admins and non-admins. The command MUST cover every visible setting in the registry, regardless of scope (per-user OR system) and regardless of nlSafe flag.
+
+**Phase:** Unified Settings Chunk D | **Status:** Implemented
+
+`handleSettings` in `core/src/services/conversation/handle-settings.ts` dispatches all sub-forms. The Router built-in in `core/src/services/router/index.ts` parses `/settings` as a built-in command, tokenizes args, and calls `ConversationService.handleSettings`. AdminOnly and hidden settings return "Unknown setting" regardless of which sub-form is used. The command is registered in `BUILTIN_COMMAND_NAMES` and appears in `/help` output.
+
+**Standard tests** (`handle-settings.test.ts`, `handle-settings.integration.test.ts`):
+- `lists visible categories for non-admin`
+- `lists visible categories for admin (includes dangerous)`
+- `shows full detail for food key`
+- `shows full detail for system key`
+- `sets a non-dangerous per-user string setting`
+- `sets a non-dangerous system setting`
+- `non-admin cannot see dangerous key by show`
+- `hidden setting show by admin → "Unknown setting" (defense-in-depth)`
+- `set and getOverrides reflects it (real filesystem)`
+
+**Router tests** (`settings-command.test.ts`):
+- `/settings dispatches to handleSettings with args=[] and rawArgs=""`
+- `/settings food dispatches with args=["food"]`
+- `/settings reset food default_store dispatches with reset args`
+- `/Settings, /SETTINGS (wrong case) do NOT dispatch`
+- `BUILTIN_COMMAND_NAMES.has("/settings") is true`
+
+**Persona tests** (`settings-command.persona.test.ts`):
+- ≥20 "should match" inputs verified as `/settings`
+- ≥16 "should not match" inputs verified as not `/settings`
+- Scenario 1: View → Set → Reset flow
+
+---
+
+### REQ-SETTINGS-010 — Dangerous setting writes AND dangerous resets via `/settings` MUST require typed-phrase confirmation matching `def.dangerConfirmPrompt` via timing-safe comparison, with a per-user single-use 60-second pending entry storing the un-coerced rawValue (for sets) or the reset action (for resets). The pending entry MUST NOT be consumed by phrase mismatch and MUST NOT be redeemable across users. On confirm the system MUST re-resolve the def, re-check admin and dangerous flags, re-validate the rawValue, and write through WriteSource = 'admin-confirmed'.
+
+**Phase:** Unified Settings Chunk D | **Status:** Implemented
+
+`PendingSettingsConfirmStore` in `core/src/services/settings/pending-settings-confirm-store.ts` provides per-user single-use TTL store (60s default). The confirm flow in `handleSettings` uses `matchesDangerConfirmPhrase` (timing-safe via `timingSafeEqual`) for phrase comparison. Cross-user reuse is prevented because `pendingStore.peek/get` are keyed by `userId`. Re-resolve on confirm: the handler calls `registry.getByAppKey` again, checks `adminOnly`, `hidden`, and `dangerous` flags before executing the write.
+
+**Standard tests** (`handle-settings.test.ts`, `pending-settings-confirm-store.test.ts`):
+- `set on dangerous key creates pending entry with action=set and rawValue`
+- `confirm with correct phrase consumes pending and writes via admin-confirmed`
+- `confirm phrase mismatch does NOT consume pending entry`
+- `pending entry for user A not consumable by user B`
+- `admin-downgrade-before-confirm → consumed silently, "No pending change"`
+- `dangerous-flag-removed-before-confirm → consumed, no write`
+
+**Integration tests** (`handle-settings.integration.test.ts`):
+- `step a: dangerous set creates pending entry with confirm prompt`
+- `step b: confirm with correct phrase writes and mutates in-memory config`
+- `step a: dangerous reset creates pending entry with action=reset`
+- `expired pending entry is not redeemable`
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -9803,6 +9856,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SETTINGS-034 | settings-confirm.test.ts | 2 | 2 | Implemented |
 | REQ-SETTINGS-035 | settings-system.test.ts | 1 | 1 | Implemented |
 | REQ-SETTINGS-036 | system-config-writer.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-009 | handle-settings.test.ts, handle-settings.integration.test.ts, settings-command.test.ts, settings-command.persona.test.ts | 15 | 10 | Implemented |
+| REQ-SETTINGS-010 | pending-settings-confirm-store.test.ts, handle-settings.test.ts, handle-settings.integration.test.ts | 10 | 8 | Implemented |
 
 | REQ-CONV-FLUSH-013 | router-flush-memory.test.ts, flush-memory.persona.test.ts | 6 | 1 | Implemented |
 | REQ-CONV-FLUSH-014 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 1 | Implemented |
