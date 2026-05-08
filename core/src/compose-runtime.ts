@@ -153,7 +153,6 @@ export type RuntimeOverrides =
 			providerRegistry?: ProviderRegistry;
 			telegramService?: TelegramService & { cleanup(): void | Promise<void> };
 			logger?: Logger;
-			/** Override the apps directory path. Useful in tests running from a sub-package CWD. */
 			appsDir?: string;
 	  };
 

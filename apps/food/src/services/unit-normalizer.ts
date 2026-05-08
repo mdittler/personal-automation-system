@@ -13,19 +13,12 @@ export interface ParsedSize {
 	base: SizeBase;
 }
 
-// Strict numeric regex: rejects NaN, Infinity, scientific notation, leading sign+.
-// Accepts: "12", "1.5", "750", ".5" → not allowed, must have at least one digit before the dot.
+// Strict numeric regex: accepts "12", "1.5", "750". Rejects ".5" (no leading digit), "-5", "NaN", "1e3".
 const NUMERIC_RE = /^(\d+(?:\.\d+)?)/;
-
-interface UnitDef {
-	base: SizeBase;
-	factor: number;
-	pattern: RegExp;
-}
 
 // Order matters: longer/multi-word matches must come before single-word ones
 // so that "fl oz" is matched before "oz".
-const UNIT_DEFS: UnitDef[] = [
+const UNIT_DEFS: Array<{ base: SizeBase; factor: number; pattern: RegExp }> = [
 	// Volume — multi-word fl oz first
 	{ base: 'ml', factor: 29.5735, pattern: /^fl\.?\s*oz\.?$/i },
 	// Mass
