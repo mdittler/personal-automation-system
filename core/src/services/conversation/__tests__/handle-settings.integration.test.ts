@@ -16,22 +16,23 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
+import { matchesDangerConfirmPhrase } from '../../../gui/routes/settings-confirm-helpers.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { AppManifest } from '../../../types/manifest.js';
-import {
-	SYSTEM_KEY_RUNTIME_PATH,
-	SYSTEM_SETTING_DEFS,
-} from '../../config/settings-metadata.js';
-import { SystemConfigWriter } from '../../config/system-config-writer.js';
 import { AppConfigServiceImpl } from '../../config/app-config-service.js';
+import { SYSTEM_KEY_RUNTIME_PATH, SYSTEM_SETTING_DEFS } from '../../config/settings-metadata.js';
+import { SystemConfigWriter } from '../../config/system-config-writer.js';
 import { buildSettingsRegistry } from '../../settings/build-registry.js';
-import { SettingsWriter } from '../../settings/settings-writer.js';
 import { createPendingSettingsConfirmStore } from '../../settings/pending-settings-confirm-store.js';
-import { matchesDangerConfirmPhrase } from '../../../gui/routes/settings-confirm-helpers.js';
-import { handleSettings, type HandleSettingsDeps, type HandleSettingsArgs } from '../handle-settings.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
+import {
+	type HandleSettingsArgs,
+	type HandleSettingsDeps,
+	handleSettings,
+} from '../handle-settings.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -133,7 +134,10 @@ function makeFoodManifest(): AppManifest {
 	} as AppManifest;
 }
 
-async function writeSeedYaml(tempDir: string, extra: Record<string, unknown> = {}): Promise<string> {
+async function writeSeedYaml(
+	tempDir: string,
+	extra: Record<string, unknown> = {},
+): Promise<string> {
 	const p = join(tempDir, 'pas.yaml');
 	await writeFile(p, JSON.stringify({ users: [], ...extra }), 'utf-8');
 	return p;
@@ -160,13 +164,17 @@ async function makeIntegrationContext(opts?: { isAdmin?: boolean }) {
 	const foodAppConfig = new AppConfigServiceImpl({
 		dataDir: tempDir,
 		appId: 'food',
-		defaults: (foodManifest.user_config ?? []).map((u) => ({ ...u, description: u.help ?? '' })) as never,
+		defaults: (foodManifest.user_config ?? []).map((u) => ({
+			...u,
+			description: u.help ?? '',
+		})) as never,
 	});
 
 	const writer = new SettingsWriter({
 		registry,
 		appConfigResolver: (appId) => (appId === 'food' ? foodAppConfig : undefined),
-		manifestResolver: (appId) => (appId === 'food' ? (foodManifest.user_config as never) : undefined),
+		manifestResolver: (appId) =>
+			appId === 'food' ? (foodManifest.user_config as never) : undefined,
 		logger: makeLogger(),
 		systemConfigWriter,
 		systemConfig: config,
@@ -195,7 +203,18 @@ async function makeIntegrationContext(opts?: { isAdmin?: boolean }) {
 		};
 	}
 
-	return { tempDir, config, registry, writer, foodAppConfig, systemConfigWriter, pendingStore, deps, input, configPath };
+	return {
+		tempDir,
+		config,
+		registry,
+		writer,
+		foodAppConfig,
+		systemConfigWriter,
+		pendingStore,
+		deps,
+		input,
+		configPath,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -399,14 +418,18 @@ describe('IT-06: Set a system setting', () => {
 		const raw = await readFile(configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)?.['sessions'] as Record<string, unknown>)?.['retention_days'],
+			((parsed.chat as Record<string, unknown>)?.sessions as Record<string, unknown>)
+				?.retention_days,
 		).toBe(30);
 	});
 
 	it('restart required badge appears in set reply for retention_days', async () => {
 		const { deps, input } = await ctx();
 		const { reply } = await handleSettings(
-			input(['memory-sessions', 'chat.sessions.retention_days', '180'], 'memory-sessions chat.sessions.retention_days 180'),
+			input(
+				['memory-sessions', 'chat.sessions.retention_days', '180'],
+				'memory-sessions chat.sessions.retention_days 180',
+			),
 			deps,
 		);
 		expect(reply).toContain('Restart required');
@@ -423,14 +446,20 @@ describe('IT-07: Reset a system setting', () => {
 
 		// Set to custom value first
 		await handleSettings(
-			input(['memory-sessions', 'chat.sessions.retention_days', '30'], 'memory-sessions chat.sessions.retention_days 30'),
+			input(
+				['memory-sessions', 'chat.sessions.retention_days', '30'],
+				'memory-sessions chat.sessions.retention_days 30',
+			),
 			deps,
 		);
 		expect(config.chat?.sessions?.retention_days).toBe(30);
 
 		// Reset
 		const { reply } = await handleSettings(
-			input(['reset', 'memory-sessions', 'chat.sessions.retention_days'], 'reset memory-sessions chat.sessions.retention_days'),
+			input(
+				['reset', 'memory-sessions', 'chat.sessions.retention_days'],
+				'reset memory-sessions chat.sessions.retention_days',
+			),
 			deps,
 		);
 		expect(reply.toLowerCase()).toMatch(/reset|default/);
@@ -448,7 +477,11 @@ describe('IT-08: Dangerous set with confirm — happy path', () => {
 	it('step a: dangerous set creates pending entry with confirm prompt', async () => {
 		const { deps, pendingStore, input } = await ctx({ isAdmin: true });
 		const { reply } = await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		expect(reply.toLowerCase()).toContain('dangerous');
@@ -456,9 +489,9 @@ describe('IT-08: Dangerous set with confirm — happy path', () => {
 
 		const pending = pendingStore.peek('testuser');
 		expect(pending).toBeDefined();
-		expect(pending!.action).toBe('set');
-		expect(pending!.rawValue).toBe('true');
-		expect(pending!.qualifiedKey).toBe('system.chat.sessions.auto_prune');
+		expect(pending?.action).toBe('set');
+		expect(pending?.rawValue).toBe('true');
+		expect(pending?.qualifiedKey).toBe('system.chat.sessions.auto_prune');
 	});
 
 	it('step b: confirm with correct phrase writes and mutates in-memory config', async () => {
@@ -466,7 +499,11 @@ describe('IT-08: Dangerous set with confirm — happy path', () => {
 
 		// Create pending entry
 		await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		expect(pendingStore.has('testuser')).toBe(true);
@@ -492,28 +529,40 @@ describe('IT-08: Dangerous set with confirm — happy path', () => {
 
 describe('IT-09: Dangerous reset with confirm', () => {
 	it('step a: dangerous reset creates pending entry with action=reset', async () => {
-		const { deps, pendingStore, config, input } = await ctx({ isAdmin: true });
+		const { deps, pendingStore, input } = await ctx({ isAdmin: true });
 
 		// First set auto_prune to true (with confirm)
 		await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		await handleSettings(
-			input(['confirm', 'permanently', 'delete', 'expired', 'transcripts'], 'confirm permanently delete expired transcripts', true),
+			input(
+				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
+				'confirm permanently delete expired transcripts',
+				true,
+			),
 			deps,
 		);
 
 		// Now issue a reset on the dangerous key
 		const { reply } = await handleSettings(
-			input(['reset', 'dangerous', 'chat.sessions.auto_prune'], 'reset dangerous chat.sessions.auto_prune', true),
+			input(
+				['reset', 'dangerous', 'chat.sessions.auto_prune'],
+				'reset dangerous chat.sessions.auto_prune',
+				true,
+			),
 			deps,
 		);
 		expect(reply.toLowerCase()).toContain('confirm');
 		const pending = pendingStore.peek('testuser');
 		expect(pending).toBeDefined();
-		expect(pending!.action).toBe('reset');
-		expect(pending!.rawValue).toBeUndefined();
+		expect(pending?.action).toBe('reset');
+		expect(pending?.rawValue).toBeUndefined();
 	});
 
 	it('step b: confirm of reset reverts in-memory config to false', async () => {
@@ -521,23 +570,39 @@ describe('IT-09: Dangerous reset with confirm', () => {
 
 		// Set it to true first (full confirm flow)
 		await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		await handleSettings(
-			input(['confirm', 'permanently', 'delete', 'expired', 'transcripts'], 'confirm permanently delete expired transcripts', true),
+			input(
+				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
+				'confirm permanently delete expired transcripts',
+				true,
+			),
 			deps,
 		);
 		expect(config.chat?.sessions?.auto_prune).toBe(true);
 
 		// Issue reset
 		await handleSettings(
-			input(['reset', 'dangerous', 'chat.sessions.auto_prune'], 'reset dangerous chat.sessions.auto_prune', true),
+			input(
+				['reset', 'dangerous', 'chat.sessions.auto_prune'],
+				'reset dangerous chat.sessions.auto_prune',
+				true,
+			),
 			deps,
 		);
 		// Confirm reset
 		const { reply } = await handleSettings(
-			input(['confirm', 'permanently', 'delete', 'expired', 'transcripts'], 'confirm permanently delete expired transcripts', true),
+			input(
+				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
+				'confirm permanently delete expired transcripts',
+				true,
+			),
 			deps,
 		);
 		expect(reply).toContain('Confirmed');
@@ -564,7 +629,11 @@ describe('IT-10: Non-admin walk for adminOnly/dangerous keys', () => {
 	it('non-admin cannot set a dangerous key', async () => {
 		const { deps, pendingStore, input } = await ctx();
 		const { reply } = await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', false),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				false,
+			),
 			deps,
 		);
 		expect(reply).toContain('Unknown setting');
@@ -609,9 +678,7 @@ describe('IT-11: Post-write hook fires on set', () => {
 			deps,
 		);
 
-		expect(hookFn).toHaveBeenCalledWith(
-			expect.objectContaining({ userId: 'testuser' }),
-		);
+		expect(hookFn).toHaveBeenCalledWith(expect.objectContaining({ userId: 'testuser' }));
 	});
 });
 
@@ -672,7 +739,10 @@ describe('IT-12: Dangerous set → expired TTL → confirm rejected', () => {
 		// Create pending entry at t=0
 		now = 0;
 		await handleSettings(
-			adminInput(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true'),
+			adminInput(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+			),
 			deps,
 		);
 		expect(pendingStore.has('testuser')).toBe(true);
@@ -682,7 +752,10 @@ describe('IT-12: Dangerous set → expired TTL → confirm rejected', () => {
 
 		// Confirm should fail — entry expired
 		const { reply } = await handleSettings(
-			adminInput(['confirm', 'permanently', 'delete', 'expired', 'transcripts'], 'confirm permanently delete expired transcripts'),
+			adminInput(
+				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
+				'confirm permanently delete expired transcripts',
+			),
 			deps,
 		);
 		expect(reply).toContain('No pending change');

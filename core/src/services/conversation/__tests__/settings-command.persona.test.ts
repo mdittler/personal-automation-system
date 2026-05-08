@@ -13,18 +13,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
-import type { ManifestUserConfig } from '../../../types/manifest.js';
-import { parseCommand } from '../../router/command-parser.js';
-import {
-	SYSTEM_KEY_RUNTIME_PATH,
-	SYSTEM_SETTING_DEFS,
-} from '../../config/settings-metadata.js';
-import { SystemConfigWriter } from '../../config/system-config-writer.js';
-import { buildSettingsRegistry } from '../../settings/build-registry.js';
-import { SettingsWriter } from '../../settings/settings-writer.js';
-import { createPendingSettingsConfirmStore } from '../../settings/pending-settings-confirm-store.js';
-import { handleSettings, type HandleSettingsDeps, type HandleSettingsArgs } from '../handle-settings.js';
 import type { AppConfigService } from '../../../types/config.js';
+import type { ManifestUserConfig } from '../../../types/manifest.js';
+import { SYSTEM_SETTING_DEFS } from '../../config/settings-metadata.js';
+import type { SystemConfigWriter } from '../../config/system-config-writer.js';
+import { parseCommand } from '../../router/command-parser.js';
+import { buildSettingsRegistry } from '../../settings/build-registry.js';
+import { createPendingSettingsConfirmStore } from '../../settings/pending-settings-confirm-store.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
+import {
+	type HandleSettingsArgs,
+	type HandleSettingsDeps,
+	handleSettings,
+} from '../handle-settings.js';
 
 // ---------------------------------------------------------------------------
 // Part 1: parseCommand recognition tests
@@ -113,24 +114,27 @@ function makeLogger(): AppLogger {
 }
 
 function makeAppConfig(
-	overrides: Record<string, unknown> | null = null,
-): AppConfigService & { updateOverrides: ReturnType<typeof vi.fn>; removeOverride: ReturnType<typeof vi.fn> } {
+	initialOverrides: Record<string, unknown> | null = null,
+): AppConfigService & {
+	updateOverrides: ReturnType<typeof vi.fn>;
+	removeOverride: ReturnType<typeof vi.fn>;
+} {
+	let overrides = initialOverrides;
 	return {
 		get: vi.fn(),
 		getAll: vi.fn(),
-		getOverrides: vi.fn().mockResolvedValue(overrides),
+		getOverrides: vi.fn().mockImplementation(async () => overrides),
 		setAll: vi.fn(),
-		updateOverrides: vi.fn().mockImplementation(
-			async (userId: string, partial: Record<string, unknown>) => {
-				// Simulate an in-memory write: merge into overrides map
+		updateOverrides: vi
+			.fn()
+			.mockImplementation(async (_userId: string, partial: Record<string, unknown>) => {
 				if (overrides === null) {
-					Object.assign(overrides = {}, partial);
+					overrides = { ...partial };
 				} else {
 					Object.assign(overrides, partial);
 				}
-			},
-		),
-		removeOverride: vi.fn().mockImplementation(async (userId: string, key: string) => {
+			}),
+		removeOverride: vi.fn().mockImplementation(async (_userId: string, key: string) => {
 			if (overrides) {
 				delete overrides[key];
 			}
@@ -188,11 +192,11 @@ function makeSystemConfigWriter(systemCfg: SystemConfig): SystemConfigWriter {
 	function dotSet(obj: Record<string, unknown>, path: string[], value: unknown): void {
 		let cur = obj;
 		for (let i = 0; i < path.length - 1; i++) {
-			const seg = path[i]!;
+			const seg = path[i] as string;
 			if (typeof cur[seg] !== 'object' || cur[seg] === null) cur[seg] = {};
 			cur = cur[seg] as Record<string, unknown>;
 		}
-		cur[path[path.length - 1]!] = value;
+		cur[path[path.length - 1] as string] = value;
 	}
 
 	return {
@@ -222,9 +226,32 @@ function makeSystemConfigWriter(systemCfg: SystemConfig): SystemConfigWriter {
 }
 
 const FOOD_MANIFEST: ManifestUserConfig[] = [
-	{ key: 'default_store', type: 'string', default: '', description: 'Preferred store', label: 'Default store', help: 'Your grocery store.' },
-	{ key: 'seasonal_nudges', type: 'boolean', default: true, description: 'Seasonal', label: 'Seasonal nudges', help: 'Seasonal suggestions.' },
-	{ key: 'macro_target_calories', type: 'number', default: 2000, description: 'Calories', label: 'Daily calorie target', help: 'Daily calorie target.', min: 500, max: 10000 },
+	{
+		key: 'default_store',
+		type: 'string',
+		default: '',
+		description: 'Preferred store',
+		label: 'Default store',
+		help: 'Your grocery store.',
+	},
+	{
+		key: 'seasonal_nudges',
+		type: 'boolean',
+		default: true,
+		description: 'Seasonal',
+		label: 'Seasonal nudges',
+		help: 'Seasonal suggestions.',
+	},
+	{
+		key: 'macro_target_calories',
+		type: 'number',
+		default: 2000,
+		description: 'Calories',
+		label: 'Daily calorie target',
+		help: 'Daily calorie target.',
+		min: 500,
+		max: 10000,
+	},
 ];
 
 function buildFlowDeps(opts?: {
@@ -338,14 +365,16 @@ describe('Scenario 1: View → Set → Reset (food.default_store)', () => {
 		const overrides: Record<string, unknown> = { default_store: 'Target' };
 		const foodCfg = makeAppConfig(overrides);
 		const systemCfg = makeSystemConfig();
-		const systemCfgWriter = makeSystemConfigWriter();
+		const systemCfgWriter = makeSystemConfigWriter(systemCfg);
 		const logger = makeLogger();
 		const registry = buildSettingsRegistry({
-			installedApps: [{
-				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'Food', author: 'Test' },
-				capabilities: { messages: {} },
-				user_config: FOOD_MANIFEST,
-			} as never],
+			installedApps: [
+				{
+					app: { id: 'food', name: 'Food', version: '1.0.0', description: 'Food', author: 'Test' },
+					capabilities: { messages: {} },
+					user_config: FOOD_MANIFEST,
+				} as never,
+			],
 			systemDefs: SYSTEM_SETTING_DEFS,
 		});
 		const writer = new SettingsWriter({
@@ -357,27 +386,40 @@ describe('Scenario 1: View → Set → Reset (food.default_store)', () => {
 			systemConfig: systemCfg,
 		});
 		// Reset removes the key
-		vi.mocked(foodCfg.removeOverride).mockImplementation(async (uid: string, key: string) => {
+		vi.mocked(foodCfg.removeOverride).mockImplementation(async (_uid: string, key: string) => {
 			delete overrides[key];
 		});
 		// After reset, getOverrides returns without default_store
 		vi.mocked(foodCfg.getOverrides).mockImplementation(async () => ({ ...overrides }));
 		const pendingStore = createPendingSettingsConfirmStore();
 		const deps: HandleSettingsDeps = {
-			registry, writer,
+			registry,
+			writer,
 			appConfigResolver: (id) => (id === 'food' ? foodCfg : undefined),
-			systemConfigWriter: systemCfgWriter, systemConfig: systemCfg,
-			pendingStore, matchesDangerConfirmPhrase: (s, e) => s === e, logger,
+			systemConfigWriter: systemCfgWriter,
+			systemConfig: systemCfg,
+			pendingStore,
+			matchesDangerConfirmPhrase: (s, e) => s === e,
+			logger,
 		};
 		const input = (args: string[], rawArgs?: string, isAdmin?: boolean): HandleSettingsArgs => ({
-			args, rawArgs: rawArgs ?? args.join(' '), userId: 'u1', isAdmin: isAdmin ?? false,
+			args,
+			rawArgs: rawArgs ?? args.join(' '),
+			userId: 'u1',
+			isAdmin: isAdmin ?? false,
 		});
 
 		// Reset
-		await handleSettings(input(['reset', 'food', 'default_store'], 'reset food default_store'), deps);
+		await handleSettings(
+			input(['reset', 'food', 'default_store'], 'reset food default_store'),
+			deps,
+		);
 
 		// Show — should not contain Target
-		const { reply } = await handleSettings(input(['food', 'default_store'], 'food default_store'), deps);
+		const { reply } = await handleSettings(
+			input(['food', 'default_store'], 'food default_store'),
+			deps,
+		);
 		expect(reply).not.toContain('Target');
 	});
 });
@@ -390,7 +432,11 @@ describe('Scenario 2: Dangerous set → confirm (happy path)', () => {
 	it('step 1: dangerous set → produces confirm prompt', async () => {
 		const { deps, pendingStore, input } = buildFlowDeps({ isAdmin: true });
 		const { reply } = await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		expect(reply.toLowerCase()).toContain('confirm');
@@ -402,7 +448,11 @@ describe('Scenario 2: Dangerous set → confirm (happy path)', () => {
 
 		// Initiate
 		await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 		// Confirm
@@ -431,7 +481,11 @@ describe('Scenario 3: Dangerous set → expired TTL → confirm fails', () => {
 
 		// Initiate at t=0
 		await handleSettings(
-			input(['dangerous', 'chat.sessions.auto_prune', 'true'], 'dangerous chat.sessions.auto_prune true', true),
+			input(
+				['dangerous', 'chat.sessions.auto_prune', 'true'],
+				'dangerous chat.sessions.auto_prune true',
+				true,
+			),
 			deps,
 		);
 
