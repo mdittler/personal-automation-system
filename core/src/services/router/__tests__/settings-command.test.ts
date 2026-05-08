@@ -25,7 +25,7 @@ import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
 import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { FallbackHandler } from '../fallback.js';
-import { Router } from '../index.js';
+import { BUILTIN_COMMAND_NAMES, Router } from '../index.js';
 
 function createMockLogger(): Logger {
 	return {
@@ -347,6 +347,10 @@ describe('PS4 — Missing conversationService → graceful fallback', () => {
 // ---------------------------------------------------------------------------
 
 describe('PS5 — /settings in BUILTIN_COMMAND_NAMES', () => {
+	it('BUILTIN_COMMAND_NAMES.has("/settings") is true', () => {
+		expect(BUILTIN_COMMAND_NAMES.has('/settings')).toBe(true);
+	});
+
 	it('/settings is listed in /help output exactly once', async () => {
 		const conv = makeConversationService();
 		const { router, telegram } = buildRouter({ conversationService: conv });
@@ -409,5 +413,33 @@ describe('PS5 — /settings in BUILTIN_COMMAND_NAMES', () => {
 		const helpText = calls.map(([, text]) => text as string).join('\n');
 		// 'Old settings command' should NOT appear — it's a chatbot-manifest built-in, suppressed.
 		expect(helpText).not.toContain('Old settings command');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PS6 — Missing pendingSettingsConfirmStore guard
+// ---------------------------------------------------------------------------
+
+describe('PS6 — ConversationService.handleSettings missing deps guard', () => {
+	it('sends "Settings are not available." when pendingSettingsConfirmStore is undefined', async () => {
+		const { ConversationService } = await import('../../conversation/conversation-service.js');
+		const { ManifestCache: _MC } = await import('../../app-registry/index.js');
+		const telegram = createMockTelegram();
+		const logger = createMockLogger();
+		// Minimal deps — no pendingSettingsConfirmStore, no registry, no writer
+		const service = new ConversationService({
+			llm: createMockLLM() as any,
+			telegram,
+			data: undefined as any,
+			logger: logger as any,
+			timezone: 'UTC',
+			chatSessions: undefined as any,
+		} as any);
+
+		const ctx = msg('/settings');
+		// Should not throw, should send "Settings are not available."
+		await service.handleSettings([], '', ctx, false);
+
+		expect(telegram.send).toHaveBeenCalledWith(ctx.userId, 'Settings are not available.');
 	});
 });

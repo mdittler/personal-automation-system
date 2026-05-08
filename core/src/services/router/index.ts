@@ -66,6 +66,25 @@ import type { SessionControlLogger, SessionControlClassificationEntry } from '..
 /** Default confidence threshold for intent classification. */
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
 
+/**
+ * Built-in command names that the Router handles directly (bypassing app manifest commands).
+ * Exported so tests can assert membership without depending on /help output.
+ */
+export const BUILTIN_COMMAND_NAMES = new Set([
+	'/ask',
+	'/edit',
+	'/notes',
+	'/newchat',
+	'/reset',
+	'/title',
+	'/recall',
+	'/refreshmemory',
+	'/refresh-memory',
+	'/flushmemory',
+	'/flush-memory',
+	'/settings',
+]);
+
 // ---------------------------------------------------------------------------
 // Route info factory helpers
 // ---------------------------------------------------------------------------
@@ -631,7 +650,10 @@ export class Router {
 			}
 			if (parsed.command === '/settings') {
 				const isAdmin = this.findUser(ctx.userId)?.isAdmin ?? false;
-				await this.conversationService.handleSettings(parsed.args, parsed.rawArgs, ctx, isAdmin);
+				await this.dispatchConversationCommand('settings', parsed.args, ctx, {
+					rawArgs: parsed.rawArgs,
+					isAdmin,
+				});
 				return;
 			}
 		}
@@ -830,9 +852,10 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory' | 'flush-memory',
+		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory' | 'flush-memory' | 'settings',
 		args: string[],
 		ctx: MessageContext,
+		opts?: { rawArgs?: string; isAdmin?: boolean },
 	): Promise<void> {
 		if (!this.conversationService) return;
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
@@ -851,6 +874,13 @@ export class Router {
 					await this.conversationService?.handleRefreshMemory(args, enrichedCtx);
 				else if (name === 'flush-memory')
 					await this.conversationService?.handleFlushMemory(args, enrichedCtx);
+				else if (name === 'settings')
+					await this.conversationService?.handleSettings(
+						args,
+						opts?.rawArgs ?? args.join(' '),
+						enrichedCtx,
+						opts?.isAdmin ?? false,
+					);
 				else await this.conversationService?.handleNotes(args, enrichedCtx);
 			});
 		} catch (error) {
@@ -904,20 +934,6 @@ export class Router {
 
 		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
 		// entries if conversationService is wired (they're now built-ins, not app commands).
-		const BUILTIN_COMMAND_NAMES = new Set([
-			'/ask',
-			'/edit',
-			'/notes',
-			'/newchat',
-			'/reset',
-			'/title',
-			'/recall',
-			'/refreshmemory',
-			'/refresh-memory',
-			'/flushmemory',
-			'/flush-memory',
-			'/settings',
-		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
 		for (const [, entry] of this.commandMap) {

@@ -1,4 +1,4 @@
-import type { AppConfigService } from '../../types/config.js';
+import type { AppConfigService, SystemConfig } from '../../types/config.js';
 import type { MessageContext } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { getCurrentHouseholdId } from '../context/request-context.js';
@@ -17,6 +17,7 @@ import { handleRecall as coreHandleRecall } from './handle-recall.js';
 import { handleRefreshMemory as coreHandleRefreshMemory } from './handle-refresh-memory.js';
 import { handleSettings as handleSettingsFn } from './handle-settings.js';
 import type { MemoryFlushSave } from './memory-flush.js';
+import { sendSplitResponse } from './telegram-format.js';
 import { pendingEdits } from './pending-edits.js';
 
 /**
@@ -42,6 +43,8 @@ export type ConversationServiceDeps = HandleMessageDeps & {
 	appConfigResolver?: (appId: string) => AppConfigService | undefined;
 	/** System config writer — required for /settings to read/reset system-scoped settings. */
 	systemConfigWriter?: SystemConfigWriter;
+	/** In-memory system config — passed to handle-settings for system-scope reads. */
+	systemConfig?: SystemConfig;
 };
 
 /**
@@ -241,6 +244,7 @@ export class ConversationService {
 					writer,
 					appConfigResolver: this.deps.appConfigResolver ?? (() => undefined),
 					systemConfigWriter: this.deps.systemConfigWriter,
+					systemConfig: this.deps.systemConfig,
 					pendingStore,
 					matchesDangerConfirmPhrase,
 					logger: this.deps.logger,
@@ -261,7 +265,10 @@ export class ConversationService {
 		}
 
 		try {
-			await this.deps.telegram.send(ctx.userId, result.reply);
+			await sendSplitResponse(ctx.userId, result.reply, {
+				telegram: this.deps.telegram,
+				logger: this.deps.logger,
+			});
 		} catch (err) {
 			this.deps.logger.warn(
 				'handleSettings: send failed for userId=%s: %s',

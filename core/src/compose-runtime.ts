@@ -1157,6 +1157,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		pendingSettingsConfirmStore,
 		appConfigResolver: settingsAppConfigResolver,
 		systemConfigWriter,
+		systemConfig: config,
 	});
 	logger.info('ConversationService: initialized');
 
