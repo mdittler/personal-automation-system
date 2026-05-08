@@ -167,6 +167,23 @@ function makeRegistry(): SettingsRegistry {
 		nlSafe: false,
 	});
 
+	// chatbot.log_to_notes — per-user, systemConfigBackingKey (for category-defaults test)
+	reg.register({
+		key: 'log_to_notes',
+		appId: 'chatbot',
+		category: 'personal',
+		label: 'Daily notes logging',
+		help: 'Save every chat message to your daily notes file.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: false,
+		systemConfigBackingKey: 'chat.logToNotes',
+	});
+
 	return reg;
 }
 
@@ -434,13 +451,13 @@ describe('handleSettings — happy path', () => {
 		expect(foodCfg.updateOverrides).toHaveBeenCalledWith('u1', { seasonal_nudges: false });
 	});
 
-	it('sets a non-dangerous system setting (retention_days)', async () => {
+	it('sets a non-dangerous system setting (retention_days) as admin', async () => {
 		const { deps, systemCfgWriter } = makeContext();
 		const { reply } = await handleSettings(
 			makeInput({
 				args: ['memory-sessions', 'chat.sessions.retention_days', '180'],
 				rawArgs: 'memory-sessions chat.sessions.retention_days 180',
-				isAdmin: false,
+				isAdmin: true,
 			}),
 			deps,
 		);
@@ -466,9 +483,11 @@ describe('handleSettings — happy path', () => {
 		expect(reply).toContain('confirm');
 		const pending = pendingStore.peek('u1');
 		expect(pending).toBeDefined();
-		expect(pending!.action).toBe('set');
-		expect(pending!.rawValue).toBe('true');
-		expect(pending!.qualifiedKey).toBe('system.chat.sessions.auto_prune');
+		expect(pending?.action).toBe('set');
+		expect(pending?.rawValue).toBe('true');
+		expect(pending?.qualifiedKey).toBe('system.chat.sessions.auto_prune');
+		// Nonce is included in the prompt
+		expect(reply).toContain(pending?.id);
 	});
 
 	it('confirm with correct phrase consumes pending and writes via admin-confirmed', async () => {
@@ -485,11 +504,14 @@ describe('handleSettings — happy path', () => {
 		);
 		expect(pendingStore.has('u1')).toBe(true);
 
-		// Confirm with correct phrase
+		// Capture nonce from the pending entry
+		const nonce = pendingStore.peek('u1')!.id;
+
+		// Confirm with correct nonce + phrase
 		const { reply } = await handleSettings(
 			makeInput({
-				args: ['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				rawArgs: 'confirm permanently delete expired transcripts',
+				args: ['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${nonce} permanently delete expired transcripts`,
 				isAdmin: true,
 			}),
 			deps,
@@ -536,7 +558,7 @@ describe('handleSettings — happy path', () => {
 			makeInput({
 				args: ['reset', 'memory-sessions', 'chat.sessions.retention_days'],
 				rawArgs: 'reset memory-sessions chat.sessions.retention_days',
-				isAdmin: false,
+				isAdmin: true,
 			}),
 			deps,
 		);
@@ -561,8 +583,10 @@ describe('handleSettings — happy path', () => {
 		expect(reply).toContain('Dangerous');
 		const pending = pendingStore.peek('u1');
 		expect(pending).toBeDefined();
-		expect(pending!.action).toBe('reset');
-		expect(pending!.rawValue).toBeUndefined();
+		expect(pending?.action).toBe('reset');
+		expect(pending?.rawValue).toBeUndefined();
+		// Nonce is included in the prompt
+		expect(reply).toContain(pending?.id);
 	});
 
 	it('confirm dangerous reset completes the reset', async () => {
@@ -578,10 +602,12 @@ describe('handleSettings — happy path', () => {
 		);
 		expect(pendingStore.has('u1')).toBe(true);
 
+		const nonce = pendingStore.peek('u1')!.id;
+
 		const { reply } = await handleSettings(
 			makeInput({
-				args: ['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				rawArgs: 'confirm permanently delete expired transcripts',
+				args: ['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${nonce} permanently delete expired transcripts`,
 				isAdmin: true,
 			}),
 			deps,
@@ -593,12 +619,12 @@ describe('handleSettings — happy path', () => {
 	});
 
 	it('shows restart required badge in set reply', async () => {
-		const { deps, systemCfgWriter } = makeContext();
+		const { deps } = makeContext();
 		const { reply } = await handleSettings(
 			makeInput({
 				args: ['memory-sessions', 'chat.sessions.retention_days', '30'],
 				rawArgs: 'memory-sessions chat.sessions.retention_days 30',
-				isAdmin: false,
+				isAdmin: true,
 			}),
 			deps,
 		);
@@ -838,6 +864,22 @@ describe('handleSettings — edge cases', () => {
 		// Empty string for a number field should fail coercion
 		expect(reply).toContain('Invalid value');
 	});
+
+	it('category list uses systemConfigBackingKey effective default when no user override', async () => {
+		// System config has logToNotes = true, but manifest default is false.
+		const sysConfig = makeSystemConfig();
+		sysConfig.chat.logToNotes = true;
+		const { deps } = makeContext({ systemConfig: sysConfig });
+
+		const { reply } = await handleSettings(
+			makeInput({ args: ['personal'], rawArgs: 'personal' }),
+			deps,
+		);
+		// log_to_notes has systemConfigBackingKey = 'chat.logToNotes' = true
+		// Category list should show ON (from system config), not OFF (manifest default).
+		expect(reply).toContain('Daily notes logging');
+		expect(reply).toContain('ON');
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -978,10 +1020,12 @@ describe('handleSettings — error handling', () => {
 			matchesDangerConfirmPhrase: (s, e) => s === e,
 		};
 
+		// Must be admin so P1 guard doesn't fire before the infrastructure check.
 		const { reply } = await handleSettings(
 			makeInput({
 				args: ['memory-sessions', 'chat.sessions.retention_days', '30'],
 				rawArgs: 'memory-sessions chat.sessions.retention_days 30',
+				isAdmin: true,
 			}),
 			deps,
 		);
@@ -1098,11 +1142,12 @@ describe('handleSettings — security', () => {
 		);
 		expect(pendingStore.has('u1')).toBe(true);
 
-		// Wrong phrase
+		// Correct nonce but wrong phrase
+		const nonce = pendingStore.peek('u1')!.id;
 		const { reply } = await handleSettings(
 			makeInput({
-				args: ['confirm', 'wrong phrase'],
-				rawArgs: 'confirm wrong phrase',
+				args: ['confirm', nonce, 'wrong', 'phrase'],
+				rawArgs: `confirm ${nonce} wrong phrase`,
 				isAdmin: true,
 			}),
 			deps,
@@ -1239,16 +1284,17 @@ describe('handleSettings — security', () => {
 			expectedPhrase: 'permanently delete expired transcripts',
 		});
 
-		// Try confirming with wrong case
+		// Use correct nonce but wrong case phrase
+		const nonce = pendingStore.peek('u1')!.id;
 		const { reply } = await handleSettings(
 			makeInput({
-				args: ['confirm', 'Permanently', 'Delete', 'Expired', 'Transcripts'],
-				rawArgs: 'confirm Permanently Delete Expired Transcripts',
+				args: ['confirm', nonce, 'Permanently', 'Delete', 'Expired', 'Transcripts'],
+				rawArgs: `confirm ${nonce} Permanently Delete Expired Transcripts`,
 				isAdmin: true,
 			}),
 			deps,
 		);
-		// Case-sensitive match → mismatch
+		// Case-sensitive phrase match → mismatch
 		expect(reply).toContain('did not match');
 		// Entry still present
 		expect(pendingStore.has('u1')).toBe(true);
@@ -1265,6 +1311,57 @@ describe('handleSettings — security', () => {
 			deps,
 		);
 		expect(reply).toContain('No pending change');
+	});
+
+	it('stale nonce is rejected without consuming the entry', async () => {
+		const { deps, pendingStore } = makeContext();
+		pendingStore.attach('u1', {
+			userId: 'u1',
+			qualifiedKey: 'system.chat.sessions.auto_prune',
+			action: 'set',
+			rawValue: 'true',
+			expectedPhrase: 'permanently delete expired transcripts',
+		});
+		// Use a different nonce
+		const { reply } = await handleSettings(
+			makeInput({
+				args: ['confirm', 'stale-nonce', 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: 'confirm stale-nonce permanently delete expired transcripts',
+				isAdmin: true,
+			}),
+			deps,
+		);
+		expect(reply).toContain('No pending change');
+		// Entry was NOT consumed
+		expect(pendingStore.has('u1')).toBe(true);
+	});
+
+	it('non-admin cannot set a non-dangerous system setting', async () => {
+		const { deps, systemCfgWriter } = makeContext();
+		const { reply } = await handleSettings(
+			makeInput({
+				args: ['memory-sessions', 'chat.sessions.retention_days', '30'],
+				rawArgs: 'memory-sessions chat.sessions.retention_days 30',
+				isAdmin: false,
+			}),
+			deps,
+		);
+		expect(reply).toContain('administrators');
+		expect(systemCfgWriter.write).not.toHaveBeenCalled();
+	});
+
+	it('non-admin cannot reset a non-dangerous system setting', async () => {
+		const { deps, systemCfgWriter } = makeContext();
+		const { reply } = await handleSettings(
+			makeInput({
+				args: ['reset', 'memory-sessions', 'chat.sessions.retention_days'],
+				rawArgs: 'reset memory-sessions chat.sessions.retention_days',
+				isAdmin: false,
+			}),
+			deps,
+		);
+		expect(reply).toContain('administrators');
+		expect(systemCfgWriter.resetToSchemaDefault).not.toHaveBeenCalled();
 	});
 });
 
@@ -1286,11 +1383,13 @@ describe('handleSettings — state transitions', () => {
 			deps,
 		);
 
+		const nonce = pendingStore.peek('u1')!.id;
+
 		// Confirm (consumes)
 		await handleSettings(
 			makeInput({
-				args: ['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				rawArgs: 'confirm permanently delete expired transcripts',
+				args: ['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${nonce} permanently delete expired transcripts`,
 				isAdmin: true,
 			}),
 			deps,
@@ -1299,8 +1398,8 @@ describe('handleSettings — state transitions', () => {
 		// Another confirm attempt should find nothing
 		const { reply } = await handleSettings(
 			makeInput({
-				args: ['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				rawArgs: 'confirm permanently delete expired transcripts',
+				args: ['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${nonce} permanently delete expired transcripts`,
 				isAdmin: true,
 			}),
 			deps,
@@ -1309,7 +1408,7 @@ describe('handleSettings — state transitions', () => {
 	});
 
 	it('successful confirm clears pending; user can attach another immediately', async () => {
-		const { deps, pendingStore, systemCfgWriter } = makeContext();
+		const { deps, pendingStore } = makeContext();
 
 		await handleSettings(
 			makeInput({
@@ -1320,10 +1419,11 @@ describe('handleSettings — state transitions', () => {
 			deps,
 		);
 
+		const nonce = pendingStore.peek('u1')!.id;
 		await handleSettings(
 			makeInput({
-				args: ['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				rawArgs: 'confirm permanently delete expired transcripts',
+				args: ['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${nonce} permanently delete expired transcripts`,
 				isAdmin: true,
 			}),
 			deps,
@@ -1358,10 +1458,10 @@ describe('handleSettings — state transitions', () => {
 	});
 
 	it('attach overwrites; older nonce not redeemable', async () => {
-		const { deps, pendingStore } = makeContext();
+		const { deps, pendingStore, systemCfgWriter } = makeContext();
 
 		// First attach
-		const first = await handleSettings(
+		await handleSettings(
 			makeInput({
 				args: ['dangerous', 'chat.sessions.auto_prune', 'true'],
 				rawArgs: 'dangerous chat.sessions.auto_prune true',
@@ -1369,8 +1469,9 @@ describe('handleSettings — state transitions', () => {
 			}),
 			deps,
 		);
+		const oldNonce = pendingStore.peek('u1')!.id;
 
-		// Second attach overwrites (different value)
+		// Second attach overwrites (different value, new nonce)
 		await handleSettings(
 			makeInput({
 				args: ['dangerous', 'chat.sessions.auto_prune', 'false'],
@@ -1383,7 +1484,36 @@ describe('handleSettings — state transitions', () => {
 		// Only the second entry should be present
 		const pending = pendingStore.peek('u1');
 		expect(pending).toBeDefined();
-		expect(pending!.rawValue).toBe('false');
+		expect(pending?.rawValue).toBe('false');
+		const newNonce = pending!.id;
+		expect(newNonce).not.toBe(oldNonce);
+
+		// Confirming with the old nonce fails (no consume)
+		const { reply: staleReply } = await handleSettings(
+			makeInput({
+				args: ['confirm', oldNonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${oldNonce} permanently delete expired transcripts`,
+				isAdmin: true,
+			}),
+			deps,
+		);
+		expect(staleReply).toContain('No pending change');
+		// Entry is still present (not consumed)
+		expect(pendingStore.has('u1')).toBe(true);
+
+		// Confirming with the new nonce + correct phrase succeeds
+		const { reply: goodReply } = await handleSettings(
+			makeInput({
+				args: ['confirm', newNonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				rawArgs: `confirm ${newNonce} permanently delete expired transcripts`,
+				isAdmin: true,
+			}),
+			deps,
+		);
+		expect(goodReply).toContain('Confirmed and saved');
+		expect(pendingStore.has('u1')).toBe(false);
+		// Wrote false (the second value)
+		expect(systemCfgWriter.write).toHaveBeenCalledWith('chat.sessions.auto_prune', false, expect.anything());
 	});
 });
 

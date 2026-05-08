@@ -444,7 +444,7 @@ describe('Scenario 2: Dangerous set → confirm (happy path)', () => {
 	});
 
 	it('step 2: confirm → "Confirmed and saved"', async () => {
-		const { deps, systemCfg, input } = buildFlowDeps({ isAdmin: true });
+		const { deps, systemCfg, pendingStore, input } = buildFlowDeps({ isAdmin: true });
 
 		// Initiate
 		await handleSettings(
@@ -455,11 +455,13 @@ describe('Scenario 2: Dangerous set → confirm (happy path)', () => {
 			),
 			deps,
 		);
+		// Peek nonce from pending store (P2: grammar is now /settings confirm <nonce> <phrase>)
+		const nonce = pendingStore.peek('u1')!.id;
 		// Confirm
 		const { reply } = await handleSettings(
 			input(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce} permanently delete expired transcripts`,
 				true,
 			),
 			deps,

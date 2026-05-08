@@ -400,12 +400,12 @@ describe('IT-05: Reset a food setting', () => {
 
 describe('IT-06: Set a system setting', () => {
 	it('sets retention_days: persists to YAML and in-memory config', async () => {
-		const { deps, config, configPath, input } = await ctx();
+		const { deps, config, configPath, input } = await ctx({ isAdmin: true });
 		const { reply } = await handleSettings(
 			input(
 				['memory-sessions', 'chat.sessions.retention_days', '30'],
 				'memory-sessions chat.sessions.retention_days 30',
-				false,
+				true,
 			),
 			deps,
 		);
@@ -424,15 +424,30 @@ describe('IT-06: Set a system setting', () => {
 	});
 
 	it('restart required badge appears in set reply for retention_days', async () => {
-		const { deps, input } = await ctx();
+		const { deps, input } = await ctx({ isAdmin: true });
 		const { reply } = await handleSettings(
 			input(
 				['memory-sessions', 'chat.sessions.retention_days', '180'],
 				'memory-sessions chat.sessions.retention_days 180',
+				true,
 			),
 			deps,
 		);
 		expect(reply).toContain('Restart required');
+	});
+
+	it('non-admin cannot set a system setting', async () => {
+		const { deps, input } = await ctx();
+		const { reply } = await handleSettings(
+			input(
+				['memory-sessions', 'chat.sessions.retention_days', '30'],
+				'memory-sessions chat.sessions.retention_days 30',
+				false,
+			),
+			deps,
+		);
+		expect(reply).toContain('administrators');
+		expect(reply).not.toContain('Saved');
 	});
 });
 
@@ -442,13 +457,14 @@ describe('IT-06: Set a system setting', () => {
 
 describe('IT-07: Reset a system setting', () => {
 	it('resets retention_days back to schema default', async () => {
-		const { deps, config, input } = await ctx();
+		const { deps, config, input } = await ctx({ isAdmin: true });
 
 		// Set to custom value first
 		await handleSettings(
 			input(
 				['memory-sessions', 'chat.sessions.retention_days', '30'],
 				'memory-sessions chat.sessions.retention_days 30',
+				true,
 			),
 			deps,
 		);
@@ -459,6 +475,7 @@ describe('IT-07: Reset a system setting', () => {
 			input(
 				['reset', 'memory-sessions', 'chat.sessions.retention_days'],
 				'reset memory-sessions chat.sessions.retention_days',
+				true,
 			),
 			deps,
 		);
@@ -508,11 +525,13 @@ describe('IT-08: Dangerous set with confirm — happy path', () => {
 		);
 		expect(pendingStore.has('testuser')).toBe(true);
 
-		// Confirm
+		const nonce = pendingStore.peek('testuser')!.id;
+
+		// Confirm with nonce + phrase
 		const { reply } = await handleSettings(
 			input(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce} permanently delete expired transcripts`,
 				true,
 			),
 			deps,
@@ -540,10 +559,11 @@ describe('IT-09: Dangerous reset with confirm', () => {
 			),
 			deps,
 		);
+		const nonce1 = pendingStore.peek('testuser')!.id;
 		await handleSettings(
 			input(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce1, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce1} permanently delete expired transcripts`,
 				true,
 			),
 			deps,
@@ -566,7 +586,7 @@ describe('IT-09: Dangerous reset with confirm', () => {
 	});
 
 	it('step b: confirm of reset reverts in-memory config to false', async () => {
-		const { deps, config, input } = await ctx({ isAdmin: true });
+		const { deps, config, pendingStore, input } = await ctx({ isAdmin: true });
 
 		// Set it to true first (full confirm flow)
 		await handleSettings(
@@ -577,10 +597,11 @@ describe('IT-09: Dangerous reset with confirm', () => {
 			),
 			deps,
 		);
+		const nonce1 = pendingStore.peek('testuser')!.id;
 		await handleSettings(
 			input(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce1, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce1} permanently delete expired transcripts`,
 				true,
 			),
 			deps,
@@ -596,11 +617,12 @@ describe('IT-09: Dangerous reset with confirm', () => {
 			),
 			deps,
 		);
-		// Confirm reset
+		// Confirm reset with new nonce
+		const nonce2 = pendingStore.peek('testuser')!.id;
 		const { reply } = await handleSettings(
 			input(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce2, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce2} permanently delete expired transcripts`,
 				true,
 			),
 			deps,
@@ -746,15 +768,16 @@ describe('IT-12: Dangerous set → expired TTL → confirm rejected', () => {
 			deps,
 		);
 		expect(pendingStore.has('testuser')).toBe(true);
+		const nonce = pendingStore.peek('testuser')!.id;
 
 		// Advance clock past TTL
 		now = 200;
 
-		// Confirm should fail — entry expired
+		// Confirm should fail — entry expired (nonce check never reached)
 		const { reply } = await handleSettings(
 			adminInput(
-				['confirm', 'permanently', 'delete', 'expired', 'transcripts'],
-				'confirm permanently delete expired transcripts',
+				['confirm', nonce, 'permanently', 'delete', 'expired', 'transcripts'],
+				`confirm ${nonce} permanently delete expired transcripts`,
 			),
 			deps,
 		);
@@ -762,5 +785,41 @@ describe('IT-12: Dangerous set → expired TTL → confirm rejected', () => {
 		expect(pendingStore.has('testuser')).toBe(false);
 		// in-memory config should NOT have changed
 		expect(config.chat?.sessions?.auto_prune).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// IT-13: Production registry — chatbot keys with systemConfigBackingKey
+// ---------------------------------------------------------------------------
+
+describe('IT-13: Production registry — systemConfigBackingKey effective default in category list', () => {
+	it('buildSettingsRegistry includes chatbot.log_to_notes with systemConfigBackingKey', async () => {
+		const { registry } = await ctx();
+		const def = registry.getByAppKey('chatbot', 'log_to_notes');
+		expect(def).toBeDefined();
+		expect(def?.systemConfigBackingKey).toBe('chat.logToNotes');
+		expect(def?.scope).toBe('per-user');
+		expect(def?.category).toBe('personal');
+	});
+
+	it('category list shows system config value (ON) via systemConfigBackingKey when no user override', async () => {
+		const { deps, config, input } = await ctx();
+		// Override system config in-memory to logToNotes = true
+		config.chat.logToNotes = true;
+
+		const { reply } = await handleSettings(input(['personal'], 'personal'), deps);
+		// log_to_notes def has systemConfigBackingKey = 'chat.logToNotes' = true
+		// Category list should show ON (not OFF which is the manifest default).
+		expect(reply).toContain('Daily notes logging');
+		expect(reply).toContain('ON');
+	});
+
+	it('category list shows manifest default (OFF) when systemConfig has logToNotes = false', async () => {
+		const { deps, config, input } = await ctx();
+		config.chat.logToNotes = false;
+
+		const { reply } = await handleSettings(input(['personal'], 'personal'), deps);
+		expect(reply).toContain('Daily notes logging');
+		expect(reply).toContain('OFF');
 	});
 });

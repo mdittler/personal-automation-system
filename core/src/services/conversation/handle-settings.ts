@@ -168,6 +168,23 @@ async function listCategoryKeys(
 	// Fetch per-app overrides for value display
 	const overridesByApp = await fetchOverrides(userId, visible, deps);
 
+	// For per-user defs with systemConfigBackingKey, inject the effective system
+	// config value when no user override exists (same logic as readEffectiveDefault).
+	if (deps.systemConfig) {
+		for (const def of visible) {
+			if (def.scope !== 'per-user' || !def.systemConfigBackingKey) continue;
+			const appOverrides = overridesByApp.get(def.appId) ?? {};
+			if (Object.prototype.hasOwnProperty.call(appOverrides, def.key)) continue;
+			const sysVal = dotGet(
+				deps.systemConfig as unknown as Record<string, unknown>,
+				def.systemConfigBackingKey,
+			);
+			if (sysVal !== undefined) {
+				overridesByApp.set(def.appId, { ...appOverrides, [def.key]: sysVal });
+			}
+		}
+	}
+
 	const reply = formatCategorySettings(category, visible, overridesByApp);
 	return { reply };
 }
@@ -235,8 +252,8 @@ async function setFlow(
 			return { reply: `Invalid value: ${escapeMarkdown(validation.reason)}` };
 		}
 
-		// Create pending entry.
-		deps.pendingStore.attach(userId, {
+		// Create pending entry; capture id for inclusion in the prompt.
+		const entry = deps.pendingStore.attach(userId, {
 			userId,
 			qualifiedKey: qualifiedKey(def.appId, def.key),
 			action: 'set',
@@ -244,8 +261,13 @@ async function setFlow(
 			expectedPhrase: def.dangerConfirmPrompt ?? '',
 		});
 
-		const reply = formatDangerPrompt(def, rawValue, 'set');
+		const reply = formatDangerPrompt(def, rawValue, 'set', entry.id);
 		return { reply };
+	}
+
+	// System settings require admin privileges.
+	if (def.scope === 'system' && !isAdmin) {
+		return { reply: 'System settings can only be changed by administrators.' };
 	}
 
 	// Non-dangerous set
@@ -316,8 +338,8 @@ async function resetFlow(
 			return { reply: unknownSettingReply() };
 		}
 
-		// Create pending entry for dangerous reset.
-		deps.pendingStore.attach(userId, {
+		// Create pending entry for dangerous reset; capture id for the prompt.
+		const entry = deps.pendingStore.attach(userId, {
 			userId,
 			qualifiedKey: qualifiedKey(def.appId, def.key),
 			action: 'reset',
@@ -325,8 +347,13 @@ async function resetFlow(
 			expectedPhrase: def.dangerConfirmPrompt ?? '',
 		});
 
-		const reply = formatDangerPrompt(def, undefined, 'reset');
+		const reply = formatDangerPrompt(def, undefined, 'reset', entry.id);
 		return { reply };
+	}
+
+	// System settings require admin privileges.
+	if (def.scope === 'system' && !isAdmin) {
+		return { reply: 'System settings can only be changed by administrators.' };
 	}
 
 	// Non-dangerous reset
@@ -343,12 +370,15 @@ async function confirmFlow(
 ): Promise<{ reply: string }> {
 	const { rawArgs, userId, isAdmin } = input;
 
-	// Extract phrase: everything after 'confirm '
-	const phrase = rawArgs.startsWith('confirm ')
+	// Grammar: /settings confirm <nonce> <phrase...>
+	const afterConfirm = rawArgs.startsWith('confirm ')
 		? rawArgs.slice('confirm '.length).trim()
 		: rawArgs.trim() === 'confirm'
 			? ''
 			: rawArgs.trim();
+	const firstSpaceInRest = afterConfirm.indexOf(' ');
+	const submittedNonce = firstSpaceInRest === -1 ? afterConfirm : afterConfirm.slice(0, firstSpaceInRest);
+	const phrase = firstSpaceInRest === -1 ? '' : afterConfirm.slice(firstSpaceInRest + 1).trim();
 
 	// Peek (non-consuming) first.
 	const entry = deps.pendingStore.peek(userId);
@@ -378,6 +408,11 @@ async function confirmFlow(
 		return {
 			reply: 'Pending change is no longer dangerous; please re-issue without confirm.',
 		};
+	}
+
+	// Nonce check — must match the stored entry's id. No consume on mismatch.
+	if (submittedNonce !== entry.id) {
+		return { reply: 'No pending change to confirm.' };
 	}
 
 	// Phrase comparison.

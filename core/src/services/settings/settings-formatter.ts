@@ -188,12 +188,15 @@ export function formatSingleSetting(def: SettingDef, currentValue: unknown): str
 
 /**
  * Warning message asking the user to confirm a dangerous operation.
- * The user must type the exact phrase to proceed.
+ * The user must type the nonce and exact phrase to proceed.
+ *
+ * Grammar: /settings confirm <nonce> <phrase>
  */
 export function formatDangerPrompt(
 	def: SettingDef,
 	rawValue: string | undefined,
 	action: PendingSettingsAction,
+	nonce: string,
 ): string {
 	const qid = qualifiedKey(def.appId, def.key);
 	const lines: string[] = [
@@ -211,7 +214,7 @@ export function formatDangerPrompt(
 	const phrase = def.dangerConfirmPrompt ?? '';
 	lines.push('');
 	lines.push('To confirm, type:');
-	lines.push(`\`/settings confirm ${escapeMarkdown(phrase)}\``);
+	lines.push(`\`/settings confirm ${escapeMarkdown(nonce)} ${escapeMarkdown(phrase)}\``);
 	lines.push('');
 	lines.push('This confirmation expires in 60 seconds.');
 
