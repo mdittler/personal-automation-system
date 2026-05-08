@@ -12,7 +12,7 @@
  * routes/apps.ts and routes/config.ts keep their own private caches.
  *
  * REQ-SETTINGS-002, 003, 004, 005, 014, 015, 016, 017, 018, 019, 020
- * REQ-SETTINGS-022, 023, 025, 031, 034, 035, 036
+ * REQ-SETTINGS-022, 023, 025, 026, 027, 031, 034, 035, 036
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -25,6 +25,8 @@ import { qualifiedKey } from '../../services/settings/settings-registry.js';
 import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import type { SettingsWriter, WriteRequest } from '../../services/settings/settings-writer.js';
 import type { SystemConfigWriter } from '../../services/config/system-config-writer.js';
+import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
+import { matchesDangerConfirmPhrase } from './settings-confirm-helpers.js';
 import { escapeHtml } from '../../utils/escape-html.js';
 
 const NON_ADMIN_CATEGORIES: readonly SettingsCategory[] = [
@@ -200,6 +202,58 @@ async function readCurrentValues(
 		}
 	}
 	return out;
+}
+
+/** Build the confirm modal HTML for a dangerous action. Not wrapped in layout. */
+function buildConfirmModalHtml(opts: {
+	def: SettingDef;
+	appId: string;
+	key: string;
+	action: 'set' | 'reset';
+	proposedValue: string;
+	coercionError: string;
+	csrfToken: string;
+	error: string;
+}): string {
+	const { def, appId, key, action, proposedValue, coercionError, csrfToken, error } = opts;
+	const safeAppId = escapeHtml(appId);
+	const safeKey = escapeHtml(key);
+	const safeLabel = escapeHtml(def.label);
+	const safePrompt = escapeHtml(def.dangerConfirmPrompt ?? 'confirm');
+	const safeValue = escapeHtml(proposedValue);
+	const safeError = error ? escapeHtml(error) : '';
+	const safeCoercionError = coercionError ? escapeHtml(coercionError) : '';
+	const safeCsrf = escapeHtml(csrfToken);
+
+	const actionBody =
+		action === 'set'
+			? `<p>Proposed new value: <code>${safeValue}</code></p>
+      ${safeCoercionError ? `<p><small style="color:var(--pico-del-color)">Invalid value: ${safeCoercionError}</small></p>` : ''}
+      <input type="hidden" name="value" value="${safeValue}" />`
+			: `<p>Action: <strong>reset to default</strong></p>`;
+
+	const errorHtml = safeError
+		? `<small style="color:var(--pico-del-color)">${safeError}</small>`
+		: '';
+
+	return `<dialog open>
+  <article>
+    <header><strong>${safeLabel}</strong></header>
+    <p><em>This is a dangerous setting. To confirm, type the exact phrase below:</em></p>
+    <blockquote>${safePrompt}</blockquote>
+    ${actionBody}
+    <form hx-post="/gui/settings/${safeAppId}/${safeKey}/confirm" hx-target="#confirm-dialog" hx-swap="innerHTML">
+      <input type="hidden" name="_csrf" value="${safeCsrf}" />
+      <input type="hidden" name="action" value="${escapeHtml(action)}" />
+      <input type="text" name="phrase" autocomplete="off" autofocus placeholder="Type the phrase above to confirm" />
+      ${errorHtml}
+      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+        <button type="submit" class="contrast">Confirm</button>
+        <button type="button" onclick="this.closest('dialog').close();this.closest('dialog').innerHTML=''">Cancel</button>
+      </div>
+    </form>
+  </article>
+</dialog>`;
 }
 
 function groupByCategory(visibleDefs: SettingDef[]): Record<string, SettingDef[]> {
@@ -468,6 +522,155 @@ export function registerSettingsRoutes(
 			}
 
 			return reply.type('text/html').send(buildSettingRowHtml(def, resetValue));
+		},
+	);
+
+	// -------------------------------------------------------------------------
+	// GET /settings/:appId/:key/confirm — render confirm modal for dangerous keys
+	// REQ-SETTINGS-026, 027
+	// -------------------------------------------------------------------------
+	server.get(
+		'/settings/:appId/:key/confirm',
+		{ preHandler: [requirePlatformAdmin] },
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { appId, key } = request.params as { appId: string; key: string };
+			const query = request.query as Record<string, string>;
+
+			if (!PARAM_PATTERN.test(appId) || !PARAM_PATTERN.test(key)) {
+				return reply.status(404).send('Not found');
+			}
+
+			const def = settingsRegistry.getByAppKey(appId, key);
+			if (!def) return reply.status(404).send('Not found');
+
+			if (!def.dangerous) {
+				return reply.status(400).send('Confirm flow only applies to dangerous settings');
+			}
+
+			const action = query['action'] === 'reset' ? 'reset' : 'set';
+
+			// Extract proposed value for 'set' action.
+			// Value can come from ?value= directly or from the field included via hx-include.
+			let proposedValue = '';
+			if (action === 'set') {
+				const fieldKey = fieldName(appId, key);
+				const presentKey = presentFieldName(appId, key);
+				if (query['value'] !== undefined) {
+					proposedValue = query['value'];
+				} else if (def.type === 'boolean') {
+					// hx-include: checkbox present=1 + checkbox checked=on
+					proposedValue = fieldKey in query ? 'true' : (presentKey in query ? 'false' : '');
+				} else {
+					proposedValue = query[fieldKey] ?? '';
+				}
+			}
+
+			// Validate the proposed value coerces correctly (pre-validation for user feedback).
+			let coercionError = '';
+			if (action === 'set' && proposedValue !== '') {
+				const result = settingsWriter.validate({
+					userId: request.user!.userId,
+					appId, key, rawValue: proposedValue, source: 'admin-confirmed',
+				});
+				if (!result.ok) coercionError = result.reason;
+			}
+
+			return reply.type('text/html').send(buildConfirmModalHtml({
+				def,
+				appId,
+				key,
+				action,
+				proposedValue,
+				coercionError,
+				csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
+				error: '',
+			}));
+		},
+	);
+
+	// -------------------------------------------------------------------------
+	// POST /settings/:appId/:key/confirm — execute confirmed dangerous action
+	// REQ-SETTINGS-026, 027, 034
+	// -------------------------------------------------------------------------
+	server.post(
+		'/settings/:appId/:key/confirm',
+		{ preHandler: [requirePlatformAdmin] },
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const { appId, key } = request.params as { appId: string; key: string };
+			const body = (request.body ?? {}) as Record<string, string>;
+
+			if (!PARAM_PATTERN.test(appId) || !PARAM_PATTERN.test(key)) {
+				return reply.status(404).send('Not found');
+			}
+
+			const def = settingsRegistry.getByAppKey(appId, key);
+			if (!def) return reply.status(404).send('Not found');
+
+			if (!def.dangerous) {
+				return reply.status(400).send('Confirm flow only applies to dangerous settings');
+			}
+
+			const action = body['action'] === 'reset' ? 'reset' : 'set';
+			const phrase = body['phrase'] ?? '';
+			const expectedPhrase = def.dangerConfirmPrompt ?? 'confirm';
+
+			// REQ-SETTINGS-027: timing-safe phrase match.
+			if (!matchesDangerConfirmPhrase(phrase, expectedPhrase)) {
+				return reply.status(403).type('text/html').send(buildConfirmModalHtml({
+					def,
+					appId,
+					key,
+					action,
+					proposedValue: body['value'] ?? '',
+					coercionError: '',
+					csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
+					error: 'Phrase did not match. Try again.',
+				}));
+			}
+
+			const userId = request.user!.userId;
+
+			if (action === 'set') {
+				const rawValue = body['value'] ?? '';
+				// Server-side re-validation (REQ-SETTINGS-027: re-validate at POST time).
+				const result = await settingsWriter.write({
+					userId, appId, key, rawValue, source: 'admin-confirmed',
+				});
+				if (!result.ok) {
+					return reply.status(400).send(`Write failed: ${result.reason}`);
+				}
+			} else {
+				// action === 'reset'
+				let prevValue: unknown = def.default;
+				if (def.scope === 'system') {
+					if (!systemConfigWriter || !systemConfig) {
+						logger.warn({ appId, key, userId }, 'confirm reset: no SystemConfigWriter');
+						return reply.status(500).send('Internal error');
+					}
+					try { prevValue = systemConfigWriter.read(key, systemConfig); } catch { /* use default */ }
+					const resetValue = await systemConfigWriter.resetToSchemaDefault(key, systemConfig);
+					await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
+						userId, appId, key, prevValue, newValue: resetValue,
+					});
+					return reply.redirect('/gui/settings?saved=1');
+				} else {
+					const cfg = appConfigResolver(appId);
+					if (!cfg) {
+						logger.warn({ appId, key, userId }, 'confirm reset: no AppConfigService');
+						return reply.status(500).send('Internal error');
+					}
+					try {
+						const all = await cfg.getAll(userId);
+						prevValue = all[key];
+					} catch { /* use default */ }
+					await cfg.removeOverride(userId, key);
+					await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
+						userId, appId, key, prevValue, newValue: def.default,
+					});
+				}
+			}
+
+			return reply.redirect('/gui/settings?saved=1');
 		},
 	);
 }

@@ -1,0 +1,50 @@
+<dialog open>
+  <article>
+    <header>
+      <strong><%= it.def.label %></strong>
+    </header>
+
+    <p><em>This is a dangerous setting. To confirm, type the exact phrase below:</em></p>
+    <blockquote><%= it.dangerConfirmPrompt %></blockquote>
+
+    <% if (it.action === 'set') { %>
+    <p>Proposed new value: <code><%= it.proposedValue %></code></p>
+    <% if (it.coercionError) { %>
+    <p><small style="color:var(--pico-del-color)">Invalid value: <%= it.coercionError %></small></p>
+    <% } %>
+    <% } else { %>
+    <p>Action: <strong>reset to default</strong></p>
+    <% } %>
+
+    <form
+      hx-post="/gui/settings/<%= it.appId %>/<%= it.key %>/confirm"
+      hx-target="#confirm-dialog"
+      hx-swap="innerHTML"
+    >
+      <input type="hidden" name="_csrf" value="<%= it.csrfToken %>" />
+      <input type="hidden" name="action" value="<%= it.action %>" />
+      <% if (it.action === 'set') { %>
+      <input type="hidden" name="value" value="<%= it.proposedValue %>" />
+      <% } %>
+
+      <input
+        type="text"
+        name="phrase"
+        autocomplete="off"
+        autofocus
+        placeholder="Type the phrase above to confirm"
+      />
+
+      <% if (it.error) { %>
+      <small style="color:var(--pico-del-color)"><%= it.error %></small>
+      <% } %>
+
+      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+        <button type="submit" class="contrast">Confirm</button>
+        <button type="button" onclick="this.closest('dialog').close();this.closest('dialog').innerHTML=''">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </article>
+</dialog>
