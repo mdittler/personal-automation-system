@@ -16,6 +16,8 @@ import {
 
 export interface BuildSettingsRegistryDeps {
   installedApps: AppManifest[];
+  /** System-scope setting defs to register with appId: 'system'. */
+  systemDefs?: ReadonlyArray<Omit<SettingDef, 'appId'>>;
 }
 
 export function buildSettingsRegistry(deps: BuildSettingsRegistryDeps): SettingsRegistry {
@@ -26,7 +28,12 @@ export function buildSettingsRegistry(deps: BuildSettingsRegistryDeps): Settings
     reg.register(def);
   }
 
-  // 2. Installed app manifests — skip appId === 'chatbot' (no double-register).
+  // 2. System-scope defs (appId: 'system').
+  for (const def of deps.systemDefs ?? []) {
+    reg.register({ ...def, appId: 'system' });
+  }
+
+  // 3. Installed app manifests — skip appId === 'chatbot' (no double-register).
   for (const manifest of deps.installedApps) {
     const appId = manifest.app.id;
     if (appId === 'chatbot') continue;
@@ -81,6 +88,8 @@ function entryToDef(entry: ManifestUserConfig, appId: string): SettingDef {
     scope: 'per-user',
     nlSafe,
     nlIntentRegex,
+    min: entry.min,
+    max: entry.max,
   };
 }
 

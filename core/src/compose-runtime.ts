@@ -127,6 +127,11 @@ import {
 	SettingsWriter,
 	type SettingsRegistry,
 } from './services/settings/index.js';
+import { SystemConfigWriter } from './services/config/system-config-writer.js';
+import {
+	SYSTEM_KEY_RUNTIME_PATH,
+	SYSTEM_SETTING_DEFS,
+} from './services/config/settings-metadata.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
 import type { LLMSafeguardsConfig, SystemConfig } from './types/config.js';
@@ -1013,6 +1018,14 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	// to prevent double-registration.
 	const settingsRegistry = buildSettingsRegistry({
 		installedApps: registry.getAll().map((r) => r.manifest),
+		systemDefs: SYSTEM_SETTING_DEFS,
+	});
+
+	// Settings-C: SystemConfigWriter — atomic read/write of system-scope keys in pas.yaml.
+	const systemConfigWriter = new SystemConfigWriter({
+		configPath,
+		runtimePathTable: SYSTEM_KEY_RUNTIME_PATH,
+		keyDefaults: Object.fromEntries(SYSTEM_SETTING_DEFS.map((d) => [d.key, d.default])),
 	});
 
 	// Build per-app AppConfigService instances — one per installed app + chatbot.
@@ -1043,6 +1056,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		registry: settingsRegistry,
 		appConfigResolver: settingsAppConfigResolver,
 		logger: logger.child({ component: 'settings-reader' }),
+		systemConfigWriter,
+		systemConfig: config,
 	});
 
 	const settingsWriter = new SettingsWriter({
@@ -1050,6 +1065,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		appConfigResolver: settingsAppConfigResolver,
 		manifestResolver: settingsManifestResolver,
 		logger: createChildLogger(logger, { service: 'settings-writer' }),
+		systemConfigWriter,
+		systemConfig: config,
 	});
 
 	// Settings-B/Batch1: fire onDisableFlush when flush_memory_on_idle_reset is toggled OFF.
@@ -1202,6 +1219,16 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'router' }),
 	});
 	router.buildRoutingTables();
+
+	// Settings-C REQ-SETTINGS-030: hot-update idle minutes when the system setting is written.
+	// The Router.setIdleMinutes call propagates the new value into the running idle detector
+	// without requiring a restart.
+	settingsWriter.registerPostWriteHook(
+		'system.chat.sessions.auto_reset_idle_minutes',
+		async ({ newValue }) => {
+			router.setIdleMinutes(newValue as number | null);
+		},
+	);
 
 	// Wire router into alert service (circular dep: AlertService created before Router)
 	alertService.setRouter(router);
@@ -1496,6 +1523,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsRegistry,
 		settingsWriter,
 		settingsAppConfigResolver,
+		systemConfigWriter,
+		systemConfig: config,
 	});
 
 	// 13b. External Data API (optional)

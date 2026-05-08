@@ -29,6 +29,7 @@ import type { SettingsWriter } from '../services/settings/settings-writer.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
+import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
@@ -92,6 +93,10 @@ export interface GuiOptions {
 	settingsWriter: SettingsWriter;
 	/** Settings-B: Resolves AppConfigService by appId for /gui/settings reads + resets. */
 	settingsAppConfigResolver?: (appId: string) => AppConfigService | undefined;
+	/** Settings-C: SystemConfigWriter for system-scope reads, writes, and resets. */
+	systemConfigWriter?: SystemConfigWriter;
+	/** Settings-C: Live SystemConfig reference for system-scope reads. */
+	systemConfig?: SystemConfig;
 }
 
 /**
@@ -268,6 +273,8 @@ export async function registerGuiRoutes(
 					settingsWriter: options.settingsWriter,
 					appConfigResolver: options.settingsAppConfigResolver,
 					logger,
+					systemConfigWriter: options.systemConfigWriter,
+					systemConfig: options.systemConfig,
 				});
 			}
 		},

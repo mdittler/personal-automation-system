@@ -698,7 +698,7 @@ describe('Settings — Slice 4 (save validation errors)', () => {
 		expect(res.statusCode).toBe(404);
 	});
 
-	it('POST /gui/settings/:appId/:key/reset for hidden key → 403', async () => {
+	it('POST /gui/settings/:appId/:key/reset for hidden key → 404 (not discoverable)', async () => {
 		const { allCookies, csrfToken } = await loginAndGetCookies(server.app);
 		const res = await server.app.inject({
 			method: 'POST',
@@ -706,7 +706,8 @@ describe('Settings — Slice 4 (save validation errors)', () => {
 			payload: { _csrf: csrfToken },
 			cookies: allCookies,
 		});
-		expect(res.statusCode).toBe(403);
+		// Hidden settings return 404 so their existence is not confirmed.
+		expect(res.statusCode).toBe(404);
 	});
 
 	it('POST /gui/settings/:appId/:key/reset for adminOnly key → 403', async () => {

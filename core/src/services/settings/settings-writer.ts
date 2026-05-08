@@ -1,8 +1,9 @@
 import type { AppLogger } from '../../types/app-module.js';
-import type { AppConfigService } from '../../types/config.js';
+import type { AppConfigService, SystemConfig } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
-import { coerceUserConfigValue } from '../config/coerce-user-config.js';
-import type { SettingsRegistry } from './settings-registry.js';
+import { coerceUserConfigValue, type CoerceResult } from '../config/coerce-user-config.js';
+import type { SystemConfigWriter } from '../config/system-config-writer.js';
+import type { SettingDef, SettingsRegistry } from './settings-registry.js';
 import { qualifiedKey } from './settings-registry.js';
 
 export interface SettingsWriterDeps {
@@ -10,9 +11,33 @@ export interface SettingsWriterDeps {
   appConfigResolver: (appId: string) => AppConfigService | undefined;
   manifestResolver: (appId: string) => ManifestUserConfig[] | undefined;
   logger: AppLogger;
+  /**
+   * Required for system-scope writes. When absent, any write to a system-scope
+   * setting returns { ok: false }.
+   */
+  systemConfigWriter?: SystemConfigWriter;
+  /** In-memory SystemConfig passed by reference. Mutated on system-scope writes. */
+  systemConfig?: SystemConfig;
 }
 
-export type WriteSource = 'nl' | 'admin-confirmed';
+/**
+ * Source of a settings write.
+ *
+ * Source is content policy, NOT an authentication mechanism. Auth is enforced
+ * at the Fastify preHandler (requirePlatformAdmin on adminOnly + dangerous
+ * routes). The source flag enforces what the calling surface is *allowed* to
+ * write by content, independent of who is calling.
+ *
+ * - 'nl':             NL tag processor — only nlSafe, non-admin, non-dangerous,
+ *                     non-hidden, per-user keys are allowed.
+ * - 'gui':            Single-form GUI save — dangerous and hidden keys are
+ *                     rejected. adminOnly is intentionally allowed here because
+ *                     route-level requirePlatformAdmin is the auth boundary.
+ * - 'admin-confirmed': Confirm-flow endpoint — bypasses content policy (all keys
+ *                     including dangerous and adminOnly). Auth at the route via
+ *                     requirePlatformAdmin + typed-phrase match.
+ */
+export type WriteSource = 'nl' | 'gui' | 'admin-confirmed';
 
 export interface WriteRequest {
   userId: string;
@@ -46,6 +71,61 @@ export type PostWriteHook = (ctx: {
   newValue: unknown;
 }) => Promise<void> | void;
 
+// ---------------------------------------------------------------------------
+// Coercion helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Coerce a raw string value for a system-scope setting.
+ *
+ * Nullable keys (def.default === null): empty string or literal 'null' → null.
+ * All other keys: synthesise a ManifestUserConfig-shaped object and reuse
+ * coerceUserConfigValue so bounds enforcement is consistent.
+ */
+function coerceSystemValue(def: SettingDef, rawValue: string): CoerceResult {
+  if (def.default === null && (rawValue === '' || rawValue.toLowerCase() === 'null')) {
+    return { ok: true, coerced: null };
+  }
+  const syntheticEntry: ManifestUserConfig = {
+    key: def.key,
+    type: def.type as ManifestUserConfig['type'],
+    default: def.default,
+    description: def.help,
+    options: def.options ? [...def.options] : undefined,
+    min: def.min,
+    max: def.max,
+  };
+  return coerceUserConfigValue(syntheticEntry, rawValue);
+}
+
+/** Apply source-based content policy. Returns a rejection result or null (no rejection). */
+function checkSourcePolicy(req: WriteRequest, def: SettingDef): WriteResult | null {
+  if (req.source === 'nl') {
+    if (def.adminOnly || def.dangerous || def.hidden || !def.nlSafe || def.scope !== 'per-user') {
+      return {
+        ok: false,
+        reason: `NL writes blocked for ${req.appId}.${req.key} (adminOnly/dangerous/hidden/non-nlSafe/non-per-user)`,
+      };
+    }
+  }
+  if (req.source === 'gui') {
+    if (def.dangerous || def.hidden) {
+      return {
+        ok: false,
+        reason: `GUI source blocked for ${req.appId}.${req.key} — dangerous/hidden keys require admin-confirmed flow`,
+      };
+    }
+    // Note: adminOnly is intentionally NOT blocked here. Route-level requirePlatformAdmin
+    // is the auth boundary; the writer's source flag is content policy, not identity policy.
+  }
+  // 'admin-confirmed': bypasses all content policy — auth at route + typed phrase.
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// SettingsWriter
+// ---------------------------------------------------------------------------
+
 export class SettingsWriter {
   private readonly hooks = new Map<string, PostWriteHook[]>();
 
@@ -62,16 +142,15 @@ export class SettingsWriter {
       return { ok: false, reason: `not in registry: ${req.appId}.${req.key}` };
     }
 
-    // Defense in depth: enforce NL safety policy at the writer level.
-    if (req.source === 'nl') {
-      if (def.adminOnly || def.dangerous || def.hidden || !def.nlSafe || def.scope !== 'per-user') {
-        return {
-          ok: false,
-          reason: `NL writes blocked for ${req.appId}.${req.key} (adminOnly/dangerous/hidden/non-nlSafe/non-per-user)`,
-        };
-      }
+    const policyReject = checkSourcePolicy(req, def);
+    if (policyReject) return policyReject;
+
+    // System-scope branch
+    if (def.scope === 'system') {
+      return this.writeSystemKey(req, def);
     }
 
+    // Per-user branch
     const cfg = this.deps.appConfigResolver(req.appId);
     if (!cfg) {
       return { ok: false, reason: `no AppConfigService for appId '${req.appId}'` };
@@ -131,15 +210,17 @@ export class SettingsWriter {
       return { ok: false, reason: `not in registry: ${req.appId}.${req.key}` };
     }
 
-    if (req.source === 'nl') {
-      if (def.adminOnly || def.dangerous || def.hidden || !def.nlSafe || def.scope !== 'per-user') {
-        return {
-          ok: false,
-          reason: `NL writes blocked for ${req.appId}.${req.key} (adminOnly/dangerous/hidden/non-nlSafe/non-per-user)`,
-        };
-      }
+    const policyReject = checkSourcePolicy(req, def);
+    if (policyReject) return policyReject;
+
+    // System-scope coercion (no I/O)
+    if (def.scope === 'system') {
+      const coerced = coerceSystemValue(def, req.rawValue);
+      if (!coerced.ok) return { ok: false, reason: `coercion failed: ${coerced.reason}` };
+      return { ok: true, coerced: coerced.coerced };
     }
 
+    // Per-user coercion
     const manifest = this.deps.manifestResolver(req.appId) ?? [];
     const entry = manifest.find((e) => e.key === req.key);
     if (!entry) {
@@ -195,9 +276,10 @@ export class SettingsWriter {
    * Phase 1: validate ALL items (pure, no I/O). If any fails, returns
    *   immediately with perField populated and NO persistence.
    * Phase 2: group valid items by appId, persist each app's changes in
-   *   one updateOverrides call (one file-lock per app). Cross-app atomicity
-   *   is best-effort: if app B fails, app A's write stays. Caller should
-   *   inspect perApp to detect partial failures.
+   *   one updateOverrides call (one file-lock per app). System-scope items
+   *   (appId === 'system') are written individually via SystemConfigWriter.
+   *   Cross-app atomicity is best-effort: if app B fails, app A's write stays.
+   *   Caller should inspect perApp to detect partial failures.
    * Phase 3: fire registered post-write hooks (after successful persist,
    *   inside the same app loop iteration).
    */
@@ -244,6 +326,13 @@ export class SettingsWriter {
 
     // Phase 3: persist per app
     for (const [appId, appItems] of byApp) {
+      // System-scope branch — writes via SystemConfigWriter
+      if (appId === 'system') {
+        await this.persistSystemBatch(appItems, firstUserId, perApp, perField);
+        continue;
+      }
+
+      // Per-user branch
       const cfg = this.deps.appConfigResolver(appId);
       if (!cfg) {
         const reason = `no AppConfigService for appId '${appId}'`;
@@ -316,5 +405,124 @@ export class SettingsWriter {
     }
 
     return { perField, perApp };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /** Handle a single system-scope write inside write(). */
+  private async writeSystemKey(req: WriteRequest, def: SettingDef): Promise<WriteResult> {
+    const writer = this.deps.systemConfigWriter;
+    const config = this.deps.systemConfig;
+    if (!writer || !config) {
+      return { ok: false, reason: `system config writer not available for ${req.key}` };
+    }
+
+    const coerced = coerceSystemValue(def, req.rawValue);
+    if (!coerced.ok) {
+      return { ok: false, reason: `coercion failed: ${coerced.reason}` };
+    }
+
+    let prevValue: unknown = def.default;
+    try {
+      prevValue = writer.read(req.key, config);
+    } catch {
+      // Key not in allowlist? Fall back to def.default (non-fatal)
+    }
+
+    try {
+      await writer.write(req.key, coerced.coerced, config);
+      await this.runHooksForKey(qualifiedKey(req.appId, req.key), {
+        userId: req.userId,
+        appId: req.appId,
+        key: req.key,
+        prevValue,
+        newValue: coerced.coerced,
+      });
+      return { ok: true, coerced: coerced.coerced };
+    } catch (err) {
+      this.deps.logger.warn(
+        'SettingsWriter.write(system) failed: %s userId=%s err=%s',
+        req.key,
+        req.userId,
+        err instanceof Error ? err.message : String(err),
+      );
+      return { ok: false, reason: 'persist failed' };
+    }
+  }
+
+  /**
+   * Write a batch of system-scope items atomically via SystemConfigWriter.writeMany:
+   * all keys are validated, the file lock is acquired once, and all in-memory
+   * mutations are rolled back together if the YAML write fails.
+   */
+  private async persistSystemBatch(
+    appItems: Array<{ req: WriteRequest; coerced: unknown }>,
+    userId: string,
+    perApp: Map<string, BatchAppResult>,
+    perField: Map<string, WriteResult>,
+  ): Promise<void> {
+    const writer = this.deps.systemConfigWriter;
+    const config = this.deps.systemConfig;
+    if (!writer || !config) {
+      const reason = 'system config writer not available';
+      perApp.set('system', { ok: false, reason, written: [] });
+      for (const { req } of appItems) {
+        perField.set(qualifiedKey('system', req.key), { ok: false, reason });
+      }
+      return;
+    }
+
+    // Snapshot prevValues for hooks (before any in-memory mutation).
+    const prevValues = new Map<string, unknown>();
+    for (const { req } of appItems) {
+      const def = this.deps.registry.getByAppKey('system', req.key);
+      let prev: unknown = def?.default;
+      try {
+        prev = writer.read(req.key, config);
+      } catch {
+        // Non-fatal — hooks see def default as prevValue
+      }
+      prevValues.set(req.key, prev);
+    }
+
+    const written: string[] = [];
+    try {
+      // Single atomic write: one lock acquisition, one YAML round-trip.
+      await writer.writeMany(
+        appItems.map(({ req, coerced }) => ({ key: req.key, coerced })),
+        config,
+      );
+      for (const { req } of appItems) {
+        written.push(req.key);
+      }
+    } catch (err) {
+      const reason = 'persist failed';
+      this.deps.logger.warn(
+        'SettingsWriter.writeBatch(system): atomic write failed userId=%s err=%s',
+        userId,
+        err instanceof Error ? err.message : String(err),
+      );
+      perApp.set('system', { ok: false, reason, written: [] });
+      for (const { req } of appItems) {
+        perField.set(qualifiedKey('system', req.key), { ok: false, reason });
+      }
+      return;
+    }
+
+    // Fire hooks after a successful atomic write.
+    for (const { req, coerced } of appItems) {
+      const qk = qualifiedKey('system', req.key);
+      await this.runHooksForKey(qk, {
+        userId,
+        appId: 'system',
+        key: req.key,
+        prevValue: prevValues.get(req.key),
+        newValue: coerced,
+      });
+    }
+
+    perApp.set('system', { ok: true, written });
   }
 }

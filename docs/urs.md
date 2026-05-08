@@ -9158,6 +9158,200 @@ Before building the `WriteRequest[]` batch, the route reads current effective va
 
 ---
 
+### REQ-SETTINGS-021 — `SettingsRegistry` MUST register system-scope settings (`scope: 'system'`) sourced from `SYSTEM_SETTING_DEFS` with synthetic `appId: 'system'`
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`buildSettingsRegistry` accepts an optional `systemDefs` parameter (`ReadonlyArray<Omit<SettingDef, 'appId'>>`). Each entry is registered with `appId: 'system'` and `scope: 'system'`. The resulting qualified keys follow the `system.<key>` pattern (e.g., `system.chat.sessions.retention_days`).
+
+**Standard tests** (`settings-metadata.test.ts`, `system-settings-integration.test.ts`):
+- `registry exposes all SYSTEM_SETTING_DEFS qualified keys`
+- `system-scope defs have appId='system' and scope='system'`
+
+---
+
+### REQ-SETTINGS-022 — System-scope writes MUST persist atomically to `config/pas.yaml` via `mutatePasYaml`, semantically preserving every unmodified top-level key
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`SystemConfigWriter.write` calls `mutatePasYaml(configPath, mutator)` which acquires the file lock, parses YAML, applies the mutation, and atomically writes back. Unmodified top-level keys are preserved parse-equivalent (not necessarily byte-equal — YAML re-serialization may reformat, but the parsed structure is identical).
+
+**Standard tests** (`pas-yaml-mutator.test.ts`, `system-config-writer.test.ts`):
+- `writes new key at correct YAML path`
+- `preserves untouched top-level keys parse-equivalent`
+
+---
+
+### REQ-SETTINGS-023 — System-scope writes MUST mutate the in-memory `SystemConfig` so subsequent reads see the new value without restart
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+After `mutatePasYaml` completes, `SystemConfigWriter.write` applies the same value to the in-memory `SystemConfig` object via the `SYSTEM_KEY_RUNTIME_PATH` camelCase dot-path. `SettingsReader.resolveValue` for system-scope defs delegates to `systemConfigWriter.read(key, systemConfig)` which dot-walks the live object.
+
+**Standard tests** (`system-config-writer.test.ts`):
+- `in-memory config mutated to new value after write`
+
+---
+
+### REQ-SETTINGS-024 — All `pas.yaml` mutations MUST serialize via a shared `withFileLock(configPath, …)` so concurrent writes cannot interleave
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`mutatePasYaml` wraps every read-modify-write cycle in `withFileLock`. Both `syncUsersToConfig` and `SystemConfigWriter.write` route through this helper, so concurrent users-array writes and system writes serialize against each other on the same lock.
+
+**Standard tests** (`pas-yaml-mutator.test.ts`, `system-config-writer.test.ts`):
+- `two concurrent writes to different keys both persist`
+- `mixed users-sync + system-write concurrency: both persist`
+
+---
+
+### REQ-SETTINGS-025 — Non-admin users MUST see Memory & Sessions, Personal, and per-app sections; non-admin users MUST NOT see System or Dangerous accordions
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`getForUser(isAdmin)` in `SettingsRegistry` filters by `adminOnly` and `dangerous`: non-admin users receive defs where `!adminOnly && !dangerous`. The GUI route uses `getVisibleCategories(isAdmin)` to gate the System and Dangerous accordions server-side. Route endpoints for admin-only or dangerous keys return 404 for non-admins.
+
+**Standard tests** (`settings-admin-visibility.test.ts`, `settings-system.persona.test.ts`, `settings-system.test.ts`):
+- `non-admin catalog excludes adminOnly and dangerous system settings`
+- `non-admin GET /gui/settings: HTML has no System or Dangerous accordions`
+
+---
+
+### REQ-SETTINGS-026 — `GET/POST /gui/settings/:appId/:key/confirm` MUST require platform-admin auth (preHandler 403 for non-admins) and CSRF on POST
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+Both confirm endpoints have `preHandler: [requirePlatformAdmin]`. The global CSRF preHandler runs on all POSTs before route-level handlers. Non-admins receive 403 from the admin guard; non-CSRF POSTs receive 403 from the CSRF guard.
+
+**Standard tests** (`settings-confirm.test.ts`):
+- `non-admin GET /confirm → 403`
+- `non-admin POST /confirm → 403`
+- `POST /confirm without CSRF → 403`
+
+---
+
+### REQ-SETTINGS-027 — `POST /gui/settings/:appId/:key/confirm` MUST validate the submitted phrase against `def.dangerConfirmPrompt` using `matchesDangerConfirmPhrase`; mismatch MUST return 403 with no write
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`matchesDangerConfirmPhrase` uses `timingSafeEqual` with a Buffer.from/utf8 conversion and a length pre-check to prevent exceptions on mismatched-length inputs. Whitespace, case differences, truncations, and cross-key substitutions all produce 403 without calling the writer.
+
+**Standard tests** (`settings-confirm.test.ts`, `settings-confirm-helpers.test.ts`):
+- `exact phrase → write succeeds`
+- `whitespace/case/truncation/cross-key mismatch → 403, no write`
+- `helper: equal strings → true; different length → false; same length different bytes → false`
+
+---
+
+### REQ-SETTINGS-028 — `WriteSource` policy: `'nl'` rejects adminOnly/dangerous/hidden/!nlSafe/!per-user; `'gui'` rejects dangerous and hidden; `'admin-confirmed'` permits all
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`SettingsWriter.validate` enforces three-tier content policy. System-scope defs have `nlSafe: false` by construction (system keys are never in `getNlSafeQualifiedKeys()`), so NL writes to any system key are rejected regardless of admin status.
+
+**Standard tests** (`settings-writer-system-scope.test.ts`, `settings-system.persona.test.ts`):
+- `source nl rejects admin/dangerous`
+- `source gui rejects dangerous`
+- `source admin-confirmed permits all`
+- `all system keys not in NL-safe allowlist`
+
+---
+
+### REQ-SETTINGS-029 — `SettingsReader.buildCatalog` MUST resolve effective default for per-user keys with `systemConfigBackingKey`: when no user override exists, the displayed value is the system value
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`resolveValue` checks `def.systemConfigBackingKey`: when set and no user override exists, it dot-walks the live `SystemConfig` using the camelCase path. `chatbot.log_to_notes` resolves to `chat.logToNotes` from `SystemConfig`. A user override takes precedence and bypasses the system value.
+
+**Standard tests** (`system-settings-integration.test.ts`, `settings-system.persona.test.ts`):
+- `no override + system value true → catalog shows ON`
+- `user override false beats system value true → shows OFF`
+- `log_to_notes has systemConfigBackingKey='chat.logToNotes' in registry`
+
+---
+
+### REQ-SETTINGS-030 — A post-write hook for `system.chat.sessions.auto_reset_idle_minutes` MUST update the running Router's idle-detector minutes without restart
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`compose-runtime.ts` registers a post-write hook on `system.chat.sessions.auto_reset_idle_minutes` that calls `router.setIdleMinutes(newValue)`. `Router.setIdleMinutes` mutates `idleResetDeps.idleMinutes` in place; subsequent idle-detection ticks use the new value.
+
+**Standard tests** (`settings-system.persona.test.ts`, `system-settings-integration.test.ts`):
+- `hook fires with correct newValue on write`
+- `null newValue on blank input`
+
+---
+
+### REQ-SETTINGS-031 — Settings flagged `restartRequired: true` MUST render a "Restart required" badge in the GUI; the write MUST still persist immediately
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`buildSettingRowHtml` includes a `<mark>Restart required</mark>` badge when `def.restartRequired === true`. The write path is unchanged — the key persists to YAML and in-memory config on every successful write regardless of the flag.
+
+**Standard tests** (`settings-system.test.ts`):
+- `restart-required badge present for routing.verification.enabled`
+- `restart-required badge absent for auto_reset_idle_minutes`
+
+---
+
+### REQ-SETTINGS-032 — `apps/food/manifest.yaml` `user_config` MUST NOT contain `guest_profiles_info` or `schedule_overrides_info`
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+Both pseudo-fields were `hidden: true` workarounds from Chunk B. They have been deleted from `apps/food/manifest.yaml`. Any useful copy has been preserved in `docs/MANIFEST_REFERENCE.md`.
+
+**Standard tests** (`settings-system.test.ts`):
+- `food manifest user_config does not contain guest_profiles_info or schedule_overrides_info`
+
+---
+
+### REQ-SETTINGS-033 — The chatbot-discoverability settings catalog MUST include the system-scope settings the requesting user is authorized to see, and the rendered "current value" MUST equal the value `SettingsReader` returns when polled directly
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`SettingsReader.buildCatalog` uses `registry.getForUser(isAdmin)` which applies the same visibility filter as the GUI. System-scope values are read via `systemConfigWriter.read(key, systemConfig)`. Per-user settings with `systemConfigBackingKey` use the effective-default resolver. The catalog string value and a direct registry read produce the same value.
+
+**Standard tests** (`settings-admin-visibility.test.ts`, `settings-system.persona.test.ts`):
+- `admin catalog includes auto_prune; non-admin excludes it`
+- `catalog value for retention_days matches live systemConfig value`
+
+---
+
+### REQ-SETTINGS-034 — Dangerous resets MUST require the same typed-phrase confirmation as dangerous sets; direct POSTs to the reset endpoint for any dangerous key MUST return 403
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+The standard reset endpoint (`POST /gui/settings/:appId/:key/reset`) returns 403 for any dangerous key. Dangerous resets route through `POST /gui/settings/:appId/:key/confirm` with `action=reset`, which applies the same `matchesDangerConfirmPhrase` validation.
+
+**Standard tests** (`settings-confirm.test.ts`):
+- `direct dangerous reset → 403`
+- `confirm reset with correct phrase → succeeds; key removed`
+
+---
+
+### REQ-SETTINGS-035 — The single-form `POST /gui/settings` MUST reject any submitted dangerous key with HTTP 400, even when the field is present in the body
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+Before validation, the settings save route iterates submitted keys and returns 400 if any resolved def has `dangerous: true`. This defense-in-depth check applies even when the GUI excluded the field client-side.
+
+**Standard tests** (`settings-system.test.ts`):
+- `single-form POST with dangerous field in body → 400`
+
+---
+
+### REQ-SETTINGS-036 — `SystemConfigWriter.resetToSchemaDefault` MUST remove the key from pas.yaml AND mutate in-memory config to the Zod-parsed effective default of the resulting file
+
+**Phase:** Unified Settings Chunk C | **Status:** Implemented
+
+`resetToSchemaDefault` uses `mutatePasYaml` to delete the key from YAML (Zod schema default applies on next parse), then re-parses the file through `pasYamlSchema` to compute the effective default, then writes that value back to the in-memory `SystemConfig`.
+
+**Standard tests** (`system-config-writer.test.ts`):
+- `reset removes key from YAML; in-memory matches Zod default`
+- `reset is idempotent (already-default value)`
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -9593,6 +9787,22 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SETTINGS-018 | settings.concurrency.test.ts, app-config-service-remove.test.ts | 5 | 3 | Implemented |
 | REQ-SETTINGS-019 | settings-writer-batch.test.ts, settings.test.ts, settings.integration.test.ts | 4 | 3 | Implemented |
 | REQ-SETTINGS-020 | settings.test.ts, settings-writer-batch.test.ts | 4 | 2 | Implemented |
+| REQ-SETTINGS-021 | settings-metadata.test.ts, system-settings-integration.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-022 | pas-yaml-mutator.test.ts, system-config-writer.test.ts | 3 | 2 | Implemented |
+| REQ-SETTINGS-023 | system-config-writer.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-024 | pas-yaml-mutator.test.ts, system-config-writer.test.ts | 2 | 2 | Implemented |
+| REQ-SETTINGS-025 | settings-admin-visibility.test.ts, settings-system.persona.test.ts, settings-system.test.ts | 4 | 3 | Implemented |
+| REQ-SETTINGS-026 | settings-confirm.test.ts | 3 | 2 | Implemented |
+| REQ-SETTINGS-027 | settings-confirm.test.ts, settings-confirm-helpers.test.ts | 3 | 5 | Implemented |
+| REQ-SETTINGS-028 | settings-writer-system-scope.test.ts, settings-system.persona.test.ts | 4 | 3 | Implemented |
+| REQ-SETTINGS-029 | system-settings-integration.test.ts, settings-system.persona.test.ts | 4 | 2 | Implemented |
+| REQ-SETTINGS-030 | settings-system.persona.test.ts, system-settings-integration.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-031 | settings-system.test.ts | 2 | 1 | Implemented |
+| REQ-SETTINGS-032 | settings-system.test.ts | 1 | 0 | Implemented |
+| REQ-SETTINGS-033 | settings-admin-visibility.test.ts, settings-system.persona.test.ts | 3 | 2 | Implemented |
+| REQ-SETTINGS-034 | settings-confirm.test.ts | 2 | 2 | Implemented |
+| REQ-SETTINGS-035 | settings-system.test.ts | 1 | 1 | Implemented |
+| REQ-SETTINGS-036 | system-config-writer.test.ts | 2 | 1 | Implemented |
 
 | REQ-CONV-FLUSH-013 | router-flush-memory.test.ts, flush-memory.persona.test.ts | 6 | 1 | Implemented |
 | REQ-CONV-FLUSH-014 | handle-flush-memory.test.ts, flush-memory.persona.test.ts | 2 | 1 | Implemented |

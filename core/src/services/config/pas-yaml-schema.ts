@@ -10,6 +10,12 @@
  */
 
 import { z } from 'zod';
+import {
+	IDLE_MINUTES_MAX,
+	IDLE_MINUTES_MIN,
+	RETENTION_DAYS_MAX,
+	RETENTION_DAYS_MIN,
+} from './settings-metadata.js';
 
 const YamlUserSchema = z
 	.object({
@@ -150,14 +156,14 @@ export const PasYamlConfigSchema = z
 						retention_days: z
 							.number()
 							.int('retention_days must be an integer')
-							.min(1, 'retention_days must be at least 1')
-							.max(3650, 'retention_days must be at most 3650')
+							.min(RETENTION_DAYS_MIN, `retention_days must be at least ${RETENTION_DAYS_MIN}`)
+							.max(RETENTION_DAYS_MAX, `retention_days must be at most ${RETENTION_DAYS_MAX}`)
 							.optional(),
 						auto_reset_idle_minutes: z
 							.number()
 							.int('auto_reset_idle_minutes must be an integer')
-							.min(1, 'auto_reset_idle_minutes must be at least 1')
-							.max(525_600, 'auto_reset_idle_minutes must be at most 525600')
+							.min(IDLE_MINUTES_MIN, `auto_reset_idle_minutes must be at least ${IDLE_MINUTES_MIN}`)
+							.max(IDLE_MINUTES_MAX, `auto_reset_idle_minutes must be at most ${IDLE_MINUTES_MAX}`)
 							.nullable()
 							.optional(),
 					})

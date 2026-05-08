@@ -29,5 +29,6 @@ export function conversationManifestToSettingDefs(
 		scope: 'per-user' as const,
 		nlSafe: e.nlSafe ?? false,
 		nlIntentRegex: e.nlIntentRegex,
+		systemConfigBackingKey: e.systemConfigBackingKey,
 	}));
 }
