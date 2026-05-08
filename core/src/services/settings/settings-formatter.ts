@@ -12,7 +12,7 @@ import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
 import { CATEGORY_LABELS, CATEGORY_ORDER } from './categories.js';
 import type { PendingSettingsAction } from './pending-settings-confirm-store.js';
-import type { SettingDef, SettingsCategory, SettingsRegistry } from './settings-registry.js';
+import type { SettingDef, SettingsCategory } from './settings-registry.js';
 import { qualifiedKey } from './settings-registry.js';
 
 // ---------------------------------------------------------------------------
@@ -65,12 +65,11 @@ export function formatDisplayValue(def: SettingDef, raw: unknown): string {
 export function formatCategoryList(
 	categories: readonly SettingsCategory[],
 	defs: SettingDef[],
-	overridesByApp: Map<string, Record<string, unknown>>,
+	_overridesByApp: Map<string, Record<string, unknown>>,
 ): string {
 	const lines: string[] = ['*Settings categories:*', ''];
 
 	for (const cat of categories) {
-		const label = CATEGORY_LABELS[cat] ?? cat;
 		const count = defs.filter((d) => d.category === cat).length;
 		if (count === 0) continue;
 		lines.push(`  /settings ${cat}  (${count} setting${count === 1 ? '' : 's'})`);
@@ -81,9 +80,6 @@ export function formatCategoryList(
 	lines.push('Type `/settings <category> <key>` to show a single setting.');
 	lines.push('Type `/settings <category> <key> <value>` to change a setting.');
 	lines.push('Type `/settings reset <category> <key>` to reset to default.');
-
-	// Suppress unused param warning — included for API consistency.
-	void overridesByApp;
 
 	return lines.join('\n');
 }
@@ -162,7 +158,7 @@ export function formatSingleSetting(def: SettingDef, currentValue: unknown): str
 	lines.push(`Default: ${escapeMarkdown(displayDefault)}`);
 
 	if (def.restartRequired) {
-		lines.push(`⚠️ Restart required for changes to take effect.`);
+		lines.push('⚠️ Restart required for changes to take effect.');
 	}
 
 	if (def.help) {
@@ -176,8 +172,12 @@ export function formatSingleSetting(def: SettingDef, currentValue: unknown): str
 	}
 
 	lines.push('');
-	lines.push(`To change: \`/settings ${escapeMarkdown(def.category)} ${escapeMarkdown(def.key)} <value>\``);
-	lines.push(`To reset: \`/settings reset ${escapeMarkdown(def.category)} ${escapeMarkdown(def.key)}\``);
+	lines.push(
+		`To change: \`/settings ${escapeMarkdown(def.category)} ${escapeMarkdown(def.key)} <value>\``,
+	);
+	lines.push(
+		`To reset: \`/settings reset ${escapeMarkdown(def.category)} ${escapeMarkdown(def.key)}\``,
+	);
 
 	return lines.join('\n');
 }
@@ -197,7 +197,7 @@ export function formatDangerPrompt(
 ): string {
 	const qid = qualifiedKey(def.appId, def.key);
 	const lines: string[] = [
-		`⚠️ *Dangerous setting change*`,
+		'⚠️ *Dangerous setting change*',
 		'',
 		`Setting: \`${escapeMarkdown(qid)}\``,
 	];
@@ -205,15 +205,15 @@ export function formatDangerPrompt(
 	if (action === 'set' && rawValue !== undefined) {
 		lines.push(`New value: ${escapeMarkdown(rawValue)}`);
 	} else if (action === 'reset') {
-		lines.push(`Action: reset to default`);
+		lines.push('Action: reset to default');
 	}
 
 	const phrase = def.dangerConfirmPrompt ?? '';
 	lines.push('');
-	lines.push(`To confirm, type:`);
+	lines.push('To confirm, type:');
 	lines.push(`\`/settings confirm ${escapeMarkdown(phrase)}\``);
 	lines.push('');
-	lines.push(`This confirmation expires in 60 seconds.`);
+	lines.push('This confirmation expires in 60 seconds.');
 
 	return lines.join('\n');
 }
@@ -236,7 +236,6 @@ export function formatHelp(): string {
 		'`/settings reset <category> <key>` — reset to default',
 		'`/settings confirm <phrase>` — confirm a dangerous change',
 		'',
-		'Categories: ' +
-			CATEGORY_ORDER.map((c) => `\`${c}\``).join(', '),
+		`Categories: ${CATEGORY_ORDER.map((c) => `\`${c}\``).join(', ')}`,
 	].join('\n');
 }

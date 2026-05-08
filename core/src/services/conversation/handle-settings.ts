@@ -14,6 +14,7 @@
 
 import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService, SystemConfig } from '../../types/config.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { dotGet } from '../config/system-config-writer.js';
 import type { SystemConfigWriter } from '../config/system-config-writer.js';
 import { CATEGORY_ORDER } from '../settings/categories.js';
@@ -30,7 +31,6 @@ import type { SettingDef, SettingsCategory } from '../settings/settings-registry
 import { qualifiedKey } from '../settings/settings-registry.js';
 import type { SettingsRegistry } from '../settings/settings-registry.js';
 import type { SettingsWriter } from '../settings/settings-writer.js';
-import { escapeMarkdown } from '../../utils/escape-markdown.js';
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -69,14 +69,14 @@ export async function handleSettings(
 	input: HandleSettingsArgs,
 	deps: HandleSettingsDeps,
 ): Promise<{ reply: string }> {
-	const { args, rawArgs, userId, isAdmin } = input;
+	const { args } = input;
 
 	// No args → list categories
 	if (args.length === 0) {
 		return listCategories(input, deps);
 	}
 
-	const firstArg = args[0]!.toLowerCase();
+	const firstArg = (args[0] ?? '').toLowerCase();
 
 	if (firstArg === 'confirm') {
 		return confirmFlow(input, deps);
@@ -98,13 +98,11 @@ async function listCategories(
 	input: HandleSettingsArgs,
 	deps: HandleSettingsDeps,
 ): Promise<{ reply: string }> {
-	const { userId, isAdmin } = input;
+	const { isAdmin } = input;
 	const visible = deps.registry.getForUser(isAdmin);
 
 	// We pass empty overridesByApp — we only need counts here, not values.
-	const presentCategories = CATEGORY_ORDER.filter((cat) =>
-		visible.some((d) => d.category === cat),
-	);
+	const presentCategories = CATEGORY_ORDER.filter((cat) => visible.some((d) => d.category === cat));
 
 	const reply = formatCategoryList(presentCategories, visible, new Map());
 	return { reply };
@@ -118,9 +116,9 @@ async function categoryFlow(
 	input: HandleSettingsArgs,
 	deps: HandleSettingsDeps,
 ): Promise<{ reply: string }> {
-	const { args, rawArgs, userId, isAdmin } = input;
+	const { args, isAdmin } = input;
 
-	const category = args[0]!.toLowerCase() as SettingsCategory;
+	const category = (args[0] ?? '').toLowerCase() as SettingsCategory;
 
 	// Validate category
 	const validCategory = CATEGORY_ORDER.includes(category);
@@ -140,7 +138,7 @@ async function categoryFlow(
 		return listCategoryKeys(input, category, deps);
 	}
 
-	const key = args[1]!;
+	const key = args[1] ?? '';
 
 	if (args.length === 2) {
 		// Show one setting
@@ -207,7 +205,7 @@ async function setFlow(
 	key: string,
 	deps: HandleSettingsDeps,
 ): Promise<{ reply: string }> {
-	const { args, rawArgs, userId, isAdmin } = input;
+	const { rawArgs, userId, isAdmin } = input;
 
 	// Recover full value from rawArgs: everything after second whitespace boundary.
 	// rawArgs = "<category> <key> <value...>" (no leading '/settings ')
@@ -243,7 +241,7 @@ async function setFlow(
 			qualifiedKey: qualifiedKey(def.appId, def.key),
 			action: 'set',
 			rawValue,
-			expectedPhrase: def.dangerConfirmPrompt!,
+			expectedPhrase: def.dangerConfirmPrompt ?? '',
 		});
 
 		const reply = formatDangerPrompt(def, rawValue, 'set');
@@ -304,8 +302,8 @@ async function resetFlow(
 		return { reply: formatHelp() };
 	}
 
-	const category = args[1]!.toLowerCase() as SettingsCategory;
-	const key = args[2]!;
+	const category = (args[1] ?? '').toLowerCase() as SettingsCategory;
+	const key = args[2] ?? '';
 
 	const resolveResult = resolveDef(category, key, isAdmin, deps.registry);
 	if (resolveResult.type !== 'ok') {
@@ -324,7 +322,7 @@ async function resetFlow(
 			qualifiedKey: qualifiedKey(def.appId, def.key),
 			action: 'reset',
 			rawValue: undefined,
-			expectedPhrase: def.dangerConfirmPrompt!,
+			expectedPhrase: def.dangerConfirmPrompt ?? '',
 		});
 
 		const reply = formatDangerPrompt(def, undefined, 'reset');
@@ -343,7 +341,7 @@ async function confirmFlow(
 	input: HandleSettingsArgs,
 	deps: HandleSettingsDeps,
 ): Promise<{ reply: string }> {
-	const { args, rawArgs, userId, isAdmin } = input;
+	const { rawArgs, userId, isAdmin } = input;
 
 	// Extract phrase: everything after 'confirm '
 	const phrase = rawArgs.startsWith('confirm ')
@@ -407,7 +405,7 @@ async function confirmFlow(
 			userId,
 			appId,
 			key: defKey,
-			rawValue: consumed.rawValue!,
+			rawValue: consumed.rawValue ?? '',
 		});
 		if (!validation.ok) {
 			return { reply: `Validation failed: ${escapeMarkdown(validation.reason)}` };
@@ -418,7 +416,7 @@ async function confirmFlow(
 			userId,
 			appId,
 			key: defKey,
-			rawValue: consumed.rawValue!,
+			rawValue: consumed.rawValue ?? '',
 		});
 
 		if (!result.ok) {
@@ -545,9 +543,7 @@ async function executeReset(
 // def resolver
 // ---------------------------------------------------------------------------
 
-type DefResolveResult =
-	| { type: 'ok'; def: SettingDef }
-	| { type: 'error'; message: string };
+type DefResolveResult = { type: 'ok'; def: SettingDef } | { type: 'error'; message: string };
 
 function resolveDef(
 	category: SettingsCategory,
@@ -575,7 +571,7 @@ function resolveDef(
 				.getForUser(isAdmin)
 				.filter((d) => d.key === keyOrQualified && d.category === category);
 			if (exactMatches.length === 1) {
-				def = exactMatches[0]!;
+				def = exactMatches[0];
 			} else if (exactMatches.length > 1) {
 				const qids = exactMatches
 					.map((d) => `\`${escapeMarkdown(qualifiedKey(d.appId, d.key))}\``)
@@ -602,10 +598,12 @@ function resolveDef(
 		if (matches.length === 0) {
 			def = undefined;
 		} else if (matches.length === 1) {
-			def = matches[0]!;
+			def = matches[0];
 		} else {
 			// Multiple apps define this key in this category.
-			const qids = matches.map((d) => `\`${escapeMarkdown(qualifiedKey(d.appId, d.key))}\``).join(', ');
+			const qids = matches
+				.map((d) => `\`${escapeMarkdown(qualifiedKey(d.appId, d.key))}\``)
+				.join(', ');
 			return {
 				type: 'error',
 				message: `Multiple apps define key \`${escapeMarkdown(keyOrQualified)}\` in this category. Qualify with appId.key: ${qids}`,
@@ -722,7 +720,7 @@ async function fetchOverrides(
 				if (deps.systemConfigWriter && deps.systemConfig) {
 					for (const def of defs.filter((d) => d.appId === 'system')) {
 						try {
-							result[def.key] = deps.systemConfigWriter.read(def.key, deps.systemConfig!);
+							result[def.key] = deps.systemConfigWriter.read(def.key, deps.systemConfig);
 						} catch {
 							// Non-fatal
 						}
