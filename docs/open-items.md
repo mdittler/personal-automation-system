@@ -5,6 +5,40 @@ User manual actions are tracked separately in `user_actions.md`.
 
 ---
 
+## Phase Sequence (ordered — "next phase" = first unchecked item)
+
+| # | Phase | Sessions | What it delivers |
+|---|---|---|---|
+| 1 | **Settings Chunk D** | 1 | `/settings` Telegram command — list and set tunables inline |
+| 2 | **Persona Regression Suite Chunk A** | 1 | `regression/` workspace, test runner, cache, 4 oracle types (structural + rubric), CLI |
+| 3 | **Persona Regression Suite Chunk B** | 1 | GUI page `/gui/regression`, result history per (case × model), admin controls |
+| 4 | **T1a — Dependency spike** | 1 | Lock Vercel AI SDK v6 + provider versions; per-model tool-call support matrix |
+| 5 | **T1 — LLMService substrate** | 1 | `completeWithTools` + owned loop wrapper + per-step cost reservation + capability flags |
+| 6 | **T2a — Tool foundation** | 1 | `types/tool.ts`, manifest `capabilities.tools[]`, ToolRegistry, ToolPolicy, install/load validation |
+| 7 | **T2b — Security surface** | 1 | PendingToolConfirmationStore, `tc:yes`/`tc:no` callbacks in compose-runtime, AttachmentStore |
+| 8 | **T2c — Execution surface** | 1 | tool-trace NDJSON, tool-result-fence, PII redactor, preselection, end-to-end round-trip |
+| 9 | **T3 — Shadow mode** | 1–2 | Chatbot dry-run shadow, persona corpus, sample-rate + cost cap + kill switch |
+| 10 | **T3b — Per-user beta** | 1 | `routing.primary: chatbot` for opt-in users after ≥1 month T3 telemetry |
+| 11 | **T4 — Pseudo-tool migration** | 1 | `<config-set>`, `<memory-kind-set>`, `<session-search>`, `<switch-model>`, `<model-journal>` → native tools |
+| 12 | **T5.notes** | 1 | Notes app NL intents → tools |
+| 13 | **T5.food.recipes** | 1 | Recipe intents → tools |
+| 14 | **T5.food.grocery** | 1 | Grocery intents → tools |
+| 15 | **T5.food.pantry** | 1 | Pantry intents → tools |
+| 16 | **T5.food.health** | 1 | Health intents → tools |
+| 17 | **T5.food.receipts** | 1 | Receipt intents → tools (highest blast radius, last) |
+| 18 | **T6a — Canary flip** | 1 | Default `routing.primary: chatbot` for all users; ≥2 week canary + SLOs |
+| 19 | **T6b — Cleanup** | 1 | Delete IntentClassifier, RouteVerifier, grey-zone, shadow-classifier internals |
+| 20 | **T7.1** | 1 | EmbeddingService + sqlite-vec + platform spike (non-blocking, activate when telemetry justifies) |
+| 21 | **T7.2** | 1 | Hybrid FTS5 + vector recall via RRF |
+| 22 | **T7.3** | 1 | Optional LLM rerank stage |
+| 23 | **T7.4** | 1 | Optional HyDE query expansion |
+| 24 | **T7.5** | 1 | ContextStore supersession + governance |
+| 25 | **T7.6** | 1 | PII redaction for embeddings + tool traces |
+
+*T7 slices (#20–25) are a non-blocking epic — begin when post-T6b recall telemetry shows FTS5 alone is insufficient.*
+
+---
+
 ## Confirmed Phases (need planning before implementation)
 
 These are greenlit but not yet planned. Each needs a spec/plan before coding.
