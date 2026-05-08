@@ -9,7 +9,7 @@ User manual actions are tracked separately in `user_actions.md`.
 
 | # | Phase | Sessions | What it delivers |
 |---|---|---|---|
-| 1 | **Settings Chunk D** | 1 | `/settings` Telegram command — list and set tunables inline |
+| 1 | ~~**Settings Chunk D**~~ ✓ Complete (2026-05-08) | 1 | `/settings` Telegram command — list and set tunables inline. `handleSettings` + Router built-in + `PendingSettingsConfirmStore` + integration + persona tests. REQ-SETTINGS-009 + REQ-SETTINGS-010. |
 | 2 | **Persona Regression Suite Chunk A** | 1 | `regression/` workspace, test runner, cache, 4 oracle types (structural + rubric), CLI |
 | 3 | **Persona Regression Suite Chunk B** | 1 | GUI page `/gui/regression`, result history per (case × model), admin controls |
 | 4 | **T1a — Dependency spike** | 1 | Lock Vercel AI SDK v6 + provider versions; per-model tool-call support matrix |
@@ -126,7 +126,9 @@ Cross-cutting review work that should happen in staged sessions before any clean
 
 Confirmed gaps that need to be addressed; timing depends on which phase picks them up.
 
-- **Settings Chunk G — `/gui/credentials` page** — Secrets that don't belong on the Settings page (USDA FDC API key, n8n dispatch URL, webhook secrets + HMAC signing keys) need a dedicated `/gui/credentials` admin-only page with masked values and per-credential revoke/update. Deferred from the Unified Settings Surface phase; implement as its own focused session after Chunks A–F ship. (Note: Chunks A+E+F shipped 2026-05-05; Chunks B/C/D still pending — see Confirmed Phases above.)
+- **Settings Chunk G — `/gui/credentials` page** — Secrets that don't belong on the Settings page (USDA FDC API key, n8n dispatch URL, webhook secrets + HMAC signing keys) need a dedicated `/gui/credentials` admin-only page with masked values and per-credential revoke/update. Deferred from the Unified Settings Surface phase; implement as its own focused session after Chunks A–F ship. (Note: Chunks A+E+F shipped 2026-05-05; Chunks B/C complete; Chunk D complete 2026-05-08.)
+- **Rename `WriteSource = 'gui'` → `'authorized-form'`** — The `'gui'` write source is also used for Telegram `/settings` non-dangerous writes (Settings Chunk D). The name `'gui'` is misleading now that two surfaces use it. A future cleanup should rename it to `'authorized-form'` across `SettingsWriter`, `handle-settings.ts`, `/gui/settings` route, and all tests. Low urgency; purely cosmetic correctness.
+- **Telegram `/settings`: rate-limit confirm attempts** — The dangerous-setting confirm flow is currently only TTL-limited (60s window, single-use on success). A brute-force attacker could attempt many wrong phrases within the 60s window. A future improvement should add a per-user attempt counter (e.g. max 5 tries per pending entry) so the entry is invalidated after repeated mismatches. Accepted risk for now given the requirement for admin isAdmin status and the 60s TTL.
 - **Scheduler cron editing** — `PUT /gui/scheduler/:appId/:jobId` endpoint needed before the food manifest's "Edit cron via GUI Scheduler" claim is true. The Unified Settings Surface phase corrects the manifest text only; building the actual edit endpoint is deferred. Scope: `/gui/scheduler` route + eta view update + AppConfig cron-override persistence.
 - **D5a §1 — `forShared(scope)` path segment** — `forShared()` ignores its scope argument. Fixing requires migrating ~30+ food callsites + existing shared files. Target: D5c or later. Search `forShared(` in `core/` and `apps/`.
 - **D5a §4 — Collaboration space UX** — `kind: 'collaboration'` is fully modeled but no production code creates one. Add `SpaceService.createCollaboration()`, admin command `/collab create`, GUI screen. Do NOT weaken isolation tests. Target: post-D5c.

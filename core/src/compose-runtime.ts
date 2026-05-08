@@ -127,6 +127,7 @@ import {
 	SettingsWriter,
 	type SettingsRegistry,
 } from './services/settings/index.js';
+import { createPendingSettingsConfirmStore } from './services/settings/pending-settings-confirm-store.js';
 import { SystemConfigWriter } from './services/config/system-config-writer.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
@@ -1126,6 +1127,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const getFlushEnabled = (userId: string) =>
 		resolveUserBool(conversationAppConfig, userId, 'flush_memory_on_idle_reset', false, flushLogger);
 
+	const pendingSettingsConfirmStore = createPendingSettingsConfirmStore();
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1151,6 +1154,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		recallMaxWindowDays: config.chat?.recall?.max_window_days ?? 365,
 		summarizer: sessionSummarizer,
 		flushSave,
+		pendingSettingsConfirmStore,
+		appConfigResolver: settingsAppConfigResolver,
+		systemConfigWriter,
+		systemConfig: config,
 	});
 	logger.info('ConversationService: initialized');
 
