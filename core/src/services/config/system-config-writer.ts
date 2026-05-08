@@ -113,7 +113,7 @@ export class SystemConfigWriter {
 }
 
 // ---------------------------------------------------------------------------
-// Dot-path utilities (private to this module)
+// Dot-path utilities (exported; also used by settings-reader.ts)
 // ---------------------------------------------------------------------------
 
 /**
