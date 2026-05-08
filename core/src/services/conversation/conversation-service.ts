@@ -1,8 +1,13 @@
+import type { AppConfigService } from '../../types/config.js';
 import type { MessageContext } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import type { SessionTurn } from '../conversation-session/chat-session-store.js';
+import type { SystemConfigWriter } from '../config/system-config-writer.js';
 import type { EditService } from '../edit/index.js';
+import { matchesDangerConfirmPhrase } from '../../gui/routes/settings-confirm-helpers.js';
+import type { PendingSettingsConfirmStore } from '../settings/pending-settings-confirm-store.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
 import { handleFlushMemory as coreHandleFlushMemory } from './handle-flush-memory.js';
@@ -10,6 +15,7 @@ import { type HandleMessageDeps, handleMessage as coreHandleMessage } from './ha
 import { handleNotes as coreHandleNotes } from './handle-notes.js';
 import { handleRecall as coreHandleRecall } from './handle-recall.js';
 import { handleRefreshMemory as coreHandleRefreshMemory } from './handle-refresh-memory.js';
+import { handleSettings as handleSettingsFn } from './handle-settings.js';
 import type { MemoryFlushSave } from './memory-flush.js';
 import { pendingEdits } from './pending-edits.js';
 
@@ -27,6 +33,15 @@ export type ConversationServiceDeps = HandleMessageDeps & {
 	summarizer?: (turns: SessionTurn[], signal?: AbortSignal) => Promise<string | null>;
 	/** Context-store saver — when present, enables /flushmemory. */
 	flushSave?: MemoryFlushSave;
+	/** In-memory TTL store for dangerous-setting confirm flow. */
+	pendingSettingsConfirmStore?: PendingSettingsConfirmStore;
+	/**
+	 * Resolves an AppConfigService for the given appId.
+	 * Required for /settings to read/write per-user overrides per app.
+	 */
+	appConfigResolver?: (appId: string) => AppConfigService | undefined;
+	/** System config writer — required for /settings to read/reset system-scoped settings. */
+	systemConfigWriter?: SystemConfigWriter;
 };
 
 /**
@@ -193,5 +208,66 @@ export class ConversationService {
 			flushSave: this.deps.flushSave,
 			logger: this.deps.logger,
 		});
+	}
+
+	async handleSettings(
+		args: string[],
+		rawArgs: string,
+		ctx: MessageContext,
+		isAdmin: boolean,
+	): Promise<void> {
+		const pendingStore = this.deps.pendingSettingsConfirmStore;
+		const registry = this.deps.settingsRegistry;
+		const writer = this.deps.settingsWriter;
+
+		if (!registry || !writer || !pendingStore) {
+			try {
+				await this.deps.telegram.send(ctx.userId, 'Settings are not available.');
+			} catch {
+				// ignore send failure
+			}
+			return;
+		}
+
+		// householdId is not on MessageContext — read from requestContext ALS.
+		const householdId = getCurrentHouseholdId();
+
+		let result: { reply: string };
+		try {
+			result = await handleSettingsFn(
+				{ args, rawArgs, userId: ctx.userId, householdId, isAdmin },
+				{
+					registry,
+					writer,
+					appConfigResolver: this.deps.appConfigResolver ?? (() => undefined),
+					systemConfigWriter: this.deps.systemConfigWriter,
+					pendingStore,
+					matchesDangerConfirmPhrase,
+					logger: this.deps.logger,
+				},
+			);
+		} catch (err) {
+			this.deps.logger.warn(
+				'handleSettings: handler threw for userId=%s: %s',
+				ctx.userId,
+				err instanceof Error ? err.message : String(err),
+			);
+			try {
+				await this.deps.telegram.send(ctx.userId, 'Something went wrong processing your settings command.');
+			} catch {
+				// ignore send failure
+			}
+			return;
+		}
+
+		try {
+			await this.deps.telegram.send(ctx.userId, result.reply);
+		} catch (err) {
+			this.deps.logger.warn(
+				'handleSettings: send failed for userId=%s: %s',
+				ctx.userId,
+				err instanceof Error ? err.message : String(err),
+			);
+		}
 	}
 }

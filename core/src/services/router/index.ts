@@ -629,6 +629,11 @@ export class Router {
 				await this.dispatchConversationCommand('flush-memory', parsed.args, ctx);
 				return;
 			}
+			if (parsed.command === '/settings') {
+				const isAdmin = this.findUser(ctx.userId)?.isAdmin ?? false;
+				await this.conversationService.handleSettings(parsed.args, parsed.rawArgs, ctx, isAdmin);
+				return;
+			}
 		}
 
 		const result = lookupCommand(parsed, this.commandMap);
@@ -890,6 +895,10 @@ export class Router {
 			lines.push('  /recall <query> — Search your past conversations');
 			lines.push('  /refreshmemory — Rebuild memory snapshot for the active session');
 			lines.push('  /flushmemory — Save a summary of the current chat to long-term memory');
+			lines.push('  /settings — View or change your settings');
+			lines.push('  /settings <category> \\[key\\] \\[value\\] — Read or write a setting');
+			lines.push('  /settings reset <category> <key> — Reset a setting to its default');
+			lines.push('  /settings confirm <phrase> — Confirm a dangerous settings change');
 			lines.push('');
 		}
 
@@ -907,6 +916,7 @@ export class Router {
 			'/refresh-memory',
 			'/flushmemory',
 			'/flush-memory',
+			'/settings',
 		]);
 		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
 
