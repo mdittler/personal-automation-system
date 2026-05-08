@@ -265,6 +265,13 @@ export class Router {
 		});
 	}
 
+	/** Hot-update the idle-reset threshold without restart (REQ-SETTINGS-030). */
+	setIdleMinutes(n: number | null): void {
+		if (this.idleResetDeps) {
+			this.idleResetDeps.idleMinutes = n;
+		}
+	}
+
 	/** Build routing tables from the registry's manifest cache. */
 	buildRoutingTables(): void {
 		const cache = this.registry.getManifestCache();

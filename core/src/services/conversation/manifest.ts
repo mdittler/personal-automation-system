@@ -44,6 +44,8 @@ export interface ConversationUserConfigEntry {
 	nlSafe?: boolean;
 	/** Compiled RegExp (not a string source) — used directly by SettingsRegistry. */
 	nlIntentRegex?: RegExp;
+	/** Dot-path through SystemConfig used as effective default when no user override exists. */
+	systemConfigBackingKey?: string;
 }
 
 export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
@@ -68,6 +70,9 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		category: 'personal',
 		nlSafe: true,
 		nlIntentRegex: NOTES_INTENT_REGEX,
+		// When no user override exists, the system-wide chat.logToNotes value serves as the
+		// effective default so the GUI and catalog show the operator default, not the manifest default.
+		systemConfigBackingKey: 'chat.logToNotes',
 	},
 	{
 		key: 'flush_memory_on_idle_reset',
