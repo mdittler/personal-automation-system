@@ -208,7 +208,7 @@ export function formatDangerPrompt(
 		lines.push(`Action: reset to default`);
 	}
 
-	const phrase = def.dangerConfirmPrompt ?? 'I understand';
+	const phrase = def.dangerConfirmPrompt ?? '';
 	lines.push('');
 	lines.push(`To confirm, type:`);
 	lines.push(`\`/settings confirm ${escapeMarkdown(phrase)}\``);

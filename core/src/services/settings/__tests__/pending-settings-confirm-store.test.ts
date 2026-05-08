@@ -287,13 +287,17 @@ describe('PendingSettingsConfirmStore — cleanupExpired', () => {
 	});
 
 	it('does not remove entries that have not yet expired', () => {
-		const store = makeStore(10_000); // 10s TTL
-		store.attach('u1', BASE_ENTRY); // expiresAt = 1_010_000
+		const store = makeStore(10_000); // 10s TTL; expiresAt = 1_000_000 + 10_000 = 1_010_000
+		store.attach('u1', BASE_ENTRY);
 		store.attach('u2', { ...BASE_ENTRY, userId: 'u2' });
 
-		// Only expire u1 by passing now = 1_010_001
-		// But both have same expiresAt in this setup... let me advance clock between attaches.
-		// Actually, reset to test them at different times.
+		// Pass now = 1_009_999 — strictly before expiresAt (1_010_000), so no entries should expire.
+		const count = store.cleanupExpired(1_009_999);
+		expect(count).toBe(0);
+
+		// Both entries must still be accessible via peek.
+		expect(store.peek('u1')).toBeDefined();
+		expect(store.peek('u2')).toBeDefined();
 	});
 });
 

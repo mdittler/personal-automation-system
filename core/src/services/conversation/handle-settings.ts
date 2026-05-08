@@ -238,7 +238,7 @@ async function setFlow(
 		}
 
 		// Create pending entry.
-		const entry = deps.pendingStore.attach(userId, {
+		deps.pendingStore.attach(userId, {
 			userId,
 			qualifiedKey: qualifiedKey(def.appId, def.key),
 			action: 'set',
@@ -572,7 +572,7 @@ function resolveDef(
 		if (!def) {
 			// Fallback: treat the whole string as an unqualified key (system key path).
 			const exactMatches = registry
-				.getAll()
+				.getForUser(isAdmin)
 				.filter((d) => d.key === keyOrQualified && d.category === category);
 			if (exactMatches.length === 1) {
 				def = exactMatches[0]!;
@@ -596,7 +596,7 @@ function resolveDef(
 	} else {
 		// Unqualified key (no dots) — scan for matches in the given category.
 		const matches = registry
-			.getAll()
+			.getForUser(isAdmin)
 			.filter((d) => d.key === keyOrQualified && d.category === category);
 
 		if (matches.length === 0) {
