@@ -75,6 +75,50 @@ export class SystemConfigWriter {
 	 * SYSTEM_SETTING_DEFS.default at construction time), which must equal
 	 * what the config loader would produce when the key is absent from YAML.
 	 */
+	/**
+	 * Write multiple keys atomically: validate all, acquire the file lock once,
+	 * apply all mutations in a single YAML round-trip, roll back all in-memory
+	 * changes if the write fails (REQ-SETTINGS-024).
+	 *
+	 * Throws if any key is not in the allowlist (checked before any mutation).
+	 */
+	async writeMany(
+		items: ReadonlyArray<{ key: string; coerced: unknown }>,
+		config: SystemConfig,
+	): Promise<void> {
+		// Validate all keys up-front so we don't partially mutate on allowlist error.
+		const resolved = items.map(({ key, coerced }) => ({
+			key,
+			runtimePath: this.resolveRuntimePath(key),
+			coerced,
+		}));
+
+		// Snapshot previous in-memory values for coordinated rollback.
+		const cfg = config as unknown as Record<string, unknown>;
+		const prevValues = resolved.map(({ runtimePath }) => dotGet(cfg, runtimePath));
+
+		// Optimistically mutate in-memory.
+		for (const { runtimePath, coerced } of resolved) {
+			dotSet(cfg, runtimePath, coerced);
+		}
+
+		// Persist all keys in a single lock acquisition.
+		try {
+			await mutatePasYaml(this.deps.configPath, (parsed) => {
+				for (const { key, coerced } of resolved) {
+					dotSet(parsed, key, coerced);
+				}
+				return parsed;
+			});
+		} catch (err) {
+			// Roll back all in-memory mutations together.
+			for (let i = 0; i < resolved.length; i++) {
+				dotSet(cfg, resolved[i]!.runtimePath, prevValues[i]);
+			}
+			throw err;
+		}
+	}
+
 	async resetToSchemaDefault(unqualifiedKey: string, config: SystemConfig): Promise<unknown> {
 		this.resolveRuntimePath(unqualifiedKey); // validate allowlist membership
 

@@ -223,12 +223,16 @@ function buildConfirmModalHtml(opts: {
 	const safeCoercionError = coercionError ? escapeHtml(coercionError) : '';
 	const safeCsrf = escapeHtml(csrfToken);
 
-	const actionBody =
+	// Display-only section (outside the form — no name attributes).
+	const actionDisplay =
 		action === 'set'
 			? `<p>Proposed new value: <code>${safeValue}</code></p>
-      ${safeCoercionError ? `<p><small style="color:var(--pico-del-color)">Invalid value: ${safeCoercionError}</small></p>` : ''}
-      <input type="hidden" name="value" value="${safeValue}" />`
+      ${safeCoercionError ? `<p><small style="color:var(--pico-del-color)">Invalid value: ${safeCoercionError}</small></p>` : ''}`
 			: '<p>Action: <strong>reset to default</strong></p>';
+
+	// Hidden value input lives inside the form so it is submitted with the POST.
+	const valueInput =
+		action === 'set' ? `<input type="hidden" name="value" value="${safeValue}" />` : '';
 
 	const errorHtml = safeError
 		? `<small style="color:var(--pico-del-color)">${safeError}</small>`
@@ -239,10 +243,11 @@ function buildConfirmModalHtml(opts: {
     <header><strong>${safeLabel}</strong></header>
     <p><em>This is a dangerous setting. To confirm, type the exact phrase below:</em></p>
     <blockquote>${safePrompt}</blockquote>
-    ${actionBody}
+    ${actionDisplay}
     <form hx-post="/gui/settings/${safeAppId}/${safeKey}/confirm" hx-target="#confirm-dialog" hx-swap="innerHTML">
       <input type="hidden" name="_csrf" value="${safeCsrf}" />
       <input type="hidden" name="action" value="${escapeHtml(action)}" />
+      ${valueInput}
       <input type="text" name="phrase" autocomplete="off" autofocus placeholder="Type the phrase above to confirm" />
       ${errorHtml}
       <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
@@ -471,9 +476,11 @@ export function registerSettingsRoutes(
 				return reply.status(403).send('Dangerous settings require the confirm flow');
 			}
 
-			// System-scope resets require admin.
+			// System-scope resets: adminOnly keys require admin; non-adminOnly system
+			// keys (retention_days, auto_reset_idle_minutes) are writable by all users
+			// per the visibility matrix — resets follow the same rule.
 			if (def.scope === 'system') {
-				if (!isAdmin) return reply.status(403).send('Forbidden');
+				if (def.adminOnly && !isAdmin) return reply.status(403).send('Forbidden');
 
 				const writer = systemConfigWriter;
 				const config = systemConfig;
@@ -554,6 +561,8 @@ export function registerSettingsRoutes(
 		'/settings/:appId/:key/confirm',
 		{ preHandler: [requirePlatformAdmin] },
 		async (request: FastifyRequest, reply: FastifyReply) => {
+			// requirePlatformAdmin preHandler guarantees user is set.
+			const userId = request.user!.userId;
 			const { appId, key } = request.params as { appId: string; key: string };
 			const query = request.query as Record<string, string>;
 
@@ -590,7 +599,7 @@ export function registerSettingsRoutes(
 			let coercionError = '';
 			if (action === 'set' && proposedValue !== '') {
 				const result = settingsWriter.validate({
-					userId: request.user?.userId,
+					userId,
 					appId,
 					key,
 					rawValue: proposedValue,
@@ -622,6 +631,8 @@ export function registerSettingsRoutes(
 		'/settings/:appId/:key/confirm',
 		{ preHandler: [requirePlatformAdmin] },
 		async (request: FastifyRequest, reply: FastifyReply) => {
+			// requirePlatformAdmin preHandler guarantees user is set.
+			const userId = request.user!.userId;
 			const { appId, key } = request.params as { appId: string; key: string };
 			const body = (request.body ?? {}) as Record<string, string>;
 
@@ -638,7 +649,14 @@ export function registerSettingsRoutes(
 
 			const action = body.action === 'reset' ? 'reset' : 'set';
 			const phrase = body.phrase ?? '';
-			const expectedPhrase = def.dangerConfirmPrompt ?? 'confirm';
+
+			// Fail closed if dangerConfirmPrompt is missing — registry validation
+			// should prevent this, but a future registration path could bypass it.
+			const expectedPhrase = def.dangerConfirmPrompt;
+			if (!expectedPhrase) {
+				logger.error({ appId, key }, 'confirm: dangerous def missing dangerConfirmPrompt');
+				return reply.status(500).send('Internal configuration error');
+			}
 
 			// REQ-SETTINGS-027: timing-safe phrase match.
 			if (!matchesDangerConfirmPhrase(phrase, expectedPhrase)) {
@@ -658,8 +676,6 @@ export function registerSettingsRoutes(
 						}),
 					);
 			}
-
-			const userId = request.user?.userId;
 
 			if (action === 'set') {
 				const rawValue = body.value ?? '';

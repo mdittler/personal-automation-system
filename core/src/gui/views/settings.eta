@@ -22,6 +22,7 @@
 </div>
 <% } %>
 
+<!-- Non-dangerous categories: inputs inside this form are submitted on Save. -->
 <form method="post" action="/gui/settings">
   <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
 
@@ -29,16 +30,14 @@
     <% const defs = it.byCategory[cat]; %>
     <% if (!defs || defs.length === 0) { continue; } %>
     <% if (!it.visibleCategories.includes(cat)) { continue; } %>
+    <% if (cat === 'dangerous') { continue; } %>
 
-    <% const isDangerousCat = cat === 'dangerous'; %>
     <% const isSystemCat = cat === 'system'; %>
 
     <details <%= cat === 'personal' ? 'open' : '' %> style="margin-bottom:1rem">
       <summary>
         <strong><%= it.categoryLabels[cat] %></strong>
-        <% if (isDangerousCat) { %>
-        <small style="color:var(--pico-del-color);margin-left:0.5rem">&#9888; Admin only — changes require confirmation</small>
-        <% } else if (isSystemCat) { %>
+        <% if (isSystemCat) { %>
         <small style="color:var(--pico-muted-color);margin-left:0.5rem">System-wide settings</small>
         <% } %>
       </summary>
@@ -52,7 +51,7 @@
           <% const errorMsg = it.errors[qk]; %>
           <% const rawValue = it.rawValues[qk]; %>
 
-          <div class="setting-row<%= def.dangerous ? ' dangerous-row' : '' %>" data-app="<%= def.appId %>" data-key="<%= def.key %>">
+          <div class="setting-row" data-app="<%= def.appId %>" data-key="<%= def.key %>">
             <div class="setting-label">
               <% if (def.type !== 'boolean') { %>
               <label for="sf-<%= fname %>"><strong><%= def.label %></strong></label>
@@ -101,23 +100,6 @@
 
             </div>
             <div class="setting-actions">
-              <% if (def.dangerous) { %>
-              <button
-                type="button"
-                class="outline"
-                style="font-size:0.8rem;padding:0.2rem 0.5rem"
-                hx-get="/gui/settings/<%= def.appId %>/<%= def.key %>/confirm?action=set"
-                hx-include="closest .setting-row"
-                hx-target="#confirm-dialog"
-              >Save&hellip;</button>
-              <button
-                type="button"
-                class="outline secondary"
-                style="font-size:0.8rem;padding:0.2rem 0.5rem"
-                hx-get="/gui/settings/<%= def.appId %>/<%= def.key %>/confirm?action=reset"
-                hx-target="#confirm-dialog"
-              >Reset&hellip;</button>
-              <% } else { %>
               <button
                 type="button"
                 class="outline secondary"
@@ -126,7 +108,6 @@
                 hx-target="closest .setting-row"
                 hx-swap="outerHTML"
               >Reset</button>
-              <% } %>
             </div>
           </div>
           <hr style="margin:0.5rem 0;opacity:0.2" />
@@ -140,6 +121,95 @@
     <button type="submit">Save Settings</button>
   </div>
 </form>
+
+<% if (it.visibleCategories.includes('dangerous') && it.byCategory['dangerous'] && it.byCategory['dangerous'].length > 0) { %>
+<details style="margin-bottom:1rem">
+  <summary>
+    <strong><%= it.categoryLabels['dangerous'] %></strong>
+    <small style="color:var(--pico-del-color);margin-left:0.5rem">&#9888; Admin only — changes require confirmation</small>
+  </summary>
+  <div style="padding:0.5rem 0">
+
+    <% for (const def of it.byCategory['dangerous']) { %>
+      <% const qk = def.appId + '.' + def.key; %>
+      <% const fname = def.appId + '__' + def.key; %>
+      <% const pname = def.appId + '__' + def.key + '__present'; %>
+      <% const currentValue = it.currentValues[qk]; %>
+      <% const errorMsg = it.errors[qk]; %>
+      <% const rawValue = it.rawValues[qk]; %>
+
+      <div class="setting-row dangerous-row" data-app="<%= def.appId %>" data-key="<%= def.key %>">
+        <div class="setting-label">
+          <% if (def.type !== 'boolean') { %>
+          <label for="sf-<%= fname %>"><strong><%= def.label %></strong></label>
+          <% } %>
+          <small class="setting-help" style="display:block;color:var(--pico-muted-color)"><%= def.help %></small>
+          <% if (def.restartRequired) { %>
+          <small class="restart-badge" style="color:var(--pico-color-amber-500,#f59e0b);font-size:0.75rem;display:block">&#9888; Restart required to take effect</small>
+          <% } %>
+          <% if (errorMsg) { %>
+          <small class="setting-error" style="color:var(--pico-del-color)"><%= errorMsg %></small>
+          <% } %>
+        </div>
+        <div class="setting-widget" style="margin:0.5rem 0">
+
+          <% if (def.type === 'boolean') { %>
+            <label>
+              <input type="hidden" name="<%= pname %>" value="1" />
+              <input type="checkbox" name="<%= fname %>" role="switch"
+                <%= Boolean(currentValue) ? 'checked' : '' %> />
+              <%= def.label %>
+            </label>
+
+          <% } else if (def.type === 'number') { %>
+            <input
+              type="number"
+              id="sf-<%= fname %>"
+              name="<%= fname %>"
+              value="<%= rawValue !== undefined ? rawValue : (currentValue !== undefined ? currentValue : '') %>"
+            />
+
+          <% } else if (def.type === 'select') { %>
+            <select id="sf-<%= fname %>" name="<%= fname %>">
+              <% for (const opt of (def.options || [])) { %>
+                <option value="<%= opt %>" <%= String(currentValue) === opt ? 'selected' : '' %>><%= opt %></option>
+              <% } %>
+            </select>
+
+          <% } else { %>
+            <input
+              type="text"
+              id="sf-<%= fname %>"
+              name="<%= fname %>"
+              value="<%= rawValue !== undefined ? rawValue : (currentValue !== undefined ? currentValue : '') %>"
+            />
+          <% } %>
+
+        </div>
+        <div class="setting-actions">
+          <button
+            type="button"
+            class="outline"
+            style="font-size:0.8rem;padding:0.2rem 0.5rem"
+            hx-get="/gui/settings/<%= def.appId %>/<%= def.key %>/confirm?action=set"
+            hx-include="closest .setting-row"
+            hx-target="#confirm-dialog"
+          >Save&hellip;</button>
+          <button
+            type="button"
+            class="outline secondary"
+            style="font-size:0.8rem;padding:0.2rem 0.5rem"
+            hx-get="/gui/settings/<%= def.appId %>/<%= def.key %>/confirm?action=reset"
+            hx-target="#confirm-dialog"
+          >Reset&hellip;</button>
+        </div>
+      </div>
+      <hr style="margin:0.5rem 0;opacity:0.2" />
+    <% } %>
+
+  </div>
+</details>
+<% } %>
 
 <!-- Confirm dialog placeholder — filled by htmx confirm endpoints (C.4) -->
 <dialog id="confirm-dialog"></dialog>

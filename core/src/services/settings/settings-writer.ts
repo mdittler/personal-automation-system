@@ -452,7 +452,11 @@ export class SettingsWriter {
     }
   }
 
-  /** Write a batch of system-scope items, one key at a time via SystemConfigWriter. */
+  /**
+   * Write a batch of system-scope items atomically via SystemConfigWriter.writeMany:
+   * all keys are validated, the file lock is acquired once, and all in-memory
+   * mutations are rolled back together if the YAML write fails.
+   */
   private async persistSystemBatch(
     appItems: Array<{ req: WriteRequest; coerced: unknown }>,
     userId: string,
@@ -470,46 +474,55 @@ export class SettingsWriter {
       return;
     }
 
-    const written: string[] = [];
-    let anyFailed = false;
-
-    for (const { req, coerced } of appItems) {
+    // Snapshot prevValues for hooks (before any in-memory mutation).
+    const prevValues = new Map<string, unknown>();
+    for (const { req } of appItems) {
       const def = this.deps.registry.getByAppKey('system', req.key);
-      let prevValue: unknown = def?.default;
+      let prev: unknown = def?.default;
       try {
-        prevValue = writer.read(req.key, config);
+        prev = writer.read(req.key, config);
       } catch {
         // Non-fatal — hooks see def default as prevValue
       }
-
-      try {
-        await writer.write(req.key, coerced, config);
-        written.push(req.key);
-
-        const qk = qualifiedKey('system', req.key);
-        await this.runHooksForKey(qk, {
-          userId,
-          appId: 'system',
-          key: req.key,
-          prevValue,
-          newValue: coerced,
-        });
-      } catch (err) {
-        this.deps.logger.warn(
-          'SettingsWriter.writeBatch(system): persist failed for key=%s userId=%s err=%s',
-          req.key,
-          userId,
-          err instanceof Error ? err.message : String(err),
-        );
-        anyFailed = true;
-        perField.set(qualifiedKey('system', req.key), { ok: false, reason: 'persist failed' });
-      }
+      prevValues.set(req.key, prev);
     }
 
-    perApp.set('system', {
-      ok: !anyFailed,
-      reason: anyFailed ? 'one or more system keys failed to persist' : undefined,
-      written,
-    });
+    const written: string[] = [];
+    try {
+      // Single atomic write: one lock acquisition, one YAML round-trip.
+      await writer.writeMany(
+        appItems.map(({ req, coerced }) => ({ key: req.key, coerced })),
+        config,
+      );
+      for (const { req } of appItems) {
+        written.push(req.key);
+      }
+    } catch (err) {
+      const reason = 'persist failed';
+      this.deps.logger.warn(
+        'SettingsWriter.writeBatch(system): atomic write failed userId=%s err=%s',
+        userId,
+        err instanceof Error ? err.message : String(err),
+      );
+      perApp.set('system', { ok: false, reason, written: [] });
+      for (const { req } of appItems) {
+        perField.set(qualifiedKey('system', req.key), { ok: false, reason });
+      }
+      return;
+    }
+
+    // Fire hooks after a successful atomic write.
+    for (const { req, coerced } of appItems) {
+      const qk = qualifiedKey('system', req.key);
+      await this.runHooksForKey(qk, {
+        userId,
+        appId: 'system',
+        key: req.key,
+        prevValue: prevValues.get(req.key),
+        newValue: coerced,
+      });
+    }
+
+    perApp.set('system', { ok: true, written });
   }
 }
