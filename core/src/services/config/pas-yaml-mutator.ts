@@ -11,8 +11,8 @@
  */
 import { readFile } from 'node:fs/promises';
 import { parse, stringify } from 'yaml';
-import { atomicWrite } from '../../utils/file.js';
 import { withFileLock } from '../../utils/file-mutex.js';
+import { atomicWrite } from '../../utils/file.js';
 
 /**
  * Read → apply mutator → write pas.yaml atomically under a file lock.
@@ -38,8 +38,7 @@ export async function mutatePasYaml(
 		} catch (err: unknown) {
 			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
 				throw new Error(
-					`mutatePasYaml: config file not found at '${configPath}'. ` +
-						`PAS requires an existing pas.yaml at runtime.`,
+					`mutatePasYaml: config file not found at '${configPath}'. PAS requires an existing pas.yaml at runtime.`,
 				);
 			}
 			throw err;

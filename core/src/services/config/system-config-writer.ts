@@ -31,7 +31,7 @@ export class SystemConfigWriter {
 	 */
 	read(unqualifiedKey: string, config: SystemConfig): unknown {
 		const runtimePath = this.resolveRuntimePath(unqualifiedKey);
-		return dotGet(config as Record<string, unknown>, runtimePath);
+		return dotGet(config as unknown as Record<string, unknown>, runtimePath);
 	}
 
 	/**
@@ -42,18 +42,14 @@ export class SystemConfigWriter {
 	 * If the YAML write fails the in-memory mutation is rolled back so both
 	 * stores stay consistent.
 	 */
-	async write(
-		unqualifiedKey: string,
-		coerced: unknown,
-		config: SystemConfig,
-	): Promise<void> {
+	async write(unqualifiedKey: string, coerced: unknown, config: SystemConfig): Promise<void> {
 		const runtimePath = this.resolveRuntimePath(unqualifiedKey);
 
 		// Capture previous in-memory value for rollback on YAML failure.
-		const prevValue = dotGet(config as Record<string, unknown>, runtimePath);
+		const prevValue = dotGet(config as unknown as Record<string, unknown>, runtimePath);
 
 		// 1. Mutate in-memory first (optimistic).
-		dotSet(config as Record<string, unknown>, runtimePath, coerced);
+		dotSet(config as unknown as Record<string, unknown>, runtimePath, coerced);
 
 		// 2. Persist to YAML. Roll back in-memory on failure.
 		try {
@@ -62,7 +58,7 @@ export class SystemConfigWriter {
 				return parsed;
 			});
 		} catch (err) {
-			dotSet(config as Record<string, unknown>, runtimePath, prevValue);
+			dotSet(config as unknown as Record<string, unknown>, runtimePath, prevValue);
 			throw err;
 		}
 	}
@@ -79,16 +75,11 @@ export class SystemConfigWriter {
 	 * SYSTEM_SETTING_DEFS.default at construction time), which must equal
 	 * what the config loader would produce when the key is absent from YAML.
 	 */
-	async resetToSchemaDefault(
-		unqualifiedKey: string,
-		config: SystemConfig,
-	): Promise<unknown> {
+	async resetToSchemaDefault(unqualifiedKey: string, config: SystemConfig): Promise<unknown> {
 		this.resolveRuntimePath(unqualifiedKey); // validate allowlist membership
 
 		if (!(unqualifiedKey in this.deps.keyDefaults)) {
-			throw new Error(
-				`SystemConfigWriter: no default registered for key '${unqualifiedKey}'.`,
-			);
+			throw new Error(`SystemConfigWriter: no default registered for key '${unqualifiedKey}'.`);
 		}
 
 		const runtimePath = this.deps.runtimePathTable[unqualifiedKey]!;
@@ -101,7 +92,7 @@ export class SystemConfigWriter {
 		});
 
 		// Mirror default into in-memory config.
-		dotSet(config as Record<string, unknown>, runtimePath, effectiveDefault);
+		dotSet(config as unknown as Record<string, unknown>, runtimePath, effectiveDefault);
 
 		return effectiveDefault;
 	}
@@ -114,8 +105,7 @@ export class SystemConfigWriter {
 		const path = this.deps.runtimePathTable[unqualifiedKey];
 		if (path === undefined) {
 			throw new Error(
-				`SystemConfigWriter: key '${unqualifiedKey}' is not in the runtime path table. ` +
-					`Only keys declared in SYSTEM_KEY_RUNTIME_PATH are allowed (closed allowlist).`,
+				`SystemConfigWriter: key '${unqualifiedKey}' is not in the runtime path table. Only keys declared in SYSTEM_KEY_RUNTIME_PATH are allowed (closed allowlist).`,
 			);
 		}
 		return path;
@@ -144,11 +134,7 @@ export function dotGet(obj: Record<string, unknown>, path: string): unknown {
  * Set a value on a nested object using a dot-notation path, creating
  * intermediate objects as needed.
  */
-export function dotSet(
-	obj: Record<string, unknown>,
-	path: string,
-	value: unknown,
-): void {
+export function dotSet(obj: Record<string, unknown>, path: string, value: unknown): void {
 	const parts = path.split('.');
 	let cur: Record<string, unknown> = obj;
 	for (let i = 0; i < parts.length - 1; i++) {

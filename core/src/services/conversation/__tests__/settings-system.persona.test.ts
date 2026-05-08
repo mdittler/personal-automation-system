@@ -16,19 +16,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { AppConfigService, SystemConfig } from '../../../types/config.js';
 import type { AppLogger } from '../../../types/app-module.js';
-import { SettingsRegistry, qualifiedKey } from '../../settings/settings-registry.js';
-import { SettingsReader } from '../../settings/settings-reader.js';
-import { SettingsWriter } from '../../settings/settings-writer.js';
+import type { AppConfigService, SystemConfig } from '../../../types/config.js';
+import { SYSTEM_KEY_RUNTIME_PATH, SYSTEM_SETTING_DEFS } from '../../config/settings-metadata.js';
+import type { SystemConfigWriter } from '../../config/system-config-writer.js';
 import { buildSettingsRegistry } from '../../settings/build-registry.js';
-import { SystemConfigWriter } from '../../config/system-config-writer.js';
-import {
-	SYSTEM_KEY_RUNTIME_PATH,
-	SYSTEM_SETTING_DEFS,
-} from '../../config/settings-metadata.js';
-import { CONVERSATION_USER_CONFIG } from '../manifest.js';
-import { conversationManifestToSettingDefs } from '../manifest-settings.js';
+import { SettingsReader } from '../../settings/settings-reader.js';
+import { type SettingsRegistry, qualifiedKey } from '../../settings/settings-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,14 +31,17 @@ import { conversationManifestToSettingDefs } from '../manifest-settings.js';
 
 function makeLogger(): AppLogger {
 	return {
-		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
-		error: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
 	} as AppLogger;
 }
 
-function makeAppConfig(
-	overrides: Record<string, unknown> | null = null,
-): AppConfigService {
+function makeAppConfig(overrides: Record<string, unknown> | null = null): AppConfigService {
 	return {
 		get: vi.fn(),
 		getAll: vi.fn(),
@@ -56,14 +54,33 @@ function makeAppConfig(
 
 function makeSystemConfig(overrides: Partial<SystemConfig> = {}): SystemConfig {
 	return {
-		port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
-		telegram: { botToken: '' }, claude: { apiKey: '', model: '' },
-		cloudflare: {}, llm: { providers: {}, tiers: { fast: { provider: 'claude', model: '' }, standard: { provider: 'claude', model: '' } } },
-		gui: { authToken: '' }, api: { token: '' }, n8n: { dispatchUrl: '' },
+		port: 3000,
+		dataDir: '/tmp',
+		logLevel: 'info',
+		timezone: 'UTC',
+		telegram: { botToken: '' },
+		claude: { apiKey: '', model: '' },
+		cloudflare: {},
+		llm: {
+			providers: {},
+			tiers: {
+				fast: { provider: 'claude', model: '' },
+				standard: { provider: 'claude', model: '' },
+			},
+		},
+		gui: { authToken: '' },
+		api: { token: '' },
+		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [], webhooks: [],
+		users: [],
+		webhooks: [],
 		backup: { enabled: false, path: '/tmp', schedule: '0 3 * * *', retentionCount: 7 },
-		chat: { logToNotes: false, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } },
+		chat: {
+			logToNotes: false,
+			memory: { strict_durable_kinds: false },
+			sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null },
+			recall: { max_window_days: 365 },
+		},
 		...overrides,
 	} as unknown as SystemConfig;
 }
@@ -76,11 +93,13 @@ interface TestContext {
 	chatbotConfig: AppConfigService;
 }
 
-function buildContext(opts: {
-	chatbotOverrides?: Record<string, unknown> | null;
-	systemConfigOverrides?: Partial<SystemConfig>;
-	mockSystemConfigWriter?: SystemConfigWriter;
-} = {}): TestContext {
+function buildContext(
+	opts: {
+		chatbotOverrides?: Record<string, unknown> | null;
+		systemConfigOverrides?: Partial<SystemConfig>;
+		mockSystemConfigWriter?: SystemConfigWriter;
+	} = {},
+): TestContext {
 	const systemConfig = makeSystemConfig(opts.systemConfigOverrides);
 
 	const registry = buildSettingsRegistry({
@@ -95,8 +114,9 @@ function buildContext(opts: {
 	};
 
 	// Use a no-op SystemConfigWriter (reads from systemConfig directly via dotGet)
-	const systemConfigWriter = opts.mockSystemConfigWriter ??
-		{
+	const systemConfigWriter =
+		opts.mockSystemConfigWriter ??
+		({
 			read: (key: string, cfg: SystemConfig) => {
 				// Simple dot-path reader for test purposes
 				const parts = SYSTEM_KEY_RUNTIME_PATH[key]?.split('.') ?? key.split('.');
@@ -109,7 +129,7 @@ function buildContext(opts: {
 			},
 			write: vi.fn().mockResolvedValue(undefined),
 			resetToSchemaDefault: vi.fn().mockResolvedValue(undefined),
-		} as unknown as SystemConfigWriter;
+		} as unknown as SystemConfigWriter);
 
 	const reader = new SettingsReader({
 		registry,
@@ -187,14 +207,32 @@ describe('Admin vs non-admin catalog visibility (REQ-SETTINGS-025, 033)', () => 
 	});
 
 	it('admin catalog entry for retention_days shows the live system value', async () => {
-		const { reader } = buildContext({ systemConfigOverrides: { chat: { logToNotes: false, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 180, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig> });
+		const { reader } = buildContext({
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: false,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: false, retention_days: 180, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
+		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: true });
 		const value = catalogValue(catalog, 'system.chat.sessions.retention_days');
 		expect(value).toBe('180');
 	});
 
 	it('admin catalog auto_prune entry reflects live system config value', async () => {
-		const { reader } = buildContext({ systemConfigOverrides: { chat: { logToNotes: false, memory: { strict_durable_kinds: false }, sessions: { auto_prune: true, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig> });
+		const { reader } = buildContext({
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: false,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: true, retention_days: 90, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
+		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: true });
 		const value = catalogValue(catalog, 'system.chat.sessions.auto_prune');
 		expect(value).toBe('ON');
@@ -251,7 +289,14 @@ describe('Effective-default resolver for log_to_notes (REQ-SETTINGS-029)', () =>
 	it('no user override + chat.logToNotes=true → catalog shows true', async () => {
 		const { reader } = buildContext({
 			chatbotOverrides: null, // no overrides
-			systemConfigOverrides: { chat: { logToNotes: true, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig>,
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: true,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
 		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 		const value = catalogValue(catalog, 'chatbot.log_to_notes');
@@ -262,7 +307,14 @@ describe('Effective-default resolver for log_to_notes (REQ-SETTINGS-029)', () =>
 	it('no user override + chat.logToNotes=false → catalog shows false (manifest default)', async () => {
 		const { reader } = buildContext({
 			chatbotOverrides: null,
-			systemConfigOverrides: { chat: { logToNotes: false, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig>,
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: false,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
 		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 		const value = catalogValue(catalog, 'chatbot.log_to_notes');
@@ -273,7 +325,14 @@ describe('Effective-default resolver for log_to_notes (REQ-SETTINGS-029)', () =>
 	it('user override (false) beats system value (true)', async () => {
 		const { reader } = buildContext({
 			chatbotOverrides: { log_to_notes: false },
-			systemConfigOverrides: { chat: { logToNotes: true, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig>,
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: true,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
 		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 		const value = catalogValue(catalog, 'chatbot.log_to_notes');
@@ -283,7 +342,14 @@ describe('Effective-default resolver for log_to_notes (REQ-SETTINGS-029)', () =>
 	it('user override (true) beats system value (false)', async () => {
 		const { reader } = buildContext({
 			chatbotOverrides: { log_to_notes: true },
-			systemConfigOverrides: { chat: { logToNotes: false, memory: { strict_durable_kinds: false }, sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null }, recall: { max_window_days: 365 } } } as unknown as Partial<SystemConfig>,
+			systemConfigOverrides: {
+				chat: {
+					logToNotes: false,
+					memory: { strict_durable_kinds: false },
+					sessions: { auto_prune: false, retention_days: 90, auto_reset_idle_minutes: null },
+					recall: { max_window_days: 365 },
+				},
+			} as unknown as Partial<SystemConfig>,
 		});
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
 		const value = catalogValue(catalog, 'chatbot.log_to_notes');
@@ -340,9 +406,7 @@ describe('Hot-update hook: auto_reset_idle_minutes (REQ-SETTINGS-030)', () => {
 			source: 'admin-confirmed',
 		});
 
-		expect(hookFn).toHaveBeenCalledWith(
-			expect.objectContaining({ newValue: null }),
-		);
+		expect(hookFn).toHaveBeenCalledWith(expect.objectContaining({ newValue: null }));
 	});
 });
 

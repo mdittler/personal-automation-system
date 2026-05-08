@@ -509,6 +509,11 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Regex source string (compiled with /i flag) used to detect NL intent to change this setting."
+				},
+				"systemConfigBackingKey": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Dot-path into SystemConfig (camelCase) used as effective default when no user override exists."
 				}
 			},
 			"if": {

@@ -451,11 +451,6 @@ user_config:
     category: food
     nlSafe: true
     nlIntentRegex: "(set|change|update|my).*(fiber.target|target.fiber|fiber.goal)|fiber.target.*(set|change|update|to)"
-  - key: guest_profiles_info
-    type: string
-    default: "Edit via /hosting guests add|remove|list"
-    description: "Guest profiles are managed via the /hosting command (not editable here)"
-    hidden: true
   - key: cultural_calendar
     type: boolean
     default: true
@@ -465,11 +460,6 @@ user_config:
     category: food
     nlSafe: true
     nlIntentRegex: "(turn|enable|disable|toggle).*(cultural.calendar|cultural calendar)|(cultural.calendar|cultural calendar).*(on|off|enable|disable)"
-  - key: schedule_overrides_info
-    type: string
-    default: "Edit the seasonal-nudge and weekly-nutrition-summary cron schedules via the GUI Scheduler page"
-    description: "Schedule cron expressions are managed via the GUI Scheduler page, not here"
-    hidden: true
   - key: shadow_sample_rate
     type: number
     default: 1

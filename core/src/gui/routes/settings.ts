@@ -17,17 +17,17 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
-import type { SystemConfig } from '../../types/config.js';
-import type { AppConfigService } from '../../types/config.js';
+import type { SystemConfigWriter } from '../../services/config/system-config-writer.js';
 import { CATEGORY_LABELS, CATEGORY_ORDER } from '../../services/settings/categories.js';
 import type { SettingDef, SettingsCategory } from '../../services/settings/settings-registry.js';
 import { qualifiedKey } from '../../services/settings/settings-registry.js';
 import type { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import type { SettingsWriter, WriteRequest } from '../../services/settings/settings-writer.js';
-import type { SystemConfigWriter } from '../../services/config/system-config-writer.js';
+import type { SystemConfig } from '../../types/config.js';
+import type { AppConfigService } from '../../types/config.js';
+import { escapeHtml } from '../../utils/escape-html.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
 import { matchesDangerConfirmPhrase } from './settings-confirm-helpers.js';
-import { escapeHtml } from '../../utils/escape-html.js';
 
 const NON_ADMIN_CATEGORIES: readonly SettingsCategory[] = [
 	'personal',
@@ -88,7 +88,7 @@ export function buildSettingRowHtml(
 	let widget = '';
 
 	if (def.type === 'boolean') {
-		const checked = Boolean(currentValue) ? 'checked' : '';
+		const checked = currentValue ? 'checked' : '';
 		const safePname = escapeHtml(presentFieldName(def.appId, def.key));
 		const safeFname = escapeHtml(fname);
 		widget = `<label>
@@ -122,9 +122,7 @@ export function buildSettingRowHtml(
 		: '';
 
 	const labelHtml =
-		def.type !== 'boolean'
-			? `<label for="sf-${escapeHtml(fname)}">${safeLabel}</label>`
-			: '';
+		def.type !== 'boolean' ? `<label for="sf-${escapeHtml(fname)}">${safeLabel}</label>` : '';
 
 	// Dangerous rows: per-row Save (confirm flow) + Reset (confirm flow).
 	// Standard rows: shared form Reset button.
@@ -230,7 +228,7 @@ function buildConfirmModalHtml(opts: {
 			? `<p>Proposed new value: <code>${safeValue}</code></p>
       ${safeCoercionError ? `<p><small style="color:var(--pico-del-color)">Invalid value: ${safeCoercionError}</small></p>` : ''}
       <input type="hidden" name="value" value="${safeValue}" />`
-			: `<p>Action: <strong>reset to default</strong></p>`;
+			: '<p>Action: <strong>reset to default</strong></p>';
 
 	const errorHtml = safeError
 		? `<small style="color:var(--pico-del-color)">${safeError}</small>`
@@ -270,7 +268,14 @@ export function registerSettingsRoutes(
 	server: FastifyInstance,
 	options: SettingsRoutesOptions,
 ): void {
-	const { settingsRegistry, settingsWriter, appConfigResolver, logger, systemConfigWriter, systemConfig } = options;
+	const {
+		settingsRegistry,
+		settingsWriter,
+		appConfigResolver,
+		logger,
+		systemConfigWriter,
+		systemConfig,
+	} = options;
 
 	// -------------------------------------------------------------------------
 	// GET /settings — render full accordion page
@@ -283,7 +288,11 @@ export function registerSettingsRoutes(
 		const isAdmin = user.isPlatformAdmin;
 		const visibleDefs = getVisibleDefs(settingsRegistry, isAdmin);
 		const currentValues = await readCurrentValues(
-			visibleDefs, userId, appConfigResolver, systemConfigWriter, systemConfig,
+			visibleDefs,
+			userId,
+			appConfigResolver,
+			systemConfigWriter,
+			systemConfig,
 		);
 		const byCategory = groupByCategory(visibleDefs);
 
@@ -327,7 +336,11 @@ export function registerSettingsRoutes(
 
 		// Read current effective values for diffing
 		const currentEffective = await readCurrentValues(
-			visibleDefs, userId, appConfigResolver, systemConfigWriter, systemConfig,
+			visibleDefs,
+			userId,
+			appConfigResolver,
+			systemConfigWriter,
+			systemConfig,
 		);
 
 		// Build batch items — iterate registry defs (NOT posted fields)
@@ -336,15 +349,15 @@ export function registerSettingsRoutes(
 			const fname = fieldName(def.appId, def.key);
 			const pname = presentFieldName(def.appId, def.key);
 
-			const inBody = def.type === 'boolean' ? (pname in body) : (fname in body);
+			const inBody = def.type === 'boolean' ? pname in body : fname in body;
 
 			// REQ-SETTINGS-035: dangerous keys must use the confirm flow.
 			// Return 400 if a dangerous field appears in the body (tamper guard).
 			if (def.dangerous) {
 				if (inBody) {
-					return reply.status(400).send(
-						'Dangerous settings require the confirm flow. Direct POST rejected.',
-					);
+					return reply
+						.status(400)
+						.send('Dangerous settings require the confirm flow. Direct POST rejected.');
 				}
 				continue;
 			}
@@ -470,12 +483,20 @@ export function registerSettingsRoutes(
 				}
 
 				let prevValue: unknown = def.default;
-				try { prevValue = writer.read(key, config); } catch { /* use def.default */ }
+				try {
+					prevValue = writer.read(key, config);
+				} catch {
+					/* use def.default */
+				}
 
 				const resetValue = await writer.resetToSchemaDefault(key, config);
 
 				await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
-					userId: user.userId, appId, key, prevValue, newValue: resetValue,
+					userId: user.userId,
+					appId,
+					key,
+					prevValue,
+					newValue: resetValue,
 				});
 
 				return reply.type('text/html').send(buildSettingRowHtml(def, resetValue));
@@ -547,7 +568,7 @@ export function registerSettingsRoutes(
 				return reply.status(400).send('Confirm flow only applies to dangerous settings');
 			}
 
-			const action = query['action'] === 'reset' ? 'reset' : 'set';
+			const action = query.action === 'reset' ? 'reset' : 'set';
 
 			// Extract proposed value for 'set' action.
 			// Value can come from ?value= directly or from the field included via hx-include.
@@ -555,11 +576,11 @@ export function registerSettingsRoutes(
 			if (action === 'set') {
 				const fieldKey = fieldName(appId, key);
 				const presentKey = presentFieldName(appId, key);
-				if (query['value'] !== undefined) {
-					proposedValue = query['value'];
+				if (query.value !== undefined) {
+					proposedValue = query.value;
 				} else if (def.type === 'boolean') {
 					// hx-include: checkbox present=1 + checkbox checked=on
-					proposedValue = fieldKey in query ? 'true' : (presentKey in query ? 'false' : '');
+					proposedValue = fieldKey in query ? 'true' : presentKey in query ? 'false' : '';
 				} else {
 					proposedValue = query[fieldKey] ?? '';
 				}
@@ -569,22 +590,27 @@ export function registerSettingsRoutes(
 			let coercionError = '';
 			if (action === 'set' && proposedValue !== '') {
 				const result = settingsWriter.validate({
-					userId: request.user!.userId,
-					appId, key, rawValue: proposedValue, source: 'admin-confirmed',
+					userId: request.user?.userId,
+					appId,
+					key,
+					rawValue: proposedValue,
+					source: 'admin-confirmed',
 				});
 				if (!result.ok) coercionError = result.reason;
 			}
 
-			return reply.type('text/html').send(buildConfirmModalHtml({
-				def,
-				appId,
-				key,
-				action,
-				proposedValue,
-				coercionError,
-				csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
-				error: '',
-			}));
+			return reply.type('text/html').send(
+				buildConfirmModalHtml({
+					def,
+					appId,
+					key,
+					action,
+					proposedValue,
+					coercionError,
+					csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
+					error: '',
+				}),
+			);
 		},
 	);
 
@@ -610,31 +636,40 @@ export function registerSettingsRoutes(
 				return reply.status(400).send('Confirm flow only applies to dangerous settings');
 			}
 
-			const action = body['action'] === 'reset' ? 'reset' : 'set';
-			const phrase = body['phrase'] ?? '';
+			const action = body.action === 'reset' ? 'reset' : 'set';
+			const phrase = body.phrase ?? '';
 			const expectedPhrase = def.dangerConfirmPrompt ?? 'confirm';
 
 			// REQ-SETTINGS-027: timing-safe phrase match.
 			if (!matchesDangerConfirmPhrase(phrase, expectedPhrase)) {
-				return reply.status(403).type('text/html').send(buildConfirmModalHtml({
-					def,
-					appId,
-					key,
-					action,
-					proposedValue: body['value'] ?? '',
-					coercionError: '',
-					csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
-					error: 'Phrase did not match. Try again.',
-				}));
+				return reply
+					.status(403)
+					.type('text/html')
+					.send(
+						buildConfirmModalHtml({
+							def,
+							appId,
+							key,
+							action,
+							proposedValue: body.value ?? '',
+							coercionError: '',
+							csrfToken: (request as unknown as { csrfToken?: string }).csrfToken ?? '',
+							error: 'Phrase did not match. Try again.',
+						}),
+					);
 			}
 
-			const userId = request.user!.userId;
+			const userId = request.user?.userId;
 
 			if (action === 'set') {
-				const rawValue = body['value'] ?? '';
+				const rawValue = body.value ?? '';
 				// Server-side re-validation (REQ-SETTINGS-027: re-validate at POST time).
 				const result = await settingsWriter.write({
-					userId, appId, key, rawValue, source: 'admin-confirmed',
+					userId,
+					appId,
+					key,
+					rawValue,
+					source: 'admin-confirmed',
 				});
 				if (!result.ok) {
 					return reply.status(400).send(`Write failed: ${result.reason}`);
@@ -647,27 +682,40 @@ export function registerSettingsRoutes(
 						logger.warn({ appId, key, userId }, 'confirm reset: no SystemConfigWriter');
 						return reply.status(500).send('Internal error');
 					}
-					try { prevValue = systemConfigWriter.read(key, systemConfig); } catch { /* use default */ }
+					try {
+						prevValue = systemConfigWriter.read(key, systemConfig);
+					} catch {
+						/* use default */
+					}
 					const resetValue = await systemConfigWriter.resetToSchemaDefault(key, systemConfig);
 					await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
-						userId, appId, key, prevValue, newValue: resetValue,
+						userId,
+						appId,
+						key,
+						prevValue,
+						newValue: resetValue,
 					});
 					return reply.redirect('/gui/settings?saved=1');
-				} else {
-					const cfg = appConfigResolver(appId);
-					if (!cfg) {
-						logger.warn({ appId, key, userId }, 'confirm reset: no AppConfigService');
-						return reply.status(500).send('Internal error');
-					}
-					try {
-						const all = await cfg.getAll(userId);
-						prevValue = all[key];
-					} catch { /* use default */ }
-					await cfg.removeOverride(userId, key);
-					await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
-						userId, appId, key, prevValue, newValue: def.default,
-					});
 				}
+				const cfg = appConfigResolver(appId);
+				if (!cfg) {
+					logger.warn({ appId, key, userId }, 'confirm reset: no AppConfigService');
+					return reply.status(500).send('Internal error');
+				}
+				try {
+					const all = await cfg.getAll(userId);
+					prevValue = all[key];
+				} catch {
+					/* use default */
+				}
+				await cfg.removeOverride(userId, key);
+				await settingsWriter.runHooksForKey(qualifiedKey(appId, key), {
+					userId,
+					appId,
+					key,
+					prevValue,
+					newValue: def.default,
+				});
 			}
 
 			return reply.redirect('/gui/settings?saved=1');
