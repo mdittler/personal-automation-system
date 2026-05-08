@@ -462,6 +462,12 @@ describe('Food cheapest-price unit normalization (REQ-FOOD-PRICE-003)', () => {
 			expect(sent).toContain('Costco');
 			expect(sent).toContain('/100g');
 			expect(sent).not.toContain('Lowest saved package price');
+			// Exact unit-price math (only assert on P5.1 to avoid duplication):
+			// Costco winner: 7.99 / (12 * 28.3495) * 100 = $2.35/100g
+			// (Trader Joe's loser: 4.99 / (6 * 28.3495) * 100 = $2.93/100g)
+			if (label === 'P5.1') {
+				expect(sent).toContain('$2.35/100g');
+			}
 		});
 	}
 

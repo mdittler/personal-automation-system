@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { NORMALIZE_PROMPT } from '../price-store.js';
+import { NORMALIZE_PROMPT, PARSE_PRICE_PROMPT } from '../price-store.js';
 import { buildReceiptPrompt } from '../receipt-parser.js';
 
 describe('NORMALIZE_PROMPT (REQ-FOOD-PRICE-003.4)', () => {
@@ -22,6 +22,20 @@ describe('NORMALIZE_PROMPT (REQ-FOOD-PRICE-003.4)', () => {
 		expect(NORMALIZE_PROMPT).toContain('ct');
 		expect(NORMALIZE_PROMPT).toContain('lb');
 		expect(NORMALIZE_PROMPT).toContain('ml');
+	});
+});
+
+describe('PARSE_PRICE_PROMPT (REQ-FOOD-PRICE-003.4)', () => {
+	it('mentions parseable size tokens', () => {
+		expect(PARSE_PRICE_PROMPT).toMatch(/parseable/i);
+	});
+
+	it('lists recognized units', () => {
+		expect(PARSE_PRICE_PROMPT).toContain('oz');
+		expect(PARSE_PRICE_PROMPT).toContain('gal');
+		expect(PARSE_PRICE_PROMPT).toContain('ct');
+		expect(PARSE_PRICE_PROMPT).toContain('lb');
+		expect(PARSE_PRICE_PROMPT).toContain('ml');
 	});
 });
 

@@ -11,6 +11,7 @@ import { withFileLock } from '@pas/core/utils/file-mutex';
 import { buildAppTags, generateFrontmatter } from '@pas/core/utils/frontmatter';
 import type { PriceEntry, Receipt, ReceiptPriceUpdate, StorePriceData } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
+import { parseSizeString } from './unit-normalizer.js';
 
 const PRICES_DIR = 'prices';
 
@@ -55,7 +56,16 @@ export function formatPriceFile(data: StorePriceData): string {
 	for (const [dept, items] of byDept) {
 		lines.push(`## ${dept}`);
 		for (const item of items) {
-			lines.push(`- ${item.name}: $${item.price.toFixed(2)} <!-- updated: ${item.updatedAt} -->`);
+			// Preserve unit on the line: when the entry's name doesn't already end
+			// with a parenthetical (e.g. "Milk" with unit "12 oz"), append " (unit)"
+			// so parsePriceFile can recover the unit on reload via extractUnit().
+			// Forward-emission only — existing files are not rewritten.
+			const hasParenSuffix = /\([^)]+\)\s*$/.test(item.name);
+			const displayName =
+				!hasParenSuffix && item.unit && item.unit.trim() !== ''
+					? `${item.name} (${item.unit.trim()})`
+					: item.name;
+			lines.push(`- ${displayName}: $${item.price.toFixed(2)} <!-- updated: ${item.updatedAt} -->`);
 		}
 		lines.push('');
 	}
@@ -263,11 +273,16 @@ export async function updatePricesFromReceipt(
 		const norm = normalMap.get(li.name);
 		if (!norm) continue;
 
-		// Prefer the LLM-emitted packageSize from the line item when present and non-empty,
-		// otherwise fall back to the normalizer's unit.
-		const packageSizeFromLine =
+		// Prefer the LLM-emitted packageSize from the line item when present and parseable,
+		// otherwise fall back to the normalizer's unit. LLM output is untrusted — gate on
+		// parseSizeString so values like "unknown", "NaN", "-5", or "large" are rejected.
+		const rawPackageSize =
 			typeof li.packageSize === 'string' && li.packageSize.trim() !== ''
 				? li.packageSize.trim()
+				: null;
+		const packageSizeFromLine =
+			rawPackageSize !== null && parseSizeString(rawPackageSize) !== null
+				? rawPackageSize
 				: null;
 		const resolvedUnit = packageSizeFromLine ?? norm.unit;
 
@@ -337,7 +352,7 @@ export interface ParsedPriceUpdate {
 	department: string;
 }
 
-const PARSE_PRICE_PROMPT = `Extract a price update from this message. Return ONLY valid JSON (no markdown, no explanation):
+export const PARSE_PRICE_PROMPT = `Extract a price update from this message. Return ONLY valid JSON (no markdown, no explanation):
 {
   "item": "Eggs (60ct)",
   "price": 3.50,
