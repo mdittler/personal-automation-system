@@ -205,6 +205,80 @@ For full architecture details, see `CLAUDE.md`.
 | `pnpm install-app <git-url>` | Install a shared app from a git repo |
 | `pnpm uninstall-app <app-id>` | Remove an installed app |
 
+## Long-Term Memory (Hermes)
+
+PAS maintains per-user long-term memory on the local filesystem — no external service required. This layer is called **Hermes**. Each conversation is a Markdown transcript; a derived SQLite + FTS5 index powers full-text recall across sessions.
+
+### Layer model
+
+The system prompt is assembled from six fenced layers on every turn:
+
+| Layer | Source | Contents | Stability |
+|---|---|---|---|
+| 1 | Base prompt | Static persona, safety rules, capability overview | Static |
+| 2 | Durable snapshot | ContextStore entries frozen at session-mint (`durable-memory` fence) | Frozen per-session |
+| 3 | App + system context | Installed apps, schedule summaries, household config | Per-turn |
+| 4 | Recalled data | App/DataQuery search results (`recalled-data` fence) | Per-turn |
+| 5 | Recalled sessions | Past conversation excerpts found by FTS5, LLM-classified (`recalled-session` fence) | Per-turn |
+| 6 | Live history | Current session turn pairs (up to 20 turns) | Per-turn |
+
+### Persistence model
+
+```
+data/households/<householdId>/users/<userId>/chatbot/conversation/
+  active-sessions.yaml           ← index: active session id + list of ended sessions
+  sessions/
+    <YYYYMMDD_HHMMSS_<8hex>>.md  ← per-session Markdown transcript (canonical)
+data/system/chat-state.db        ← SQLite FTS5 derived index (rebuildable on demand)
+```
+
+Markdown transcripts are the authoritative source. The SQLite index is derived and rebuilt with `pnpm chat-index-rebuild`.
+
+### Recall pipeline
+
+| Path | How triggered | Output |
+|---|---|---|
+| **Auto (Layer 5)** | Every turn: pre-filter heuristic → fast-tier LLM classifier | Top-5 excerpts injected into prompt |
+| **`/recall <query>`** | Explicit Telegram command | FTS5 hits displayed in chat (up to 5) |
+| **`<session-search/>`** | LLM-self-issued pseudo-tool mid-response | Re-prompt with fenced search results |
+
+### Snapshot lifecycle
+
+- **Minted** at session start (`ensureActiveSession`): ContextStore entries are frozen and stored in session frontmatter — they don't change during the session even if you update preferences.
+- **Rebuilt** explicitly via `/refreshmemory` (Telegram) or the GUI.
+- **Flushed on idle reset** (opt-in via `flush_memory_on_idle_reset`): a fast-tier LLM summarizes the dying session and writes it to ContextStore under key `recent-session-summary`, which is pinned in the next session's Layer 2 snapshot.
+
+### Typed memory and temporal recall
+
+ContextStore entries carry a typed `kind:` field: `user-preference`, `communication-preference`, `environment-fact`, `project-convention`, or `household-policy`. The LLM can tag new facts with `<memory-kind-set kind="..."/>`. Session search supports temporal filters:
+
+```
+<session-search after="2026-04-01" before="2026-05-01"/>
+```
+
+Natural-language relative dates ("last week", "in March") are also understood by the recall classifier.
+
+### Further reading
+
+- FTS5 transcript search design: `docs/superpowers/specs/2026-04-28-hermes-p5-transcript-search-design.md`
+- Memory snapshot design: `docs/superpowers/specs/2026-04-28-hermes-p4-memory-snapshot-design.md`
+- Future memory enhancements (vector recall, RRF, supersession): `docs/open-items.md`
+
+---
+
+## Credits and Influences
+
+| Resource | License | What we borrowed |
+|---|---|---|
+| [Vercel AI SDK (`ai`)](https://github.com/vercel/ai) | Apache 2.0 | Tool-call substrate: `ToolLoopAgent`, per-step cost reservation, `activeTools` preselection (chatbot-primary phase) |
+| [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) | MIT | Local vector index virtual table for semantic recall (future) |
+| [Mert Cobanov — memory.cobanov.dev](https://memory.cobanov.dev/) | (cited as influence) | Working/episodic/semantic/procedural memory taxonomy; RRF hybrid retrieval; HyDE; supersession governance |
+| [Letta (formerly MemGPT)](https://github.com/letta-ai/letta) | Apache 2.0 | Self-editing memory + hierarchical context paging (informs snapshot rebuild and `<memory-kind-set>`) |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | MIT | Tool-loop checkpoint design concepts |
+| [Anthropic MCP](https://modelcontextprotocol.io/) | MIT | Future: expose PAS apps as MCP servers or consume external MCP tools |
+
+---
+
 ## License
 
 MIT

@@ -9,6 +9,36 @@ User manual actions are tracked separately in `user_actions.md`.
 
 These are greenlit but not yet planned. Each needs a spec/plan before coding.
 
+- **Chatbot-Primary + Native Tool Calls (T0–T7)** — Transition PAS from "deterministic router-first, chatbot-fallback" to "chatbot-primary with native LLM tool calls." Plan: `plans/how-much-does-the-curious-lake.md`. Router is thinned, not deleted — auth, invites, slash-commands, photo handoff, idle-reset hook all stay.
+  - **T0** (doc-only) — README Hermes section, CLAUDE.md directive, this file updates. *(Complete, this session.)*
+  - **T1a** — Dependency spike: lock Vercel AI SDK v6 exact versions, confirm tool-call API per provider, Ollama per-model support. Findings populate "Per-Model Tool-Call Support Matrix" section below.
+  - **T1** — `LLMService.completeWithTools` substrate: owned loop wrapper around `ToolLoopAgent`; per-step cost reservation via `prepareStep`; `ModelCatalog` capability flags; banned-import extension.
+  - **T2** — ToolRegistry + ToolPolicy + PendingToolConfirmationStore + AttachmentStore + tool trace (NDJSON sidecar) + tool-result fencing + preselection + minimal PII redaction + Telegram `tc:yes`/`tc:no` callback wiring.
+  - **T3** — Chatbot shadow (dry-run only): `routing.primary: shadow_chatbot`; `chatbot_shadow_sample_rate`, daily/monthly cost cap, kill switch; labeled persona corpus.
+  - **T3b** — Per-user beta: `routing.primary: chatbot` for opt-in users after ≥1 month T3 telemetry showing tool-precision ≥90%.
+  - **T4** — Pseudo-tool migration: `<config-set>`, `<memory-kind-set>`, `<session-search>`, `<switch-model>`, `<model-journal>` → native tool calls in the chatbot virtual app.
+  - **T5** — App migration (one sub-phase per session): T5.notes → T5.food.recipes → T5.food.grocery → T5.food.pantry → T5.food.health → T5.food.receipts.
+  - **T6a** — Default flip with canary: `routing.primary` defaults to `chatbot`; ≥2 week canary + SLOs.
+  - **T6b** — Cleanup after stable canary: delete IntentClassifier, RouteVerifier, grey-zone, shadow-classifier internals, parallel-mode plumbing.
+  - **T7** — Non-blocking backlog epic: see "T7 — Hybrid Memory" entry below.
+
+  **Obsoleted by this phase** (full rationale in plan §6; items marked below in their original sections):
+  - Route-first allowlist expansion A.1 + A.2 → canceled in T5 (ROUTE_HANDLERS disappears)
+  - Per-handler `is*Intent` classifiers → canceled in T6b
+  - Route verification / grey-zone / RouteVerifier / pending-verification-store / verification-logger → canceled in T6b
+  - Context-promotion → canceled in T6b
+  - MODEL_SWITCH route-first conversion (7-component plan) → canceled; `<switch-model>` becomes a native tool in T4
+  - Food deterministic-filter chain inversion → subsumed in T5
+  - Shadow classifier production flip (`routing_primary: shadow`) → repurposed as chatbot-vs-regex shadow telemetry harness through T3–T5, retires in T6b
+
+- **T7 — Hybrid Memory: Vector Retrieval + RRF + Governance** *(non-blocking confirmed epic; activate slices individually when post-T6 recall telemetry justifies them)*
+  - **T7.1** — `EmbeddingService` (Ollama default / OpenAI-compat fallback / Transformers.js last-resort); `chat-state.db` embedding metadata table `(model_name, embedding_dim, created_at)`; `messages_vec` sqlite-vec virtual table (platform spike on Mac Mini + Windows gates schema bump).
+  - **T7.2** — Hybrid recall (FTS5 + vector) via Reciprocal Rank Fusion; `chat.recall.vector_enabled` telemetry flag; `pnpm chat-recall-eval` offline corpus tool.
+  - **T7.3** — Optional fast-tier LLM rerank stage (off by default, telemetry-gated).
+  - **T7.4** — Optional HyDE hypothetical-document embedding for query (off by default, telemetry-gated).
+  - **T7.5** — ContextStore supersession: `deprecated_at`, `superseded_by`, `superseded_at` fields; supersession audit log; `<memory-kind-set supersedes="...">` tag extension; deprecated entries excluded from `listForUser` and Layer 2 snapshot.
+  - **T7.6** — PII redaction: `redactPii(text, policy)` regex + opt-in fast-tier LLM pass. Default-on for embedding inputs and tool traces; default-off for transcripts. Config: `chat.embedding.privacy_mode`, `chat.tool_trace.privacy_mode`.
+
 - ~~**Hermes P1 Chunk C**~~ ✓ Complete (2026-04-26) — `/ask`, `/edit`, `/notes` Router built-ins; daily-notes opt-in (`chat.log_to_notes`, default OFF); `<config-set>` LLM tag (allowlist + intent-regex); `coerceUserConfigValue` shared coercion; `/help` dedup. REQ-CONV-006/007/008/009/010/016/019/020 implemented.
 - ~~**Hermes P2 Chunks B–E**~~ ✓ Complete (2026-04-27) — ConversationRetrievalService full implementation. Chunk B: `ReportService.listForUser` + `AlertService.listForUser` scoped APIs. Chunk C: compose all readers + `buildContextSnapshot` with partial-failure tolerance. Chunk D: wired into `handleMessage`/`handleAsk` + persona tests. Chunk E: URS finalization + docs. REQ-CONV-RETRIEVAL-001 through 016 implemented. Spec: `docs/superpowers/specs/2026-04-27-hermes-p2-conversation-retrieval-design.md`.
 - ~~**Hermes P3**~~ ✓ Complete (2026-04-27) — Session persistence: manual `/newchat` and `/reset`. `ChatSessionStore` with per-session markdown transcripts (`YYYYMMDD_HHMMSS_<8hex>`), `active-sessions.yaml` index under `withFileLock`, legacy `history.json` migration (one `source: legacy-import` session), `expectedSessionId` in-flight race guard. REQ-CONV-SESSION-001 through 014 implemented. Plan: `docs/superpowers/plans/can-you-start-on-wondrous-bentley.md`.
@@ -37,7 +67,7 @@ These are greenlit but not yet planned. Each needs a spec/plan before coding.
 - ~~**Hermes P9 — Photo Memory Bridge + Receipt Integrity**~~ ✓ Complete (2026-04-29, 9dba662; Codex corrections aab0a8f) — Photo handlers return `photoSummary`; router appends to session transcript; `formatConversationHistory` whitelist exempts photo-summary turns (2000-char, spoof-resistant); `PHOTO_SUMMARY_GUIDANCE` in chatbot prompt; `sanitizePhotoField` strips control chars + bidi (U+200B–U+2069 incl. LRI/RLI/FSI/PDI, explicit `\uXXXX` notation) + XML fence. Receipt: `isValidReceiptDate` (calendar-strict, 90-day window); date rejection warns include `userId` from requestContext; non-string dates explicitly warned; frontmatter has `date: parsed.date` (display) + `capturedAt` (sort authority); `rawExtractedDate` audit trail; price-store `updatedAt` from `capturedAt`. REQ-CONV-PHOTO-001..005, REQ-FOOD-RECEIPT-001..002. LLM Enhancement #3.A/B/C complete.
 - **LLM Enhancement #3** — Entity/slot extraction: grocery items, quantities, stores, days, portions via `llm.extractStructured`. Extends Enhancement #2's classifier-only approach to structured extraction across Food handlers. Plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`.
 - **LLM Enhancements #4–#7** — DataQuery keyword gate removal, chatbot system-data categorization, knowledge reranker, photo caption confidence routing. Same plan.
-- **LLM Enhancement #8 — Native tool-call infrastructure** — Migrate from tag-based pseudo-tools (`<config-set>`, `<switch-model>`, `<session-search>`, and any future tool tags) to native LLM tool calling. Most likely path: adopt **Vercel AI SDK** (`ai` npm, MIT, ~17k GH stars, supports Anthropic + Google + OpenAI + Ollama uniformly via provider packages). Replace `LLMService.complete` text-in/text-out with a tool-aware API: `completeWithTools({ prompt, tools, maxToolTurns })` returning `{ text, toolCalls[], stopReason }`. Provider notes: Anthropic SDK 0.78.0 supports natively; Google `@google/genai` supports `functionDeclarations`; OpenAI-compat depends on backend (OpenAI/Groq fine, vLLM mixed); Ollama needs `client.chat()` switch from `client.generate()` + per-model capability check. Driver-loop in `handle-message`/`handle-ask` with `maxToolTurns: 3`. `LLMGuard` extension: per-loop reservation envelope so a tool loop counts as one budget transaction. Migration: keep tag-based patterns as fallback for providers without native support; converge over time. **Performance:** native is ~5–15% more efficient per round-trip (cleaner stop semantics, no post-tag prose waste). **Strategic value:** unblocks the Hermes tool registry (`docs/open-items.md`, Proposals), Channel adapter ABC, and Agentic loops proposals; aligns PAS with Anthropic Agent SDK and MCP. Each new tool becomes a `{ name, description, parameters: zodSchema, execute: fn }` declaration instead of "design XML grammar + custom parser + manual validation." **Tag-based limitations inherited until this ships:** (a) tag escape edge cases when user/transcript content contains literal `<session-search>` text; (b) reliability ceiling — every model upgrade requires re-validating tag adherence; (c) no parallel tool calls; (d) freeform attribute parsing vs. JSON-schema validation; (e) prompt-section bloat as more tools accumulate; (f) token waste from "I'll search for that" prose preceding the tag. **Trigger:** ≥2 of {a third tool tag is being added, a model upgrade breaks tag adherence, a parallel-tool use case appears} are true; or when migrating to MCP.
+- ~~**LLM Enhancement #8 — Native tool-call infrastructure**~~ — **Promoted to blocking prerequisite T1** of the Chatbot-Primary phase (see confirmed phase entry above). The Vercel AI SDK v6 (`ai` + provider packages) is the selected substrate. `LLMService.completeWithTools` with an owned loop wrapper around `ToolLoopAgent`, per-step cost reservation via `prepareStep`, and `ModelCatalog` capability flags replace the original "add a new tag" framing entirely. No separate planning needed — T1a spike then T1 implementation are the execution path. The tag-based limitations listed in the original entry (escape edge cases, reliability ceiling, no parallel calls, prompt-section bloat) are the primary motivation for the migration.
 - **Phase H12c** — Alcohol + Meal Quality Signals. Deferred pending H12a stabilization.
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until a concrete use case requires it.
 - **Persona Regression Suite** — Separate opt-in LLM-calling test suite (`regression/` workspace) that catches accuracy, quality, and safety regressions when swapping LLM tier models. GUI-runnable (`/gui/regression`, admin-only), cache-keyed on (test definition + coverage file hashes + model IDs), result history retained per (case × model). v1 buckets: receipt extraction (structural oracle), chatbot fallback (rubric judge), recall classifier (structural), routing/intent (structural, ≥0.95 accuracy gate). Spec: `docs/superpowers/specs/2026-05-04-persona-regression-suite-design.md`.
@@ -46,7 +76,7 @@ These are greenlit but not yet planned. Each needs a spec/plan before coding.
 - ~~**Unified Settings Surface Chunk C — system-config-derived settings**~~ ✓ Complete (2026-05-08) — `SystemConfigWriter` + `mutatePasYaml` for atomic YAML writes with in-memory propagation; `SYSTEM_SETTING_DEFS` + `SYSTEM_KEY_RUNTIME_PATH` in `settings-metadata.ts`; system-scope defs registered via `buildSettingsRegistry`; `SettingsWriter` three-source policy (`nl`/`gui`/`admin-confirmed`); `SettingsReader` system reads + effective-default resolver (`systemConfigBackingKey`); GUI admin visibility + restart badge + dangerous-tampering check; confirm flow (`GET/POST /confirm`, `matchesDangerConfirmPhrase`); `Router.setIdleMinutes` hot-update hook; food manifest pseudo-field cleanup (`guest_profiles_info`, `schedule_overrides_info`). 16 URS requirements: REQ-SETTINGS-021..036. Plan: `can-you-start-unified-cozy-clarke.md`.
 - **Unified Settings Surface Chunk C.next — additional system settings** — Surface `defaults.timezone`, `defaults.log_level`, `backup.{enabled,path,schedule,retentionCount}`, `llm.safeguards.*`. These reuse the SystemConfigWriter + GUI infrastructure from Chunk C and only add new `SYSTEM_SETTING_DEFS` entries plus per-key restart-required flags. Deferred from Chunk C.
 - **Unified Settings Surface Chunk D — /settings Telegram command** — Telegram `/settings` command that lists and sets tunables inline, without requiring the GUI. Deferred from Chunks A+E+F; implement as a follow-on session.
-- **Deterministic-filter chain inversion (food handleMessage) — standalone phase** — `apps/food/src/index.ts handleMessage` currently runs free-text through 30+ regex gates (`isMealPlanViewIntent`, `isReceiptQueryIntent`, `isPriceLookupIntent`, `isPantryQueryIntent`, …) before any chatbot yield. There is a final `{handled: false}` fallthrough at the bottom of `handleMessage`, but many deterministic regex handlers still terminate early with `services.telegram.send` and a hard `return`. Effect: phrasings the regexes match too eagerly land in canned replies, and tightening any one regex pushes the next phrasing into a different handler black hole. **Proposed phase:** invert by *category*, not blanket "chatbot first": (a) **Imperative actions** (save recipe, edit recipe, log meal, generate meal plan) → continue through deterministic regex handlers; (b) **Questions / data requests** (everything else) → yield to chatbot+DataQuery earlier, with regex handlers as fallback only when the chatbot path fails. The LLM router (`ROUTE_HANDLERS`) stays as the structured path — it is already intent-aware. **Why deferred:** needs its own diagnosis of which handlers are command-like vs. question-like, plus a real-LLM regression run to confirm chatbot+DataQuery does not regress imperative flows. Coordinate with LLM Enhancement #2 production-flip (needs ≥95% telemetry agreement first). URS REQ-* will be assigned when the phase is planned.
+- ~~**Deterministic-filter chain inversion (food handleMessage) — standalone phase**~~ — Subsumed by chatbot-primary T5. When food's NL intents are migrated to native tools (T5.food.*), the regex-gate cascade in `handleMessage` is retired entirely. The motivating problem (too-eager regex matching, canned-reply black holes) evaporates when `handleMessage` returns `{handled: false}` for all NL intents and the chatbot tool loop takes over.
 
 ---
 
@@ -69,11 +99,11 @@ Confirmed gaps that need to be addressed; timing depends on which phase picks th
 - **One-off task user scope** — `OneOffTask` has no `user_scope` field; all tasks run as `userScope: 'system'`. Apps needing per-user one-off tasks need the schema extended + bootstrap wiring.
 - **Per-space scheduled jobs** — Space-scoped apps have no way to register scheduled jobs that run per-space. Needs scheduler support. (From `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md`.)
 - **Review Phase 7 residual — broader active-space food migration** — Phase 7 only made recipe/receipt/grocery photo writes and interaction records space-aware. Follow `docs/superpowers/specs/2026-04-14-space-aware-food-data-design.md` to extend active-space behavior to pantry photos, callback-space plumbing, the major shared-data interactive message/callback flows in `apps/food/src/index.ts`, and cross-scope read/write reconciliation. Keep scheduled jobs shared-only until per-space scheduler support exists. This follow-up should add higher-level regressions proving those flows write to `spaces/<spaceId>/food/...` when a space is active and still fall back to shared when none is active. Depends in part on the separate `forShared(scope)` selector bug above.
-- **Route-first allowlist: 'save a recipe'** — Add `'user wants to save a recipe'` back to Food's `ROUTE_HANDLERS` once `handleEditRecipe` is declared as a manifest intent. Currently omitted because phrases like "edit the lasagna recipe" misclassify as save-intent; the overlap disappears once both intents are manifest-declared with distinct descriptions. (Enhancement #2 A.1)
-- **Route-first allowlist: 'search for a recipe'** — Add `'user wants to search for a recipe'` back to `ROUTE_HANDLERS` once `handleRecipePhotoRetrieval` is declared as a manifest intent. Same root cause as above. (Enhancement #2 A.1)
-- **Route-first allowlist expansion (A.2)** — Cover additional manifest intents (pantry, grocery, leftovers, nutrition) after auditing each for regex-branch collision. Needs design decisions on ambiguous multi-sub-intent cases first. (Enhancement #2 A.2)
-- **Per-handler `is*Intent` classifiers** — `apps/food/src/handlers/{budget,hosting,cultural-calendar-handler,health,nutrition,family}.ts` + `apps/food/src/services/price-store.ts` still use local regex predicates. Most will be bypassed automatically as their manifest intents enter the allowlist; the remainder serve non-manifest sub-intents and stay as fallback.
-- **`MODEL_SWITCH_INTENT_REGEX` route-first conversion (`core/src/services/conversation/control-tags.ts`)** — *Original framing as a "straightforward follow-up" was incorrect. Codex review (2026-05-06) revealed five blockers; this is a multi-component phase, not a quick win.*
+- ~~**Route-first allowlist: 'save a recipe'**~~ — Canceled (superseded by chatbot-primary T5; the entire ROUTE_HANDLERS allowlist disappears when food NL intents migrate to native tools).
+- ~~**Route-first allowlist: 'search for a recipe'**~~ — Canceled (same reason as above).
+- ~~**Route-first allowlist expansion (A.2)**~~ — Canceled (superseded by chatbot-primary T5).
+- ~~**Per-handler `is*Intent` classifiers**~~ — Canceled by T6b (replaced by tool descriptions and per-turn preselection intent gates during chatbot-primary T5).
+- ~~**`MODEL_SWITCH_INTENT_REGEX` route-first conversion**~~ — Canceled (superseded by chatbot-primary T4). `<switch-model>` becomes a native tool call with `ToolPolicy { adminOnly: true, dangerous: true, confirmationRequired: true }` registered by the chatbot virtual app. The 7-component router plumbing (route intent signal, processModelSwitchTags in handleMessage, prompt-builder route-awareness, constant+manifest declaration, RouteInfo threading, tests, persona NL tests) is replaced by the tool declaration + ToolRegistry enforcement. *Original framing as a "straightforward follow-up" was incorrect. Codex review (2026-05-06) revealed five blockers; chatbot-primary T4 is now the cleaner path.*
 
   **Current behavior:**
   - `<switch-model>` tags are processed only on `/ask` (`handle-ask.ts:380` calls `processModelSwitchTags`).
@@ -97,7 +127,7 @@ Confirmed gaps that need to be addressed; timing depends on which phase picks th
 
   **Size:** L (multi-component, 7+ files) once a direction is chosen.
 - **Hermes P1 Chunk C residual — `/edit` LLM rate-limit parity** — `EditServiceImpl` uses `systemLlm` (system-tier guard), not `conversationLLMGuard`. Free-text and `/ask` go through the per-app conversation guard; `/edit`'s LLM proposals use the system guard instead. Not a bug, but the discrepancy could surprise operator cost-cap tuning. Rewiring `EditServiceImpl` to accept a conversation-scoped guard is a separate refactor; revisit if the discrepancy surfaces in real cost-cap behavior.
-- **Enhancement #2 production flip** — Change `default: regex` to `default: shadow` in the `routing_primary` user_config block of `apps/food/manifest.yaml` (~line 364) once `pnpm analyze-shadow-log` shows ≥95% agreement over ≥1 week of real usage. Requires a code commit + PAS restart (not a live config change). Test-isolation fix merged 2026-05-05 (CoreServices.dataDir injection, 11 test files cleaned). Contaminated log archived to `data/system/food/shadow-classifier-log.archive-2026-05-05.md`; fresh baseline begins after next PAS restart.
+- **Enhancement #2 production flip** — *(Repurposed by chatbot-primary phase.)* Originally: flip `routing_primary` to `shadow` in food manifest after ≥95% telemetry agreement. **New path:** the food shadow classifier infrastructure (`SHADOW_HANDLERS`, `routing_primary` flag, `analyze-shadow-log` CLI) is repurposed as the chatbot-vs-regex telemetry harness during T3–T5 of the chatbot-primary phase. The food shadow log baseline (fresh since 2026-05-05 test-isolation fix) feeds into T3 persona corpus calibration. The shadow classifier infrastructure retires in T6b when the chatbot-primary canary has been stable for ≥2 weeks.
 - **D2a non-target food write sites** — FileIndex enrichment was intentionally scoped to the primary food stores. The following are indexed by path/title only and will not surface well in NL queries: freezer, leftovers, waste log, budget history, quick meals, guests, family profiles, ingredient cache. Enrich in a follow-up phase if D2b NL querying reveals gaps. (See `docs/superpowers/specs/2026-04-13-d2a-file-index-foundation-design.md` line 163)
 
 ---
@@ -165,17 +195,17 @@ Ideas that are not yet approved. Each has a stated trigger condition.
 - **Container isolation** — Trigger: community forms and multi-tenant security requirements harden.
 - **Smart freeze suitability** — Warn when foods that don't freeze well are being frozen. (H6 spec.)
 - **Batch expiry estimation** — Estimate multiple pantry items in one LLM call instead of per-item. (H6 spec.)
-- **Agentic loops** — 6 agent proposals (Routing-Learning, Data Steward, Receipt/OCR QA, Household Planning, Ops, App Onboarding). See `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`. **Dependency: LLM Enhancement #8 (native tool-call infrastructure).**
+- **Agentic loops** — 6 agent proposals (Routing-Learning, Data Steward, Receipt/OCR QA, Household Planning, Ops, App Onboarding). See `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`. **Dependency: chatbot-primary T2 (ToolRegistry + ToolPolicy).** Unblocked once T2 lands.
 - **Regression Suite v2 — `judge` oracle** — Reference-answer comparison: commit a human-written "gold" answer; judge LLM scores actual vs. gold. More expensive and harder to maintain than the rubric oracle but more precise for factual recall cases. Trigger: rubric false-fail rate becomes noisy enough to warrant more precision.
 - **Regression Suite v2 — cost-regression assertions** — Assert that token counts for a given case stay within a threshold (e.g., ±30%) of the last cached run. Useful for detecting models that drastically increase prompt consumption. Trigger: operator cost-cap tuning reveals unexpected token spikes after a model swap.
 - **Regression Suite v2 — CI integration** — Optional GitHub Actions job that runs `pnpm test:regression --no-cache` when `config/pas.yaml` fast/standard/reasoning model IDs change. Requires real API keys in CI secrets. Trigger: team grows beyond solo deployment and model changes become reviewed PRs.
 - **Regression Suite v2 — verdict annotation UI** — Allow an admin to mark a rubric verdict as "acceptable" (false-fail override) so the history timeline doesn't accumulate noise from borderline cases across model versions. Trigger: rubric false-fail rate observed in practice.
 - **Settings — per-household settings inheritance UX** — Visualize and edit the system → household → user override chain in the GUI (e.g., "system default: 90 days; your household override: 30 days; your personal override: —"). Trigger: multi-household deployment where household admins want to set household-wide defaults.
 - **Settings — Notifications section content** — The Settings page reserves a "Notifications" collapsible section. Content is a placeholder until a per-app digest opt-in feature is designed (e.g., weekly food summary, alert digest, session summary email). Trigger: user requests a notification preference toggle.
-- **Hermes: tool registry with AST-gated discovery** — Auto-discover tools via AST analysis so runtime registration matches declared exports. Trigger: PAS gains a plug-in tool system. (See `docs/hermes-agent-adoption-review.md`) **Dependency: LLM Enhancement #8 (native tool-call infrastructure).**
+- **Hermes: tool registry with AST-gated discovery** — Auto-discover tools via AST analysis so runtime registration matches declared exports. (See `docs/hermes-agent-adoption-review.md`) **Unblocked by chatbot-primary T2** — ToolRegistry + static-export check at app-load time is the T2 implementation of this proposal.
 - **Hermes: channel adapter ABC + PLATFORM_HINTS** — Clean abstraction for multi-channel messaging (max length, markdown support, reaction support). Trigger: a second messaging channel is added beyond Telegram. (See `docs/hermes-agent-adoption-review.md`)
 - **Hermes: secret redaction with import-time flag snapshot** — Scrub known secret-shaped strings from any string sent externally or logged. Trigger: conversation transcripts ever leave the local machine. (See `docs/hermes-agent-adoption-review.md`)
-- **Shadow-primary persona sweep (collapsed-bucket overlap)** — Before flipping `routing_primary: shadow` in production, run targeted integration tests for the high-risk many-to-one bucket overlap phrases: freezer-vs-pantry (`add soup to the freezer` vs `add soup to the pantry`), leftover-view-vs-add (`show me my leftovers` vs `just finished the leftover chili`), grocery-generate-vs-view, edit-vs-save recipe, recipe-photo-vs-search, meal-plan generate-vs-view-vs-swap. Each phrase pair verifies the correct sub-dispatch closure fires. NOT one test per FOOD_PERSONAS persona — target the overlap boundaries only. Trigger: ≥95% telemetry agreement reached and production flip is being prepared.
+- **Shadow-primary persona sweep (collapsed-bucket overlap)** — *(Repurposed by chatbot-primary T3.)* Originally a trigger-gated pre-flip integration test for food's regex shadow. Now the overlap phrases become part of the labeled persona corpus (`tests/persona/tool-cases.json`) for chatbot-primary T3, which tests tool-call precision on these exact boundary phrasings. No longer a separate proposal — subsumed into T3 persona corpus construction.
 
 ---
 
@@ -188,4 +218,42 @@ Documented decisions to live with known imperfections.
 - **D42** — Conversation history anti-instruction framing removed. Accepted: continuity > theoretical injection risk.
 - **Callback space semantics — originating scope** — Inline keyboard callbacks resolve space context at tap-time, not button-generation-time. Encoding the originating scope into every callback data string is a large change with low practical impact (buttons are tapped promptly). Accepted as designed.
 - **P8a — Active-work protection is silent** — When `pendingEdits` or `PendingSessionControlStore` blocks an idle reset (`status: 'protected'`), no inactivity notice is sent to the user. The session remains active and the protection window expires naturally. Sending a notice in the protected case would be misleading (the session isn't ending) and adds undesirable noise. Accepted by design.
+
+---
+
+## Per-Model Tool-Call Support Matrix
+
+*(Populated during T1a dependency spike — all entries TBV as of 2026-05-08)*
+
+When T1a spike runs, update this table with confirmed results from the `experiments/tool-call-spike/` driver:
+
+| Provider | Model | supportsTools | supportsParallelToolCalls | supportsJsonSchema | Notes |
+|---|---|---|---|---|---|
+| Anthropic | claude-sonnet-4-6 | TBV | TBV | TBV | |
+| Anthropic | claude-haiku-4-5 | TBV | TBV | TBV | |
+| Google | gemini-2.0-flash | TBV | TBV | TBV | |
+| OpenAI-compat | gpt-4o | TBV | TBV | TBV | |
+| Ollama | llama3.1 | TBV | TBV | TBV | |
+| Ollama | qwen2.5 | TBV | TBV | TBV | |
+| Ollama | mistral | TBV | TBV | TBV | |
+| Ollama | gemma2 | TBV | TBV | TBV | Expected: no tool support |
+
+Tool-name pattern (confirmed in spike): `[a-zA-Z0-9_-]{1,64}` (Anthropic/OpenAI, no dots); verify Google's variant.
+Ollama provider pick: `ai-sdk-ollama@^3.8.x` OR `ollama-ai-provider-v2` — T1a chooses based on tool-call fidelity per model.
+
+---
+
+## Credits and Influences
+
+Resources that informed PAS design, used with attribution:
+
+| Resource | License | What we borrowed |
+|---|---|---|
+| [Vercel AI SDK (`ai`)](https://github.com/vercel/ai) | Apache 2.0 | Tool-call substrate: `ToolLoopAgent`, per-step cost reservation via `prepareStep`, `activeTools` preselection, `tool approval` callback (chatbot-primary T1+) |
+| [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) | MIT | Local vector index virtual table for semantic recall alongside FTS5 (T7.1+) |
+| [Mert Cobanov — memory.cobanov.dev](https://memory.cobanov.dev/) | (cited as influence) | Working/episodic/semantic/procedural memory taxonomy; RRF hybrid retrieval; HyDE; supersession governance patterns |
+| [Letta (formerly MemGPT)](https://github.com/letta-ai/letta) | Apache 2.0 | Self-editing memory + hierarchical context paging (informs snapshot rebuild design and `<memory-kind-set>`) |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | MIT | Tool-loop checkpoint design concepts |
+| [Anthropic MCP](https://modelcontextprotocol.io/) | MIT | Future: expose PAS apps as MCP servers or consume external MCP tools |
+| [Xenova/Transformers.js](https://github.com/xenova/transformers.js) | Apache 2.0 | Fallback in-process embedding (T7.1, if Ollama + OpenAI-compat both unavailable) |
 

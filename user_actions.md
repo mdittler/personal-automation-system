@@ -41,4 +41,4 @@ Development open items (deferred phases, corrections, proposals) are tracked in 
 
 ### Shadow Classifier Telemetry Baseline (2026-05-05)
 
-- [ ] **Restart PAS** — The contaminated shadow log was archived to `data/system/food/shadow-classifier-log.archive-2026-05-05.md`. Restart PAS so it creates a fresh `shadow-classifier-log.md` and begins accumulating clean telemetry. After ≥1 week of usage, run `pnpm analyze-shadow-log` to evaluate the flip.
+- [x] **Restart PAS** — The contaminated shadow log was archived to `data/system/food/shadow-classifier-log.archive-2026-05-05.md`. Restart PAS so it creates a fresh `shadow-classifier-log.md` and begins accumulating clean telemetry. After ≥1 week of usage, run `pnpm analyze-shadow-log` to evaluate the flip.

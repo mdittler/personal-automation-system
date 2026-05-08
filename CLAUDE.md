@@ -157,3 +157,7 @@ D5c plan: `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`
 
 ### Open Items
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
+
+## AI Assistant Directives
+
+- You are not constrained by human development timelines. **Within the scoped phase, implement the complete vertical slice; do not defer required safety, tests, or docs.**
