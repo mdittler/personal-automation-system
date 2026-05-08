@@ -2,13 +2,17 @@
  * Receipt parser — uses LLM vision to extract data from grocery receipt photos.
  */
 
+import { getCurrentUserId } from '@pas/core/services/context/request-context';
 import type { CoreServices } from '@pas/core/types';
 import type { ReceiptLineItem } from '../types.js';
-import { parseJsonResponse } from './recipe-parser.js';
-import { fenceCaption } from '../utils/sanitize.js';
-import { isValidReceiptLineItem, isValidReceiptAmount } from '../utils/photo-validators.js';
 import { todayDate } from '../utils/date.js';
-import { getCurrentUserId } from '@pas/core/services/context/request-context';
+import {
+	isValidReceiptAmount,
+	isValidReceiptLineItem,
+	normalizeReceiptLineItem,
+} from '../utils/photo-validators.js';
+import { fenceCaption } from '../utils/sanitize.js';
+import { parseJsonResponse } from './recipe-parser.js';
 
 export const MAX_RECEIPT_AGE_DAYS = 90;
 
@@ -22,7 +26,9 @@ export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
 	if (typeof value !== 'string') return false;
 	const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 	if (!m) return false;
-	const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+	const y = Number(m[1]);
+	const mo = Number(m[2]);
+	const d = Number(m[3]);
 	if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return false;
 	if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
 
@@ -32,13 +38,14 @@ export function isValidReceiptDate(value: unknown, todayISO: string): boolean {
 		candidate.getUTCFullYear() !== y ||
 		candidate.getUTCMonth() !== mo - 1 ||
 		candidate.getUTCDate() !== d
-	) return false;
+	)
+		return false;
 
 	const todayMatch = todayISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 	if (!todayMatch) return false;
-	const todayDateObj = new Date(Date.UTC(
-		Number(todayMatch[1]), Number(todayMatch[2]) - 1, Number(todayMatch[3]),
-	));
+	const todayDateObj = new Date(
+		Date.UTC(Number(todayMatch[1]), Number(todayMatch[2]) - 1, Number(todayMatch[3])),
+	);
 
 	// Reject future dates
 	if (candidate.getTime() > todayDateObj.getTime()) return false;
@@ -61,7 +68,7 @@ export interface ParsedReceipt {
 	total: number;
 }
 
-function buildReceiptPrompt(todayISO: string): string {
+export function buildReceiptPrompt(todayISO: string): string {
 	return `Today is ${todayISO}. You are a grocery receipt parser. Extract data from this receipt photo.
 
 Return ONLY valid JSON with this exact structure (no markdown, no explanation):
@@ -69,7 +76,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
   "store": "Store Name",
   "date": "2026-04-05",
   "lineItems": [
-    { "name": "Item Name", "quantity": 1, "unitPrice": 3.99, "totalPrice": 3.99 }
+    { "name": "Item Name", "quantity": 1, "unitPrice": 3.99, "totalPrice": 3.99, "packageSize": "12 oz" }
   ],
   "subtotal": 25.50,
   "tax": 1.53,
@@ -81,6 +88,12 @@ Rules:
 - date is ISO format (YYYY-MM-DD); if unclear, use today (${todayISO})
 - lineItems: extract as many items as you can read clearly
 - unitPrice can be null if not visible
+- packageSize: emit a parseable size token from the recognized unit set, or null if unknown.
+  Recognized units:
+    - mass: g, kg, oz, lb (e.g. "12 oz", "5 lb", "1 kg", "100 g")
+    - volume: ml, l, fl oz, gal (e.g. "750 ml", "1.5 L", "12 fl oz", "1 gal")
+    - count: ct, count, pack, pk, dozen (e.g. "60 ct", "1 pack", "2 dozen")
+  Use null when the package size is not visible or not interpretable.
 - subtotal and tax can be null if not visible
 - total is REQUIRED — estimate from lineItems if necessary`;
 }
@@ -107,11 +120,15 @@ export async function parseReceiptFromPhoto(
 	const parsed = parseJsonResponse(result, 'receipt parse') as Record<string, unknown>;
 
 	if (!isValidReceiptAmount(parsed.total)) {
-		throw new Error('Could not extract a total from the receipt. Please ensure the receipt is clearly visible.');
+		throw new Error(
+			'Could not extract a total from the receipt. Please ensure the receipt is clearly visible.',
+		);
 	}
 
 	const lineItems = Array.isArray(parsed.lineItems)
-		? (parsed.lineItems as unknown[]).filter(isValidReceiptLineItem) as ReceiptLineItem[]
+		? ((parsed.lineItems as unknown[])
+				.filter(isValidReceiptLineItem)
+				.map(normalizeReceiptLineItem) as ReceiptLineItem[])
 		: [];
 
 	let date = todayISO;

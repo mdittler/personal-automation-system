@@ -17,6 +17,12 @@ import type {
 } from '../types.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { listStores, loadStorePrices } from './price-store.js';
+import {
+	type ParsedSize,
+	calculateUnitPrice,
+	formatUnitPriceToken,
+	parseSizeString,
+} from './unit-normalizer.js';
 
 const RECEIPTS_DIR = 'receipts';
 
@@ -361,16 +367,67 @@ export function formatStorePriceAnswer(
 	return lines.join('\n');
 }
 
+function isValidPriceNumber(price: unknown): price is number {
+	return typeof price === 'number' && Number.isFinite(price) && price > 0;
+}
+
 export function formatCheapestPriceAnswer(
 	priceData: readonly StorePriceData[],
 	itemQuery: string,
 ): string {
-	const matches = findPriceMatches(priceData, itemQuery);
+	const allMatches = findPriceMatches(priceData, itemQuery);
+
+	// Step 1: filter out entries with invalid price (NaN, Infinity, ≤0).
+	const matches = allMatches.filter((m) => isValidPriceNumber(m.entry.price));
 	if (matches.length === 0) {
 		return `I do not have saved prices for ${escapeMarkdown(itemQuery)} yet.`;
 	}
 
-	const cheapest = [...matches].sort((a, b) => a.entry.price - b.entry.price)[0];
+	// Step 2: parse each entry's unit string at comparison time.
+	const parsedMatches = matches.map((m) => ({
+		match: m,
+		parsed: parseSizeString(m.entry.unit) as ParsedSize | null,
+	}));
+
+	// Step 3: unit-price mode iff ALL parse, ALL share the same base, AND ≥2 entries.
+	const allParsed = parsedMatches.every((p) => p.parsed !== null);
+	const firstBase = parsedMatches[0]?.parsed?.base;
+	const allSameBase =
+		allParsed &&
+		firstBase !== undefined &&
+		parsedMatches.every((p) => p.parsed?.base === firstBase);
+	const useUnitMode = allParsed && allSameBase && parsedMatches.length >= 2;
+
+	if (useUnitMode && firstBase) {
+		// Compute unit price per entry; pick lowest. Tiebreak: alphabetical by store name.
+		const ranked = parsedMatches
+			.map((p) => ({
+				match: p.match,
+				// p.parsed is non-null here because allParsed === true
+				// biome-ignore lint/style/noNonNullAssertion: guarded by allParsed
+				unitPrice: calculateUnitPrice(p.match.entry.price, p.parsed!),
+			}))
+			.sort((a, b) => {
+				if (a.unitPrice !== b.unitPrice) return a.unitPrice - b.unitPrice;
+				return a.match.store.localeCompare(b.match.store);
+			});
+
+		const winner = ranked[0];
+		if (!winner) {
+			return `I do not have saved prices for ${escapeMarkdown(itemQuery)} yet.`;
+		}
+		const token = formatUnitPriceToken(winner.unitPrice, firstBase);
+		const updated = winner.match.entry.updatedAt
+			? ` (updated ${winner.match.entry.updatedAt})`
+			: '';
+		return `Lowest saved unit price for ${escapeMarkdown(itemQuery)}: ${escapeMarkdown(winner.match.entry.name)} at ${formatMoney(winner.match.entry.price)} (${token}) at ${escapeMarkdown(winner.match.store)}${updated}.`;
+	}
+
+	// Package-price mode: lowest price; tiebreak alphabetical by store name.
+	const cheapest = [...matches].sort((a, b) => {
+		if (a.entry.price !== b.entry.price) return a.entry.price - b.entry.price;
+		return a.store.localeCompare(b.store);
+	})[0];
 	if (!cheapest) {
 		return `I do not have saved prices for ${escapeMarkdown(itemQuery)} yet.`;
 	}

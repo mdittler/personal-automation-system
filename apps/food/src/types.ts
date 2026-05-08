@@ -254,6 +254,8 @@ export interface ReceiptLineItem {
 	quantity: number;
 	unitPrice: number | null;
 	totalPrice: number;
+	/** Parseable size token (e.g. "12 oz", "1 gal", "60 ct"); LLM-emitted, may be null. */
+	packageSize?: string | null;
 }
 
 export interface Receipt {
@@ -288,6 +290,10 @@ export interface PriceEntry {
 	unit: string; // package unit, e.g. "60ct", "1 gal", "5 lb"
 	department: string; // Dairy, Produce, Meat, Pantry, etc.
 	updatedAt: string; // ISO date of last update
+	/** Populated at comparison time from `unit` via parseSizeString; not persisted. */
+	sizeValue?: number;
+	/** Populated at comparison time from `unit` via parseSizeString; not persisted. */
+	sizeBase?: 'g' | 'ml' | 'ct';
 }
 
 export interface StorePriceData {

@@ -135,16 +135,26 @@ import type { DataQueryOptions } from './types/data-query.js';
 import type { ManifestDataScope } from './types/manifest.js';
 import type { TelegramService } from './types/telegram.js';
 
-export interface RuntimeOverrides {
-	dataDir?: string;
-	configPath?: string;
-	config?: SystemConfig;
-	providerRegistry?: ProviderRegistry;
-	telegramService?: TelegramService & { cleanup(): void | Promise<void> };
-	logger?: Logger;
-	/** Override the apps directory path. Useful in tests running from a sub-package CWD. */
-	appsDir?: string;
-}
+export type RuntimeOverrides =
+	| {
+			config?: undefined;
+			configPath?: string;
+			dataDir?: string;
+			providerRegistry?: ProviderRegistry;
+			telegramService?: TelegramService & { cleanup(): void | Promise<void> };
+			logger?: Logger;
+			/** Override the apps directory path. Useful in tests running from a sub-package CWD. */
+			appsDir?: string;
+	  }
+	| {
+			config: SystemConfig;
+			configPath: string;
+			dataDir?: string;
+			providerRegistry?: ProviderRegistry;
+			telegramService?: TelegramService & { cleanup(): void | Promise<void> };
+			logger?: Logger;
+			appsDir?: string;
+	  };
 
 /**
  * Named bundle of all runtime services returned by composeRuntime().
@@ -212,6 +222,11 @@ export interface RuntimeHandle {
  * LLM providers, Telegram, loggers, and the data directory.
  */
 export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<RuntimeHandle> {
+	// Runtime guard — catches JS callers that bypass TypeScript's type system.
+	if (overrides.config && !overrides.configPath) {
+		throw new Error('composeRuntime: configPath is required when config is provided');
+	}
+
 	const hasOverrides = Object.keys(overrides).length > 0;
 
 	// -------------------------------------------------------------------------
@@ -223,12 +238,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	if (overrides.config) {
 		// Test override: use config directly without loading from disk.
-		// FOOTGUN: if configPath is not also overridden, UserMutationService will
-		// write-back to the real config/pas.yaml on invite redemption or user
-		// mutation. Always pass configPath alongside config in test callers.
-		// See docs/open-items.md — "composeRuntime configPath footgun".
+		// configPath is guaranteed non-null by the discriminated union + runtime guard above.
 		config = overrides.config;
-		configPath = overrides.configPath ?? resolve('config', 'pas.yaml');
+		configPath = overrides.configPath;
 		// Apply dataDir override to config if provided
 		if (overrides.dataDir) {
 			config = { ...config, dataDir: overrides.dataDir };

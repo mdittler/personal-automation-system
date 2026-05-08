@@ -5771,6 +5771,86 @@ This requirement is the path-(a) stopgap for the known limitation that `formatCh
 
 ---
 
+### REQ-FOOD-PRICE-003 — `formatCheapestPriceAnswer` MUST compare unit prices when all entries share a base
+
+**Phase:** Item 2 — formatCheapestPriceAnswer unit-price normalization (2026-05-07) | **Status:** Implemented
+
+When `formatCheapestPriceAnswer` is given two or more `PriceEntry` rows and every matched row's `unit` string parses (via `parseSizeString`) to the same base unit (mass `g`, volume `ml`, or count `ct`), the answer SHALL be the row with the lowest unit price. When any row is unparseable, when rows parse to mismatched dimensions, or when fewer than two rows remain after price filtering, the answer SHALL fall back to the lowest package price ("Lowest saved package price …" wording, REQ-FOOD-PRICE-002). Tiebreak (both modes): alphabetical by store name.
+
+**Standard tests:**
+- `receipt-query.test.ts` > unit-price comparison > U12 (smaller package wins on package price but larger on unit price)
+- `receipt-query.test.ts` > unit-price comparison > U13 (three same-base entries — lowest unit price wins)
+- `receipt-query.test.ts` > unit-price comparison > U14 (mixed mass+volume → package mode)
+- `receipt-query.test.ts` > unit-price comparison > U15 (one unparseable unit forces package mode)
+- `receipt-query.test.ts` > unit-price comparison > U16 (parseable but mixed-base → package mode)
+- `receipt-query.test.ts` > unit-price comparison > U17 (all unparseable → package mode)
+- `receipt-query.test.ts` > unit-price comparison > U18 (tie on unit price → alphabetical by store)
+- `receipt-query.test.ts` > unit-price comparison > U20 (single parseable entry → package mode)
+- `receipt-query.test.ts` > unit-price comparison > U23 (idempotent: pre-populating sizeValue/sizeBase yields same winner)
+- `receipt-query.test.ts` > unit-price comparison > U24 (contract: exactly one of unit/package wording)
+- `receipt-query.test.ts` > unit-price comparison > U25 (single 5 lb flour entry uses package wording, no unit token)
+- `receipt-prompt-loop.test.ts` > unit normalization > P5.1–P5.5 (unit-price persona, ≥5 phrasings, /100g token, Costco wins)
+- `receipt-prompt-loop.test.ts` > unit normalization > P6.1–P6.3 (mixed-base persona, package fallback)
+
+---
+
+### REQ-FOOD-PRICE-003.1 — Unit-price wording MUST carry a `/100g`, `/100ml`, or `/ct` token
+
+**Phase:** Item 2 — formatCheapestPriceAnswer unit-price normalization (2026-05-07) | **Status:** Implemented
+
+In unit-price mode, the reply SHALL include the parenthetical token `($X.XX/100g)` for mass, `($X.XX/100ml)` for volume, or `($X.XX/ct)` for count, computed via `formatUnitPriceToken`. In package-price mode, this token SHALL be absent and the existing "Lowest saved package price" wording (REQ-FOOD-PRICE-002) SHALL be used unchanged.
+
+**Standard tests:**
+- `unit-normalizer.test.ts` > formatUnitPriceToken (3 cases: mass, volume, count)
+- `unit-normalizer.test.ts` > precision flour example (5 lb @ $4.99 must not round to $0.00/100g)
+- `receipt-query.test.ts` > U12, U13 (mass token)
+- `receipt-query.test.ts` > U22 (mass token after invalid-price filter)
+
+---
+
+### REQ-FOOD-PRICE-003.2 — `parseSizeString` MUST reject empty/partial/invalid/out-of-range inputs
+
+**Phase:** Item 2 — formatCheapestPriceAnswer unit-price normalization (2026-05-07) | **Status:** Implemented
+
+`parseSizeString` SHALL return `null` for empty strings, whitespace-only inputs, partial parses (extra text after a recognized unit), missing numeric or unit parts, NaN/Infinity/negative/zero values, scientific notation, and values exceeding the per-base maximum bounds (mass > 50 000 g, volume > 50 000 ml, count > 10 000 after conversion). The parser SHALL be case-insensitive and tolerate compact notation (e.g. `1gal`, `12fl oz`) and surrounding whitespace.
+
+**Standard tests:**
+- `unit-normalizer.test.ts` > happy path (12 cases covering mass, volume, count units)
+- `unit-normalizer.test.ts` > case insensitivity (3 cases)
+- `unit-normalizer.test.ts` > whitespace tolerance (4 cases)
+- `unit-normalizer.test.ts` > null cases (6 cases)
+- `unit-normalizer.test.ts` > partial parses (2 cases)
+- `unit-normalizer.test.ts` > numeric edges (5 cases including scientific notation)
+- `unit-normalizer.test.ts` > max bounds (6 cases including at-cap and over-cap)
+- `unit-normalizer.test.ts` > purity (deeply-equal repeat call)
+
+---
+
+### REQ-FOOD-PRICE-003.3 — Invalid `price` fields MUST be excluded from comparison
+
+**Phase:** Item 2 — formatCheapestPriceAnswer unit-price normalization (2026-05-07) | **Status:** Implemented
+
+Price entries with invalid `price` fields (NaN, Infinity, ≤ 0, negative) SHALL be filtered before `formatCheapestPriceAnswer` decides between unit-price and package-price mode. If all entries are filtered out, the function SHALL return the existing "no saved prices" wording. Valid entries SHALL continue to compete in the appropriate mode.
+
+**Standard tests:**
+- `receipt-query.test.ts` > U21 (all invalid → no-saved-prices wording)
+- `receipt-query.test.ts` > U22 (mixed valid + invalid → valid entries compete)
+
+---
+
+### REQ-FOOD-PRICE-003.4 — Receipt + price-update LLM prompts MUST instruct parseable size tokens; `ReceiptLineItem.packageSize` flows through to `PriceEntry.unit`
+
+**Phase:** Item 2 — formatCheapestPriceAnswer unit-price normalization (2026-05-07) | **Status:** Implemented
+
+The receipt-parser prompt (`buildReceiptPrompt`) and the price-update prompts (`NORMALIZE_PROMPT`, `PARSE_PRICE_PROMPT` in `price-store.ts`) SHALL instruct the model to emit a parseable size token from the recognized unit set (mass: g/kg/oz/lb, volume: ml/l/fl oz/gal, count: ct/count/pack/pk/dozen). `ReceiptLineItem` SHALL include the optional field `packageSize?: string \| null`. The receipt line-item validator SHALL coerce non-string or empty `packageSize` to `null`. `updatePricesFromReceipt` SHALL use `packageSize` (when present and non-empty) as the `unit` value on the resulting `PriceEntry`; otherwise it falls back to the LLM normalizer's `unit` field.
+
+**Standard tests:**
+- `prompt-content.test.ts` > NORMALIZE_PROMPT mentions parseable + lists units
+- `prompt-content.test.ts` > buildReceiptPrompt includes `packageSize` field + parseable guidance + today date
+- `unit-normalizer.test.ts` > all parseSizeString tests (50 tests) confirm the recognized-unit set parses correctly
+
+---
+
 ### REQ-FOOD-HEALTH-NEG-001 — `HealthDailyMetricsPayload.metrics` MUST NOT contain `energyLevel` or `mood` fields
 
 **Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
@@ -6163,6 +6243,19 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `shutdown.test.ts` > performTeardown > only calls server.close when server.server.listening is true
 - `shutdown.test.ts` > performTeardown > is idempotent — second call is a no-op
 - `shutdown.test.ts` > performTeardown > returns without throwing if registerServices was never called
+
+### REQ-COMPOSE-001: configPath required when config is overridden
+
+**Phase:** P1-sprightly-brooks | **Status:** Implemented
+
+`composeRuntime` must reject any call that passes a `config` override without a `configPath`. The type signature enforces the pairing at compile time (discriminated union — the second branch requires both `config: SystemConfig` and `configPath: string`; the first branch requires `config?: undefined`). A runtime guard throws `'composeRuntime: configPath is required when config is provided'` before any service is constructed, catching JS callers that bypass TypeScript's type system.
+
+**Standard tests:**
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime guard tests > C1 — composes and shuts down cleanly with config + configPath pairing
+- `compose-runtime.smoke.integration.test.ts` > composeRuntime guard tests > C2 — throws when config is provided without configPath
+
+**Typecheck fixture:**
+- `core/src/typecheck/compose-runtime-types.typecheck.ts` — `@ts-expect-error` on `{ config: cfg }` (missing `configPath`); `{ config: cfg, configPath: '...' }` compiles without error
 
 ### REQ-LLM-030: 40-user load-test harness
 
@@ -9448,6 +9541,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-RECEIPT-003 | receipt-query.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PRICE-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-PRICE-002 | receipt-query.test.ts, receipt-prompt-loop.test.ts | 11 | 4 | Implemented |
+| REQ-FOOD-PRICE-003 | receipt-query.test.ts, receipt-prompt-loop.test.ts | 13 | 6 | Implemented |
+| REQ-FOOD-PRICE-003.1 | unit-normalizer.test.ts, receipt-query.test.ts | 6 | 0 | Implemented |
+| REQ-FOOD-PRICE-003.2 | unit-normalizer.test.ts | 12 | 26 | Implemented |
+| REQ-FOOD-PRICE-003.3 | receipt-query.test.ts | 0 | 2 | Implemented |
+| REQ-FOOD-PRICE-003.4 | prompt-content.test.ts, unit-normalizer.test.ts | 5 | 0 | Implemented |
 | REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |

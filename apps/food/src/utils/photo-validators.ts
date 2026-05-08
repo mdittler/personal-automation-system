@@ -11,7 +11,7 @@ export function isValidPantryPhotoItem(
 ): item is { name: string; quantity: string; category: string } {
 	if (!item || typeof item !== 'object') return false;
 	const record = item as Record<string, unknown>;
-	return typeof record['name'] === 'string' && record['name'].trim() !== '';
+	return typeof record.name === 'string' && record.name.trim() !== '';
 }
 
 /**
@@ -24,28 +24,55 @@ export function isValidGroceryPhotoItem(
 ): item is { name: string; quantity: number | null; unit: string | null } {
 	if (!item || typeof item !== 'object') return false;
 	const record = item as Record<string, unknown>;
-	if (typeof record['name'] !== 'string' || record['name'].trim() === '') return false;
+	if (typeof record.name !== 'string' || record.name.trim() === '') return false;
 	// Quantity must be absent, null, or a finite number
-	const q = record['quantity'];
+	const q = record.quantity;
 	if (q !== undefined && q !== null && (typeof q !== 'number' || !Number.isFinite(q))) {
 		return false;
 	}
 	// Unit must be absent, null, or a string
-	const u = record['unit'];
+	const u = record.unit;
 	if (u !== undefined && u !== null && typeof u !== 'string') return false;
 	return true;
 }
 
-/** Guard for receipt line items. Rejects missing/non-string names and invalid totalPrice. */
-export function isValidReceiptLineItem(
-	item: unknown,
-): item is { name: string; quantity?: number | null; unitPrice?: number | null; totalPrice: number } {
+/**
+ * Guard for receipt line items. Rejects missing/non-string names and invalid totalPrice.
+ * `packageSize` is optional: a non-empty string is preserved; anything else (number,
+ * boolean, missing, empty) is coerced to null at the call site by checking the field
+ * explicitly. The guard itself does not reject items lacking packageSize and does NOT
+ * mutate the input object.
+ */
+export function isValidReceiptLineItem(item: unknown): item is {
+	name: string;
+	quantity?: number | null;
+	unitPrice?: number | null;
+	totalPrice: number;
+	packageSize?: string | null;
+} {
 	if (!item || typeof item !== 'object') return false;
 	const record = item as Record<string, unknown>;
-	if (typeof record['name'] !== 'string' || record['name'].trim() === '') return false;
-	const price = record['totalPrice'];
+	if (typeof record.name !== 'string' || record.name.trim() === '') return false;
+	const price = record.totalPrice;
 	if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) return false;
 	return true;
+}
+
+/**
+ * Normalise the optional `packageSize` field on a receipt line item that has
+ * already passed `isValidReceiptLineItem`.
+ *
+ * - Non-empty string → trimmed string (preserved)
+ * - Anything else (number, boolean, null, undefined, empty string) → null
+ *
+ * Returns a new object; does not mutate the input.
+ */
+export function normalizeReceiptLineItem<T extends { packageSize?: string | null | undefined }>(
+	item: T,
+): T & { packageSize: string | null } {
+	const ps = item.packageSize;
+	const normalized = typeof ps === 'string' && ps.trim() !== '' ? ps.trim() : null;
+	return { ...item, packageSize: normalized };
 }
 
 /** Guard for receipt top-level numeric totals (total, subtotal, tax). */

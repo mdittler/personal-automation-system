@@ -283,3 +283,42 @@ describe.sequential('composeRuntime smoke', { timeout: SMOKE_TEST_TIMEOUT_MS }, 
 		await expect(runtime.dispose()).resolves.not.toThrow();
 	});
 });
+
+describe('composeRuntime guard tests', { timeout: SMOKE_TEST_TIMEOUT_MS }, () => {
+	let tempDir2 = '';
+
+	beforeAll(async () => {
+		tempDir2 = await mkdtemp(join(tmpdir(), 'pas-compose-guard-'));
+	}, SMOKE_TEST_TIMEOUT_MS);
+
+	afterAll(async () => {
+		if (tempDir2) {
+			await rm(tempDir2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+		}
+	}, SMOKE_TEST_TIMEOUT_MS);
+
+	it('C1 — composes and shuts down cleanly with config + configPath pairing', async () => {
+		const logger = pino({ level: 'silent' });
+		const seed = await seedUsers({ dataDir: tempDir2, users: 1, households: 1 });
+		const tempCostTracker = new CostTracker(join(tempDir2, 'data'), logger);
+		const rt = await composeRuntime({
+			dataDir: join(tempDir2, 'data'),
+			configPath: seed.configPath,
+			config: seed.config,
+			providerRegistry: createStubProviderRegistry(tempCostTracker, logger, SMOKE_STUB_OPTIONS),
+			telegramService: fakeTelegramService(),
+			logger,
+		});
+		expect(rt).toBeDefined();
+		expect(rt.services.router).toBeDefined();
+		await rt.dispose();
+	});
+
+	it('C2 — throws when config is provided without configPath', async () => {
+		const logger = pino({ level: 'silent' });
+		const seed = await seedUsers({ dataDir: tempDir2, users: 1, households: 1 });
+		await expect(
+			composeRuntime({ config: seed.config } as any),
+		).rejects.toThrow('composeRuntime: configPath is required when config is provided');
+	});
+});

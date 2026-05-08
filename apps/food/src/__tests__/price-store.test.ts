@@ -190,6 +190,36 @@ describe('price-store', () => {
 			expect(result.items[0]?.unit).toBe('25 lb');
 			expect(result.items[0]?.name).toBe('AP Flour (25 lb)');
 		});
+
+		// Round-trip: when normalizedName has no parenthetical suffix but unit is set,
+		// formatPriceFile must append `(unit)` so the unit survives reload.
+		it('round-trip: packageSize "12 oz" with normalizedName "Milk" survives reload as unit-comparable', () => {
+			const data: StorePriceData = {
+				store: 'Test',
+				slug: 'test',
+				lastUpdated: '2026-05-07',
+				items: [
+					{
+						name: 'Milk', // no parenthetical suffix
+						price: 4.99,
+						unit: '12 oz',
+						department: 'Dairy',
+						updatedAt: '2026-05-07',
+					},
+				],
+			};
+			const written = formatPriceFile(data);
+			// Display name on the line should include the unit
+			expect(written).toContain('- Milk (12 oz): $4.99');
+
+			const reloaded = parsePriceFile(written, 'test');
+			expect(reloaded.items).toHaveLength(1);
+			const reloadedEntry = reloaded.items[0];
+			expect(reloadedEntry).toBeDefined();
+			// The reloaded unit must be parseable by parseSizeString so that
+			// unit-price comparison works after the round-trip.
+			expect(reloadedEntry?.unit).toBe('12 oz');
+		});
 	});
 
 	describe('loadStorePrices', () => {
@@ -493,6 +523,121 @@ describe('price-store', () => {
 			// biome-ignore lint/style/noNonNullAssertion: test asserts non-null above
 			const [, content] = mockStore.write.mock.calls[0]!;
 			expect(content).toContain('updated: 2026-04-07'); // falls back to receipt.date
+		});
+
+		// Correction 2 (LLM trust boundary): packageSize from LLM must be parseable
+		// before being preferred over norm.unit. Invalid values fall back to norm.unit.
+		describe('packageSize validation (LLM trust boundary)', () => {
+			function buildServicesWithUnit(normUnit: string): CoreServices {
+				return {
+					llm: {
+						complete: vi.fn().mockResolvedValue(
+							JSON.stringify([
+								{
+									receiptName: 'KS ORG EGGS 5DZ',
+									normalizedName: 'Eggs (60ct)',
+									department: 'Dairy',
+									unit: normUnit,
+								},
+							]),
+						),
+					},
+					logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+				} as unknown as CoreServices;
+			}
+
+			function buildSingleItemReceipt(packageSize: unknown): Receipt {
+				return {
+					id: '2026-04-07-abc123',
+					store: 'Costco',
+					date: '2026-04-07',
+					lineItems: [
+						{
+							name: 'KS ORG EGGS 5DZ',
+							quantity: 1,
+							unitPrice: 8.49,
+							totalPrice: 8.49,
+							packageSize: packageSize as string | null | undefined,
+						},
+					],
+					subtotal: 8.49,
+					tax: 0.5,
+					total: 8.99,
+					photoPath: 'photos/receipt-abc.jpg',
+					capturedAt: '2026-04-07T10:00:00.000Z',
+				};
+			}
+
+			async function getResolvedUnitFromWrite(
+				services: CoreServices,
+				store: ReturnType<typeof createMockStore>,
+				receipt: Receipt,
+			): Promise<string> {
+				await updatePricesFromReceipt(services, store as never, receipt);
+				expect(store.write).toHaveBeenCalledOnce();
+				const [, content] = store.write.mock.calls[0] as [string, string];
+				// formatPriceFile appends (unit) when name has no parenthetical;
+				// here normalizedName="Eggs (60ct)" already has one, so use the result-items list instead.
+				return content as string;
+			}
+
+			it('falls back to norm.unit when packageSize is "unknown"', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('unknown');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items).toHaveLength(1);
+				expect(result.items[0]?.unit).toBe('60ct'); // fell back to norm.unit
+			});
+
+			it('falls back to norm.unit when packageSize is empty string', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items[0]?.unit).toBe('60ct');
+			});
+
+			it('falls back to norm.unit when packageSize is "NaN"', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('NaN');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items[0]?.unit).toBe('60ct');
+			});
+
+			it('falls back to norm.unit when packageSize is "-5" (no leading digit)', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('-5');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items[0]?.unit).toBe('60ct');
+			});
+
+			it('falls back to norm.unit when packageSize is "large" (unrecognized unit)', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('large');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items[0]?.unit).toBe('60ct');
+			});
+
+			it('uses packageSize when value is parseable (e.g. "12 oz")', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('12 oz');
+				const result = await updatePricesFromReceipt(services, mockStore as never, receipt);
+				expect(result.items[0]?.unit).toBe('12 oz'); // preferred over norm.unit
+			});
+
+			// Use the helper to silence the "unused function" warning if applicable.
+			it('write occurs for valid packageSize (helper reuse)', async () => {
+				const mockStore = createMockStore();
+				const services = buildServicesWithUnit('60ct');
+				const receipt = buildSingleItemReceipt('12 oz');
+				const content = await getResolvedUnitFromWrite(services, mockStore, receipt);
+				expect(content).toContain('store: Costco');
+			});
 		});
 
 		it('logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)', async () => {
