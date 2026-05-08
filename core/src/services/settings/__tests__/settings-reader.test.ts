@@ -434,7 +434,7 @@ describe('SettingsReader.buildCatalog', () => {
     expect(c2).toContain('10');
   });
 
-  it('does NOT advertise /settings or /gui/settings', async () => {
+  it('does NOT advertise /gui/settings in catalog or trustedInstructions', async () => {
     const chatbotCfg = makeAppConfig({ log_to_notes: false });
     const reader = new SettingsReader({
       registry: makeRegistry(),
@@ -445,8 +445,9 @@ describe('SettingsReader.buildCatalog', () => {
     const { catalog, trustedInstructions } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
     expect(catalog).not.toContain('/settings');
     expect(catalog).not.toContain('/gui/settings');
-    expect(trustedInstructions).not.toContain('/settings');
     expect(trustedInstructions).not.toContain('/gui/settings');
+    // trustedInstructions now advertises /settings for direct user use (Settings Chunk D)
+    expect(trustedInstructions).toContain('/settings');
   });
 
   it('trustedInstructions lists only nlSafe qualified keys', async () => {

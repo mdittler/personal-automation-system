@@ -14,15 +14,14 @@
  *   the current system config value at the camelCase dotpath (effective-default resolver).
  * - sanitizeContextContent is called on the raw catalog before returning so hostile
  *   role-tag breakouts (</memory-context>, <system>, <user>, <assistant>) are neutralized.
- * - Does NOT advertise /settings or /gui/settings (those are future phases).
  */
 import type { AppLogger } from '../../types/app-module.js';
 import type { AppConfigService, SystemConfig } from '../../types/config.js';
-import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
 import { dotGet } from '../config/system-config-writer.js';
 import type { SystemConfigWriter } from '../config/system-config-writer.js';
 import { sanitizeContextContent } from '../prompt-assembly/memory-context.js';
 import { CATEGORY_ORDER } from './categories.js';
+import { formatDisplayValue } from './settings-formatter.js';
 import type { SettingDef, SettingsCategory, SettingsRegistry } from './settings-registry.js';
 import { qualifiedKey } from './settings-registry.js';
 
@@ -68,39 +67,6 @@ export interface CatalogOutput {
  * Prevents unbounded context injection when many nlSafe keys are registered.
  */
 const MAX_TRUSTED_INSTRUCTIONS_CHARS = 3_000;
-
-// ---------------------------------------------------------------------------
-// Value display helpers
-// ---------------------------------------------------------------------------
-
-function displayValue(def: SettingDef, raw: unknown): string {
-	if (def.type === 'boolean') {
-		if (raw === true) return 'ON';
-		if (raw === false) return 'OFF';
-		// Coerce string booleans from YAML manual edits (e.g. 'true', 'on', '1')
-		if (typeof raw === 'string') {
-			const lower = raw.toLowerCase();
-			if (BOOLEAN_TRUTHY.has(lower)) return 'ON';
-			if (BOOLEAN_FALSY.has(lower)) return 'OFF';
-		}
-		// Unexpected type — fall through to default
-		return raw == null ? 'OFF' : String(raw);
-	}
-
-	if (def.type === 'string' || def.type === 'select') {
-		if (raw == null || raw === '') return '(not set)';
-		return String(raw);
-	}
-
-	if (def.type === 'number') {
-		if (raw == null) return '(not set)';
-		return String(raw);
-	}
-
-	// Fallback for unexpected types
-	if (raw == null) return '(not set)';
-	return String(raw);
-}
 
 // ---------------------------------------------------------------------------
 // SettingsReader
@@ -161,7 +127,7 @@ export class SettingsReader {
 			for (const def of defs) {
 				const overrides = overridesByApp.get(def.appId) ?? {};
 				const rawValue = this.resolveValue(def, overrides);
-				lines.push(`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${displayValue(def, rawValue)}`);
+				lines.push(`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${formatDisplayValue(def, rawValue)}`);
 			}
 		}
 
@@ -288,6 +254,7 @@ export class SettingsReader {
 			'Available keys:',
 			keyLines,
 			'Only emit a tag when the user explicitly asks to change a setting.',
+			'You can also type `/settings` to view or change settings directly.',
 		].join('\n');
 	}
 }
