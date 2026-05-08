@@ -24,6 +24,14 @@ export interface SettingDef {
   scope: 'per-user' | 'per-household' | 'system';
   nlSafe: boolean;
   nlIntentRegex?: RegExp;
+  /** Minimum value for numeric settings (GUI validation + coercion). */
+  min?: number;
+  /** Maximum value for numeric settings (GUI validation + coercion). */
+  max?: number;
+  /** When true, a PAS restart is required for this setting to take effect. GUI renders a badge. */
+  restartRequired?: boolean;
+  /** For per-user defs: camelCase dotpath into SystemConfig used as effective default when no user override exists. */
+  systemConfigBackingKey?: string;
 }
 
 export function qualifiedKey(appId: string, key: string): string {

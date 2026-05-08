@@ -8,13 +8,19 @@
  * - Groups visible settings by category (ordered by CATEGORY_ORDER).
  * - Reads live per-user overrides via appConfigResolver; falls back to registry defaults
  *   on missing AppConfigService or thrown getOverrides (degraded — logs warning).
+ * - For system-scope defs (appId === 'system'), reads live values from SystemConfigWriter
+ *   rather than AppConfigService.
+ * - For per-user defs with systemConfigBackingKey: when no user override exists, displays
+ *   the current system config value at the camelCase dotpath (effective-default resolver).
  * - sanitizeContextContent is called on the raw catalog before returning so hostile
  *   role-tag breakouts (</memory-context>, <system>, <user>, <assistant>) are neutralized.
  * - Does NOT advertise /settings or /gui/settings (those are future phases).
  */
 import type { AppLogger } from '../../types/app-module.js';
-import type { AppConfigService } from '../../types/config.js';
+import type { AppConfigService, SystemConfig } from '../../types/config.js';
 import { BOOLEAN_FALSY, BOOLEAN_TRUTHY } from '../config/coerce-user-config.js';
+import { dotGet } from '../config/system-config-writer.js';
+import type { SystemConfigWriter } from '../config/system-config-writer.js';
 import { sanitizeContextContent } from '../prompt-assembly/memory-context.js';
 import { CATEGORY_ORDER } from './categories.js';
 import type { SettingDef, SettingsCategory, SettingsRegistry } from './settings-registry.js';
@@ -32,6 +38,10 @@ export interface SettingsReaderDeps {
 	 */
 	appConfigResolver: (appId: string) => AppConfigService | undefined;
 	logger?: AppLogger;
+	/** Required for system-scope reads and effective-default resolution. */
+	systemConfigWriter?: SystemConfigWriter;
+	/** In-memory SystemConfig. Read-only from the reader's perspective. */
+	systemConfig?: SystemConfig;
 }
 
 export interface CatalogOutput {
@@ -100,11 +110,15 @@ export class SettingsReader {
 	private readonly registry: SettingsRegistry;
 	private readonly appConfigResolver: (appId: string) => AppConfigService | undefined;
 	private readonly logger: AppLogger | undefined;
+	private readonly systemConfigWriter: SystemConfigWriter | undefined;
+	private readonly systemConfig: SystemConfig | undefined;
 
 	constructor(deps: SettingsReaderDeps) {
 		this.registry = deps.registry;
 		this.appConfigResolver = deps.appConfigResolver;
 		this.logger = deps.logger;
+		this.systemConfigWriter = deps.systemConfigWriter;
+		this.systemConfig = deps.systemConfig;
 	}
 
 	/**
@@ -146,9 +160,7 @@ export class SettingsReader {
 			const defs = byCategory.get(cat) ?? [];
 			for (const def of defs) {
 				const overrides = overridesByApp.get(def.appId) ?? {};
-				const rawValue = Object.prototype.hasOwnProperty.call(overrides, def.key)
-					? overrides[def.key]
-					: def.default;
+				const rawValue = this.resolveValue(def, overrides);
 				lines.push(`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${displayValue(def, rawValue)}`);
 			}
 		}
@@ -175,7 +187,29 @@ export class SettingsReader {
 	// ---------------------------------------------------------------------------
 
 	/**
+	 * Resolve the display value for a setting:
+	 *   1. User override (highest priority).
+	 *   2. For per-user defs with systemConfigBackingKey: the system config value.
+	 *   3. The SettingDef default.
+	 */
+	private resolveValue(def: SettingDef, overrides: Record<string, unknown>): unknown {
+		if (Object.prototype.hasOwnProperty.call(overrides, def.key)) {
+			return overrides[def.key];
+		}
+		// Effective-default resolver: per-user def backed by a system config value.
+		if (def.scope === 'per-user' && def.systemConfigBackingKey && this.systemConfig) {
+			const systemValue = dotGet(
+				this.systemConfig as unknown as Record<string, unknown>,
+				def.systemConfigBackingKey,
+			);
+			if (systemValue !== undefined) return systemValue;
+		}
+		return def.default;
+	}
+
+	/**
 	 * Fetches per-app overrides for all distinct appIds in the visible defs.
+	 * For system-scope (appId === 'system'), reads live values via SystemConfigWriter.
 	 * Errors from getOverrides are caught and logged (degraded, not thrown).
 	 */
 	private async fetchAllOverrides(
@@ -187,6 +221,11 @@ export class SettingsReader {
 
 		const entries = await Promise.all(
 			appIds.map(async (appId) => {
+				// System-scope: read from SystemConfigWriter, not AppConfigService.
+				if (appId === 'system') {
+					return [appId, this.buildSystemOverrides(visible)] as const;
+				}
+
 				const cfg = this.appConfigResolver(appId);
 				if (!cfg) {
 					// No service for this app — use empty overrides (defaults will apply).
@@ -208,6 +247,23 @@ export class SettingsReader {
 		);
 
 		return new Map(entries);
+	}
+
+	/** Build a fake "overrides" record for system-scope defs by reading live SystemConfig values. */
+	private buildSystemOverrides(visible: SettingDef[]): Record<string, unknown> {
+		const writer = this.systemConfigWriter;
+		const config = this.systemConfig;
+		if (!writer || !config) return {};
+
+		const result: Record<string, unknown> = {};
+		for (const def of visible.filter((d) => d.appId === 'system')) {
+			try {
+				result[def.key] = writer.read(def.key, config);
+			} catch {
+				// Key not in allowlist or read error — fall back to def.default
+			}
+		}
+		return result;
 	}
 
 	/**
