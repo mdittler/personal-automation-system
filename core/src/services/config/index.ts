@@ -109,6 +109,9 @@ interface PasYamlConfig {
 			max_window_days?: number;
 		};
 	};
+	regression?: {
+		maxRunBudgetUsd?: number;
+	};
 }
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
@@ -286,6 +289,9 @@ export async function loadSystemConfig(options?: {
 			recall: {
 				max_window_days: yamlConfig?.chat?.recall?.max_window_days ?? 365,
 			},
+		},
+		regression: {
+			maxRunBudgetUsd: yamlConfig?.regression?.maxRunBudgetUsd ?? 5.0,
 		},
 	};
 

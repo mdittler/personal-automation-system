@@ -183,6 +183,17 @@ export const PasYamlConfigSchema = z
 			})
 			.passthrough()
 			.optional(),
+		// Persona regression suite settings (REQ-REG-009).
+		regression: z
+			.object({
+				maxRunBudgetUsd: z
+					.number({ invalid_type_error: 'regression.maxRunBudgetUsd must be a number' })
+					.finite('regression.maxRunBudgetUsd must be a finite number')
+					.positive('regression.maxRunBudgetUsd must be a positive number')
+					.optional(),
+			})
+			.passthrough()
+			.optional(),
 	})
 	.passthrough();
 
