@@ -77,6 +77,12 @@ export interface LLMConfig {
 // System configuration
 // ---------------------------------------------------------------------------
 
+/** Persona regression suite settings (REQ-REG-009). */
+export interface RegressionConfig {
+	/** Per-run cost ceiling in USD. Default 5.00. REQ-REG-009. */
+	maxRunBudgetUsd: number;
+}
+
 /** Top-level system configuration. */
 export interface SystemConfig {
 	/** Fastify server port. Default: 3000. */
@@ -216,6 +222,12 @@ export interface SystemConfig {
 			auto_reset_idle_minutes?: number | null;
 		};
 	};
+
+	/**
+	 * Persona regression suite settings. Loader always populates with defaults
+	 * (REQ-REG-009). Optional on the type so existing test fixtures still compile.
+	 */
+	regression?: RegressionConfig;
 }
 
 /** Route verification configuration. */

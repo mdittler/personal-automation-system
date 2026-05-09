@@ -123,3 +123,8 @@ defaults:
 #   # Can also be set via the USDA_FDC_API_KEY environment variable.
 #   # Leave empty to disable cross-check (the LLM estimate is used alone).
 #   usda_fdc_api_key: ""
+
+# Persona Regression Suite per-run cost ceiling, USD. REQ-REG-009.
+# When omitted, defaults to 5.00. CLI flag `--max-run-budget=<usd>` overrides per-run.
+regression:
+  maxRunBudgetUsd: 5.00
