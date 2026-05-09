@@ -9,7 +9,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunResult, Verdict } from '../shared/types.js';
 
@@ -70,6 +70,7 @@ export class CacheStore {
 			buf = await readFile(path, 'utf8');
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+			// biome-ignore lint/suspicious/noConsole: cache read observability — REQ-REG-002/010
 			console.warn(`[regression] cache read error ${path}: ${(err as Error).message}`);
 			return null;
 		}
@@ -77,15 +78,18 @@ export class CacheStore {
 		try {
 			parsed = JSON.parse(buf);
 		} catch (err) {
+			// biome-ignore lint/suspicious/noConsole: cache read observability — REQ-REG-002/010
 			console.warn(`[regression] cache JSON parse failed ${path}: ${(err as Error).message}`);
 			return null;
 		}
 		if (!isPlainObject(parsed)) {
+			// biome-ignore lint/suspicious/noConsole: cache read observability — REQ-REG-002/010
 			console.warn(`[regression] cache shape invalid (not object) ${path}`);
 			return null;
 		}
 		const inner = (parsed as { result?: unknown }).result;
 		if (!looksLikeRunResult(inner, caseId, cacheKey)) {
+			// biome-ignore lint/suspicious/noConsole: cache read observability — REQ-REG-002/010
 			console.warn(`[regression] cache shape invalid (RunResult schema mismatch) ${path}`);
 			return null;
 		}
