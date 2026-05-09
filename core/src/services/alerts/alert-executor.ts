@@ -395,6 +395,22 @@ async function executeWriteData(
 	const resolvedPath = resolveDateTokens(config.path, deps.timezone || 'UTC');
 	const content = resolveTemplate(config.content, vars);
 
+	// Defense-in-depth: reject obviously hostile path shapes BEFORE resolve()+join()
+	// flattens them. On POSIX, backslashes are valid filename characters, so
+	// `..\..\etc\passwd` is treated as a single filename and the startsWith()
+	// containment check below would not catch it. Manifest validation also
+	// catches these at install time, but runtime validation guards against
+	// programmatically-constructed alerts and config drift.
+	if (
+		resolvedPath.includes('\0') ||
+		resolvedPath.includes('\\') ||
+		resolvedPath.startsWith('/') ||
+		/^[a-zA-Z]:[\\/]/.test(resolvedPath) ||
+		resolvedPath.split('/').some((seg) => seg === '..')
+	) {
+		throw new Error('Path traversal detected in write_data action');
+	}
+
 	// Use household-aware path layout when householdService is available
 	const householdId = deps.householdService?.getHouseholdForUser(config.user_id) ?? null;
 	const baseDir = householdId
