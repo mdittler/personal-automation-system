@@ -36,11 +36,11 @@ describe('regression types', () => {
 		expect(s.reasoning).toBeNull();
 	});
 
-	it('RunResult judgeModelId removed (was in early plan; types use modelIds only)', () => {
-		// Sanity: making sure nothing leaked the old judgeModelId field
-		const r: Pick<RunResult, 'modelIds'> = {
-			modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
-		};
-		expect(r.modelIds.fast).toBe('f');
+	it('RunResult does NOT have a judgeModelId field (regression guard)', () => {
+		// The early plan added judgeModelId; current plan drops it. This typecheck
+		// guard catches accidental re-introduction.
+		type HasJudgeModelId = 'judgeModelId' extends keyof RunResult ? true : false;
+		const _noJudgeModelId: HasJudgeModelId = false;
+		expect(_noJudgeModelId).toBe(false);
 	});
 });

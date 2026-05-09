@@ -30,8 +30,11 @@ export interface OracleVerdict {
 }
 
 /**
- * Tier model snapshot at run time. `reasoning` is optional because
- * `ModelSelector.getReasoningRef()` returns `ModelRef | undefined`.
+ * Tier model snapshot at run time.
+ *
+ * `reasoning` is nullable (not optional): the snapshot must always record the
+ * slot, but `ModelSelector.getReasoningRef()` returns `ModelRef | undefined`,
+ * which is normalized to `null` here for stable JSON round-tripping.
  */
 export interface TierModelSnapshot {
 	fast: string;
