@@ -1,0 +1,21 @@
+{
+	"name": "@pas/regression",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest watch",
+		"typecheck": "test -z \"$(find src -name '*.ts' -print -quit 2>/dev/null)\" || tsc -p tsconfig.test.json --noEmit"
+	},
+	"dependencies": {
+		"@pas/core": "workspace:*",
+		"ajv": "^8.18.0",
+		"ajv-formats": "^3.0.1"
+	},
+	"devDependencies": {
+		"vitest": "^3.0.0",
+		"tsx": "^4.19.0",
+		"@types/node": "^25.3.2"
+	}
+}
