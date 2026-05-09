@@ -265,6 +265,58 @@ describe('runReceiptCase — production parser integration', () => {
 		expect(result.costUsd).toBe(0);
 	});
 
+	it('preserves prior fail verdict when a later input would trip the budget gate', async () => {
+		// Two-input case: input 1 hallucinates a line item (verdict=fail);
+		// input 2 would trip the budget gate. Final verdict must be 'fail',
+		// NOT 'budget-exceeded' — stronger verdicts must not be clobbered.
+		const photoPath = await stagePhoto('walmart');
+		const sidecarPath = await stageSidecar('walmart-precedence', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const llmComplete = vi.fn().mockResolvedValue(
+			JSON.stringify({
+				store: 'Walmart',
+				date: '2026-04-15',
+				lineItems: [
+					{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
+					{ name: 'Hallucinated Caviar', quantity: 1, unitPrice: 100, totalPrice: 100 },
+				],
+				subtotal: 104.99,
+				tax: 0,
+				total: 104.99,
+			}),
+		);
+		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05 (would push 0.02+0.05=0.07 > 0.05)
+		let callIdx = 0;
+		const deps: ReceiptRunnerDeps = {
+			llm: { complete: llmComplete },
+			logger: makeLogger(),
+			timezone: 'America/New_York',
+			modelIds: MODELS,
+			cacheKey: HEX,
+			caseBudgetUsd: 0.05,
+			estimateUsd: () => {
+				callIdx += 1;
+				return callIdx === 1 ? 0.02 : 0.05;
+			},
+		};
+		const c = makeCase(photoPath, sidecarPath, 'precedence');
+		c.inputs.push({
+			payload: { photoFixture: photoPath, sidecarFixture: sidecarPath },
+			expected: { kind: 'sidecar' },
+		});
+		const result = await runReceiptCase(c, deps);
+		expect(result.verdict).toBe('fail');
+		// First input was processed (LLM called once, hallucination → fail).
+		// Second input was gated out, but must NOT clobber the prior fail.
+		expect(llmComplete).toHaveBeenCalledTimes(1);
+		expect(result.oracleVerdicts).toHaveLength(1);
+		expect(result.oracleVerdicts[0]?.verdict).toBe('fail');
+	});
+
 	it('passes input to production parseReceiptFromPhoto with correct mime type and tier', async () => {
 		const photoPath = await stagePhoto('walmart');
 		const sidecarPath = await stageSidecar('walmart', {

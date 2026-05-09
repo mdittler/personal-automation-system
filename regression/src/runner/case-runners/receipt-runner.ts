@@ -157,7 +157,7 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		// rather than refunding it.
 		const projectedNextCost = deps.estimateUsd({ tokenIn: 0, tokenOut: 0 });
 		if (costUsd + projectedNextCost > deps.caseBudgetUsd) {
-			aggregateVerdict = 'budget-exceeded';
+			if (aggregateVerdict === 'pass') aggregateVerdict = 'budget-exceeded';
 			break;
 		}
 

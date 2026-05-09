@@ -55,4 +55,10 @@ describe('RunBudget', () => {
 		expect(b.canAfford(0.4)).toBe(true);
 		expect(b.canAfford(0.6)).toBe(false);
 	});
+
+	it('canAfford rejects NaN/Infinity', () => {
+		const b = new RunBudget(5);
+		expect(() => b.canAfford(Number.NaN)).toThrow(/finite/i);
+		expect(() => b.canAfford(Number.POSITIVE_INFINITY)).toThrow(/finite/i);
+	});
 });

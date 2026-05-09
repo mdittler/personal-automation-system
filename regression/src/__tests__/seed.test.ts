@@ -36,7 +36,7 @@ describe('verifyFixtureIntegrity', () => {
 		expect(result.failures).toHaveLength(1);
 		const [first] = result.failures;
 		expect(first?.reason).toBe('mismatch');
-		expect(first?.path).toMatch(/a\.png$/);
+		expect(first?.path).toBe('a.png');
 	});
 
 	it('detects missing file', async () => {
@@ -46,6 +46,7 @@ describe('verifyFixtureIntegrity', () => {
 		expect(result.failures).toHaveLength(1);
 		const [first] = result.failures;
 		expect(first?.reason).toBe('missing');
+		expect(first?.path).toBe('missing.png');
 	});
 
 	it('rejects manifest line with traversal in path', async () => {
@@ -92,5 +93,7 @@ describe('verifyFixtureIntegrity', () => {
 		expect(result.failures).toHaveLength(2);
 		const reasons = result.failures.map((f) => f.reason).sort();
 		expect(reasons).toEqual(['mismatch', 'missing']);
+		const paths = result.failures.map((f) => f.path).sort();
+		expect(paths).toEqual(['missing.png', 'tampered.png']);
 	});
 });

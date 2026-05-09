@@ -1,4 +1,3 @@
-// regression/src/runner/seed.ts
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
@@ -25,8 +24,9 @@ const MANIFEST_LINE_RE = /^([0-9a-f]{64})\s+(.+)$/i;
 export async function verifyFixtureIntegrity(manifestPath: string): Promise<FixtureCheckResult> {
 	const manifestText = await readFile(manifestPath, 'utf8');
 	const baseDir = dirname(manifestPath);
-	const failures: FixtureFailure[] = [];
 
+	// Phase 1: parse + validate paths (synchronous, fail-fast on traversal/absolute)
+	const entries: Array<{ relPath: string; fullPath: string; expectedHash: string }> = [];
 	for (const rawLine of manifestText.split('\n')) {
 		const line = rawLine.trim();
 		if (!line || line.startsWith('#')) continue;
@@ -36,7 +36,6 @@ export async function verifyFixtureIntegrity(manifestPath: string): Promise<Fixt
 		}
 		const expectedHash = m[1].toLowerCase();
 		const relPath = m[2];
-
 		if (isAbsolute(relPath)) {
 			throw new Error(`Manifest path must be relative, got absolute: ${relPath}`);
 		}
@@ -44,25 +43,29 @@ export async function verifyFixtureIntegrity(manifestPath: string): Promise<Fixt
 		if (normalized.startsWith('..') || normalized.split('/').includes('..')) {
 			throw new Error(`Manifest path traversal rejected: ${relPath}`);
 		}
-
-		const fullPath = join(baseDir, normalized);
-		let buf: Buffer;
-		try {
-			buf = await readFile(fullPath);
-		} catch {
-			failures.push({ path: fullPath, reason: 'missing' });
-			continue;
-		}
-		const actualHash = createHash('sha256').update(buf).digest('hex');
-		if (actualHash !== expectedHash) {
-			failures.push({
-				path: fullPath,
-				reason: 'mismatch',
-				expected: expectedHash,
-				actual: actualHash,
-			});
-		}
+		entries.push({ relPath: normalized, fullPath: join(baseDir, normalized), expectedHash });
 	}
 
+	// Phase 2: hash + compare (parallel I/O)
+	const results = await Promise.all(
+		entries.map(async (e): Promise<FixtureFailure | null> => {
+			try {
+				const buf = await readFile(e.fullPath);
+				const actualHash = createHash('sha256').update(buf).digest('hex');
+				if (actualHash !== e.expectedHash) {
+					return {
+						path: e.relPath,
+						reason: 'mismatch',
+						expected: e.expectedHash,
+						actual: actualHash,
+					};
+				}
+				return null;
+			} catch {
+				return { path: e.relPath, reason: 'missing' };
+			}
+		}),
+	);
+	const failures = results.filter((r): r is FixtureFailure => r !== null);
 	return { ok: failures.length === 0, failures };
 }

@@ -118,11 +118,12 @@ export class CacheStore {
 			throw err;
 		}
 		const out: RunResult[] = [];
-		for (const f of files) {
-			if (!f.endsWith('.json')) continue;
-			const cacheKey = f.replace(/\.json$/, '');
-			if (!SAFE_KEY_RE.test(cacheKey)) continue;
-			const r = await this.read(caseId, cacheKey);
+		const cacheKeys = files
+			.filter((f) => f.endsWith('.json'))
+			.map((f) => f.replace(/\.json$/, ''))
+			.filter((k) => SAFE_KEY_RE.test(k));
+		const results = await Promise.all(cacheKeys.map((k) => this.read(caseId, k)));
+		for (const r of results) {
 			if (r) out.push(r);
 		}
 		out.sort((a, b) => a.timestamp.localeCompare(b.timestamp));

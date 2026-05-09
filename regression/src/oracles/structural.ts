@@ -13,6 +13,7 @@
  * rule 1: scalars require `Number.isFinite` (rejects null/NaN/Infinity).
  */
 
+import { isCalendarStrict } from '@core/utils/temporal.js';
 import AjvModule from 'ajv';
 import type { OracleVerdict } from '../shared/types.js';
 
@@ -38,16 +39,6 @@ function getByPath(obj: unknown, path: string): unknown {
 		if (acc == null || typeof acc !== 'object') return undefined;
 		return (acc as Record<string, unknown>)[k];
 	}, obj);
-}
-
-function isCalendarStrict(iso: string): boolean {
-	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-	if (!m) return false;
-	const y = Number(m[1]);
-	const mo = Number(m[2]);
-	const d = Number(m[3]);
-	const dt = new Date(Date.UTC(y, mo - 1, d));
-	return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
 export function runStructuralOracle(
