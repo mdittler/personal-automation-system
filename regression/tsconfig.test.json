@@ -1,4 +1,7 @@
 {
+	// Extends ./tsconfig.json to add tests for typecheck. TypeScript replaces
+	// (not merges) `exclude` from the parent, so this file's exclude must
+	// remain narrow on purpose.
 	"extends": "./tsconfig.json",
 	"include": ["src/**/*.ts", "src/**/*.json"],
 	"exclude": ["node_modules", "dist"]
