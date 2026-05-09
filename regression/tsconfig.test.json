@@ -2,7 +2,30 @@
 	// Extends ./tsconfig.json to add tests for typecheck. TypeScript replaces
 	// (not merges) `exclude` from the parent, so this file's exclude must
 	// remain narrow on purpose.
+	//
+	// `rootDir` is widened from "src" to the repo root so type-only imports
+	// resolved through path aliases (e.g. `@core/*`, `@food/*`) don't
+	// trigger TS6059 ("not under rootDir"). This config is --noEmit, so
+	// `rootDir` only affects diagnostics; the build config (`tsconfig.json`)
+	// keeps the narrow rootDir for output layout.
 	"extends": "./tsconfig.json",
-	"include": ["src/**/*.ts", "src/**/*.json"],
-	"exclude": ["node_modules", "dist"]
+	"compilerOptions": {
+		"rootDir": ".."
+	},
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.json",
+		"../core/src/**/*.ts",
+		"../apps/food/src/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"../core/**/*.test.ts",
+		"../core/**/__tests__/**",
+		"../core/src/cli/templates/**",
+		"../core/src/typecheck/**",
+		"../apps/**/*.test.ts",
+		"../apps/**/__tests__/**"
+	]
 }

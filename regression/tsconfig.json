@@ -5,7 +5,8 @@
 		"rootDir": "src",
 		"paths": {
 			"@regression/*": ["./src/*"],
-			"@core/*": ["../core/src/*"]
+			"@core/*": ["../core/src/*"],
+			"@food/*": ["../apps/food/src/*"]
 		}
 	},
 	"include": ["src/**/*.ts", "src/**/*.json"],
