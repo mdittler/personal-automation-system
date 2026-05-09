@@ -155,11 +155,7 @@ describe('structural — string equality (store name)', () => {
 });
 
 describe('structural — additional LLM-untrust + integration coverage', () => {
-	it('fail when scalar is NaN', () => {
-		// NaN cannot be encoded in JSON; emulate by injecting a non-finite float via raw JSON parse path
-		// Use a string that JSON.parse reads as "NaN" — JSON.parse rejects bare NaN, so we construct
-		// the case via a numeric-but-non-finite by sending Infinity-equivalent: a value parseable
-		// as Infinity is not JSON-legal. Instead use a non-number type to exercise the !isFinite guard.
+	it('fail when scalar is non-numeric (null/string)', () => {
 		const v = runStructuralOracle('{"total":"forty-two"}', {
 			schema: { type: 'object' },
 			scalars: [{ path: 'total', expected: 42, tolerance: 0.01 }],
@@ -205,5 +201,25 @@ describe('structural — additional LLM-untrust + integration coverage', () => {
 			],
 		});
 		expect(v.verdict).toBe('pass');
+	});
+});
+
+describe('structural — date range misconfig defensive (Task 7 followup)', () => {
+	it('emits error when minIso is calendar-invalid', () => {
+		const v = runStructuralOracle('{"date":"2026-04-15"}', {
+			schema: { type: 'object' },
+			dates: [{ path: 'date', minIso: '2024-13-01', maxIso: '2026-12-31' }],
+		});
+		expect(v.verdict).toBe('error');
+		expect(v.details).toMatch(/operator|misconfig/i);
+	});
+
+	it('emits error when maxIso is malformed', () => {
+		const v = runStructuralOracle('{"date":"2026-04-15"}', {
+			schema: { type: 'object' },
+			dates: [{ path: 'date', minIso: '2024-01-01', maxIso: 'not-a-date' }],
+		});
+		expect(v.verdict).toBe('error');
+		expect(v.details).toMatch(/operator|misconfig/i);
 	});
 });

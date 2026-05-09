@@ -162,6 +162,15 @@ export function runStructuralOracle(
 
 	// 7. Dates — calendar-strict + range.
 	for (const d of expectation.dates ?? []) {
+		// Defensive: operator misconfigured the range strings. Without this guard,
+		// `Date.parse('2024-13-01')` returns NaN and the comparison `t < NaN`
+		// silently evaluates to false, letting bogus ranges pass through.
+		if (!isCalendarStrict(d.minIso) || !isCalendarStrict(d.maxIso)) {
+			return {
+				verdict: 'error',
+				details: `Operator misconfigured date range: minIso=${d.minIso}, maxIso=${d.maxIso}`,
+			};
+		}
 		const a = getByPath(parsed, d.path);
 		if (typeof a !== 'string' || !isCalendarStrict(a)) {
 			return {
