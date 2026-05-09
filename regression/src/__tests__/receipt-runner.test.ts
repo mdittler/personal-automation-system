@@ -107,6 +107,19 @@ describe('runReceiptCase — production parser integration', () => {
 		expect(result.actuals).toHaveLength(1);
 		expect(result.costUsd).toBeCloseTo(0.02, 4);
 		expect(llmComplete).toHaveBeenCalledTimes(1);
+		const callArgs = llmComplete.mock.calls[0];
+		if (!callArgs) throw new Error('expected llm.complete to have been called');
+		const prompt = callArgs[0] as string;
+		// Sample the food prompt's structure — these regexes catch regressions
+		// that strip or rearrange the prompt without breaking JSON parseability.
+		expect(prompt).toMatch(/grocery receipt/i);
+		expect(prompt).toMatch(/YYYY-MM-DD/);
+		expect(prompt).toMatch(/lineItems/);
+		expect(prompt).toMatch(/total/i);
+		// The LLM-side options carry tier and images
+		const opts = callArgs[1] as { tier?: string; images?: Array<{ mimeType: string }> };
+		expect(opts.tier).toBe('standard');
+		expect(opts.images?.[0]?.mimeType).toBe('image/png');
 		expect(result.oracleVerdicts[0]?.verdict).toBe('pass');
 	});
 
