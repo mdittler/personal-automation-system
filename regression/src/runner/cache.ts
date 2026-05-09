@@ -8,6 +8,7 @@
  * REQ-REG-002, REQ-REG-010.
  */
 
+import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunResult, Verdict } from '../shared/types.js';
@@ -46,6 +47,14 @@ function looksLikeRunResult(
 	if (typeof v.costUsd !== 'number' || !Number.isFinite(v.costUsd) || v.costUsd < 0) return false;
 	if (!Array.isArray(v.actuals)) return false;
 	if (!Array.isArray(v.oracleVerdicts)) return false;
+	if (!Array.isArray(v.inputs)) return false;
+	if (!isPlainObject(v.tokenCounts)) return false;
+	const t = v.tokenCounts as Record<string, unknown>;
+	if (typeof t.input !== 'number' || !Number.isFinite(t.input) || t.input < 0) return false;
+	if (typeof t.output !== 'number' || !Number.isFinite(t.output) || t.output < 0) return false;
+	if (v.source !== 'cached' && v.source !== 'fresh') return false;
+	if (typeof v.durationMs !== 'number' || !Number.isFinite(v.durationMs) || v.durationMs < 0)
+		return false;
 	return true;
 }
 
@@ -89,7 +98,7 @@ export class CacheStore {
 		const dir = join(this.rootDir, result.caseId);
 		await mkdir(dir, { recursive: true });
 		const path = join(dir, `${result.cacheKey}.json`);
-		const tmpPath = `${path}.tmp.${process.pid}`;
+		const tmpPath = `${path}.tmp.${process.pid}.${randomBytes(6).toString('hex')}`;
 		await writeFile(tmpPath, JSON.stringify({ result }, null, 2));
 		await rename(tmpPath, path);
 	}

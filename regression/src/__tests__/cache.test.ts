@@ -49,10 +49,7 @@ describe('CacheStore.read', () => {
 		const result = makeRunResult({ caseId: 'case-1', cacheKey: VALID_KEY_A, costUsd: 0.0123 });
 		await store.write(result);
 		const loaded = await store.read('case-1', VALID_KEY_A);
-		expect(loaded).not.toBeNull();
-		expect(loaded?.caseId).toBe('case-1');
-		expect(loaded?.cacheKey).toBe(VALID_KEY_A);
-		expect(loaded?.costUsd).toBe(0.0123);
+		expect(loaded).toEqual(result);
 	});
 
 	it('returns null + warns on unparseable JSON', async () => {
@@ -76,7 +73,7 @@ describe('CacheStore.read', () => {
 		);
 		const r = await store.read('case-1', VALID_KEY_A);
 		expect(r).toBeNull();
-		expect(warnSpy).toHaveBeenCalled();
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/shape|invalid|schema/i));
 	});
 
 	it('returns null + warns when payload caseId does not match request', async () => {
@@ -163,5 +160,28 @@ describe('CacheStore.listAllForCase', () => {
 		const store = new CacheStore(tempDir);
 		const all = await store.listAllForCase('nonexistent-case');
 		expect(all).toEqual([]);
+	});
+
+	it('listAllForCase skips files with non-hex names defensively', async () => {
+		const store = new CacheStore(tempDir);
+		await store.write(makeRunResult({ cacheKey: VALID_KEY_A }));
+		await writeFile(join(tempDir, 'case-1', 'not-hex.json'), '{"result":{}}');
+		const all = await store.listAllForCase('case-1');
+		expect(all).toHaveLength(1);
+		expect(all[0]?.cacheKey).toBe(VALID_KEY_A);
+	});
+
+	it('listAllForCase returns valid results and skips corrupt ones (with warn)', async () => {
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const store = new CacheStore(tempDir);
+		await store.write(makeRunResult({ cacheKey: VALID_KEY_A }));
+		await store.write(makeRunResult({ cacheKey: VALID_KEY_B }));
+		// Overwrite one with garbage AFTER both are written
+		await writeFile(join(tempDir, 'case-1', `${VALID_KEY_A}.json`), 'not json{');
+		const all = await store.listAllForCase('case-1');
+		expect(all).toHaveLength(1);
+		expect(all[0]?.cacheKey).toBe(VALID_KEY_B);
+		expect(warnSpy).toHaveBeenCalled();
+		warnSpy.mockRestore();
 	});
 });
