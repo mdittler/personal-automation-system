@@ -10,7 +10,8 @@ User manual actions are tracked separately in `user_actions.md`.
 | # | Phase | Sessions | What it delivers |
 |---|---|---|---|
 | 1 | ~~**Settings Chunk D**~~ ✓ Complete (2026-05-08) | 1 | `/settings` Telegram command — list and set tunables inline. `handleSettings` + Router built-in + `PendingSettingsConfirmStore` + integration + persona tests. REQ-SETTINGS-009 + REQ-SETTINGS-010. |
-| 2 | **Persona Regression Suite Chunk A** | 1 | `regression/` workspace, test runner, cache, 4 oracle types (structural + rubric), CLI |
+| 2a | ~~**Persona Regression Suite Chunk A.1 — substrate**~~ ✓ Complete (2026-05-09) | 1 | `regression/` workspace, types, cache (git-blob + tier snapshot), schema-validated reads + history, budget guards (CaseBudget + RunBudget), `regression.maxRunBudgetUsd` config (REQ-REG-009), structural oracle (error-on-non-parse + calendar-strict), PersonaCase validator, fixture integrity verifier (REQ-REG-006), receipt runner against production `parseReceiptFromPhoto`. 97 unit tests. REQ-REG-001/002/004/006/008/009/010/014. |
+| 2b | **Persona Regression Suite Chunk A.2 — receipt cases + CLI** *(blocked on operator photo delivery — see "Persona Regression Suite Chunk A.2 carry-forward" below)* | 1 | 5 hand-curated receipt fixtures, sidecars, sha256 manifests, case-loader, orchestrator, CLI (`pnpm test:regression`), URS rows, CLAUDE.md status update, final verification |
 | 3 | **Persona Regression Suite Chunk B** | 1 | GUI page `/gui/regression`, result history per (case × model), admin controls |
 | 4 | **T1a — Dependency spike** | 1 | Lock Vercel AI SDK v6 + provider versions; per-model tool-call support matrix |
 | 5 | **T1 — LLMService substrate** | 1 | `completeWithTools` + owned loop wrapper + per-step cost reservation + capability flags |
@@ -105,6 +106,28 @@ These are greenlit but not yet planned. Each needs a spec/plan before coding.
 - **Phase H12c** — Alcohol + Meal Quality Signals. Deferred pending H12a stabilization.
 - **Phase 27C** — CrossAppDataService + LinkResolver: read-only cross-app file access. Deferred until a concrete use case requires it.
 - **Persona Regression Suite** — Separate opt-in LLM-calling test suite (`regression/` workspace) that catches accuracy, quality, and safety regressions when swapping LLM tier models. GUI-runnable (`/gui/regression`, admin-only), cache-keyed on (test definition + coverage file hashes + model IDs), result history retained per (case × model). v1 buckets: receipt extraction (structural oracle), chatbot fallback (rubric judge), recall classifier (structural), routing/intent (structural, ≥0.95 accuracy gate). Spec: `docs/superpowers/specs/2026-05-04-persona-regression-suite-design.md`.
+
+- **Persona Regression Suite Chunk A.2 carry-forward — operator photo delivery + downstream tasks** — Substrate (Chunk A.1) shipped 2026-05-09. Chunk A.2 cannot start until 5 receipt photos are committed. The plan is in `~/.claude/plans/can-you-start-the-bright-frog.md` Tasks 11–15.
+
+  **Operator action — commit 5 receipt photos to `regression/fixtures/receipts/`:**
+  1. `walmart-basic.png` — Standard Walmart receipt, 5–10 line items, US dollars
+  2. `harris-teeter-many-items.png` — Receipt with **20+ line items** (stresses set-equality + keyed-scalar oracles)
+  3. `kroger-handwritten-correction.png` — Receipt with a handwritten price correction (stresses LLM robustness)
+  4. `receipt-expired-90d.png` — Real receipt **dated >90 days ago** (parser's `isValidReceiptDate` rejects → oracle uses `expectRejection: true`)
+  5. `receipt-future-date.png` — Receipt where the printed date is **in the future** (also rejected; same `expectRejection` mode)
+
+  **Tasks unblocked once photos land** (executed in this order in a fresh session):
+  - Task 11: hand-curate 5 `.expected.json` ground-truth sidecars from each photo, generate `.sha256` manifests via `shasum -a 256`, write 5 `.case.ts` files, implement `case-loader.ts`, 5 shape tests
+  - Task 12: orchestrator (cache-resolve → dispatch → budget-abort → markdown report) + CLI with extracted `runCli(args, deps)` + add `test:regression` + `test:regression:dry-run` to root `package.json`
+  - Task 13: URS rows for the 8 implemented REQs (REQ-REG-001/002/004/006/008/009/010/014); mark deferred REQs (003 / 005 / 007 / 011 / 012 / 013)
+  - Task 14: mark Chunk A.2 complete in this file + CLAUDE.md Implementation Status update
+  - Task 15: final verification (root suite green, dry-run, optional real receipt run with cache hit on second invocation)
+
+  **Deferred minors from the simplify pass** (`refactor(regression-A): post-Chunk-A simplify pass`, commit `63548fe`):
+  - Stringly-typed verdict literals across regression tests — refactor to import named constants when scope grows beyond Chunk A
+  - `RunResult.tokenCounts` hardcoded to `{input: 0, output: 0}` — wire real counts from `CostTracker.estimateCost` side-channel during Task 12 orchestrator
+  - AJV validator memoization in `regression/src/oracles/structural.ts` — hoist receipt schema to module scope when bucket count grows beyond 1 or profiling shows compile time dominates
+  - `RunResult.source` set to `'cached'` after cache hit — Task 12 orchestrator updates the field post-read
 - ~~**Unified Settings Surface Chunks A + E + F**~~ ✓ Complete (2026-05-05) — `SettingsRegistry` composes from chatbot virtual manifest + installed app manifests; entries keyed by `(appId, key)`. `SettingsWriter` routes coerced writes per appId; `<config-set>` allowlist + intent gates derive from `SettingsRegistry.getNlSafeQualifiedKeys()` (REQ-SETTINGS-007). Chatbot prompt receives a per-turn `<memory-context label="settings-catalog">` block + a separate trusted `<config-set>` instruction block via new `'settings'` source category — gated by PAS classifier `settingsCandidate` flag in free-text mode, default-on in `/ask`. `adminOnly`/`dangerous`/`hidden` settings filtered from non-admin catalogs. Live per-turn reads via per-app `AppConfigService.getOverrides`. Fail-fast on invalid `nlIntentRegex`. 6 URS requirements: REQ-SETTINGS-001, 006, 007, 008, 011, 012. Spec: `docs/superpowers/specs/2026-05-04-unified-settings-surface-design.md`. Deferred chunks: see Deferred Infrastructure Work section.
 - ~~**Unified Settings Surface Chunk B — GUI settings page**~~ ✓ Complete (2026-05-06) — Single `/gui/settings` page with accordion per category; per-row Reset (htmx outerHTML swap); single-form Save with PRG redirect; `SettingsWriter.validate` + `writeBatch` + `registerPostWriteHook`; `AppConfigServiceImpl.removeOverride`; `categories.ts` shared module; layout nav link; CSRF + auth + XSS escaping; concurrency-safe via `withFileLock`. 11 URS requirements: REQ-SETTINGS-002..005, 014..020. Plan: `C:\Users\matth\.claude\plans\lexical-discovering-origami.md`.
 - ~~**Unified Settings Surface Chunk C — system-config-derived settings**~~ ✓ Complete (2026-05-08) — `SystemConfigWriter` + `mutatePasYaml` for atomic YAML writes with in-memory propagation; `SYSTEM_SETTING_DEFS` + `SYSTEM_KEY_RUNTIME_PATH` in `settings-metadata.ts`; system-scope defs registered via `buildSettingsRegistry`; `SettingsWriter` three-source policy (`nl`/`gui`/`admin-confirmed`); `SettingsReader` system reads + effective-default resolver (`systemConfigBackingKey`); GUI admin visibility + restart badge + dangerous-tampering check; confirm flow (`GET/POST /confirm`, `matchesDangerConfirmPhrase`); `Router.setIdleMinutes` hot-update hook; food manifest pseudo-field cleanup (`guest_profiles_info`, `schedule_overrides_info`). 16 URS requirements: REQ-SETTINGS-021..036. Plan: `can-you-start-unified-cozy-clarke.md`.
