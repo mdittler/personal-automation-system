@@ -14,7 +14,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ApiKeyService } from '../services/api-keys/index.js';
-import { enterRequestContext } from '../services/context/request-context.js';
+import { enterMutableRequestContext } from '../services/context/request-context.js';
 import type { HouseholdService } from '../services/household/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
@@ -42,6 +42,14 @@ export function createApiAuthHook(options: ApiAuthOptions) {
 	const expectedBuf = Buffer.from(apiToken);
 
 	return async (request: FastifyRequest, reply: FastifyReply) => {
+		// Seed the ALS frame synchronously, BEFORE any await, so the eventual
+		// Fastify route handler observes the same store object. Mutating it via
+		// `setUserId`/`setHouseholdId` after `verifyAndConsume(token)` resolves
+		// keeps the handler's `getCurrentUserId()`/`getCurrentHouseholdId()`
+		// consistent. Calling `enterRequestContext({...})` AFTER an await does
+		// not reliably propagate to the handler in Fastify's hook model.
+		const ctx = enterMutableRequestContext();
+
 		// Rate limit by IP before checking auth
 		const clientIp = request.ip;
 		if (!rateLimiter.isAllowed(clientIp)) {
@@ -81,7 +89,8 @@ export function createApiAuthHook(options: ApiAuthOptions) {
 				scopes: ['*'],
 			};
 			request.actor = actor;
-			enterRequestContext({ userId: '__platform_system__', householdId: '__platform__' });
+			ctx.setUserId('__platform_system__');
+			ctx.setHouseholdId('__platform__');
 			return;
 		}
 
@@ -114,7 +123,8 @@ export function createApiAuthHook(options: ApiAuthOptions) {
 				scopes: record.scopes,
 			};
 			request.actor = actor;
-			enterRequestContext({ userId: record.userId, householdId: resolvedHouseholdId });
+			ctx.setUserId(record.userId);
+			ctx.setHouseholdId(resolvedHouseholdId);
 			return;
 		}
 

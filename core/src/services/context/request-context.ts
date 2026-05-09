@@ -81,7 +81,58 @@ export function getCurrentSessionId(): string | undefined {
  * hooks that set the context once for the lifetime of a request handler.
  *
  * Used by the GUI auth guard (D5b-3) and the API auth hook (D5b-6).
+ *
+ * IMPORTANT: In Fastify auth hooks, calling `enterRequestContext` AFTER an
+ * `await` does NOT reliably bind the eventual route handler to the new ALS
+ * frame, because the handler runs in an async continuation forked from the
+ * hook's pre-await state. For Fastify hooks that perform awaited auth work
+ * before knowing the userId/householdId, use `enterMutableRequestContext`
+ * instead — it seeds the ALS frame synchronously before the first await and
+ * exposes mutators that update the same object reference once auth resolves.
  */
 export function enterRequestContext(store: RequestContext): void {
 	requestContext.enterWith(store);
+}
+
+/**
+ * Mutator interface for a request context seeded synchronously at hook entry.
+ *
+ * Returned by `enterMutableRequestContext`. The underlying store object is
+ * shared with the ALS frame — calling these setters updates the values that
+ * `getCurrentUserId()` / `getCurrentHouseholdId()` / `getCurrentSessionId()`
+ * return for the rest of the request, including from the route handler that
+ * runs after the hook resolves.
+ */
+export interface MutableRequestContextHandle {
+	setUserId(id?: string): void;
+	setHouseholdId(id?: string): void;
+	setSessionId(id?: string): void;
+}
+
+/**
+ * Seed a mutable request context synchronously and return mutators for it.
+ *
+ * Calls `requestContext.enterWith({})` immediately, before any `await`, so
+ * the empty store is bound to the current async resource and propagates to
+ * the eventual Fastify route handler. The returned handle exposes setters
+ * that mutate the SAME object reference, so awaited auth work can populate
+ * userId/householdId after the fact and the handler will observe the
+ * updated values via `getCurrentUserId()` etc.
+ *
+ * Use this in Fastify auth hooks; use `requestContext.run()` everywhere else.
+ */
+export function enterMutableRequestContext(): MutableRequestContextHandle {
+	const store: RequestContext = {};
+	requestContext.enterWith(store);
+	return {
+		setUserId(id?: string) {
+			store.userId = id;
+		},
+		setHouseholdId(id?: string) {
+			store.householdId = id;
+		},
+		setSessionId(id?: string) {
+			store.sessionId = id;
+		},
+	};
 }

@@ -29,7 +29,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
-import { enterRequestContext } from '../services/context/request-context.js';
+import { enterMutableRequestContext } from '../services/context/request-context.js';
 import type { CredentialService } from '../services/credentials/index.js';
 import type { HouseholdService } from '../services/household/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
@@ -282,6 +282,14 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			return;
 		}
 
+		// Seed the ALS frame synchronously, BEFORE any await, so the eventual
+		// Fastify route handler observes the same store object. Mutating it via
+		// `setUserId`/`setHouseholdId` after awaited auth work resolves keeps
+		// the handler's `getCurrentUserId()`/`getCurrentHouseholdId()` consistent.
+		// Calling `enterRequestContext({...})` AFTER an await does not reliably
+		// propagate to the handler in Fastify's hook model.
+		const ctx = enterMutableRequestContext();
+
 		// ------------------------------------------------------------------
 		// 1. Read and unsign the cookie
 		// ------------------------------------------------------------------
@@ -349,7 +357,8 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			}
 
 			request.user = actor;
-			enterRequestContext({ userId: actor.userId, householdId: actor.householdId });
+			ctx.setUserId(actor.userId);
+			ctx.setHouseholdId(actor.householdId);
 			// Upgrade to new-format cookie
 			issueSessionCookie(reply, adminUser.id, sessionVersion, 'legacy-gui-token');
 			return;
@@ -402,7 +411,8 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 		// 4e. Populate request.user and ALS context
 		request.user = actor;
-		enterRequestContext({ userId: actor.userId, householdId: actor.householdId });
+		ctx.setUserId(actor.userId);
+		ctx.setHouseholdId(actor.householdId);
 
 		// 4f. Reissue cookie with fresh issuedAt (sliding session)
 		issueSessionCookie(
