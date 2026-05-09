@@ -101,4 +101,36 @@ describe('appendWithFrontmatter', () => {
 		expect(content).toContain('A');
 		expect(content).toContain('B');
 	});
+
+	it('20 concurrent appends produce frontmatter once and exactly 20 lines', async () => {
+		const filePath = join(testDir, 'high-concurrency.md');
+		const fm = '---\ntitle: Stress\n---\n';
+
+		// 20 concurrent appends — without serialization, the previous
+		// wx-open + EEXIST-fallback implementation racing 20 callers reliably
+		// produced files where some appended lines preceded the frontmatter,
+		// or where two callers both believed they had created the file.
+		const lines = Array.from({ length: 20 }, (_, i) => `line${i}\n`);
+		await Promise.all(lines.map((line) => appendWithFrontmatter(filePath, line, fm)));
+
+		const content = await readFile(filePath, 'utf-8');
+
+		// Frontmatter must appear at the very start (no content prepended before it)
+		expect(content.startsWith(fm)).toBe(true);
+
+		// Exactly one frontmatter block (open + close === two `^---$` lines)
+		const fmCount = (content.match(/^---$/gm) || []).length;
+		expect(fmCount).toBe(2);
+
+		// All 20 lines present, none duplicated, none lost
+		for (let i = 0; i < 20; i++) {
+			const occurrences = content.split(`line${i}\n`).length - 1;
+			expect(occurrences).toBe(1);
+		}
+
+		// Content body (post-frontmatter) has exactly 20 lines
+		const body = content.slice(fm.length);
+		const bodyLines = body.split('\n').filter((l) => l.length > 0);
+		expect(bodyLines).toHaveLength(20);
+	});
 });

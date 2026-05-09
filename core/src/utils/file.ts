@@ -6,9 +6,10 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { open } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { appendFile as fsAppend, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { withFileLock } from './file-mutex.js';
 
 /**
  * Ensure a directory exists, creating it and any parents if needed.
@@ -53,7 +54,18 @@ export async function atomicWrite(filePath: string, content: string): Promise<vo
 
 /**
  * Append content to a file, prepending frontmatter only if the file is newly created.
- * Uses O_EXCL for atomic create-or-append — no TOCTOU race.
+ *
+ * Concurrency: serialized via the in-process FileMutex keyed on the absolute
+ * path. PAS is a single-process deployment, so the mutex is sufficient to
+ * prevent the create-vs-append race. Within the lock we use a stat-then-write
+ * pattern: if the file is missing we write `frontmatter + content` in one
+ * `writeFile` call; otherwise we append `content` only.
+ *
+ * Why not the previous `wx`-open + EEXIST-fallback dance? Because there is a
+ * window between `open(..., 'wx')` succeeding and `writeFile` finishing where
+ * a concurrent caller's `wx` open fails with EEXIST and falls into the append
+ * branch — appending raw content to a still-empty file BEFORE the frontmatter
+ * is written. The mutex closes that window deterministically.
  *
  * @param filePath - The file to append to.
  * @param content - The content to append.
@@ -66,20 +78,22 @@ export async function appendWithFrontmatter(
 ): Promise<void> {
 	await ensureDir(dirname(filePath));
 
-	try {
-		// O_WRONLY | O_CREAT | O_EXCL — atomically fails if file exists
-		const handle = await open(filePath, 'wx');
+	await withFileLock(filePath, async () => {
+		let exists = true;
 		try {
-			await handle.writeFile(frontmatter + content, 'utf-8');
-		} finally {
-			await handle.close();
+			await stat(filePath);
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				exists = false;
+			} else {
+				throw err;
+			}
 		}
-	} catch (err: unknown) {
-		if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-			// File already exists — just append (no frontmatter)
-			await fsAppend(filePath, content, 'utf-8');
+
+		if (!exists) {
+			await writeFile(filePath, frontmatter + content, 'utf-8');
 		} else {
-			throw err;
+			await fsAppend(filePath, content, 'utf-8');
 		}
-	}
+	});
 }
