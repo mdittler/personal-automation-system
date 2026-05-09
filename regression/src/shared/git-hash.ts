@@ -38,7 +38,14 @@ export async function hashRepoRelative(repoRel: string, opts: HashOptions): Prom
 	try {
 		await execFileAsync('git', ['ls-files', '--error-unmatch', '--', safe], { cwd: opts.repoRoot });
 		tracked = true;
-	} catch {
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		// git binary missing → propagate (don't silently treat as untracked)
+		if (code === 'ENOENT') throw new Error(`git binary not available: ${(err as Error).message}`);
+		// Node child_process error has `code` set to either an errno string OR an exit code number.
+		// Exit code 1 = "file not in index" — treat as untracked. Anything else (e.g. 128 for
+		// "not a git repository") is unexpected and should be rethrown rather than masked.
+		if (typeof code === 'number' && code !== 1) throw err;
 		tracked = false;
 	}
 
@@ -48,9 +55,13 @@ export async function hashRepoRelative(repoRel: string, opts: HashOptions): Prom
 		});
 		const isDirty = stdout.trim().length > 0;
 		if (!isDirty) {
-			const { stdout: hashOut } = await execFileAsync('git', ['hash-object', '--', safe], {
-				cwd: opts.repoRoot,
-			});
+			// --no-filters makes the hash content-only, ignoring core.autocrlf and other
+			// clean filters. Important for cache portability across contributor machines.
+			const { stdout: hashOut } = await execFileAsync(
+				'git',
+				['hash-object', '--no-filters', '--', safe],
+				{ cwd: opts.repoRoot },
+			);
 			return hashOut.trim();
 		}
 	}
