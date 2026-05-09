@@ -4,7 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, mkdtemp, symlink } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile, mkdtemp, symlink } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -177,7 +177,10 @@ describe('EditServiceImpl', () => {
     expect(result.kind).toBe('proposal');
     if (result.kind !== 'proposal') return;
     expect(result.filePath).toBe(relativePath);
-    expect(result.absolutePath).toBe(absolutePath);
+    // EditService canonicalizes paths via realpath() to defeat symlink-based escapes
+    // (intentional). On macOS, /var/... resolves to /private/var/... — the test must
+    // compare against the realpath of the temp file, not the literal join() output.
+    expect(result.absolutePath).toBe(await realpath(absolutePath));
     expect(result.appId).toBe('food');
     expect(result.userId).toBe('matt');
     expect(result.beforeContent).toBe(beforeContent);
