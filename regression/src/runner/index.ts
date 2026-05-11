@@ -37,6 +37,7 @@ import type {
 	TierModelSnapshot,
 } from '@core/types/regression.js';
 import { computeCacheKey } from '../shared/cache-key.js';
+import { parseCliArgs, HELP_TEXT, type CliOptions } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
@@ -45,7 +46,11 @@ import {
 	type RoutingClassifierAdapter,
 	runRoutingCase,
 } from './case-runners/routing-runner.js';
-import { buildSummary } from './markdown-report.js';
+import {
+	ACCURACY_GATE_THRESHOLD,
+	buildSummary,
+	formatSummaryMarkdown,
+} from './markdown-report.js';
 
 export interface RunSuiteOptions {
 	casesDir: string;
@@ -161,6 +166,73 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		results,
 		targets,
 	};
+}
+
+/**
+ * CLI entry — parses argv, dispatches `runSuite`, emits stdout, returns the
+ * exit code that REQ-REG-011 demands.
+ *
+ * `deps` is what the CLI's `cli-main.ts` provides from production config
+ * (LLMService, CostTracker, adapters, cases/cache dirs, modelIds). Tests
+ * can pass their own deps with mocked adapters.
+ *
+ * In `--json` mode the runner emits one line per case result during the
+ * run via `opts.onResult`, then a final `{type:'summary', summary}` line.
+ * The GUI subprocess (Chunk B.2) consumes this stream verbatim.
+ */
+export type RunCliDeps = Omit<RunSuiteOptions, 'bucketFilter' | 'rerunIds' | 'dryRun' | 'onResult'>;
+
+export interface RunCliResult {
+	exitCode: 0 | 1;
+	outcome: RunSuiteOutcome | null;
+	options: CliOptions;
+}
+
+export async function runCli(
+	argv: readonly string[],
+	deps: RunCliDeps,
+	streams: { stdout?: (s: string) => void } = {},
+): Promise<RunCliResult> {
+	const write = streams.stdout ?? ((s: string) => process.stdout.write(s));
+	let cli: CliOptions;
+	try {
+		cli = parseCliArgs(argv);
+	} catch (err) {
+		write(`error: ${(err as Error).message}\n${HELP_TEXT}`);
+		return { exitCode: 1, outcome: null, options: { dryRun: false, json: false, help: false } };
+	}
+	if (cli.help) {
+		write(HELP_TEXT);
+		return { exitCode: 0, outcome: null, options: cli };
+	}
+
+	const outcome = await runSuite({
+		...deps,
+		bucketFilter: cli.bucketFilter,
+		rerunIds: cli.rerunIds,
+		dryRun: cli.dryRun,
+		onResult: cli.json
+			? (r) => write(`${JSON.stringify({ type: 'case-result', result: r })}\n`)
+			: undefined,
+	});
+
+	if (cli.json) {
+		write(`${JSON.stringify({ type: 'summary', summary: outcome.summary })}\n`);
+	} else {
+		write(`${formatSummaryMarkdown(outcome.results, outcome.targets)}\n`);
+	}
+
+	// REQ-REG-011 gate. Below floor → null → exit 0 with a warning.
+	if (
+		outcome.summary.routingAccuracy !== null &&
+		outcome.summary.routingAccuracy < ACCURACY_GATE_THRESHOLD
+	) {
+		write(
+			`\nREQ-REG-011 FAILED: routing accuracy ${(outcome.summary.routingAccuracy * 100).toFixed(2)}% < ${(ACCURACY_GATE_THRESHOLD * 100).toFixed(0)}%\n`,
+		);
+		return { exitCode: 1, outcome, options: cli };
+	}
+	return { exitCode: 0, outcome, options: cli };
 }
 
 function makeDryRunResult(

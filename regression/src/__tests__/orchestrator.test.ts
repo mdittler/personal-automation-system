@@ -243,3 +243,78 @@ describe('runSuite — targets map populated', () => {
 		expect(targets.get('a-id')).toBe('food-shadow');
 	});
 });
+
+describe('runCli', () => {
+	it('prints help and exits 0 on --help', async () => {
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const r = await runCli(['--help'], baseOpts(), { stdout: (s) => out.push(s) });
+		expect(r.exitCode).toBe(0);
+		expect(out.join('')).toMatch(/Persona Regression Suite/);
+	});
+
+	it('exits 1 on bad args', async () => {
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const r = await runCli(['--garbage'], baseOpts(), { stdout: (s) => out.push(s) });
+		expect(r.exitCode).toBe(1);
+		expect(out.join('')).toMatch(/unknown flag/i);
+	});
+
+	it('emits line-delimited JSON when --json is set', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const { runCli } = await import('../runner/index.js');
+		const lines: string[] = [];
+		const stdoutFn = (s: string) => {
+			for (const l of s.split('\n')) {
+				if (l) lines.push(l);
+			}
+		};
+		await runCli(['--json'], baseOpts(), { stdout: stdoutFn });
+		const events = lines.map((l) => JSON.parse(l));
+		expect(events.some((e) => e.type === 'case-result')).toBe(true);
+		expect(events[events.length - 1]!.type).toBe('summary');
+	});
+
+	it('emits markdown summary table by default', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		await runCli([], baseOpts(), { stdout: (s) => out.push(s) });
+		expect(out.join('')).toMatch(/\| metric \| value \|/);
+	});
+
+	it('exits 1 when REQ-REG-011 gate fails (Codex C-2)', async () => {
+		// Write 25 cases; mock 24 passes + 1 fail. Accuracy = 24/25 = 0.96.
+		// Then write 25 cases where 20 pass + 5 fail. Accuracy = 0.80 → fail.
+		for (let i = 0; i < 25; i++) {
+			await writeFile(join(casesDir, `c-${i}.case.ts`), oneRoutingCase(`c-id-${i}`));
+		}
+		const adapter = makeAdapter();
+		let call = 0;
+		adapter.foodShadow.mockImplementation(async () => {
+			call++;
+			const fail = call > 20; // 5 fail at the end
+			return {
+				raw: JSON.stringify({ action: fail ? 'wrong' : 'none', confidence: 0.5 }),
+				meter: { model: 'f', tokenIn: 5, tokenOut: 5, costUsd: 0.00005 },
+			};
+		});
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const r = await runCli([], baseOpts({ classifiers: adapter }), {
+			stdout: (s) => out.push(s),
+		});
+		expect(r.exitCode).toBe(1);
+		expect(out.join('')).toMatch(/REQ-REG-011 FAILED/);
+	});
+
+	it('exits 0 with a "below floor" indication when fewer than 20 inputs ran', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const r = await runCli([], baseOpts(), { stdout: (s) => out.push(s) });
+		expect(r.exitCode).toBe(0);
+		expect(out.join('')).toMatch(/below floor/i);
+	});
+});
