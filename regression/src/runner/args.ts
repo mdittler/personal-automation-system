@@ -39,6 +39,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 	const opts: CliOptions = { dryRun: false, json: false, help: false };
 	const rerunIds = new Set<string>();
 	let i = 0;
+	// pnpm's `--` separator is sometimes forwarded to the script depending on
+	// the pnpm version. Skip a single leading `--` so users don't have to
+	// know whether `pnpm test:regression -- --help` or `pnpm test:regression --help`
+	// is the right invocation in their environment.
+	if (argv[0] === '--') i = 1;
 	while (i < argv.length) {
 		const a = argv[i]!;
 		if (a === '--help' || a === '-h') {

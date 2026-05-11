@@ -80,4 +80,9 @@ describe('parseCliArgs', () => {
 	it('rejects positional args (no positional support yet)', () => {
 		expect(() => parseCliArgs(['somepositional'])).toThrow(/unknown flag/i);
 	});
+
+	it('skips a leading -- separator (pnpm forward-arg compatibility)', () => {
+		expect(parseCliArgs(['--', '--help']).help).toBe(true);
+		expect(parseCliArgs(['--', '--bucket=routing']).bucketFilter).toBe('routing');
+	});
 });
