@@ -10,7 +10,7 @@
  *   --help           (print HELP_TEXT and exit 0)
  */
 
-export const VALID_BUCKETS = new Set<string>(['routing', 'receipt', 'chatbot', 'recall']);
+import { VALID_BUCKETS, isValidBucket } from '../shared/types.js';
 
 /** Mirrors `validatePersonaCase`'s ID_RE so a `--rerun=<id>` value cannot
  * escape the case-id allowlist when forwarded to the subprocess. */
@@ -85,21 +85,19 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		}
 		if (a.startsWith('--bucket=')) {
 			const v = a.slice('--bucket='.length);
-			if (!VALID_BUCKETS.has(v)) {
-				throw new Error(`unknown bucket: ${v} (expected one of ${[...VALID_BUCKETS].join(', ')})`);
+			if (!isValidBucket(v)) {
+				throw new Error(`unknown bucket: ${v} (expected one of ${VALID_BUCKETS.join(', ')})`);
 			}
-			opts.bucketFilter = v as CliOptions['bucketFilter'];
+			opts.bucketFilter = v;
 			i++;
 			continue;
 		}
 		if (a === '--bucket') {
 			const v = argv[i + 1];
-			if (v === undefined || !VALID_BUCKETS.has(v)) {
-				throw new Error(
-					`--bucket requires one of ${[...VALID_BUCKETS].join(', ')} (got: ${String(v)})`,
-				);
+			if (v === undefined || !isValidBucket(v)) {
+				throw new Error(`--bucket requires one of ${VALID_BUCKETS.join(', ')} (got: ${String(v)})`);
 			}
-			opts.bucketFilter = v as CliOptions['bucketFilter'];
+			opts.bucketFilter = v;
 			i += 2;
 			continue;
 		}

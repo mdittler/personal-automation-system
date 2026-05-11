@@ -21,3 +21,14 @@ export type {
 	TierModelSnapshot,
 	Verdict,
 } from '@core/types/regression.js';
+
+// Runtime helpers (shared with the GUI; see core/src/types/regression.ts).
+export {
+	isPlainObject,
+	isValidBucket,
+	looksLikeRunResult,
+	SAFE_CACHE_KEY_RE,
+	SAFE_CASE_ID_RE,
+	VALID_BUCKETS,
+	VERDICT,
+} from '@core/types/regression.js';

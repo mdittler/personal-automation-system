@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
-import type { RunResult } from '../../types/regression.js';
+import {
+	type RunResult,
+	SAFE_CASE_ID_RE,
+	type Verdict,
+	isValidBucket,
+} from '../../types/regression.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
 import {
 	type DisplayResult,
@@ -16,9 +21,6 @@ import {
 } from '../services/regression/run-registry.js';
 import { openSseStream, writeSseEvent } from '../services/regression/sse-helper.js';
 import { type SpawnFn, spawnRegression } from '../services/regression/subprocess.js';
-
-const SAFE_CASE_ID = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
-const VALID_BUCKETS = new Set(['routing', 'receipt', 'chatbot', 'recall']);
 
 export interface RegressionRoutesOptions {
 	caseDiscovery: CaseDiscoveryService;
@@ -55,7 +57,12 @@ interface DisplayedCase {
 	hasResult: boolean;
 }
 
-const VERDICT_ICON: Record<string, DisplayedCase['statusIcon']> = {
+/**
+ * Verdict → status-icon map. Typed as `Record<Verdict, …>` so adding a
+ * new variant to the `Verdict` union forces a compile error here — no
+ * silent fallback to `◆` for an unhandled verdict.
+ */
+const VERDICT_ICON: Record<Verdict, DisplayedCase['statusIcon']> = {
 	pass: '✓',
 	fail: '✗',
 	'budget-exceeded': '⊘',
@@ -114,7 +121,7 @@ export function registerRegressionRoutes(
 		const bucketParam = (request.query as { bucket?: string } | undefined)?.bucket;
 		const discovery = await caseDiscovery.discover();
 		const filtered =
-			bucketParam && VALID_BUCKETS.has(bucketParam)
+			bucketParam && isValidBucket(bucketParam)
 				? discovery.cases.filter((c) => c.bucket === bucketParam)
 				: discovery.cases;
 		const displays = await Promise.all(
@@ -135,19 +142,22 @@ export function registerRegressionRoutes(
 			filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
 			{ ceilingUsd: maxRunBudgetUsd },
 		);
-		const activeRunId = findActiveRunId(runRegistry);
 		return reply.viewAsync('regression', {
 			title: 'Regression — PAS',
 			activePage: 'regression',
 			cases,
 			modelIds: discovery.modelIds ?? null,
 			discoveryError: discovery.error ?? null,
-			selectedBucket: bucketParam && VALID_BUCKETS.has(bucketParam) ? bucketParam : null,
+			selectedBucket: bucketParam && isValidBucket(bucketParam) ? bucketParam : null,
 			estimate: {
 				totalUsd: estimate.estimateUsd.toFixed(2),
 				ceilingUsd: estimate.ceilingUsd.toFixed(2),
 			},
-			activeRunId,
+			// Active run is surfaced by the POST /runs response (UI redirects
+			// to the live stream). The initial page render does not need to
+			// probe the registry — the live progress block stays hidden until
+			// a runId arrives from POST.
+			activeRunId: null,
 		});
 	});
 
@@ -157,7 +167,7 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { caseId } = request.params;
-			if (!SAFE_CASE_ID.test(caseId)) return reply.status(404).send('not found');
+			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
 			const discovery = await caseDiscovery.discover();
 			const listed = discovery.cases.find((c) => c.caseId === caseId);
 			if (!listed) return reply.status(404).send('not found');
@@ -184,7 +194,7 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { caseId } = request.params;
-			if (!SAFE_CASE_ID.test(caseId)) return reply.status(404).send('not found');
+			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
 			const discovery = await caseDiscovery.discover();
 			const listed = discovery.cases.find((c) => c.caseId === caseId);
 			if (!listed) return reply.status(404).send('not found');
@@ -219,7 +229,7 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { caseId } = request.params;
-			if (!SAFE_CASE_ID.test(caseId)) return reply.status(404).send('not found');
+			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
 			let entries: RunResult[];
 			try {
 				entries = await readHistoryForCase(cacheDir, caseId);
@@ -249,7 +259,7 @@ export function registerRegressionRoutes(
 			const q = request.query as { bucket?: string; rerun?: string | string[] } | undefined;
 			const discovery = await caseDiscovery.discover();
 			let filtered = discovery.cases;
-			if (q?.bucket && VALID_BUCKETS.has(q.bucket)) {
+			if (q?.bucket && isValidBucket(q.bucket)) {
 				filtered = filtered.filter((c) => c.bucket === q.bucket);
 			}
 			const rerunIds = new Set(Array.isArray(q?.rerun) ? q.rerun : q?.rerun ? [q.rerun] : []);
@@ -277,7 +287,7 @@ export function registerRegressionRoutes(
 				rerun?: string | string[];
 				forceFresh?: string | boolean;
 			};
-			if (body.bucket && !VALID_BUCKETS.has(body.bucket)) {
+			if (body.bucket && !isValidBucket(body.bucket)) {
 				return reply.status(400).send({ error: `unknown bucket: ${body.bucket}` });
 			}
 			const rerunRaw = Array.isArray(body.rerun) ? body.rerun : body.rerun ? [body.rerun] : [];
@@ -411,17 +421,6 @@ function toSseEvent(event: RegressionEvent, runId: string): { type: string; data
 
 function isTerminalEventType(t: RegressionEvent['type']): boolean {
 	return t === 'complete' || t === 'gate-failed' || t === 'failed' || t === 'cancelled';
-}
-
-function findActiveRunId(registry: RunRegistry): string | null {
-	// The registry doesn't expose iteration directly. Active runs are those
-	// in starting/running/cancelling status. We probe by attempting a known
-	// terminal lookup — but since we don't have direct iteration, we instead
-	// trust the createRun-throws-on-conflict contract: the route catches that
-	// in Batch 4. For now, the page renders without an activeRunId on first
-	// load; the live progress block is hidden until a POST returns one.
-	void registry;
-	return null;
 }
 
 function findLiveResult(

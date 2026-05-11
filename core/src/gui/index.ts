@@ -228,6 +228,19 @@ export async function registerGuiRoutes(
 				cwd: repoRoot,
 				tsconfigPath,
 			});
+			// Reap terminal RunStates hourly so the in-memory registry doesn't
+			// grow without bound. SIGTERM any live children on Fastify close so
+			// shutdown doesn't orphan the subprocess.
+			const REGRESSION_GC_INTERVAL_MS = 60 * 60 * 1000;
+			const regressionGcTimer = setInterval(
+				() => regressionRunRegistry.gc({ maxAgeMs: REGRESSION_GC_INTERVAL_MS }),
+				REGRESSION_GC_INTERVAL_MS,
+			);
+			regressionGcTimer.unref();
+			gui.addHook('onClose', async () => {
+				clearInterval(regressionGcTimer);
+				await regressionRunRegistry.shutdown();
+			});
 			// Cron description API (used by cron-helper.js)
 			gui.get(
 				'/cron-describe',

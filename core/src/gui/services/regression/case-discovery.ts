@@ -19,11 +19,18 @@
  * (subprocess.ts). List mode must be authoritative.
  */
 
-import type { ChildProcessByStdio } from 'node:child_process';
-import { spawn as nodeSpawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { Readable } from 'node:stream';
-import type { TierModelSnapshot } from '../../../types/regression.js';
+import {
+	SAFE_CACHE_KEY_RE,
+	type TierModelSnapshot,
+	isValidBucket,
+} from '../../../types/regression.js';
+import {
+	type RegressionChildProcess,
+	type RegressionSpawnTarget,
+	appendStderrTail,
+	spawnRegressionCli,
+} from './spawn-helper.js';
 
 export interface ListedCase {
 	caseId: string;
@@ -44,22 +51,13 @@ export interface DiscoveryResult {
 	error?: string;
 }
 
-type SpawnProcLike = Pick<
-	ChildProcessByStdio<null, Readable, Readable>,
-	'stdout' | 'stderr' | 'on' | 'kill' | 'pid'
->;
+type SpawnProcLike = Pick<RegressionChildProcess, 'stdout' | 'stderr' | 'on' | 'kill' | 'pid'>;
 
 export type SpawnFn = () => SpawnProcLike;
 
-export interface CaseDiscoveryOptions {
+export interface CaseDiscoveryOptions extends Partial<RegressionSpawnTarget> {
 	/** Override for tests; defaults to a real CLI spawn. */
 	spawnFn?: SpawnFn;
-	/** Required when using the default spawnFn — absolute path to `cli-main.ts`. */
-	cliPath?: string;
-	/** Working directory for the subprocess (repo root). */
-	cwd?: string;
-	/** Path to `regression/tsconfig.json` — set via `TSX_TSCONFIG_PATH` env. */
-	tsconfigPath?: string;
 }
 
 export interface CaseDiscoveryService {
@@ -70,13 +68,10 @@ function defaultSpawn(options: CaseDiscoveryOptions): SpawnProcLike {
 	if (!options.cliPath) {
 		throw new Error('case-discovery: cliPath is required when no spawnFn override is set');
 	}
-	const env: NodeJS.ProcessEnv = { ...process.env };
-	if (options.tsconfigPath) env.TSX_TSCONFIG_PATH = options.tsconfigPath;
-	return nodeSpawn(process.execPath, ['--import=tsx/esm', options.cliPath, '--list', '--json'], {
-		cwd: options.cwd,
-		env,
-		stdio: ['ignore', 'pipe', 'pipe'],
-	}) as unknown as SpawnProcLike;
+	return spawnRegressionCli(
+		{ cliPath: options.cliPath, cwd: options.cwd, tsconfigPath: options.tsconfigPath },
+		['--list', '--json'],
+	);
 }
 
 interface RawCaseEntry {
@@ -92,12 +87,9 @@ interface RawCaseEntry {
 	currentCacheKey?: unknown;
 }
 
-const VALID_BUCKETS = new Set(['routing', 'receipt', 'chatbot', 'recall']);
-const HEX64 = /^[a-f0-9]{64}$/i;
-
 function validateEntry(raw: RawCaseEntry): ListedCase | string {
 	if (typeof raw.caseId !== 'string') return 'caseId missing';
-	if (typeof raw.bucket !== 'string' || !VALID_BUCKETS.has(raw.bucket))
+	if (typeof raw.bucket !== 'string' || !isValidBucket(raw.bucket))
 		return `bucket invalid: ${String(raw.bucket)}`;
 	if (typeof raw.description !== 'string') return 'description missing';
 	if (typeof raw.oracle !== 'string') return 'oracle missing';
@@ -106,7 +98,7 @@ function validateEntry(raw: RawCaseEntry): ListedCase | string {
 	if (!Array.isArray(raw.inputs)) return 'inputs missing or not array';
 	if (typeof raw.budgetUsd !== 'number' || !Number.isFinite(raw.budgetUsd))
 		return 'budgetUsd missing or not finite';
-	if (typeof raw.currentCacheKey !== 'string' || !HEX64.test(raw.currentCacheKey))
+	if (typeof raw.currentCacheKey !== 'string' || !SAFE_CACHE_KEY_RE.test(raw.currentCacheKey))
 		return 'currentCacheKey missing or invalid';
 	const entry: ListedCase = {
 		caseId: raw.caseId,
@@ -135,7 +127,7 @@ async function runOnce(spawnFn: SpawnFn): Promise<DiscoveryResult> {
 
 	const reader = createInterface({ input: proc.stdout });
 	proc.stderr.on('data', (chunk: Buffer | string) => {
-		stderrTail = `${stderrTail}${chunk.toString()}`.slice(-4096);
+		stderrTail = appendStderrTail(stderrTail, chunk);
 	});
 
 	const linePromise = (async () => {

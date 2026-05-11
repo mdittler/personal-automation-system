@@ -19,50 +19,19 @@
 
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { RunResult, Verdict } from '../../../types/regression.js';
-
-// Mirrors `regression/src/runner/cache.ts` SAFE_ID_RE / SAFE_KEY_RE. We
-// can't import them because the GUI must not depend on the regression
-// workspace (boundary preservation — Codex C4-adjacent).
-const SAFE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
-const SAFE_KEY_RE = /^[a-f0-9]{64}$/i;
-const VALID_VERDICTS: Verdict[] = ['pass', 'fail', 'error', 'budget-exceeded'];
+import {
+	type RunResult,
+	SAFE_CACHE_KEY_RE,
+	SAFE_CASE_ID_RE,
+	isPlainObject,
+	looksLikeRunResult,
+} from '../../../types/regression.js';
 
 function assertValidCaseId(id: string): void {
-	if (!SAFE_ID_RE.test(id)) throw new Error(`invalid case id: ${id}`);
+	if (!SAFE_CASE_ID_RE.test(id)) throw new Error(`invalid case id: ${id}`);
 }
 function assertValidCacheKey(key: string): void {
-	if (!SAFE_KEY_RE.test(key)) throw new Error(`invalid cache key: ${key}`);
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-	return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** Mirrors `looksLikeRunResult` in `regression/src/runner/cache.ts`. */
-function looksLikeRunResult(v: unknown, expectedCaseId: string): v is RunResult {
-	if (!isPlainObject(v)) return false;
-	if (v.caseId !== expectedCaseId) return false;
-	if (typeof v.cacheKey !== 'string' || !SAFE_KEY_RE.test(v.cacheKey)) return false;
-	if (typeof v.verdict !== 'string') return false;
-	if (!VALID_VERDICTS.includes(v.verdict as Verdict)) return false;
-	if (typeof v.timestamp !== 'string' || Number.isNaN(Date.parse(v.timestamp))) return false;
-	if (!isPlainObject(v.modelIds)) return false;
-	const m = v.modelIds as Record<string, unknown>;
-	if (typeof m.fast !== 'string' || typeof m.standard !== 'string') return false;
-	if (m.reasoning !== null && typeof m.reasoning !== 'string') return false;
-	if (typeof v.costUsd !== 'number' || !Number.isFinite(v.costUsd) || v.costUsd < 0) return false;
-	if (!Array.isArray(v.actuals)) return false;
-	if (!Array.isArray(v.oracleVerdicts)) return false;
-	if (!Array.isArray(v.inputs)) return false;
-	if (!isPlainObject(v.tokenCounts)) return false;
-	const t = v.tokenCounts as Record<string, unknown>;
-	if (typeof t.input !== 'number' || !Number.isFinite(t.input) || t.input < 0) return false;
-	if (typeof t.output !== 'number' || !Number.isFinite(t.output) || t.output < 0) return false;
-	if (v.source !== 'cached' && v.source !== 'fresh') return false;
-	if (typeof v.durationMs !== 'number' || !Number.isFinite(v.durationMs) || v.durationMs < 0)
-		return false;
-	return true;
+	if (!SAFE_CACHE_KEY_RE.test(key)) throw new Error(`invalid cache key: ${key}`);
 }
 
 async function readOne(
@@ -139,7 +108,7 @@ export async function readHistoryForCase(cacheDir: string, caseId: string): Prom
 	const keys = files
 		.filter((f) => f.endsWith('.json'))
 		.map((f) => f.slice(0, -'.json'.length))
-		.filter((k) => SAFE_KEY_RE.test(k));
+		.filter((k) => SAFE_CACHE_KEY_RE.test(k));
 	const results = await Promise.all(keys.map((k) => readOne(cacheDir, caseId, k)));
 	const valid = results.filter((r): r is RunResult => r !== null);
 	valid.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

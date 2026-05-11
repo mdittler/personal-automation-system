@@ -1,9 +1,13 @@
-import { spawn as nodeSpawn } from 'node:child_process';
 import type { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
+import { VALID_BUCKETS } from '../../../types/regression.js';
+import {
+	type RegressionSpawnTarget,
+	appendStderrTail,
+	spawnRegressionCli,
+} from './spawn-helper.js';
 
-const VALID_BUCKETS = ['routing', 'receipt', 'chatbot', 'recall'] as const;
 const SAFE_RERUN_ID = /^[a-z][a-z0-9-]{0,127}$/;
 
 const ALLOWED_SCALAR_ARGS = new Set(['--json', '--dry-run', '--list']);
@@ -18,7 +22,9 @@ export function validateSpawnArgs(args: readonly string[]): void {
 		if (a.startsWith(ALLOWED_BUCKET_PREFIX)) {
 			const v = a.slice(ALLOWED_BUCKET_PREFIX.length);
 			if (!(VALID_BUCKETS as readonly string[]).includes(v)) {
-				throw new Error(`spawn allowlist: unknown bucket "${v}"`);
+				throw new Error(
+					`spawn allowlist: unknown bucket "${v}" (expected one of ${VALID_BUCKETS.join(', ')})`,
+				);
 			}
 			continue;
 		}
@@ -59,11 +65,8 @@ export type RegressionEvent =
 	| { type: 'failed'; exitCode: number; stderrTail: string }
 	| { type: 'cancelled' };
 
-export interface SpawnRegressionOptions {
+export interface SpawnRegressionOptions extends Partial<RegressionSpawnTarget> {
 	spawnFn?: SpawnFn;
-	cliPath?: string;
-	cwd?: string;
-	tsconfigPath?: string;
 	onEvent: (event: RegressionEvent) => void;
 	signal?: AbortSignal;
 }
@@ -72,13 +75,10 @@ function defaultSpawn(args: readonly string[], options: SpawnRegressionOptions):
 	if (!options.cliPath) {
 		throw new Error('spawnRegression: cliPath is required when no spawnFn override is set');
 	}
-	const env: NodeJS.ProcessEnv = { ...process.env };
-	if (options.tsconfigPath) env.TSX_TSCONFIG_PATH = options.tsconfigPath;
-	return nodeSpawn(process.execPath, ['--import=tsx/esm', options.cliPath, ...args], {
-		cwd: options.cwd,
-		env,
-		stdio: ['ignore', 'pipe', 'pipe'],
-	}) as unknown as SpawnProcLike;
+	return spawnRegressionCli(
+		{ cliPath: options.cliPath, cwd: options.cwd, tsconfigPath: options.tsconfigPath },
+		args,
+	) as unknown as SpawnProcLike;
 }
 
 export interface SpawnRegressionHandle {
@@ -99,7 +99,7 @@ export async function spawnRegression(
 	let stderrTail = '';
 
 	proc.stderr.on('data', (chunk: Buffer | string) => {
-		stderrTail = `${stderrTail}${chunk.toString()}`.slice(-4096);
+		stderrTail = appendStderrTail(stderrTail, chunk);
 	});
 
 	const reader = createInterface({ input: proc.stdout });

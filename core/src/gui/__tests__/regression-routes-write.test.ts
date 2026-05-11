@@ -20,7 +20,7 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify, { type FastifyInstance } from 'fastify';
 import pino from 'pino';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
@@ -657,8 +657,4 @@ describe('concurrency — real Promise.all of two POSTs', () => {
 			await app.close();
 		}
 	});
-});
-
-afterEach(async () => {
-	// per-test cleanup handled by buildApp().tempDir lifecycle (mkdtemp).
 });
