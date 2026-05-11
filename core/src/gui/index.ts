@@ -224,6 +224,9 @@ export async function registerGuiRoutes(
 				cacheDir,
 				maxRunBudgetUsd: config.regression?.maxRunBudgetUsd ?? 5,
 				logger,
+				cliPath,
+				cwd: repoRoot,
+				tsconfigPath,
 			});
 			// Cron description API (used by cron-helper.js)
 			gui.get(

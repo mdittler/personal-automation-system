@@ -1,21 +1,3 @@
-/**
- * /gui/regression — Persona Regression Suite admin page.
- *
- * REQ-REG-007: admin-only via `requirePlatformAdmin` on every route.
- * REQ-REG-013: per-case model IDs, token counts, cost, timestamp.
- *
- * This file registers the **read-only** routes for Batch 3 of B.2:
- *   GET  /gui/regression                       — main page
- *   GET  /gui/regression/cases/:caseId         — drilldown partial
- *   GET  /gui/regression/cases/:caseId/row     — single case row (Codex I7;
- *                                                 fetched by SSE client)
- *   GET  /gui/regression/cases/:caseId/history — history tab partial
- *   GET  /gui/regression/estimate              — JSON estimate for confirm dialog
- *
- * The **write** routes (POST /runs, GET /runs/:runId/events, POST cancel)
- * are added in Batch 4. They share the same `RegressionRoutesOptions`.
- */
-
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { RunResult } from '../../types/regression.js';
@@ -27,7 +9,13 @@ import {
 } from '../services/regression/cache-reader.js';
 import type { CaseDiscoveryService, ListedCase } from '../services/regression/case-discovery.js';
 import { type EstimatedCase, estimateRunCostUsd } from '../services/regression/estimator.js';
-import type { RunRegistry } from '../services/regression/run-registry.js';
+import {
+	RegistrationConflictError,
+	type RegressionEvent,
+	type RunRegistry,
+} from '../services/regression/run-registry.js';
+import { openSseStream, writeSseEvent } from '../services/regression/sse-helper.js';
+import { type SpawnFn, spawnRegression } from '../services/regression/subprocess.js';
 
 const SAFE_CASE_ID = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 const VALID_BUCKETS = new Set(['routing', 'receipt', 'chatbot', 'recall']);
@@ -38,7 +26,18 @@ export interface RegressionRoutesOptions {
 	cacheDir: string;
 	maxRunBudgetUsd: number;
 	logger: Logger;
+	/** Absolute path to `regression/src/runner/cli-main.ts`. Required for real spawns. */
+	cliPath?: string;
+	/** Working directory for spawned subprocess (repo root). */
+	cwd?: string;
+	/** Path to `regression/tsconfig.json`. Sets TSX_TSCONFIG_PATH so tsx finds aliases. */
+	tsconfigPath?: string;
+	/** Override the spawn factory (tests inject a fake). */
+	spawnFn?: SpawnFn;
 }
+
+const SAFE_RERUN_ID = /^[a-z][a-z0-9-]{0,127}$/;
+const RUN_ID_RE = /^[0-9a-f-]{8,64}$/i;
 
 interface DisplayedCase {
 	caseId: string;
@@ -267,6 +266,151 @@ export function registerRegressionRoutes(
 			});
 		},
 	);
+
+	// ─────────────────────────────────── POST /gui/regression/runs
+	server.post(
+		'/regression/runs',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const body = (request.body ?? {}) as {
+				bucket?: string;
+				rerun?: string | string[];
+				forceFresh?: string | boolean;
+			};
+			if (body.bucket && !VALID_BUCKETS.has(body.bucket)) {
+				return reply.status(400).send({ error: `unknown bucket: ${body.bucket}` });
+			}
+			const rerunRaw = Array.isArray(body.rerun) ? body.rerun : body.rerun ? [body.rerun] : [];
+			for (const id of rerunRaw) {
+				if (typeof id !== 'string' || !SAFE_RERUN_ID.test(id)) {
+					return reply.status(400).send({ error: 'invalid rerun id' });
+				}
+			}
+			const discovery = await caseDiscovery.discover();
+			if (discovery.error) {
+				return reply.status(400).send({ error: `case discovery failed: ${discovery.error}` });
+			}
+			const known = new Set(discovery.cases.map((c) => c.caseId));
+			for (const id of rerunRaw) {
+				if (!known.has(id)) {
+					return reply.status(400).send({ error: `unknown case id: ${id}` });
+				}
+			}
+
+			// Codex I2: forceFresh expands the current filter into explicit rerun ids
+			// so cached cases get re-dispatched. Uses the existing --rerun mechanism
+			// rather than a new CLI flag.
+			const rerunSet = new Set<string>(rerunRaw);
+			const forceFresh = body.forceFresh === true || body.forceFresh === 'true';
+			if (forceFresh) {
+				const filtered = body.bucket
+					? discovery.cases.filter((c) => c.bucket === body.bucket)
+					: discovery.cases;
+				for (const c of filtered) rerunSet.add(c.caseId);
+			}
+
+			const args: string[] = ['--json'];
+			if (body.bucket) args.push(`--bucket=${body.bucket}`);
+			for (const id of rerunSet) args.push(`--rerun=${id}`);
+
+			try {
+				const { runId } = await runRegistry.createRun({
+					args,
+					runFactory: async (onEvent, signal) => {
+						const handle = await spawnRegression(args, {
+							spawnFn: options.spawnFn,
+							cliPath: options.cliPath,
+							cwd: options.cwd,
+							tsconfigPath: options.tsconfigPath,
+							onEvent,
+							signal,
+						});
+						return { whenComplete: handle.whenComplete };
+					},
+				});
+				return reply.status(202).send({ runId, eventsUrl: `/gui/regression/runs/${runId}/events` });
+			} catch (err) {
+				if (err instanceof RegistrationConflictError) {
+					return reply.status(409).send({ activeRunId: err.activeRunId });
+				}
+				logger.error({ err }, 'regression-gui: spawnRegression failed');
+				return reply.status(500).send({ error: 'failed to spawn run' });
+			}
+		},
+	);
+
+	// ──────────────── GET /gui/regression/runs/:runId/events  (SSE — Codex I8)
+	server.get<{ Params: { runId: string } }>(
+		'/regression/runs/:runId/events',
+		platformAdminOnly,
+		async (request, reply) => {
+			const { runId } = request.params;
+			if (!RUN_ID_RE.test(runId)) return reply.status(404).send('not found');
+			const state = runRegistry.get(runId);
+			if (!state) return reply.status(404).send('not found');
+
+			const channel = openSseStream(request, reply);
+
+			const dispatch = (event: RegressionEvent): void => {
+				const sseEvent = toSseEvent(event, runId);
+				if (sseEvent) writeSseEvent(channel, sseEvent);
+				if (isTerminalEventType(event.type)) {
+					channel.close();
+				}
+			};
+
+			// attach() replays buffered events synchronously, then forwards new ones.
+			runRegistry.attach(runId, dispatch);
+		},
+	);
+
+	// ────────────────────── POST /gui/regression/runs/:runId/cancel (REQ-REG-016)
+	server.post<{ Params: { runId: string } }>(
+		'/regression/runs/:runId/cancel',
+		platformAdminOnly,
+		async (request, reply) => {
+			const { runId } = request.params;
+			if (!RUN_ID_RE.test(runId)) return reply.status(200).send({ ok: true });
+			await runRegistry.cancel(runId);
+			return reply.status(200).send({ ok: true });
+		},
+	);
+}
+
+// Codex I7: SSE case-completed events carry ONLY {caseId, runId} — never the
+// full result payload. Clients fetch the row partial via htmx to get
+// server-rendered, escaped HTML. Other event types pass through their (already
+// trusted, number/enum-only) payloads.
+function toSseEvent(event: RegressionEvent, runId: string): { type: string; data: unknown } | null {
+	switch (event.type) {
+		case 'case-result': {
+			const r = event.result as RunResult | undefined;
+			if (!r) return null;
+			return { type: 'case-completed', data: { caseId: r.caseId, runId } };
+		}
+		case 'summary':
+			return { type: 'summary', data: event.summary };
+		case 'complete':
+			return { type: 'complete', data: { summary: event.summary, runId } };
+		case 'gate-failed':
+			return {
+				type: 'gate-failed',
+				data: { summary: event.summary, exitCode: event.exitCode, runId },
+			};
+		case 'failed':
+			return {
+				type: 'failed',
+				data: { exitCode: event.exitCode, stderrTail: event.stderrTail, runId },
+			};
+		case 'cancelled':
+			return { type: 'cancelled', data: { runId } };
+		default:
+			return null;
+	}
+}
+
+function isTerminalEventType(t: RegressionEvent['type']): boolean {
+	return t === 'complete' || t === 'gate-failed' || t === 'failed' || t === 'cancelled';
 }
 
 function findActiveRunId(registry: RunRegistry): string | null {
