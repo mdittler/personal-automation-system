@@ -7,8 +7,8 @@
 
 import { randomBytes } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { appendFile as fsAppend, mkdir, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { appendFile as fsAppend, mkdir, realpath, rename, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { withFileLock } from './file-mutex.js';
 
 /**
@@ -78,7 +78,19 @@ export async function appendWithFrontmatter(
 ): Promise<void> {
 	await ensureDir(dirname(filePath));
 
-	await withFileLock(filePath, async () => {
+	// Canonicalize the mutex key so two callers passing equivalent path
+	// spellings (e.g. ./x.md and /abs/x.md, or paths through symlinks)
+	// share the same lock. After ensureDir the parent directory always
+	// exists, so realpath(dirname) cannot ENOENT under normal conditions.
+	// Fall back to resolve() if realpath unexpectedly throws.
+	let lockKey: string;
+	try {
+		lockKey = join(await realpath(dirname(filePath)), basename(filePath));
+	} catch {
+		lockKey = resolve(filePath);
+	}
+
+	await withFileLock(lockKey, async () => {
 		let exists = true;
 		try {
 			await stat(filePath);
