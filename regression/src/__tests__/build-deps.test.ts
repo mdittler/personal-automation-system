@@ -13,13 +13,18 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pino } from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CostTracker } from '@core/services/llm/cost-tracker.js';
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import { createStubProviderRegistry } from '@core/testing/fixtures/stub-llm-provider.js';
 import type { SystemConfig } from '@core/types/config.js';
-import { composeLLMService } from '../runner/build-deps.js';
+import { pino } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	applyModelMatrixOverride,
+	buildDryRunDeps,
+	buildMetadataDeps,
+	composeLLMService,
+} from '../runner/build-deps.js';
 
 let tempDir: string;
 let dataDir: string;
@@ -126,11 +131,52 @@ describe('composeLLMService — production wiring', () => {
 		// ModelSelector.reconcile() throws when neither saved nor default tier
 		// providers are available. The CLI surfaces this as "config error" rather
 		// than silently running with a broken LLM — matches `compose-runtime.ts`.
-		await expect(
-			composeLLMService(config, costTracker, logger, emptyRegistry),
-		).rejects.toThrow(/provider.*available|api key/i);
+		await expect(composeLLMService(config, costTracker, logger, emptyRegistry)).rejects.toThrow(
+			/provider.*available|api key/i,
+		);
+	});
+});
+
+describe('build-deps — Chunk C wiring', () => {
+	beforeEach(() => {
+		vi.stubEnv('TELEGRAM_BOT_TOKEN', 'stub-token');
+		vi.stubEnv('GUI_AUTH_TOKEN', 'stub-gui-token');
+		vi.stubEnv('ANTHROPIC_API_KEY', 'sk-stub-not-real');
+	});
+	afterEach(() => {
+		vi.unstubAllEnvs();
 	});
 
+	it('buildDryRunDeps stubs the chatbot factory to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		expect(typeof deps.chatbotEnvFactory).toBe('function');
+		await expect(deps.chatbotEnvFactory!()).rejects.toThrow(/dry-run/i);
+	});
+
+	it('buildDryRunDeps stubs the recall adapter to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		expect(typeof deps.recallAdapter?.recall).toBe('function');
+		await expect(deps.recallAdapter!.recall('hi')).rejects.toThrow(/dry-run/i);
+	});
+
+	it('buildMetadataDeps does not require chatbot fixture access', async () => {
+		const deps = await buildMetadataDeps();
+		expect(deps.chatbotEnvFactory).toBeUndefined();
+		expect(deps.recallAdapter).toBeUndefined();
+	});
+
+	it('applyModelMatrixOverride mutates the tier model IDs reported by deps', () => {
+		const baseDeps = buildDryRunDeps();
+		const overridden = applyModelMatrixOverride(baseDeps, {
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+		expect(overridden.modelIds.fast).toBe('gemma4:e4b');
+		expect(overridden.modelIds.standard).toBe('gemma4:26b');
+	});
+});
+
+describe('composeLLMService — cost-tracker delta', () => {
 	it('cost-tracker delta is non-zero after a real provider call (drives REQ-REG-013 cost field)', async () => {
 		const logger = pino({ level: 'silent' });
 		const config = makeConfig();

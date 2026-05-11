@@ -114,3 +114,37 @@ describe('parseCliArgs', () => {
 		expect(parseCliArgs(['--', '--bucket=routing']).bucketFilter).toBe('routing');
 	});
 });
+
+describe('--model-matrix + --judge-model parsing', () => {
+	it('parses positional comma form: --model-matrix=ollama/gemma4:e4b,anthropic/claude-sonnet-4-7', () => {
+		const o = parseCliArgs(['--model-matrix=ollama/gemma4:e4b,anthropic/claude-sonnet-4-7']);
+		expect(o.modelMatrix).toEqual({
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+			standard: { provider: 'anthropic', model: 'claude-sonnet-4-7' },
+		});
+	});
+
+	it('parses tier=provider/model form: --model-matrix=standard=ollama/gemma4:26b', () => {
+		const o = parseCliArgs(['--model-matrix=standard=ollama/gemma4:26b']);
+		expect(o.modelMatrix).toEqual({
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+	});
+
+	it('rejects an empty model-matrix value', () => {
+		expect(() => parseCliArgs(['--model-matrix='])).toThrow(/empty|required/i);
+	});
+
+	it('rejects an entry without a slash separator', () => {
+		expect(() => parseCliArgs(['--model-matrix=ollama-gemma4:e4b'])).toThrow(/provider\/model/i);
+	});
+
+	it('parses --judge-model=ollama/gemma4:26b', () => {
+		const o = parseCliArgs(['--judge-model=ollama/gemma4:26b']);
+		expect(o.judgeModel).toEqual({ provider: 'ollama', model: 'gemma4:26b' });
+	});
+
+	it('rejects --judge-model without a value', () => {
+		expect(() => parseCliArgs(['--judge-model'])).toThrow(/judge-model requires/i);
+	});
+});

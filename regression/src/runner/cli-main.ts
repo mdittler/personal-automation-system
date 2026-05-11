@@ -11,9 +11,22 @@
  *    to load cases and render an estimate.
  *  - otherwise: `buildProductionDeps()` — loads pas.yaml + composes the
  *    real LLMService stack (requires production env vars).
+ *
+ * Also peeks at argv for `--model-matrix=<list>` and `--judge-model=<ref>`
+ * so the chatbot env factory can capture the tier override at factory-build
+ * time (Task 12). Both `--flag=value` and `--flag value` forms are
+ * supported.
  */
 
-import { buildDryRunDeps, buildMetadataDeps, buildProductionDeps } from './build-deps.js';
+import { parseCliArgs } from './args.js';
+import type { CliOptions } from './args.js';
+import {
+	applyJudgeModelOverride,
+	applyModelMatrixOverride,
+	buildDryRunDeps,
+	buildMetadataDeps,
+	buildProductionDeps,
+} from './build-deps.js';
 import { runCli } from './index.js';
 
 // Silence dotenv's `[dotenv@x.y.z] injecting env (N) from .env` banner so
@@ -26,10 +39,44 @@ process.env.DOTENV_CONFIG_QUIET = process.env.DOTENV_CONFIG_QUIET ?? 'true';
 const argv = process.argv.slice(2);
 const isList = argv.includes('--list');
 const isDryRun = argv.includes('--dry-run');
-const deps = isList
+
+// Peek at `--model-matrix` / `--judge-model` so the production deps factory
+// can pass the tier override into `createChatbotEnvironment`. Reuses the
+// canonical `parseCliArgs` rather than hand-rolling a partial peek so the
+// equals-vs-space forms stay in lockstep with the test suite.
+let peeked: CliOptions;
+try {
+	peeked = parseCliArgs(argv);
+} catch {
+	// Surface the parse error inside `runCli` (which prints HELP_TEXT). For
+	// the peek-and-build phase, fall back to an empty CliOptions.
+	peeked = { dryRun: false, json: false, help: false, listOnly: false };
+}
+
+let deps = isList
 	? await buildMetadataDeps()
 	: isDryRun
 		? buildDryRunDeps()
-		: await buildProductionDeps();
+		: await buildProductionDeps(
+				peeked.modelMatrix
+					? {
+							tierOverride: {
+								...(peeked.modelMatrix.fast ? { fast: peeked.modelMatrix.fast } : {}),
+								...(peeked.modelMatrix.standard ? { standard: peeked.modelMatrix.standard } : {}),
+								...(peeked.modelMatrix.reasoning
+									? { reasoning: peeked.modelMatrix.reasoning }
+									: {}),
+							},
+						}
+					: undefined,
+			);
+
+if (peeked.modelMatrix) {
+	deps = applyModelMatrixOverride(deps, peeked.modelMatrix);
+}
+if (peeked.judgeModel) {
+	deps = applyJudgeModelOverride(deps, peeked.judgeModel);
+}
+
 const { exitCode } = await runCli(argv, deps);
 process.exit(exitCode);
