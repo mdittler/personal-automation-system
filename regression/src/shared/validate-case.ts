@@ -7,8 +7,8 @@
  * Windows separators, absolute paths) are caught here, not after a stale cache
  * read or a fixture write.
  *
- * Per REQ-REG-014, oracle: 'judge' is reserved (always rejected). Per Chunk A
- * scope, oracle: 'rubric' is deferred to Chunk C and rejected here.
+ * Per REQ-REG-014, oracle: 'judge' is reserved (always rejected). Chunk C
+ * lifts the rubric ban on chatbot cases (REQ-REG-005); judge stays reserved.
  */
 
 import type { PersonaCase } from './types.js';
@@ -71,11 +71,22 @@ export function validatePersonaCase(c: PersonaCase): void {
 		throw new Error(`PersonaCase.oracle 'judge' is reserved (REQ-REG-014)`);
 	}
 	if (c.oracle === 'rubric') {
-		throw new Error(`PersonaCase.oracle 'rubric' is deferred to Chunk C; not supported in Chunk A`);
+		if (c.bucket !== 'chatbot') {
+			throw new Error(
+				`PersonaCase.oracle 'rubric' is only allowed on bucket 'chatbot' (got bucket="${c.bucket}", case: ${c.id})`,
+			);
+		}
+		if (typeof c.rubric !== 'string') {
+			throw new Error(`PersonaCase.oracle 'rubric' field is required (case: ${c.id})`);
+		}
+		if (c.rubric.trim().length === 0) {
+			throw new Error(`PersonaCase.rubric must be non-empty (case: ${c.id})`);
+		}
+		return;
 	}
 	if (c.oracle !== 'structural') {
 		throw new Error(
-			`PersonaCase.oracle must be 'structural' in Chunk A: ${JSON.stringify(c.oracle)}`,
+			`PersonaCase.oracle must be 'structural' or 'rubric': ${JSON.stringify(c.oracle)}`,
 		);
 	}
 }
