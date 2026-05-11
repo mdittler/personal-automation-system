@@ -15,6 +15,7 @@ import type { PersonaCase } from './types.js';
 
 const ID_RE = /^[a-z][a-z0-9-]{0,127}$/;
 const BUCKETS: PersonaCase['bucket'][] = ['receipt', 'chatbot', 'recall', 'routing'];
+const VALID_ROUTING_TARGETS = new Set<string>(['food-shadow', 'session-control', 'pas']);
 
 function isPosixRepoRelative(p: string): boolean {
 	if (!p) return false;
@@ -33,6 +34,22 @@ export function validatePersonaCase(c: PersonaCase): void {
 	}
 	if (!BUCKETS.includes(c.bucket)) {
 		throw new Error(`PersonaCase.bucket invalid: ${JSON.stringify(c.bucket)}`);
+	}
+	if (c.bucket === 'routing') {
+		if (typeof c.routingTarget !== 'string') {
+			throw new Error(
+				`PersonaCase.routingTarget is required when bucket === 'routing' (case: ${c.id})`,
+			);
+		}
+		if (!VALID_ROUTING_TARGETS.has(c.routingTarget)) {
+			throw new Error(
+				`PersonaCase.routingTarget invalid: ${JSON.stringify(c.routingTarget)} (must be one of food-shadow, session-control, pas)`,
+			);
+		}
+	} else if (c.routingTarget !== undefined) {
+		throw new Error(
+			`PersonaCase.routingTarget only allowed when bucket === 'routing' (got bucket="${c.bucket}", routingTarget="${c.routingTarget}")`,
+		);
 	}
 	if (!Array.isArray(c.coverage) || c.coverage.length === 0) {
 		throw new Error('PersonaCase.coverage must be a non-empty array');

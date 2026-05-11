@@ -78,3 +78,58 @@ describe('validatePersonaCase', () => {
 		expect(() => validatePersonaCase({ ...valid, inputs: [] })).toThrow(/inputs/i);
 	});
 });
+
+describe('validatePersonaCase — routingTarget (Chunk B)', () => {
+	const validRouting: PersonaCase = {
+		id: 'food-recipe-save',
+		description: 'user saves a recipe',
+		bucket: 'routing',
+		routingTarget: 'food-shadow',
+		coverage: ['apps/food/src/routing/shadow-classifier.ts'],
+		inputs: [
+			{
+				payload: 'save this recipe',
+				expected: {
+					schema: { type: 'object' },
+					strings: [{ path: 'action', expectedCaseInsensitive: 'user wants to save a recipe' }],
+				},
+			},
+		],
+		oracle: 'structural',
+		budgetUsd: 0.05,
+	};
+
+	it('accepts a routing case with valid routingTarget', () => {
+		expect(() => validatePersonaCase(validRouting)).not.toThrow();
+	});
+
+	it('throws when routing bucket has no routingTarget', () => {
+		const c = { ...validRouting, routingTarget: undefined };
+		expect(() => validatePersonaCase(c as PersonaCase)).toThrow(/routingTarget.*required/i);
+	});
+
+	it.each(['food-shadow', 'session-control', 'pas'] as const)(
+		'accepts routingTarget=%s',
+		(t) => {
+			expect(() => validatePersonaCase({ ...validRouting, routingTarget: t })).not.toThrow();
+		},
+	);
+
+	it('rejects unknown routingTarget value', () => {
+		expect(() =>
+			validatePersonaCase({
+				...validRouting,
+				routingTarget: 'garbage' as never,
+			}),
+		).toThrow(/routingTarget.*invalid|must be one of/i);
+	});
+
+	it('rejects routingTarget when bucket is not routing', () => {
+		const c: PersonaCase = {
+			...validRouting,
+			bucket: 'receipt',
+			routingTarget: 'food-shadow',
+		};
+		expect(() => validatePersonaCase(c)).toThrow(/routingTarget.*only.*routing/i);
+	});
+});
