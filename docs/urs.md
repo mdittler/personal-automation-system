@@ -9407,6 +9407,154 @@ Before validation, the settings save route iterates submitted keys and returns 4
 
 ---
 
+## Persona Regression Suite
+
+The Persona Regression Suite is a fixture-backed, cached, real-LLM
+regression harness for the PAS classifier and parser surfaces. It lives
+in its own top-level `regression/` pnpm workspace excluded from root
+`pnpm test` (REQ-REG-001). Operators run it intentionally via
+`pnpm test:regression` before merging changes that touch the shadow
+classifier, the session-control NL classifier, the PAS-relevance
+classifier, or the receipt parser.
+
+### REQ-REG-001 — The regression suite MUST be excluded from `pnpm test` and all CI runs that do not explicitly opt in
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+The regression workspace is registered as a pnpm package but not listed in the root `vitest.config.ts` `projects` array, so `pnpm test` at the root never picks up its tests. The suite is invoked via `pnpm test:regression`, a separate root script that delegates to `regression/src/runner/cli-main.ts`.
+
+**Standard tests:** verified by composition (root vitest config + workspace exclusion).
+
+---
+
+### REQ-REG-002 — Each persona case MUST declare a `coverage` array of repo-relative file paths; the cache key MUST include their git blob hashes
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`validatePersonaCase` requires non-empty `coverage[]` with repo-relative POSIX paths only (no traversal, no Windows separators, no absolute paths). `computeCacheKey` hashes every coverage path via `hashRepoRelative` (git blob hash when clean, SHA-256 of contents when dirty or untracked) and folds the hashes into a SHA-256 with the case file hash + model tier IDs.
+
+**Standard tests:**
+- `validate-case.test.ts` > rejects bad coverage path (6 hostile variants)
+- `cache-key.test.ts` > computeCacheKey changes when coverage file content changes
+- `cache-invalidation.test.ts` > modifying a tracked-clean coverage file invalidates the cache key
+
+---
+
+### REQ-REG-004 — The structural oracle MUST reject any LLM output that fails JSON schema validation, type checks, or set equality assertions
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`runStructuralOracle` parses the raw LLM output, validates against the supplied AJV strict-mode JSON schema, then runs targeted assertions (string equality, set equality, scalar tolerance, keyed scalar tolerance, calendar-strict date ranges). Non-parseable JSON returns `verdict: 'error'`; schema violations return `verdict: 'fail'`.
+
+**Standard tests:**
+- `structural-oracle.test.ts` > emits error on non-JSON
+- `structural-oracle.test.ts` > rejects schema violations
+- `structural-oracle.test.ts` > rejects set-equality mismatches
+- `structural-oracle.test.ts` > rejects scalar out-of-tolerance
+- `routing-runner.test.ts` > trust-boundary table (NaN/Infinity-equivalent, missing fields, wrong root types)
+
+---
+
+### REQ-REG-006 — Fixture integrity MUST be verified via SHA-256 checksum before any chatbot-bucket run
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`verifyFixtureIntegrity(manifestPath)` parses a `<sha256>  <relpath>` manifest, rejects absolute paths and traversals at parse time, and verifies each listed file's SHA-256 in parallel. Returns `FixtureCheckResult` with per-file failures (`mismatch` or `missing`) for diagnostics. Chunk B does not yet ship chatbot cases — REQ-REG-006's enforcement point is Chunk C.
+
+**Standard tests:**
+- `seed.test.ts` > verifies matching hashes
+- `seed.test.ts` > detects mismatches with expected/actual diagnostics
+- `seed.test.ts` > rejects manifest line with traversal in path
+- `seed.test.ts` > rejects manifest line with absolute path
+
+---
+
+### REQ-REG-008 — Each case MUST define a `budgetUsd` ceiling; the runner MUST abort the case with `verdict: 'budget-exceeded'` if exceeded
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`validatePersonaCase` requires `budgetUsd` finite and positive. Both `runReceiptCase` and `runRoutingCase` enforce a pre-charge gate: estimate the next call's cost via `deps.estimateUsd`, abort the input loop with `verdict: 'budget-exceeded'` if accruing it would cross `deps.caseBudgetUsd` (which the orchestrator forwards from `c.budgetUsd`). Failed calls do not charge.
+
+**Standard tests:**
+- `budget.test.ts` > CaseBudget rejects non-positive ceiling
+- `budget.test.ts` > CaseBudget rejects NaN/Infinity charges
+- `receipt-runner.test.ts` > budget-exceeded short-circuits input loop
+- `routing-runner.test.ts` > stops dispatching mid-case when pre-charge would exceed deps.caseBudgetUsd
+
+---
+
+### REQ-REG-009 — The per-run cost ceiling `regression.maxRunBudgetUsd` MUST default to 5.00 USD and abort remaining cases if exceeded
+
+**Phase:** Chunk A.1 + B.1 | **Status:** Implemented
+
+`regression.maxRunBudgetUsd` is declared in `pas.yaml.example` and the Zod schema with a default of 5.00. The orchestrator (Chunk B.1) implements a hard-abort: once `runBudget.canAfford(nextCaseEstimate)` is false, every remaining selected case is pushed as `verdict: 'budget-exceeded'` **without dispatching any LLM call**. Each skipped input gets a synthesized `oracleVerdict: 'error'` so the REQ-REG-011 gate counts the skipped inputs against accuracy.
+
+**Standard tests:**
+- `budget.test.ts` > RunBudget canAfford returns false above ceiling
+- `pas-yaml-schema.test.ts` > regression.maxRunBudgetUsd defaults to 5.00 (existing)
+- `orchestrator.test.ts` > marks remaining cases budget-exceeded WITHOUT dispatching
+- `orchestrator.test.ts` > synthesizes one error oracleVerdict per input on budget-exceeded cases
+
+---
+
+### REQ-REG-010 — Run results MUST be persisted to `data/system/regression-cache/<case-id>/<cache-key>.json` and MUST NOT be deleted on subsequent runs (history retained)
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`CacheStore.write` atomically writes via tmp+rename (PID+nonce suffix to prevent torn writes) to `<case-id>/<cache-key>.json`. No deletion path exists; `listAllForCase` enumerates every cached entry sorted by timestamp ascending so history is preserved indefinitely.
+
+**Standard tests:**
+- `cache.test.ts` > round-trips a written RunResult
+- `cache.test.ts` > write uses atomic tmp+rename
+- `cache.test.ts` > listAllForCase returns multiple entries sorted by timestamp
+- `cache-invalidation.test.ts` > history is retained after invalidation
+
+---
+
+### REQ-REG-011 — The routing bucket MUST assert overall accuracy ≥ 0.95 across all food-shadow inputs
+
+**Phase:** Chunk B.1 | **Status:** Implemented
+
+`computeRoutingAccuracy(results, targets)` in `regression/src/runner/markdown-report.ts` computes accuracy at the **input** level over food-shadow routing cases. `pass` is the only verdict in the numerator; **both `fail` AND `error` count against the denominator** (Codex C-2). A parser regression that flips `kind: 'ok'` to `kind: 'parse-failed'` surfaces as an oracle `verdict: 'error'` and is correctly counted. The floor (`FOOD_SHADOW_INPUT_FLOOR = 20`) prevents a trivially-passing run from masking misconfiguration. Below the floor the gate returns `null` and the CLI exits 0 with a warning; otherwise the CLI exits 1 when accuracy < `ACCURACY_GATE_THRESHOLD = 0.95`.
+
+The routing bucket is populated from a single generator module (`regression/src/cases/routing/food-personas/index.ts`) that imports `FOOD_PERSONAS` from `apps/food/src/routing/__tests__/shadow-classifier.personas.ts` and emits one `LoadedCase` per persona label, with every `accept[]` phrase becoming an input. A contract test (`cases.contract.test.ts`) asserts every persona phrase appears as a covered input so drift between the persona dataset and the regression cases is impossible.
+
+**Standard tests:**
+- `markdown-report.test.ts` > returns 1.0 when all food-shadow inputs pass
+- `markdown-report.test.ts` > counts fail against the gate
+- `markdown-report.test.ts` > counts error against the gate
+- `markdown-report.test.ts` > counts budget-exceeded cases against the gate
+- `markdown-report.test.ts` > aggregates across multi-input cases at the input level
+- `markdown-report.test.ts` > ignores non-food-shadow targets
+- `cases.contract.test.ts` > every FOOD_PERSONAS accept phrase is represented as an input
+- `cases.contract.test.ts` > every FOOD_PERSONAS label has at least one food-shadow case
+- `orchestrator.test.ts` > summary.routingAccuracy computed when above floor
+- `routing-runner.test.ts` > food-shadow / session-control / pas happy paths (all 3 targets)
+- `routing-runner.test.ts` > parse-failed surfaces as verdict=fail/error (Codex C-3)
+- `dispatch.test.ts` > foodShadow adapter parse-failed pass-through
+- `dispatch.test.ts` > sessionControl prefilter zero-cost (3 commands)
+- `dispatch.test.ts` > pas DATA_QUERY_PREFILTER zero-cost
+
+**Edge cases:**
+- `markdown-report.test.ts` > returns null below floor
+- `markdown-report.test.ts` > returns null when there are exactly FLOOR-1 evaluable inputs
+- `routing-runner.test.ts` > trust-boundary table (9 malformed-output variants)
+- `orchestrator.test.ts` > exits 1 when REQ-REG-011 gate fails
+
+---
+
+### REQ-REG-014 — The `judge` oracle kind MUST be reserved but MUST NOT be implemented in v1; declaring it on a case MUST throw a configuration error
+
+**Phase:** Chunk A.1 | **Status:** Implemented
+
+`OracleKind` includes `'judge'` for forward-compatibility, but `validatePersonaCase` throws when a case sets `oracle: 'judge'` ("reserved REQ-REG-014"). The same check rejects `oracle: 'rubric'` until Chunk C wires the rubric oracle.
+
+**Standard tests:**
+- `validate-case.test.ts` > rejects oracle: judge always
+- `validate-case.test.ts` > rejects oracle: rubric in Chunk A
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
@@ -9874,5 +10022,15 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-TEMPORAL-013 | build-classifier-prompt-nl.test.ts, parse-recall-verdict.test.ts, recall-pipeline.test.ts | 4 | 4 | Implemented |
 | REQ-CONV-TEMPORAL-014 | pas-yaml-schema.test.ts | 7 | 0 | Implemented |
 | REQ-CONV-TEMPORAL-015 | pas-yaml-schema.test.ts | 1 | 0 | Implemented |
+
+| REQ-REG-001 | (workspace exclusion verified by vitest config) | 0 | 0 | Implemented |
+| REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts | 8 | 4 | Implemented |
+| REQ-REG-004 | structural-oracle.test.ts, routing-runner.test.ts | 14 | 9 | Implemented |
+| REQ-REG-006 | seed.test.ts | 4 | 4 | Implemented |
+| REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts | 5 | 4 | Implemented |
+| REQ-REG-009 | budget.test.ts, pas-yaml-schema.test.ts, orchestrator.test.ts | 5 | 3 | Implemented |
+| REQ-REG-010 | cache.test.ts, cache-invalidation.test.ts | 6 | 2 | Implemented |
+| REQ-REG-011 | markdown-report.test.ts, cases.contract.test.ts, orchestrator.test.ts, routing-runner.test.ts, dispatch.test.ts | 18 | 8 | Implemented |
+| REQ-REG-014 | validate-case.test.ts | 2 | 0 | Implemented |
 
 | **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |
