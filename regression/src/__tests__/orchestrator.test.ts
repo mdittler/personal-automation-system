@@ -284,6 +284,38 @@ describe('runCli', () => {
 		expect(out.join('')).toMatch(/\| metric \| value \|/);
 	});
 
+	it('--dry-run renders the estimate-focused summary (no pass/fail counts)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const adapter = makeAdapter();
+		const r = await runCli(['--dry-run'], baseOpts({ classifiers: adapter }), {
+			stdout: (s) => out.push(s),
+		});
+		const body = out.join('');
+		expect(r.exitCode).toBe(0);
+		expect(adapter.foodShadow).not.toHaveBeenCalled();
+		expect(body).toMatch(/DRY RUN/);
+		expect(body).toMatch(/cases that would dispatch \| 2/);
+		expect(body).toMatch(/estimated cost upper-bound/);
+		expect(body).not.toMatch(/pass \| 2/); // no fake pass counts
+		expect(body).not.toMatch(/REQ-REG-011/); // gate is skipped on dry-run
+	});
+
+	it('--dry-run does not trigger the REQ-REG-011 gate even with synthetic pass results', async () => {
+		// 25 cases all marked dry-run → would naively show "25 pass" in the
+		// regular summary; the dry-run path must skip the gate.
+		for (let i = 0; i < 25; i++) {
+			await writeFile(join(casesDir, `c-${i}.case.ts`), oneRoutingCase(`c-id-${i}`));
+		}
+		const { runCli } = await import('../runner/index.js');
+		const out: string[] = [];
+		const r = await runCli(['--dry-run'], baseOpts(), { stdout: (s) => out.push(s) });
+		expect(r.exitCode).toBe(0);
+		expect(out.join('')).not.toMatch(/REQ-REG-011 FAILED/);
+	});
+
 	it('exits 1 when REQ-REG-011 gate fails', async () => {
 		// Write 25 cases; mock 24 passes + 1 fail. Accuracy = 24/25 = 0.96.
 		// Then write 25 cases where 20 pass + 5 fail. Accuracy = 0.80 → fail.

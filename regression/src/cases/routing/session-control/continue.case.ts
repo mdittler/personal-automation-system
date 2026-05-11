@@ -17,9 +17,12 @@ const c: PersonaCase = {
 	routingTarget: 'session-control',
 	coverage: ['core/src/services/conversation/session-control-classifier.ts'],
 	inputs: [
-		// Meta-questions about the command itself
+		// Meta-questions about the command itself. The phrase below is
+		// unambiguous — "what does X do" is a documentation question, not an
+		// invocation. The borderline phrase "how do I start a new chat" was
+		// removed because a reasonable LLM could read it as a new-session
+		// request.
 		'what does /newchat do?',
-		'how do I start a new chat',
 		// Negations
 		"don't start over",
 		"i'm not done with this conversation",

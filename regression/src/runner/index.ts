@@ -43,6 +43,7 @@ import {
 import {
 	ACCURACY_GATE_THRESHOLD,
 	buildSummary,
+	formatDryRunMarkdown,
 	formatSummaryMarkdown,
 } from './markdown-report.js';
 
@@ -226,12 +227,19 @@ export async function runCli(
 
 	if (cli.json) {
 		write(`${JSON.stringify({ type: 'summary', summary: outcome.summary })}\n`);
+	} else if (cli.dryRun) {
+		// Dry-run cases have empty oracleVerdicts and synthetic pass verdicts.
+		// Reporting them as pass/fail would mislead the operator — render the
+		// estimate-focused dry-run summary instead.
+		write(`${formatDryRunMarkdown(outcome.results, deps.estimateUsd)}\n`);
 	} else {
 		write(`${formatSummaryMarkdown(outcome.results, outcome.targets)}\n`);
 	}
 
-	// REQ-REG-011 gate. Below floor → null → exit 0 with a warning.
+	// REQ-REG-011 gate: skip on dry-run (no oracle ran). Below floor → null →
+	// exit 0 with a warning.
 	if (
+		!cli.dryRun &&
 		outcome.summary.routingAccuracy !== null &&
 		outcome.summary.routingAccuracy < ACCURACY_GATE_THRESHOLD
 	) {

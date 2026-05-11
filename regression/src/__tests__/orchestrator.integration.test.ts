@@ -1,14 +1,11 @@
 /**
- * Production-wiring integration test (testing-standards rule 5).
+ * runSuite → buildClassifierAdapters → FoodShadowClassifier integration test.
  *
- * Runs `runSuite()` against a temp git repo with a real `food-shadow`
- * routing case, using the **real** `buildClassifierAdapters` →
- * `FoodShadowClassifier` → adapter contract. Only the LLM provider is
- * stubbed (via `StubLLMService`); everything else — case loader,
- * structural oracle, cache, budget, summary — runs production code.
- *
- * This catches integration bugs that the per-component unit tests
- * (with mocked adapters) miss.
+ * Exercises the orchestrator dispatch path with the real adapter wiring
+ * (case loader, structural oracle, cache, budget, summary all run
+ * production code; only the LLMService is stubbed). Complementary to
+ * `build-deps.test.ts`, which covers the CLI-side ProviderRegistry →
+ * ModelSelector → LLMServiceImpl composition that this test bypasses.
  */
 
 import { execSync } from 'node:child_process';
@@ -84,7 +81,7 @@ const logger = {
 	error: vi.fn(),
 };
 
-describe('orchestrator integration — real classifier path', () => {
+describe('orchestrator → adapters → FoodShadowClassifier integration', () => {
 	it('dispatches a food-shadow case through FoodShadowClassifier with StubLLMService', async () => {
 		await writeFile(join(casesDir, 'a.case.ts'), foodShadowCase);
 

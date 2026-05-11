@@ -111,14 +111,21 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 		},
 
 		pas: async (text: string): Promise<AdapterResult> => {
+			// `appMetadata` is intentionally omitted. Production passes installed-
+			// app names to refine routing, but the regression suite exercises the
+			// base (no-metadata) classifier path so cases don't drift when apps
+			// are installed/uninstalled between runs. If future cases need the
+			// app-aware path, pass an AppMetadataService stub here and split into
+			// a new routingTarget for the metadata-aware branch.
+			//
+			// DATA_QUERY_PREFILTER short-circuits without an LLM call; cost delta
+			// naturally lands at 0 in that case.
 			const { value: r, meter } = await meterCall(deps, 'fast', () =>
 				classifyPASMessage(text, {
 					llm: deps.llm,
 					logger: widenedLogger,
 				}),
 			);
-			// classifyPASMessage's DATA_QUERY_PREFILTER short-circuits without an
-			// LLM call; cost delta naturally lands at 0 in that case.
 			return { raw: JSON.stringify(r), meter };
 		},
 	};

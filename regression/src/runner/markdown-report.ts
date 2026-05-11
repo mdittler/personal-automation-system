@@ -65,6 +65,31 @@ export function buildSummary(
 	return summary;
 }
 
+/**
+ * Format the dry-run preview: how many cases / inputs would dispatch,
+ * estimated cost, what the operator would pay before pressing the
+ * trigger. **Does NOT** report pass/fail counts — no oracle ran.
+ */
+export function formatDryRunMarkdown(
+	results: readonly RunResult[],
+	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number,
+): string {
+	const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 };
+	const totalCases = results.length;
+	const totalInputs = results.reduce((n, r) => n + r.inputs.length, 0);
+	const estimatedCost = estimateUsd(ESTIMATE_TOKENS) * totalInputs;
+	return [
+		'DRY RUN — no LLM calls were made. The numbers below are estimates.',
+		'',
+		'| metric | value |',
+		'|---|---|',
+		`| cases that would dispatch | ${totalCases} |`,
+		`| total inputs across selected cases | ${totalInputs} |`,
+		`| estimated calls (cache misses only — cached cases skip dispatch) | ≤ ${totalInputs} |`,
+		`| estimated cost upper-bound (USD) | ${estimatedCost.toFixed(6)} |`,
+	].join('\n');
+}
+
 export function formatSummaryMarkdown(
 	results: readonly RunResult[],
 	targets: ReadonlyMap<string, RoutingTarget>,

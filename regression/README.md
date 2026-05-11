@@ -1,21 +1,34 @@
 # Persona Regression Suite
 
-A fixture-backed, cached, real-LLM regression suite for the PAS classifier and
-parser surfaces. Sits outside the root `pnpm test` so it doesn't run on every
-push (REQ-REG-001). Run it intentionally before merging changes that touch the
-shadow classifier, the session-control NL classifier, the PAS-relevance
-classifier, or the receipt parser.
+A fixture-backed, cached, real-LLM regression harness for the PAS classifier
+and parser surfaces. Sits outside the root `pnpm test` so it doesn't run on
+every push (REQ-REG-001). Run it intentionally before merging changes that
+touch the shadow classifier, the session-control NL classifier, the
+PAS-relevance classifier, or the receipt parser.
 
 ## Quick start
 
 ```sh
-pnpm test:regression                    # run all buckets, respect cache, exit 0/1 per REQ-REG-011
-pnpm test:regression -- --help          # show CLI help
-pnpm test:regression -- --dry-run       # print estimated cost without LLM calls
-pnpm test:regression -- --bucket=routing
-pnpm test:regression -- --rerun food-user-wants-to-save-a-recipe
-pnpm test:regression -- --json          # line-delimited JSON events (used by GUI)
+# Dry-run: lists selected cases + estimated cost. No env vars required, no LLM call.
+pnpm test:regression -- --dry-run
+
+# Real run: composes the production LLMService stack. Requires the same env vars
+# as `pnpm dev`: TELEGRAM_BOT_TOKEN, GUI_AUTH_TOKEN, and at least one provider
+# API key (ANTHROPIC_API_KEY / GOOGLE_AI_API_KEY / OPENAI_API_KEY / OLLAMA_URL).
+# Cache hits short-circuit dispatch — most cases run once and stay cached until
+# their coverage files change.
+pnpm test:regression
+
+pnpm test:regression -- --help                        # show CLI help
+pnpm test:regression -- --bucket=routing              # routing bucket only
+pnpm test:regression -- --rerun food-save-a-recipe    # force one fresh dispatch
+pnpm test:regression -- --json                        # line-delimited JSON events (used by GUI subprocess)
 ```
+
+**Note on tokens:** the GUI displays per-case cost (authoritative, via
+`CostTracker` delta) but token counts are currently 0. `LLMService.complete()`
+returns only the response string; per-call token usage isn't exposed yet.
+The Chunk B.2 GUI design surfaces cost prominently and renders tokens as "—".
 
 ## Exit codes
 
@@ -46,7 +59,7 @@ pnpm test:regression -- --json          # line-delimited JSON events (used by GU
 | `src/runner/markdown-report.ts` | REQ-REG-011 accuracy gate + stdout summary |
 | `src/runner/budget.ts` | `CaseBudget` + `RunBudget` |
 | `src/runner/cache.ts` | `CacheStore` (atomic write, schema-validated read) |
-| `src/runner/build-deps.ts` | Production composition (CLI uses this) |
+| `src/runner/build-deps.ts` | `buildProductionDeps` (full LLM stack) + `buildDryRunDeps` (no env) |
 | `src/oracles/structural.ts` | AJV-based JSON-schema + dot-path assertion engine |
 | `src/shared/types.ts` | Re-export of `@core/types/regression` for in-workspace ergonomics |
 | `src/cases/routing/food-personas/index.ts` | Generated FOOD_PERSONAS cases (27 labels × N phrases) |
