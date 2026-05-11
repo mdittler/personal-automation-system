@@ -65,6 +65,9 @@
 			"data",
 			".claude",
 			".claude-plugins",
+			".codex",
+			".agents",
+			"AGENTS.md",
 			"*.min.js",
 			"*.min.css"
 		]

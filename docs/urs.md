@@ -8519,7 +8519,7 @@ The chatbot `/ask` command must detect data-related questions via keyword heuris
 
 **Phase:** Post-24 | **Status:** Implemented
 
-`appendWithFrontmatter()` must atomically create a file with frontmatter on first write, and append without frontmatter on subsequent writes. Uses `O_EXCL` to prevent TOCTOU race conditions. Concurrent appends must not duplicate frontmatter.
+`appendWithFrontmatter()` must atomically create a file with frontmatter on first write, and append without frontmatter on subsequent writes. The implementation acquires a single-process per-file mutex (`withFileLock` keyed on a canonical path — `realpath(dirname) + basename` after `ensureDir`) across the entire create-or-append operation so concurrent callers cannot observe an empty file between creation and the initial write. Concurrent appends must not duplicate frontmatter or interleave content.
 
 **Standard tests:**
 - `file-frontmatter.test.ts` > appendWithFrontmatter > creates new file with frontmatter + content
@@ -8532,6 +8532,8 @@ The chatbot `/ask` command must detect data-related questions via keyword heuris
 - `file-frontmatter.test.ts` > appendWithFrontmatter > propagates errors other than EEXIST
 - Concurrency
   - `file-frontmatter.test.ts` > appendWithFrontmatter > concurrent appends do not duplicate frontmatter
+  - `file-frontmatter.test.ts` > appendWithFrontmatter > 20 concurrent appends produce frontmatter once and exactly 20 lines
+  - `file-frontmatter.test.ts` > appendWithFrontmatter > concurrent appends through equivalent path spellings share the same lock
 
 ### REQ-FMATTER-003: Migration script
 

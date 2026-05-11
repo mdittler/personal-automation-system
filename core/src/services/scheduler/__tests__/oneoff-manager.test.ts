@@ -388,9 +388,11 @@ describe('OneOffManager', () => {
 		await localManager.schedule('app1', 'job1', pastDate, 'handler.js');
 
 		vi.useFakeTimers();
+		// Declared outside try so the finally block can await it.
+		let checkPromise: Promise<void> | undefined;
 		try {
 			// Start checkAndExecute (will block on blockForever)
-			const checkPromise = localManager.checkAndExecute();
+			checkPromise = localManager.checkAndExecute();
 			checkPromise.catch(() => {}); // prevent unhandled rejection after stop() timeout
 
 			// Drain microtasks so the handler starts executing inside the queue chain
@@ -410,6 +412,12 @@ describe('OneOffManager', () => {
 			vi.useRealTimers();
 			// Unblock the handler so the queue can drain and temp files can be cleaned up
 			releaseHandler();
+			// Await the in-flight check so any handler-side writes complete BEFORE
+			// the afterEach tempDir rm() races with them. Without this await, the
+			// blocked handler resumes on the real-timer tick, attempts to remove
+			// the task file, and intermittently hits ENOENT when rm has already
+			// run.
+			if (checkPromise) await checkPromise.catch(() => {});
 			// localDataDir is a subdirectory of tempDir, so the afterEach rm() covers it
 		}
 	});
