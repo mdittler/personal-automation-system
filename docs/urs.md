@@ -9555,9 +9555,154 @@ The routing bucket is populated from a single generator module (`regression/src/
 
 ---
 
+### REQ-REG-003 — Coverage-changed banner: when a coverage file changes since the last cached run, the GUI MUST surface "coverage changed — needs re-run" and MUST NOT report the prior verdict as current
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+`readDisplayForCase` (in `core/src/gui/services/regression/cache-reader.ts`) first looks up the entry whose `cacheKey === currentCacheKey`; only if no current-key entry exists does it fall back to the newest-any entry with `coverageChanged: true` (Codex C2 fix — older "latest-by-timestamp" logic would have masked the current pass with a newer stale entry). The `/gui/regression` page renders the ⚠ status icon and the label "coverage changed — needs re-run" for stale rows. `currentCacheKey` is recomputed fresh on every page load (no TTL — Codex C4).
+
+**Standard tests:**
+- `cache-reader.test.ts` > readDisplayForCase — current-key-first selection (C2) > returns the matching-key entry with coverageChanged=false
+- `cache-reader.test.ts` > readDisplayForCase — current-key-first selection (C2) > falls back to newest-stale with coverageChanged=true when current key not cached
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "coverage changed" (⚠) when cached cacheKey differs from currentCacheKey
+
+**Edge case tests:**
+- `cache-reader.test.ts` > readDisplayForCase — current-key-first selection (C2) > CRITICAL: newer stale + older current-key → returns current-key entry, NOT the newer stale
+- `cache-reader.test.ts` > readDisplayForCase — current-key-first selection (C2) > returns null when no cache files exist
+- `cache-reader.test.ts` > readDisplayForCase — current-key-first selection (C2) > returns null when only invalid cache files exist
+- `case-discovery.test.ts` > case-discovery — no TTL on cacheKey (C4) > does NOT reuse a previous discover() result
+
+---
+
+### REQ-REG-007 — The `/gui/regression` page MUST be accessible only to `isPlatformAdmin` users
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+Every route on the `/gui/regression` surface (GET page, drilldown, row partial, history, estimate, POST run, GET SSE events, POST cancel) is registered with `preHandler: [requirePlatformAdmin]`. Non-admin authenticated users receive a 403 rendered from the existing 403.eta template. Unauthenticated requests (missing or invalid auth cookie) redirect to `/gui/login` via the existing auth middleware (302), matching the `core/src/gui/auth.ts:296` behavior — Codex I6 confirmed JSON 401 is NOT the current global pattern.
+
+**Standard tests:**
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression returns 200 for admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case returns 200 for admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/row returns 200 for admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/history returns 200 for admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/estimate returns 200 for admin
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — auth + CSRF > returns 202 + runId for admin with valid CSRF
+
+**Security tests:**
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression returns 403 for authenticated non-admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression returns 302 redirect to /gui/login for unauthenticated request (Codex I6)
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case returns 403 for authenticated non-admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case returns 302 redirect to /gui/login for unauthenticated request (Codex I6)
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/row returns 403 for authenticated non-admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/row returns 302 redirect to /gui/login for unauthenticated request (Codex I6)
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/history returns 403 for authenticated non-admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/cases/demo-case/history returns 302 redirect to /gui/login for unauthenticated request (Codex I6)
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/estimate returns 403 for authenticated non-admin
+- `regression-routes.test.ts` > REQ-REG-007 — admin gate on all read routes > /gui/regression/estimate returns 302 redirect to /gui/login for unauthenticated request (Codex I6)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — auth + CSRF > returns 403 for authenticated non-admin (REQ-REG-007)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — auth + CSRF > returns 302 redirect to /gui/login for unauthenticated POST (Codex I6)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — auth + CSRF > returns 403 for POST without CSRF token
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — SSE > returns 403 for authenticated non-admin
+- `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 403 for authenticated non-admin
+
+---
+
+### REQ-REG-013 — The GUI MUST display per-case model IDs, token counts, cost, and timestamp for each completed run
+
+**Phase:** Chunk B.2 | **Status:** Implemented (token counts as `—` — see open-items.md)
+
+The case list on `/gui/regression` renders status icon, fast/standard model IDs, formatted cost (4 decimal places), and ISO timestamp for each cached case. Per-case token counts are rendered as `—` (em-dash) with a documented footnote — `LLMService.complete()` currently returns only the response string, dropping the `usage` object even though providers expose it via `completeWithUsage`. Cost is authoritative via `CostTracker` delta. A carry-forward in `docs/open-items.md` tracks plumbing usage through the LLMService boundary.
+
+**Standard tests:**
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the case list with tier model badges + status icons
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the per-bucket cost estimate in the Run button label (REQ-REG-017)
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the token-counts footnote (REQ-REG-013 token gap is documented)
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders full result + oracle verdicts when cache hit
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > renders a single row with escaped HTML
+
+**Edge case tests:**
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "never run" (●) for a case with no cache
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "coverage changed" (⚠) when cached cacheKey differs from currentCacheKey
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders discovery error banner + disables Run controls when --list fails closed (Codex I4)
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > filters by bucket via ?bucket= query param
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders an empty-state when bucket filter matches nothing
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders inputs + expected from ListedCase even when never run
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > reflects the live run result when ?runId= matches the in-progress run (Codex I7)
+
+**Security tests:**
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > returns 404 for unknown caseId (allowlist defense)
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > returns 404 for traversal-shaped caseId (defense in depth)
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > escapes hostile content in cached actuals (XSS via SSE→row flow)
+
+---
+
+### REQ-REG-015 — The `/gui/regression` page MUST surface a per-case history view listing all cached runs for that case
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/history`, which calls `readHistoryForCase` to glob `data/system/regression-cache/<caseId>/*.json`, validate each entry against the strict `RunResult` schema (Codex I5 — invalid files skipped with warning, never normalized into UI state), and return all valid entries DESC by timestamp. Each row in the history table shows timestamp, verdict, cost, fast/standard model IDs, and a truncated cache key. Operationalises the retention contract in REQ-REG-010.
+
+**Standard tests:**
+- `cache-reader.test.ts` > readHistoryForCase > returns all valid entries DESC by timestamp
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/history > renders all cache entries DESC by timestamp
+
+**Edge case tests:**
+- `cache-reader.test.ts` > readHistoryForCase > returns [] when no entries exist
+- `cache-reader.test.ts` > readHistoryForCase > skips invalid files but returns the valid ones (I5 behavior)
+- `cache-reader.test.ts` > readHistoryForCase > ignores non-hex filenames in the cache dir
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/history > renders empty-state when no history
+
+---
+
+### REQ-REG-016 — Operators MUST be able to cancel an in-progress regression run
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+`POST /gui/regression/runs/:runId/cancel` (CSRF + admin) calls `runRegistry.cancel(runId)`, which aborts the subprocess via `AbortSignal` → `child.kill('SIGTERM')` with a 5-second SIGKILL fallback. The run transitions through `cancelling` → `cancelled` status and the SSE stream emits a `cancelled` event before closing. Idempotent — calling cancel on an unknown or already-terminal run returns 200 without side effects.
+
+**Standard tests:**
+- `run-registry.test.ts` > run-registry — cancel > cancel triggers abort signal on the active run
+- `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > cancels an active run and triggers cancelled event
+- `subprocess.test.ts` > spawnRegression — cancel > emits "cancelled" when handle.cancel() is called
+
+**Edge case tests:**
+- `run-registry.test.ts` > run-registry — cancel > cancel for an unknown runId is a no-op
+- `run-registry.test.ts` > run-registry — cancel > cancel after completion is idempotent (no-op)
+- `run-registry.test.ts` > run-registry — terminal state inference > marks status="cancelled" after "cancelled" event
+- `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 200 (idempotent no-op) for an unknown runId
+
+**Security tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 403 without CSRF
+- `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 403 for authenticated non-admin
+
+---
+
+### REQ-REG-017 — The `/gui/regression` page MUST display an approximate cost estimate before initiating a run
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+`estimator.ts` provides `estimateRunCostUsd(cases, {ceilingUsd})` returning total + per-bucket subtotals using documented per-bucket constants (routing $0.005, receipt $0.06, chatbot $0.04, recall $0.01). The constants are approximations — the production cost calculator (`CostTracker.estimateCost`) requires loaded model pricing and a different deps stack. The binding safety limit remains `regression.maxRunBudgetUsd` (default 5.00 USD). Estimates appear in the Run button label ("est. ≈ $0.18 (cap $5.00)") and are also returned as JSON from `GET /gui/regression/estimate` for the confirm-dialog flow.
+
+**Standard tests:**
+- `estimator.test.ts` > estimateRunCostUsd > sums per-bucket constants for a routing-only set
+- `estimator.test.ts` > estimateRunCostUsd > breaks out per-bucket subtotals for the GUI banner
+- `estimator.test.ts` > estimateRunCostUsd > total === sum of perBucketUsd values (contract)
+- `regression-routes.test.ts` > GET /gui/regression/estimate > returns JSON totals matching the per-bucket constants (REQ-REG-017)
+- `regression-routes.test.ts` > GET /gui/regression/estimate > honours bucket query param
+- `regression-routes.test.ts` > GET /gui/regression/estimate > honours rerun query param (expands to specified cases only)
+
+**Edge case tests:**
+- `estimator.test.ts` > estimateRunCostUsd > returns 0 for an empty case list
+- `estimator.test.ts` > estimateRunCostUsd > charges receipt cases more than routing cases (vision dispatch)
+- `estimator.test.ts` > estimateRunCostUsd > passes through the ceiling unchanged for the GUI banner
+- `estimator.test.ts` > estimateRunCostUsd > rejects NaN ceiling (defensive)
+- `estimator.test.ts` > estimateRunCostUsd > rejects negative ceiling (defensive)
+
+---
+
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-REG-003, REQ-REG-005, REQ-REG-007, REQ-REG-012, REQ-REG-013) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace (excluded from root `pnpm test`) and are not summed into the totals row below.
+The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-REG-005, REQ-REG-012) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|
@@ -10031,6 +10176,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-009 | budget.test.ts, pas-yaml-schema.test.ts, orchestrator.test.ts | 5 | 3 | Implemented |
 | REQ-REG-010 | cache.test.ts, cache-invalidation.test.ts | 6 | 2 | Implemented |
 | REQ-REG-011 | markdown-report.test.ts, cases.contract.test.ts, orchestrator.test.ts, routing-runner.test.ts, dispatch.test.ts | 18 | 8 | Implemented |
+| REQ-REG-003 | cache-reader.test.ts, case-discovery.test.ts, regression-routes.test.ts | 3 | 4 | Implemented |
+| REQ-REG-007 | regression-routes.test.ts, regression-routes-write.test.ts | 6 | 16 | Implemented |
+| REQ-REG-013 | regression-routes.test.ts | 5 | 7 | Implemented |
 | REQ-REG-014 | validate-case.test.ts | 2 | 0 | Implemented |
+| REQ-REG-015 | cache-reader.test.ts, regression-routes.test.ts | 2 | 4 | Implemented |
+| REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts | 3 | 6 | Implemented |
+| REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 
 | **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |
