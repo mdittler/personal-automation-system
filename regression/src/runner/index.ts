@@ -21,6 +21,8 @@
  */
 
 import { relative } from 'node:path';
+import { requestContext } from '@core/services/context/request-context.js';
+import type { LLMService } from '@core/types/llm.js';
 import {
 	type PersonaCase,
 	type RoutingTarget,
@@ -34,6 +36,7 @@ import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
+import { runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
 import {
 	ESTIMATE_TOKENS,
@@ -59,6 +62,20 @@ export interface RunSuiteOptions {
 	classifiers: RoutingClassifierAdapter;
 	/** Recall adapter (Chunk C). Required when any case has bucket === 'recall'. */
 	recallAdapter?: RecallAdapter;
+	/** Lazily builds the chatbot environment when the first chatbot case dispatches. */
+	chatbotEnvFactory?: () => Promise<{
+		userId: string;
+		householdId: string;
+		telegram: { sent: ReadonlyArray<{ userId: string; text: string }> };
+		runtime: { services: { router: { routeMessage: (ctx: unknown) => Promise<void> } } };
+		captureHandler: () => () => string | null;
+		endActiveSession: () => Promise<void>;
+		dispose: () => Promise<void>;
+	}>;
+	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
+	judgeLlm?: Pick<LLMService, 'complete'>;
+	/** CostTracker proxy used by the rubric oracle to meter judge cost (and chatbot turn cost). */
+	costTracker?: { getMonthlyTotalCost: () => number };
 	logger: MinimalLogger;
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
 	rerunIds?: Set<string>;
@@ -113,78 +130,156 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		}),
 	);
 
-	for (let i = 0; i < filtered.length; i++) {
-		const lc = filtered[i]!;
-		const cacheKey = cacheKeys[i]!;
-		const cached = cacheReads[i];
+	// Chatbot env is built lazily on the first chatbot case; reused across the
+	// run; disposed once in the `finally` below (REQ-REG-006). Codex I3: if the
+	// factory fails once, every subsequent chatbot case yields a synthesized
+	// error result without retrying — the failure message is cached here.
+	let chatbotEnv: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>> | null = null;
+	let chatbotEnvFailure: string | null = null;
 
-		if (cached) {
-			const out: RunResult = { ...cached, source: 'cached' };
-			results.push(out);
-			opts.onResult?.(out);
-			continue;
-		}
+	try {
+		for (let i = 0; i < filtered.length; i++) {
+			const lc = filtered[i]!;
+			const cacheKey = cacheKeys[i]!;
+			const cached = cacheReads[i];
 
-		if (opts.dryRun) {
-			const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
-			results.push(dr);
-			opts.onResult?.(dr);
-			continue;
-		}
-
-		const caseEstimate = opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
-		if (!runBudget.canAfford(caseEstimate)) {
-			opts.logger.warn(
-				{
-					caseId: lc.case.id,
-					remaining: runBudget.remainingUsd,
-					estimate: caseEstimate,
-				},
-				'orchestrator: run budget exhausted — case skipped without dispatch',
-			);
-			const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
-			results.push(be);
-			opts.onResult?.(be);
-			continue;
-		}
-
-		let result: RunResult;
-		if (lc.case.bucket === 'routing') {
-			result = await runRoutingCase(lc.case, {
-				modelIds: opts.modelIds,
-				cacheKey,
-				caseBudgetUsd: lc.case.budgetUsd,
-				estimateUsd: opts.estimateUsd,
-				logger: opts.logger,
-				classifiers: opts.classifiers,
-			});
-		} else if (lc.case.bucket === 'recall') {
-			if (!opts.recallAdapter) {
-				throw new Error(
-					`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
-				);
+			if (cached) {
+				const out: RunResult = { ...cached, source: 'cached' };
+				results.push(out);
+				opts.onResult?.(out);
+				continue;
 			}
-			result = await runRecallCase(lc.case, {
-				adapter: opts.recallAdapter,
-				modelIds: opts.modelIds,
-				cacheKey,
-				caseBudgetUsd: lc.case.budgetUsd,
-				estimateUsd: opts.estimateUsd,
-				logger: opts.logger,
-			});
-		} else {
-			// Receipt bucket lands with Chunk A.2; chatbot with Chunk C (Task 11).
-			opts.logger.info(
-				{ caseId: lc.case.id, bucket: lc.case.bucket },
-				'orchestrator: bucket runner not wired yet — skipping case',
-			);
-			continue;
-		}
 
-		runBudget.add(result.costUsd);
-		await cache.write(result);
-		results.push(result);
-		opts.onResult?.(result);
+			if (opts.dryRun) {
+				const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
+				results.push(dr);
+				opts.onResult?.(dr);
+				continue;
+			}
+
+			const caseEstimate = opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
+			if (!runBudget.canAfford(caseEstimate)) {
+				opts.logger.warn(
+					{
+						caseId: lc.case.id,
+						remaining: runBudget.remainingUsd,
+						estimate: caseEstimate,
+					},
+					'orchestrator: run budget exhausted — case skipped without dispatch',
+				);
+				const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
+				results.push(be);
+				opts.onResult?.(be);
+				continue;
+			}
+
+			let result: RunResult;
+			if (lc.case.bucket === 'routing') {
+				result = await runRoutingCase(lc.case, {
+					modelIds: opts.modelIds,
+					cacheKey,
+					caseBudgetUsd: lc.case.budgetUsd,
+					estimateUsd: opts.estimateUsd,
+					logger: opts.logger,
+					classifiers: opts.classifiers,
+				});
+			} else if (lc.case.bucket === 'recall') {
+				if (!opts.recallAdapter) {
+					throw new Error(
+						`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
+					);
+				}
+				result = await runRecallCase(lc.case, {
+					adapter: opts.recallAdapter,
+					modelIds: opts.modelIds,
+					cacheKey,
+					caseBudgetUsd: lc.case.budgetUsd,
+					estimateUsd: opts.estimateUsd,
+					logger: opts.logger,
+				});
+			} else if (lc.case.bucket === 'chatbot') {
+				if (!opts.chatbotEnvFactory || !opts.judgeLlm) {
+					throw new Error(
+						`orchestrator: chatbotEnvFactory + judgeLlm are required to dispatch chatbot case "${lc.case.id}"`,
+					);
+				}
+				// Codex I3: once the factory has failed once, every subsequent
+				// chatbot case in the same run yields an error result without
+				// dispatch — the factory is NOT retried.
+				if (chatbotEnvFailure !== null) {
+					const errResult = makeEnvFailureResult(
+						lc.case,
+						cacheKey,
+						opts.modelIds,
+						chatbotEnvFailure,
+					);
+					results.push(errResult);
+					opts.onResult?.(errResult);
+					continue;
+				}
+				if (chatbotEnv === null) {
+					try {
+						chatbotEnv = await opts.chatbotEnvFactory();
+					} catch (err) {
+						chatbotEnvFailure = (err as Error).message || 'chatbot env factory failed';
+						opts.logger.warn(
+							{ err: chatbotEnvFailure },
+							'orchestrator: chatbot env factory failed — marking remaining chatbot cases as error',
+						);
+						const errResult = makeEnvFailureResult(
+							lc.case,
+							cacheKey,
+							opts.modelIds,
+							chatbotEnvFailure,
+						);
+						results.push(errResult);
+						opts.onResult?.(errResult);
+						continue;
+					}
+				}
+				const env = chatbotEnv;
+				result = await runChatbotCase(lc.case, {
+					env: {
+						userId: env.userId,
+						householdId: env.householdId,
+						telegram: env.telegram,
+						captureHandler: env.captureHandler,
+						endActiveSession: env.endActiveSession,
+						routeMessage: (ctx) =>
+							requestContext.run(
+								{ userId: env.userId, householdId: env.householdId },
+								() => env.runtime.services.router.routeMessage(ctx),
+							),
+					},
+					judgeLlm: opts.judgeLlm,
+					judgeModelId: opts.modelIds.standard,
+					costTracker: opts.costTracker ?? { getMonthlyTotalCost: () => 0 },
+					modelIds: opts.modelIds,
+					cacheKey,
+					caseBudgetUsd: lc.case.budgetUsd,
+					estimateUsd: opts.estimateUsd,
+					logger: opts.logger,
+				});
+			} else {
+				// Receipt bucket lands with Chunk A.2 carry-forward — orchestrator
+				// dispatch is intentionally not wired (the standalone receipt
+				// runner is invoked from a dedicated entry point).
+				opts.logger.info(
+					{ caseId: lc.case.id, bucket: lc.case.bucket },
+					'orchestrator: bucket runner not wired yet — skipping case',
+				);
+				continue;
+			}
+
+			runBudget.add(result.costUsd);
+			await cache.write(result);
+			results.push(result);
+			opts.onResult?.(result);
+		}
+	} finally {
+		if (chatbotEnv) {
+			await chatbotEnv.dispose();
+		}
 	}
 
 	return {
@@ -361,6 +456,37 @@ function makeBudgetExceededResult(
 		oracleVerdicts: c.inputs.map(() => ({
 			verdict: VERDICT.error,
 			details: 'run budget exhausted; case skipped without dispatch',
+		})),
+		tokenCounts: { input: 0, output: 0 },
+		costUsd: 0,
+		modelIds,
+		timestamp: new Date().toISOString(),
+		durationMs: 0,
+	};
+}
+
+/**
+ * Synthesized chatbot-bucket result for cases that cannot dispatch because the
+ * `chatbotEnvFactory` itself failed (Codex I3). One `error` oracle verdict per
+ * input so any downstream gate counts these against accuracy the same way
+ * `makeBudgetExceededResult` does for the run-budget hard-abort.
+ */
+function makeEnvFailureResult(
+	c: PersonaCase,
+	cacheKey: string,
+	modelIds: TierModelSnapshot,
+	reason: string,
+): RunResult {
+	return {
+		caseId: c.id,
+		cacheKey,
+		source: 'fresh',
+		verdict: VERDICT.error,
+		inputs: c.inputs,
+		actuals: [],
+		oracleVerdicts: c.inputs.map(() => ({
+			verdict: VERDICT.error,
+			details: `chatbot env-factory failed: ${reason}`,
 		})),
 		tokenCounts: { input: 0, output: 0 },
 		costUsd: 0,
