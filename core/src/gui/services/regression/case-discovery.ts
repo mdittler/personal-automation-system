@@ -146,7 +146,12 @@ async function runOnce(spawnFn: SpawnFn): Promise<DiscoveryResult> {
 			try {
 				parsed = JSON.parse(line);
 			} catch {
-				parseError = `malformed JSON line: ${line.slice(0, 200)}`;
+				// Non-JSON noise (e.g. dotenv's `[dotenv@x.y.z] injecting env`
+				// banner that runs before the runner emits NDJSON) is silently
+				// skipped. Fail-closed (Codex I4) is enforced by:
+				//   1) `validateEntry` setting `parseError` on a malformed
+				//      `case-list-entry` line, AND
+				//   2) the missing-terminator check after the loop.
 				continue;
 			}
 			if (typeof parsed !== 'object' || parsed === null) continue;

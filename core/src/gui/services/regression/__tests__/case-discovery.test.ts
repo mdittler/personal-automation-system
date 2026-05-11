@@ -144,16 +144,40 @@ describe('case-discovery — fail closed (I4)', () => {
 		expect(out.cases).toEqual([]);
 	});
 
-	it('returns error when a line is malformed JSON', async () => {
+	it('silently skips non-JSON noise (e.g. dotenv banner) before NDJSON', async () => {
+		// Pre-NDJSON noise from loader/dotenv plugins is common — the fail-
+		// closed signal is the missing terminator + validateEntry rejection,
+		// not the presence of an unparseable line.
 		const disc = createCaseDiscovery({
 			spawnFn: fakeSpawn({
-				stdoutLines: [VALID_ENTRY('case-a'), 'not-json', VALID_END],
+				stdoutLines: [
+					'[dotenv@17.3.1] injecting env (0) from .env',
+					'some startup log line that is not JSON',
+					VALID_ENTRY('case-a'),
+					VALID_END,
+				],
 				exitCode: 0,
 			}),
 		});
 		const out = await disc.discover();
-		expect(out.error).toMatch(/malformed|parse/i);
-		expect(out.cases).toEqual([]);
+		expect(out.error).toBeUndefined();
+		expect(out.cases).toHaveLength(1);
+	});
+
+	it('silently skips JSON-shaped lines whose `type` is unknown (e.g. Pino log)', async () => {
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [
+					JSON.stringify({ level: 30, msg: 'unexpected pino on stdout' }),
+					VALID_ENTRY('case-a'),
+					VALID_END,
+				],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toBeUndefined();
+		expect(out.cases).toHaveLength(1);
 	});
 
 	it('returns error when a case-list-entry has missing fields (defensive)', async () => {
