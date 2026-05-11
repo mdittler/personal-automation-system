@@ -113,7 +113,11 @@ interface RecallFixture {
 	id: string;
 	description: string;
 	payload: string;
-	expected: ReturnType<typeof expectTrueNullAnchor>;
+	expected:
+		| ReturnType<typeof expectTrueNullAnchor>
+		| ReturnType<typeof expectTrueAbsolute>
+		| ReturnType<typeof expectTrueWindow>
+		| ReturnType<typeof expectFalse>;
 	today?: string;
 	observational?: boolean;
 }
