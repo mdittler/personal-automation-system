@@ -120,7 +120,7 @@ describe('orchestrator integration — real classifier path', () => {
 		expect(stubLLM.calls).toBe(1);
 	});
 
-	it('integration: parse-failed LLM output surfaces as verdict=error (Codex C-3)', async () => {
+	it('integration: parse-failed LLM output surfaces as verdict=error', async () => {
 		await writeFile(join(casesDir, 'a.case.ts'), foodShadowCase);
 
 		const stubLLM = new StubLLMService();
@@ -148,7 +148,7 @@ describe('orchestrator integration — real classifier path', () => {
 		// Non-JSON LLM output → FoodShadowClassifier returns kind='parse-failed' →
 		// adapter surfaces raw string → structural oracle returns verdict='error'
 		// (non-parseable JSON per spec line 180). The runner records error and
-		// the REQ-REG-011 gate counts it against accuracy (Codex C-2).
+		// the REQ-REG-011 gate counts it against accuracy.
 		expect(outcome.results[0]!.verdict).toBe('error');
 		expect(stubLLM.calls).toBe(1);
 	});

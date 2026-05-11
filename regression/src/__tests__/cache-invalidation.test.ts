@@ -1,5 +1,5 @@
 /**
- * Cache invalidation tests (Codex C-21).
+ * Cache invalidation tests.
  *
  * Tests the end-to-end "touched coverage file → cache miss → fresh
  * dispatch" flow without modifying any real source files. Uses a temp

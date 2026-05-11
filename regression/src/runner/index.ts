@@ -4,44 +4,38 @@
  *
  * `runSuite()` loads PersonaCases, dispatches them sequentially, and
  * returns aggregated `{summary, results, targets}`. Designed to be called
- * both from the CLI (Task 8) and the GUI (Chunk B.2 via subprocess).
+ * both from the CLI and the GUI (Chunk B.2 via subprocess).
  *
- * Behaviours:
+ * Key behaviours:
+ *  - Cache hit short-circuits dispatch (REQ-REG-002 / REQ-REG-010).
+ *  - `bucketFilter` / `rerunIds` / `dryRun` shape the run.
+ *  - Hard-abort RunBudget: once `runBudget.canAfford(next)` is false, every
+ *    remaining selected case is emitted as `verdict: 'budget-exceeded'`
+ *    without an LLM call; synthesized 'error' oracle verdicts per input
+ *    let the REQ-REG-011 gate count the skipped inputs against accuracy.
+ *  - `onResult(r)` fires once per case in dispatch order — used by the
+ *    GUI subprocess (B.2) for SSE progress.
  *
- * - Cache hit short-circuits the dispatch (REQ-REG-002 / REQ-REG-010).
- * - `bucketFilter` skips non-matching cases; useful for routing-only runs
- *   in CI before receipt fixtures arrive.
- * - `rerunIds` forces a fresh dispatch for the listed case IDs even when
- *   a valid cache entry exists.
- * - `dryRun` produces zero-cost "fresh" results without dispatching, so
- *   operators can preview a run's estimate (REQ-REG-009 prep).
- * - **Hard-abort RunBudget** (Codex C-9): once `runBudget.canAfford(next)`
- *   returns false, all remaining selected cases are emitted as
- *   `verdict: 'budget-exceeded'` without any LLM dispatch. The per-case
- *   `oracleVerdicts` are filled with `verdict: 'error'` entries so the
- *   REQ-REG-011 gate counts the skipped inputs against accuracy.
- * - `onResult(r)` fires once per case completion, in dispatch order.
- *   Used by the SSE handler in Chunk B.2 to stream progress.
- *
- * Dispatch is sequential by design. Two parallel cases would race the
- * `CostTracker` snapshot used by classifier adapters; the gate would
- * still be correct in aggregate but per-case `costUsd` would drift.
+ * Dispatch is sequential by design: two parallel cases would race the
+ * `CostTracker` delta used by classifier adapters.
  */
 
 import { relative } from 'node:path';
-import type {
-	PersonaCase,
-	RoutingTarget,
-	RunResult,
-	RunSummary,
-	TierModelSnapshot,
+import {
+	type PersonaCase,
+	type RoutingTarget,
+	type RunResult,
+	type RunSummary,
+	type TierModelSnapshot,
+	VERDICT,
 } from '@core/types/regression.js';
 import { computeCacheKey } from '../shared/cache-key.js';
-import { parseCliArgs, HELP_TEXT, type CliOptions } from './args.js';
+import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
 import {
+	ESTIMATE_TOKENS,
 	type MinimalLogger,
 	type RoutingClassifierAdapter,
 	runRoutingCase,
@@ -74,8 +68,6 @@ export interface RunSuiteOutcome {
 	targets: Map<string, RoutingTarget>;
 }
 
-const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 };
-
 export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> {
 	const loaded = await loadCases(opts.casesDir);
 	const filtered = opts.bucketFilter
@@ -90,23 +82,42 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		if (lc.case.routingTarget) targets.set(lc.case.id, lc.case.routingTarget);
 	}
 
-	for (const lc of filtered) {
-		const cacheKey = await computeCacheKey({
-			casePath: relative(opts.repoRoot, lc.filePath),
-			coveragePaths: lc.case.coverage,
-			modelIds: opts.modelIds,
-			repoRoot: opts.repoRoot,
-		});
+	// Compute every cache key up-front in parallel. Cases share coverage paths
+	// (all 27 FOOD_PERSONAS use the same 3) — the shared `hashCache` map
+	// coalesces repeated `git hash-object` spawns across calls.
+	const hashCache = new Map<string, Promise<string>>();
+	const cacheKeys = await Promise.all(
+		filtered.map((lc) =>
+			computeCacheKey({
+				casePath: relative(opts.repoRoot, lc.filePath),
+				coveragePaths: lc.case.coverage,
+				modelIds: opts.modelIds,
+				repoRoot: opts.repoRoot,
+				hashCache,
+			}),
+		),
+	);
 
-		// Cache short-circuit (unless rerun requested or dry-run).
-		if (!opts.dryRun && !opts.rerunIds?.has(lc.case.id)) {
-			const cached = await cache.read(lc.case.id, cacheKey);
-			if (cached) {
-				const out: RunResult = { ...cached, source: 'cached' };
-				results.push(out);
-				opts.onResult?.(out);
-				continue;
-			}
+	// Pre-read every cache entry in parallel for the cache-hit happy path.
+	// Misses become dispatches in the sequential loop below; hits short-circuit.
+	const cacheReads = await Promise.all(
+		filtered.map((lc, i) => {
+			if (opts.dryRun) return Promise.resolve(null);
+			if (opts.rerunIds?.has(lc.case.id)) return Promise.resolve(null);
+			return cache.read(lc.case.id, cacheKeys[i]!);
+		}),
+	);
+
+	for (let i = 0; i < filtered.length; i++) {
+		const lc = filtered[i]!;
+		const cacheKey = cacheKeys[i]!;
+		const cached = cacheReads[i];
+
+		if (cached) {
+			const out: RunResult = { ...cached, source: 'cached' };
+			results.push(out);
+			opts.onResult?.(out);
+			continue;
 		}
 
 		if (opts.dryRun) {
@@ -116,8 +127,6 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 			continue;
 		}
 
-		// Hard-abort RunBudget (Codex C-9): skip dispatch entirely when the
-		// case's worst-case estimate would push us over the run ceiling.
 		const caseEstimate =
 			opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
 		if (!runBudget.canAfford(caseEstimate)) {
@@ -146,8 +155,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 				classifiers: opts.classifiers,
 			});
 		} else {
-			// receipt / chatbot / recall buckets aren't wired in B.1; receipt arrives
-			// with Chunk A.2's photo delivery, chatbot+recall in Chunk C.
+			// Receipt bucket lands with Chunk A.2; chatbot + recall with Chunk C.
 			opts.logger.info(
 				{ caseId: lc.case.id, bucket: lc.case.bucket },
 				'orchestrator: bucket runner not wired yet — skipping case',
@@ -244,7 +252,7 @@ function makeDryRunResult(
 		caseId: c.id,
 		cacheKey,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: c.inputs,
 		actuals: [],
 		oracleVerdicts: [],
@@ -265,14 +273,13 @@ function makeBudgetExceededResult(
 		caseId: c.id,
 		cacheKey,
 		source: 'fresh',
-		verdict: 'budget-exceeded',
+		verdict: VERDICT.budgetExceeded,
 		inputs: c.inputs,
 		actuals: [],
 		// One synthetic 'error' oracle verdict per input so the REQ-REG-011
-		// accuracy gate counts skipped food-shadow inputs against accuracy
-		// (Codex C-2).
+		// accuracy gate counts skipped food-shadow inputs against accuracy.
 		oracleVerdicts: c.inputs.map(() => ({
-			verdict: 'error' as const,
+			verdict: VERDICT.error,
 			details: 'run budget exhausted; case skipped without dispatch',
 		})),
 		tokenCounts: { input: 0, output: 0 },

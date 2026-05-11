@@ -64,7 +64,7 @@ describe('foodShadow adapter — happy path', () => {
 	});
 });
 
-describe('foodShadow adapter — parse-failed (Codex C-3)', () => {
+describe('foodShadow adapter — parse-failed', () => {
 	it('returns the raw output WITHOUT throwing', async () => {
 		const llm = {
 			complete: vi.fn().mockResolvedValue('this is not json'),
@@ -102,7 +102,7 @@ describe('foodShadow adapter — parse-failed (Codex C-3)', () => {
 	});
 });
 
-describe('foodShadow adapter — throws on llm-error (Codex C-3)', () => {
+describe('foodShadow adapter — throws on llm-error', () => {
 	it('throws when the LLM call rejects', async () => {
 		const llm = {
 			complete: vi.fn().mockRejectedValue(new Error('network down')),
@@ -119,7 +119,7 @@ describe('foodShadow adapter — throws on llm-error (Codex C-3)', () => {
 	});
 });
 
-describe('sessionControl adapter — prefilter zero-cost (Codex C-14)', () => {
+describe('sessionControl adapter — prefilter zero-cost', () => {
 	it('returns prefilter result for /newchat without LLM call; meter.costUsd=0', async () => {
 		const llm = {
 			complete: vi.fn(),
@@ -176,7 +176,7 @@ describe('sessionControl adapter — NL path calls LLM and meters', () => {
 	});
 });
 
-describe('pas adapter — DATA_QUERY_PREFILTER path (Codex C-14)', () => {
+describe('pas adapter — DATA_QUERY_PREFILTER path', () => {
 	it('returns prefilter result for "how much did we spend at Costco" without LLM call', async () => {
 		const llm = {
 			complete: vi.fn(),

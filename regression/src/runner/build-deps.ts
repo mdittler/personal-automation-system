@@ -85,7 +85,7 @@ export async function buildProductionDeps(): Promise<RunCliDeps> {
 			debug: (...args) => logger.debug(...(args as Parameters<typeof logger.debug>)),
 			error: (...args) => logger.error(...(args as Parameters<typeof logger.error>)),
 		},
-		costTracker: costTracker as unknown as CostMeterSource,
+		costTracker,
 		modelIds,
 	});
 

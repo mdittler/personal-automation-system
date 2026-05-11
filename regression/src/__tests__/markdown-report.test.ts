@@ -35,7 +35,7 @@ function mk(
 	};
 }
 
-describe('computeRoutingAccuracy (REQ-REG-011, Codex C-2)', () => {
+describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 	it('threshold constant equals 0.95', () => {
 		expect(ACCURACY_GATE_THRESHOLD).toBe(0.95);
 	});

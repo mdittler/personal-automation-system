@@ -3,26 +3,13 @@
  *
  * Dispatches a `PersonaCase` with `bucket: 'routing'` to one of three
  * adapter functions and evaluates the response through the structural
- * oracle.
+ * oracle. Adapters do not throw on classifier parse failures — they
+ * surface the raw output so the oracle judges schema mismatch as a real
+ * regression. Adapters DO throw on infrastructure errors (LLM network
+ * failures); the runner catches those as `verdict: 'error'`.
  *
- * The adapter contract is `(text: string) => Promise<{raw: string; meter}>`:
- *  - `raw` is the JSON-stringified classifier output. Adapters DO NOT throw
- *    on LLM parse failures — they surface the raw output so the structural
- *    oracle judges it as a regression (verdict: 'fail' on schema mismatch).
- *  - `meter` records `{model, tokenIn, tokenOut, costUsd}` from a
- *    `CostTracker` delta around the call.
- *  - Adapters DO throw on infrastructure errors (LLM network failures);
- *    the runner catches those as `verdict: 'error'` per the REQ-REG-011
- *    semantics defined in `markdown-report.ts`.
- *
- * Budget semantics:
- *  - `deps.caseBudgetUsd` is authoritative (passed by orchestrator from
- *    `c.budgetUsd`). Pre-charge gate aborts the input loop when the next
- *    estimated call would exceed the case budget.
- *  - Estimates are conservative; the real cost (from `meter.costUsd`) is
- *    used for the running total.
- *
- * Verdict precedence (matches `receipt-runner`): `error > fail > pass`.
+ * Budget: `deps.caseBudgetUsd` is authoritative (forwarded by the
+ * orchestrator from `c.budgetUsd`). Verdict precedence: error > fail > pass.
  */
 
 import type {
@@ -34,6 +21,7 @@ import type {
 	TierModelSnapshot,
 	Verdict,
 } from '@core/types/regression.js';
+import { VERDICT } from '@core/types/regression.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
 
 export interface MinimalLogger {
@@ -64,7 +52,8 @@ export interface RoutingRunnerDeps {
 	classifiers: RoutingClassifierAdapter;
 }
 
-const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 };
+/** Conservative token budget used for the pre-charge gate. */
+export const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 } as const;
 
 export async function runRoutingCase(
 	c: PersonaCase,
@@ -83,14 +72,12 @@ export async function runRoutingCase(
 	let costUsd = 0;
 	let tokenIn = 0;
 	let tokenOut = 0;
-	let verdict: Verdict = 'pass';
+	let verdict: Verdict = VERDICT.pass;
 
 	for (const input of c.inputs) {
-		// Pre-charge gate (REQ-REG-008). deps.caseBudgetUsd is authoritative —
-		// c.budgetUsd is read by the orchestrator and forwarded here.
 		const projected = deps.estimateUsd(ESTIMATE_TOKENS);
 		if (costUsd + projected > deps.caseBudgetUsd) {
-			if (verdict === 'pass') verdict = 'budget-exceeded';
+			if (verdict === VERDICT.pass) verdict = VERDICT.budgetExceeded;
 			deps.logger.warn(
 				{ caseId: c.id, costUsd, projected, budget: deps.caseBudgetUsd },
 				'routing-runner: case budget exceeded — aborting input loop',
@@ -107,11 +94,11 @@ export async function runRoutingCase(
 				'routing-runner: classifier threw (infrastructure error)',
 			);
 			oracleVerdicts.push({
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `classifier error: ${(err as Error).message}`,
 			});
 			actuals.push(null);
-			verdict = 'error';
+			verdict = VERDICT.error;
 			continue;
 		}
 
@@ -124,8 +111,8 @@ export async function runRoutingCase(
 		const ov = runStructuralOracle(r.raw, expectation);
 		oracleVerdicts.push(ov);
 
-		if (ov.verdict === 'fail' && verdict === 'pass') verdict = 'fail';
-		if (ov.verdict === 'error') verdict = 'error';
+		if (ov.verdict === VERDICT.fail && verdict === VERDICT.pass) verdict = VERDICT.fail;
+		if (ov.verdict === VERDICT.error) verdict = VERDICT.error;
 	}
 
 	return {

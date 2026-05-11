@@ -10,6 +10,17 @@ export type OracleKind = 'structural' | 'rubric' | 'judge';
 
 export type Verdict = 'pass' | 'fail' | 'error' | 'budget-exceeded';
 
+/**
+ * Verdict literal constants. Use these in place of bare strings so a typo
+ * fails at the type level instead of silently mis-categorising a result.
+ */
+export const VERDICT = {
+	pass: 'pass',
+	fail: 'fail',
+	error: 'error',
+	budgetExceeded: 'budget-exceeded',
+} as const satisfies Record<string, Verdict>;
+
 export type RoutingTarget = 'food-shadow' | 'session-control' | 'pas';
 
 export interface PersonaInput {

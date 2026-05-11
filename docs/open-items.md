@@ -14,6 +14,8 @@ User manual actions are tracked separately in `user_actions.md`.
 | 2b | **Persona Regression Suite Chunk A.2 — receipt cases** *(blocked on operator photo delivery — see "Persona Regression Suite Chunk A.2 carry-forward" below; orchestrator + CLI shipped in Chunk B.1 on 2026-05-11)* | 1 | 5 hand-curated receipt fixtures, sidecars, sha256 manifests, food-receipt cases under `regression/src/cases/receipt/`, CLAUDE.md status update, final verification |
 | 3a | ~~**Persona Regression Suite Chunk B.1 — routing bucket + orchestrator + CLI**~~ ✓ Complete (2026-05-11) | 1 | LoadedCase loader, routing case-runner (food-shadow + session-control + pas), metered classifier adapters (cost via CostTracker delta), orchestrator with hard-abort RunBudget, REQ-REG-011 accuracy gate (per-input; fail+error count), CLI (`pnpm test:regression --bucket=routing --dry-run --rerun --json --help`), 36 routing cases (27 FOOD_PERSONAS generated + 3 session-control + 6 PAS), URS REQ-REG-001/002/004/006/008/009/010/011/014. 211 unit tests; full root suite (10,890) green. |
 | 3b | **Persona Regression Suite Chunk B.2 — GUI scaffolding** | 1 | `/gui/regression` admin-only page (REQ-REG-007), per-case model IDs / token counts / cost / timestamp (REQ-REG-013), POST /gui/regression/runs (CSRF) + GET /runs/:runId/events (SSE) via subprocess, drilldown view, XSS hardening |
+| 3c | **Persona Regression Suite Chunk C — recall bucket + rubric oracle + chatbot bucket** | 1–2 | 25 recall-classifier cases, `regression/oracles/rubric.ts` (judge LLM call, score parsing, ≥4 pass threshold — REQ-REG-005), 10–15 chatbot cases with seeded fixtures + `runner/seed.ts` invocation, `regression/fixtures/chatbot/seed.json` + `seed.sha256`, `_regression-user` DataStore isolation (REQ-REG-012) |
+| 3d | **Persona Regression Suite Chunk D — GUI history view + coverage-changed state** | 1 | History tab on case drilldown, "coverage changed — needs re-run" amber state (REQ-REG-003), estimated run cost displayed before "Run all" |
 | 4 | **T1a — Dependency spike** | 1 | Lock Vercel AI SDK v6 + provider versions; per-model tool-call support matrix |
 | 5 | **T1 — LLMService substrate** | 1 | `completeWithTools` + owned loop wrapper + per-step cost reservation + capability flags |
 | 6 | **T2a — Tool foundation** | 1 | `types/tool.ts`, manifest `capabilities.tools[]`, ToolRegistry, ToolPolicy, install/load validation |
@@ -118,9 +120,9 @@ These are greenlit but not yet planned. Each needs a spec/plan before coding.
   5. `receipt-future-date.png` — Receipt where the printed date is **in the future** (also rejected; same `expectRejection` mode)
 
   **Tasks unblocked once photos land** (executed in this order in a fresh session):
-  - Task 11: hand-curate 5 `.expected.json` ground-truth sidecars from each photo, generate `.sha256` manifests via `shasum -a 256`, write 5 `.case.ts` files, implement `case-loader.ts`, 5 shape tests
-  - Task 12: orchestrator (cache-resolve → dispatch → budget-abort → markdown report) + CLI with extracted `runCli(args, deps)` + add `test:regression` + `test:regression:dry-run` to root `package.json`
-  - Task 13: URS rows for the 8 implemented REQs (REQ-REG-001/002/004/006/008/009/010/014); mark deferred REQs (003 / 005 / 007 / 011 / 012 / 013)
+  - Task 11: hand-curate 5 `.expected.json` ground-truth sidecars from each photo, generate `.sha256` manifests via `shasum -a 256`, write 5 `.case.ts` files under `regression/src/cases/receipt/`, add 5 shape tests
+  - ~~Task 12: orchestrator + CLI~~ ✓ Shipped in Chunk B.1 (2026-05-11) — `regression/src/runner/index.ts`, `cli-main.ts`, `args.ts`, and `pnpm test:regression` are already wired. Receipt cases just need to plug into the existing orchestrator dispatch.
+  - Task 13: URS narrative cross-references — append the new receipt test file references to REQ-REG-004/006/008/010 rows; verify REQ-REG-001/002 still hold (they're substrate). B.1 already added the 9 substrate URS rows; no new REQ-REG entries needed.
   - Task 14: mark Chunk A.2 complete in this file + CLAUDE.md Implementation Status update
   - Task 15: final verification (root suite green, dry-run, optional real receipt run with cache hit on second invocation)
 

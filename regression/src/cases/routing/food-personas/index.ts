@@ -1,17 +1,17 @@
 /**
  * Generated FOOD_PERSONAS regression cases.
  *
- * This module imports `FOOD_PERSONAS` from
- * `apps/food/src/routing/__tests__/shadow-classifier.personas.ts` and emits
- * one `PersonaCase` per persona label, with every accept-phrase becoming an
- * input. Adding a label or phrase to `FOOD_PERSONAS` automatically lands
- * a new case input — no per-label .case.ts file to keep in sync (Codex C-12).
+ * Imports `FOOD_PERSONAS` and emits one `PersonaCase` per persona label,
+ * with every accept-phrase becoming an input. Adding a label or phrase
+ * to the persona source automatically lands new test coverage — no
+ * per-label .case.ts file to keep in sync.
  *
  * Coverage paths include the classifier, taxonomy, and the persona source
  * itself so a phrase edit invalidates only this module's cache key (REQ-REG-002).
  */
 
 import { fileURLToPath } from 'node:url';
+import { slugifyKey } from '@core/services/context-store/index.js';
 import type { LoadedCase, PersonaCase } from '@core/types/regression.js';
 import { FOOD_PERSONAS } from '@food/routing/__tests__/shadow-classifier.personas.js';
 
@@ -23,14 +23,6 @@ const COVERAGE: readonly string[] = [
 	'apps/food/src/routing/__tests__/shadow-classifier.personas.ts',
 ];
 
-function slugify(label: string): string {
-	return label
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '')
-		.slice(0, 100);
-}
-
 export function buildCases(): LoadedCase[] {
 	const out: LoadedCase[] = [];
 	for (const p of FOOD_PERSONAS) {
@@ -38,7 +30,7 @@ export function buildCases(): LoadedCase[] {
 		// non-empty today, but a future entry could add one.
 		if (p.accept.length === 0) continue;
 		const c: PersonaCase = {
-			id: `food-${slugify(p.label)}`,
+			id: `food-${slugifyKey(p.label)}`,
 			description: `FOOD_PERSONAS — ${p.label}`,
 			bucket: 'routing',
 			routingTarget: 'food-shadow',

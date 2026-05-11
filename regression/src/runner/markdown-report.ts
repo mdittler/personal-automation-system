@@ -1,19 +1,15 @@
 /**
  * Markdown summary + REQ-REG-011 accuracy gate.
  *
- * The accuracy gate (`computeRoutingAccuracy`) operates at the **input**
- * level for food-shadow routing cases — every oracle verdict counts toward
- * the denominator. `pass` is the only verdict in the numerator.
+ * `computeRoutingAccuracy` operates at the input level over food-shadow
+ * routing cases. `pass` is the only verdict in the numerator; `fail` AND
+ * `error` both count against the denominator — a parser regression that
+ * makes the oracle fail or error is exactly the signal the gate exists to
+ * catch.
  *
- * Per Codex C-2: `fail` AND `error` BOTH count against the gate. A parser
- * regression that converts `kind: 'ok'` into `kind: 'parse-failed'` shows
- * up as `verdict: 'error'` from the oracle — exactly the regression signal
- * we want the gate to catch.
- *
- * The floor (`FOOD_SHADOW_INPUT_FLOOR`) prevents a trivially-passing run
- * from masking misconfiguration (e.g. a bucket filter that excludes
- * everything). Below the floor the gate returns `null` and the CLI exits 0
- * with a warning rather than 1.
+ * `FOOD_SHADOW_INPUT_FLOOR` prevents a trivially-passing run from masking
+ * misconfiguration (e.g. an over-aggressive bucket filter). Below the floor
+ * the gate returns `null` and the CLI exits 0 with a warning rather than 1.
  */
 
 import type { RoutingTarget, RunResult, RunSummary } from '@core/types/regression.js';
@@ -32,7 +28,7 @@ export function computeRoutingAccuracy(
 		for (const ov of r.oracleVerdicts) {
 			totalInputs++;
 			if (ov.verdict === 'pass') passInputs++;
-			// 'fail' and 'error' both count against the gate (Codex C-2).
+			// 'fail' and 'error' both count against the gate.
 		}
 	}
 	if (totalInputs < FOOD_SHADOW_INPUT_FLOOR) return null;
@@ -76,9 +72,7 @@ export function formatSummaryMarkdown(
 	const s = buildSummary(results, targets);
 	const acc =
 		s.routingAccuracy === null
-			? '(below floor — fewer than ' +
-				FOOD_SHADOW_INPUT_FLOOR +
-				' food-shadow inputs)'
+			? `(below floor — fewer than ${FOOD_SHADOW_INPUT_FLOOR} food-shadow inputs)`
 			: `${(s.routingAccuracy * 100).toFixed(2)}%`;
 	return [
 		'| metric | value |',

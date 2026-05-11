@@ -9,6 +9,7 @@
 
 import { SESSION_CONTROL_NL_EXAMPLES } from '@core/services/conversation/session-control-classifier.js';
 import type { PersonaCase } from '@core/types/regression.js';
+import { SESSION_CONTROL_SCHEMA } from '../_schemas.js';
 
 const c: PersonaCase = {
 	id: 'session-control-nl-new-session',
@@ -19,15 +20,7 @@ const c: PersonaCase = {
 	inputs: SESSION_CONTROL_NL_EXAMPLES.map((payload) => ({
 		payload,
 		expected: {
-			schema: {
-				type: 'object',
-				required: ['intent', 'confidence', 'source'],
-				properties: {
-					intent: { type: 'string' },
-					confidence: { type: 'number', minimum: 0, maximum: 1 },
-					source: { type: 'string' },
-				},
-			},
+			schema: SESSION_CONTROL_SCHEMA,
 			strings: [
 				{ path: 'intent', expectedCaseInsensitive: 'new_session' },
 				{ path: 'source', expectedCaseInsensitive: 'llm' },

@@ -118,7 +118,7 @@ describe('runSuite — cache lifecycle', () => {
 	});
 });
 
-describe('runSuite — RunBudget hard-abort (REQ-REG-009, Codex C-9)', () => {
+describe('runSuite — RunBudget hard-abort (REQ-REG-009)', () => {
 	it('marks remaining cases budget-exceeded WITHOUT dispatching', async () => {
 		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
 		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
@@ -139,7 +139,7 @@ describe('runSuite — RunBudget hard-abort (REQ-REG-009, Codex C-9)', () => {
 		expect(verdictCounts).toEqual(['budget-exceeded', 'budget-exceeded', 'pass']);
 	});
 
-	it('synthesizes one error oracleVerdict per input on budget-exceeded cases (Codex C-2)', async () => {
+	it('synthesizes one error oracleVerdict per input on budget-exceeded cases', async () => {
 		const multiInputCase = `
 			import type { PersonaCase } from '${TYPES_PATH.replace(/'/g, "\\'")}';
 			const c: PersonaCase = {
@@ -284,7 +284,7 @@ describe('runCli', () => {
 		expect(out.join('')).toMatch(/\| metric \| value \|/);
 	});
 
-	it('exits 1 when REQ-REG-011 gate fails (Codex C-2)', async () => {
+	it('exits 1 when REQ-REG-011 gate fails', async () => {
 		// Write 25 cases; mock 24 passes + 1 fail. Accuracy = 24/25 = 0.96.
 		// Then write 25 cases where 20 pass + 5 fail. Accuracy = 0.80 → fail.
 		for (let i = 0; i < 25; i++) {

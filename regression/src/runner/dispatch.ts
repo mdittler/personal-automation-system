@@ -1,25 +1,16 @@
 /**
  * Build classifier adapters used by the routing case-runner.
  *
- * Each adapter wraps one production classifier and:
+ * Each adapter wraps one production classifier. On parse-failed output the
+ * adapter returns the raw LLM string (NOT a thrown error) so the structural
+ * oracle judges the schema mismatch — preserving regression signal that
+ * REQ-REG-011 would otherwise miss. Infrastructure errors (LLM network
+ * failures) DO throw and become `verdict: 'error'` at the runner.
  *
- *  - Returns the JSON-stringified output that the structural oracle expects
- *    (the production return shape, not a re-serialization).
- *  - On parse-failed kinds (currently only food-shadow's discriminated
- *    union has this), returns the raw LLM output so the oracle can fail it
- *    via schema mismatch (Codex C-3). Throwing here would convert real
- *    parser regressions into runner-level `verdict: 'error'`, which the
- *    REQ-REG-011 accuracy gate now counts (Codex C-2) but loses the
- *    "the LLM said X but it was nonsense" diagnostic in the GUI drilldown.
- *  - On LLM infrastructure errors, throws — the routing-runner catches and
- *    records `verdict: 'error'`.
- *  - Meters cost via `CostTracker.getMonthlyTotalCost()` delta. Token
- *    counts are 0 (best-effort; CostTracker doesn't expose per-call
- *    tokens). Cost is authoritative for REQ-REG-013.
- *
- * Cost-delta correctness depends on sequential dispatch — the orchestrator
- * runs cases one at a time. Two parallel routing cases would race the
- * snapshot. Documented in `runner/index.ts`.
+ * Cost is metered via `CostTracker.getMonthlyTotalCost()` delta. Token
+ * counts are best-effort 0 (CostTracker has no per-call token surface);
+ * cost is authoritative for REQ-REG-013. The delta is only correct under
+ * sequential dispatch — the orchestrator enforces that invariant.
  */
 
 import { classifyPASMessage } from '@core/services/conversation/pas-classifier.js';
@@ -96,9 +87,8 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 				};
 			}
 			if (r.kind === 'parse-failed') {
-				// Codex C-3: surface raw output instead of throwing. The structural
-				// oracle will fail it on schema mismatch, which the REQ-REG-011 gate
-				// counts as a real regression rather than an infrastructure miss.
+				// Surface raw output so the oracle fails on schema mismatch — that's
+				// real regression signal the REQ-REG-011 gate is designed to catch.
 				return { raw: r.raw, meter };
 			}
 			if (r.kind === 'llm-error') {
@@ -115,9 +105,7 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 				}),
 			);
 			// Prefilter path didn't hit the LLM; force a zero meter even if the
-			// delta is non-zero (paranoid — other code could have called CostTracker
-			// in between, though the orchestrator's sequential dispatch makes that
-			// effectively impossible).
+			// delta drifted (defensive against unrelated CostTracker activity).
 			const finalMeter = r.source === 'prefilter' ? ZERO_METER(meter.model) : meter;
 			return { raw: JSON.stringify(r), meter: finalMeter };
 		},
@@ -129,11 +117,8 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 					logger: widenedLogger,
 				}),
 			);
-			// The internal DATA_QUERY_PREFILTER in classifyPASMessage short-circuits
-			// without an LLM call. The cost delta will be 0 naturally; tests in
-			// dispatch.test.ts assert the LLM mock wasn't invoked for prefilter
-			// phrases. The adapter has no way to distinguish prefilter from
-			// LLM-skipped-on-empty-input, so we trust the delta.
+			// classifyPASMessage's DATA_QUERY_PREFILTER short-circuits without an
+			// LLM call; cost delta naturally lands at 0 in that case.
 			return { raw: JSON.stringify(r), meter };
 		},
 	};

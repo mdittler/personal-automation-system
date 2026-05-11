@@ -1,5 +1,5 @@
 /**
- * Contract tests for the Chunk B routing cases (Codex C-12 + testing-standards rule 4).
+ * Contract tests for the Chunk B routing cases (testing-standards rule 4 — testing-standards rule 4).
  *
  * Asserts every FOOD_PERSONAS accept-phrase is represented as an input in a
  * food-shadow case (catches drift between persona dataset and generated cases),
@@ -47,7 +47,7 @@ describe('routing cases contract', () => {
 		expect(failures).toEqual([]);
 	});
 
-	it('every FOOD_PERSONAS accept phrase is represented as an input in a food-shadow case (Codex C-12)', async () => {
+	it('every FOOD_PERSONAS accept phrase is represented as an input in a food-shadow case', async () => {
 		const loaded = await loadCases(CASES_DIR);
 		const foodShadowInputs = new Set<string>();
 		for (const lc of loaded) {

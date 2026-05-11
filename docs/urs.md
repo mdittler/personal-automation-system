@@ -9557,7 +9557,7 @@ The routing bucket is populated from a single generator module (`regression/src/
 
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements.
+The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-REG-003, REQ-REG-005, REQ-REG-007, REQ-REG-012, REQ-REG-013) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace (excluded from root `pnpm test`) and are not summed into the totals row below.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|

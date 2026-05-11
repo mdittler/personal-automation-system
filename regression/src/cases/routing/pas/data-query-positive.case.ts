@@ -4,7 +4,7 @@
  * Includes both deterministic-prefilter phrases (DATA_QUERY_PREFILTER in
  * pas-classifier.ts:141) and LLM-classified data queries. The prefilter
  * phrases never reach the LLM — they're tested for coverage parity in
- * dispatch.test.ts (Codex C-14). Here we assert the OUTPUT contract.
+ * dispatch.test.ts. Here we assert the OUTPUT contract.
  */
 
 import type { PersonaCase } from '@core/types/regression.js';

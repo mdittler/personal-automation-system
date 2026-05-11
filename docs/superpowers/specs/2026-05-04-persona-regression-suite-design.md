@@ -347,7 +347,7 @@ coverage: [
 - `auto_detect_pas === expected_bool` (chatbot cases).
 - `sessionControlIntent === expected_bool` (NL newchat cases).
 
-**Aggregate assertion:** overall accuracy ≥ 0.95 across all food-persona cases. Individual per-label accuracy reported in GUI drilldown.
+**Aggregate assertion:** overall accuracy ≥ 0.95 across all food-shadow inputs (per-input, not per-case; `fail` and `error` both count against the gate). Individual per-label accuracy reported in GUI drilldown. See `docs/urs.md` REQ-REG-011 for the authoritative gate semantics shipped in Chunk B.1.
 
 This bucket **doubles as a production-flip gate companion** to `pnpm analyze-shadow-log`. If this suite passes with ≥0.95 on the new model, it provides pre-flip confidence independent of production telemetry.
 
@@ -516,7 +516,7 @@ To be added to `docs/urs.md` under a new `## Regression Suite` section:
 | REQ-REG-008 | Each case MUST define a `budgetUsd` ceiling; the runner MUST abort the case with `verdict: 'budget-exceeded'` if exceeded. |
 | REQ-REG-009 | The per-run cost ceiling `regression.maxRunBudgetUsd` MUST default to 5.00 USD and abort remaining cases if exceeded. |
 | REQ-REG-010 | Run results MUST be persisted to `data/system/regression-cache/<case-id>/<cache-key>.json` and MUST NOT be deleted on subsequent runs (history retained). |
-| REQ-REG-011 | The routing bucket MUST assert overall accuracy ≥ 0.95 across all food-persona cases. |
+| REQ-REG-011 | The routing bucket MUST assert overall accuracy ≥ 0.95 across all food-shadow inputs. *(Shipped in Chunk B.1 2026-05-11; computed at the input level with `fail` and `error` both counting against the gate. Floor: 20 evaluable inputs. See `docs/urs.md` REQ-REG-011 narrative for authoritative semantics.)* |
 | REQ-REG-012 | The seeded fixture user (`_regression-user`) MUST be isolated to a temporary DataStore directory and MUST NOT touch real `data/` during a run. |
 | REQ-REG-013 | The GUI MUST show per-case model IDs, token counts, cost, and timestamp for each completed run. |
 | REQ-REG-014 | The `judge` oracle kind MUST be reserved but MUST NOT be implemented in v1; declaring it on a case MUST throw a configuration error. |

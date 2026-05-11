@@ -149,7 +149,7 @@ describe('runRoutingCase — verdict=fail when expected label disagrees', () => 
 	});
 });
 
-describe('runRoutingCase — deps.caseBudgetUsd authority (Codex C-10)', () => {
+describe('runRoutingCase — deps.caseBudgetUsd authority', () => {
 	it('honours deps.caseBudgetUsd over c.budgetUsd when smaller', async () => {
 		const deps = { ...baseDeps(), caseBudgetUsd: 0.00005, estimateUsd: () => 0.0001 };
 		const c: PersonaCase = {
@@ -163,7 +163,7 @@ describe('runRoutingCase — deps.caseBudgetUsd authority (Codex C-10)', () => {
 	});
 });
 
-describe('runRoutingCase — parse-failed surfaces as fail/error (Codex C-3)', () => {
+describe('runRoutingCase — parse-failed surfaces as fail/error', () => {
 	it('non-JSON raw output → oracle verdict=error (not adapter throw)', async () => {
 		const deps = baseDeps();
 		// Adapter does NOT throw on parse-failed; it returns the raw output.
@@ -181,7 +181,7 @@ describe('runRoutingCase — parse-failed surfaces as fail/error (Codex C-3)', (
 		});
 		const result = await runRoutingCase(c, deps);
 		// Non-parseable JSON is treated as an oracle error by the structural oracle.
-		// REQ-REG-011 accuracy gate counts this against the gate (Codex C-2).
+		// REQ-REG-011 accuracy gate counts this against the gate.
 		expect(result.oracleVerdicts[0]!.verdict).toBe('error');
 		expect(result.verdict).toBe('error');
 	});
@@ -232,7 +232,7 @@ describe('runRoutingCase — trust-boundary table (testing-standards rule 1)', (
 	});
 });
 
-describe('runRoutingCase — classifier throw is infra error (Codex C-3)', () => {
+describe('runRoutingCase — classifier throw is infra error', () => {
 	it('LLM-error → verdict=error, costUsd=0', async () => {
 		const deps = baseDeps();
 		deps.classifiers.foodShadow.mockRejectedValueOnce(new Error('LLM timeout'));
@@ -244,7 +244,7 @@ describe('runRoutingCase — classifier throw is infra error (Codex C-3)', () =>
 	});
 });
 
-describe('runRoutingCase — budget abort precision (Codex C-9 within-case)', () => {
+describe('runRoutingCase — budget abort precision', () => {
 	it('stops dispatching mid-case when pre-charge would exceed deps.caseBudgetUsd', async () => {
 		const deps = { ...baseDeps(), caseBudgetUsd: 0.00015, estimateUsd: () => 0.0001 };
 		deps.classifiers.foodShadow.mockResolvedValue({

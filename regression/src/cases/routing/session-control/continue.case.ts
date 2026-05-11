@@ -3,12 +3,12 @@
  *
  * Strict expectation: `intent: 'continue'`. Includes meta-questions about
  * the /newchat command, negations of "start over", and ordinary user
- * messages that share keywords with new-session phrases. These are the
- * cases where lenient classification would produce false positives —
- * keeping them strict catches drift in either direction (Codex C-13).
+ * messages that share keywords with new-session phrases. Strict
+ * expectations here catch classifier drift in both directions.
  */
 
 import type { PersonaCase } from '@core/types/regression.js';
+import { SESSION_CONTROL_SCHEMA } from '../_schemas.js';
 
 const c: PersonaCase = {
 	id: 'session-control-continue',
@@ -33,15 +33,7 @@ const c: PersonaCase = {
 	].map((payload) => ({
 		payload,
 		expected: {
-			schema: {
-				type: 'object',
-				required: ['intent', 'confidence', 'source'],
-				properties: {
-					intent: { type: 'string' },
-					confidence: { type: 'number', minimum: 0, maximum: 1 },
-					source: { type: 'string' },
-				},
-			},
+			schema: SESSION_CONTROL_SCHEMA,
 			strings: [{ path: 'intent', expectedCaseInsensitive: 'continue' }],
 		},
 	})),
