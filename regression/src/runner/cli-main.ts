@@ -16,6 +16,13 @@
 import { buildDryRunDeps, buildMetadataDeps, buildProductionDeps } from './build-deps.js';
 import { runCli } from './index.js';
 
+// Silence dotenv's `[dotenv@x.y.z] injecting env (N) from .env` banner so
+// stdout is strictly NDJSON whenever `--json` is set. Honour an explicit
+// operator override. `loadDotenv` is only invoked at call time inside
+// `loadSystemConfig` (not at module-load), so setting this before the
+// build-deps call below is sufficient. (Codex P3.2.)
+process.env.DOTENV_CONFIG_QUIET = process.env.DOTENV_CONFIG_QUIET ?? 'true';
+
 const argv = process.argv.slice(2);
 const isList = argv.includes('--list');
 const isDryRun = argv.includes('--dry-run');

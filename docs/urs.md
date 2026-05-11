@@ -9438,6 +9438,9 @@ The regression workspace is registered as a pnpm package but not listed in the r
 - `cache-key.test.ts` > computeCacheKey changes when coverage file content changes
 - `cache-invalidation.test.ts` > modifying a tracked-clean coverage file invalidates the cache key
 
+**Edge case tests:**
+- `codex-corrections.test.ts` > Codex P2.1 — cache-reader filename/content cacheKey parity > rejects a file whose content cacheKey does not match its filename
+
 ---
 
 ### REQ-REG-004 — The structural oracle MUST reject any LLM output that fails JSON schema validation, type checks, or set equality assertions
@@ -9617,6 +9620,7 @@ The case list on `/gui/regression` renders status icon, fast/standard model IDs,
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the case list with tier model badges + status icons
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the per-bucket cost estimate in the Run button label (REQ-REG-017)
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the token-counts footnote (REQ-REG-013 token gap is documented)
+- `regression-routes.test.ts` > GET /gui/regression — client wiring (Codex P1) > renders the regression-live script block so the page is end-to-end wired
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders full result + oracle verdicts when cache hit
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > renders a single row with escaped HTML
 
@@ -9651,6 +9655,7 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 - `cache-reader.test.ts` > readHistoryForCase > skips invalid files but returns the valid ones (I5 behavior)
 - `cache-reader.test.ts` > readHistoryForCase > ignores non-hex filenames in the cache dir
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/history > renders empty-state when no history
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/history > returns 404 for a regex-valid but unknown caseId (Codex P2 allowlist)
 
 ---
 
@@ -9670,6 +9675,10 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 - `run-registry.test.ts` > run-registry — cancel > cancel after completion is idempotent (no-op)
 - `run-registry.test.ts` > run-registry — terminal state inference > marks status="cancelled" after "cancelled" event
 - `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 200 (idempotent no-op) for an unknown runId
+- `codex-corrections.test.ts` > Codex P1.2 — SIGKILL fallback > SIGKILL is sent 5 s after SIGTERM if the child does not exit
+- `codex-corrections.test.ts` > Codex P1.2 — SIGKILL fallback > SIGKILL timer is cleared when the child exits in time
+- `codex-corrections.test.ts` > Codex P1.3 — run-registry recovers when runFactory throws > rejects the createRun call, clears activeRunId, and allows the next run
+- `codex-corrections.test.ts` > Codex P1.3 — run-registry recovers when runFactory throws > the failed initial run state is recorded as `failed`
 
 **Security tests:**
 - `regression-routes-write.test.ts` > POST /gui/regression/runs/:runId/cancel — REQ-REG-016 > returns 403 without CSRF
@@ -10169,7 +10178,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-TEMPORAL-015 | pas-yaml-schema.test.ts | 1 | 0 | Implemented |
 
 | REQ-REG-001 | (workspace exclusion verified by vitest config) | 0 | 0 | Implemented |
-| REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts | 8 | 4 | Implemented |
+| REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts, codex-corrections.test.ts | 8 | 5 | Implemented |
 | REQ-REG-004 | structural-oracle.test.ts, routing-runner.test.ts | 14 | 9 | Implemented |
 | REQ-REG-006 | seed.test.ts | 4 | 4 | Implemented |
 | REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts | 5 | 4 | Implemented |
@@ -10178,10 +10187,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-011 | markdown-report.test.ts, cases.contract.test.ts, orchestrator.test.ts, routing-runner.test.ts, dispatch.test.ts | 18 | 8 | Implemented |
 | REQ-REG-003 | cache-reader.test.ts, case-discovery.test.ts, regression-routes.test.ts | 3 | 4 | Implemented |
 | REQ-REG-007 | regression-routes.test.ts, regression-routes-write.test.ts | 6 | 16 | Implemented |
-| REQ-REG-013 | regression-routes.test.ts | 5 | 7 | Implemented |
+| REQ-REG-013 | regression-routes.test.ts | 6 | 7 | Implemented |
 | REQ-REG-014 | validate-case.test.ts | 2 | 0 | Implemented |
-| REQ-REG-015 | cache-reader.test.ts, regression-routes.test.ts | 2 | 4 | Implemented |
-| REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts | 3 | 6 | Implemented |
+| REQ-REG-015 | cache-reader.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
+| REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 
 | **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |

@@ -131,6 +131,52 @@ describe('case-discovery integration (fake CLI --list)', () => {
 	});
 });
 
+describe('real CLI --list strict NDJSON (Codex P3.2 — dotenv silenced)', () => {
+	it('every non-empty stdout line is valid JSON (no dotenv banner)', async () => {
+		const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+		const cliPath = resolve(repoRoot, 'regression', 'src', 'runner', 'cli-main.ts');
+		const tsconfigPath = resolve(repoRoot, 'regression', 'tsconfig.json');
+		const savedEnv = {
+			TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+			GUI_AUTH_TOKEN: process.env.GUI_AUTH_TOKEN,
+			ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+		};
+		// `||=` rather than `??=` so an empty string left behind by an earlier
+		// test still gets overridden (test-ordering safety).
+		process.env.TELEGRAM_BOT_TOKEN ||= 'smoke-token';
+		process.env.GUI_AUTH_TOKEN ||= 'smoke-gui-token';
+		process.env.ANTHROPIC_API_KEY ||= 'smoke-api-key';
+		try {
+			const child = nodeSpawn(
+				process.execPath,
+				['--import=tsx/esm', cliPath, '--list', '--json'],
+				{
+					cwd: repoRoot,
+					env: { ...process.env, TSX_TSCONFIG_PATH: tsconfigPath },
+					stdio: ['ignore', 'pipe', 'pipe'],
+				},
+			);
+			let stdoutBuf = '';
+			child.stdout.on('data', (c) => {
+				stdoutBuf += c.toString();
+			});
+			const exitCode = await new Promise<number>((res) => {
+				child.on('exit', (code) => res(code ?? 1));
+			});
+			expect(exitCode).toBe(0);
+			const lines = stdoutBuf.split('\n').filter((l) => l.length > 0);
+			expect(lines.length).toBeGreaterThan(0);
+			for (const line of lines) {
+				expect(() => JSON.parse(line)).not.toThrow();
+			}
+		} finally {
+			process.env.TELEGRAM_BOT_TOKEN = savedEnv.TELEGRAM_BOT_TOKEN ?? '';
+			process.env.GUI_AUTH_TOKEN = savedEnv.GUI_AUTH_TOKEN ?? '';
+			process.env.ANTHROPIC_API_KEY = savedEnv.ANTHROPIC_API_KEY ?? '';
+		}
+	}, 30_000);
+});
+
 describe('real CLI --list smoke (no LLM dispatch)', () => {
 	it('invokes the actual regression CLI in --list mode and parses the output', async () => {
 		// Resolve repo root from the worktree layout: this file is at
@@ -153,9 +199,11 @@ describe('real CLI --list smoke (no LLM dispatch)', () => {
 			GUI_AUTH_TOKEN: process.env.GUI_AUTH_TOKEN,
 			ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
 		};
-		process.env.TELEGRAM_BOT_TOKEN ??= 'smoke-token';
-		process.env.GUI_AUTH_TOKEN ??= 'smoke-gui-token';
-		process.env.ANTHROPIC_API_KEY ??= 'smoke-api-key';
+		// `||=` rather than `??=` so an empty string left behind by an earlier
+		// test still gets overridden (test-ordering safety).
+		process.env.TELEGRAM_BOT_TOKEN ||= 'smoke-token';
+		process.env.GUI_AUTH_TOKEN ||= 'smoke-gui-token';
+		process.env.ANTHROPIC_API_KEY ||= 'smoke-api-key';
 		try {
 			const out = await discovery.discover();
 			// We don't pin the number of cases — the routing bucket grows as
