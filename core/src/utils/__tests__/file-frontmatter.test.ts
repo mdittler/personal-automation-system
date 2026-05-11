@@ -102,6 +102,47 @@ describe('appendWithFrontmatter', () => {
 		expect(content).toContain('B');
 	});
 
+	it('concurrent appends through equivalent path spellings share the same lock', async () => {
+		// Two callers targeting the same logical file via different but
+		// equivalent path spellings (relative vs. absolute, or '.' segment)
+		// must serialize through the same in-process mutex. Otherwise the
+		// create-vs-append race re-opens: both callers stat() an empty file,
+		// both writeFile() the frontmatter, and the result is duplicated
+		// frontmatter + lost content.
+		const { mkdir } = await import('node:fs/promises');
+		await mkdir(testDir, { recursive: true });
+
+		const fm = '---\ntitle: Alias\n---\n';
+		const absPath = join(testDir, 'aliased.md');
+		// Equivalent spelling using a redundant '.' segment — resolves to the
+		// same realpath but is a different string, so a naive lock key would
+		// give the two callers different mutexes.
+		const dotPath = join(testDir, '.', 'aliased.md');
+
+		await Promise.all([
+			appendWithFrontmatter(absPath, 'A\n', fm),
+			appendWithFrontmatter(dotPath, 'B\n', fm),
+		]);
+
+		const content = await readFile(absPath, 'utf-8');
+
+		// Frontmatter must appear exactly once (open + close === two ^---$ lines)
+		const fmCount = (content.match(/^---$/gm) || []).length;
+		expect(fmCount).toBe(2);
+
+		// Content must start with frontmatter (no content prepended before it)
+		expect(content.startsWith(fm)).toBe(true);
+
+		// Both appends landed
+		expect(content).toContain('A');
+		expect(content).toContain('B');
+
+		// Body has exactly two lines
+		const body = content.slice(fm.length);
+		const bodyLines = body.split('\n').filter((l) => l.length > 0);
+		expect(bodyLines).toHaveLength(2);
+	});
+
 	it('20 concurrent appends produce frontmatter once and exactly 20 lines', async () => {
 		const filePath = join(testDir, 'high-concurrency.md');
 		const fm = '---\ntitle: Stress\n---\n';
