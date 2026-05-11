@@ -132,11 +132,39 @@ export async function spawnRegression(
 		proc.on('exit', (code: number | null) => resolve(code ?? 1));
 	});
 
+	// SIGTERM with a SIGKILL fallback after `SIGKILL_GRACE_MS`. Both the
+	// AbortSignal path (Codex P1: registry-driven cancel) and the direct
+	// `handle.cancel()` path share this helper; the timer is cleared when
+	// the child exits so well-behaved children never receive SIGKILL.
+	let killTimer: NodeJS.Timeout | null = null;
+	const SIGKILL_GRACE_MS = 5000;
+	function sigtermWithSigkillFallback(): void {
+		try {
+			proc.kill('SIGTERM');
+		} catch {
+			/* already dead */
+		}
+		if (killTimer) return;
+		killTimer = setTimeout(() => {
+			try {
+				proc.kill('SIGKILL');
+			} catch {
+				/* already dead */
+			}
+		}, SIGKILL_GRACE_MS);
+	}
+	proc.on('exit', () => {
+		if (killTimer) {
+			clearTimeout(killTimer);
+			killTimer = null;
+		}
+	});
+
 	const whenComplete = (async () => {
 		// Wire cancel BEFORE awaiting in case the caller fires it synchronously.
 		options.signal?.addEventListener('abort', () => {
 			cancelled = true;
-			proc.kill('SIGTERM');
+			sigtermWithSigkillFallback();
 		});
 		await linePromise;
 		const exitCode = await exitPromise;
@@ -159,7 +187,7 @@ export async function spawnRegression(
 		pid: proc.pid,
 		cancel: () => {
 			cancelled = true;
-			proc.kill('SIGTERM');
+			sigtermWithSigkillFallback();
 		},
 		whenComplete,
 	};

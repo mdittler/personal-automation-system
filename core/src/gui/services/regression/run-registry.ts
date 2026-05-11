@@ -149,18 +149,32 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 				dispatchEvent(state, event);
 			};
 
-			const handle = (await runFactory(onEvent, abort.signal)) as FakeRunHandleShape | undefined;
+			// Codex P1: if runFactory rejects (e.g. spawnRegression throws on a
+			// bad cliPath), clear `activeRunId`, mark the state failed, resolve
+			// `whenComplete`, then rethrow. Without this, the registry would
+			// leave `activeRunId` set and `whenComplete` pending forever,
+			// wedging subsequent createRun() calls behind a phantom active.
+			let handle: FakeRunHandleShape | undefined;
+			try {
+				handle = (await runFactory(onEvent, abort.signal)) as FakeRunHandleShape | undefined;
+			} catch (err) {
+				state.status = 'failed';
+				state.endedAt = now();
+				if (activeRunId === runId) activeRunId = null;
+				resolveComplete();
+				throw err;
+			}
+
 			if (handle && typeof (handle as FakeRunHandleShape).whenComplete?.then === 'function') {
 				(handle as FakeRunHandleShape).whenComplete.then(resolveComplete, resolveComplete);
 			} else {
-				// No external completion signal — resolve once a terminal event fires.
-				const checkDone = (): void => {
-					if (TERMINAL_STATUSES.has(state.status)) resolveComplete();
-				};
+				// No external completion signal — resolve once a terminal event
+				// fires. Check the event directly rather than state.status, since
+				// listeners are invoked before dispatchEvent updates status.
 				const detach = (e: RegressionEvent): void => {
 					if (inferTerminal(e)) {
 						state.listeners.delete(detach);
-						checkDone();
+						resolveComplete();
 					}
 				};
 				state.listeners.add(detach);

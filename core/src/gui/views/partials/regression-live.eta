@@ -1,0 +1,167 @@
+<script>
+// Regression suite client wiring (Codex P1). Intercepts Run / Re-run / Force-fresh
+// form submits, runs the estimate → confirm → POST /runs flow, opens EventSource,
+// fetches per-case row partials on case-completed, renders terminal banners, and
+// exposes a Cancel button while the run is active. Pure vanilla JS — htmx auto-
+// injects the CSRF header on hx-* requests but we make our own POSTs so we set
+// X-CSRF-Token explicitly.
+(function () {
+	const live = document.getElementById('regression-live');
+	if (!live) return;
+	let es = null;
+	let activeRunId = null;
+
+	function csrfHeader() {
+		const meta = document.querySelector('meta[name="csrf-token"]');
+		return meta ? meta.getAttribute('content') : '';
+	}
+
+	function setState(label) {
+		const el = live.querySelector('.run-state');
+		if (el) el.textContent = label;
+	}
+
+	function showRunBanner(runId) {
+		activeRunId = runId;
+		live.dataset.runid = runId;
+		live.hidden = false;
+		live.innerHTML =
+			'<article class="run-banner">' +
+			'<strong>Run ' + runId.slice(0, 8) + '</strong> — <span class="run-state">starting</span> ' +
+			'<button type="button" class="cancel-btn outline secondary">Cancel</button>' +
+			'<div class="terminal-msg" hidden></div>' +
+			'</article>';
+		const btn = live.querySelector('.cancel-btn');
+		btn.addEventListener('click', cancelActive);
+	}
+
+	function showTerminal(state, msg) {
+		setState(state);
+		const btn = live.querySelector('.cancel-btn');
+		if (btn) btn.disabled = true;
+		const m = live.querySelector('.terminal-msg');
+		if (m) {
+			m.hidden = false;
+			m.className = 'terminal-msg terminal-' + state;
+			m.textContent = msg;
+		}
+		if (es) { es.close(); es = null; }
+	}
+
+	function attach(runId, eventsUrl) {
+		showRunBanner(runId);
+		if (es) es.close();
+		es = new EventSource(eventsUrl);
+		es.addEventListener('case-completed', async function (e) {
+			let payload;
+			try { payload = JSON.parse(e.data); } catch (_) { return; }
+			const caseId = payload && payload.caseId;
+			if (!caseId) return;
+			const url = '/gui/regression/cases/' + encodeURIComponent(caseId) +
+				'/row?runId=' + encodeURIComponent(runId);
+			const res = await fetch(url, { headers: { Accept: 'text/html' } });
+			if (!res.ok) return;
+			const html = await res.text();
+			const row = document.getElementById('row-' + caseId);
+			if (row) row.outerHTML = html;
+		});
+		es.addEventListener('summary', function () { setState('finalising'); });
+		es.addEventListener('complete', function () { showTerminal('complete', 'Run complete.'); });
+		es.addEventListener('gate-failed', function (e) {
+			let summary = {};
+			try { summary = (JSON.parse(e.data) || {}).summary || {}; } catch (_) {}
+			const acc = summary.routingAccuracy;
+			const msg = 'REQ-REG-011 gate failed' +
+				(typeof acc === 'number' ? ' (routing accuracy ' + (acc * 100).toFixed(1) + '%)' : '');
+			showTerminal('gate-failed', msg);
+		});
+		es.addEventListener('failed', function (e) {
+			let payload = {};
+			try { payload = JSON.parse(e.data) || {}; } catch (_) {}
+			showTerminal('failed', 'Run failed (exit ' + (payload.exitCode || '?') + ').');
+		});
+		es.addEventListener('cancelled', function () { showTerminal('cancelled', 'Run cancelled.'); });
+	}
+
+	async function cancelActive() {
+		if (!activeRunId) return;
+		await fetch('/gui/regression/runs/' + encodeURIComponent(activeRunId) + '/cancel', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfHeader() },
+			body: '{}',
+		});
+	}
+
+	function fdToBody(fd) {
+		const body = {};
+		const reruns = [];
+		for (const [k, v] of fd.entries()) {
+			if (k === '_csrf') continue;
+			if (k === 'rerun') reruns.push(String(v));
+			else body[k] = String(v);
+		}
+		if (reruns.length > 0) body.rerun = reruns;
+		return body;
+	}
+
+	function fdToEstimateQuery(fd) {
+		const params = new URLSearchParams();
+		const bucket = fd.get('bucket');
+		if (bucket) params.set('bucket', String(bucket));
+		for (const r of fd.getAll('rerun')) params.append('rerun', String(r));
+		return params;
+	}
+
+	async function submitRun(form, event) {
+		event.preventDefault();
+		const fd = new FormData(form);
+		// Confirm with the operator using a fresh estimate.
+		try {
+			const res = await fetch('/gui/regression/estimate?' + fdToEstimateQuery(fd), {
+				headers: { Accept: 'application/json' },
+			});
+			const est = res.ok ? await res.json() : null;
+			const total = est && typeof est.totalUsd === 'number' ? est.totalUsd.toFixed(2) : '?';
+			const cap = est && typeof est.ceilingUsd === 'number' ? est.ceilingUsd.toFixed(2) : '?';
+			const cases = est && typeof est.totalCases === 'number' ? est.totalCases : '?';
+			if (!confirm('Run ' + cases + ' case(s)? Estimated cost ≈ $' + total + ' (cap $' + cap + ').')) {
+				return;
+			}
+		} catch (_) {
+			if (!confirm('Run the regression suite? (estimate unavailable)')) return;
+		}
+		const post = await fetch('/gui/regression/runs', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfHeader() },
+			body: JSON.stringify(fdToBody(fd)),
+		});
+		if (post.status === 409) {
+			const j = await post.json().catch(function () { return {}; });
+			if (j && j.activeRunId) {
+				if (confirm('A run is already in progress. Attach to the live stream?')) {
+					attach(j.activeRunId, '/gui/regression/runs/' + encodeURIComponent(j.activeRunId) + '/events');
+				}
+			}
+			return;
+		}
+		if (!post.ok) {
+			const j = await post.json().catch(function () { return {}; });
+			alert('Failed to start run: ' + ((j && j.error) || post.status));
+			return;
+		}
+		const body = await post.json();
+		if (body && body.runId && body.eventsUrl) attach(body.runId, body.eventsUrl);
+	}
+
+	function wireForm(form) {
+		form.addEventListener('submit', function (e) { submitRun(form, e); });
+	}
+
+	document
+		.querySelectorAll('form[action="/gui/regression/runs"]')
+		.forEach(wireForm);
+
+	const preExisting = live.dataset.runid;
+	if (preExisting) attach(preExisting, '/gui/regression/runs/' + encodeURIComponent(preExisting) + '/events');
+})();
+</script>

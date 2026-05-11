@@ -63,7 +63,11 @@ async function readOne(
 		return null;
 	}
 	const inner = (parsed as { result?: unknown }).result;
-	if (!looksLikeRunResult(inner, caseId)) {
+	// Codex P2: pass the filename cacheKey to looksLikeRunResult so a stale
+	// or tampered file whose `result.cacheKey` doesn't match its filename is
+	// rejected — otherwise readDisplayForCase could report `coverageChanged: false`
+	// for a file whose contents disagree with the cache-key it lives under.
+	if (!looksLikeRunResult(inner, caseId, cacheKey)) {
 		// biome-ignore lint/suspicious/noConsole: cache-reader observability — REQ-REG-002/010
 		console.warn(`[regression-gui] cache shape invalid (RunResult schema mismatch) ${path}`);
 		return null;

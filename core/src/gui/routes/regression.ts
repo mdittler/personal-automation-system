@@ -230,6 +230,12 @@ export function registerRegressionRoutes(
 		async (request, reply) => {
 			const { caseId } = request.params;
 			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
+			// Codex P2: mirror the drilldown/row allowlist check so a regex-
+			// valid but unknown caseId can't read a directory left behind by
+			// a removed case definition.
+			const discovery = await caseDiscovery.discover();
+			const listed = discovery.cases.find((c) => c.caseId === caseId);
+			if (!listed) return reply.status(404).send('not found');
 			let entries: RunResult[];
 			try {
 				entries = await readHistoryForCase(cacheDir, caseId);
@@ -359,7 +365,14 @@ export function registerRegressionRoutes(
 			const state = runRegistry.get(runId);
 			if (!state) return reply.status(404).send('not found');
 
-			const channel = openSseStream(request, reply);
+			// Codex P2: ensure the registry listener is detached when the
+			// client disconnects, the SSE write fails, OR a terminal event
+			// triggers `channel.close()`. Otherwise closed clients leave
+			// listeners behind until the run is GC'd.
+			let detach: (() => void) | null = null;
+			const channel = openSseStream(request, reply, {
+				onClose: () => detach?.(),
+			});
 
 			const dispatch = (event: RegressionEvent): void => {
 				const sseEvent = toSseEvent(event, runId);
@@ -370,7 +383,10 @@ export function registerRegressionRoutes(
 			};
 
 			// attach() replays buffered events synchronously, then forwards new ones.
-			runRegistry.attach(runId, dispatch);
+			// If the run was already terminal, the buffered replay ran above —
+			// `dispatch` will have called `channel.close()` which triggers `onClose`,
+			// which then calls `detach()` to remove the no-op listener we just added.
+			detach = runRegistry.attach(runId, dispatch);
 		},
 	);
 

@@ -568,6 +568,34 @@ describe('GET /gui/regression/cases/:caseId/history', () => {
 			await app.close();
 		}
 	});
+
+	it('returns 404 for a regex-valid but unknown caseId (Codex P2 allowlist)', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase({ caseId: 'real-case' })] });
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/not-discovered/history');
+			expect(res.statusCode).toBe(404);
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+describe('GET /gui/regression — client wiring (Codex P1)', () => {
+	it('renders the regression-live script block so the page is end-to-end wired', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.statusCode).toBe(200);
+			// The page must include the EventSource bootstrap script.
+			expect(res.body).toContain('new EventSource(');
+			// And the cancel + estimate confirm + per-row fetch handlers.
+			expect(res.body).toContain('cancel-btn');
+			expect(res.body).toContain('/gui/regression/estimate?');
+			expect(res.body).toContain("'case-completed'");
+		} finally {
+			await app.close();
+		}
+	});
 });
 
 describe('GET /gui/regression/estimate', () => {

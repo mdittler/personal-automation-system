@@ -27,6 +27,14 @@ export interface SseChannel {
 
 export interface OpenSseOptions {
 	keepAliveMs?: number;
+	/**
+	 * Called exactly once when the channel closes (client disconnect, error,
+	 * explicit `channel.close()`, or process write failure). Use this to
+	 * detach any registry listeners attached by the route handler — otherwise
+	 * a closed client leaves a listener registered until the run's terminal
+	 * event fires or the run is GC'd (Codex P2).
+	 */
+	onClose?: () => void;
 }
 
 const DEFAULT_KEEPALIVE_MS = 25_000;
@@ -70,6 +78,7 @@ export function openSseStream(
 		} catch {
 			/* swallow — connection may already be torn down */
 		}
+		options.onClose?.();
 	}
 
 	(request.raw as { on: (e: string, cb: () => void) => void }).on('close', cleanup);
