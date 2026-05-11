@@ -1,0 +1,29 @@
+<h3>History for <code><%= it.caseId %></code></h3>
+<% if (it.entries.length === 0) { %>
+  <p class="empty-state">No runs recorded for this case.</p>
+<% } else { %>
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th>Timestamp</th>
+        <th>Verdict</th>
+        <th>Cost</th>
+        <th>Fast model</th>
+        <th>Standard model</th>
+        <th>Cache key</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const e of it.entries) { %>
+        <tr>
+          <td><time datetime="<%= e.timestamp %>"><%= e.timestamp %></time></td>
+          <td><%= e.verdict %></td>
+          <td>$<%= e.costUsd %></td>
+          <td><code><%= e.modelFast %></code></td>
+          <td><code><%= e.modelStandard %></code></td>
+          <td><code><%= e.cacheKey.slice(0, 12) %>…</code></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>

@@ -1,0 +1,68 @@
+<article class="drilldown" data-case-id="<%= it.listed.caseId %>">
+  <header>
+    <h2><code><%= it.listed.caseId %></code></h2>
+    <p><%= it.listed.description %></p>
+    <nav class="drilldown-tabs">
+      <a href="#" aria-current="page">Detail</a>
+      <a href="#" hx-get="/gui/regression/cases/<%= encodeURIComponent(it.listed.caseId) %>/history" hx-target="#drilldown-history" hx-swap="innerHTML">History</a>
+    </nav>
+  </header>
+
+  <section class="detail-tab">
+    <h3>Inputs &amp; expected</h3>
+    <% if (!it.listed.inputs || it.listed.inputs.length === 0) { %>
+      <p class="empty-state">No inputs declared.</p>
+    <% } else { %>
+      <ol class="inputs-list">
+        <% for (const input of it.listed.inputs) { %>
+          <li>
+            <% if (input.label) { %><strong><%= input.label %></strong><br /><% } %>
+            <details>
+              <summary>payload</summary>
+              <pre><%= JSON.stringify(input.payload, null, 2) %></pre>
+            </details>
+            <details open>
+              <summary>expected</summary>
+              <pre><%= JSON.stringify(input.expected, null, 2) %></pre>
+            </details>
+          </li>
+        <% } %>
+      </ol>
+    <% } %>
+
+    <h3>Actuals &amp; oracle verdicts</h3>
+    <% if (!it.result) { %>
+      <p class="empty-state">Never run — execute the case to populate.</p>
+    <% } else { %>
+      <% if (it.coverageChanged) { %>
+        <p class="warning">⚠ Coverage changed since this run — re-run to refresh.</p>
+      <% } %>
+      <dl class="result-fields">
+        <dt>Verdict</dt><dd><%= it.result.verdict %></dd>
+        <dt>Timestamp</dt><dd><time datetime="<%= it.result.timestamp %>"><%= it.result.timestamp %></time></dd>
+        <dt>Cost</dt><dd>$<%= it.result.costUsd.toFixed(4) %></dd>
+        <dt>Token counts</dt><dd>—<small> (plumbing pending — see open-items.md)</small></dd>
+        <dt>Model — fast</dt><dd><code><%= it.result.modelIds.fast %></code></dd>
+        <dt>Model — standard</dt><dd><code><%= it.result.modelIds.standard %></code></dd>
+        <% if (it.result.modelIds.reasoning) { %>
+          <dt>Model — reasoning</dt><dd><code><%= it.result.modelIds.reasoning %></code></dd>
+        <% } %>
+        <dt>Duration</dt><dd><%= it.result.durationMs %> ms</dd>
+      </dl>
+      <h4>Actuals</h4>
+      <pre><%= JSON.stringify(it.result.actuals, null, 2) %></pre>
+      <h4>Oracle verdicts</h4>
+      <% if (!it.result.oracleVerdicts || it.result.oracleVerdicts.length === 0) { %>
+        <p class="empty-state">No oracle verdicts recorded.</p>
+      <% } else { %>
+        <ol>
+          <% for (const ov of it.result.oracleVerdicts) { %>
+            <li><strong><%= ov.verdict %></strong> — <%= ov.details %></li>
+          <% } %>
+        </ol>
+      <% } %>
+    <% } %>
+  </section>
+
+  <section id="drilldown-history" class="history-tab" hidden></section>
+</article>

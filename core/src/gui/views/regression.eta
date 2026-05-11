@@ -1,0 +1,61 @@
+<div class="page-header">
+  <h1>Regression Suite</h1>
+</div>
+
+<%~ include('partials/regression-summary-bar', {
+  modelIds: it.modelIds,
+  estimate: it.estimate,
+  selectedBucket: it.selectedBucket,
+  activeRunId: it.activeRunId,
+}) %>
+
+<% if (it.discoveryError) { %>
+  <article class="error-banner" role="alert" data-testid="discovery-error">
+    <strong>Failed to enumerate cases.</strong>
+    <p><%= it.discoveryError %></p>
+    <small>Run controls are disabled until this resolves. Check the server log and rerun <code>pnpm test:regression -- --list --json</code>.</small>
+  </article>
+<% } %>
+
+<nav class="bucket-filter" aria-label="Filter by bucket">
+  <a href="/gui/regression" <% if (!it.selectedBucket) { %>aria-current="page"<% } %>>All</a>
+  <a href="/gui/regression?bucket=routing" <% if (it.selectedBucket === 'routing') { %>aria-current="page"<% } %>>Routing</a>
+  <a href="/gui/regression?bucket=receipt" <% if (it.selectedBucket === 'receipt') { %>aria-current="page"<% } %>>Receipt</a>
+  <a href="/gui/regression?bucket=chatbot" <% if (it.selectedBucket === 'chatbot') { %>aria-current="page"<% } %>>Chatbot</a>
+  <a href="/gui/regression?bucket=recall" <% if (it.selectedBucket === 'recall') { %>aria-current="page"<% } %>>Recall</a>
+</nav>
+
+<section id="regression-live" data-runid="<%= it.activeRunId || '' %>" hidden></section>
+
+<% if (it.cases.length === 0) { %>
+  <p class="empty-state">No cases in this bucket. Add cases under <code>regression/src/cases/&lt;bucket&gt;/</code>.</p>
+<% } else { %>
+  <table class="regression-table">
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Case</th>
+        <th>Bucket</th>
+        <th>Fast model</th>
+        <th>Standard model</th>
+        <th>Cost</th>
+        <th>Timestamp</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const c of it.cases) { %>
+        <%~ include('partials/regression-case-row', { case: c }) %>
+      <% } %>
+    </tbody>
+  </table>
+<% } %>
+
+<aside id="regression-drilldown" hidden></aside>
+
+<footer class="regression-footnote">
+  <small>
+    Per-case token counts are not yet plumbed through <code>LLMService.complete()</code> — see
+    <code>docs/open-items.md</code>. Cost is authoritative via CostTracker.
+  </small>
+</footer>

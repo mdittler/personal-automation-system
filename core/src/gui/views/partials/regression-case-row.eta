@@ -1,0 +1,30 @@
+<tr id="row-<%= it.case.caseId %>" data-case-id="<%= it.case.caseId %>" class="case-row case-row-<%= it.case.statusIcon === '✓' ? 'pass' : (it.case.statusIcon === '✗' ? 'fail' : (it.case.statusIcon === '⚠' ? 'coverage-changed' : 'other')) %>">
+  <td class="status-cell" title="<%= it.case.verdictLabel %>"><%= it.case.statusIcon %></td>
+  <td>
+    <a href="#" hx-get="/gui/regression/cases/<%= encodeURIComponent(it.case.caseId) %>" hx-target="#regression-drilldown" hx-swap="innerHTML" hx-on::after-request="document.getElementById('regression-drilldown').hidden = false">
+      <code><%= it.case.caseId %></code>
+    </a>
+    <br /><small><%= it.case.description %></small>
+  </td>
+  <td>
+    <%= it.case.bucket %>
+    <% if (it.case.routingTarget) { %><br /><small><%= it.case.routingTarget %></small><% } %>
+  </td>
+  <td><code><%= it.case.modelFast %></code></td>
+  <td><code><%= it.case.modelStandard %></code></td>
+  <td>$<%= it.case.costUsd %></td>
+  <td>
+    <% if (it.case.timestamp) { %>
+      <time datetime="<%= it.case.timestamp %>"><%= it.case.timestamp %></time>
+    <% } else { %>
+      <span class="muted">—</span>
+    <% } %>
+  </td>
+  <td>
+    <form method="post" action="/gui/regression/runs" class="row-rerun">
+      <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+      <input type="hidden" name="rerun" value="<%= it.case.caseId %>" />
+      <button type="submit" class="outline secondary small">Re-run</button>
+    </form>
+  </td>
+</tr>

@@ -6,6 +6,7 @@
  * and LLM usage pages.
  */
 
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { RateLimiter } from '../middleware/rate-limiter.js';
@@ -13,6 +14,7 @@ import type { AlertService } from '../services/alerts/index.js';
 import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { AppRegistry } from '../services/app-registry/index.js';
 import type { AppToggleStore } from '../services/app-toggle/index.js';
+import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
 import type { CredentialService } from '../services/credentials/index.js';
 import type { HouseholdService } from '../services/household/index.js';
@@ -29,7 +31,6 @@ import type { SettingsWriter } from '../services/settings/settings-writer.js';
 import type { SpaceService } from '../services/spaces/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
 import type { UserMutationService } from '../services/user-manager/user-mutation-service.js';
-import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../types/config.js';
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
@@ -44,11 +45,14 @@ import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
+import { registerRegressionRoutes } from './routes/regression.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
+import { createCaseDiscovery } from './services/regression/case-discovery.js';
+import { createRunRegistry } from './services/regression/run-registry.js';
 import { registerViewLocals } from './view-locals.js';
 
 export interface GuiOptions {
@@ -198,6 +202,28 @@ export async function registerGuiRoutes(
 				householdService: options.householdService,
 				messageRateTracker,
 				llmSafeguards,
+			});
+			// Persona Regression Suite admin page (Chunk B.2). The case-discovery
+			// service shells out to the regression CLI on each page load (Codex
+			// C4); the run-registry tracks in-flight subprocess runs. Resolve
+			// repo-relative paths from cwd at registration time so the GUI works
+			// against any worktree.
+			const repoRoot = resolve(process.cwd());
+			const cliPath = resolve(repoRoot, 'regression', 'src', 'runner', 'cli-main.ts');
+			const tsconfigPath = resolve(repoRoot, 'regression', 'tsconfig.json');
+			const cacheDir = resolve(repoRoot, 'data', 'system', 'regression-cache');
+			const regressionRunRegistry = createRunRegistry();
+			const regressionCaseDiscovery = createCaseDiscovery({
+				cliPath,
+				cwd: repoRoot,
+				tsconfigPath,
+			});
+			registerRegressionRoutes(gui, {
+				caseDiscovery: regressionCaseDiscovery,
+				runRegistry: regressionRunRegistry,
+				cacheDir,
+				maxRunBudgetUsd: config.regression?.maxRunBudgetUsd ?? 5,
+				logger,
 			});
 			// Cron description API (used by cron-helper.js)
 			gui.get(

@@ -1,0 +1,28 @@
+<header class="regression-summary-bar">
+  <div class="tier-models">
+    <% if (it.modelIds) { %>
+      <span class="tier-badge">fast: <code><%= it.modelIds.fast %></code></span>
+      <span class="tier-badge">standard: <code><%= it.modelIds.standard %></code></span>
+      <% if (it.modelIds.reasoning) { %>
+        <span class="tier-badge">reasoning: <code><%= it.modelIds.reasoning %></code></span>
+      <% } %>
+    <% } else { %>
+      <span class="tier-badge muted">tier models unknown</span>
+    <% } %>
+  </div>
+
+  <form id="regression-run-form" method="post" action="/gui/regression/runs" class="run-controls" data-bucket="<%= it.selectedBucket || '' %>">
+    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+    <% if (it.selectedBucket) { %><input type="hidden" name="bucket" value="<%= it.selectedBucket %>" /><% } %>
+    <label class="force-fresh-toggle">
+      <input type="checkbox" name="forceFresh" value="true" /> Force fresh (ignore cache)
+    </label>
+    <button type="submit" class="primary" <% if (it.activeRunId) { %>disabled<% } %>>
+      <% if (it.selectedBucket) { %>Run bucket: <%= it.selectedBucket %><% } else { %>Run all<% } %>
+      <span class="estimate">— est. ≈ $<%= it.estimate.totalUsd %> (cap $<%= it.estimate.ceilingUsd %>)</span>
+    </button>
+    <% if (it.activeRunId) { %>
+      <span class="active-run-notice">Run <%= it.activeRunId %> in progress — <a href="/gui/regression?runId=<%= it.activeRunId %>">view live</a></span>
+    <% } %>
+  </form>
+</header>
