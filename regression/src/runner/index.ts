@@ -128,8 +128,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 			continue;
 		}
 
-		const caseEstimate =
-			opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
+		const caseEstimate = opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
 		if (!runBudget.canAfford(caseEstimate)) {
 			opts.logger.warn(
 				{
@@ -208,10 +207,18 @@ export async function runCli(
 		cli = parseCliArgs(argv);
 	} catch (err) {
 		write(`error: ${(err as Error).message}\n${HELP_TEXT}`);
-		return { exitCode: 1, outcome: null, options: { dryRun: false, json: false, help: false } };
+		return {
+			exitCode: 1,
+			outcome: null,
+			options: { dryRun: false, json: false, help: false, listOnly: false },
+		};
 	}
 	if (cli.help) {
 		write(HELP_TEXT);
+		return { exitCode: 0, outcome: null, options: cli };
+	}
+	if (cli.listOnly) {
+		await emitCaseList(deps, write);
 		return { exitCode: 0, outcome: null, options: cli };
 	}
 
@@ -249,6 +256,53 @@ export async function runCli(
 		return { exitCode: 1, outcome, options: cli };
 	}
 	return { exitCode: 0, outcome, options: cli };
+}
+
+/**
+ * `--list` mode (Chunk B.2 Codex C5). Loads cases and emits one
+ * `{type:'case-list-entry'}` line per case (with enough metadata for the
+ * GUI to render a never-run drilldown), then a `{type:'case-list-end'}`
+ * terminator (Codex I4 fail-closed signal for the case-discovery
+ * consumer). No dispatch occurs; the orchestrator's classifier adapters
+ * are never invoked.
+ */
+async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promise<void> {
+	const loaded = await loadCases(deps.casesDir);
+	const hashCache = new Map<string, Promise<string>>();
+	const cacheKeys = await Promise.all(
+		loaded.map((lc) =>
+			computeCacheKey({
+				casePath: relative(deps.repoRoot, lc.filePath),
+				coveragePaths: lc.case.coverage,
+				modelIds: deps.modelIds,
+				repoRoot: deps.repoRoot,
+				hashCache,
+			}),
+		),
+	);
+	for (let i = 0; i < loaded.length; i++) {
+		const c = loaded[i]!.case;
+		const entry: Record<string, unknown> = {
+			type: 'case-list-entry',
+			caseId: c.id,
+			bucket: c.bucket,
+			description: c.description,
+			oracle: c.oracle,
+			coverage: c.coverage,
+			inputs: c.inputs,
+			budgetUsd: c.budgetUsd,
+			currentCacheKey: cacheKeys[i]!,
+		};
+		if (c.routingTarget) entry.routingTarget = c.routingTarget;
+		write(`${JSON.stringify(entry)}\n`);
+	}
+	write(
+		`${JSON.stringify({
+			type: 'case-list-end',
+			totalCases: loaded.length,
+			modelIds: deps.modelIds,
+		})}\n`,
+	);
 }
 
 function makeDryRunResult(

@@ -14,7 +14,6 @@
  */
 
 import { resolve } from 'node:path';
-import { type Logger, pino } from 'pino';
 import { loadSystemConfig } from '@core/services/config/index.js';
 import { CostTracker } from '@core/services/llm/cost-tracker.js';
 import { LLMServiceImpl } from '@core/services/llm/index.js';
@@ -23,6 +22,7 @@ import { ModelSelector } from '@core/services/llm/model-selector.js';
 import { createProvider } from '@core/services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import type { TierModelSnapshot } from '@core/types/regression.js';
+import { type Logger, pino } from 'pino';
 import { buildClassifierAdapters } from './dispatch.js';
 import type { RunCliDeps } from './index.js';
 
@@ -47,7 +47,8 @@ function resolveRepoPaths(): RepoPaths {
 
 export async function buildProductionDeps(): Promise<RunCliDeps> {
 	const paths = resolveRepoPaths();
-	const logger = pino({ level: process.env['LOG_LEVEL'] ?? 'info' });
+	// Codex I3: route logs to stderr so stdout stays NDJSON-clean for `--json`.
+	const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' }, process.stderr);
 
 	const config = await loadSystemConfig({ configPath: paths.configPath, mode: 'strict' });
 
@@ -55,7 +56,7 @@ export async function buildProductionDeps(): Promise<RunCliDeps> {
 	await costTracker.loadMonthlyCache();
 
 	const llm = await composeLLMService(config, costTracker, logger);
-	const modelIds = await resolveTierModelIds(config, costTracker, logger);
+	const modelIds = await resolveTierModelIds(config, logger);
 	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
 
 	const classifiers = buildClassifierAdapters({
@@ -120,7 +121,10 @@ export async function composeLLMService(
 
 	const modelSelector = new ModelSelector({
 		dataDir: config.dataDir,
-		defaultStandard: llmConfig?.tiers.standard ?? { provider: 'anthropic', model: config.claude.model },
+		defaultStandard: llmConfig?.tiers.standard ?? {
+			provider: 'anthropic',
+			model: config.claude.model,
+		},
 		defaultFast: llmConfig?.tiers.fast ?? {
 			provider: 'anthropic',
 			model: config.claude.fastModel ?? 'claude-haiku-4-5-20251001',
@@ -162,7 +166,8 @@ export async function composeLLMService(
  */
 export function buildDryRunDeps(): RunCliDeps {
 	const paths = resolveRepoPaths();
-	const logger = pino({ level: process.env['LOG_LEVEL'] ?? 'warn' });
+	// Codex I3: route logs to stderr so stdout stays NDJSON-clean for `--json`.
+	const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' }, process.stderr);
 	const throwOnDispatch = (): never => {
 		throw new Error(
 			'dry-run deps: classifier adapter invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
@@ -191,15 +196,72 @@ export function buildDryRunDeps(): RunCliDeps {
 	};
 }
 
+/**
+ * Build deps for `--list` mode (Chunk B.2 Codex C1 fix).
+ *
+ * Resolves real tier model IDs from `pas.yaml` + `ModelSelector` so the
+ * `currentCacheKey` emitted by the orchestrator matches what `runSuite`
+ * would later write to cache. Critically: does NOT compose providers or
+ * instantiate `LLMServiceImpl`, so it works even when API keys are
+ * unconfigured. Classifier adapters and `estimateUsd` are stubs that
+ * throw / return 0 — list mode never dispatches.
+ *
+ * Requires the same env vars as `loadSystemConfig` (TELEGRAM_BOT_TOKEN,
+ * GUI_AUTH_TOKEN). GUI process always has them; CLI-from-shell users get
+ * the same env requirement as `pnpm dev`.
+ */
+export async function buildMetadataDeps(options?: { configPath?: string }): Promise<RunCliDeps> {
+	const paths = resolveRepoPaths();
+	// Codex I3: route logs to stderr so stdout stays NDJSON-clean for `--json`.
+	const logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' }, process.stderr);
+	const config = await loadSystemConfig({
+		configPath: options?.configPath ?? paths.configPath,
+		mode: 'strict',
+	});
+	const modelIds = await resolveTierModelIds(config, logger);
+	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
+	const throwOnDispatch = (): never => {
+		throw new Error(
+			'metadata-only deps: classifier adapter invoked. List mode does not dispatch — the orchestrator should short-circuit on listOnly=true.',
+		);
+	};
+	return {
+		casesDir: paths.casesDir,
+		cacheDir: paths.cacheDir,
+		repoRoot: paths.repoRoot,
+		modelIds,
+		maxRunBudgetUsd,
+		estimateUsd: () => 0,
+		classifiers: {
+			foodShadow: async () => throwOnDispatch(),
+			sessionControl: async () => throwOnDispatch(),
+			pas: async () => throwOnDispatch(),
+		},
+		logger: {
+			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),
+			info: (...args) => logger.info(...(args as Parameters<typeof logger.info>)),
+			debug: (...args) => logger.debug(...(args as Parameters<typeof logger.debug>)),
+			error: (...args) => logger.error(...(args as Parameters<typeof logger.error>)),
+		},
+	};
+}
+
+/**
+ * Resolve concrete model identifiers for each tier, after `ModelSelector`
+ * has reconciled against the registered providers. The returned snapshot
+ * feeds the cache key — a tier-model swap invalidates cached runs.
+ */
 async function resolveTierModelIds(
 	config: Awaited<ReturnType<typeof loadSystemConfig>>,
-	costTracker: CostTracker,
 	logger: Logger,
 ): Promise<TierModelSnapshot> {
 	const llmConfig = config.llm;
 	const modelSelector = new ModelSelector({
 		dataDir: config.dataDir,
-		defaultStandard: llmConfig?.tiers.standard ?? { provider: 'anthropic', model: config.claude.model },
+		defaultStandard: llmConfig?.tiers.standard ?? {
+			provider: 'anthropic',
+			model: config.claude.model,
+		},
 		defaultFast: llmConfig?.tiers.fast ?? {
 			provider: 'anthropic',
 			model: config.claude.fastModel ?? 'claude-haiku-4-5-20251001',
@@ -208,7 +270,6 @@ async function resolveTierModelIds(
 		logger: logger.child({ service: 'model-selector-resolve' }),
 	});
 	await modelSelector.load();
-	void costTracker; // currently unused here; reserved for cost-aware tier resolution
 	const fast = modelSelector.getTierRef('fast')?.model ?? 'unknown';
 	const standard = modelSelector.getTierRef('standard')?.model ?? 'unknown';
 	const reasoning = modelSelector.getTierRef('reasoning')?.model ?? null;

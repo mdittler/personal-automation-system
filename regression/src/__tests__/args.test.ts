@@ -2,14 +2,41 @@ import { describe, expect, it } from 'vitest';
 import { parseCliArgs } from '../runner/args.js';
 
 describe('parseCliArgs', () => {
-	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help', () => {
+	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help, no list', () => {
 		expect(parseCliArgs([])).toEqual({
 			bucketFilter: undefined,
 			rerunIds: undefined,
 			dryRun: false,
 			json: false,
 			help: false,
+			listOnly: false,
 		});
+	});
+
+	it('parses --list', () => {
+		expect(parseCliArgs(['--list']).listOnly).toBe(true);
+	});
+
+	it('parses --rerun=<id> (equals form)', () => {
+		const o = parseCliArgs(['--rerun=food-a']);
+		expect(o.rerunIds).toEqual(new Set(['food-a']));
+	});
+
+	it('accepts both --rerun forms together', () => {
+		const o = parseCliArgs(['--rerun=food-a', '--rerun', 'food-b']);
+		expect(o.rerunIds).toEqual(new Set(['food-a', 'food-b']));
+	});
+
+	it('rejects --rerun=<id> with invalid id (regex)', () => {
+		expect(() => parseCliArgs(['--rerun=BAD!!!'])).toThrow(/--rerun.*id/i);
+	});
+
+	it('rejects --rerun=<empty>', () => {
+		expect(() => parseCliArgs(['--rerun='])).toThrow(/--rerun/i);
+	});
+
+	it('rejects --rerun <id> (space-form) with invalid id', () => {
+		expect(() => parseCliArgs(['--rerun', 'BAD!!!'])).toThrow(/--rerun.*id/i);
 	});
 
 	it('parses --bucket=routing (=-form)', () => {
@@ -70,6 +97,7 @@ describe('parseCliArgs', () => {
 			dryRun: true,
 			json: true,
 			help: false,
+			listOnly: false,
 		});
 	});
 
