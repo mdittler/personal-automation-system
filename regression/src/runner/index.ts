@@ -34,12 +34,14 @@ import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
+import { runRecallCase } from './case-runners/recall-runner.js';
 import {
 	ESTIMATE_TOKENS,
 	type MinimalLogger,
 	type RoutingClassifierAdapter,
 	runRoutingCase,
 } from './case-runners/routing-runner.js';
+import type { RecallAdapter } from './dispatch.js';
 import {
 	ACCURACY_GATE_THRESHOLD,
 	buildSummary,
@@ -55,6 +57,8 @@ export interface RunSuiteOptions {
 	maxRunBudgetUsd: number;
 	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
 	classifiers: RoutingClassifierAdapter;
+	/** Recall adapter (Chunk C). Required when any case has bucket === 'recall'. */
+	recallAdapter?: RecallAdapter;
 	logger: MinimalLogger;
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
 	rerunIds?: Set<string>;
@@ -154,8 +158,22 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 				logger: opts.logger,
 				classifiers: opts.classifiers,
 			});
+		} else if (lc.case.bucket === 'recall') {
+			if (!opts.recallAdapter) {
+				throw new Error(
+					`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
+				);
+			}
+			result = await runRecallCase(lc.case, {
+				adapter: opts.recallAdapter,
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+			});
 		} else {
-			// Receipt bucket lands with Chunk A.2; chatbot + recall with Chunk C.
+			// Receipt bucket lands with Chunk A.2; chatbot with Chunk C (Task 11).
 			opts.logger.info(
 				{ caseId: lc.case.id, bucket: lc.case.bucket },
 				'orchestrator: bucket runner not wired yet — skipping case',
