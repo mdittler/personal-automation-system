@@ -193,6 +193,39 @@ export async function createChatbotEnvironment(
 			await writeFile(fullPath, fixture.contents, 'utf8');
 		}
 
+		// Codex correction: the food app's `requireHousehold` reads its OWN
+		// `household.yaml` from the shared food path (`apps/food/src/utils/household-guard.ts:22`),
+		// distinct from the core HouseholdService's `households.yaml`. Without
+		// it every food-app dispatch returns "Set up a household first" and the
+		// chatbot bucket grades zero replies. Write the food household record
+		// here so seeded dispatches see a member-of-household user.
+		const foodHouseholdPath = join(
+			dataDir,
+			'households',
+			created.id,
+			'shared',
+			'food',
+			'household.yaml',
+		);
+		await mkdir(dirname(foodHouseholdPath), { recursive: true });
+		const foodHousehold = [
+			'---',
+			`title: ${seededHousehold.id}`,
+			'app: food',
+			'tags:',
+			'  - food/household',
+			'---',
+			`id: ${created.id}`,
+			`name: ${seededHousehold.id}`,
+			`createdBy: ${firstUserId}`,
+			'members:',
+			...seededHousehold.members.map((m) => `  - ${m}`),
+			'joinCode: REG001',
+			'createdAt: 2026-05-12T00:00:00.000Z',
+			'',
+		].join('\n');
+		await writeFile(foodHouseholdPath, foodHousehold, 'utf8');
+
 		const telegram = fakeTelegramService();
 		const runtime = await composeRuntime({
 			config,
