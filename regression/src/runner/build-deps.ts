@@ -74,6 +74,25 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 
 	const config = await loadSystemConfig({ configPath: paths.configPath, mode: 'strict' });
 
+	// Apply tier override BEFORE composing LLM service so `llm.complete({tier:'fast'})`
+	// actually resolves to the override model. Without this, the override would only
+	// reach `modelIds` (cache-key metadata) but LLMService would still resolve every
+	// tier through the original `config.llm.tiers` — Codex correction.
+	if (opts?.tierOverride && config.llm) {
+		config.llm = {
+			...config.llm,
+			tiers: {
+				fast: opts.tierOverride.fast ?? config.llm.tiers.fast,
+				standard: opts.tierOverride.standard ?? config.llm.tiers.standard,
+				...(opts.tierOverride.reasoning !== undefined
+					? { reasoning: opts.tierOverride.reasoning }
+					: config.llm.tiers.reasoning !== undefined
+						? { reasoning: config.llm.tiers.reasoning }
+						: {}),
+			},
+		};
+	}
+
 	const costTracker = new CostTracker(config.dataDir, logger.child({ service: 'cost-tracker' }));
 	await costTracker.loadMonthlyCache();
 

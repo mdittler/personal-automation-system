@@ -53,28 +53,41 @@ try {
 	peeked = { dryRun: false, json: false, help: false, listOnly: false };
 }
 
+// Combine --model-matrix and --judge-model into a single tier override so
+// `buildProductionDeps` can push it into `config.llm.tiers` BEFORE composing the
+// LLM service. `--judge-model` overrides the standard tier specifically; if the
+// operator also passes `--model-matrix=...,standard=...`, judge-model wins for
+// the standard slot (the rubric oracle is the primary consumer of standard tier
+// in the regression run). Codex correction: previously the override only
+// reached `modelIds` metadata and never affected the actual LLMService dispatch.
+const tierOverride =
+	peeked.modelMatrix || peeked.judgeModel
+		? {
+				...(peeked.modelMatrix?.fast ? { fast: peeked.modelMatrix.fast } : {}),
+				...(peeked.judgeModel
+					? { standard: peeked.judgeModel }
+					: peeked.modelMatrix?.standard
+						? { standard: peeked.modelMatrix.standard }
+						: {}),
+				...(peeked.modelMatrix?.reasoning
+					? { reasoning: peeked.modelMatrix.reasoning }
+					: {}),
+			}
+		: undefined;
+
 let deps = isList
 	? await buildMetadataDeps()
 	: isDryRun
 		? buildDryRunDeps()
-		: await buildProductionDeps(
-				peeked.modelMatrix
-					? {
-							tierOverride: {
-								...(peeked.modelMatrix.fast ? { fast: peeked.modelMatrix.fast } : {}),
-								...(peeked.modelMatrix.standard ? { standard: peeked.modelMatrix.standard } : {}),
-								...(peeked.modelMatrix.reasoning
-									? { reasoning: peeked.modelMatrix.reasoning }
-									: {}),
-							},
-						}
-					: undefined,
-			);
+		: await buildProductionDeps(tierOverride ? { tierOverride } : undefined);
 
-if (peeked.modelMatrix) {
+// `applyModelMatrixOverride` / `applyJudgeModelOverride` are retained for the
+// dry-run / metadata paths where the LLM service was never composed and the
+// modelIds substitution is still needed to flow through cache keys.
+if ((isDryRun || isList) && peeked.modelMatrix) {
 	deps = applyModelMatrixOverride(deps, peeked.modelMatrix);
 }
-if (peeked.judgeModel) {
+if ((isDryRun || isList) && peeked.judgeModel) {
 	deps = applyJudgeModelOverride(deps, peeked.judgeModel);
 }
 

@@ -174,6 +174,41 @@ describe('build-deps — Chunk C wiring', () => {
 		expect(overridden.modelIds.fast).toBe('gemma4:e4b');
 		expect(overridden.modelIds.standard).toBe('gemma4:26b');
 	});
+
+	// Codex correction: tier override must reach the actual LLMService, not just
+	// the cache-key metadata. This is the regression guard for the bug where
+	// --model-matrix=ollama/gemma4:e4b would persist gemma4:e4b in `modelIds`
+	// but still dispatch through the production tier (e.g., anthropic/claude-haiku).
+	it('config.llm.tiers mutation propagates into LLMService.getModelForTier', async () => {
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		// Mutate tiers as buildProductionDeps now does up-front when tierOverride
+		// is supplied.
+		if (config.llm) {
+			config.llm = {
+				...config.llm,
+				tiers: {
+					fast: { provider: 'stub', model: 'gemma4:e4b-mock' },
+					standard: { provider: 'stub', model: 'gemma4:26b-mock' },
+				},
+			};
+		}
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+		const llm = await composeLLMService(config, costTracker, logger, stubRegistry);
+		// getModelForTier returns `<provider>/<model>` form; we asserted on the
+		// model substring after the slash to keep the assertion robust to the
+		// provider-id wrapping convention.
+		expect(llm.getModelForTier?.('fast')).toContain('gemma4:e4b-mock');
+		expect(llm.getModelForTier?.('standard')).toContain('gemma4:26b-mock');
+	});
 });
 
 describe('composeLLMService — cost-tracker delta', () => {
