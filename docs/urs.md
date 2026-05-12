@@ -9612,13 +9612,15 @@ The routing bucket is populated from a single generator module (`regression/src/
 
 ### REQ-REG-014 — The `judge` oracle kind MUST be reserved but MUST NOT be implemented in v1; declaring it on a case MUST throw a configuration error
 
-**Phase:** Chunk A.1 | **Status:** Implemented
+**Phase:** Chunk A.1 (judge reservation) + Chunk C (rubric activation) | **Status:** Implemented
 
-`OracleKind` includes `'judge'` for forward-compatibility, but `validatePersonaCase` throws when a case sets `oracle: 'judge'` ("reserved REQ-REG-014"). The same check rejects `oracle: 'rubric'` until Chunk C wires the rubric oracle.
+`OracleKind` includes `'judge'` for forward-compatibility, but `validatePersonaCase` throws when a case sets `oracle: 'judge'` ("reserved REQ-REG-014"). Chunk C activated `oracle: 'rubric'` on the `chatbot` bucket only; `rubric` is rejected on routing / recall / receipt cases, and `judge` remains reserved (no v1 implementation).
 
 **Standard tests:**
 - `validate-case.test.ts` > rejects oracle: judge always
-- `validate-case.test.ts` > rejects oracle: rubric in Chunk A
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > still rejects oracle="judge" (REQ-REG-014)
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a non-chatbot bucket (recall)
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a routing bucket
 
 ---
 
