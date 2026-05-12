@@ -10,8 +10,9 @@
  * change context. The chatbot-runner additionally calls
  * `env.endActiveSession()` between inputs.
  *
- * Codex I6 — every fixture declares `expectedHandler` so the runner
- * asserts routing correctness alongside reply quality.
+ * Codex I6 (deferred) — `expectedHandler` was originally declared on every
+ * fixture to assert routing correctness alongside reply quality. Removed
+ * pending Router instrumentation — see the `ChatbotFixture` JSDoc below.
  *
  * v0 source: scripts/iterate-prompts.ts:182-420
  */
@@ -32,7 +33,21 @@ interface ChatbotFixture {
 	description: string;
 	prompt: string;
 	rubric: string;
-	expectedHandler: string;
+	/**
+	 * Codex correction: `expectedHandler` is REMOVED from chatbot fixtures.
+	 * The current chatbot env factory (`build-deps.ts:131`) ships a placeholder
+	 * `captureHandler` that always returns null because the Router does not
+	 * yet emit a per-dispatch handler-id event surface-able through
+	 * `RuntimeServices`. With `expectedHandler` declared, every chatbot case
+	 * would trip the runner's "diagnostic captured no handler" branch and
+	 * emit `verdict: 'error'` regardless of reply quality. Until Router
+	 * instrumentation lands, chatbot cases grade reply quality via the
+	 * rubric oracle alone. Re-introduce `expectedHandler` per fixture once
+	 * the instrumentation is wired AND fixture IDs are aligned with the
+	 * food app's actual `regexWinner` taxonomy (`receipt_query`,
+	 * `price_lookup`, `store_spending`, `grocery_view`, etc. — see
+	 * `apps/food/src/index.ts` line ~1000).
+	 */
 	budgetUsd?: number;
 }
 
@@ -44,7 +59,6 @@ const FIXTURES: ChatbotFixture[] = [
 			'List the items on my Costco receipt from May 1 2026, with each price, and call out which are new entries.',
 		rubric:
 			'1. Reply MUST mention at least 5 of these Costco items: Spindrift, Blueberries, Chicken, Eggs, Strawberries, Avocados, Coffee, Salmon, Yogurt, Olive Oil.\n2. Reply MUST NOT say "first 10 items" or otherwise truncate.\n3. Reply MUST be readable in a Telegram message (no raw JSON dumps).',
-		expectedHandler: 'free-text-receipt-query',
 	},
 	{
 		id: 'chatbot-last-costco-trip',
@@ -52,7 +66,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'When was my most recent Costco trip and how much did it cost?',
 		rubric:
 			'1. Reply MUST mention the date 2026-05-01 or "May 1".\n2. Reply MUST mention $306 (the total).\n3. Reply MUST be relevant to a Costco trip.',
-		expectedHandler: 'free-text-receipt-query',
 	},
 	{
 		id: 'chatbot-receipt-vs-meal-plan',
@@ -60,7 +73,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'Show me the items and total from my most recent Costco receipt — not a meal plan.',
 		rubric:
 			'1. Reply MUST address the Costco receipt items and total.\n2. Reply MUST NOT offer to generate a meal plan.\n3. Reply MUST NOT say "no meal plan".',
-		expectedHandler: 'free-text-receipt-query',
 	},
 	{
 		id: 'chatbot-receipt-items-and-total',
@@ -68,7 +80,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'List the items and total from my most recent Costco receipt.',
 		rubric:
 			'1. Reply MUST mention more than 5 Costco items OR mention the $306.77 total.\n2. Reply MUST reference Costco.\n3. Reply MUST NOT be empty or "I do not know".',
-		expectedHandler: 'free-text-receipt-query',
 	},
 	{
 		id: 'chatbot-cheapest-blueberries',
@@ -77,7 +88,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'Where can I get the cheapest blueberries among the stores I have saved prices for?',
 		rubric:
 			'1. Reply MUST mention Trader Joes (or "Trader Joe").\n2. Reply MUST mention the $6.49 price (or "6.49").\n3. Reply MUST be a price-comparison answer, not a refusal.\n4. Reply MUST NOT claim a price the seed does not contain.',
-		expectedHandler: 'free-text-price-lookup',
 	},
 	{
 		id: 'chatbot-store-spending',
@@ -85,7 +95,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'How much have I spent at Costco and Trader Joes based on my saved receipts?',
 		rubric:
 			'1. Reply MUST mention Costco.\n2. Reply MUST mention Trader Joes (or "Trader Joe").\n3. Reply MUST mention the Costco total ($306 or close).\n4. Reply MUST NOT say "no meal plan".',
-		expectedHandler: 'free-text-store-spending',
 		budgetUsd: 0.25,
 	},
 	{
@@ -94,7 +103,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'What is on my grocery list right now?',
 		rubric:
 			'1. Reply MUST address the grocery list question (empty list is fine).\n2. Reply MUST NOT contain the word "error".\n3. Reply MUST be a coherent sentence in English.',
-		expectedHandler: 'free-text-grocery-query',
 	},
 	{
 		id: 'chatbot-blueberries-at-costco',
@@ -102,7 +110,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'What is the saved price for blueberries at Costco?',
 		rubric:
 			'1. Reply MUST mention Costco.\n2. Reply MUST mention $7.69 (or "7.69").\n3. Reply MUST NOT suggest a different store as the answer.',
-		expectedHandler: 'free-text-price-lookup',
 	},
 	{
 		id: 'chatbot-costco-last-items',
@@ -110,7 +117,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'What items did I buy on my most recent Costco trip?',
 		rubric:
 			'1. Reply MUST mention at least 3 of these seeded items: Spindrift, Blueberries, Chicken, Olive Oil, Eggs, Strawberries, Salmon, Coffee.\n2. Reply MUST be specific to the most recent Costco trip.\n3. Reply MUST NOT be a generic refusal.',
-		expectedHandler: 'free-text-receipt-query',
 	},
 	{
 		id: 'chatbot-new-receipt-items',
@@ -118,7 +124,6 @@ const FIXTURES: ChatbotFixture[] = [
 		prompt: 'Which items on my most recent Costco receipt are new additions to the price list?',
 		rubric:
 			'1. Reply MUST mention "new" or "added" items.\n2. Reply MUST reference at least one Costco item from the seeded receipt.\n3. Reply MUST NOT say "no new items" given the seeded receipt has priceUpdates with status=added.',
-		expectedHandler: 'free-text-receipt-query',
 	},
 ];
 
@@ -133,7 +138,7 @@ export function buildCases(): LoadedCase[] {
 			inputs: [
 				{
 					payload: fx.prompt,
-					expected: { expectedHandler: fx.expectedHandler },
+					expected: {},
 				},
 			],
 			oracle: 'rubric',

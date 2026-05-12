@@ -40,11 +40,14 @@ describe('chatbot bucket cases (migrated from v0)', () => {
 		expect(new Set(cases.map((c) => c.id))).toEqual(expected);
 	});
 
-	it('every chatbot case declares expectedHandler on its input (Codex I6)', () => {
+	// Codex I6 follow-up: expectedHandler is INTENTIONALLY ABSENT pending
+	// Router instrumentation. Re-introduce this test (asserting presence +
+	// taxonomy alignment with apps/food/src/index.ts regexWinner values) once
+	// the chatbot env factory's captureHandler returns a real handler id.
+	it('no chatbot case declares expectedHandler (deferred — Router instrumentation pending)', () => {
 		for (const c of cases) {
 			const exp = c.inputs[0]!.expected as { expectedHandler?: string };
-			expect(typeof exp.expectedHandler).toBe('string');
-			expect(exp.expectedHandler!.length).toBeGreaterThan(0);
+			expect(exp.expectedHandler).toBeUndefined();
 		}
 	});
 
