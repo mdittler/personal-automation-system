@@ -1,0 +1,193 @@
+/**
+ * Shared parser for `--model-matrix` / `--judge-model` specs.
+ *
+ * Single source of truth used by:
+ *   - the regression CLI (`regression/src/runner/args.ts`)
+ *   - the regression GUI POST handler (`core/src/gui/routes/regression.ts`)
+ *
+ * Tightened semantics (REQ-REG-GUI-OV-002): provider/model parts are matched
+ * against explicit allow-list regexes. Shell metacharacters, traversal
+ * sequences, whitespace, control characters, and HTML payloads are all
+ * rejected — closing the defense-in-depth gap Codex flagged on the original
+ * "verbatim copy" plan.
+ */
+
+export const MAX_MODEL_SPEC_CHARS = 256;
+
+// Provider: lowercase alpha first char, then lowercase alphanumeric + hyphens.
+// Captures real-world identifiers like "anthropic", "openai-compat", "ollama".
+const PROVIDER_RE = /^[a-z][a-z0-9-]{0,31}$/;
+
+// Model: alphanumeric first char, then alphanumeric + dot/colon/hyphen/underscore.
+// Captures real-world identifiers like "claude-haiku-4-5-20251001",
+// "gemma4:e4b", "gemini-2.0-flash", "gpt-4o".
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+const TIER_NAMES = new Set(['fast', 'standard', 'reasoning'] as const);
+
+export type ModelTier = 'fast' | 'standard' | 'reasoning';
+
+export interface ModelRef {
+	provider: string;
+	model: string;
+}
+
+export type ModelMatrix = Partial<Record<ModelTier, ModelRef>>;
+
+/**
+ * Parse a single `provider/model` spec.
+ *
+ * Tight semantics: rejects empty parts, illegal characters, traversal,
+ * shell/HTML metacharacters, and oversized inputs.
+ */
+export function parseModelRef(s: string): ModelRef {
+	if (typeof s !== 'string') {
+		throw new TypeError('model ref must be a string');
+	}
+	const singleCap = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
+	if (s.length > singleCap) {
+		throw new RangeError(`model ref exceeds ${singleCap} chars`);
+	}
+	const idx = s.indexOf('/');
+	if (idx < 0) {
+		throw new Error(`model ref must be provider/model (got: ${JSON.stringify(s)})`);
+	}
+	const provider = s.slice(0, idx);
+	const model = s.slice(idx + 1);
+	if (!provider) {
+		throw new Error('model ref provider is empty');
+	}
+	if (!model) {
+		throw new Error('model ref model is empty');
+	}
+	if (!PROVIDER_RE.test(provider)) {
+		throw new Error(
+			`model ref provider must match ${PROVIDER_RE.source} (got: ${JSON.stringify(provider)})`,
+		);
+	}
+	if (!MODEL_RE.test(model)) {
+		throw new Error(
+			`model ref model must match ${MODEL_RE.source} (got: ${JSON.stringify(model)})`,
+		);
+	}
+	// Defense in depth — `..` cannot appear via PROVIDER_RE (no dots allowed),
+	// but the model regex permits dots so guard against `..` traversal explicitly.
+	if (model.includes('..')) {
+		throw new Error('model ref must not contain ".." traversal sequence');
+	}
+	return { provider, model };
+}
+
+/**
+ * Parse a `--model-matrix=` payload.
+ *
+ * Forms:
+ *   "fast=provider/model"                        — single named tier
+ *   "fast=p/m,standard=p/m,reasoning=p/m"        — multiple named tiers
+ *   "p/m"                                        — single positional (→ fast)
+ *   "p/m,p/m,p/m"                                — three positional (fast, standard, reasoning)
+ *   "fast=p/m,p/m"                               — mixed (REJECTED if it would conflict)
+ *
+ * Rejects:
+ *   - empty / whitespace-only / comma-only
+ *   - duplicate tier assignments
+ *   - mixed positional+named that target the same tier
+ *   - unknown tier names
+ *   - more than 3 positional entries
+ *   - any embedded `parseModelRef` violation
+ */
+export function parseModelMatrixValue(v: string): ModelMatrix {
+	if (typeof v !== 'string') {
+		throw new TypeError('model-matrix value must be a string');
+	}
+	if (v.length > MAX_MODEL_SPEC_CHARS) {
+		throw new RangeError(`model-matrix value exceeds ${MAX_MODEL_SPEC_CHARS} chars`);
+	}
+	if (!v) {
+		throw new Error('--model-matrix requires a value (empty string rejected)');
+	}
+	const rawEntries = v.split(',').map((e) => e.trim());
+	const entries = rawEntries.filter(Boolean);
+	if (entries.length === 0) {
+		throw new Error('--model-matrix requires a value (no non-empty entries)');
+	}
+
+	const out: ModelMatrix = {};
+	const POSITIONAL_ORDER: readonly ModelTier[] = ['fast', 'standard', 'reasoning'];
+	let positionalIdx = 0;
+
+	for (const entry of entries) {
+		const eqIdx = entry.indexOf('=');
+		let tier: ModelTier;
+		let refStr: string;
+		if (eqIdx > 0) {
+			const tierStr = entry.slice(0, eqIdx);
+			if (!TIER_NAMES.has(tierStr as ModelTier)) {
+				throw new Error(
+					`--model-matrix tier must be one of ${[...TIER_NAMES].join('/')} (got: ${JSON.stringify(tierStr)})`,
+				);
+			}
+			tier = tierStr as ModelTier;
+			refStr = entry.slice(eqIdx + 1);
+		} else {
+			tier = POSITIONAL_ORDER[positionalIdx++] as ModelTier;
+			if (!tier) {
+				throw new Error('--model-matrix: too many positional entries (max 3)');
+			}
+			refStr = entry;
+		}
+
+		if (out[tier]) {
+			throw new Error(
+				`--model-matrix: duplicate assignment to tier ${tier} (already set by an earlier entry — conflict)`,
+			);
+		}
+
+		out[tier] = parseModelRef(refStr);
+	}
+
+	return out;
+}
+
+/**
+ * Parse a `--judge-model=` payload — always lands on the standard tier.
+ */
+export function parseJudgeModelValue(v: string): ModelRef {
+	if (typeof v !== 'string') {
+		throw new TypeError('judge-model value must be a string');
+	}
+	const singleCap = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
+	if (v.length > singleCap) {
+		throw new RangeError(`judge-model value exceeds ${singleCap} chars`);
+	}
+	if (!v) {
+		throw new Error('--judge-model requires a value (empty string rejected)');
+	}
+	return parseModelRef(v);
+}
+
+/**
+ * Type-safe normalizer for body fields read from JSON requests.
+ *
+ *   undefined / null  → undefined (omit)
+ *   ''  / whitespace  → undefined (treat as "no override")
+ *   string (≤MAX)     → trimmed string
+ *   non-string        → TypeError (the POST handler maps to 400)
+ *   over-MAX string   → RangeError (the POST handler maps to 400)
+ */
+export function normalizeOptionalModelSpec(value: unknown): string | undefined {
+	if (value === undefined || value === null) {
+		return undefined;
+	}
+	if (typeof value !== 'string') {
+		throw new TypeError('model spec must be a string');
+	}
+	const trimmed = value.trim();
+	if (trimmed.length === 0) {
+		return undefined;
+	}
+	if (trimmed.length > MAX_MODEL_SPEC_CHARS) {
+		throw new RangeError(`model spec exceeds ${MAX_MODEL_SPEC_CHARS} chars`);
+	}
+	return trimmed;
+}

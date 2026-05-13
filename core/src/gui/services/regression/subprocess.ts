@@ -1,6 +1,10 @@
 import type { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
+import {
+	parseJudgeModelValue,
+	parseModelMatrixValue,
+} from '../../../services/regression/model-spec.js';
 import { VALID_BUCKETS } from '../../../types/regression.js';
 import {
 	type RegressionSpawnTarget,
@@ -13,6 +17,8 @@ const SAFE_RERUN_ID = /^[a-z][a-z0-9-]{0,127}$/;
 const ALLOWED_SCALAR_ARGS = new Set(['--json', '--dry-run', '--list']);
 const ALLOWED_BUCKET_PREFIX = '--bucket=';
 const ALLOWED_RERUN_PREFIX = '--rerun=';
+const ALLOWED_MODEL_MATRIX_PREFIX = '--model-matrix=';
+const ALLOWED_JUDGE_MODEL_PREFIX = '--judge-model=';
 
 /** Throws when any arg is not on the spawn allowlist (defense in depth). */
 export function validateSpawnArgs(args: readonly string[]): void {
@@ -42,6 +48,28 @@ export function validateSpawnArgs(args: readonly string[]): void {
 				throw new Error(`spawn allowlist: invalid --rerun id "${String(v)}"`);
 			}
 			i++;
+			continue;
+		}
+		// REQ-REG-GUI-OV-004: --model-matrix and --judge-model (equals form only,
+		// re-validated through the shared parser for defense in depth).
+		if (a.startsWith(ALLOWED_MODEL_MATRIX_PREFIX)) {
+			const v = a.slice(ALLOWED_MODEL_MATRIX_PREFIX.length);
+			try {
+				parseModelMatrixValue(v);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				throw new Error(`spawn allowlist: invalid --model-matrix "${v}": ${msg}`);
+			}
+			continue;
+		}
+		if (a.startsWith(ALLOWED_JUDGE_MODEL_PREFIX)) {
+			const v = a.slice(ALLOWED_JUDGE_MODEL_PREFIX.length);
+			try {
+				parseJudgeModelValue(v);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				throw new Error(`spawn allowlist: invalid --judge-model "${v}": ${msg}`);
+			}
 			continue;
 		}
 		throw new Error(`spawn allowlist: forbidden arg "${a}"`);

@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import {
+	normalizeOptionalModelSpec,
+	parseJudgeModelValue,
+	parseModelMatrixValue,
+} from '../../services/regression/model-spec.js';
+import {
 	type RunResult,
 	SAFE_CASE_ID_RE,
 	type Verdict,
@@ -292,6 +297,8 @@ export function registerRegressionRoutes(
 				bucket?: string;
 				rerun?: string | string[];
 				forceFresh?: string | boolean;
+				modelMatrix?: unknown;
+				judgeModel?: unknown;
 			};
 			if (body.bucket && !isValidBucket(body.bucket)) {
 				return reply.status(400).send({ error: `unknown bucket: ${body.bucket}` });
@@ -302,6 +309,31 @@ export function registerRegressionRoutes(
 					return reply.status(400).send({ error: 'invalid rerun id' });
 				}
 			}
+
+			// REQ-REG-GUI-OV-005 / 002: validate optional model overrides.
+			// Reuses the same parsers the CLI uses (REQ-REG-GUI-OV-003) so the
+			// GUI and CLI accept exactly the same value set.
+			let modelMatrixRaw: string | undefined;
+			let judgeModelRaw: string | undefined;
+			try {
+				modelMatrixRaw = normalizeOptionalModelSpec(body.modelMatrix);
+				if (modelMatrixRaw !== undefined) {
+					parseModelMatrixValue(modelMatrixRaw);
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return reply.status(400).send({ error: `invalid modelMatrix: ${msg}` });
+			}
+			try {
+				judgeModelRaw = normalizeOptionalModelSpec(body.judgeModel);
+				if (judgeModelRaw !== undefined) {
+					parseJudgeModelValue(judgeModelRaw);
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return reply.status(400).send({ error: `invalid judgeModel: ${msg}` });
+			}
+
 			const discovery = await caseDiscovery.discover();
 			if (discovery.error) {
 				return reply.status(400).send({ error: `case discovery failed: ${discovery.error}` });
@@ -328,6 +360,8 @@ export function registerRegressionRoutes(
 			const args: string[] = ['--json'];
 			if (body.bucket) args.push(`--bucket=${body.bucket}`);
 			for (const id of rerunSet) args.push(`--rerun=${id}`);
+			if (modelMatrixRaw !== undefined) args.push(`--model-matrix=${modelMatrixRaw}`);
+			if (judgeModelRaw !== undefined) args.push(`--judge-model=${judgeModelRaw}`);
 
 			try {
 				const { runId } = await runRegistry.createRun({

@@ -8,8 +8,18 @@
  *   --json           (emit line-delimited JSON events; used by the GUI subprocess)
  *   --list           (emit case-list NDJSON only; no dispatch — used by the GUI)
  *   --help           (print HELP_TEXT and exit 0)
+ *
+ * `--model-matrix` and `--judge-model` parsing lives in
+ * `core/src/services/regression/model-spec.ts` — same parser is used by the
+ * GUI POST handler (REQ-REG-GUI-OV-003).
  */
 
+import {
+	type ModelMatrix,
+	type ModelRef,
+	parseJudgeModelValue,
+	parseModelMatrixValue,
+} from '@core/services/regression/model-spec.js';
 import { VALID_BUCKETS, isValidBucket } from '../shared/types.js';
 
 /** Mirrors `validatePersonaCase`'s ID_RE so a `--rerun=<id>` value cannot
@@ -26,10 +36,8 @@ export interface CliOptions {
 	/** Force fresh dispatch for every case (no cache reads). Equivalent to
 	 * passing `--rerun=<id>` for every loaded case. Used by Batch 5 verification. */
 	noCache: boolean;
-	modelMatrix?: Partial<
-		Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>
-	>;
-	judgeModel?: { provider: string; model: string };
+	modelMatrix?: ModelMatrix;
+	judgeModel?: ModelRef;
 }
 
 export const HELP_TEXT = `\
@@ -66,53 +74,6 @@ function validateRerunId(v: string): string {
 		);
 	}
 	return v;
-}
-
-function parseModelRef(s: string): { provider: string; model: string } {
-	const idx = s.indexOf('/');
-	if (idx <= 0 || idx === s.length - 1) {
-		throw new Error(`--model-matrix entry must be provider/model (got: ${JSON.stringify(s)})`);
-	}
-	return { provider: s.slice(0, idx), model: s.slice(idx + 1) };
-}
-
-function parseModelMatrixValue(v: string): NonNullable<CliOptions['modelMatrix']> {
-	if (!v) throw new Error('--model-matrix requires a value (empty string rejected)');
-	const out: NonNullable<CliOptions['modelMatrix']> = {};
-	const entries = v
-		.split(',')
-		.map((e) => e.trim())
-		.filter(Boolean);
-	const positional: Array<keyof NonNullable<CliOptions['modelMatrix']>> = [
-		'fast',
-		'standard',
-		'reasoning',
-	];
-	let positionalIdx = 0;
-	for (const entry of entries) {
-		const eqIdx = entry.indexOf('=');
-		if (eqIdx > 0) {
-			const tierStr = entry.slice(0, eqIdx);
-			if (tierStr !== 'fast' && tierStr !== 'standard' && tierStr !== 'reasoning') {
-				throw new Error(`--model-matrix tier must be fast/standard/reasoning (got ${tierStr})`);
-			}
-			out[tierStr] = parseModelRef(entry.slice(eqIdx + 1));
-		} else {
-			const tier = positional[positionalIdx++];
-			if (!tier) throw new Error('--model-matrix: too many positional entries (max 3)');
-			out[tier] = parseModelRef(entry);
-		}
-	}
-	return out;
-}
-
-function parseJudgeModelValue(v: string): { provider: string; model: string } {
-	if (!v) throw new Error('--judge-model requires a value (empty string rejected)');
-	const idx = v.indexOf('/');
-	if (idx <= 0 || idx === v.length - 1) {
-		throw new Error(`--judge-model requires provider/model (got: ${JSON.stringify(v)})`);
-	}
-	return { provider: v.slice(0, idx), model: v.slice(idx + 1) };
 }
 
 export function parseCliArgs(argv: readonly string[]): CliOptions {
