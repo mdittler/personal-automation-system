@@ -1897,7 +1897,7 @@ The GUI must require token-based authentication via HTTP-only cookie. Login must
 
 **Phase:** 8 | **Status:** Implemented
 
-The GUI must provide routes for dashboard, app list, app details, app toggle, scheduler view, log viewer, config view, and LLM usage. Non-existent apps must return 404.
+The GUI must provide routes for dashboard, app list, app details, app toggle, scheduler view, log viewer, config view, and LLM usage. Static GUI assets such as htmx must be served locally from `/gui/public/` so htmx-driven panels can load without external network dependencies. Non-existent apps must return 404.
 
 **Standard tests:**
 - `routes.test.ts` > GET /gui/ (Dashboard) > returns 200 with dashboard content
@@ -1910,6 +1910,7 @@ The GUI must provide routes for dashboard, app list, app details, app toggle, sc
 - `routes.test.ts` > GET /gui/config > returns 200 with config content
 - `routes.test.ts` > GET /gui/config > shows registered users
 - `routes.test.ts` > GET /gui/llm > returns 200 with empty state when no usage
+- `server.test.ts` > `createServer` > serves the vendored htmx asset used by GUI lazy-loaded panels
 
 **Edge case tests:**
 - `routes.test.ts` > GET /gui/apps/:appId > returns 404 for non-existent app
@@ -7283,11 +7284,13 @@ Report definitions must be validated: ID pattern (`^[a-z][a-z0-9-]*$`, max 50 ch
 
 **Phase:** 21 | **Status:** Implemented
 
-Section collector gathers data per section type: changes (from change log with lookback_hours and app_filter), app-data (file read with path traversal protection and date token resolution), context (store search by key_prefix), custom (static text). Unknown types and errors handled gracefully.
+Section collector gathers data per section type: changes (from change log with lookback_hours and app_filter), app-data (file read with path traversal protection and date token resolution), context (store search by key_prefix), custom (static text). Changes sections include write, append, and archive operations; read-only activity is filtered out. Duplicate operations on the same path are collapsed only when their scope metadata also matches, so same-path changes in different spaces remain distinct. Unknown types and errors handled gracefully.
 
 **Standard tests:**
 - `section-collector.test.ts` > collectSection — changes > collects changes from change log
 - `section-collector.test.ts` > collectSection — changes > filters by app when app_filter specified
+- `section-collector.test.ts` > collectSection — changes > ignores read-only activity because reports summarize actual changes
+- `section-collector.test.ts` > collectSection — changes > collapses duplicate operations on the same path
 - `section-collector.test.ts` > collectSection — app-data > reads an app data file
 - `section-collector.test.ts` > collectSection — app-data > resolves {today} date token
 - `section-collector.test.ts` > collectSection — context > collects matching context entries
@@ -7299,6 +7302,8 @@ Section collector gathers data per section type: changes (from change log with l
 
 **Edge case tests:**
 - `section-collector.test.ts` > collectSection — changes > returns empty when no changes exist
+- `section-collector.test.ts` > collectSection — changes > returns empty when the window only contains reads
+- `section-collector.test.ts` > collectSection — changes > does not collapse same-path operations from different scopes
 - `section-collector.test.ts` > collectSection — changes > returns empty when filter matches no apps
 - `section-collector.test.ts` > collectSection — changes > uses default lookback hours when not specified
 - `section-collector.test.ts` > collectSection — app-data > returns file not found when file missing
@@ -7340,7 +7345,7 @@ Reports formatted as markdown with header, optional LLM summary (before sections
 
 **Phase:** 21 | **Status:** Implemented
 
-ReportService provides CRUD (save/get/list/delete) with YAML persistence, report execution (collect sections, optional LLM summarize, format, deliver via Telegram, save to history), preview mode (no send/save), max 50 reports limit.
+ReportService provides CRUD (save/get/list/delete) with YAML persistence, report execution (collect sections, optional LLM summarize, format, deliver via Telegram, save to history), preview mode (no send/save), max 50 reports limit. LLM summaries are framed to focus on meaningful user-facing changes and to avoid implementation noise such as app IDs, user IDs, and file paths unless the path itself is the useful fact.
 
 **Standard tests:**
 - `report-service.test.ts` > ReportService — CRUD > saves and retrieves a report
@@ -7353,6 +7358,7 @@ ReportService provides CRUD (save/get/list/delete) with YAML persistence, report
 - `report-service.test.ts` > ReportService — run > saves report to history
 - `report-service.test.ts` > ReportService — LLM summarization > summarizes when LLM enabled
 - `report-service.test.ts` > ReportService — LLM summarization > uses custom LLM prompt when provided
+- `report-service.test.ts` > ReportService — LLM summarization > frames the LLM prompt to avoid implementation-noise summaries
 
 **Edge case tests:**
 - `report-service.test.ts` > ReportService — CRUD > returns false when deleting nonexistent report
@@ -9855,7 +9861,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SERVER-001 | health.test.ts | 1 | 2 | Implemented |
 | REQ-SERVER-002 | webhook.test.ts | 2 | 3 | Implemented |
 | REQ-GUI-001 | auth.test.ts | 4 | 2 | Implemented |
-| REQ-GUI-002 | routes.test.ts | 10 | 3 | Implemented |
+| REQ-GUI-002 | routes.test.ts, server.test.ts | 11 | 3 | Implemented |
 | REQ-GUI-004 | routes.test.ts | 2 | 3 | Implemented |
 | REQ-GUI-005 | routes.test.ts | 3 | 4 | Implemented |
 | REQ-GUI-006 | cron-describe.test.ts, cron-manager.test.ts, routes.test.ts | 14 | 10 | Implemented |
@@ -9936,9 +9942,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CHATBOT-009 | control-tags.test.ts | 2 | 4 | Implemented |
 | REQ-SECRETS-001 | secrets.test.ts | 3 | 5 | Implemented |
 | REQ-REPORT-001 | report-validator.test.ts | 8 | 33 | Implemented |
-| REQ-REPORT-002 | section-collector.test.ts | 10 | 12 | Implemented |
+| REQ-REPORT-002 | section-collector.test.ts | 12 | 14 | Implemented |
 | REQ-REPORT-003 | report-formatter.test.ts | 7 | 4 | Implemented |
-| REQ-REPORT-004 | report-service.test.ts, report-load-validation.test.ts | 10 | 24 | Implemented |
+| REQ-REPORT-004 | report-service.test.ts, report-load-validation.test.ts | 11 | 24 | Implemented |
 | REQ-REPORT-005 | report-service.test.ts, cron-manager.test.ts, n8n-dispatch-integration.test.ts | 6 | 7 | Implemented |
 | REQ-REPORT-006 | reports.test.ts, report-space-id.test.ts | 17 | 17 | Implemented |
 | REQ-ALERT-001 | alert-validator.test.ts | 19 | 30 | Implemented |
@@ -10265,4 +10271,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 
-| **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |
+| **Totals** | **249 test files** | **1848** | **1984** | **3832 tests** |
