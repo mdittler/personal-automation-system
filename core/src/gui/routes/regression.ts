@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import {
+	normalizeOptionalModelSpec,
+	parseJudgeModelValue,
+	parseModelMatrixValue,
+} from '../../services/regression/model-spec.js';
+import {
 	type RunResult,
 	SAFE_CASE_ID_RE,
 	type Verdict,
@@ -68,6 +73,27 @@ const VERDICT_ICON: Record<Verdict, DisplayedCase['statusIcon']> = {
 	'budget-exceeded': '⊘',
 	error: '◆',
 };
+
+/**
+ * Normalize + validate an optional model-spec body field. Returns either the
+ * trimmed string (or `undefined` for "no override") OR an error message ready
+ * for a 400 response. Centralizes the two near-identical try/catch blocks the
+ * POST handler would otherwise need for `modelMatrix` and `judgeModel`.
+ */
+function validateOptionalModelField(
+	raw: unknown,
+	fieldName: string,
+	parser: (v: string) => unknown,
+): { value: string | undefined; error: null } | { value: null; error: string } {
+	try {
+		const v = normalizeOptionalModelSpec(raw);
+		if (v !== undefined) parser(v);
+		return { value: v, error: null };
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return { value: null, error: `invalid ${fieldName}: ${msg}` };
+	}
+}
 
 function buildDisplayedCase(listed: ListedCase, display: DisplayResult | null): DisplayedCase {
 	if (!display) {
@@ -292,6 +318,8 @@ export function registerRegressionRoutes(
 				bucket?: string;
 				rerun?: string | string[];
 				forceFresh?: string | boolean;
+				modelMatrix?: unknown;
+				judgeModel?: unknown;
 			};
 			if (body.bucket && !isValidBucket(body.bucket)) {
 				return reply.status(400).send({ error: `unknown bucket: ${body.bucket}` });
@@ -302,6 +330,16 @@ export function registerRegressionRoutes(
 					return reply.status(400).send({ error: 'invalid rerun id' });
 				}
 			}
+
+			// REQ-REG-GUI-OV-003/005: same parser as the CLI; non-string body
+			// values throw before discovery runs.
+			const mm = validateOptionalModelField(body.modelMatrix, 'modelMatrix', parseModelMatrixValue);
+			if (mm.error) return reply.status(400).send({ error: mm.error });
+			const jm = validateOptionalModelField(body.judgeModel, 'judgeModel', parseJudgeModelValue);
+			if (jm.error) return reply.status(400).send({ error: jm.error });
+			const modelMatrixRaw = mm.value;
+			const judgeModelRaw = jm.value;
+
 			const discovery = await caseDiscovery.discover();
 			if (discovery.error) {
 				return reply.status(400).send({ error: `case discovery failed: ${discovery.error}` });
@@ -328,6 +366,8 @@ export function registerRegressionRoutes(
 			const args: string[] = ['--json'];
 			if (body.bucket) args.push(`--bucket=${body.bucket}`);
 			for (const id of rerunSet) args.push(`--rerun=${id}`);
+			if (modelMatrixRaw !== undefined) args.push(`--model-matrix=${modelMatrixRaw}`);
+			if (judgeModelRaw !== undefined) args.push(`--judge-model=${judgeModelRaw}`);
 
 			try {
 				const { runId } = await runRegistry.createRun({

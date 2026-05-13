@@ -139,7 +139,33 @@ All infrastructure (phases 0–30), food app (H1–H12b), security remediation (
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
-### Current Priority: Stronger-Routing-Model Sweep (in progress, branch `regression/stronger-routing-models`, 2026-05-13)
+### Current Priority: Regression GUI model-override surface (complete, branch `regression/gui-model-override`, 2026-05-13)
+**Goal:** Adds `modelMatrix` and `judgeModel` text inputs to the `/gui/regression` admin form so operators can compare routing models from the web UI rather than CLI-only invocations. Closes the carry-forward from the stronger-routing-model sweep that landed earlier the same day.
+
+**Approach:** TDD across 9 batches. New shared parser module at `core/src/services/regression/model-spec.ts` exports `parseModelRef`, `parseModelMatrixValue`, `parseJudgeModelValue`, `normalizeOptionalModelSpec`, and `MAX_MODEL_SPEC_CHARS` — used by both the regression CLI (`regression/src/runner/args.ts`) and the GUI POST handler (`core/src/gui/routes/regression.ts`) as the single source of truth (REQ-REG-GUI-OV-003). The parser tightens semantics over the original CLI parser: provider/model character classes via regex, rejection of shell metachars (`;$\`<>&|()'"\\`), traversal sequences (`..`), control characters, HTML payloads, and oversized inputs (256-char cap).
+
+**Code surfaces:** `core/src/services/regression/model-spec.ts` (NEW shared parser); `regression/src/runner/args.ts` (imports from shared); `core/src/gui/services/regression/subprocess.ts` (`validateSpawnArgs` re-validates via shared parser — defense in depth); `core/src/gui/routes/regression.ts` (POST handler normalizes body fields via `normalizeOptionalModelSpec`, parses via shared parser, appends `--model-matrix=` / `--judge-model=` to spawn args after `--bucket=` / `--rerun=`); `core/src/gui/views/partials/regression-summary-bar.eta` (two `<label>`-wrapped `<input>` elements with `aria-label`, placeholder, `autocomplete="off"`; client `fdToBody()` captures arbitrary text fields so no JS change needed — server normalizes empty strings).
+
+**10 new URS REQs** (REQ-REG-GUI-OV-001..010): operator surface (001), tightened parser (002), single-source-of-truth contract (003), spawn allowlist re-validation (004), empty/non-string handling (005), backwards-compat (006), distinct model IDs → distinct cache rows (007, narrowed — see Out of Scope), accessible UI labels (008), auth/CSRF posture unchanged (009), XSS framing for JSON response (010).
+
+**Test inventory (6 touched test files):**
+- `core/src/services/regression/__tests__/model-spec.test.ts` (NEW, 56 tests) — `parseModelRef` (27), `parseModelMatrixValue` (12), `parseJudgeModelValue` (4), `normalizeOptionalModelSpec` (13). Covers happy path, edge, security categories per `pas-testing-standards`.
+- `core/src/gui/services/regression/__tests__/subprocess.test.ts` (+17 tests) — allowlist accepts/rejects new flags with full security coverage.
+- `core/src/gui/__tests__/regression-routes-write.test.ts` (+27 tests) — POST handler validation, type-safe body normalization, contract tests asserting parser/POST parity, operator persona scenario (multi-step run-two-models-back-to-back).
+- `core/src/gui/__tests__/regression-routes.test.ts` (+7 tests) — UI rendering with accessibility assertions, history view rendering distinct models for one case.
+- `core/src/gui/__tests__/regression-integration.test.ts` (+7 tests) — `spawnRegression` end-to-end with fake CLI, plus real-CLI `--list` smoke tests asserting cache-key changes under override flags.
+- `regression/src/__tests__/cache.test.ts` (+2 tests) — distinct modelIds → distinct cache files for one case.
+
+**Out of scope (deferred, tracked in open-items.md):**
+- **Cache key should include provider, not just model name.** `TierModelSnapshot` stores model strings only; two providers with the same model name would collide. GUI-OV-7 was narrowed to "distinct model IDs" for this phase; the schema migration is deferred.
+- Model picker dropdown sourced from `ModelCatalog` — free-text input matches CLI ergonomics.
+- Per-bucket model override — CLI applies overrides globally per run; GUI mirrors that.
+- Model-aware estimator — existing flat per-bucket constants kept.
+- CSS polish — minimal classes added; visual refinement in a UX-focused follow-on.
+
+**Tests:** 11,241 root + 348 regression workspace tests pass. **Codex review applied** (15 items reviewed, ~12 ruled in/partially): tightened parser with regex allowlists (item 1), security fixtures use legitimate provider/model shape with embedded metachars (item 2), split Batch 4 into POST-args-construction + separate real-CLI integration (item 3), regression-side cache-store tests for distinct modelIds (item 4), full matrix coverage + judgeModel precedence tests (item 5), correct auth expectations 403 vs 302 (item 6), `normalizeOptionalModelSpec` for non-string body values (item 7), MAX_MODEL_SPEC_CHARS in shared module (item 8), reject comma-only / duplicate tiers / mixed positional+named (item 9), narrowed GUI-OV-7 to model-ID-only (item 10, partial), dropped client-side `fdToBody` capture tests (item 11, partial), reframed XSS test for JSON response (item 12), accessible `<label>` + aria-label (item 13), added URS/traceability section (item 15).
+
+### Previous Priority: Stronger-Routing-Model Sweep (complete, branch `regression/stronger-routing-models`, 2026-05-13)
 **Goal:** After Chunk C left REQ-REG-011 routing accuracy at 0.8962 under `gemma4:e4b`, step up the routing model rather than prompt-harden a weak local model. Decision tree: Gemma 4 26B → Gemma 4 31B → Claude Haiku 4.5; halt at first ≥0.95.
 
 **Outcome:** **Gemma 4 31B clears the 0.95 gate at 0.9811 per-input routing accuracy (33/36 cases pass).** Gemma 4 26B plateaued at 0.9057 (semantic mispicks); attempts to prompt-harden made things worse (v3 PRECISION block regressed to 0.7642). Haiku 4.5 surprised at 0.9151 — Haiku over-generalizes cultural-recipe inputs (Thanksgiving/Christmas/Eid/Lunar New Year) to generic recipe search. Sonnet 4.6 sweep declined by operator.

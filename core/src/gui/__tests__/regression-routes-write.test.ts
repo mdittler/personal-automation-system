@@ -11,7 +11,7 @@
  * Security: command-injection-style bucket/rerun → 400 before spawn.
  */
 
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -653,6 +653,546 @@ describe('concurrency — real Promise.all of two POSTs', () => {
 			]);
 			const statuses = [a.statusCode, b.statusCode].sort();
 			expect(statuses).toEqual([202, 409]);
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+// ─── REQ-REG-GUI-OV — POST /gui/regression/runs model-override fields ─────────
+describe('POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV)', () => {
+	// Happy path
+	it('forwards modelMatrix=fast=ollama/gemma4:31b as --model-matrix= arg', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'fast=ollama/gemma4:31b' },
+			});
+			expect(res.statusCode).toBe(202);
+			expect(pendingRuns[0]?.args).toContain('--model-matrix=fast=ollama/gemma4:31b');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('forwards judgeModel as --judge-model= arg', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: {
+					_csrf: csrf,
+					judgeModel: 'anthropic/claude-haiku-4-5-20251001',
+				},
+			});
+			expect(res.statusCode).toBe(202);
+			expect(pendingRuns[0]?.args).toContain('--judge-model=anthropic/claude-haiku-4-5-20251001');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('forwards a full matrix (fast + standard + reasoning)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const matrix =
+				'fast=ollama/gemma4:31b,standard=anthropic/claude-sonnet-4-6,reasoning=anthropic/claude-opus-4-7';
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: matrix },
+			});
+			expect(res.statusCode).toBe(202);
+			expect(pendingRuns[0]?.args).toContain(`--model-matrix=${matrix}`);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('forwards both modelMatrix and judgeModel together', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: {
+					_csrf: csrf,
+					modelMatrix: 'fast=ollama/gemma4:31b',
+					judgeModel: 'anthropic/claude-haiku-4-5-20251001',
+				},
+			});
+			expect(res.statusCode).toBe(202);
+			const args = pendingRuns[0]?.args ?? [];
+			expect(args).toContain('--model-matrix=fast=ollama/gemma4:31b');
+			expect(args).toContain('--judge-model=anthropic/claude-haiku-4-5-20251001');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('appends NO model flags when neither field is provided (backwards compat)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			expect(res.statusCode).toBe(202);
+			const args = pendingRuns[0]?.args ?? [];
+			expect(args.some((a) => a.startsWith('--model-matrix='))).toBe(false);
+			expect(args.some((a) => a.startsWith('--judge-model='))).toBe(false);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Edge: empty / whitespace
+	it('omits --model-matrix arg when modelMatrix is empty string', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: '' },
+			});
+			expect(res.statusCode).toBe(202);
+			expect((pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix='))).toBe(false);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('omits --model-matrix arg when modelMatrix is whitespace-only', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: '   ' },
+			});
+			expect(res.statusCode).toBe(202);
+			expect((pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix='))).toBe(false);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Error handling
+	it('rejects malformed modelMatrix with 400 and parser error in body', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'garbage' },
+			});
+			expect(res.statusCode).toBe(400);
+			expect(res.json()).toMatchObject({ error: expect.stringMatching(/model/i) });
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects malformed judgeModel with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: 'no-slash' },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Security: non-string body types
+	it('rejects modelMatrix sent as array with 400 (no crash)', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: [] },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects modelMatrix sent as object with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: { foo: 'bar' } },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as number with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: 42 },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as array with 400 (no crash)', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: [] },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as object with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: { foo: 'bar' } },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as boolean with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: true },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects modelMatrix exceeding MAX_MODEL_SPEC_CHARS with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'a'.repeat(1024) },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Security: shell metachars rejected before spawn
+	it('rejects modelMatrix with embedded shell metachars before spawn', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'fast=ollama/gemma;rm' },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects HTML payload in modelMatrix with 400 JSON envelope (XSS framing)', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: '<script>alert(1)</script>' },
+			});
+			expect(res.statusCode).toBe(400);
+			expect(res.headers['content-type']).toMatch(/application\/json/i);
+			// Body must be valid JSON (envelope intact); error message itself may
+			// echo the payload, but JSON.stringify ensures it can't break out of
+			// the JSON response context.
+			const parsed = JSON.parse(res.body);
+			expect(parsed.error).toBeTruthy();
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Precedence — verify judgeModel and modelMatrix=standard= flow through
+	// as separate flags; the CLI's buildTierOverrideFromCli handles the
+	// precedence at the LLM-service layer (judge wins). The GUI just forwards
+	// both flags so the same precedence applies.
+	it('forwards judgeModel + modelMatrix standard slot as two separate flags', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: {
+					_csrf: csrf,
+					modelMatrix: 'standard=anthropic/claude-sonnet-4-6',
+					judgeModel: 'anthropic/claude-haiku-4-5-20251001',
+				},
+			});
+			expect(res.statusCode).toBe(202);
+			const args = pendingRuns[0]?.args ?? [];
+			expect(args).toContain('--model-matrix=standard=anthropic/claude-sonnet-4-6');
+			expect(args).toContain('--judge-model=anthropic/claude-haiku-4-5-20251001');
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Auth — confirms unchanged posture under the new fields
+	it('returns 403 for authenticated non-admin even with valid model override', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app, 'user');
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'fast=ollama/gemma4:31b' },
+			});
+			expect(res.statusCode).toBe(403);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('returns 302 redirect for unauthenticated POST with model override', async () => {
+		const { app } = await buildApp();
+		try {
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				payload: { modelMatrix: 'fast=ollama/gemma4:31b' },
+			});
+			expect(res.statusCode).toBe(302);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// Contract tests — every value the shared parser accepts/rejects in unit
+	// tests must produce the same accept/reject decision through the POST.
+	const ACCEPTED_BY_PARSER = [
+		'fast=ollama/gemma4:31b',
+		'anthropic/claude-sonnet-4-6',
+		'fast=ollama/gemma4:31b,standard=anthropic/claude-sonnet-4-6',
+		'ollama/gemma4:31b,anthropic/claude-sonnet-4-6,anthropic/claude-opus-4-7',
+	];
+	for (const matrix of ACCEPTED_BY_PARSER) {
+		it(`contract: POST accepts matrix "${matrix}" (parser accepts → POST accepts)`, async () => {
+			const { app, pendingRuns } = await buildApp();
+			try {
+				const { cookies, csrf } = await loginAndGetCsrf(app);
+				const res = await app.inject({
+					method: 'POST',
+					url: '/gui/regression/runs',
+					cookies,
+					payload: { _csrf: csrf, modelMatrix: matrix },
+				});
+				expect(res.statusCode).toBe(202);
+				expect(pendingRuns[0]?.args).toContain(`--model-matrix=${matrix}`);
+			} finally {
+				await app.close();
+			}
+		});
+	}
+
+	const REJECTED_BY_PARSER = [
+		'garbage',
+		'fast=ollama/gemma;rm',
+		'tier1=foo/bar',
+		'fast=ollama/../etc',
+		'<script>alert(1)</script>',
+		'fast=ollama/x,fast=anthropic/y',
+	];
+	for (const matrix of REJECTED_BY_PARSER) {
+		it(`contract: POST rejects matrix "${matrix}" (parser rejects → POST 400)`, async () => {
+			const { app } = await buildApp();
+			try {
+				const { cookies, csrf } = await loginAndGetCsrf(app);
+				const res = await app.inject({
+					method: 'POST',
+					url: '/gui/regression/runs',
+					cookies,
+					payload: { _csrf: csrf, modelMatrix: matrix },
+				});
+				expect(res.statusCode).toBe(400);
+			} finally {
+				await app.close();
+			}
+		});
+	}
+});
+
+// ─── REQ-REG-GUI-OV — operator persona scenario (Batch 8) ─────────────────────
+describe('operator persona — runs two models back-to-back, both visible in history', () => {
+	it('two POSTs with different modelMatrix overrides + seeded cache files → history shows both rows', async () => {
+		const caseId = 'persona-case';
+		const { app, pendingRuns, cacheDir } = await buildApp({
+			listedCases: [makeListedCase({ caseId })],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+
+			// Run 1: operator submits fast tier override for Gemma 4 e4b.
+			const run1 = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'fast=ollama/gemma4:e4b' },
+			});
+			expect(run1.statusCode).toBe(202);
+			expect(pendingRuns[0]?.args).toContain('--model-matrix=fast=ollama/gemma4:e4b');
+			// Simulate the subprocess completing and writing a cache file. The
+			// fake runFactory captures args but does not write cache; the GUI
+			// would normally see the file appear after the real CLI exits.
+			const cacheKey1 = 'a'.repeat(64);
+			const caseDir1 = join(cacheDir, caseId);
+			await mkdir(caseDir1, { recursive: true });
+			await writeFile(
+				join(caseDir1, `${cacheKey1}.json`),
+				JSON.stringify({
+					result: {
+						caseId,
+						cacheKey: cacheKey1,
+						source: 'fresh',
+						verdict: 'pass',
+						inputs: [],
+						actuals: [],
+						oracleVerdicts: [],
+						tokenCounts: { input: 0, output: 0 },
+						costUsd: 0,
+						modelIds: {
+							fast: 'gemma4:e4b',
+							standard: 'claude-sonnet-4-6',
+							reasoning: null,
+						},
+						timestamp: '2026-05-13T00:00:00Z',
+						durationMs: 1000,
+					},
+				}),
+			);
+			pendingRuns[0]?.emit({ type: 'complete', summary: { totalCases: 1 } });
+			pendingRuns[0]?.finish();
+			// Let the registry settle so activeRunId clears.
+			await new Promise((r) => setImmediate(r));
+
+			// Run 2: operator now switches to Gemma 4 31B.
+			const run2 = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, modelMatrix: 'fast=ollama/gemma4:31b' },
+			});
+			expect(run2.statusCode).toBe(202);
+			expect(pendingRuns[1]?.args).toContain('--model-matrix=fast=ollama/gemma4:31b');
+			// Simulate run 2 cache file.
+			const cacheKey2 = 'b'.repeat(64);
+			await writeFile(
+				join(caseDir1, `${cacheKey2}.json`),
+				JSON.stringify({
+					result: {
+						caseId,
+						cacheKey: cacheKey2,
+						source: 'fresh',
+						verdict: 'pass',
+						inputs: [],
+						actuals: [],
+						oracleVerdicts: [],
+						tokenCounts: { input: 0, output: 0 },
+						costUsd: 0,
+						modelIds: {
+							fast: 'gemma4:31b',
+							standard: 'claude-sonnet-4-6',
+							reasoning: null,
+						},
+						timestamp: '2026-05-13T00:01:00Z',
+						durationMs: 1000,
+					},
+				}),
+			);
+			pendingRuns[1]?.emit({ type: 'complete', summary: { totalCases: 1 } });
+			pendingRuns[1]?.finish();
+			await new Promise((r) => setImmediate(r));
+
+			// Operator visits the history view → both model runs visible.
+			const history = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/cases/${caseId}/history`,
+				cookies,
+			});
+			expect(history.statusCode).toBe(200);
+			expect(history.body).toContain('gemma4:e4b');
+			expect(history.body).toContain('gemma4:31b');
 		} finally {
 			await app.close();
 		}

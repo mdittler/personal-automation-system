@@ -9777,6 +9777,176 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 
 ---
 
+### REQ-REG-GUI-OV-001 — Operators MUST be able to submit per-tier `--model-matrix` and `--judge-model` overrides from `/gui/regression`
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+The run form on `/gui/regression` exposes two optional text inputs (`modelMatrix`, `judgeModel`) that flow through the POST body to the spawned CLI as `--model-matrix=<v>` / `--judge-model=<v>`. Empty or omitted fields preserve the current `ModelSelector` defaults (REQ-REG-GUI-OV-006). The CLI's `buildTierOverrideFromCli` precedence is unchanged — `--judge-model` wins over `--model-matrix=standard=` on the standard slot.
+
+**Standard tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > forwards modelMatrix=fast=ollama/gemma4:31b as --model-matrix= arg
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > forwards judgeModel as --judge-model= arg
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > forwards a full matrix (fast + standard + reasoning)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > forwards both modelMatrix and judgeModel together
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > forwards judgeModel + modelMatrix standard slot as two separate flags
+
+---
+
+### REQ-REG-GUI-OV-002 — A tightened shared parser MUST reject shell metacharacters, traversal sequences, control characters, and HTML payloads in model specs
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+`core/src/services/regression/model-spec.ts` defines `parseModelRef`, `parseModelMatrixValue`, `parseJudgeModelValue`, `normalizeOptionalModelSpec`, and `MAX_MODEL_SPEC_CHARS`. Provider parts align with the GUI provider id pattern (`^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$`), and model parts allow safe namespaced ids (`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$`) for OpenAI-compatible / HuggingFace-style model names. `..` traversal sequences, `//` empty path segments, and trailing `/` are explicitly rejected even within the model-part character class. Length cap is 256 chars overall (128 per single ref). Test fixtures use legitimate `provider/model` shapes with embedded metachars to ensure rejection fires for the right reason (not just "no slash").
+
+**Standard tests:**
+- `model-spec.test.ts` > parseModelRef > accepts real-world provider/model strings, GUI-compatible provider ids, and namespaced model ids (8 happy-path entries)
+- `model-spec.test.ts` > parseModelMatrixValue > parses named and positional forms (3 entries)
+- `model-spec.test.ts` > parseJudgeModelValue > accepts anthropic/claude-haiku-4-5-20251001
+- `model-spec.test.ts` > parseJudgeModelValue > rejects "anthropic/claude;rm" (security)
+
+**Edge case tests:**
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/gemma;rm" (semicolon)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/$(evil)" (subshell chars)
+- `model-spec.test.ts` > parseModelRef > rejects ollama/foo`bar` (backticks)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/foo&bar" (shell control)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/foo|bar" (pipe)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/foo>bar" (HTML/redirect)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/<script>" (HTML tag)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/../etc" (traversal)
+- `model-spec.test.ts` > parseModelRef > rejects namespaced model refs with consecutive slashes, trailing slash, or traversal segments
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/foo bar" (whitespace in model)
+- `model-spec.test.ts` > parseModelRef > rejects "ollama/foo\nbar" (newline control char)
+- `model-spec.test.ts` > parseModelRef > rejects "-anthropic/claude" (leading hyphen)
+- `model-spec.test.ts` > parseModelRef > rejects oversized provider / model / total length
+
+---
+
+### REQ-REG-GUI-OV-003 — The GUI POST validator and CLI parser MUST share the same model-spec parser (single source of truth)
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+`regression/src/runner/args.ts` imports `parseModelMatrixValue` and `parseJudgeModelValue` from `@core/services/regression/model-spec.js` rather than defining its own copies. The GUI POST handler imports the same module. A contract test asserts every value accepted by the parser in unit tests is also accepted end-to-end via POST, and every rejected value is also rejected at the POST.
+
+**Standard tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > contract: POST accepts matrix "<...>" (4 positive contract rows)
+
+**Edge case tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > contract: POST rejects matrix "<...>" (6 negative contract rows)
+
+---
+
+### REQ-REG-GUI-OV-004 — The spawn allowlist MUST re-validate `--model-matrix=` / `--judge-model=` flags through the shared parser (defense in depth)
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+`validateSpawnArgs` in `core/src/gui/services/regression/subprocess.ts` adds `ALLOWED_MODEL_MATRIX_PREFIX` and `ALLOWED_JUDGE_MODEL_PREFIX` and re-validates the value through `parseModelMatrixValue` / `parseJudgeModelValue` before spawning. Two-token forms (`['--model-matrix', 'fast=foo/bar']`) are rejected — equals-form only.
+
+**Standard tests:**
+- `subprocess.test.ts` > validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-004) > accepts valid forms (4 tests)
+- `regression-integration.test.ts` > spawnRegression — --model-matrix / --judge-model end-to-end (REQ-REG-GUI-OV-004) > accepts valid --model-matrix= flag and runs the subprocess to completion
+- `regression-integration.test.ts` > spawnRegression — --model-matrix / --judge-model end-to-end (REQ-REG-GUI-OV-004) > accepts valid --judge-model= flag and runs to completion
+
+**Edge case tests:**
+- `subprocess.test.ts` > validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-004) > rejects empty values, shell metachars, traversal, bad tier, duplicate tier, length cap, two-token form (11 tests)
+- `regression-integration.test.ts` > spawnRegression — --model-matrix / --judge-model end-to-end (REQ-REG-GUI-OV-004) > rejects invalid --model-matrix= at the spawn allowlist (defense in depth)
+
+---
+
+### REQ-REG-GUI-OV-005 — Empty / whitespace-only inputs MUST omit the flag; non-string body values MUST return 400 (no crash)
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+`normalizeOptionalModelSpec` returns `undefined` for `undefined`/`null`/empty-string/whitespace-only and throws `TypeError` for non-string types (array, object, number, boolean) and `RangeError` for oversized strings. The POST handler maps both errors to a 400 with a descriptive JSON body.
+
+**Standard tests:**
+- `model-spec.test.ts` > normalizeOptionalModelSpec > returns undefined for undefined / null / '' / whitespace
+- `model-spec.test.ts` > normalizeOptionalModelSpec > passes through a clean string unchanged
+- `model-spec.test.ts` > normalizeOptionalModelSpec > trims leading/trailing whitespace
+
+**Edge case tests:**
+- `model-spec.test.ts` > normalizeOptionalModelSpec > throws TypeError for arrays / objects / numbers / booleans
+- `model-spec.test.ts` > normalizeOptionalModelSpec > throws RangeError when input exceeds MAX_MODEL_SPEC_CHARS
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > omits --model-matrix arg when modelMatrix is empty / whitespace-only
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects modelMatrix sent as array / object / number with 400 (no crash)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects judgeModel sent as array / object / boolean / number with 400 (no crash)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects modelMatrix exceeding MAX_MODEL_SPEC_CHARS with 400
+
+---
+
+### REQ-REG-GUI-OV-006 — Existing POSTs that omit the new fields MUST continue to work unchanged (backwards compatible)
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+The POST handler treats absent / `undefined` `modelMatrix` and `judgeModel` as "no override" — no flag is appended to spawn args, and the run proceeds against the current `ModelSelector` defaults.
+
+**Standard tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > appends NO model flags when neither field is provided (backwards compat)
+
+---
+
+### REQ-REG-GUI-OV-007 — Two runs with distinct fast-tier model IDs MUST produce two distinct cache rows for the same case
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented (narrowed)
+
+The cache key composition in `regression/src/shared/cache-key.ts` already includes `modelIds.fast`, `modelIds.standard`, and `modelIds.reasoning`. Distinct model IDs produce distinct cache keys, which the `CacheStore` writes as separate files under `data/system/regression-cache/<caseId>/<key>.json`. The GUI history view renders each file as a separate row with its model IDs visible.
+
+**Note:** `TierModelSnapshot` currently stores model strings only (not provider+model), so two providers with the same model name would collide. This phase narrows the requirement to "distinct model IDs"; provider-qualified cache keys are tracked as a separate carry-forward in `docs/open-items.md`.
+
+**Standard tests:**
+- `cache.test.ts` > CacheStore — distinct modelIds produce distinct cache files for one case > writes two files for the same caseId when modelIds.fast differs
+- `cache.test.ts` > CacheStore — distinct modelIds produce distinct cache files for one case > listAllForCase returns both entries with their respective modelIds
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/history > renders two history rows for the same case under different fast-tier models
+- `regression-integration.test.ts` > real regression CLI --list with model overrides (REQ-REG-GUI-OV-007) > --model-matrix=fast=ollama/gemma4:e4b changes the currentCacheKey vs the default
+- `regression-integration.test.ts` > real regression CLI --list with model overrides (REQ-REG-GUI-OV-007) > --judge-model=anthropic/claude-haiku-4-5-20251001 changes the standard-tier cache key
+- `regression-integration.test.ts` > real regression CLI --list with model overrides (REQ-REG-GUI-OV-007) > --judge-model wins over --model-matrix=standard= (cache key reflects judge model)
+- `regression-routes-write.test.ts` > operator persona — runs two models back-to-back, both visible in history > two POSTs with different modelMatrix overrides + seeded cache files → history shows both rows
+
+---
+
+### REQ-REG-GUI-OV-008 — The UI inputs MUST have accessible labels, optional placeholders, and no `required` attribute
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+`regression-summary-bar.eta` adds two `<label>` elements wrapping `<input type="text" name="modelMatrix">` and `<input type="text" name="judgeModel">`. Each input carries a visible label text, an `aria-label`, a `placeholder` showing the expected `provider/model` syntax, and `autocomplete="off"`. Neither input has the `required` attribute so the existing empty-form submit continues to work.
+
+**Standard tests:**
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > renders an input named "modelMatrix" inside the run form
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > renders an input named "judgeModel" inside the run form
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > renders accessible aria-label for each model-override input
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > each model-override input has a placeholder showing provider/model syntax
+
+**Edge case tests:**
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > neither model-override input is required (preserves empty-form submit)
+- `regression-routes.test.ts` > GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008) > CSRF hidden input is still present alongside the new fields
+
+---
+
+### REQ-REG-GUI-OV-009 — Auth + CSRF posture MUST be unchanged: admin-only, CSRF-required; non-admin → 403, unauthenticated → 302
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+The `platformAdminOnly` preHandler and the existing CSRF middleware apply to the POST handler regardless of whether `modelMatrix` / `judgeModel` are supplied. Authenticated non-admin users receive 403; unauthenticated users receive a 302 redirect to login; valid admins must include the CSRF token or receive 403.
+
+**Standard tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > returns 403 for authenticated non-admin even with valid model override
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > returns 302 redirect for unauthenticated POST with model override
+
+---
+
+### REQ-REG-GUI-OV-010 — HTML/JS payloads in inputs MUST be rejected (400) inside a `Content-Type: application/json` envelope
+
+**Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
+
+The shared parser's regex rejects `<`, `>`, and HTML tag content, so a `<script>` payload returns a 400 with the parser's error message in the JSON envelope. The route uses `reply.status(400).send({error: msg})` which sets `Content-Type: application/json`; `JSON.stringify` ensures the payload cannot break out of the JSON response envelope into the surrounding context.
+
+**Standard tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects HTML payload in modelMatrix with 400 JSON envelope (XSS framing)
+
+**Edge case tests:**
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects modelMatrix with embedded shell metachars before spawn
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -10264,5 +10434,15 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-015 | cache-reader.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
+| REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
+| REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
+| REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
+| REQ-REG-GUI-OV-004 | subprocess.test.ts, regression-integration.test.ts | 6 | 12 | Implemented |
+| REQ-REG-GUI-OV-005 | model-spec.test.ts, regression-routes-write.test.ts | 3 | 10 | Implemented |
+| REQ-REG-GUI-OV-006 | regression-routes-write.test.ts | 1 | 0 | Implemented |
+| REQ-REG-GUI-OV-007 | cache.test.ts, regression-routes.test.ts, regression-integration.test.ts, regression-routes-write.test.ts | 7 | 0 | Implemented |
+| REQ-REG-GUI-OV-008 | regression-routes.test.ts | 4 | 2 | Implemented |
+| REQ-REG-GUI-OV-009 | regression-routes-write.test.ts | 2 | 0 | Implemented |
+| REQ-REG-GUI-OV-010 | regression-routes-write.test.ts | 1 | 1 | Implemented |
 
-| **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |
+| **Totals** | **250 test files** | **1884** | **2027** | **3911 tests** |
