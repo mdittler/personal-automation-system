@@ -617,7 +617,7 @@ describe('messages for other apps — no PAS-aware prompt when classifier return
 		['find me a pasta recipe', 'NO'],
 		['how many calories is in an apple', 'NO'],
 		['remove eggs from my shopping list', 'NO'],
-		['what did I have for breakfast yesterday', 'NO'],
+		['tell me what I usually eat for breakfast', 'NO'],
 	];
 
 	test.each(foodAppMessages)(

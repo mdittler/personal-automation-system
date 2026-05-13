@@ -14,6 +14,20 @@
   <form id="regression-run-form" method="post" action="/gui/regression/runs" class="run-controls" data-bucket="<%= it.selectedBucket || '' %>">
     <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
     <% if (it.selectedBucket) { %><input type="hidden" name="bucket" value="<%= it.selectedBucket %>" /><% } %>
+    <label class="model-override-label">
+      <span class="model-override-text">Model matrix override</span>
+      <input type="text" name="modelMatrix" class="model-override-input"
+             placeholder="fast=ollama/gemma4:31b"
+             aria-label="Model matrix override"
+             autocomplete="off" />
+    </label>
+    <label class="model-override-label">
+      <span class="model-override-text">Judge model override</span>
+      <input type="text" name="judgeModel" class="model-override-input"
+             placeholder="anthropic/claude-haiku-4-5-20251001"
+             aria-label="Judge model override"
+             autocomplete="off" />
+    </label>
     <label class="force-fresh-toggle">
       <input type="checkbox" name="forceFresh" value="true" /> Force fresh (ignore cache)
     </label>

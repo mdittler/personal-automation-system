@@ -145,6 +145,7 @@ export async function classifySessionControl(
 			systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
 			maxTokens: 80,
 			temperature: 0,
+			responseFormat: 'json',
 		});
 	} catch (err) {
 		deps.logger.warn({ err }, 'session-control classifier LLM call failed');

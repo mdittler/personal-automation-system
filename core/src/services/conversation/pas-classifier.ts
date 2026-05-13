@@ -139,7 +139,7 @@ export function parsePASClassifierOutput(raw: string): PASClassification {
  * (e.g., it might respond "YES" instead of "YES_DATA"). RC7.
  */
 const DATA_QUERY_PREFILTER =
-	/\b(cheapest|cheaper|lowest price|last trip|last visit|last shop|previous receipt|spent at)\b|how much.{0,50}\bat\b|\bprice.{0,30}(changed|change|difference|increased|decreased)\b/i;
+	/\b(cheapest|cheaper|lowest price|last trip|last visit|last shop|previous receipt|spent at)\b|how much.{0,50}\bat\b|\bprice.{0,30}(changed|change|difference|increased|decreased)\b|\b(?:what(?:'s|\s+is)\s+(?:in\s+)?my\s+pantry|my\s+pantry\s+right\s+now)\b|\bwhat\s+did\s+i\s+(?:eat|have)\b|\bhow\s+many\s+(?:recipes?|meals?|notes?|alerts?|reports?)\s+(?:do\s+i\s+have|have\s+i)\s+(?:saved|stored|created)\b/i;
 
 /**
  * Batch 3 — Deterministic SETTINGS prefilter. Codex correction #6: evidenced
@@ -155,22 +155,33 @@ const DATA_QUERY_PREFILTER =
  *   - "what is my current standard model"
  */
 const SETTINGS_KEYWORDS_RE =
-	/\b(?:switch|change|set|use|update|configure)\s+(?:the\s+|my\s+)\s*(?:fast|standard|reasoning|model|tier|timezone)\b|\b(?:switch|change|set|update)\s+my\s+\w+\s+(?:model|tier|timezone)\b|\bwhat\s+(?:is|are)\s+my\s+current\s+(?:fast|standard|reasoning|model|tier|timezone|setting)\b/i;
+	/\b(?:switch|change|set|use|update|configure)\s+(?:the\s+|my\s+)\s*(?:fast|standard|reasoning|model|tier|timezone)\b|\b(?:switch|change|set|update)\s+my\s+\w+\s+(?:model|tier|timezone)\b|\bwhat\s+(?:is|are)\s+my\s+current\s+(?:fast|standard|reasoning|model|tier|timezone|setting)\b|\b(?:toggle|enable|disable|configure)\s+auto[-\s]?detect(?:\s+pas)?\b|\bhow\s+(?:do\s+i|to)\s+configure\s+auto[-\s]?detect/i;
 
 /**
  * Batch 3 — Deterministic SYSTEM-DATA prefilter. Narrow: only fires on
- * phrases that explicitly name PAS-internal data. Does NOT match generic
- * prose like "what apps do I have" (without "installed" suffix) which the
- * existing test suite exercises through the LLM path.
+ * phrases that explicitly name PAS-internal data that the DataQueryService
+ * can return. Pure data-lookup queries belong here; PAS meta-questions
+ * (e.g. "what apps are installed") belong in PAS_META_RE instead.
  */
 const SYSTEM_DATA_KEYWORDS_RE =
-	/\b(?:system\s+logs?|scheduled\s+alerts?|model\s+journal|installed\s+apps?|apps?\s+(?:do\s+)?i\s+have\s+installed)\b/i;
+	/\b(?:system\s+logs?|scheduled\s+alerts?|model\s+journal)\b/i;
+
+/**
+ * PAS meta-questions — these are PAS-related but NOT data queries (DataQueryService
+ * has no useful response for "what apps are installed" — that's a question about
+ * the PAS installation itself, not stored data). Returning just `{pasRelated:true}`
+ * lets the chatbot route to general PAS knowledge instead of triggering a
+ * cross-app data search that would yield nothing.
+ */
+const PAS_META_RE =
+	/\b(?:installed\s+apps?|apps?\s+(?:do\s+)?i\s+have\s+installed|apps?\s+(?:are\s+)?installed)\b|\bhow\s+(?:do\s+i|to)\s+(?:install|uninstall|add|remove)\s+(?:(?:a|an|the)\s+)?(?:new\s+|another\s+)?apps?\b/i;
 
 /** Pre-filter table consulted in order — first matching pattern wins. */
 const PREFILTERS: ReadonlyArray<readonly [RegExp, PASClassification]> = [
 	[DATA_QUERY_PREFILTER, { pasRelated: true, dataQueryCandidate: true }],
 	[SETTINGS_KEYWORDS_RE, { pasRelated: true, settingsCandidate: true }],
 	[SYSTEM_DATA_KEYWORDS_RE, { pasRelated: true, dataQueryCandidate: true }],
+	[PAS_META_RE, { pasRelated: true }],
 ];
 
 /**

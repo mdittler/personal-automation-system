@@ -207,3 +207,93 @@ describe('validateSpawnArgs — allowlist (security)', () => {
 		expect(() => validateSpawnArgs(['--dry-run', '--json'])).not.toThrow();
 	});
 });
+
+// ─── REQ-REG-GUI-OV — --model-matrix and --judge-model allowlist ──────────────
+describe('validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-004)', () => {
+	// Happy path
+	it('accepts --model-matrix=fast=ollama/gemma4:31b', () => {
+		expect(() =>
+			validateSpawnArgs(['--json', '--model-matrix=fast=ollama/gemma4:31b']),
+		).not.toThrow();
+	});
+
+	it('accepts --model-matrix= with two named tiers', () => {
+		expect(() =>
+			validateSpawnArgs([
+				'--json',
+				'--model-matrix=fast=ollama/gemma4:31b,standard=anthropic/claude-sonnet-4-6',
+			]),
+		).not.toThrow();
+	});
+
+	it('accepts --model-matrix= with three positional tiers', () => {
+		expect(() =>
+			validateSpawnArgs([
+				'--json',
+				'--model-matrix=ollama/gemma4:31b,anthropic/claude-sonnet-4-6,anthropic/claude-opus-4-7',
+			]),
+		).not.toThrow();
+	});
+
+	it('accepts --judge-model=anthropic/claude-haiku-4-5-20251001', () => {
+		expect(() =>
+			validateSpawnArgs(['--json', '--judge-model=anthropic/claude-haiku-4-5-20251001']),
+		).not.toThrow();
+	});
+
+	// Edge cases
+	it('rejects --model-matrix= (empty value)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix='])).toThrow(
+			/requires a value|empty/i,
+		);
+	});
+
+	it('rejects --judge-model= (empty value)', () => {
+		expect(() => validateSpawnArgs(['--json', '--judge-model='])).toThrow(/requires|empty/i);
+	});
+
+	// Security
+	it('rejects --model-matrix=fast=ollama/gemma;rm (shell metachar)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/gemma;rm'])).toThrow();
+	});
+
+	it('rejects --model-matrix=fast=ollama/$(evil) (subshell)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/$(evil)'])).toThrow();
+	});
+
+	it('rejects --model-matrix=fast=ollama/foo`bar` (backticks)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/foo`bar`'])).toThrow();
+	});
+
+	it('rejects --judge-model=anthropic/claude;rm (command chain)', () => {
+		expect(() => validateSpawnArgs(['--json', '--judge-model=anthropic/claude;rm'])).toThrow();
+	});
+
+	it('rejects --model-matrix=fast=ollama/../etc (traversal)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/../etc'])).toThrow();
+	});
+
+	// Edge: arity / format
+	it('rejects --model-matrix=tier1=foo/bar (bad tier name)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=tier1=foo/bar'])).toThrow();
+	});
+
+	it('rejects --model-matrix=fast=ollama/x,fast=anthropic/y (duplicate tier)', () => {
+		expect(() =>
+			validateSpawnArgs(['--json', '--model-matrix=fast=ollama/x,fast=anthropic/y']),
+		).toThrow();
+	});
+
+	it('rejects --judge-model with absurdly long value (length cap)', () => {
+		expect(() => validateSpawnArgs(['--json', `--judge-model=${'a'.repeat(300)}`])).toThrow();
+	});
+
+	it('rejects two-token form ["--model-matrix", "fast=foo/bar"] (equals-form only)', () => {
+		expect(() => validateSpawnArgs(['--json', '--model-matrix', 'fast=foo/bar'])).toThrow();
+	});
+
+	// Regression guard — make sure existing rejection still fires
+	it('still rejects unknown flag --evil', () => {
+		expect(() => validateSpawnArgs(['--json', '--evil'])).toThrow();
+	});
+});
