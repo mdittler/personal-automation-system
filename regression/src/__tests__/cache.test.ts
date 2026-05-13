@@ -185,3 +185,53 @@ describe('CacheStore.listAllForCase', () => {
 		warnSpy.mockRestore();
 	});
 });
+
+// ─── REQ-REG-GUI-OV-007 — distinct modelIds → distinct cache rows ─────────────
+describe('CacheStore — distinct modelIds produce distinct cache files for one case', () => {
+	it('writes two files for the same caseId when modelIds.fast differs', async () => {
+		const store = new CacheStore(tempDir);
+		await store.write(
+			makeRunResult({
+				caseId: 'case-1',
+				cacheKey: VALID_KEY_A,
+				modelIds: { fast: 'gemma4:e4b', standard: 'claude-sonnet-4-6', reasoning: null },
+				timestamp: '2026-05-13T00:00:00.000Z',
+			}),
+		);
+		await store.write(
+			makeRunResult({
+				caseId: 'case-1',
+				cacheKey: VALID_KEY_B,
+				modelIds: { fast: 'gemma4:31b', standard: 'claude-sonnet-4-6', reasoning: null },
+				timestamp: '2026-05-13T00:01:00.000Z',
+			}),
+		);
+		const dirEntries = await readdir(join(tempDir, 'case-1'));
+		const jsonFiles = dirEntries.filter((f) => f.endsWith('.json'));
+		expect(jsonFiles).toHaveLength(2);
+	});
+
+	it('listAllForCase returns both entries with their respective modelIds', async () => {
+		const store = new CacheStore(tempDir);
+		await store.write(
+			makeRunResult({
+				caseId: 'case-1',
+				cacheKey: VALID_KEY_A,
+				modelIds: { fast: 'gemma4:e4b', standard: 'claude-sonnet-4-6', reasoning: null },
+				timestamp: '2026-05-13T00:00:00.000Z',
+			}),
+		);
+		await store.write(
+			makeRunResult({
+				caseId: 'case-1',
+				cacheKey: VALID_KEY_B,
+				modelIds: { fast: 'gemma4:31b', standard: 'claude-sonnet-4-6', reasoning: null },
+				timestamp: '2026-05-13T00:01:00.000Z',
+			}),
+		);
+		const all = await store.listAllForCase('case-1');
+		expect(all).toHaveLength(2);
+		const fastModels = all.map((r) => r.modelIds.fast).sort();
+		expect(fastModels).toEqual(['gemma4:31b', 'gemma4:e4b']);
+	});
+});

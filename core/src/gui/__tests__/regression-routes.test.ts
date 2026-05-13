@@ -380,6 +380,81 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 	});
 });
 
+// ─── REQ-REG-GUI-OV-008 — UI inputs for model-override surface ────────────────
+describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008)', () => {
+	it('renders an input named "modelMatrix" inside the run form', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.body).toMatch(/<input[^>]+name="modelMatrix"/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('renders an input named "judgeModel" inside the run form', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.body).toMatch(/<input[^>]+name="judgeModel"/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('renders accessible aria-label for each model-override input', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			// One of: <label>Model matrix override<input ...></label>
+			//       or <input ... aria-label="Model matrix override">
+			expect(res.body).toMatch(
+				/aria-label="Model matrix override"|>\s*Model matrix override\s*</i,
+			);
+			expect(res.body).toMatch(
+				/aria-label="Judge model override"|>\s*Judge model override\s*</i,
+			);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('each model-override input has a placeholder showing provider/model syntax', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.body).toMatch(/name="modelMatrix"[^>]*placeholder="[^"]+\//);
+			expect(res.body).toMatch(/name="judgeModel"[^>]*placeholder="[^"]+\//);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('neither model-override input is required (preserves empty-form submit)', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			// Match the modelMatrix input element and assert "required" is not in it.
+			const matrixInput = res.body.match(/<input[^>]+name="modelMatrix"[^>]*>/)?.[0] ?? '';
+			expect(matrixInput).not.toMatch(/\brequired\b/);
+			const judgeInput = res.body.match(/<input[^>]+name="judgeModel"[^>]*>/)?.[0] ?? '';
+			expect(judgeInput).not.toMatch(/\brequired\b/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('CSRF hidden input is still present alongside the new fields', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.body).toMatch(/<input[^>]+type="hidden"[^>]+name="_csrf"/);
+		} finally {
+			await app.close();
+		}
+	});
+});
+
 describe('GET /gui/regression/cases/:caseId — drilldown (Codex C5)', () => {
 	it('renders inputs + expected from ListedCase even when never run', async () => {
 		const { app } = await buildApp({
@@ -574,6 +649,44 @@ describe('GET /gui/regression/cases/:caseId/history', () => {
 		try {
 			const res = await getAuthed(app, '/gui/regression/cases/not-discovered/history');
 			expect(res.statusCode).toBe(404);
+		} finally {
+			await app.close();
+		}
+	});
+
+	// REQ-REG-GUI-OV-007 — distinct modelIds → distinct cache rows visible in history
+	it('renders two history rows for the same case under different fast-tier models', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'modeled' })],
+			cachedResults: [
+				{
+					caseId: 'modeled',
+					cacheKey: HEX64('a'),
+					result: makeRunResult({
+						caseId: 'modeled',
+						cacheKey: HEX64('a'),
+						modelIds: { fast: 'gemma4:e4b', standard: 'claude-sonnet-4-6', reasoning: null },
+						timestamp: '2026-05-13T00:00:00Z',
+					}),
+				},
+				{
+					caseId: 'modeled',
+					cacheKey: HEX64('b'),
+					result: makeRunResult({
+						caseId: 'modeled',
+						cacheKey: HEX64('b'),
+						modelIds: { fast: 'gemma4:31b', standard: 'claude-sonnet-4-6', reasoning: null },
+						timestamp: '2026-05-13T00:01:00Z',
+					}),
+				},
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/modeled/history');
+			expect(res.statusCode).toBe(200);
+			// Both fast-tier model IDs should be present in the rendered HTML.
+			expect(res.body).toContain('gemma4:e4b');
+			expect(res.body).toContain('gemma4:31b');
 		} finally {
 			await app.close();
 		}

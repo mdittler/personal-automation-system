@@ -118,9 +118,8 @@ describe('case-discovery integration (fake CLI --list)', () => {
 			spawnFn: () =>
 				nodeSpawn(process.execPath, [fakeCliPath], {
 					env: { ...process.env, FAKE_CLI_MODE: 'list' },
-					// biome-ignore lint/suspicious/noExplicitAny: cross-test process shape
-					stdio: ['ignore', 'pipe', 'pipe'],
-				}) as any,
+					stdio: ['ignore', 'pipe', 'pipe'] as const,
+				}),
 		});
 		const out = await discovery.discover();
 		expect(out.error).toBeUndefined();
@@ -147,15 +146,11 @@ describe('real CLI --list strict NDJSON (Codex P3.2 — dotenv silenced)', () =>
 		process.env.GUI_AUTH_TOKEN ||= 'smoke-gui-token';
 		process.env.ANTHROPIC_API_KEY ||= 'smoke-api-key';
 		try {
-			const child = nodeSpawn(
-				process.execPath,
-				['--import=tsx/esm', cliPath, '--list', '--json'],
-				{
-					cwd: repoRoot,
-					env: { ...process.env, TSX_TSCONFIG_PATH: tsconfigPath },
-					stdio: ['ignore', 'pipe', 'pipe'],
-				},
-			);
+			const child = nodeSpawn(process.execPath, ['--import=tsx/esm', cliPath, '--list', '--json'], {
+				cwd: repoRoot,
+				env: { ...process.env, TSX_TSCONFIG_PATH: tsconfigPath },
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
 			let stdoutBuf = '';
 			child.stdout.on('data', (c) => {
 				stdoutBuf += c.toString();
@@ -225,5 +220,171 @@ describe('real CLI --list smoke (no LLM dispatch)', () => {
 			process.env.GUI_AUTH_TOKEN = savedEnv.GUI_AUTH_TOKEN ?? '';
 			process.env.ANTHROPIC_API_KEY = savedEnv.ANTHROPIC_API_KEY ?? '';
 		}
+	}, 30_000);
+});
+
+// ─── REQ-REG-GUI-OV — spawnRegression accepts/rejects override flags ──────────
+describe('spawnRegression — --model-matrix / --judge-model end-to-end (REQ-REG-GUI-OV-004)', () => {
+	it('accepts valid --model-matrix= flag and runs the subprocess to completion', async () => {
+		const events: RegressionEvent[] = [];
+		const handle = await spawnRegression(
+			['--json', '--bucket=routing', '--model-matrix=fast=ollama/gemma4:31b'],
+			{
+				// biome-ignore lint/suspicious/noExplicitAny: cross-test process shape
+				spawnFn: () => spawnFake('happy') as any,
+				onEvent: (e) => events.push(e),
+			},
+		);
+		await handle.whenComplete;
+		expect(events.some((e) => e.type === 'complete')).toBe(true);
+	});
+
+	it('accepts valid --judge-model= flag and runs to completion', async () => {
+		const events: RegressionEvent[] = [];
+		const handle = await spawnRegression(
+			['--json', '--bucket=chatbot', '--judge-model=anthropic/claude-haiku-4-5-20251001'],
+			{
+				// biome-ignore lint/suspicious/noExplicitAny: cross-test process shape
+				spawnFn: () => spawnFake('happy') as any,
+				onEvent: (e) => events.push(e),
+			},
+		);
+		await handle.whenComplete;
+		expect(events.some((e) => e.type === 'complete')).toBe(true);
+	});
+
+	it('rejects invalid --model-matrix= at the spawn allowlist (defense in depth)', async () => {
+		await expect(
+			spawnRegression(['--json', '--model-matrix=fast=ollama/gemma;rm'], {
+				// biome-ignore lint/suspicious/noExplicitAny: cross-test process shape
+				spawnFn: () => spawnFake('happy') as any,
+				onEvent: () => {},
+			}),
+		).rejects.toThrow(/spawn allowlist|model.matrix/i);
+	});
+});
+
+// ─── REQ-REG-GUI-OV — real regression CLI accepts override flags and reflects
+//     them in the cache key (REQ-REG-GUI-OV-007 — distinct model IDs ⇒
+//     distinct cache rows). All four tests spawn the real CLI in `--list`
+//     mode (no LLM calls — fast + deterministic + free). ───────────────────
+describe('real regression CLI --list with model overrides (REQ-REG-GUI-OV-007)', () => {
+	async function spawnListCli(extraArgs: readonly string[]): Promise<{
+		exitCode: number | null;
+		stdout: string;
+		stderr: string;
+	}> {
+		const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+		const cliPath = resolve(repoRoot, 'regression', 'src', 'runner', 'cli-main.ts');
+		const tsconfigPath = resolve(repoRoot, 'regression', 'tsconfig.json');
+		const savedEnv = {
+			TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+			GUI_AUTH_TOKEN: process.env.GUI_AUTH_TOKEN,
+			ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+		};
+		process.env.TELEGRAM_BOT_TOKEN ||= 'smoke-token';
+		process.env.GUI_AUTH_TOKEN ||= 'smoke-gui-token';
+		process.env.ANTHROPIC_API_KEY ||= 'smoke-api-key';
+		try {
+			const child = nodeSpawn(
+				process.execPath,
+				['--import=tsx/esm', cliPath, '--list', '--json', ...extraArgs],
+				{
+					cwd: repoRoot,
+					env: {
+						...process.env,
+						TSX_TSCONFIG_PATH: tsconfigPath,
+						DOTENV_CONFIG_QUIET: 'true',
+					},
+					stdio: ['ignore', 'pipe', 'pipe'],
+				},
+			);
+			let stdout = '';
+			let stderr = '';
+			child.stdout.on('data', (d) => {
+				stdout += d.toString('utf8');
+			});
+			child.stderr.on('data', (d) => {
+				stderr += d.toString('utf8');
+			});
+			const exitCode: number | null = await new Promise((res) => {
+				child.on('exit', (code) => res(code));
+			});
+			return { exitCode, stdout, stderr };
+		} finally {
+			process.env.TELEGRAM_BOT_TOKEN = savedEnv.TELEGRAM_BOT_TOKEN ?? '';
+			process.env.GUI_AUTH_TOKEN = savedEnv.GUI_AUTH_TOKEN ?? '';
+			process.env.ANTHROPIC_API_KEY = savedEnv.ANTHROPIC_API_KEY ?? '';
+		}
+	}
+
+	function pickCaseKey(stdout: string, bucket: string): string | null {
+		// Find the first case-list-entry of the given bucket and return its
+		// currentCacheKey.
+		for (const line of stdout.split('\n')) {
+			if (!line) continue;
+			let parsed: { type?: string; bucket?: string; currentCacheKey?: string };
+			try {
+				parsed = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (parsed.type === 'case-list-entry' && parsed.bucket === bucket) {
+				return parsed.currentCacheKey ?? null;
+			}
+		}
+		return null;
+	}
+
+	it('--model-matrix=fast=ollama/gemma4:e4b changes the currentCacheKey vs the default', async () => {
+		const baseline = await spawnListCli([]);
+		expect(baseline.exitCode).toBe(0);
+		const overridden = await spawnListCli(['--model-matrix=fast=ollama/gemma4:e4b']);
+		expect(overridden.exitCode).toBe(0);
+
+		const baselineKey = pickCaseKey(baseline.stdout, 'routing');
+		const overriddenKey = pickCaseKey(overridden.stdout, 'routing');
+		expect(baselineKey).toBeTruthy();
+		expect(overriddenKey).toBeTruthy();
+		expect(overriddenKey).not.toBe(baselineKey);
+	}, 60_000);
+
+	it('--judge-model=anthropic/claude-haiku-4-5-20251001 changes the standard-tier cache key', async () => {
+		const baseline = await spawnListCli([]);
+		const overridden = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
+		expect(baseline.exitCode).toBe(0);
+		expect(overridden.exitCode).toBe(0);
+		const baselineKey = pickCaseKey(baseline.stdout, 'routing');
+		const overriddenKey = pickCaseKey(overridden.stdout, 'routing');
+		expect(baselineKey).toBeTruthy();
+		expect(overriddenKey).toBeTruthy();
+		expect(overriddenKey).not.toBe(baselineKey);
+	}, 60_000);
+
+	it('--judge-model wins over --model-matrix=standard= (cache key reflects judge model)', async () => {
+		const judgeOnly = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
+		const bothFlags = await spawnListCli([
+			'--model-matrix=standard=anthropic/claude-sonnet-4-6',
+			'--judge-model=anthropic/claude-haiku-4-5-20251001',
+		]);
+		expect(judgeOnly.exitCode).toBe(0);
+		expect(bothFlags.exitCode).toBe(0);
+		// Because --judge-model takes precedence on the standard slot, the cache
+		// key should be the same in both invocations (both end up with
+		// standard=claude-haiku-...).
+		const judgeOnlyKey = pickCaseKey(judgeOnly.stdout, 'routing');
+		const bothKey = pickCaseKey(bothFlags.stdout, 'routing');
+		expect(judgeOnlyKey).toBeTruthy();
+		expect(bothKey).toBe(judgeOnlyKey);
+	}, 60_000);
+
+	it('rejects invalid --model-matrix= at the CLI parser (exit non-zero, helpful error output)', async () => {
+		const out = await spawnListCli(['--model-matrix=fast=ollama/gemma;rm']);
+		expect(out.exitCode).not.toBe(0);
+		// CLI writes parse errors via `runCli`'s stdout sink (see
+		// regression/src/runner/index.ts:329) — assert against the combined
+		// stdout+stderr so the test stays robust to that routing.
+		const combined = (out.stdout + out.stderr).toLowerCase();
+		expect(combined).toMatch(/model|matrix|provider|metachar|invalid/);
 	}, 30_000);
 });
