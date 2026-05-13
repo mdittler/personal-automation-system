@@ -9,6 +9,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import type { Logger } from 'pino';
 import type { ContextStoreService } from '../../types/context-store.js';
+import type { ChangeLogEntry } from '../../types/data-store.js';
 import type {
 	AppDataSectionConfig,
 	ChangesSectionConfig,
@@ -47,6 +48,12 @@ export interface CollectorDeps {
 	 */
 	spaceService?: { getSpace(id: string): SpaceDefinition | null };
 }
+
+const REPORT_CHANGE_OPERATIONS = new Set<ChangeLogEntry['operation']>([
+	'write',
+	'append',
+	'archive',
+]);
 
 /**
  * Collect data for a single report section.
@@ -121,8 +128,14 @@ async function collectChangesSection(
 		filteredEntries = changes.entries.filter((e) => e.householdId === deps.householdId);
 	}
 
+	filteredEntries = filteredEntries.filter((e) => REPORT_CHANGE_OPERATIONS.has(e.operation));
+
 	if (filteredEntries.length === 0) {
-		return { label, content: 'No changes in this period.', isEmpty: true };
+		return {
+			label,
+			content: 'No write, append, or archive changes in this period.',
+			isEmpty: true,
+		};
 	}
 
 	// Rebuild byApp from filtered entries
@@ -145,7 +158,7 @@ async function collectChangesSection(
 
 		lines.push(`**${appId}**`);
 		for (const [userId, entries] of Object.entries(users)) {
-			const ops = entries.map((e) => `${e.operation} \`${e.path}\``).join(', ');
+			const ops = summarizeChangeOperations(entries).join(', ');
 			lines.push(`- User ${userId}: ${ops}`);
 		}
 	}
@@ -155,6 +168,42 @@ async function collectChangesSection(
 	}
 
 	return { label, content: lines.join('\n'), isEmpty: false };
+}
+
+function summarizeChangeOperations(entries: ChangeLogEntry[]): string[] {
+	const counts = new Map<string, { entry: ChangeLogEntry; scopeLabel: string; count: number }>();
+
+	for (const entry of entries) {
+		const scopeKey = [
+			entry.householdId ?? '',
+			entry.spaceId ?? '',
+			entry.spaceKind ?? '',
+			entry.collaborationId ?? '',
+			entry.sharedSelector ?? '',
+		].join('\0');
+		const key = `${entry.operation}\0${entry.path}\0${scopeKey}`;
+		const existing = counts.get(key);
+		if (existing) {
+			existing.count += 1;
+			continue;
+		}
+		counts.set(key, { entry, scopeLabel: formatChangeScope(entry), count: 1 });
+	}
+
+	return [...counts.values()].map(({ entry, scopeLabel, count }) => {
+		const suffix = count > 1 ? ` (${count}x)` : '';
+		return `${entry.operation} \`${entry.path}\`${scopeLabel}${suffix}`;
+	});
+}
+
+function formatChangeScope(entry: ChangeLogEntry): string {
+	const parts: string[] = [];
+	if (entry.householdId) parts.push(`household:${entry.householdId}`);
+	if (entry.spaceId) parts.push(`space:${entry.spaceId}`);
+	if (entry.spaceKind) parts.push(`kind:${entry.spaceKind}`);
+	if (entry.collaborationId) parts.push(`collaboration:${entry.collaborationId}`);
+	if (entry.sharedSelector) parts.push(`shared:${entry.sharedSelector}`);
+	return parts.length ? ` [${parts.join(', ')}]` : '';
 }
 
 async function collectAppDataSection(
@@ -167,7 +216,6 @@ async function collectAppDataSection(
 
 	// Build the full path using the shared household-aware resolver.
 	// deps.householdId: string → household path; undefined → legacy (service not wired).
-	// biome-ignore lint/style/noNonNullAssertion: validated by report-validator (user_id required when no space_id)
 	const baseDir = resolveScopedDataDir({
 		dataDir: deps.dataDir,
 		appId: config.app_id,
@@ -243,7 +291,9 @@ async function readMostRecentFile(dirPath: string): Promise<string> {
 	if (files.length === 0) return '';
 
 	files.sort((a, b) => b.mtime - a.mtime);
-	const raw = await readFile(join(dirPath, files[0]!.name), 'utf-8');
+	const latest = files[0];
+	if (!latest) return '';
+	const raw = await readFile(join(dirPath, latest.name), 'utf-8');
 	return stripFrontmatter(raw);
 }
 

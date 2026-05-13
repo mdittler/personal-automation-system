@@ -366,6 +366,21 @@ describe('ReportService — LLM summarization', () => {
 		expect(prompt).toContain('Focus on action items only');
 	});
 
+	it('frames the LLM prompt to avoid implementation-noise summaries', async () => {
+		const llm = makeLLM('Natural summary');
+		const { service } = makeService({ llm });
+
+		await service.saveReport(makeValidReport({ llm: { enabled: true } }));
+		await service.run('test-report');
+
+		const prompt = (llm.complete as any).mock.calls[0][0] as string;
+		expect(prompt).toContain('Summarize the following report data in natural language.');
+		expect(prompt).toContain(
+			'Do not mention implementation noise such as app IDs, user IDs, or file paths',
+		);
+		expect(prompt).toContain('If the data only provides file paths, infer cautiously');
+	});
+
 	it('sanitizes data before LLM prompt', async () => {
 		const llm = makeLLM('Safe summary');
 		const { service } = makeService({ llm });
@@ -497,7 +512,9 @@ describe('ReportService — listForUser', () => {
 
 	it('user in delivery list sees the report', async () => {
 		const { service } = makeService({ userManager: makeUserManager(['111', '222']) });
-		await service.saveReport(makeValidReport({ id: 'shared', name: 'Shared', delivery: ['111', '222'] }));
+		await service.saveReport(
+			makeValidReport({ id: 'shared', name: 'Shared', delivery: ['111', '222'] }),
+		);
 
 		const resultFor111 = await service.listForUser('111');
 		expect(resultFor111).toHaveLength(1);
@@ -535,7 +552,9 @@ describe('ReportService — listForUser', () => {
 	it('malformed YAML report is skipped (consistent with listReports)', async () => {
 		const { service } = makeService();
 		// Save a valid report first
-		await service.saveReport(makeValidReport({ id: 'valid', name: 'Valid', delivery: ['123456789'] }));
+		await service.saveReport(
+			makeValidReport({ id: 'valid', name: 'Valid', delivery: ['123456789'] }),
+		);
 		// Write an invalid YAML file directly
 		const { writeFile } = await import('node:fs/promises');
 		const { join: pathJoin } = await import('node:path');
@@ -553,16 +572,20 @@ describe('ReportService — listForUser', () => {
 
 	it('cross-user: listForUser(userA) does not include userB owned report', async () => {
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
-		await service.saveReport(makeValidReport({ id: 'u2-report', name: 'U2 Report', delivery: ['u2'] }));
+		await service.saveReport(
+			makeValidReport({ id: 'u2-report', name: 'U2 Report', delivery: ['u2'] }),
+		);
 
 		const result = await service.listForUser('u1');
 		expect(result).toHaveLength(0);
 	});
 
-	it('cross-user isolation: user does not see another user\'s report when not in their delivery list', async () => {
+	it("cross-user isolation: user does not see another user's report when not in their delivery list", async () => {
 		// u1 and u3 are in different households; report delivers to u3 only
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u3']) });
-		await service.saveReport(makeValidReport({ id: 'u3-report', name: 'U3 Report', delivery: ['u3'] }));
+		await service.saveReport(
+			makeValidReport({ id: 'u3-report', name: 'U3 Report', delivery: ['u3'] }),
+		);
 
 		// u1 is NOT in the delivery list → must NOT see the report
 		const result = await service.listForUser('u1');
@@ -594,8 +617,12 @@ describe('ReportService — listForUser', () => {
 
 	it('sort order matches listReports() output order (alphabetical by name)', async () => {
 		const { service } = makeService();
-		await service.saveReport(makeValidReport({ id: 'z-report', name: 'Zebra', delivery: ['123456789'] }));
-		await service.saveReport(makeValidReport({ id: 'a-report', name: 'Aardvark', delivery: ['123456789'] }));
+		await service.saveReport(
+			makeValidReport({ id: 'z-report', name: 'Zebra', delivery: ['123456789'] }),
+		);
+		await service.saveReport(
+			makeValidReport({ id: 'a-report', name: 'Aardvark', delivery: ['123456789'] }),
+		);
 
 		const all = await service.listReports();
 		const forUser = await service.listForUser('123456789');

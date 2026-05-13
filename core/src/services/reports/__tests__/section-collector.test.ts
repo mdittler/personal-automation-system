@@ -104,6 +104,124 @@ describe('collectSection — changes', () => {
 		expect(result.content).not.toContain('echo');
 	});
 
+	it('ignores read-only activity because reports summarize actual changes', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'read',
+				path: 'household.yaml',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'write',
+				path: 'receipts/2026-05-13-demo.yaml',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		const deps = makeDeps({ changeLog: makeChangeLog(logPath) });
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(false);
+		expect(result.content).toContain('write `receipts/2026-05-13-demo.yaml`');
+		expect(result.content).not.toContain('read `household.yaml`');
+	});
+
+	it('returns empty when the window only contains reads', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entry = {
+			timestamp: new Date().toISOString(),
+			appId: 'food',
+			userId: 'system',
+			operation: 'read',
+			path: 'household.yaml',
+		};
+		await writeFile(logPath, `${JSON.stringify(entry)}\n`);
+
+		const deps = makeDeps({ changeLog: makeChangeLog(logPath) });
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		expect(result.isEmpty).toBe(true);
+		expect(result.content).toContain('No write, append, or archive changes');
+	});
+
+	it('collapses duplicate operations on the same path', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'write',
+				path: 'prices/costco.md',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'write',
+				path: 'prices/costco.md',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		const deps = makeDeps({ changeLog: makeChangeLog(logPath) });
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		expect(result.content).toContain('write `prices/costco.md` (2x)');
+		expect(result.content.match(/prices\/costco\.md/g)).toHaveLength(1);
+	});
+
+	it('does not collapse same-path operations from different scopes', async () => {
+		const logPath = join(tempDir, 'change-log.jsonl');
+		const entries = [
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'write',
+				path: 'prices/costco.md',
+				spaceId: 'family',
+				spaceKind: 'household',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				appId: 'food',
+				userId: 'system',
+				operation: 'write',
+				path: 'prices/costco.md',
+				spaceId: 'meal-plan',
+				spaceKind: 'collaboration',
+			},
+		];
+		await writeFile(logPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`);
+
+		const deps = makeDeps({ changeLog: makeChangeLog(logPath) });
+		const result = await collectSection(
+			{ type: 'changes', label: 'Changes', config: { lookback_hours: 1 } },
+			deps,
+		);
+
+		expect(result.content.match(/write `prices\/costco\.md`/g)).toHaveLength(2);
+		expect(result.content).toContain('[space:family, kind:household]');
+		expect(result.content).toContain('[space:meal-plan, kind:collaboration]');
+		expect(result.content).not.toContain('(2x)');
+	});
+
 	it('returns empty when filter matches no apps', async () => {
 		const logPath = join(tempDir, 'change-log.jsonl');
 		const entry = {
@@ -301,7 +419,12 @@ describe('collectSection — app-data (directory)', () => {
 describe('collectSection — context', () => {
 	it('collects matching context entries', async () => {
 		const contextStore = makeContextStore([
-			{ key: 'preferences-coffee', content: 'Dark roast, no sugar', lastUpdated: new Date(), kind: 'untyped' },
+			{
+				key: 'preferences-coffee',
+				content: 'Dark roast, no sugar',
+				lastUpdated: new Date(),
+				kind: 'untyped',
+			},
 			{ key: 'preferences-food', content: 'Vegetarian', lastUpdated: new Date(), kind: 'untyped' },
 		]);
 
@@ -357,7 +480,12 @@ describe('collectSection — custom', () => {
 describe('collectSection — error handling', () => {
 	it('returns error message for unknown section type', async () => {
 		const deps = makeDeps();
-		const result = await collectSection({ type: 'unknown' as any, label: 'Bad', config: {} }, deps);
+		const invalidSection = {
+			type: 'unknown',
+			label: 'Bad',
+			config: {},
+		} as unknown as Parameters<typeof collectSection>[0];
+		const result = await collectSection(invalidSection, deps);
 
 		expect(result.isEmpty).toBe(true);
 		expect(result.content).toContain('Unknown section type');

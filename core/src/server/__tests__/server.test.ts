@@ -67,4 +67,14 @@ describe('createServer', () => {
 		expect(res.statusCode).toBe(200);
 		expect(res.json().body).toEqual({ key: 'value' });
 	});
+
+	it('serves the vendored htmx asset used by GUI lazy-loaded panels', async () => {
+		server = await createServer({ logger });
+
+		const res = await server.inject({ method: 'GET', url: '/gui/public/htmx.min.js' });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.headers['content-type']).toContain('application/javascript');
+		expect(res.body).toContain('htmx');
+	});
 });
