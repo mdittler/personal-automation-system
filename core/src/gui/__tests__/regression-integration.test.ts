@@ -118,9 +118,8 @@ describe('case-discovery integration (fake CLI --list)', () => {
 			spawnFn: () =>
 				nodeSpawn(process.execPath, [fakeCliPath], {
 					env: { ...process.env, FAKE_CLI_MODE: 'list' },
-					// biome-ignore lint/suspicious/noExplicitAny: cross-test process shape
-					stdio: ['ignore', 'pipe', 'pipe'],
-				}) as any,
+					stdio: ['ignore', 'pipe', 'pipe'] as const,
+				}),
 		});
 		const out = await discovery.discover();
 		expect(out.error).toBeUndefined();
@@ -147,15 +146,11 @@ describe('real CLI --list strict NDJSON (Codex P3.2 — dotenv silenced)', () =>
 		process.env.GUI_AUTH_TOKEN ||= 'smoke-gui-token';
 		process.env.ANTHROPIC_API_KEY ||= 'smoke-api-key';
 		try {
-			const child = nodeSpawn(
-				process.execPath,
-				['--import=tsx/esm', cliPath, '--list', '--json'],
-				{
-					cwd: repoRoot,
-					env: { ...process.env, TSX_TSCONFIG_PATH: tsconfigPath },
-					stdio: ['ignore', 'pipe', 'pipe'],
-				},
-			);
+			const child = nodeSpawn(process.execPath, ['--import=tsx/esm', cliPath, '--list', '--json'], {
+				cwd: repoRoot,
+				env: { ...process.env, TSX_TSCONFIG_PATH: tsconfigPath },
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
 			let stdoutBuf = '';
 			child.stdout.on('data', (c) => {
 				stdoutBuf += c.toString();
@@ -356,9 +351,7 @@ describe('real regression CLI --list with model overrides (REQ-REG-GUI-OV-007)',
 
 	it('--judge-model=anthropic/claude-haiku-4-5-20251001 changes the standard-tier cache key', async () => {
 		const baseline = await spawnListCli([]);
-		const overridden = await spawnListCli([
-			'--judge-model=anthropic/claude-haiku-4-5-20251001',
-		]);
+		const overridden = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
 		expect(baseline.exitCode).toBe(0);
 		expect(overridden.exitCode).toBe(0);
 		const baselineKey = pickCaseKey(baseline.stdout, 'routing');
@@ -369,9 +362,7 @@ describe('real regression CLI --list with model overrides (REQ-REG-GUI-OV-007)',
 	}, 60_000);
 
 	it('--judge-model wins over --model-matrix=standard= (cache key reflects judge model)', async () => {
-		const judgeOnly = await spawnListCli([
-			'--judge-model=anthropic/claude-haiku-4-5-20251001',
-		]);
+		const judgeOnly = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
 		const bothFlags = await spawnListCli([
 			'--model-matrix=standard=anthropic/claude-sonnet-4-6',
 			'--judge-model=anthropic/claude-haiku-4-5-20251001',

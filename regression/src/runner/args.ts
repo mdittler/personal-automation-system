@@ -92,7 +92,8 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 	// is the right invocation in their environment.
 	if (argv[0] === '--') i = 1;
 	while (i < argv.length) {
-		const a = argv[i]!;
+		const a = argv[i];
+		if (a === undefined) break;
 		if (a === '--help' || a === '-h') {
 			opts.help = true;
 			i++;
@@ -200,11 +201,15 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
  * Extracted from `cli-main.ts` so the precedence logic is unit-testable
  * (Codex correction #3).
  */
-export function buildTierOverrideFromCli(opts: CliOptions):
+export function buildTierOverrideFromCli(
+	opts: CliOptions,
+):
 	| Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>>
 	| undefined {
 	if (!opts.modelMatrix && !opts.judgeModel) return undefined;
-	const out: Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>> = {};
+	const out: Partial<
+		Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>
+	> = {};
 	if (opts.modelMatrix?.fast) out.fast = opts.modelMatrix.fast;
 	if (opts.judgeModel) out.standard = opts.judgeModel;
 	else if (opts.modelMatrix?.standard) out.standard = opts.modelMatrix.standard;

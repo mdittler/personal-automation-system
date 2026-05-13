@@ -9796,10 +9796,10 @@ The run form on `/gui/regression` exposes two optional text inputs (`modelMatrix
 
 **Phase:** GUI override surface (2026-05-13) | **Status:** Implemented
 
-`core/src/services/regression/model-spec.ts` defines `parseModelRef`, `parseModelMatrixValue`, `parseJudgeModelValue`, `normalizeOptionalModelSpec`, and `MAX_MODEL_SPEC_CHARS`. Provider parts match `^[a-z][a-z0-9-]{0,31}$` and model parts match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`. `..` traversal sequences are explicitly rejected even within the model-part character class. Length cap is 256 chars overall (128 per single ref). Test fixtures use legitimate `provider/model` shapes with embedded metachars to ensure rejection fires for the right reason (not just "no slash").
+`core/src/services/regression/model-spec.ts` defines `parseModelRef`, `parseModelMatrixValue`, `parseJudgeModelValue`, `normalizeOptionalModelSpec`, and `MAX_MODEL_SPEC_CHARS`. Provider parts align with the GUI provider id pattern (`^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$`), and model parts allow safe namespaced ids (`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$`) for OpenAI-compatible / HuggingFace-style model names. `..` traversal sequences, `//` empty path segments, and trailing `/` are explicitly rejected even within the model-part character class. Length cap is 256 chars overall (128 per single ref). Test fixtures use legitimate `provider/model` shapes with embedded metachars to ensure rejection fires for the right reason (not just "no slash").
 
 **Standard tests:**
-- `model-spec.test.ts` > parseModelRef > accepts real-world provider/model strings (5 happy-path entries)
+- `model-spec.test.ts` > parseModelRef > accepts real-world provider/model strings, GUI-compatible provider ids, and namespaced model ids (8 happy-path entries)
 - `model-spec.test.ts` > parseModelMatrixValue > parses named and positional forms (3 entries)
 - `model-spec.test.ts` > parseJudgeModelValue > accepts anthropic/claude-haiku-4-5-20251001
 - `model-spec.test.ts` > parseJudgeModelValue > rejects "anthropic/claude;rm" (security)
@@ -9813,9 +9813,9 @@ The run form on `/gui/regression` exposes two optional text inputs (`modelMatrix
 - `model-spec.test.ts` > parseModelRef > rejects "ollama/foo>bar" (HTML/redirect)
 - `model-spec.test.ts` > parseModelRef > rejects "ollama/<script>" (HTML tag)
 - `model-spec.test.ts` > parseModelRef > rejects "ollama/../etc" (traversal)
+- `model-spec.test.ts` > parseModelRef > rejects namespaced model refs with consecutive slashes, trailing slash, or traversal segments
 - `model-spec.test.ts` > parseModelRef > rejects "ollama/foo bar" (whitespace in model)
 - `model-spec.test.ts` > parseModelRef > rejects "ollama/foo\nbar" (newline control char)
-- `model-spec.test.ts` > parseModelRef > rejects "ANTHROPIC/claude" (uppercase provider)
 - `model-spec.test.ts` > parseModelRef > rejects "-anthropic/claude" (leading hyphen)
 - `model-spec.test.ts` > parseModelRef > rejects oversized provider / model / total length
 
@@ -9868,6 +9868,7 @@ The run form on `/gui/regression` exposes two optional text inputs (`modelMatrix
 - `model-spec.test.ts` > normalizeOptionalModelSpec > throws RangeError when input exceeds MAX_MODEL_SPEC_CHARS
 - `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > omits --model-matrix arg when modelMatrix is empty / whitespace-only
 - `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects modelMatrix sent as array / object / number with 400 (no crash)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects judgeModel sent as array / object / boolean / number with 400 (no crash)
 - `regression-routes-write.test.ts` > POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV) > rejects modelMatrix exceeding MAX_MODEL_SPEC_CHARS with 400
 
 ---

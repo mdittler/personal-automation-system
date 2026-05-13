@@ -254,21 +254,15 @@ describe('validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-0
 
 	// Security
 	it('rejects --model-matrix=fast=ollama/gemma;rm (shell metachar)', () => {
-		expect(() =>
-			validateSpawnArgs(['--json', '--model-matrix=fast=ollama/gemma;rm']),
-		).toThrow();
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/gemma;rm'])).toThrow();
 	});
 
 	it('rejects --model-matrix=fast=ollama/$(evil) (subshell)', () => {
-		expect(() =>
-			validateSpawnArgs(['--json', '--model-matrix=fast=ollama/$(evil)']),
-		).toThrow();
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/$(evil)'])).toThrow();
 	});
 
 	it('rejects --model-matrix=fast=ollama/foo`bar` (backticks)', () => {
-		expect(() =>
-			validateSpawnArgs(['--json', '--model-matrix=fast=ollama/foo`bar`']),
-		).toThrow();
+		expect(() => validateSpawnArgs(['--json', '--model-matrix=fast=ollama/foo`bar`'])).toThrow();
 	});
 
 	it('rejects --judge-model=anthropic/claude;rm (command chain)', () => {
@@ -291,9 +285,7 @@ describe('validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-0
 	});
 
 	it('rejects --judge-model with absurdly long value (length cap)', () => {
-		expect(() =>
-			validateSpawnArgs(['--json', `--judge-model=${'a'.repeat(300)}`]),
-		).toThrow();
+		expect(() => validateSpawnArgs(['--json', `--judge-model=${'a'.repeat(300)}`])).toThrow();
 	});
 
 	it('rejects two-token form ["--model-matrix", "fast=foo/bar"] (equals-form only)', () => {

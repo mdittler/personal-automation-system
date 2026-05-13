@@ -23,7 +23,8 @@ const ALLOWED_JUDGE_MODEL_PREFIX = '--judge-model=';
 /** Throws when any arg is not on the spawn allowlist (defense in depth). */
 export function validateSpawnArgs(args: readonly string[]): void {
 	for (let i = 0; i < args.length; i++) {
-		const a = args[i]!;
+		const a = args[i];
+		if (a === undefined) break;
 		if (ALLOWED_SCALAR_ARGS.has(a)) continue;
 		if (a.startsWith(ALLOWED_BUCKET_PREFIX)) {
 			const v = a.slice(ALLOWED_BUCKET_PREFIX.length);

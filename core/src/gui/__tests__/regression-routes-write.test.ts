@@ -693,9 +693,7 @@ describe('POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV
 				},
 			});
 			expect(res.statusCode).toBe(202);
-			expect(pendingRuns[0]?.args).toContain(
-				'--judge-model=anthropic/claude-haiku-4-5-20251001',
-			);
+			expect(pendingRuns[0]?.args).toContain('--judge-model=anthropic/claude-haiku-4-5-20251001');
 		} finally {
 			await app.close();
 		}
@@ -774,9 +772,7 @@ describe('POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV
 				payload: { _csrf: csrf, modelMatrix: '' },
 			});
 			expect(res.statusCode).toBe(202);
-			expect(
-				(pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix=')),
-			).toBe(false);
+			expect((pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix='))).toBe(false);
 		} finally {
 			await app.close();
 		}
@@ -793,9 +789,7 @@ describe('POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV
 				payload: { _csrf: csrf, modelMatrix: '   ' },
 			});
 			expect(res.statusCode).toBe(202);
-			expect(
-				(pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix=')),
-			).toBe(false);
+			expect((pendingRuns[0]?.args ?? []).some((a) => a.startsWith('--model-matrix='))).toBe(false);
 		} finally {
 			await app.close();
 		}

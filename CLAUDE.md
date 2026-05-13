@@ -148,10 +148,10 @@ Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`
 
 **10 new URS REQs** (REQ-REG-GUI-OV-001..010): operator surface (001), tightened parser (002), single-source-of-truth contract (003), spawn allowlist re-validation (004), empty/non-string handling (005), backwards-compat (006), distinct model IDs → distinct cache rows (007, narrowed — see Out of Scope), accessible UI labels (008), auth/CSRF posture unchanged (009), XSS framing for JSON response (010).
 
-**Test inventory (~62 new tests across 5 files):**
-- `core/src/services/regression/__tests__/model-spec.test.ts` (NEW, 52 tests) — `parseModelRef` (23), `parseModelMatrixValue` (12), `parseJudgeModelValue` (4), `normalizeOptionalModelSpec` (13). Covers happy path, edge, security categories per `pas-testing-standards`.
+**Test inventory (6 touched test files):**
+- `core/src/services/regression/__tests__/model-spec.test.ts` (NEW, 56 tests) — `parseModelRef` (27), `parseModelMatrixValue` (12), `parseJudgeModelValue` (4), `normalizeOptionalModelSpec` (13). Covers happy path, edge, security categories per `pas-testing-standards`.
 - `core/src/gui/services/regression/__tests__/subprocess.test.ts` (+17 tests) — allowlist accepts/rejects new flags with full security coverage.
-- `core/src/gui/__tests__/regression-routes-write.test.ts` (+24 tests) — POST handler validation, type-safe body normalization, contract tests asserting parser/POST parity, operator persona scenario (multi-step run-two-models-back-to-back).
+- `core/src/gui/__tests__/regression-routes-write.test.ts` (+27 tests) — POST handler validation, type-safe body normalization, contract tests asserting parser/POST parity, operator persona scenario (multi-step run-two-models-back-to-back).
 - `core/src/gui/__tests__/regression-routes.test.ts` (+7 tests) — UI rendering with accessibility assertions, history view rendering distinct models for one case.
 - `core/src/gui/__tests__/regression-integration.test.ts` (+7 tests) — `spawnRegression` end-to-end with fake CLI, plus real-CLI `--list` smoke tests asserting cache-key changes under override flags.
 - `regression/src/__tests__/cache.test.ts` (+2 tests) — distinct modelIds → distinct cache files for one case.
