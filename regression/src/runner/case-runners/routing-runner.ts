@@ -14,6 +14,7 @@
 
 import type {
 	CallMeter,
+	EvaluatedTier,
 	OracleVerdict,
 	PersonaCase,
 	RoutingTarget,
@@ -54,6 +55,21 @@ export interface RoutingRunnerDeps {
 
 /** Conservative token budget used for the pre-charge gate. */
 export const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 } as const;
+
+/**
+ * Tier slot exercised by each routing classifier. All three production
+ * classifiers (food-shadow, session-control, pas) currently call
+ * `LLMService.complete()` with `tier: 'fast'`, so a routing case is
+ * always a `'fast'` evaluation.
+ *
+ * If the routing-classifier tier ever changes, update this table — the
+ * leaderboard's tier attribution depends on it.
+ */
+export const ROUTING_TARGET_TIER: Readonly<Record<RoutingTarget, EvaluatedTier>> = {
+	'food-shadow': 'fast',
+	'session-control': 'fast',
+	pas: 'fast',
+};
 
 export async function runRoutingCase(
 	c: PersonaCase,
@@ -126,6 +142,7 @@ export async function runRoutingCase(
 		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
+		evaluatedTier: ROUTING_TARGET_TIER[c.routingTarget],
 		timestamp: new Date().toISOString(),
 		durationMs: Date.now() - start,
 	};

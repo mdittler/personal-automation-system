@@ -8,8 +8,7 @@
  * REQ-REG-002, REQ-REG-010.
  */
 
-import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
 	type RunResult,
@@ -18,6 +17,7 @@ import {
 	isPlainObject,
 	looksLikeRunResult,
 } from '../shared/types.js';
+import { atomicWriteJson } from './atomic-write.js';
 
 function assertValidCaseId(id: string): void {
 	if (!SAFE_CASE_ID_RE.test(id)) throw new Error(`invalid case id: ${id}`);
@@ -67,12 +67,8 @@ export class CacheStore {
 	async write(result: RunResult): Promise<void> {
 		assertValidCaseId(result.caseId);
 		assertValidCacheKey(result.cacheKey);
-		const dir = join(this.rootDir, result.caseId);
-		await mkdir(dir, { recursive: true });
-		const path = join(dir, `${result.cacheKey}.json`);
-		const tmpPath = `${path}.tmp.${process.pid}.${randomBytes(6).toString('hex')}`;
-		await writeFile(tmpPath, JSON.stringify({ result }, null, 2));
-		await rename(tmpPath, path);
+		const path = join(this.rootDir, result.caseId, `${result.cacheKey}.json`);
+		await atomicWriteJson(path, { result });
 	}
 
 	async listAllForCase(caseId: string): Promise<RunResult[]> {

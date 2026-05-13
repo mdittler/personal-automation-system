@@ -5,7 +5,7 @@ import {
 	parseJudgeModelValue,
 	parseModelMatrixValue,
 } from '../../../services/regression/model-spec.js';
-import { VALID_BUCKETS } from '../../../types/regression.js';
+import { SAFE_RUN_ID_RE, VALID_BUCKETS } from '../../../types/regression.js';
 import {
 	type RegressionSpawnTarget,
 	appendStderrTail,
@@ -19,6 +19,7 @@ const ALLOWED_BUCKET_PREFIX = '--bucket=';
 const ALLOWED_RERUN_PREFIX = '--rerun=';
 const ALLOWED_MODEL_MATRIX_PREFIX = '--model-matrix=';
 const ALLOWED_JUDGE_MODEL_PREFIX = '--judge-model=';
+const ALLOWED_RUN_ID_PREFIX = '--run-id=';
 
 /** Throws when any arg is not on the spawn allowlist (defense in depth). */
 export function validateSpawnArgs(args: readonly string[]): void {
@@ -55,6 +56,14 @@ export function validateSpawnArgs(args: readonly string[]): void {
 		// shared parser the POST handler used.
 		if (revalidatePrefixedArg(a, ALLOWED_MODEL_MATRIX_PREFIX, parseModelMatrixValue)) continue;
 		if (revalidatePrefixedArg(a, ALLOWED_JUDGE_MODEL_PREFIX, parseJudgeModelValue)) continue;
+		// REQ-REG-GUI-V2-003: --run-id=<uuid> — strictly UUID-shaped.
+		if (a.startsWith(ALLOWED_RUN_ID_PREFIX)) {
+			const v = a.slice(ALLOWED_RUN_ID_PREFIX.length);
+			if (!SAFE_RUN_ID_RE.test(v)) {
+				throw new Error(`spawn allowlist: invalid --run-id "${v}" (must be UUID)`);
+			}
+			continue;
+		}
 		throw new Error(`spawn allowlist: forbidden arg "${a}"`);
 	}
 }

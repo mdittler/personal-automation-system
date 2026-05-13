@@ -45,6 +45,7 @@ import {
 	runRoutingCase,
 } from './case-runners/routing-runner.js';
 import type { RecallAdapter } from './dispatch.js';
+import { buildManifest, writeManifest } from './manifest-writer.js';
 import {
 	ACCURACY_GATE_THRESHOLD,
 	buildSummary,
@@ -84,6 +85,17 @@ export interface RunSuiteOptions {
 	noCache?: boolean;
 	dryRun?: boolean;
 	onResult?: (result: RunResult) => void;
+	/**
+	 * When set together with `manifestDir`, the runner writes a `RunManifest`
+	 * at completion (REQ-REG-GUI-V2-003). The GUI's subprocess always passes
+	 * its registry UUID; pure CLI invocations leave this blank and no
+	 * manifest is written.
+	 */
+	runId?: string;
+	/** Root directory for manifest files. Required iff `runId` is set. */
+	manifestDir?: string;
+	/** Signals that `--judge-model` was applied at run time (recorded in manifest). */
+	judgeOverrideApplied?: boolean;
 }
 
 export interface RunSuiteOutcome {
@@ -94,6 +106,7 @@ export interface RunSuiteOutcome {
 }
 
 export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> {
+	const startedAt = new Date().toISOString();
 	const loaded = await loadCases(opts.casesDir);
 	const filtered = opts.bucketFilter
 		? loaded.filter((lc) => lc.case.bucket === opts.bucketFilter)
@@ -286,8 +299,39 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		}
 	}
 
+	const summary = buildSummary(results, targets);
+
+	// REQ-REG-GUI-V2-003: persist a RunManifest when the GUI passes --run-id
+	// (or a test sets these directly). Dry-runs and `--list` mode bypass
+	// runSuite entirely, so no extra guard is needed here. Manifest write
+	// failures are logged but do NOT fail the run — the subprocess's exit
+	// code is REQ-REG-011's gate, not the manifest's persistence.
+	if (opts.runId && opts.manifestDir && !opts.dryRun) {
+		try {
+			const cases = new Map<string, PersonaCase>();
+			for (const lc of filtered) cases.set(lc.case.id, lc.case);
+			const manifest = buildManifest({
+				runId: opts.runId,
+				startedAt,
+				completedAt: new Date().toISOString(),
+				modelIds: opts.modelIds,
+				judgeOverrideApplied: opts.judgeOverrideApplied === true,
+				bucketsRequested: opts.bucketFilter ? [opts.bucketFilter] : ['__all__'],
+				results,
+				cases,
+				summary,
+			});
+			await writeManifest(opts.manifestDir, manifest);
+		} catch (err) {
+			opts.logger.warn(
+				{ err: (err as Error).message, runId: opts.runId, manifestDir: opts.manifestDir },
+				'orchestrator: RunManifest write failed (run results still valid; GUI leaderboard will miss this run)',
+			);
+		}
+	}
+
 	return {
-		summary: buildSummary(results, targets),
+		summary,
 		results,
 		targets,
 	};
@@ -307,7 +351,13 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
  */
 export type RunCliDeps = Omit<
 	RunSuiteOptions,
-	'bucketFilter' | 'rerunIds' | 'noCache' | 'dryRun' | 'onResult'
+	| 'bucketFilter'
+	| 'rerunIds'
+	| 'noCache'
+	| 'dryRun'
+	| 'onResult'
+	| 'runId'
+	| 'judgeOverrideApplied'
 >;
 
 export interface RunCliResult {
@@ -348,6 +398,8 @@ export async function runCli(
 		rerunIds: cli.rerunIds,
 		noCache: cli.noCache,
 		dryRun: cli.dryRun,
+		runId: cli.runId,
+		judgeOverrideApplied: cli.judgeModel !== undefined,
 		onResult: cli.json
 			? (r) => write(`${JSON.stringify({ type: 'case-result', result: r })}\n`)
 			: undefined,

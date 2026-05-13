@@ -61,9 +61,16 @@ interface FakeRunHandleShape {
 
 export interface CreateRunOptions {
 	args: readonly string[];
+	/**
+	 * Factory invoked once `createRun()` has minted the runId. The third
+	 * argument is the registry-issued runId so the factory can pass it into
+	 * the spawned subprocess (`--run-id=<runId>`) without observing a
+	 * temporal-dead-zone capture of an outer `runId` variable.
+	 */
 	runFactory: (
 		onEvent: (e: RegressionEvent) => void,
 		signal: AbortSignal,
+		runId: string,
 	) => Promise<FakeRunHandleShape | undefined> | FakeRunHandleShape | undefined;
 }
 
@@ -76,6 +83,14 @@ export interface RunRegistry {
 	shutdown(): Promise<void>;
 	waitForCompletion(runId: string): Promise<void>;
 	setNow(fn: () => number): void;
+	/**
+	 * Register a hook that fires once a run reaches a terminal status
+	 * (complete, gate-failed, failed, cancelled). The hook runs after the
+	 * SSE listeners have been dispatched and the registry state has been
+	 * marked terminal. Errors are swallowed so a misbehaving hook cannot
+	 * wedge other listeners.
+	 */
+	onTerminal(hook: (runId: string, status: RunStatus) => void): () => void;
 }
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set([
@@ -102,6 +117,7 @@ function inferTerminal(event: RegressionEvent): RunStatus | null {
 
 export function createRunRegistry(options?: { now?: () => number }): RunRegistry {
 	const runs = new Map<string, RunState>();
+	const terminalHooks = new Set<(runId: string, status: RunStatus) => void>();
 	let activeRunId: string | null = null;
 	let now: () => number = options?.now ?? (() => Date.now());
 
@@ -119,6 +135,19 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 			state.status = terminal;
 			state.endedAt = now();
 			if (activeRunId === state.runId) activeRunId = null;
+			// Defer hook invocation so a slow hook body (e.g. a manifest disk
+			// read before the auto-summarize kick-off) cannot block the
+			// synchronous SSE listener loop above.
+			const runId = state.runId;
+			for (const hook of terminalHooks) {
+				queueMicrotask(() => {
+					try {
+						hook(runId, terminal);
+					} catch {
+						/* terminal-hook errors do not affect other hooks */
+					}
+				});
+			}
 		}
 	}
 
@@ -156,7 +185,9 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 			// wedging subsequent createRun() calls behind a phantom active.
 			let handle: FakeRunHandleShape | undefined;
 			try {
-				handle = (await runFactory(onEvent, abort.signal)) as FakeRunHandleShape | undefined;
+				handle = (await runFactory(onEvent, abort.signal, runId)) as
+					| FakeRunHandleShape
+					| undefined;
 			} catch (err) {
 				state.status = 'failed';
 				state.endedAt = now();
@@ -233,6 +264,13 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 
 		setNow(fn) {
 			now = fn;
+		},
+
+		onTerminal(hook) {
+			terminalHooks.add(hook);
+			return () => {
+				terminalHooks.delete(hook);
+			};
 		},
 	};
 }

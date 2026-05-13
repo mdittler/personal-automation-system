@@ -166,6 +166,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		tokenCounts: { input: 0, output: 0 },
 		costUsd,
 		modelIds: deps.modelIds,
+		evaluatedTier: 'standard',
 		timestamp: new Date().toISOString(),
 		durationMs: Date.now() - start,
 	};

@@ -201,6 +201,7 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
+		evaluatedTier: 'standard',
 		timestamp: new Date().toISOString(),
 		durationMs: Date.now() - start,
 	};

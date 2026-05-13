@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildTierOverrideFromCli, parseCliArgs } from '../runner/args.js';
+import { RUN_ID_RE, buildTierOverrideFromCli, parseCliArgs } from '../runner/args.js';
 
 describe('parseCliArgs', () => {
-	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help, no list, no no-cache', () => {
+	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help, no list, no no-cache, no run-id', () => {
 		expect(parseCliArgs([])).toEqual({
 			bucketFilter: undefined,
 			rerunIds: undefined,
@@ -11,6 +11,48 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			runId: undefined,
+			modelMatrix: undefined,
+			judgeModel: undefined,
+		});
+	});
+
+	describe('--run-id (REQ-REG-GUI-V2-003)', () => {
+		const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+
+		it('parses --run-id=<uuid> (equals form)', () => {
+			expect(parseCliArgs([`--run-id=${VALID_UUID}`]).runId).toBe(VALID_UUID);
+		});
+
+		it('parses --run-id <uuid> (space form)', () => {
+			expect(parseCliArgs(['--run-id', VALID_UUID]).runId).toBe(VALID_UUID);
+		});
+
+		it('rejects a non-UUID --run-id (equals form)', () => {
+			expect(() => parseCliArgs(['--run-id=hello'])).toThrow(/--run-id must be a UUID/);
+		});
+
+		it('rejects a non-UUID --run-id (space form)', () => {
+			expect(() => parseCliArgs(['--run-id', 'hello'])).toThrow(/--run-id requires a UUID/);
+		});
+
+		it('rejects an empty --run-id', () => {
+			expect(() => parseCliArgs(['--run-id='])).toThrow(/--run-id must be a UUID/);
+		});
+
+		it('RUN_ID_RE accepts UUID v1-v5 shapes (case-insensitive)', () => {
+			expect(RUN_ID_RE.test(VALID_UUID)).toBe(true);
+			expect(RUN_ID_RE.test(VALID_UUID.toUpperCase())).toBe(true);
+			expect(RUN_ID_RE.test('00000000-0000-1000-8000-000000000000')).toBe(true); // v1
+			expect(RUN_ID_RE.test('00000000-0000-5000-b000-000000000000')).toBe(true); // v5
+		});
+
+		it('RUN_ID_RE rejects malformed strings', () => {
+			expect(RUN_ID_RE.test('')).toBe(false);
+			expect(RUN_ID_RE.test('not-a-uuid')).toBe(false);
+			expect(RUN_ID_RE.test('550e8400-e29b-41d4-a716')).toBe(false); // too short
+			expect(RUN_ID_RE.test('550e8400-e29b-01d4-a716-446655440000')).toBe(false); // version 0
+			expect(RUN_ID_RE.test('550e8400-e29b-71d4-a716-446655440000')).toBe(false); // version 7
 		});
 	});
 

@@ -263,7 +263,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('fast-m');
 			expect(res.body).toContain('std-m');
@@ -281,7 +281,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			listedCases: [makeListedCase({ caseId: 'never-run-case' })],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toContain('never-run-case');
 			expect(res.body).toContain('●');
 		} finally {
@@ -301,7 +301,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toContain('⚠');
 			expect(res.body).toContain('coverage changed');
 		} finally {
@@ -314,7 +314,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			discoveryError: 'regression --list exited 1: boom',
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toContain('Failed to enumerate cases');
 			expect(res.body).toContain('boom');
 		} finally {
@@ -322,7 +322,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 		}
 	});
 
-	it('filters by bucket via ?bucket= query param', async () => {
+	it('filters by bucket via ?view=compare&bucket=… query params', async () => {
 		const { app } = await buildApp({
 			listedCases: [
 				makeListedCase({ caseId: 'r-1', bucket: 'routing' }),
@@ -334,9 +334,27 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression?bucket=routing');
+			const res = await getAuthed(app, '/gui/regression?view=compare&bucket=routing');
 			expect(res.body).toContain('r-1');
 			expect(res.body).not.toContain('p-1');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-005: legacy ?bucket= redirects 302 to Compare tab', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'r-1', bucket: 'routing' })],
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/regression?bucket=routing',
+				cookies,
+			});
+			expect(res.statusCode).toBe(302);
+			expect(res.headers.location).toBe('/gui/regression?view=compare&bucket=routing');
 		} finally {
 			await app.close();
 		}
@@ -347,7 +365,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			listedCases: [makeListedCase({ caseId: 'r-1', bucket: 'routing' })],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression?bucket=chatbot');
+			const res = await getAuthed(app, '/gui/regression?view=compare&bucket=chatbot');
 			expect(res.body).toContain('No cases in this bucket');
 		} finally {
 			await app.close();
@@ -362,7 +380,7 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 			],
 		});
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/est\.\s*≈\s*\$0\.\d/);
 		} finally {
 			await app.close();
@@ -372,8 +390,90 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 	it('renders the token-counts footnote (REQ-REG-013 token gap is documented)', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/token counts.*not yet plumbed/i);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-007: default view is Overview when ?view is absent', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.statusCode).toBe(200);
+			// Overview shell renders the tab strip + the overview partial. No
+			// runHistoryStore was injected, so the empty-state placeholder shows.
+			expect(res.body).toMatch(/No runs recorded yet/i);
+			expect(res.body).toMatch(/aria-current="page"[^>]*>Overview|>Overview<\/a>/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-007: ?view=trends renders the trends partial', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=trends');
+			expect(res.statusCode).toBe(200);
+			// Trends partial has a `?window=` selector and an empty-state when
+			// no run history exists.
+			expect(res.body).toMatch(/data-testid="trends-window"/);
+			expect(res.body).toMatch(/No runs in this window|trends-empty/i);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-007: ?view=run renders the Run launcher form', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=run');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toMatch(/name="tier_fast"/);
+			expect(res.body).toMatch(/name="tier_standard"/);
+			expect(res.body).toMatch(/name="tier_reasoning"/);
+			expect(res.body).toMatch(/name="judge"/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-017: Compare filter chips render with model/verdict/caseId inputs', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).toMatch(/data-testid="compare-filter-model"/);
+			expect(res.body).toMatch(/data-testid="compare-filter-verdict"/);
+			expect(res.body).toMatch(/data-testid="compare-filter-case-id"/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-017: ?caseId=<x> filters the Compare case table to a single case', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'wanted-case', bucket: 'routing' }),
+				makeListedCase({ caseId: 'other-case', bucket: 'routing' }),
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare&caseId=wanted-case');
+			expect(res.body).toContain('wanted-case');
+			expect(res.body).not.toContain('other-case');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('REQ-REG-GUI-V2-020: drilldown renders the "see across all runs" link', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase({ caseId: 'd-1' })] });
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/d-1');
+			expect(res.body).toMatch(
+				/href="\/gui\/regression\?view=compare&caseId=d-1"|data-testid="drilldown-cross-model-link"/,
+			);
 		} finally {
 			await app.close();
 		}
@@ -385,7 +485,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('renders an input named "modelMatrix" inside the run form', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/<input[^>]+name="modelMatrix"/);
 		} finally {
 			await app.close();
@@ -395,7 +495,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('renders an input named "judgeModel" inside the run form', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/<input[^>]+name="judgeModel"/);
 		} finally {
 			await app.close();
@@ -405,7 +505,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('renders accessible aria-label for each model-override input', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			// One of: <label>Model matrix override<input ...></label>
 			//       or <input ... aria-label="Model matrix override">
 			expect(res.body).toMatch(
@@ -422,7 +522,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('each model-override input has a placeholder showing provider/model syntax', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/name="modelMatrix"[^>]*placeholder="[^"]+\//);
 			expect(res.body).toMatch(/name="judgeModel"[^>]*placeholder="[^"]+\//);
 		} finally {
@@ -433,7 +533,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('neither model-override input is required (preserves empty-form submit)', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			// Match the modelMatrix input element and assert "required" is not in it.
 			const matrixInput = res.body.match(/<input[^>]+name="modelMatrix"[^>]*>/)?.[0] ?? '';
 			expect(matrixInput).not.toMatch(/\brequired\b/);
@@ -447,7 +547,7 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 	it('CSRF hidden input is still present alongside the new fields', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
-			const res = await getAuthed(app, '/gui/regression');
+			const res = await getAuthed(app, '/gui/regression?view=compare');
 			expect(res.body).toMatch(/<input[^>]+type="hidden"[^>]+name="_csrf"/);
 		} finally {
 			await app.close();

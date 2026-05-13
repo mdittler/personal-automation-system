@@ -20,11 +20,19 @@ import {
 	parseModelMatrixValue,
 } from '@core/services/regression/model-spec.js';
 import type { ModelRef } from '@core/types/llm.js';
+import { SAFE_RUN_ID_RE } from '@core/types/regression.js';
 import { VALID_BUCKETS, isValidBucket } from '../shared/types.js';
 
 /** Mirrors `validatePersonaCase`'s ID_RE so a `--rerun=<id>` value cannot
  * escape the case-id allowlist when forwarded to the subprocess. */
 const RERUN_ID_RE = /^[a-z][a-z0-9-]{0,127}$/;
+
+/**
+ * Re-export of the canonical UUID allowlist used by the regression workspace
+ * (REQ-REG-GUI-V2-003). The single source of truth lives in
+ * `core/src/types/regression.ts` so every call site validates identically.
+ */
+export { SAFE_RUN_ID_RE as RUN_ID_RE };
 
 export interface CliOptions {
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
@@ -38,6 +46,13 @@ export interface CliOptions {
 	noCache: boolean;
 	modelMatrix?: ModelMatrix;
 	judgeModel?: ModelRef;
+	/**
+	 * When set, the subprocess writes a `RunManifest` at terminal summary
+	 * (REQ-REG-GUI-V2-003). The GUI always passes this. Pure CLI invocations
+	 * leave it empty and no manifest is written — keeps interactive CLI use
+	 * free of disk-side-effects.
+	 */
+	runId?: string;
 }
 
 export const HELP_TEXT = `\
@@ -61,6 +76,11 @@ Usage:
   pnpm test:regression -- --judge-model=<provider/model>
                                        Override the rubric-oracle judge model (standard tier).
   pnpm test:regression -- --no-cache   Force fresh dispatch for every case (skip all cache reads).
+  pnpm test:regression -- --run-id=<uuid>
+                                       Tag this run with a UUID; subprocess writes a RunManifest
+                                       JSON file at data/system/regression-runs/<uuid>.json so the
+                                       GUI leaderboard can attribute results to this run. The GUI
+                                       passes its registry UUID here automatically.
 
 Exit code:
   0  REQ-REG-011 gate met (or below floor).
@@ -182,6 +202,24 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 				throw new Error('--judge-model requires a provider/model value');
 			}
 			opts.judgeModel = parseJudgeModelValue(v);
+			i += 2;
+			continue;
+		}
+		if (a.startsWith('--run-id=')) {
+			const v = a.slice('--run-id='.length);
+			if (!SAFE_RUN_ID_RE.test(v)) {
+				throw new Error(`--run-id must be a UUID (got: ${JSON.stringify(v)})`);
+			}
+			opts.runId = v;
+			i++;
+			continue;
+		}
+		if (a === '--run-id') {
+			const v = argv[i + 1];
+			if (v === undefined || !SAFE_RUN_ID_RE.test(v)) {
+				throw new Error(`--run-id requires a UUID (got: ${String(v)})`);
+			}
+			opts.runId = v;
 			i += 2;
 			continue;
 		}

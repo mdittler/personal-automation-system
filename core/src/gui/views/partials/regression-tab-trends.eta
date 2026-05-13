@@ -1,0 +1,83 @@
+<section class="regression-trends" aria-label="Performance trends">
+
+<form method="get" action="/gui/regression" class="trends-filter-form">
+  <input type="hidden" name="view" value="trends" />
+  <label>
+    Window
+    <select name="window" onchange="this.form.submit()" data-testid="trends-window">
+      <option value="7d" <% if (it.trendsWindow === '7d') { %>selected<% } %>>Last 7 days</option>
+      <option value="30d" <% if (it.trendsWindow === '30d') { %>selected<% } %>>Last 30 days</option>
+      <option value="all" <% if (it.trendsWindow === 'all') { %>selected<% } %>>All time</option>
+    </select>
+  </label>
+  <label>
+    Tier
+    <select name="tier" onchange="this.form.submit()" data-testid="trends-tier">
+      <option value="fast" <% if (it.trendsTier === 'fast') { %>selected<% } %>>Fast</option>
+      <option value="standard" <% if (it.trendsTier === 'standard') { %>selected<% } %>>Standard</option>
+      <option value="reasoning" <% if (it.trendsTier === 'reasoning') { %>selected<% } %>>Reasoning</option>
+    </select>
+  </label>
+  <label>
+    Bucket
+    <select name="bucket" onchange="this.form.submit()" data-testid="trends-bucket">
+      <option value="" <% if (!it.selectedBucket) { %>selected<% } %>>All</option>
+      <option value="routing" <% if (it.selectedBucket === 'routing') { %>selected<% } %>>Routing</option>
+      <option value="receipt" <% if (it.selectedBucket === 'receipt') { %>selected<% } %>>Receipt</option>
+      <option value="chatbot" <% if (it.selectedBucket === 'chatbot') { %>selected<% } %>>Chatbot</option>
+      <option value="recall" <% if (it.selectedBucket === 'recall') { %>selected<% } %>>Recall</option>
+    </select>
+  </label>
+  <noscript>
+    <button type="submit">Apply filters</button>
+  </noscript>
+</form>
+
+<% if (!it.trendsHasData) { %>
+  <article class="empty-state" data-testid="trends-empty">
+    <h3>No runs in this window</h3>
+    <p>
+      Run a regression from the <a href="/gui/regression?view=run">Run</a> tab.
+      After it completes the chart will populate.
+    </p>
+  </article>
+<% } else { %>
+  <article class="chart-block" aria-labelledby="trend-line-heading">
+    <h2 id="trend-line-heading">Accuracy over time</h2>
+    <%~ it.trendsLineSvg %>
+  </article>
+
+  <article class="chart-block" aria-labelledby="trend-scatter-heading">
+    <h2 id="trend-scatter-heading">Cost vs accuracy</h2>
+    <%~ it.trendsScatterSvg %>
+  </article>
+
+  <% /* REQ-REG-GUI-V2-016: accessible <table> fallback alongside the SVGs */ %>
+  <details class="chart-data-fallback">
+    <summary>Underlying data (accessible table)</summary>
+    <table class="regression-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Run date</th>
+          <th>Pass rate</th>
+          <th>Cases (pass/total)</th>
+          <th>Total cost USD</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (const row of it.trendsTable) { %>
+          <tr data-testid="trends-table-row">
+            <td><code><%= row.modelId %></code></td>
+            <td><time datetime="<%= row.completedAt %>"><%= row.completedAt %></time></td>
+            <td><%= (row.passRate * 100).toFixed(1) %>%</td>
+            <td><%= row.pass %>/<%= row.total %></td>
+            <td>$<%= row.costUsd.toFixed(4) %></td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </details>
+<% } %>
+
+</section>

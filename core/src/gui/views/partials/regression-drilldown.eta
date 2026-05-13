@@ -5,6 +5,10 @@
     <nav class="drilldown-tabs">
       <a href="#" aria-current="page">Detail</a>
       <a href="#" hx-get="/gui/regression/cases/<%= encodeURIComponent(it.listed.caseId) %>/history" hx-target="#drilldown-history" hx-swap="innerHTML">History</a>
+      <%
+        // REQ-REG-GUI-V2-020: "see this case across all model runs"
+      %>
+      <a href="/gui/regression?view=compare&caseId=<%= encodeURIComponent(it.listed.caseId) %>" data-testid="drilldown-cross-model-link">See across all runs</a>
     </nav>
   </header>
 

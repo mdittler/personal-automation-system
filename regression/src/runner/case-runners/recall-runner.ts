@@ -105,6 +105,7 @@ export async function runRecallCase(c: PersonaCase, deps: RecallRunnerDeps): Pro
 		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
+		evaluatedTier: 'fast',
 		timestamp: new Date().toISOString(),
 		durationMs: Date.now() - start,
 	};

@@ -45,6 +45,7 @@ interface RepoPaths {
 	repoRoot: string;
 	casesDir: string;
 	cacheDir: string;
+	manifestDir: string;
 	configPath: string;
 	chatbotSeedJsonPath: string;
 	chatbotSeedShaPath: string;
@@ -56,6 +57,7 @@ function resolveRepoPaths(): RepoPaths {
 		repoRoot,
 		casesDir: resolve(repoRoot, 'regression', 'src', 'cases'),
 		cacheDir: resolve(repoRoot, 'data', 'system', 'regression-cache'),
+		manifestDir: resolve(repoRoot, 'data', 'system', 'regression-runs'),
 		configPath: resolve(repoRoot, 'config', 'pas.yaml'),
 		chatbotSeedJsonPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.json'),
 		chatbotSeedShaPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.sha256'),
@@ -184,6 +186,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
+		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
 		maxRunBudgetUsd,
@@ -302,6 +305,7 @@ export function buildDryRunDeps(): RunCliDeps {
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
+		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		// Stable placeholder model IDs — irrelevant for dry-run because no LLM
 		// call is made and the result's cache key is not persisted.
@@ -358,6 +362,7 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
+		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
 		maxRunBudgetUsd,

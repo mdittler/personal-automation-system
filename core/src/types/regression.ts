@@ -72,6 +72,25 @@ export interface CallMeter {
 	costUsd: number;
 }
 
+/**
+ * The LLM tier slot a case-runner exercised. Recorded per-case so the
+ * leaderboard can attribute results to the correct tier slot
+ * (REQ-REG-GUI-V2-001). Legacy cache entries that pre-date this field
+ * decode as `'unknown'` and are excluded from the per-tier leaderboard.
+ *
+ * `'mixed'` is reserved for future runners that genuinely span tiers in
+ * a single case; today every runner uses a single tier per case.
+ */
+export type EvaluatedTier = 'fast' | 'standard' | 'reasoning' | 'mixed' | 'unknown';
+
+export const EVALUATED_TIER_VALUES: readonly EvaluatedTier[] = [
+	'fast',
+	'standard',
+	'reasoning',
+	'mixed',
+	'unknown',
+] as const;
+
 export interface RunResult {
 	caseId: string;
 	cacheKey: string;
@@ -83,12 +102,58 @@ export interface RunResult {
 	tokenCounts: { input: number; output: number };
 	costUsd: number;
 	modelIds: TierModelSnapshot;
+	/**
+	 * Tier slot exercised by this case. New runs always set this; legacy
+	 * cache entries that omit it decode as `'unknown'` and are filtered
+	 * from per-tier leaderboards.
+	 */
+	evaluatedTier?: EvaluatedTier;
 	timestamp: string; // ISO-8601
 	durationMs: number;
 }
 
 export interface CacheEntry {
 	result: RunResult;
+}
+
+/**
+ * Per-case row stored in a `RunManifest`. One entry per selected case
+ * (including cache hits, distinguished by `source`).
+ *
+ * REQ-REG-GUI-V2-003.
+ */
+export interface ManifestCaseResult {
+	caseId: string;
+	bucket: PersonaCase['bucket'];
+	cacheKey: string;
+	evaluatedTier: EvaluatedTier;
+	verdict: Verdict;
+	source: 'cached' | 'fresh';
+	costUsd: number;
+	timestamp: string; // ISO-8601
+}
+
+/**
+ * Persistent record of a single subprocess invocation. Written atomically by
+ * the regression runner at terminal summary when `--run-id=<uuid>` is set.
+ *
+ * REQ-REG-GUI-V2-003.
+ */
+export interface RunManifest {
+	runId: string; // UUID v4
+	startedAt: string; // ISO-8601
+	completedAt: string; // ISO-8601
+	modelIds: TierModelSnapshot;
+	/**
+	 * Signals that `--judge-model` was passed at run time, in which case the
+	 * standard-tier slot reflects the judge override rather than the default
+	 * standard model. There is intentionally no `judgeModelId` field;
+	 * `modelIds.standard` IS the judge model when this flag is true.
+	 */
+	judgeOverrideApplied: boolean;
+	bucketsRequested: readonly string[]; // ['routing'] | ['__all__'] | ...
+	caseResults: readonly ManifestCaseResult[];
+	summary: RunSummary;
 }
 
 /**
@@ -145,7 +210,17 @@ export const SAFE_CASE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 /** SHA-256 hex (cache key on disk). */
 export const SAFE_CACHE_KEY_RE = /^[a-f0-9]{64}$/i;
 
-const VERDICT_VALUES: readonly Verdict[] = ['pass', 'fail', 'error', 'budget-exceeded'];
+/**
+ * RFC 4122 UUID v1–v5 (case-insensitive). The regression GUI uses
+ * `randomUUID()` (v4) for run IDs; this regex is intentionally inclusive of
+ * v1–v5 so the run-id allowlist is robust to a future swap of the generator.
+ *
+ * Canonical source — every regression UUID validation site imports this.
+ */
+export const SAFE_RUN_ID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const VERDICT_VALUES: readonly Verdict[] = ['pass', 'fail', 'error', 'budget-exceeded'];
 
 export function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -189,5 +264,19 @@ export function looksLikeRunResult(
 	if (typeof v.durationMs !== 'number' || !Number.isFinite(v.durationMs) || v.durationMs < 0) {
 		return false;
 	}
+	// evaluatedTier is optional (legacy-tolerant): missing → 'unknown' at read
+	// time. When present, must be one of the allowed enum values.
+	if (v.evaluatedTier !== undefined) {
+		if (typeof v.evaluatedTier !== 'string') return false;
+		if (!(EVALUATED_TIER_VALUES as readonly string[]).includes(v.evaluatedTier)) return false;
+	}
 	return true;
+}
+
+/**
+ * Read-side helper: returns the `evaluatedTier` if set on the result, else
+ * `'unknown'`. Callers should never assume new shape on legacy reads.
+ */
+export function getEvaluatedTier(r: Pick<RunResult, 'evaluatedTier'>): EvaluatedTier {
+	return r.evaluatedTier ?? 'unknown';
 }

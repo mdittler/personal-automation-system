@@ -1,0 +1,91 @@
+<%
+  // REQ-REG-GUI-V2-008: three tier-grouped tables. Each row reflects ONE
+  // RunManifest (latest per (tier, model) by default; pinned via ?pin=).
+  // Tokens render as `—` (carry-forward); cost is authoritative.
+%>
+<%
+  const tables = it.tierTables || [];
+  const noRunsAnywhere = tables.length === 0 || tables.every((t) => t.rows.length === 0);
+%>
+<section class="regression-overview" aria-label="Model performance by tier">
+
+<% if (noRunsAnywhere) { %>
+  <article class="empty-state" data-testid="overview-empty">
+    <h3>No runs recorded yet</h3>
+    <p>
+      Start a run from the <a href="/gui/regression?view=run">Run</a> tab. After it completes,
+      a <code>RunManifest</code> is persisted under
+      <code>data/system/regression-runs/</code> and shows up here.
+    </p>
+    <p>
+      <small>Pre-rework cache entries (before this branch) do not appear here — those runs were not manifested. Use Compare to inspect them.</small>
+    </p>
+  </article>
+<% } %>
+
+<% for (const table of tables) { %>
+  <article class="leaderboard-table" aria-labelledby="leaderboard-<%= table.tier %>">
+    <header>
+      <h2 id="leaderboard-<%= table.tier %>"><%= table.label %> tier</h2>
+      <% if (table.rows.length === 0) { %>
+        <p><small>No runs recorded under this tier yet.</small></p>
+      <% } %>
+    </header>
+    <% if (table.rows.length > 0) { %>
+      <table class="regression-table">
+        <thead>
+          <tr>
+            <th scope="col">Model</th>
+            <th scope="col">Run date</th>
+            <th scope="col">Cases</th>
+            <th scope="col">Pass rate</th>
+            <th scope="col">Total cost</th>
+            <th scope="col">Tokens</th>
+            <th scope="col">Status</th>
+            <th scope="col">Weakness summary</th>
+          </tr>
+        </thead>
+        <tbody>
+        <% for (const row of table.rows) { %>
+          <tr data-testid="leaderboard-row" data-tier="<%= row.tier %>" data-model="<%= row.modelId %>" data-runid="<%= row.runId %>">
+            <td>
+              <code><%= row.modelId %></code>
+              <% if (row.judgeOverrideApplied) { %>
+                <small class="badge badge-warn" title="--judge-model override applied at run time">(judge override)</small>
+              <% } %>
+            </td>
+            <td><time datetime="<%= row.completedAt %>"><%= row.completedAtFormatted %></time></td>
+            <td>
+              <%= row.pass %>/<%= row.total %> pass
+              <% if (row.fail > 0) { %><small> · <%= row.fail %> fail</small><% } %>
+              <% if (row.error > 0) { %><small> · <%= row.error %> error</small><% } %>
+              <% if (row.cached > 0) { %><small> · (<%= row.cached %> cached)</small><% } %>
+            </td>
+            <td><strong><%= row.passRateFormatted %></strong></td>
+            <td><%= row.totalCostFormatted %></td>
+            <td>—</td>
+            <td>
+              <% if (row.gateStatus === 'pass') { %>
+                <span class="badge badge-ok" title="REQ-REG-011 routing-accuracy gate (≥0.95)">PASS</span>
+              <% } else if (row.gateStatus === 'fail') { %>
+                <span class="badge badge-err" title="REQ-REG-011 routing-accuracy gate (≥0.95)">FAIL</span>
+              <% } else { %>
+                <span class="badge" title="No routing cases in this row — gate not applicable">—</span>
+              <% } %>
+            </td>
+            <td data-testid="weakness-summary-cell" data-runid="<%= row.runId %>" data-tier="<%= row.tier %>">
+              <% if (row.persistedSummary) { %>
+                <%~ include('regression-weakness-summary', { summary: row.persistedSummary }) %>
+              <% } else { %>
+                <small>generating…</small>
+              <% } %>
+            </td>
+          </tr>
+        <% } %>
+        </tbody>
+      </table>
+    <% } %>
+  </article>
+<% } %>
+
+</section>

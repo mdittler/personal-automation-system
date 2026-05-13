@@ -1,0 +1,32 @@
+<%
+  const s = it.summary;
+%>
+<% if (!s) { %>
+  <small>generating…</small>
+<% } else if (s.status === 'no-failures') { %>
+  <small class="badge badge-ok">No failures</small>
+<% } else if (s.status === 'error') { %>
+  <details class="weakness-error">
+    <summary><small class="badge badge-err">Generate failed</small></summary>
+    <small><%= s.errorMessage || 'unknown error' %></small>
+  </details>
+<% } else { %>
+  <details>
+    <summary><small><%= s.summary %></small></summary>
+    <ul class="weakness-categories">
+      <% for (const cat of (s.failureCategories || [])) { %>
+        <li>
+          <strong><%= cat.label %></strong>
+          <small>(<%= cat.count %>)</small>
+          <% if (cat.exampleCaseIds && cat.exampleCaseIds.length > 0) { %>
+            <small>—
+              <% for (let i = 0; i < cat.exampleCaseIds.length; i++) { %>
+                <a href="/gui/regression?view=compare&caseId=<%= encodeURIComponent(cat.exampleCaseIds[i]) %>"><code><%= cat.exampleCaseIds[i] %></code></a><% if (i < cat.exampleCaseIds.length - 1) { %>, <% } %>
+              <% } %>
+            </small>
+          <% } %>
+        </li>
+      <% } %>
+    </ul>
+  </details>
+<% } %>

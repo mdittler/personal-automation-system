@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import type { ModelCatalog } from '../../services/llm/model-catalog.js';
+import type { ModelSelector } from '../../services/llm/model-selector.js';
 import {
 	normalizeOptionalModelSpec,
 	parseJudgeModelValue,
@@ -8,7 +10,9 @@ import {
 import {
 	type RunResult,
 	SAFE_CASE_ID_RE,
+	SAFE_RUN_ID_RE,
 	type Verdict,
+	VERDICT_VALUES,
 	isValidBucket,
 } from '../../types/regression.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
@@ -20,12 +24,27 @@ import {
 import type { CaseDiscoveryService, ListedCase } from '../services/regression/case-discovery.js';
 import { type EstimatedCase, estimateRunCostUsd } from '../services/regression/estimator.js';
 import {
+	renderLineChart,
+	renderScatter,
+} from '../services/regression/chart-svg.js';
+import {
+	type LeaderboardTier,
+	type PinOverrideKey,
+	aggregateLeaderboard,
+} from '../services/regression/leaderboard-aggregator.js';
+import { type TimeWindow, buildTrendData } from '../services/regression/trend-aggregator.js';
+import {
 	RegistrationConflictError,
 	type RegressionEvent,
 	type RunRegistry,
 } from '../services/regression/run-registry.js';
+import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 import { openSseStream, writeSseEvent } from '../services/regression/sse-helper.js';
 import { type SpawnFn, spawnRegression } from '../services/regression/subprocess.js';
+import type {
+	SummaryTier,
+	WeaknessSummarizer,
+} from '../services/regression/weakness-summarizer.js';
 
 export interface RegressionRoutesOptions {
 	caseDiscovery: CaseDiscoveryService;
@@ -41,10 +60,32 @@ export interface RegressionRoutesOptions {
 	tsconfigPath?: string;
 	/** Override the spawn factory (tests inject a fake). */
 	spawnFn?: SpawnFn;
+	/**
+	 * Reads RunManifest files from `data/system/regression-runs/`. Required for
+	 * the Overview/Trends tabs (REQ-REG-GUI-V2-004). Routes degrade to "no runs
+	 * recorded yet" when this is unset or returns empty.
+	 */
+	runHistoryStore?: RunHistoryStore;
+	/**
+	 * Used by the Run tab to render `<select>` model dropdowns sourced from
+	 * live provider listings (REQ-REG-GUI-V2-006/011). When omitted, the Run
+	 * tab falls back to legacy text inputs.
+	 */
+	modelCatalog?: ModelCatalog;
+	/**
+	 * Reads current per-tier defaults to pre-select dropdown values and detect
+	 * unavailable-current models (REQ-REG-GUI-V2-011).
+	 */
+	modelSelector?: ModelSelector;
+	/**
+	 * Generates the weakness summary persisted at the polled
+	 * `/runs/:runId/summary` route (REQ-REG-GUI-V2-018/019). When omitted, the
+	 * polled route returns 503 with a documented error.
+	 */
+	weaknessSummarizer?: WeaknessSummarizer;
 }
 
 const SAFE_RERUN_ID = /^[a-z][a-z0-9-]{0,127}$/;
-const RUN_ID_RE = /^[0-9a-f-]{8,64}$/i;
 
 interface DisplayedCase {
 	caseId: string;
@@ -140,52 +181,169 @@ export function registerRegressionRoutes(
 	options: RegressionRoutesOptions,
 ): void {
 	const { caseDiscovery, runRegistry, cacheDir, maxRunBudgetUsd, logger } = options;
+	const { runHistoryStore, modelCatalog, modelSelector, weaknessSummarizer } = options;
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
+
+	// REQ-REG-GUI-V2-018: auto-generate weakness summaries on run completion.
+	// The subprocess has written the RunManifest atomically before emitting
+	// the terminal event; the manifest is on disk now and we can summarize.
+	// Only `complete` and `gate-failed` carry meaningful failure data —
+	// `failed` (subprocess crash) and `cancelled` (operator-initiated) have
+	// no usable manifest to summarize against.
+	if (weaknessSummarizer && runHistoryStore) {
+		runRegistry.onTerminal((runId, status) => {
+			if (status !== 'complete' && status !== 'gate-failed') return;
+			scheduleAutoSummarize({
+				runId,
+				runHistoryStore,
+				weaknessSummarizer,
+				logger,
+			}).catch((err) =>
+				logger.warn(
+					{ runId, err: (err as Error).message },
+					'regression-gui: auto-summarize task threw',
+				),
+			);
+		});
+	}
 
 	// ───────────────────────────────────────────────────── GET /gui/regression
 	server.get('/regression', platformAdminOnly, async (request, reply) => {
-		const bucketParam = (request.query as { bucket?: string } | undefined)?.bucket;
-		const discovery = await caseDiscovery.discover();
-		const filtered =
-			bucketParam && isValidBucket(bucketParam)
-				? discovery.cases.filter((c) => c.bucket === bucketParam)
-				: discovery.cases;
-		const displays = await Promise.all(
-			filtered.map((c) =>
-				readDisplayForCase(cacheDir, c.caseId, c.currentCacheKey).catch((err) => {
-					logger.warn(
-						{ caseId: c.caseId, err },
-						'regression-gui: cache-reader failed for case (treating as never-run)',
-					);
-					return null;
-				}),
-			),
-		);
-		const cases: DisplayedCase[] = filtered.map((c, i) =>
-			buildDisplayedCase(c, displays[i] ?? null),
-		);
-		const estimate = estimateRunCostUsd(
-			filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
-			{ ceilingUsd: maxRunBudgetUsd },
-		);
-		return reply.viewAsync('regression', {
-			title: 'Regression — PAS',
-			activePage: 'regression',
-			cases,
-			modelIds: discovery.modelIds ?? null,
-			discoveryError: discovery.error ?? null,
-			selectedBucket: bucketParam && isValidBucket(bucketParam) ? bucketParam : null,
-			estimate: {
-				totalUsd: estimate.estimateUsd.toFixed(2),
-				ceilingUsd: estimate.ceilingUsd.toFixed(2),
-			},
-			// Active run is surfaced by the POST /runs response (UI redirects
-			// to the live stream). The initial page render does not need to
-			// probe the registry — the live progress block stays hidden until
-			// a runId arrives from POST.
-			activeRunId: null,
+		const q =
+			(request.query as {
+				view?: string;
+				bucket?: string;
+				pin?: string | string[];
+				window?: string;
+				tier?: string;
+			}) ?? {};
+
+		// REQ-REG-GUI-V2-005: legacy ?bucket=<x> with no ?view= → 302 to Compare.
+		if (q.bucket && !q.view) {
+			return reply.redirect(
+				`/gui/regression?view=compare&bucket=${encodeURIComponent(q.bucket)}`,
+				302,
+			);
+		}
+
+		const view = parseView(q.view);
+		const selectedBucket =
+			q.bucket && isValidBucket(q.bucket) ? (q.bucket as DisplayedCase['bucket']) : null;
+		const pinOverrides = parsePinOverrides(q.pin);
+
+		if (view === 'overview') {
+			return renderOverviewTab(reply, {
+				runHistoryStore,
+				weaknessSummarizer,
+				pinOverrides,
+				logger,
+			});
+		}
+		if (view === 'trends') {
+			return renderTrendsTab(reply, {
+				runHistoryStore,
+				selectedBucket,
+				rawWindow: typeof q.window === 'string' ? q.window : undefined,
+				rawTier: typeof q.tier === 'string' ? q.tier : undefined,
+				logger,
+			});
+		}
+		if (view === 'run') {
+			return renderRunTab(reply, {
+				modelCatalog,
+				modelSelector,
+				caseDiscovery,
+				maxRunBudgetUsd,
+				selectedBucket,
+				logger,
+			});
+		}
+		// view === 'compare' (default fallback)
+		const qAny = q as { model?: unknown; verdict?: unknown; caseId?: unknown };
+		return renderCompareTab(reply, {
+			caseDiscovery,
+			cacheDir,
+			maxRunBudgetUsd,
+			selectedBucket,
+			compareFilters: parseCompareFilters(qAny),
+			logger,
 		});
 	});
+
+	// ─────────────────────── GET /gui/regression/runs/:runId/summary (REQ-REG-GUI-V2-018)
+	// Polled by the client after SSE `complete`. Returns 200 with the rendered
+	// summary cell when persisted, 202 if generation is in-progress, 503 when
+	// the summarizer isn't wired (tests).
+	server.get<{
+		Params: { runId: string };
+		Querystring: { tier?: string };
+	}>(
+		'/regression/runs/:runId/summary',
+		platformAdminOnly,
+		async (request, reply) => {
+			const { runId } = request.params;
+			if (!isUuid(runId)) return reply.status(404).send('not found');
+			const tierRaw = request.query.tier;
+			if (!tierRaw || !isSummaryTier(tierRaw)) {
+				return reply.status(400).send({ error: 'tier query param required (fast|standard|reasoning)' });
+			}
+			if (!options.weaknessSummarizer) {
+				return reply.status(503).send({ error: 'summarizer not configured' });
+			}
+			const existing = await options.weaknessSummarizer.read(runId, tierRaw);
+			if (!existing) {
+				return reply.status(202).send({ status: 'pending' });
+			}
+			return reply.viewAsync('partials/regression-weakness-summary', {
+				summary: existing,
+			});
+		},
+	);
+
+	// ─────────────────── POST /gui/regression/runs/:runId/summary (REQ-REG-GUI-V2-019)
+	// Manual (re)generation. `?force=true` overwrites an existing file.
+	server.post<{
+		Params: { runId: string };
+		Querystring: { force?: string };
+	}>(
+		'/regression/runs/:runId/summary',
+		platformAdminOnly,
+		async (request, reply) => {
+			const { runId } = request.params;
+			if (!isUuid(runId)) return reply.status(404).send('not found');
+			if (!options.weaknessSummarizer || !options.runHistoryStore) {
+				return reply.status(503).send({ error: 'summarizer not configured' });
+			}
+			const manifest = await options.runHistoryStore.getById(runId);
+			if (!manifest) return reply.status(404).send({ error: 'unknown runId' });
+			const force = request.query.force === 'true';
+			// Kick off summarization for every tier present in the manifest. Run
+			// sequentially to avoid concurrent LLM bursts; the polled GET route
+			// will pick up the persisted files as they land.
+			const summarizer = options.weaknessSummarizer;
+			(async () => {
+				try {
+					const tiers: SummaryTier[] = ['fast', 'standard', 'reasoning'];
+					for (const tier of tiers) {
+						const modelForTier =
+							tier === 'fast'
+								? manifest.modelIds.fast
+								: tier === 'standard'
+									? manifest.modelIds.standard
+									: manifest.modelIds.reasoning;
+						if (!modelForTier) continue;
+						await summarizer.summarize({ manifest, tier, force });
+					}
+				} catch (err) {
+					logger.warn(
+						{ runId, err: (err as Error).message },
+						'regression-gui: summarizer background task failed',
+					);
+				}
+			})();
+			return reply.status(202).send({ status: 'queued' });
+		},
+	);
 
 	// ──────────────────────── GET /gui/regression/cases/:caseId  (drilldown)
 	server.get<{ Params: { caseId: string } }>(
@@ -212,8 +370,8 @@ export function registerRegressionRoutes(
 	);
 
 	// ─────────────────────────────── GET /gui/regression/cases/:caseId/row
-	// Codex I7: server-rendered single row, fetched by the SSE client after
-	// a `case-completed` event. Keeps row HTML construction on the server so
+	// Server-rendered single row, fetched by the SSE client after a
+	// `case-completed` event. Keeps row HTML construction on the server so
 	// no untrusted payload reaches client-side HTML builders.
 	server.get<{ Params: { caseId: string }; Querystring: { runId?: string } }>(
 		'/regression/cases/:caseId/row',
@@ -256,9 +414,9 @@ export function registerRegressionRoutes(
 		async (request, reply) => {
 			const { caseId } = request.params;
 			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
-			// Codex P2: mirror the drilldown/row allowlist check so a regex-
-			// valid but unknown caseId can't read a directory left behind by
-			// a removed case definition.
+			// Mirror the drilldown/row allowlist check so a regex-valid but
+			// unknown caseId can't read a directory left behind by a removed
+			// case definition.
 			const discovery = await caseDiscovery.discover();
 			const listed = discovery.cases.find((c) => c.caseId === caseId);
 			if (!listed) return reply.status(404).send('not found');
@@ -320,6 +478,10 @@ export function registerRegressionRoutes(
 				forceFresh?: string | boolean;
 				modelMatrix?: unknown;
 				judgeModel?: unknown;
+				tier_fast?: unknown;
+				tier_standard?: unknown;
+				tier_reasoning?: unknown;
+				judge?: unknown;
 			};
 			if (body.bucket && !isValidBucket(body.bucket)) {
 				return reply.status(400).send({ error: `unknown bucket: ${body.bucket}` });
@@ -331,14 +493,72 @@ export function registerRegressionRoutes(
 				}
 			}
 
-			// REQ-REG-GUI-OV-003/005: same parser as the CLI; non-string body
-			// values throw before discovery runs.
-			const mm = validateOptionalModelField(body.modelMatrix, 'modelMatrix', parseModelMatrixValue);
-			if (mm.error) return reply.status(400).send({ error: mm.error });
-			const jm = validateOptionalModelField(body.judgeModel, 'judgeModel', parseJudgeModelValue);
-			if (jm.error) return reply.status(400).send({ error: jm.error });
-			const modelMatrixRaw = mm.value;
-			const judgeModelRaw = jm.value;
+			// REQ-REG-GUI-V2-012: server-side tier composition.
+			// `tier_*` fields (from dropdowns) take precedence over the legacy
+			// `modelMatrix` text input. `judge` field takes precedence over
+			// legacy `judgeModel`. Live-catalog re-validation (REQ-REG-GUI-V2-011)
+			// runs at submit time so an unavailable model can't slip through.
+			let modelMatrixRaw: string | undefined;
+			let judgeModelRaw: string | undefined;
+			const tierFromDropdowns = composeTierMatrixFromBody(body);
+			if (tierFromDropdowns) {
+				modelMatrixRaw = tierFromDropdowns;
+			} else {
+				const mm = validateOptionalModelField(
+					body.modelMatrix,
+					'modelMatrix',
+					parseModelMatrixValue,
+				);
+				if (mm.error !== null) return reply.status(400).send({ error: mm.error });
+				modelMatrixRaw = mm.value ?? undefined;
+			}
+			const judgeFromDropdown = normalizeSelectValue(body.judge);
+			if (judgeFromDropdown !== undefined) {
+				judgeModelRaw = judgeFromDropdown;
+			} else {
+				const jm = validateOptionalModelField(
+					body.judgeModel,
+					'judgeModel',
+					parseJudgeModelValue,
+				);
+				if (jm.error !== null) return reply.status(400).send({ error: jm.error });
+				judgeModelRaw = jm.value ?? undefined;
+			}
+
+			// REQ-REG-GUI-V2-011: re-validate every submitted model against the
+			// live catalog at submit time. Defense in depth — the dropdowns hide
+			// unavailable currents, but a hand-crafted POST could still try one.
+			if (modelCatalog) {
+				const validationError = await validateModelsAgainstLiveCatalog(
+					{ modelMatrixRaw, judgeModelRaw },
+					modelCatalog,
+					logger,
+				);
+				if (validationError) {
+					return reply.status(400).send({ error: validationError });
+				}
+			}
+
+			// Final shape validation for the composed strings (catches accidentally
+			// malformed dropdown values too).
+			if (modelMatrixRaw !== undefined) {
+				try {
+					parseModelMatrixValue(modelMatrixRaw);
+				} catch (err) {
+					return reply
+						.status(400)
+						.send({ error: `invalid modelMatrix: ${(err as Error).message}` });
+				}
+			}
+			if (judgeModelRaw !== undefined) {
+				try {
+					parseJudgeModelValue(judgeModelRaw);
+				} catch (err) {
+					return reply
+						.status(400)
+						.send({ error: `invalid judgeModel: ${(err as Error).message}` });
+				}
+			}
 
 			const discovery = await caseDiscovery.discover();
 			if (discovery.error) {
@@ -351,9 +571,9 @@ export function registerRegressionRoutes(
 				}
 			}
 
-			// Codex I2: forceFresh expands the current filter into explicit rerun ids
-			// so cached cases get re-dispatched. Uses the existing --rerun mechanism
-			// rather than a new CLI flag.
+			// forceFresh expands the current filter into explicit rerun ids so
+			// cached cases get re-dispatched. Reuses the existing --rerun
+			// mechanism rather than introducing a new CLI flag.
 			const rerunSet = new Set<string>(rerunRaw);
 			const forceFresh = body.forceFresh === true || body.forceFresh === 'true';
 			if (forceFresh) {
@@ -372,8 +592,12 @@ export function registerRegressionRoutes(
 			try {
 				const { runId } = await runRegistry.createRun({
 					args,
-					runFactory: async (onEvent, signal) => {
-						const handle = await spawnRegression(args, {
+					runFactory: async (onEvent, signal, registryRunId) => {
+						// REQ-REG-GUI-V2-003: receive the canonical runId from the
+						// registry as a factory argument (avoids a TDZ capture of the
+						// outer `runId` since the factory is invoked during createRun).
+						const subprocessArgs = [...args, `--run-id=${registryRunId}`];
+						const handle = await spawnRegression(subprocessArgs, {
 							spawnFn: options.spawnFn,
 							cliPath: options.cliPath,
 							cwd: options.cwd,
@@ -395,20 +619,20 @@ export function registerRegressionRoutes(
 		},
 	);
 
-	// ──────────────── GET /gui/regression/runs/:runId/events  (SSE — Codex I8)
+	// ──────────────── GET /gui/regression/runs/:runId/events  (SSE)
 	server.get<{ Params: { runId: string } }>(
 		'/regression/runs/:runId/events',
 		platformAdminOnly,
 		async (request, reply) => {
 			const { runId } = request.params;
-			if (!RUN_ID_RE.test(runId)) return reply.status(404).send('not found');
+			if (!SAFE_RUN_ID_RE.test(runId)) return reply.status(404).send('not found');
 			const state = runRegistry.get(runId);
 			if (!state) return reply.status(404).send('not found');
 
-			// Codex P2: ensure the registry listener is detached when the
-			// client disconnects, the SSE write fails, OR a terminal event
-			// triggers `channel.close()`. Otherwise closed clients leave
-			// listeners behind until the run is GC'd.
+			// Ensure the registry listener is detached when the client
+			// disconnects, the SSE write fails, OR a terminal event triggers
+			// `channel.close()`. Otherwise closed clients leave listeners
+			// behind until the run is GC'd.
 			let detach: (() => void) | null = null;
 			const channel = openSseStream(request, reply, {
 				onClose: () => detach?.(),
@@ -436,17 +660,17 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { runId } = request.params;
-			if (!RUN_ID_RE.test(runId)) return reply.status(200).send({ ok: true });
+			if (!SAFE_RUN_ID_RE.test(runId)) return reply.status(200).send({ ok: true });
 			await runRegistry.cancel(runId);
 			return reply.status(200).send({ ok: true });
 		},
 	);
 }
 
-// Codex I7: SSE case-completed events carry ONLY {caseId, runId} — never the
-// full result payload. Clients fetch the row partial via htmx to get
-// server-rendered, escaped HTML. Other event types pass through their (already
-// trusted, number/enum-only) payloads.
+// SSE case-completed events carry ONLY {caseId, runId} — never the full
+// result payload. Clients fetch the row partial via htmx to get
+// server-rendered, escaped HTML. Other event types pass through their
+// (already trusted, number/enum-only) payloads.
 function toSseEvent(event: RegressionEvent, runId: string): { type: string; data: unknown } | null {
 	switch (event.type) {
 		case 'case-result': {
@@ -490,4 +714,629 @@ function findLiveResult(
 		if (r && r.caseId === caseId) return r;
 	}
 	return null;
+}
+
+type ActiveView = 'overview' | 'trends' | 'compare' | 'run';
+const VALID_VIEWS = new Set<ActiveView>(['overview', 'trends', 'compare', 'run']);
+
+function parseView(raw: unknown): ActiveView {
+	if (typeof raw === 'string' && VALID_VIEWS.has(raw as ActiveView)) return raw as ActiveView;
+	return 'overview';
+}
+
+/**
+ * REQ-REG-GUI-V2-010: parse `?pin=<tier>:<modelId>:<runId>` (repeatable).
+ * Silently drops malformed entries — they show up as "no pin honored" rather
+ * than a 400; the operator's filter just falls back to latest.
+ */
+function parsePinOverrides(raw: unknown): PinOverrideKey[] {
+	if (raw === undefined || raw === null || raw === '') return [];
+	const values: string[] = Array.isArray(raw)
+		? raw.filter((v): v is string => typeof v === 'string')
+		: typeof raw === 'string'
+			? [raw]
+			: [];
+	const out: PinOverrideKey[] = [];
+	for (const v of values) {
+		// Split on first ":" then last ":". Middle is the modelId (may contain
+		// `/` and `:` itself, e.g. "ollama/gemma3:31b") — split from both ends.
+		const firstColon = v.indexOf(':');
+		const lastColon = v.lastIndexOf(':');
+		if (firstColon < 0 || lastColon === firstColon) continue;
+		const tier = v.slice(0, firstColon);
+		const modelId = v.slice(firstColon + 1, lastColon);
+		const runId = v.slice(lastColon + 1);
+		if (tier !== 'fast' && tier !== 'standard' && tier !== 'reasoning') continue;
+		if (!modelId || !SAFE_RUN_ID_RE.test(runId)) continue;
+		out.push({ tier: tier as LeaderboardTier, modelId, runId });
+	}
+	return out;
+}
+
+const TIER_TABLE_LABELS: Record<LeaderboardTier, string> = {
+	fast: 'Fast',
+	standard: 'Standard',
+	reasoning: 'Reasoning',
+};
+
+/**
+ * Format an ISO timestamp into a short human-friendly run-date string.
+ * Used by the leaderboard `Run date` column (REQ-REG-GUI-V2-009).
+ */
+function formatRunDate(iso: string): string {
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return iso;
+	const date = d.toISOString().slice(0, 10);
+	const time = d.toISOString().slice(11, 16);
+	return `${date} ${time}Z`;
+}
+
+/**
+ * REQ-REG-011's 0.95 gate is routing-specific. Returns 'pass' or 'fail' only
+ * when this row has routing-bucket cases; otherwise null (rendered as "—" by
+ * the template).
+ */
+function computeRoutingGate(
+	buckets: ReadonlyArray<{ bucket: string; pass: number; total: number }>,
+): 'pass' | 'fail' | null {
+	const routing = buckets.find((b) => b.bucket === 'routing');
+	if (!routing || routing.total === 0) return null;
+	const rate = routing.pass / routing.total;
+	return rate >= 0.95 ? 'pass' : 'fail';
+}
+
+async function renderOverviewTab(
+	reply: FastifyReply,
+	deps: {
+		runHistoryStore?: RunHistoryStore;
+		weaknessSummarizer?: WeaknessSummarizer;
+		pinOverrides: PinOverrideKey[];
+		logger: Logger;
+	},
+): Promise<unknown> {
+	let manifests: Awaited<ReturnType<RunHistoryStore['list']>> = [];
+	if (deps.runHistoryStore) {
+		try {
+			manifests = await deps.runHistoryStore.list();
+		} catch (err) {
+			deps.logger.warn({ err }, 'regression-gui: run-history-store.list failed');
+		}
+	}
+	const tiers: LeaderboardTier[] = ['fast', 'standard', 'reasoning'];
+	const aggregated = tiers.map((tier) => ({
+		tier,
+		label: TIER_TABLE_LABELS[tier],
+		rows: aggregateLeaderboard({ manifests, tier, pinOverrides: deps.pinOverrides }),
+	}));
+
+	// Pre-fetch persisted weakness summaries so a returning operator sees the
+	// real summary on first paint instead of an empty placeholder. The polling
+	// loop in regression-live.eta only runs after an SSE `complete` event, so
+	// without this prefetch a refreshed page would show "generating…" forever.
+	const summaryFetches: Array<Promise<{
+		runId: string;
+		tier: SummaryTier;
+		summary: Awaited<ReturnType<WeaknessSummarizer['read']>>;
+	}>> = [];
+	if (deps.weaknessSummarizer) {
+		const summarizer = deps.weaknessSummarizer;
+		for (const table of aggregated) {
+			for (const r of table.rows) {
+				summaryFetches.push(
+					summarizer.read(r.runId, r.tier).then((summary) => ({
+						runId: r.runId,
+						tier: r.tier,
+						summary,
+					})),
+				);
+			}
+		}
+	}
+	const summaryByKey = new Map<string, Awaited<ReturnType<WeaknessSummarizer['read']>>>();
+	for (const { runId, tier, summary } of await Promise.all(summaryFetches)) {
+		summaryByKey.set(`${runId}:${tier}`, summary);
+	}
+
+	const tierTables = aggregated.map(({ tier, label, rows }) => ({
+		tier,
+		label,
+		rows: rows.map((r) => ({
+			...r,
+			completedAtFormatted: formatRunDate(r.completedAt),
+			passRateFormatted: `${(r.passRate * 100).toFixed(1)}%`,
+			totalCostFormatted: `$${r.totalCostUsd.toFixed(4)}`,
+			// REQ-REG-011's 0.95 gate is routing-specific. Rows without routing
+			// cases display "—" rather than being scored against an irrelevant
+			// threshold.
+			gateStatus: computeRoutingGate(r.buckets),
+			persistedSummary: summaryByKey.get(`${r.runId}:${r.tier}`) ?? null,
+		})),
+	}));
+	return reply.viewAsync('regression', {
+		title: 'Regression — Overview — PAS',
+		activePage: 'regression',
+		activeView: 'overview',
+		tierTables,
+		activeRunId: null,
+	});
+}
+
+async function renderRunTab(
+	reply: FastifyReply,
+	deps: {
+		modelCatalog?: ModelCatalog;
+		modelSelector?: ModelSelector;
+		caseDiscovery: CaseDiscoveryService;
+		maxRunBudgetUsd: number;
+		selectedBucket: DisplayedCase['bucket'] | null;
+		logger: Logger;
+	},
+): Promise<unknown> {
+	let modelGroups: Array<{ provider: string; models: Array<{ refId: string; label: string }> }> = [];
+	let catalogError: string | null = null;
+	const availableRefIds = new Set<string>();
+	if (deps.modelCatalog) {
+		try {
+			const catalog = await deps.modelCatalog.getModels();
+			const byProvider = new Map<string, Array<{ refId: string; label: string }>>();
+			for (const m of catalog) {
+				const provider = m.provider ?? m.providerType ?? 'unknown';
+				const refId = `${provider}/${m.id}`;
+				availableRefIds.add(refId);
+				const list = byProvider.get(provider) ?? [];
+				list.push({ refId, label: m.displayName || m.id });
+				byProvider.set(provider, list);
+			}
+			modelGroups = Array.from(byProvider.entries())
+				.sort((a, b) => a[0].localeCompare(b[0]))
+				.map(([provider, models]) => ({
+					provider,
+					models: models.sort((a, b) => a.label.localeCompare(b.label)),
+				}));
+		} catch (err) {
+			catalogError = (err as Error).message;
+			deps.logger.warn({ err }, 'regression-gui: model-catalog fetch failed');
+		}
+	}
+
+	function tierConfigFor(
+		ref: { provider: string; model: string } | null | undefined,
+	): { currentRef: { provider: string; model: string } | null; currentRefId: string | null; currentAvailable: boolean } {
+		if (!ref) return { currentRef: null, currentRefId: null, currentAvailable: true };
+		const refId = `${ref.provider}/${ref.model}`;
+		return {
+			currentRef: { provider: ref.provider, model: ref.model },
+			currentRefId: refId,
+			currentAvailable: availableRefIds.has(refId),
+		};
+	}
+
+	const fastRef = deps.modelSelector?.getFastRef() ?? null;
+	const standardRef = deps.modelSelector?.getStandardRef() ?? null;
+	const reasoningRef = deps.modelSelector?.getReasoningRef() ?? null;
+	const tierConfigs = {
+		fast: tierConfigFor(fastRef),
+		standard: tierConfigFor(standardRef),
+		reasoning: tierConfigFor(reasoningRef),
+	};
+	const judgeConfig = tierConfigFor(standardRef); // judge defaults to standard tier
+
+	const discovery = await deps.caseDiscovery.discover();
+	const filtered = deps.selectedBucket
+		? discovery.cases.filter((c) => c.bucket === deps.selectedBucket)
+		: discovery.cases;
+	const estimate = estimateRunCostUsd(
+		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
+		{ ceilingUsd: deps.maxRunBudgetUsd },
+	);
+
+	return reply.viewAsync('regression', {
+		title: 'Regression — Run — PAS',
+		activePage: 'regression',
+		activeView: 'run',
+		activeRunId: null,
+		selectedBucket: deps.selectedBucket,
+		modelGroups,
+		tierConfigs,
+		judgeConfig,
+		catalogError,
+		estimate: {
+			totalUsd: estimate.estimateUsd.toFixed(2),
+			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+		},
+	});
+}
+
+const VALID_WINDOWS = new Set<TimeWindow>(['7d', '30d', 'all']);
+const VALID_TIERS_FOR_TRENDS = new Set<LeaderboardTier>(['fast', 'standard', 'reasoning']);
+
+async function renderTrendsTab(
+	reply: FastifyReply,
+	deps: {
+		runHistoryStore?: RunHistoryStore;
+		selectedBucket: DisplayedCase['bucket'] | null;
+		rawWindow?: string;
+		rawTier?: string;
+		logger: Logger;
+	},
+): Promise<unknown> {
+	const window: TimeWindow =
+		deps.rawWindow && VALID_WINDOWS.has(deps.rawWindow as TimeWindow)
+			? (deps.rawWindow as TimeWindow)
+			: '30d';
+	const tier: LeaderboardTier =
+		deps.rawTier && VALID_TIERS_FOR_TRENDS.has(deps.rawTier as LeaderboardTier)
+			? (deps.rawTier as LeaderboardTier)
+			: 'standard';
+	let manifests: Awaited<ReturnType<RunHistoryStore['list']>> = [];
+	if (deps.runHistoryStore) {
+		try {
+			manifests = await deps.runHistoryStore.list();
+		} catch (err) {
+			deps.logger.warn({ err }, 'regression-gui: trends list failed');
+		}
+	}
+	const trend = buildTrendData({
+		manifests,
+		tier,
+		bucket: deps.selectedBucket ?? undefined,
+		window,
+	});
+	const showThreshold = (deps.selectedBucket ?? '') === 'routing';
+	const lineSvg = renderLineChart({
+		series: trend.lineSeries,
+		width: 720,
+		height: 280,
+		yMin: 0,
+		yMax: 1,
+		thresholdY: showThreshold ? 0.95 : undefined,
+		thresholdLabel: showThreshold ? 'REQ-REG-011 (0.95)' : undefined,
+		yLabel: 'pass rate',
+		xLabel: 'run date',
+	});
+	const scatterSvg = renderScatter({
+		points: trend.scatterPoints,
+		width: 720,
+		height: 280,
+		xLabel: 'total cost USD',
+		yLabel: 'pass rate',
+	});
+	return reply.viewAsync('regression', {
+		title: 'Regression — Trends — PAS',
+		activePage: 'regression',
+		activeView: 'trends',
+		activeRunId: null,
+		selectedBucket: deps.selectedBucket,
+		trendsWindow: window,
+		trendsTier: tier,
+		trendsLineSvg: lineSvg,
+		trendsScatterSvg: scatterSvg,
+		trendsTable: trend.tableRows,
+		trendsHasData: trend.lineSeries.length > 0,
+	});
+}
+
+/**
+ * Compose `tier_fast` / `tier_standard` / `tier_reasoning` form fields into
+ * a single `--model-matrix=...` CLI string. Returns `undefined` when no
+ * dropdown was used (caller falls back to the legacy `modelMatrix` field).
+ * Empty-string values mean "use pas.yaml default" — they're dropped.
+ *
+ * REQ-REG-GUI-V2-012.
+ */
+function composeTierMatrixFromBody(body: {
+	tier_fast?: unknown;
+	tier_standard?: unknown;
+	tier_reasoning?: unknown;
+}): string | undefined {
+	const fast = normalizeSelectValue(body.tier_fast);
+	const standard = normalizeSelectValue(body.tier_standard);
+	const reasoning = normalizeSelectValue(body.tier_reasoning);
+	const parts: string[] = [];
+	if (fast !== undefined) parts.push(`fast=${fast}`);
+	if (standard !== undefined) parts.push(`standard=${standard}`);
+	if (reasoning !== undefined) parts.push(`reasoning=${reasoning}`);
+	return parts.length > 0 ? parts.join(',') : undefined;
+}
+
+/**
+ * Normalize a `<select>` form value. Returns `undefined` (meaning "no
+ * dropdown selection") when the value is empty, whitespace, non-string,
+ * an array (multi-select sent for a single-select), or an object.
+ */
+function normalizeSelectValue(raw: unknown): string | undefined {
+	if (typeof raw !== 'string') return undefined;
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	return trimmed;
+}
+
+/**
+ * Re-validate every submitted model ref against `ModelCatalog.getModels()`.
+ * Returns an error string on rejection, or `null` on success.
+ *
+ * Defense in depth (REQ-REG-GUI-V2-011): the Run tab dropdowns hide
+ * unavailable currents, but a hand-crafted POST could still try one.
+ *
+ * **Fail-closed semantics:** if no submitted refs need checking, skip the
+ * catalog fetch and return null. Otherwise, a catalog fetch error blocks the
+ * run — operators rerun once their providers are reachable. This trades a
+ * usability regression for the user-requirement guarantee that submission of
+ * an unavailable model is rejected.
+ */
+async function validateModelsAgainstLiveCatalog(
+	composed: { modelMatrixRaw?: string; judgeModelRaw?: string },
+	modelCatalog: ModelCatalog,
+	logger: Logger,
+): Promise<string | null> {
+	const submitted = new Set<string>();
+	if (composed.modelMatrixRaw) {
+		try {
+			const parsed = parseModelMatrixValue(composed.modelMatrixRaw);
+			for (const tier of ['fast', 'standard', 'reasoning'] as const) {
+				const ref = parsed[tier];
+				if (ref) submitted.add(`${ref.provider}/${ref.model}`);
+			}
+		} catch {
+			// Shape error — surface in the dedicated parseModelMatrixValue gate
+			// caller, not here.
+			return null;
+		}
+	}
+	if (composed.judgeModelRaw) {
+		try {
+			const ref = parseJudgeModelValue(composed.judgeModelRaw);
+			submitted.add(`${ref.provider}/${ref.model}`);
+		} catch {
+			return null;
+		}
+	}
+	if (submitted.size === 0) return null;
+
+	let catalog;
+	try {
+		catalog = await modelCatalog.getModels();
+	} catch (err) {
+		// Fail closed: the user requirement is "currently available models
+		// only"; a failed catalog fetch cannot prove availability so we
+		// reject the run rather than waving it through.
+		logger.warn(
+			{ err: (err as Error).message },
+			'regression-gui: model-catalog fetch failed during POST validation — rejecting (fail-closed)',
+		);
+		return 'live provider catalog unavailable — cannot verify model availability, please retry';
+	}
+	const available = new Set<string>();
+	for (const m of catalog) {
+		const provider = m.provider ?? m.providerType ?? 'unknown';
+		available.add(`${provider}/${m.id}`);
+	}
+	for (const ref of submitted) {
+		if (!available.has(ref)) {
+			return `model not currently available from any registered provider: ${ref}`;
+		}
+	}
+	return null;
+}
+
+/** REQ-REG-GUI-V2-017: Compare filter chips (model / verdict / bucket / caseId). */
+export interface CompareFilters {
+	model?: string;
+	verdict?: Verdict;
+	caseId?: string;
+}
+
+function parseCompareFilters(q: {
+	model?: unknown;
+	verdict?: unknown;
+	caseId?: unknown;
+}): CompareFilters {
+	const out: CompareFilters = {};
+	if (typeof q.model === 'string' && q.model.trim()) out.model = q.model.trim();
+	if (
+		typeof q.verdict === 'string' &&
+		(VERDICT_VALUES as readonly string[]).includes(q.verdict)
+	) {
+		out.verdict = q.verdict as Verdict;
+	}
+	if (typeof q.caseId === 'string' && SAFE_CASE_ID_RE.test(q.caseId)) out.caseId = q.caseId;
+	return out;
+}
+
+async function renderCompareTab(
+	reply: FastifyReply,
+	deps: {
+		caseDiscovery: CaseDiscoveryService;
+		cacheDir: string;
+		maxRunBudgetUsd: number;
+		selectedBucket: DisplayedCase['bucket'] | null;
+		compareFilters?: CompareFilters;
+		logger: Logger;
+	},
+): Promise<unknown> {
+	const filters = deps.compareFilters ?? {};
+	const discovery = await deps.caseDiscovery.discover();
+
+	// When ?caseId= is set, render ALL historical entries for that case
+	// across every run/model, sorted desc by timestamp — makes the "see
+	// across all runs" drilldown link match its label. Other filters
+	// (model/verdict) apply to those rows after history expansion.
+	if (filters.caseId) {
+		const listed = discovery.cases.find((c) => c.caseId === filters.caseId);
+		if (!listed) {
+			return reply.viewAsync('regression', {
+				title: 'Regression — Compare — PAS',
+				activePage: 'regression',
+				activeView: 'compare',
+				cases: [],
+				historicalRows: [],
+				modelIds: discovery.modelIds ?? null,
+				discoveryError: discovery.error ?? null,
+				selectedBucket: deps.selectedBucket,
+				compareFilters: filters,
+				estimate: { totalUsd: '0.00', ceilingUsd: deps.maxRunBudgetUsd.toFixed(2) },
+				activeRunId: null,
+			});
+		}
+		let historicalRows: HistoricalRow[] = [];
+		try {
+			const entries = await readHistoryForCase(deps.cacheDir, filters.caseId);
+			historicalRows = entries
+				.map((e) => ({
+					caseId: filters.caseId!,
+					bucket: listed.bucket,
+					timestamp: e.timestamp,
+					verdict: e.verdict,
+					costUsd: e.costUsd.toFixed(4),
+					modelFast: e.modelIds.fast,
+					modelStandard: e.modelIds.standard,
+					modelReasoning: e.modelIds.reasoning ?? '—',
+					cacheKey: e.cacheKey,
+				}))
+				.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+		} catch (err) {
+			deps.logger.warn(
+				{ caseId: filters.caseId, err },
+				'regression-gui: cross-run history read failed',
+			);
+		}
+		// Apply post-history filters.
+		if (filters.model) {
+			historicalRows = historicalRows.filter(
+				(r) =>
+					r.modelFast === filters.model ||
+					r.modelStandard === filters.model ||
+					r.modelReasoning === filters.model,
+			);
+		}
+		if (filters.verdict) {
+			historicalRows = historicalRows.filter((r) => r.verdict === filters.verdict);
+		}
+		return reply.viewAsync('regression', {
+			title: 'Regression — Compare — PAS',
+			activePage: 'regression',
+			activeView: 'compare',
+			cases: [],
+			historicalRows,
+			historicalCaseId: filters.caseId,
+			modelIds: discovery.modelIds ?? null,
+			discoveryError: discovery.error ?? null,
+			selectedBucket: deps.selectedBucket,
+			compareFilters: filters,
+			estimate: { totalUsd: '0.00', ceilingUsd: deps.maxRunBudgetUsd.toFixed(2) },
+			activeRunId: null,
+		});
+	}
+
+	const filtered = deps.selectedBucket
+		? discovery.cases.filter((c) => c.bucket === deps.selectedBucket)
+		: discovery.cases;
+	const displays = await Promise.all(
+		filtered.map((c) =>
+			readDisplayForCase(deps.cacheDir, c.caseId, c.currentCacheKey).catch((err) => {
+				deps.logger.warn(
+					{ caseId: c.caseId, err },
+					'regression-gui: cache-reader failed for case (treating as never-run)',
+				);
+				return null;
+			}),
+		),
+	);
+	let cases: DisplayedCase[] = filtered.map((c, i) =>
+		buildDisplayedCase(c, displays[i] ?? null),
+	);
+	// Apply post-display filters (model + verdict). These need the resolved
+	// row data so they can't happen earlier.
+	if (filters.model) {
+		cases = cases.filter(
+			(c) => c.modelFast === filters.model || c.modelStandard === filters.model,
+		);
+	}
+	if (filters.verdict) {
+		cases = cases.filter((c) => c.verdictLabel === filters.verdict);
+	}
+
+	const estimate = estimateRunCostUsd(
+		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
+		{ ceilingUsd: deps.maxRunBudgetUsd },
+	);
+	return reply.viewAsync('regression', {
+		title: 'Regression — Compare — PAS',
+		activePage: 'regression',
+		activeView: 'compare',
+		cases,
+		historicalRows: null,
+		modelIds: discovery.modelIds ?? null,
+		discoveryError: discovery.error ?? null,
+		selectedBucket: deps.selectedBucket,
+		compareFilters: filters,
+		estimate: {
+			totalUsd: estimate.estimateUsd.toFixed(2),
+			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+		},
+		activeRunId: null,
+	});
+}
+
+interface HistoricalRow {
+	caseId: string;
+	bucket: string;
+	timestamp: string;
+	verdict: string;
+	costUsd: string;
+	modelFast: string;
+	modelStandard: string;
+	modelReasoning: string;
+	cacheKey: string;
+}
+
+function isUuid(v: string): boolean {
+	return SAFE_RUN_ID_RE.test(v);
+}
+
+function isSummaryTier(v: string): v is SummaryTier {
+	return v === 'fast' || v === 'standard' || v === 'reasoning';
+}
+
+/**
+ * REQ-REG-GUI-V2-018: auto-summarize every tier represented in a completed
+ * run's manifest. Idempotent by virtue of `WeaknessSummarizer.summarize`
+ * skipping when the persisted file exists. The hook is fire-and-forget;
+ * the polled `/runs/:runId/summary?tier=...` endpoint reads the persisted
+ * file as it lands.
+ */
+async function scheduleAutoSummarize(opts: {
+	runId: string;
+	runHistoryStore: RunHistoryStore;
+	weaknessSummarizer: WeaknessSummarizer;
+	logger: Logger;
+}): Promise<void> {
+	const manifest = await opts.runHistoryStore.getById(opts.runId);
+	if (!manifest) {
+		opts.logger.warn(
+			{ runId: opts.runId },
+			'regression-gui: auto-summarize skipped — manifest not found (subprocess may have crashed before write)',
+		);
+		return;
+	}
+	const evaluatedTiers = new Set<SummaryTier>();
+	for (const cr of manifest.caseResults) {
+		if (
+			cr.evaluatedTier === 'fast' ||
+			cr.evaluatedTier === 'standard' ||
+			cr.evaluatedTier === 'reasoning'
+		) {
+			evaluatedTiers.add(cr.evaluatedTier);
+		}
+	}
+	for (const tier of evaluatedTiers) {
+		try {
+			await opts.weaknessSummarizer.summarize({ manifest, tier });
+		} catch (err) {
+			opts.logger.warn(
+				{ runId: opts.runId, tier, err: (err as Error).message },
+				'regression-gui: auto-summarize tier failed',
+			);
+		}
+	}
 }

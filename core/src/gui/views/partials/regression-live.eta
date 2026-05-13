@@ -66,7 +66,14 @@
 			if (row) row.outerHTML = html;
 		});
 		es.addEventListener('summary', function () { setState('finalising'); });
-		es.addEventListener('complete', function () { showTerminal('complete', 'Run complete.'); });
+		es.addEventListener('complete', function () {
+			showTerminal('complete', 'Run complete.');
+			// REQ-REG-GUI-V2-018: poll /summary for each visible tier cell once
+			// the run completes. The server's onTerminal hook has already
+			// scheduled summarization; the polled GET picks up the persisted
+			// JSON as it lands.
+			pollWeaknessSummaries(activeRunId);
+		});
 		es.addEventListener('gate-failed', function (e) {
 			let summary = {};
 			try { summary = (JSON.parse(e.data) || {}).summary || {}; } catch (_) {}
@@ -74,6 +81,10 @@
 			const msg = 'REQ-REG-011 gate failed' +
 				(typeof acc === 'number' ? ' (routing accuracy ' + (acc * 100).toFixed(1) + '%)' : '');
 			showTerminal('gate-failed', msg);
+			// Gate failure still produces a manifest (REQ-REG-011 ran but the
+			// gate fired); summarizing those failures is exactly the
+			// most-useful case for operators.
+			pollWeaknessSummaries(activeRunId);
 		});
 		es.addEventListener('failed', function (e) {
 			let payload = {};
@@ -81,6 +92,35 @@
 			showTerminal('failed', 'Run failed (exit ' + (payload.exitCode || '?') + ').');
 		});
 		es.addEventListener('cancelled', function () { showTerminal('cancelled', 'Run cancelled.'); });
+	}
+
+	function pollWeaknessSummaries(runId) {
+		if (!runId) return;
+		const cells = document.querySelectorAll('[data-testid="weakness-summary-cell"][data-runid="' + runId + '"]');
+		if (!cells.length) return;
+		const deadline = Date.now() + 30000; // 30s cap
+		cells.forEach(function (cell) {
+			const tier = cell.dataset.tier;
+			if (!tier) return;
+			const tick = async function () {
+				try {
+					const res = await fetch('/gui/regression/runs/' + encodeURIComponent(runId) + '/summary?tier=' + encodeURIComponent(tier), { headers: { Accept: 'text/html' } });
+					if (res.status === 200) {
+						const html = await res.text();
+						cell.innerHTML = html;
+						return; // done
+					}
+					if (res.status === 202 && Date.now() < deadline) {
+						setTimeout(tick, 2000);
+						return;
+					}
+					cell.innerHTML = '<small>summary unavailable</small>';
+				} catch (_) {
+					cell.innerHTML = '<small>summary unavailable</small>';
+				}
+			};
+			tick();
+		});
 	}
 
 	async function cancelActive() {

@@ -46,6 +46,8 @@ import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerRegressionRoutes } from './routes/regression.js';
+import { createRunHistoryStore } from './services/regression/run-history-store.js';
+import { createWeaknessSummarizer } from './services/regression/weakness-summarizer.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSettingsRoutes } from './routes/settings.js';
@@ -212,15 +214,32 @@ export async function registerGuiRoutes(
 			const cliPath = resolve(repoRoot, 'regression', 'src', 'runner', 'cli-main.ts');
 			const tsconfigPath = resolve(repoRoot, 'regression', 'tsconfig.json');
 			const cacheDir = resolve(repoRoot, 'data', 'system', 'regression-cache');
+			const manifestDir = resolve(repoRoot, 'data', 'system', 'regression-runs');
 			const regressionRunRegistry = createRunRegistry();
 			const regressionCaseDiscovery = createCaseDiscovery({
 				cliPath,
 				cwd: repoRoot,
 				tsconfigPath,
 			});
+			const regressionRunHistoryStore = createRunHistoryStore({
+				rootDir: manifestDir,
+				logger,
+			});
+			const summaryDir = resolve(repoRoot, 'data', 'system', 'regression-summaries');
+			const regressionWeaknessSummarizer = createWeaknessSummarizer({
+				manifestDir,
+				cacheDir,
+				summaryDir,
+				llm,
+				logger,
+			});
 			registerRegressionRoutes(gui, {
 				caseDiscovery: regressionCaseDiscovery,
 				runRegistry: regressionRunRegistry,
+				runHistoryStore: regressionRunHistoryStore,
+				weaknessSummarizer: regressionWeaknessSummarizer,
+				modelCatalog,
+				modelSelector,
 				cacheDir,
 				maxRunBudgetUsd: config.regression?.maxRunBudgetUsd ?? 5,
 				logger,

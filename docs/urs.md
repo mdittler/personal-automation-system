@@ -9953,6 +9953,296 @@ The shared parser's regex rejects `<`, `>`, and HTML tag content, so a `<script>
 
 ---
 
+### REQ-REG-GUI-V2-001 — Each case-runner MUST record `evaluatedTier` on its RunResult
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+The `EvaluatedTier` enum lives in `core/src/types/regression.ts` (`'fast' | 'standard' | 'reasoning' | 'mixed' | 'unknown'`). `routing-runner` sets `evaluatedTier` per case via `ROUTING_TARGET_TIER`; `recall-runner` sets `'fast'`; `chatbot-runner` and `receipt-runner` set `'standard'`. The `looksLikeRunResult` validator accepts missing `evaluatedTier` (legacy cache) and rejects an unknown string.
+
+**Standard tests:**
+- `regression/src/__tests__/evaluated-tier.test.ts` > EVALUATED_TIER_VALUES > enumerates exactly fast/standard/reasoning/mixed/unknown
+- `regression/src/__tests__/evaluated-tier.test.ts` > ROUTING_TARGET_TIER lookup table > maps every RoutingTarget to a tier slot
+
+**Edge case tests:**
+- `regression/src/__tests__/evaluated-tier.test.ts` > looksLikeRunResult — evaluatedTier optional + enum-strict > accepts a result with no evaluatedTier (legacy cache)
+- `regression/src/__tests__/evaluated-tier.test.ts` > looksLikeRunResult — evaluatedTier optional + enum-strict > rejects unknown evaluatedTier string
+
+---
+
+### REQ-REG-GUI-V2-002 — Cache + manifest writes MUST use a shared atomic-write helper
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`core/src/utils/atomic-write.ts` exports `atomicWriteJson` (mkdir-p + tmp write + rename). Both `regression/src/runner/cache.ts` and `manifest-writer.ts` use it. The regression workspace re-exports it from `regression/src/runner/atomic-write.ts` for backwards-compat imports.
+
+**Standard tests:**
+- `regression/src/__tests__/atomic-write.test.ts` > atomicWriteJson — happy path > writes a JSON file at the requested path
+- `regression/src/__tests__/atomic-write.test.ts` > atomicWriteJson — cleanup + atomicity > leaves no temp files behind
+
+**Edge case tests:**
+- `regression/src/__tests__/atomic-write.test.ts` > atomicWriteJson — cleanup + atomicity > handles concurrent writers
+- `regression/src/__tests__/atomic-write.test.ts` > atomicWriteJson — error paths > rejects when parent is unwritable
+
+---
+
+### REQ-REG-GUI-V2-003 — Subprocess MUST write a `RunManifest` at terminal summary when `--run-id=<uuid>` is set
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`regression/src/runner/args.ts` parses `--run-id=<uuid>` (validated via `RUN_ID_RE`). `runSuite()` builds a `RunManifest` with per-case `ManifestCaseResult[]` (caseId, bucket, cacheKey, evaluatedTier, verdict, source, costUsd, timestamp) and writes it atomically to `data/system/regression-runs/<runId>.json`. The GUI POST handler appends `--run-id=<registryUuid>` to every spawn so the manifest filename matches the SSE runId.
+
+**Standard tests:**
+- `regression/src/__tests__/manifest-writer.test.ts` > buildManifest > maps each result to a ManifestCaseResult with bucket attribution
+- `regression/src/__tests__/manifest-writer.test.ts` > writeManifest > writes manifest atomically and round-trips
+- `regression/src/__tests__/args.test.ts` > --run-id (REQ-REG-GUI-V2-003) > parses --run-id=<uuid>
+
+**Edge case tests:**
+- `regression/src/__tests__/manifest-writer.test.ts` > buildManifest > throws on missing PersonaCase entry
+- `regression/src/__tests__/args.test.ts` > --run-id > rejects non-UUID
+- `regression-routes-chunk-d.test.ts` > server-side tier composition (REQ-REG-GUI-V2-012) > POST returns a UUID-shaped runId
+
+---
+
+### REQ-REG-GUI-V2-004 — `run-history-store` MUST read manifests with strict validation
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`createRunHistoryStore` provides `list({tier, modelId, since, limit})`, `getById(runId)`, and `latestPerTierAndModel()`. Strict shape validation rejects malformed JSON, wrong runId in body, or invalid caseResults — invalid files are skipped + warned, the page degrades gracefully.
+
+**Standard tests:**
+- `run-history-store.test.ts` > happy path > round-trips a written manifest via list and getById
+- `run-history-store.test.ts` > happy path > sorts list() by completedAt descending
+- `run-history-store.test.ts` > latestPerTierAndModel > returns newest manifest per (tier, modelId)
+
+**Edge case tests:**
+- `run-history-store.test.ts` > robustness > skips a file with wrong runId in body
+- `run-history-store.test.ts` > robustness > skips a manifest with malformed JSON
+- `run-history-store.test.ts` > robustness > skips a manifest with malformed caseResults shape
+
+---
+
+### REQ-REG-GUI-V2-005 — Legacy `/gui/regression?bucket=<x>` MUST 302 redirect to `?view=compare&bucket=<x>`
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+The GET handler checks `q.bucket && !q.view` and issues `reply.redirect('?view=compare&bucket=<x>', 302)` before any other processing. Preserves all existing bookmarks.
+
+**Standard tests:**
+- `regression-routes.test.ts` > page rendering > REQ-REG-GUI-V2-005: legacy ?bucket= redirects 302 to Compare tab
+
+---
+
+### REQ-REG-GUI-V2-006 — `registerRegressionRoutes` MUST receive `modelCatalog` + `modelSelector` via options
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`RegressionRoutesOptions` adds optional `modelCatalog: ModelCatalog`, `modelSelector: ModelSelector`, `runHistoryStore: RunHistoryStore`, and `weaknessSummarizer: WeaknessSummarizer`. The production wiring in `core/src/gui/index.ts` passes all four. Tests inject stubs where needed.
+
+**Standard tests:**
+- `regression-routes-chunk-d.test.ts` > GET /gui/regression?view=run > renders the current tier ref as a disabled option when not in live catalog
+
+---
+
+### REQ-REG-GUI-V2-007 — `/gui/regression` MUST expose Overview/Trends/Compare/Run as deep-linkable `?view=` URLs
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+Single GET handler dispatches on `?view=` to `renderOverviewTab`, `renderTrendsTab`, `renderRunTab`, or `renderCompareTab`. Default is Overview. Tab strip in `regression.eta` renders `<nav>` with `aria-current` on the active tab.
+
+**Standard tests:**
+- `regression-routes.test.ts` > page rendering > default view is Overview when ?view is absent
+- `regression-routes.test.ts` > page rendering > ?view=trends renders the trends partial
+- `regression-routes.test.ts` > page rendering > ?view=run renders the Run launcher form
+
+---
+
+### REQ-REG-GUI-V2-008 — Overview MUST render three tier-grouped tables (Fast / Standard / Reasoning)
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`aggregateLeaderboard` groups manifests by (tier, modelIds[tier]), producing one row per model that ran under that tier. Mixed-tier and unknown-tier results are excluded.
+
+**Standard tests:**
+- `leaderboard-aggregator.test.ts` > single tier > returns one row per fast-tier model
+- `leaderboard-aggregator.test.ts` > counts and grouping > total = pass+fail+error+budgetExceeded; passRate = pass/total
+- `leaderboard-aggregator.test.ts` > counts and grouping > per-bucket breakdown groups results
+
+**Edge case tests:**
+- `leaderboard-aggregator.test.ts` > single tier > mixed and unknown evaluatedTier do NOT count toward any per-tier row
+- `leaderboard-aggregator.test.ts` > single tier > excludes manifests that have no fast-tier results
+
+---
+
+### REQ-REG-GUI-V2-009 — Every leaderboard row MUST show the displayed run's `completedAt`; latest-per-tier-model by default
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+The Overview partial renders a `Run date` column with `<time datetime="<completedAt>">`. Default selection in `aggregateLeaderboard` is the manifest with the latest `completedAt` per (tier, modelId).
+
+**Standard tests:**
+- `leaderboard-aggregator.test.ts` > single tier > latest-by-completedAt wins when a model has multiple runs
+
+---
+
+### REQ-REG-GUI-V2-010 — Operator MUST be able to pin a tier-model row to a specific historical run via `?pin=<tier>:<modelId>:<runId>`
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`parsePinOverrides` parses repeatable `?pin=` params, validates runId is UUID-shaped, and passes overrides to `aggregateLeaderboard`. A model's row reflects the pinned run rather than the latest.
+
+**Standard tests:**
+- `leaderboard-aggregator.test.ts` > single tier > pinOverrides selects a specific historical run (REQ-REG-GUI-V2-010)
+
+**Edge case tests:**
+- `leaderboard-aggregator.test.ts` > single tier > pin override for a different tier is ignored on this tier
+
+---
+
+### REQ-REG-GUI-V2-011 — Run tab dropdowns MUST show only live-catalog models; unavailable currents disabled; submission of unavailable model → 400
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`renderRunTab` fetches `ModelCatalog.getModels()` and builds `<optgroup>` per provider. Current `ModelSelector` refs not in the live catalog are rendered as a `<option disabled selected>` labeled "(unavailable)". `validateModelsAgainstLiveCatalog` re-checks every submitted ref at POST time; a missing model returns 400. **Freshness contract:** `ModelCatalog.getModels()` ships a 1-hour cache — operators see what providers reported within the last hour. **Fail-closed at submit (Codex P1 follow-up):** if the catalog fetch throws during POST validation, the run is rejected with 400 "catalog unavailable" rather than waved through. This trades a small usability regression (operator must retry once providers are reachable) for the user-requirement guarantee that submission of an unavailable model is rejected.
+
+**Standard tests:**
+- `regression-routes-chunk-d.test.ts` > live-catalog re-validation > rejects a model not present in the live catalog with 400
+- `regression-routes-chunk-d.test.ts` > live-catalog re-validation > accepts a model that IS present in the live catalog
+- `regression-routes-chunk-d.test.ts` > GET /gui/regression?view=run > renders the current tier ref as a disabled option when not in live catalog
+- `regression-codex-followup.test.ts` > P1 — POST fails closed when ModelCatalog throws > returns 400 with a "catalog unavailable" error when getModels() rejects
+
+---
+
+### REQ-REG-GUI-V2-012 — Run POST MUST compose `tier_*`/`judge` fields server-side; legacy text fields preserved; tier_* takes precedence
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`composeTierMatrixFromBody` builds a `<provider>/<model>` matrix string from `tier_fast`/`tier_standard`/`tier_reasoning` form fields. Each is `normalizeSelectValue`-normalized (rejects non-strings, arrays, objects). Composed value takes precedence over legacy `modelMatrix`; `judge` takes precedence over `judgeModel`.
+
+**Standard tests:**
+- `regression-routes-chunk-d.test.ts` > server-side tier composition > composes --model-matrix= from tier_fast/tier_standard/tier_reasoning
+- `regression-routes-chunk-d.test.ts` > server-side tier composition > tier_* takes precedence over legacy modelMatrix field
+- `regression-routes-chunk-d.test.ts` > server-side tier composition > judge dropdown takes precedence over legacy judgeModel field
+
+---
+
+### REQ-REG-GUI-V2-013 — Trends line chart MUST plot per-model accuracy with REQ-REG-011 threshold line where applicable
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`renderLineChart` accepts `thresholdY`. The Trends partial passes `0.95` when `bucket=routing` for the REQ-REG-011 gate visualization.
+
+**Standard tests:**
+- `chart-svg.test.ts` > renderLineChart > renders a threshold line when thresholdY is set
+- `chart-svg.test.ts` > renderLineChart > golden snapshot for a 2-series line chart
+
+**Edge case tests:**
+- `chart-svg.test.ts` > computeLineExtents > filters non-finite y values
+- `chart-svg.test.ts` > computeLineExtents > expands a flat y-range with slack
+- `chart-svg.test.ts` > renderLineChart > escapes hostile labels
+
+---
+
+### REQ-REG-GUI-V2-014 — Trends scatter MUST plot per-(model, run) cost vs accuracy with deterministic palette per (tier, model)
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`paletteSlotFor(tier, modelId)` deterministically assigns one of 8 (color, shape) slots via djb2 hash. The Trends partial renders one shape per scatter point colored by palette.
+
+**Standard tests:**
+- `chart-svg.test.ts` > paletteSlotFor > returns the same slot for the same (tier, modelId) on every call
+- `chart-svg.test.ts` > paletteSlotFor > returns one of the four allowed shapes
+- `chart-svg.test.ts` > renderScatter > renders distinct shapes per palette slot
+
+---
+
+### REQ-REG-GUI-V2-015 — Trends MUST support `?window=7d|30d|all` + `?bucket=<name>` + `?tier=<fast|standard|reasoning>` filters
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`renderTrendsTab` validates `window`, `bucket`, `tier` against allow-sets and passes them to `buildTrendData`. Filter UI is a GET-submit `<form>` (no client JS state).
+
+**Standard tests:**
+- `trend-aggregator.test.ts` > drops runs outside the time window (7d/30d/all)
+- `trend-aggregator.test.ts` > honors bucket filter
+
+---
+
+### REQ-REG-GUI-V2-016 — Every chart partial MUST render an accessible `<table>` fallback alongside the SVG
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+Trends partial wraps the underlying-data `<table>` in `<details><summary>Underlying data (accessible table)</summary>...</details>` so the data is reachable for screen-reader users and is keyboard-toggleable.
+
+**Standard tests:**
+- (Manual verification only — covered by the trends partial template that always emits the table; structural test exists at `regression-routes.test.ts > ?view=trends renders the trends partial`)
+
+---
+
+### REQ-REG-GUI-V2-017 — Compare tab MUST support filter chips: model, verdict, bucket, caseId
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`parseCompareFilters` validates `?model=`, `?verdict=` (against the four `Verdict` values), and `?caseId=` (against `SAFE_CASE_ID_RE`). `renderCompareTab` filters the displayed case rows accordingly. The Compare partial renders a GET-submit filter form with chips.
+
+**Standard tests:**
+- `regression-routes.test.ts` > page rendering > Compare filter chips render
+- `regression-routes.test.ts` > page rendering > ?caseId=<x> filters the Compare case table
+
+---
+
+### REQ-REG-GUI-V2-018 — Weakness summaries MUST auto-generate on terminal run events; client polls `/runs/:runId/summary?tier=<t>` (200/202/400/404/503) to surface them
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+**Server-side auto-trigger (Codex P1 follow-up):** the run-registry exposes `onTerminal(hook)`. `registerRegressionRoutes` subscribes a handler that — on `complete` or `gate-failed` only — loads the manifest, identifies every tier with at least one `evaluatedTier` result, and invokes `weaknessSummarizer.summarize({manifest, tier})` for each (sequential, fire-and-forget). `failed` and `cancelled` produce no usable manifest so they are skipped. The summarizer is idempotent, so a duplicate trigger (manual POST then auto, or vice versa) is a no-op.
+
+**Client-side polling:** `GET /gui/regression/runs/:runId/summary?tier=` returns 200 with the rendered partial when persisted, 202 when generation is in-progress, 400 without tier, 404 for non-UUID runId, 503 when the summarizer isn't wired. `regression-live.eta` polls every 2s up to 30s on BOTH `complete` AND `gate-failed` SSE events.
+
+**Standard tests:**
+- `regression-codex-followup.test.ts` > P1 — auto-summarize fires on terminal events > emits terminal event for a real manifest → summarize is invoked
+- `regression-codex-followup.test.ts` > P1 — auto-summarize fires on terminal events > also fires on `gate-failed` (Codex P1)
+- `regression-routes-chunk-d.test.ts` > summary GET > returns 200 with rendered partial when summary is persisted
+- `regression-routes-chunk-d.test.ts` > summary GET > returns 202 when summary is not yet persisted
+
+**Edge case tests:**
+- `regression-codex-followup.test.ts` > P1 — auto-summarize fires on terminal events > does NOT fire on `failed` or `cancelled`
+- `regression-routes-chunk-d.test.ts` > summary GET > returns 400 without tier query param
+- `regression-routes-chunk-d.test.ts` > summary GET > returns 404 when runId is not a UUID
+- `regression-routes-chunk-d.test.ts` > Auth/CSRF — new Chunk D endpoints > GET /summary returns 302 for unauthenticated
+
+---
+
+### REQ-REG-GUI-V2-019 — `POST /runs/:runId/summary` MUST be idempotent; `force=true` regenerates
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`weaknessSummarizer.summarize` skips work when an on-disk summary exists unless `force: true` is passed. The POST route accepts `?force=true` and forwards it. Background task runs all tier slots present in the manifest.
+
+**Standard tests:**
+- `weakness-summarizer.test.ts` > LLM call discipline > makes ZERO LLM calls on a second invocation (idempotent default)
+- `weakness-summarizer.test.ts` > LLM call discipline > force=true makes a fresh LLM call even if a summary file exists
+- `regression-routes-chunk-d.test.ts` > summary POST > returns 202 and queues summarization
+- `regression-routes-chunk-d.test.ts` > summary POST > forwards force=true to the summarizer
+
+**Edge case tests:**
+- `regression-routes-chunk-d.test.ts` > summary POST > returns 404 when the runId has no manifest
+- `regression-routes-chunk-d.test.ts` > Auth/CSRF > POST /summary returns 403 without CSRF
+- `regression-routes-chunk-d.test.ts` > Auth/CSRF > POST /summary returns 403 for authenticated non-admin
+
+---
+
+### REQ-REG-GUI-V2-020 — Drilldown MUST surface "see this case across all model runs" → Compare with `?caseId=` filter showing all historical entries
+
+**Phase:** Regression GUI rework v2 (2026-05-13) | **Status:** Implemented
+
+`regression-drilldown.eta` includes an `<a href="/gui/regression?view=compare&caseId=...">` link in the drilldown tab nav. Compare's handler detects `?caseId=` and renders an **expanded historical view** (Codex P2 #4 follow-up): every cached `RunResult` for that case across every model snapshot is shown, sorted desc by timestamp. Model and verdict filter chips apply post-history-expansion. The current-key restriction that powers the regular Compare case table is intentionally bypassed so the operator sees the full cross-run lineage promised by the link text.
+
+**Standard tests:**
+- `regression-routes.test.ts` > page rendering > drilldown renders the "see across all runs" link
+- `regression-codex-followup.test.ts` > P2 — Compare ?caseId= renders historical rows across runs > shows every cached run for the case, sorted desc by timestamp
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -10450,5 +10740,25 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-OV-008 | regression-routes.test.ts | 4 | 2 | Implemented |
 | REQ-REG-GUI-OV-009 | regression-routes-write.test.ts | 2 | 0 | Implemented |
 | REQ-REG-GUI-OV-010 | regression-routes-write.test.ts | 1 | 1 | Implemented |
+| REQ-REG-GUI-V2-001 | evaluated-tier.test.ts | 2 | 2 | Implemented |
+| REQ-REG-GUI-V2-002 | atomic-write.test.ts | 2 | 2 | Implemented |
+| REQ-REG-GUI-V2-003 | args.test.ts, manifest-writer.test.ts, regression-routes-chunk-d.test.ts | 3 | 3 | Implemented |
+| REQ-REG-GUI-V2-004 | run-history-store.test.ts, regression-codex-followup.test.ts | 4 | 6 | Implemented |
+| REQ-REG-GUI-V2-005 | regression-routes.test.ts | 1 | 0 | Implemented |
+| REQ-REG-GUI-V2-006 | regression-routes-chunk-d.test.ts | 1 | 0 | Implemented |
+| REQ-REG-GUI-V2-007 | regression-routes.test.ts | 3 | 0 | Implemented |
+| REQ-REG-GUI-V2-008 | leaderboard-aggregator.test.ts | 3 | 2 | Implemented |
+| REQ-REG-GUI-V2-009 | leaderboard-aggregator.test.ts | 1 | 0 | Implemented |
+| REQ-REG-GUI-V2-010 | leaderboard-aggregator.test.ts | 1 | 1 | Implemented |
+| REQ-REG-GUI-V2-011 | regression-routes-chunk-d.test.ts, regression-codex-followup.test.ts | 4 | 0 | Implemented |
+| REQ-REG-GUI-V2-012 | regression-routes-chunk-d.test.ts | 3 | 0 | Implemented |
+| REQ-REG-GUI-V2-013 | chart-svg.test.ts | 2 | 3 | Implemented |
+| REQ-REG-GUI-V2-014 | chart-svg.test.ts | 3 | 0 | Implemented |
+| REQ-REG-GUI-V2-015 | trend-aggregator.test.ts | 2 | 0 | Implemented |
+| REQ-REG-GUI-V2-016 | regression-routes.test.ts (structural) | 1 | 0 | Implemented |
+| REQ-REG-GUI-V2-017 | regression-routes.test.ts | 2 | 0 | Implemented |
+| REQ-REG-GUI-V2-018 | regression-routes-chunk-d.test.ts, regression-codex-followup.test.ts | 4 | 4 | Implemented |
+| REQ-REG-GUI-V2-019 | weakness-summarizer.test.ts, regression-routes-chunk-d.test.ts | 4 | 3 | Implemented |
+| REQ-REG-GUI-V2-020 | regression-routes.test.ts, regression-codex-followup.test.ts | 2 | 0 | Implemented |
 
 | **Totals** | **250 test files** | **1888** | **2029** | **3917 tests** |

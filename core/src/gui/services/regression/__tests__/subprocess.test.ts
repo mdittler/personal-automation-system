@@ -171,6 +171,21 @@ describe('validateSpawnArgs — allowlist (security)', () => {
 	it('accepts --json', () => {
 		expect(() => validateSpawnArgs(['--json'])).not.toThrow();
 	});
+
+	it('accepts --run-id=<uuid> (REQ-REG-GUI-V2-003)', () => {
+		expect(() =>
+			validateSpawnArgs(['--json', '--run-id=550e8400-e29b-41d4-a716-446655440000']),
+		).not.toThrow();
+	});
+
+	it('rejects --run-id=<non-uuid>', () => {
+		expect(() => validateSpawnArgs(['--json', '--run-id=not-a-uuid'])).toThrow(/run-id/);
+	});
+
+	it('rejects --run-id with shell metacharacters', () => {
+		expect(() => validateSpawnArgs(['--json', '--run-id=; rm -rf /'])).toThrow();
+	});
+
 	it('accepts --bucket=routing|receipt|chatbot|recall', () => {
 		expect(() => validateSpawnArgs(['--json', '--bucket=routing'])).not.toThrow();
 		expect(() => validateSpawnArgs(['--json', '--bucket=receipt'])).not.toThrow();

@@ -1,0 +1,117 @@
+<section class="regression-run-launcher" aria-label="Launch a regression run">
+
+<% if (it.catalogError) { %>
+  <article class="error-banner" role="alert" data-testid="catalog-error">
+    <strong>Could not list models from providers.</strong>
+    <p><%= it.catalogError %></p>
+    <p><small>Dropdowns will be empty; the legacy text-field overrides below still accept any provider/model string.</small></p>
+  </article>
+<% } %>
+
+<form method="POST" action="/gui/regression/runs" class="regression-run-form">
+  <input type="hidden" name="_csrf" value="<%= it.csrfToken %>">
+
+  <fieldset>
+    <legend>Bucket</legend>
+    <label>
+      <select name="bucket" data-testid="run-bucket">
+        <option value="">All buckets</option>
+        <option value="routing" <% if (it.selectedBucket === 'routing') { %>selected<% } %>>Routing</option>
+        <option value="receipt" <% if (it.selectedBucket === 'receipt') { %>selected<% } %>>Receipt</option>
+        <option value="chatbot" <% if (it.selectedBucket === 'chatbot') { %>selected<% } %>>Chatbot</option>
+        <option value="recall" <% if (it.selectedBucket === 'recall') { %>selected<% } %>>Recall</option>
+      </select>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Test models</legend>
+    <p><small>Only models currently listed by your providers are selectable. Tier defaults from <code>pas.yaml</code> are pre-selected.</small></p>
+
+    <% for (const tier of ['fast', 'standard', 'reasoning']) { %>
+      <%
+        const cfg = it.tierConfigs[tier];
+        const isReasoning = tier === 'reasoning';
+      %>
+      <label>
+        <span class="tier-label"><%= tier.charAt(0).toUpperCase() + tier.slice(1) %> tier</span>
+        <select name="tier_<%= tier %>" data-testid="tier-select-<%= tier %>" <% if (isReasoning) { %>data-optional="true"<% } %>>
+          <% if (isReasoning) { %>
+            <option value="">— none —</option>
+          <% } else { %>
+            <option value="">— use pas.yaml default —</option>
+          <% } %>
+          <% if (cfg.currentRef && !cfg.currentAvailable) { %>
+            <option value="<%= cfg.currentRefId %>" disabled selected>
+              <%= cfg.currentRefId %> (unavailable)
+            </option>
+          <% } %>
+          <% for (const group of it.modelGroups) { %>
+            <optgroup label="<%= group.provider %>">
+              <% for (const model of group.models) { %>
+                <option value="<%= model.refId %>" <% if (cfg.currentRefId === model.refId && cfg.currentAvailable) { %>selected<% } %>>
+                  <%= model.label %>
+                </option>
+              <% } %>
+            </optgroup>
+          <% } %>
+        </select>
+      </label>
+    <% } %>
+  </fieldset>
+
+  <fieldset>
+    <legend>Judge model (rubric oracle)</legend>
+    <p><small>Used by the rubric oracle for chatbot + receipt buckets. Wins over the standard-tier slot when set. Leave blank to use whatever the standard slot resolved to.</small></p>
+    <label>
+      <select name="judge" data-testid="judge-select">
+        <option value="">— use standard tier —</option>
+        <% if (it.judgeConfig.currentRef && !it.judgeConfig.currentAvailable) { %>
+          <option value="<%= it.judgeConfig.currentRefId %>" disabled>
+            <%= it.judgeConfig.currentRefId %> (unavailable)
+          </option>
+        <% } %>
+        <% for (const group of it.modelGroups) { %>
+          <optgroup label="<%= group.provider %>">
+            <% for (const model of group.models) { %>
+              <option value="<%= model.refId %>">
+                <%= model.label %>
+              </option>
+            <% } %>
+          </optgroup>
+        <% } %>
+      </select>
+    </label>
+  </fieldset>
+
+  <details class="legacy-overrides">
+    <summary>Power-user: free-text overrides</summary>
+    <p><small>Direct CLI strings. Dropdowns above take precedence when both are set.</small></p>
+    <label>
+      Model matrix
+      <input type="text" name="modelMatrix" placeholder="fast=ollama/gemma3:31b,standard=anthropic/claude-sonnet-4-6" autocomplete="off" data-testid="legacy-model-matrix">
+    </label>
+    <label>
+      Judge model
+      <input type="text" name="judgeModel" placeholder="anthropic/claude-haiku-4-5-20251001" autocomplete="off" data-testid="legacy-judge-model">
+    </label>
+  </details>
+
+  <fieldset>
+    <label>
+      <input type="checkbox" name="forceFresh" value="true">
+      Force fresh dispatch for every selected case (skip cache reads)
+    </label>
+  </fieldset>
+
+  <% if (it.estimate) { %>
+    <p class="estimate-banner" data-testid="estimate">
+      Estimated cost: <strong>$<%= it.estimate.totalUsd %></strong>
+      (run budget ceiling $<%= it.estimate.ceilingUsd %>)
+    </p>
+  <% } %>
+
+  <button type="submit" data-testid="run-submit">Run regression</button>
+</form>
+
+</section>
