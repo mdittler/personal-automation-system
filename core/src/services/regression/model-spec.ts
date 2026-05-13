@@ -16,17 +16,17 @@ import type { ModelRef, ModelTier } from '../../types/llm.js';
 export const MAX_MODEL_SPEC_CHARS = 256;
 const SINGLE_REF_MAX_CHARS = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
 
-// Provider: lowercase alpha first char, then lowercase alphanumeric + hyphens.
-// Captures real-world identifiers like "anthropic", "openai-compat", "ollama".
-// Deliberately tighter than `llm-usage.ts PROVIDER_ID_PATTERN` (which permits
-// uppercase + underscores) so the regression surface cannot be tricked by
-// case-folding tricks in the spawn allowlist re-validation.
-const PROVIDER_RE = /^[a-z][a-z0-9-]{0,31}$/;
+// Provider: aligned with `llm-usage.ts PROVIDER_ID_PATTERN` (alphanumeric +
+// underscore + hyphen) so every provider key the rest of PAS accepts is also
+// accepted here. First-char anchor prevents leading hyphens/underscores.
+const PROVIDER_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$/;
 
-// Model: alphanumeric first char, then alphanumeric + dot/colon/hyphen/underscore.
-// Captures real-world identifiers like "claude-haiku-4-5-20251001",
-// "gemma4:e4b", "gemini-2.0-flash", "gpt-4o".
-const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+// Model: alphanumeric first char, then alphanumeric + dot / colon / hyphen /
+// underscore — plus forward slash to support HuggingFace / Together-style
+// namespaced ids like "meta-llama/Llama-3.3-70B-Instruct-Turbo". The `..`
+// traversal sequence, "//" empty segments, and trailing "/" are rejected
+// in the parseModelRef body below.
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/;
 
 const TIER_NAMES: ReadonlySet<ModelTier> = new Set(['fast', 'standard', 'reasoning']);
 
@@ -67,10 +67,16 @@ export function parseModelRef(s: string): ModelRef {
 			`model ref model must match ${MODEL_RE.source} (got: ${JSON.stringify(model)})`,
 		);
 	}
-	// Defense in depth — `..` cannot appear via PROVIDER_RE (no dots allowed),
-	// but the model regex permits dots so guard against `..` traversal explicitly.
+	// MODEL_RE permits `.` and `/` (for HuggingFace-style namespacing), so guard
+	// against the path-traversal and empty-segment patterns those allow.
 	if (model.includes('..')) {
 		throw new Error('model ref must not contain ".." traversal sequence');
+	}
+	if (model.includes('//')) {
+		throw new Error('model ref must not contain "//" (empty path segment)');
+	}
+	if (model.endsWith('/')) {
+		throw new Error('model ref must not end with "/"');
 	}
 	return { provider, model };
 }

@@ -74,13 +74,37 @@ describe('parseModelRef', () => {
 		expect(() => parseModelRef('anthropic/')).toThrow(/model/i);
 	});
 
-	it("rejects 'a/b/c' (extra slash — model contains /)", () => {
-		// split on first /, model = 'b/c' → fails MODEL_RE
-		expect(() => parseModelRef('a/b/c')).toThrow();
+	it("accepts 'together/meta-llama/Llama-3.3-70B-Instruct-Turbo' (HuggingFace-style namespaced model)", () => {
+		expect(parseModelRef('together/meta-llama/Llama-3.3-70B-Instruct-Turbo')).toEqual({
+			provider: 'together',
+			model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+		});
 	});
 
-	it("rejects 'ANTHROPIC/claude' (uppercase provider)", () => {
-		expect(() => parseModelRef('ANTHROPIC/claude')).toThrow(/provider/i);
+	it("accepts 'openai_compat/gpt-4o' (underscore in provider matches llm-usage.ts)", () => {
+		expect(parseModelRef('openai_compat/gpt-4o')).toEqual({
+			provider: 'openai_compat',
+			model: 'gpt-4o',
+		});
+	});
+
+	it("accepts 'ANTHROPIC/claude' (uppercase provider matches llm-usage.ts pattern)", () => {
+		expect(parseModelRef('ANTHROPIC/claude')).toEqual({
+			provider: 'ANTHROPIC',
+			model: 'claude',
+		});
+	});
+
+	it("rejects 'foo/bar//baz' (consecutive slashes = empty path segment)", () => {
+		expect(() => parseModelRef('foo/bar//baz')).toThrow(/empty path segment|\/\//);
+	});
+
+	it("rejects 'foo/bar/' (trailing slash)", () => {
+		expect(() => parseModelRef('foo/bar/')).toThrow(/must not end with|\/$/);
+	});
+
+	it("rejects 'foo/bar/../etc' (traversal inside namespaced model)", () => {
+		expect(() => parseModelRef('foo/bar/../etc')).toThrow();
 	});
 
 	it("rejects '-anthropic/claude' (leading hyphen in provider)", () => {

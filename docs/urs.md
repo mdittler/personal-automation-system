@@ -10434,14 +10434,14 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
-| REQ-REG-GUI-OV-002 | model-spec.test.ts | 4 | 13 | Implemented |
+| REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
 | REQ-REG-GUI-OV-004 | subprocess.test.ts, regression-integration.test.ts | 6 | 12 | Implemented |
-| REQ-REG-GUI-OV-005 | model-spec.test.ts, regression-routes-write.test.ts | 3 | 7 | Implemented |
+| REQ-REG-GUI-OV-005 | model-spec.test.ts, regression-routes-write.test.ts | 3 | 10 | Implemented |
 | REQ-REG-GUI-OV-006 | regression-routes-write.test.ts | 1 | 0 | Implemented |
 | REQ-REG-GUI-OV-007 | cache.test.ts, regression-routes.test.ts, regression-integration.test.ts, regression-routes-write.test.ts | 7 | 0 | Implemented |
 | REQ-REG-GUI-OV-008 | regression-routes.test.ts | 4 | 2 | Implemented |
 | REQ-REG-GUI-OV-009 | regression-routes-write.test.ts | 2 | 0 | Implemented |
 | REQ-REG-GUI-OV-010 | regression-routes-write.test.ts | 1 | 1 | Implemented |
 
-| **Totals** | **249 test files** | **1844** | **1982** | **3826 tests** |
+| **Totals** | **250 test files** | **1884** | **2027** | **3911 tests** |

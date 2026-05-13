@@ -884,6 +884,54 @@ describe('POST /gui/regression/runs — modelMatrix + judgeModel (REQ-REG-GUI-OV
 		}
 	});
 
+	it('rejects judgeModel sent as array with 400 (no crash)', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: [] },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as object with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: { foo: 'bar' } },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rejects judgeModel sent as boolean with 400', async () => {
+		const { app } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, judgeModel: true },
+			});
+			expect(res.statusCode).toBe(400);
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('rejects modelMatrix exceeding MAX_MODEL_SPEC_CHARS with 400', async () => {
 		const { app } = await buildApp();
 		try {

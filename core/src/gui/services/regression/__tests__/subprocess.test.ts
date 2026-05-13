@@ -292,7 +292,7 @@ describe('validateSpawnArgs — --model-matrix / --judge-model (REQ-REG-GUI-OV-0
 
 	it('rejects --judge-model with absurdly long value (length cap)', () => {
 		expect(() =>
-			validateSpawnArgs(['--json', '--judge-model=' + 'a'.repeat(300)]),
+			validateSpawnArgs(['--json', `--judge-model=${'a'.repeat(300)}`]),
 		).toThrow();
 	});
 
