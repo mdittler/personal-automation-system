@@ -46,6 +46,7 @@ export class ModelSelector {
 	private readonly filePath: string;
 	private readonly logger: Logger;
 	private readonly defaults: { standard: ModelRef; fast: ModelRef; reasoning?: ModelRef };
+	private readonly transientOverrides: Map<ModelTier, ModelRef> = new Map();
 
 	constructor(options: ModelSelectorOptions) {
 		this.standard = options.defaultStandard;
@@ -61,6 +62,23 @@ export class ModelSelector {
 	}
 
 	/**
+	 * Apply a non-persistent override for a tier. `load()` will not overwrite
+	 * a frozen tier even if `model-selection.yaml` has a different value;
+	 * `reconcile()` throws (rather than reverting to default) when a frozen
+	 * tier references an unregistered provider — so CLI overrides like
+	 * `--judge-model=ollama/...` cannot be silently dropped when the override
+	 * provider is unavailable.
+	 *
+	 * The override lives only in memory; it is never written to YAML.
+	 */
+	applyTransientOverride(tier: ModelTier, ref: ModelRef): void {
+		this.transientOverrides.set(tier, { ...ref });
+		if (tier === 'standard') this.standard = { ...ref };
+		else if (tier === 'fast') this.fast = { ...ref };
+		else this.reasoning = { ...ref };
+	}
+
+	/**
 	 * Load saved model selection from disk.
 	 * Call once during startup. Falls back to defaults if file doesn't exist.
 	 * Auto-migrates old string-based format to ModelRef format.
@@ -71,30 +89,41 @@ export class ModelSelector {
 
 		// Detect old format (bare strings) vs new format (ModelRef objects)
 		if (typeof saved.standard === 'string' || typeof saved.fast === 'string') {
-			// Migrate V1 → V2
+			// Migrate V1 → V2. Frozen tiers are excluded from BOTH the in-memory
+			// clobber and the re-save so a CLI override-before-load (e.g.
+			// `--judge-model=ollama/...`) cannot be silently dropped AND cannot
+			// be persisted to disk (overrides are ephemeral by contract).
 			const v1 = saved as ModelSelectionV1;
-			if (v1.standard) {
+			if (v1.standard && !this.transientOverrides.has('standard')) {
 				this.standard = { provider: this.standard.provider, model: v1.standard };
 			}
-			if (v1.fast) {
+			if (v1.fast && !this.transientOverrides.has('fast')) {
 				this.fast = { provider: this.fast.provider, model: v1.fast };
 			}
 			this.logger.info(
 				{ standard: this.standard, fast: this.fast },
 				'Migrated model selection from old format',
 			);
-			// Re-save in new format
-			await this.save();
+			// Defer the V1 → V2 re-save when any override is active — otherwise
+			// `save()` would persist the override's tier values. The next
+			// non-override run completes the migration.
+			if (this.transientOverrides.size === 0) {
+				await this.save();
+			}
 		} else {
 			// V2 format
 			const v2 = saved as ModelSelectionV2;
-			if (v2.standard?.provider && v2.standard?.model) {
+			if (v2.standard?.provider && v2.standard?.model && !this.transientOverrides.has('standard')) {
 				this.standard = v2.standard;
 			}
-			if (v2.fast?.provider && v2.fast?.model) {
+			if (v2.fast?.provider && v2.fast?.model && !this.transientOverrides.has('fast')) {
 				this.fast = v2.fast;
 			}
-			if (v2.reasoning?.provider && v2.reasoning?.model) {
+			if (
+				v2.reasoning?.provider &&
+				v2.reasoning?.model &&
+				!this.transientOverrides.has('reasoning')
+			) {
 				this.reasoning = v2.reasoning;
 			}
 			this.logger.info(
@@ -208,6 +237,7 @@ export class ModelSelector {
 	reconcile(availableProviders: Set<string>): void {
 		// Standard tier (required)
 		if (!availableProviders.has(this.standard.provider)) {
+			this.throwIfFrozen('standard', this.standard.provider);
 			if (!availableProviders.has(this.defaults.standard.provider)) {
 				throw new Error(
 					`Saved standard tier uses provider '${this.standard.provider}' and config default uses ` +
@@ -223,6 +253,7 @@ export class ModelSelector {
 
 		// Fast tier (required)
 		if (!availableProviders.has(this.fast.provider)) {
+			this.throwIfFrozen('fast', this.fast.provider);
 			if (!availableProviders.has(this.defaults.fast.provider)) {
 				throw new Error(
 					`Saved fast tier uses provider '${this.fast.provider}' and config default uses ` +
@@ -238,6 +269,7 @@ export class ModelSelector {
 
 		// Reasoning tier (optional — unset if unavailable)
 		if (this.reasoning && !availableProviders.has(this.reasoning.provider)) {
+			this.throwIfFrozen('reasoning', this.reasoning.provider);
 			const defaultReasoning = this.defaults.reasoning;
 			if (defaultReasoning && availableProviders.has(defaultReasoning.provider)) {
 				this.logger.warn(
@@ -253,6 +285,17 @@ export class ModelSelector {
 				this.reasoning = undefined;
 			}
 		}
+	}
+
+	/** Throw if `tier` was set via `applyTransientOverride` — the caller must
+	 * register the override's provider or drop the override; silent fallback to
+	 * a different provider would defeat the purpose of an explicit CLI flag. */
+	private throwIfFrozen(tier: ModelTier, provider: string): void {
+		if (!this.transientOverrides.has(tier)) return;
+		throw new Error(
+			`Transient override for tier '${tier}' uses provider '${provider}' which is not available. ` +
+				`Register the provider (e.g. set OLLAMA_URL) or drop the override.`,
+		);
 	}
 
 	private async save(): Promise<void> {

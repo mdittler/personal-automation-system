@@ -9458,17 +9458,64 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 ---
 
+### REQ-REG-005 — The rubric oracle MUST use a standard-tier judge LLM and MUST pass cases with score ≥ 4
+
+**Phase:** Chunk C | **Status:** Implemented
+
+`regression/src/oracles/rubric.ts` exports `runRubricOracle()`. The judge prompt fences the actual response inside a `<memory-context label="rubric-response">` block via the production helper `buildMemoryContextBlock` (from `core/src/services/prompt-assembly/memory-context.ts`). This neutralises hostile inputs that attempt to break out of the fence: `sanitizeContextContent` (called internally) strips zero-width / bidi control chars, collapses 3+ backtick runs to 1, and escapes the leading `<` of role-like tags (`memory-context|system|user|assistant`) to `&lt;`. The judge call uses `tier: 'standard'`, `temperature: 0`, `maxTokens: 400`, and `responseFormat: 'json'` so local-model providers (Ollama) emit valid JSON (Chunk C correction phase, 2026-05-12 — pre-fix, Gemma 26b returned empty strings for the judge prompt). Parsing reuses the shared `tryParseJsonStripFences` helper from `core/src/utils/json-strip-fences.ts`. Judge output is treated as untrusted per testing-standards trust-boundary rule 1: non-parseable JSON, NaN/Infinity scores, or scores outside `[0, 5]` map to `verdict: 'error'` (not `'fail'`) so a misbehaving judge cannot silently flip a real failure to pass. Scores ≥ 4 emit `verdict: 'pass'`; scores 0–3 emit `verdict: 'fail'`. Cost is metered via the CostTracker delta around the judge call.
+
+**Standard tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > passes when judge score >= 4
+- `rubric-oracle.test.ts` > runRubricOracle > passes at the threshold (score=4)
+- `rubric-oracle.test.ts` > runRubricOracle > fails when score is 3 or below
+- `rubric-oracle.test.ts` > runRubricOracle > records non-zero costUsd from the CostTracker delta
+- `chatbot-runner.test.ts` > runChatbotCase > routes each input through the environment and grades with rubric oracle
+- `chatbot-runner.test.ts` > runChatbotCase > captures only THIS case turn even if telegram.sent was non-empty before
+- `chatbot-runner.test.ts` > runChatbotCase > calls endActiveSession before each input (Codex C3)
+- `chatbot-cases.test.ts` > chatbot bucket cases (migrated from v0) > every case uses bucket="chatbot" and oracle="rubric"
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > accepts oracle="rubric" on a chatbot case with a non-empty rubric
+
+**Edge case tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > errors when judge output is not parseable JSON
+- `rubric-oracle.test.ts` > runRubricOracle > errors when judge returns NaN
+- `rubric-oracle.test.ts` > runRubricOracle > errors when judge returns score outside 0..5
+- `rubric-oracle.test.ts` > runRubricOracle > errors when judge LLM throws (infrastructure error)
+- `rubric-oracle.test.ts` > runRubricOracle > strips ```json markdown fences before parsing
+- `rubric-oracle.test.ts` > runRubricOracle > fences hostile actualResponse inside the judge prompt (no prompt-injection escape)
+- `rubric-oracle.test.ts` > runRubricOracle > strips zero-width characters from actualResponse before fencing (Codex I7 / testing-standards rule 1)
+- `rubric-oracle.test.ts` > runRubricOracle > strips bidi-override characters from actualResponse before fencing
+- `rubric-oracle.test.ts` > runRubricOracle > neutralises case-variant fence tag attempts
+- `rubric-oracle.test.ts` > runRubricOracle > passes responseFormat: 'json' to the judge LLM call (Codex P1 follow-up, 2026-05-12)
+- `rubric-oracle.test.ts` > runRubricOracle > returns verdict=error when judge returns empty string (Gemma JSON-mode regression guard)
+- `chatbot-runner.test.ts` > runChatbotCase > fails when the rubric judge returns score < 4
+- `chatbot-runner.test.ts` > runChatbotCase > errors when the rubric judge returns a non-finite score
+- `chatbot-runner.test.ts` > runChatbotCase > aborts with budget-exceeded before invoking routeMessage when over budget
+- `chatbot-runner.test.ts` > runChatbotCase > fails when expectedHandler does not match the recorded handler (Codex I6)
+- `chatbot-runner.test.ts` > runChatbotCase > rejects calls when oracle is not "rubric"
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" without a rubric field
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" with an empty rubric string
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a non-chatbot bucket (recall)
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a routing bucket
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > still rejects oracle="judge" (REQ-REG-014)
+
+---
+
 ### REQ-REG-006 — Fixture integrity MUST be verified via SHA-256 checksum before any chatbot-bucket run
 
-**Phase:** Chunk A.1 | **Status:** Implemented
+**Phase:** Chunk A.1 + C | **Status:** Implemented
 
-`verifyFixtureIntegrity(manifestPath)` parses a `<sha256>  <relpath>` manifest, rejects absolute paths and traversals at parse time, and verifies each listed file's SHA-256 in parallel. Returns `FixtureCheckResult` with per-file failures (`mismatch` or `missing`) for diagnostics. Chunk B does not yet ship chatbot cases — REQ-REG-006's enforcement point is Chunk C.
+`verifyFixtureIntegrity(manifestPath)` parses a `<sha256>  <relpath>` manifest, rejects absolute paths and traversals at parse time, and verifies each listed file's SHA-256 in parallel. Returns `FixtureCheckResult` with per-file failures (`mismatch` or `missing`) for diagnostics. Chunk C ships the enforcement point: `chatbot-environment.ts` calls `verifyFixtureIntegrity(seedShaPath)` before any temp directory is written and before any LLM call. A tampered `seed.json` aborts environment creation; the orchestrator marks all chatbot cases in the run as `verdict: 'error'` with a synthesized oracle verdict pointing at the integrity failure.
 
 **Standard tests:**
 - `seed.test.ts` > verifies matching hashes
 - `seed.test.ts` > detects mismatches with expected/actual diagnostics
 - `seed.test.ts` > rejects manifest line with traversal in path
 - `seed.test.ts` > rejects manifest line with absolute path
+- `seed.test.ts` > the committed chatbot/seed.sha256 matches the committed seed.json
+- `chatbot-environment.test.ts` > createChatbotEnvironment > throws when the fixture sha256 manifest does not match
+
+**Edge case tests:**
+- `orchestrator.test.ts` > runSuite — chatbot bucket > on env-factory failure marks ALL remaining chatbot cases as error without retrying the factory (Codex I3)
 
 ---
 
@@ -9546,15 +9593,36 @@ The routing bucket is populated from a single generator module (`regression/src/
 
 ---
 
+### REQ-REG-012 — The seeded fixture user (`_regression-user`) MUST be isolated to a temporary DataStore directory and MUST NOT touch real `data/` during a run
+
+**Phase:** Chunk C | **Status:** Implemented
+
+`chatbot-environment.ts:createChatbotEnvironment` calls `mkdtemp(join(tmpdir(), 'regression-chatbot-'))` for every environment. All seeded state (households, receipts, price lists) lives strictly under that tmp root. The composed `RuntimeHandle` is given `dataDir: tmpRoot/data` — no path in the runtime ever resolves to the developer's real `data/` directory. `dispose()` removes the tmp root via `rm(tmpRoot, {recursive: true, force: true})`; the orchestrator wraps the chatbot dispatch loop in `try/finally` so a panic mid-run still cleans up. Codex I4 follow-up: the post-mkdtemp path is wrapped in `try/catch` with `rm(tmpRoot)` on any failure, so a compose-runtime throw cannot leak a tmp directory.
+
+**Standard tests:**
+- `chatbot-environment.test.ts` > createChatbotEnvironment > writes seed receipts + price lists into the household-shared path
+- `chatbot-environment.test.ts` > createChatbotEnvironment > produces a runtime with router + telegram services
+- `chatbot-environment.test.ts` > createChatbotEnvironment > dispose cleans up the temp directory
+- `orchestrator.test.ts` > runSuite — chatbot bucket > builds the chatbot environment once and reuses it across chatbot cases
+- `orchestrator.test.ts` > runSuite — chatbot bucket > disposes the env after the last chatbot case (try/finally)
+
+**Edge case tests:**
+- `chatbot-environment.test.ts` > createChatbotEnvironment > removes the temp directory when post-mkdtemp setup throws (Codex I4)
+- `orchestrator.test.ts` > runSuite — chatbot bucket > disposes the env even when a case throws mid-loop
+
+---
+
 ### REQ-REG-014 — The `judge` oracle kind MUST be reserved but MUST NOT be implemented in v1; declaring it on a case MUST throw a configuration error
 
-**Phase:** Chunk A.1 | **Status:** Implemented
+**Phase:** Chunk A.1 (judge reservation) + Chunk C (rubric activation) | **Status:** Implemented
 
-`OracleKind` includes `'judge'` for forward-compatibility, but `validatePersonaCase` throws when a case sets `oracle: 'judge'` ("reserved REQ-REG-014"). The same check rejects `oracle: 'rubric'` until Chunk C wires the rubric oracle.
+`OracleKind` includes `'judge'` for forward-compatibility, but `validatePersonaCase` throws when a case sets `oracle: 'judge'` ("reserved REQ-REG-014"). Chunk C activated `oracle: 'rubric'` on the `chatbot` bucket only; `rubric` is rejected on routing / recall / receipt cases, and `judge` remains reserved (no v1 implementation).
 
 **Standard tests:**
 - `validate-case.test.ts` > rejects oracle: judge always
-- `validate-case.test.ts` > rejects oracle: rubric in Chunk A
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > still rejects oracle="judge" (REQ-REG-014)
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a non-chatbot bucket (recall)
+- `validate-case.test.ts` > Chunk C — rubric oracle rules > rejects oracle="rubric" on a routing bucket
 
 ---
 
@@ -9711,7 +9779,9 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 
 ## Traceability Matrix
 
-The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021, REQ-REG-005, REQ-REG-012) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
+The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
+
+**Chunk C Correction Phase (2026-05-12) traceability note:** the correction phase introduced framework-level implementation fixes — `ModelSelector.applyTransientOverride` + `--no-cache` CLI flag + `LLMCompletionOptions.responseFormat` plumbing + classifier opt-in + deterministic PAS / session-control prefilters — that restore the intended behavior of existing REQ-REG-* contracts but do not add new behavioral requirements. Tests for these changes live under `model-selector.test.ts`, `build-deps.test.ts`, `args.test.ts`, `llm-service.test.ts`, the four `*-provider.test.ts` files, `shadow-classifier.test.ts`, `recall-classifier.test.ts`, `pas-classifier.test.ts`, `session-control-classifier.test.ts`, and `rubric-oracle.test.ts` (Codex P1 follow-up — +2 entries for REQ-REG-005). No new REQ-REG row was created; the changes harden the implementation of REQ-REG-001/005 and restore correct semantics under `--judge-model` / `--model-matrix` override flags. **Codex P2/P3 review (2026-05-12) extends the same note:** `cli-main.ts` drain-before-exit + `ModelSelector.load()` V1 migration override-safety + retracted Costco-21-items resolution claim in findings doc + reconciled stale numbers in `open-items.md`. Test additions: `model-selector.test.ts` +2 V1 migration cases (override-before-load preserves override AND defers V2 persist; no-override path still rewrites V2 — REQ-REG-001 implementation); new `json-strip-fences.test.ts` (22 direct tests for the shared utility used by recall classifier + rubric oracle — supports REQ-REG-005). Still no new REQ-REG row.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|
@@ -10180,11 +10250,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-001 | (workspace exclusion verified by vitest config) | 0 | 0 | Implemented |
 | REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts, codex-corrections.test.ts | 8 | 5 | Implemented |
 | REQ-REG-004 | structural-oracle.test.ts, routing-runner.test.ts | 14 | 9 | Implemented |
-| REQ-REG-006 | seed.test.ts | 4 | 4 | Implemented |
+| REQ-REG-005 | rubric-oracle.test.ts, chatbot-runner.test.ts, chatbot-cases.test.ts, validate-case.test.ts | 11 | 19 | Implemented |
+| REQ-REG-006 | seed.test.ts, chatbot-environment.test.ts, orchestrator.test.ts | 6 | 5 | Implemented |
 | REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts | 5 | 4 | Implemented |
 | REQ-REG-009 | budget.test.ts, pas-yaml-schema.test.ts, orchestrator.test.ts | 5 | 3 | Implemented |
 | REQ-REG-010 | cache.test.ts, cache-invalidation.test.ts | 6 | 2 | Implemented |
 | REQ-REG-011 | markdown-report.test.ts, cases.contract.test.ts, orchestrator.test.ts, routing-runner.test.ts, dispatch.test.ts | 18 | 8 | Implemented |
+| REQ-REG-012 | chatbot-environment.test.ts, orchestrator.test.ts | 5 | 2 | Implemented |
 | REQ-REG-003 | cache-reader.test.ts, case-discovery.test.ts, regression-routes.test.ts | 3 | 4 | Implemented |
 | REQ-REG-007 | regression-routes.test.ts, regression-routes-write.test.ts | 6 | 16 | Implemented |
 | REQ-REG-013 | regression-routes.test.ts | 6 | 7 | Implemented |

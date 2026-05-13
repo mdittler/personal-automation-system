@@ -368,4 +368,46 @@ describe('LLMServiceImpl (multi-provider)', () => {
 
 		await expect(service.classify('test', ['a', 'b'])).rejects.toThrow(/not registered/);
 	});
+
+	// Batch 1 — responseFormat: 'json' pass-through. Codex correction #4:
+	// per-provider tests prove each provider maps the option once it receives
+	// it, but they cannot catch a regression where LLMService strips the field
+	// during option propagation. This test locks the contract end-to-end.
+	describe('responseFormat option pass-through', () => {
+		it('forwards responseFormat: "json" to provider.completeWithUsage', async () => {
+			const provider = createMockProvider('anthropic');
+			const registry = createMockRegistry({ anthropic: provider });
+			const selector = createMockSelector();
+
+			const service = new LLMServiceImpl({
+				registry,
+				modelSelector: selector,
+				costTracker: createMockCostTracker(),
+				logger,
+			});
+
+			await service.complete('test', { tier: 'fast', responseFormat: 'json' });
+
+			const callArgs = (provider.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(callArgs?.[1]).toMatchObject({ responseFormat: 'json' });
+		});
+
+		it('omits responseFormat by default (does not inject the field)', async () => {
+			const provider = createMockProvider('anthropic');
+			const registry = createMockRegistry({ anthropic: provider });
+			const selector = createMockSelector();
+
+			const service = new LLMServiceImpl({
+				registry,
+				modelSelector: selector,
+				costTracker: createMockCostTracker(),
+				logger,
+			});
+
+			await service.complete('test', { tier: 'fast' });
+
+			const callArgs = (provider.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(callArgs?.[1]).not.toHaveProperty('responseFormat');
+		});
+	});
 });

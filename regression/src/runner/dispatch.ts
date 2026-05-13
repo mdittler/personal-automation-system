@@ -13,6 +13,10 @@
  * sequential dispatch — the orchestrator enforces that invariant.
  */
 
+import {
+	classifyRecallIntent,
+	recallPreFilter,
+} from '@core/services/conversation-retrieval/recall-classifier.js';
 import { classifyPASMessage } from '@core/services/conversation/pas-classifier.js';
 import { detectSessionControl } from '@core/services/conversation/session-control-classifier.js';
 import type { AppLogger } from '@core/types/app-module.js';
@@ -127,6 +131,63 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 				}),
 			);
 			return { raw: JSON.stringify(r), meter };
+		},
+	};
+}
+
+export interface RecallAdapter {
+	/**
+	 * Classify a message; `today` overrides `defaultToday` when supplied
+	 * (case fixtures pin a deterministic date for temporal assertions).
+	 */
+	recall(message: string, today?: string): Promise<AdapterResult>;
+}
+
+export interface BuildRecallAdapterDeps {
+	llm: LLMService;
+	logger: MinimalLogger;
+	costTracker: CostMeterSource;
+	modelIds: TierModelSnapshot;
+	/** YYYY-MM-DD default — used when the case fixture does not pin its own. */
+	defaultToday: string;
+	maxWindowDays?: number;
+}
+
+export function buildRecallAdapter(deps: BuildRecallAdapterDeps): RecallAdapter {
+	const widenedLogger = deps.logger as unknown as AppLogger;
+	return {
+		recall: async (message: string, today?: string): Promise<AdapterResult> => {
+			const effectiveToday = today ?? deps.defaultToday;
+			// Pre-filter is synchronous + zero-cost; mirror the prod two-stage pipeline.
+			const pf = recallPreFilter(message);
+			if (pf.skip) {
+				return {
+					raw: JSON.stringify({
+						shouldRecall: false,
+						query: null,
+						timeAnchor: null,
+						reason: `prefilter:${pf.reason}`,
+					}),
+					meter: ZERO_METER(deps.modelIds.fast),
+				};
+			}
+			const before = deps.costTracker.getMonthlyTotalCost();
+			const verdict = await classifyRecallIntent(message, {
+				llm: deps.llm,
+				logger: widenedLogger,
+				today: effectiveToday,
+				...(deps.maxWindowDays !== undefined ? { maxWindowDays: deps.maxWindowDays } : {}),
+			});
+			const after = deps.costTracker.getMonthlyTotalCost();
+			return {
+				raw: JSON.stringify(verdict),
+				meter: {
+					model: deps.modelIds.fast,
+					tokenIn: 0,
+					tokenOut: 0,
+					costUsd: Math.max(0, after - before),
+				},
+			};
 		},
 	};
 }

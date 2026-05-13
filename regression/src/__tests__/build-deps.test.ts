@@ -13,13 +13,19 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pino } from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CostTracker } from '@core/services/llm/cost-tracker.js';
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import { createStubProviderRegistry } from '@core/testing/fixtures/stub-llm-provider.js';
 import type { SystemConfig } from '@core/types/config.js';
-import { composeLLMService } from '../runner/build-deps.js';
+import { pino } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	applyModelMatrixOverride,
+	buildDryRunDeps,
+	buildMetadataDeps,
+	composeLLMService,
+	resolveTierModelIds,
+} from '../runner/build-deps.js';
 
 let tempDir: string;
 let dataDir: string;
@@ -126,11 +132,182 @@ describe('composeLLMService — production wiring', () => {
 		// ModelSelector.reconcile() throws when neither saved nor default tier
 		// providers are available. The CLI surfaces this as "config error" rather
 		// than silently running with a broken LLM — matches `compose-runtime.ts`.
-		await expect(
-			composeLLMService(config, costTracker, logger, emptyRegistry),
-		).rejects.toThrow(/provider.*available|api key/i);
+		await expect(composeLLMService(config, costTracker, logger, emptyRegistry)).rejects.toThrow(
+			/provider.*available|api key/i,
+		);
+	});
+});
+
+describe('build-deps — Chunk C wiring', () => {
+	beforeEach(() => {
+		vi.stubEnv('TELEGRAM_BOT_TOKEN', 'stub-token');
+		vi.stubEnv('GUI_AUTH_TOKEN', 'stub-gui-token');
+		vi.stubEnv('ANTHROPIC_API_KEY', 'sk-stub-not-real');
+	});
+	afterEach(() => {
+		vi.unstubAllEnvs();
 	});
 
+	it('buildDryRunDeps stubs the chatbot factory to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		expect(typeof deps.chatbotEnvFactory).toBe('function');
+		await expect(deps.chatbotEnvFactory!()).rejects.toThrow(/dry-run/i);
+	});
+
+	it('buildDryRunDeps stubs the recall adapter to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		expect(typeof deps.recallAdapter?.recall).toBe('function');
+		await expect(deps.recallAdapter!.recall('hi')).rejects.toThrow(/dry-run/i);
+	});
+
+	it('buildMetadataDeps does not require chatbot fixture access', async () => {
+		const deps = await buildMetadataDeps();
+		expect(deps.chatbotEnvFactory).toBeUndefined();
+		expect(deps.recallAdapter).toBeUndefined();
+	});
+
+	it('applyModelMatrixOverride mutates the tier model IDs reported by deps', () => {
+		const baseDeps = buildDryRunDeps();
+		const overridden = applyModelMatrixOverride(baseDeps, {
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+		expect(overridden.modelIds.fast).toBe('gemma4:e4b');
+		expect(overridden.modelIds.standard).toBe('gemma4:26b');
+	});
+
+	// Codex correction: tier override must reach the actual LLMService, not just
+	// the cache-key metadata. This is the regression guard for the bug where
+	// --model-matrix=ollama/gemma4:e4b would persist gemma4:e4b in `modelIds`
+	// but still dispatch through the production tier (e.g., anthropic/claude-haiku).
+	it('config.llm.tiers mutation propagates into LLMService.getModelForTier', async () => {
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		// Mutate tiers as buildProductionDeps now does up-front when tierOverride
+		// is supplied.
+		if (config.llm) {
+			config.llm = {
+				...config.llm,
+				tiers: {
+					fast: { provider: 'stub', model: 'gemma4:e4b-mock' },
+					standard: { provider: 'stub', model: 'gemma4:26b-mock' },
+				},
+			};
+		}
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+		const llm = await composeLLMService(config, costTracker, logger, stubRegistry);
+		// getModelForTier returns `<provider>/<model>` form; we asserted on the
+		// model substring after the slash to keep the assertion robust to the
+		// provider-id wrapping convention.
+		expect(llm.getModelForTier?.('fast')).toContain('gemma4:e4b-mock');
+		expect(llm.getModelForTier?.('standard')).toContain('gemma4:26b-mock');
+	});
+});
+
+describe('composeLLMService — transient override (Batch 0)', () => {
+	// Regression for the Codex-reviewed bug: persisted `model-selection.yaml`
+	// overrides used to silently clobber `--judge-model` / `--model-matrix`.
+	// composeLLMService now calls applyTransientOverride AFTER load() to freeze
+	// override tiers so neither load() nor reconcile() can revert them.
+
+	it('tierOverride survives a persisted model-selection.yaml that disagrees', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+
+		// Persist a saved selection that, without the fix, would silently win.
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+
+		const llm = await composeLLMService(config, costTracker, logger, stubRegistry, {
+			standard: { provider: 'stub', model: 'override-standard' },
+			fast: { provider: 'stub', model: 'override-fast' },
+		});
+
+		expect(llm.getModelForTier?.('standard')).toContain('override-standard');
+		expect(llm.getModelForTier?.('fast')).toContain('override-fast');
+	});
+
+	it('tierOverride with an unregistered provider causes reconcile() to throw (not silently fall back)', async () => {
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+
+		// Stub registry registers only 'stub'. The override points at 'ollama'
+		// which is NOT registered — must throw.
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+
+		await expect(
+			composeLLMService(config, costTracker, logger, stubRegistry, {
+				standard: { provider: 'ollama', model: 'gemma4:26b' },
+			}),
+		).rejects.toThrow(/transient override.*standard.*ollama.*not available/i);
+	});
+});
+
+describe('resolveTierModelIds — transient override (Batch 0)', () => {
+	// Codex correction: deps.modelIds.standard must reflect the override, not
+	// the persisted value. Pre-fix, the cache key would echo the persisted
+	// standard tier even when --judge-model was set, masking the bug.
+
+	it('returns persisted values when no override is supplied', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const ids = await resolveTierModelIds(config, logger);
+		expect(ids.standard).toBe('persisted-standard');
+		expect(ids.fast).toBe('persisted-fast');
+	});
+
+	it('returns override values when tierOverride is supplied (cache-key reflects truth)', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		// Persist a saved selection; the override must still win.
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const ids = await resolveTierModelIds(config, logger, {
+			standard: { provider: 'stub', model: 'override-standard' },
+		});
+		expect(ids.standard).toBe('override-standard');
+		expect(ids.fast).toBe('persisted-fast'); // non-overridden tier untouched
+	});
+});
+
+describe('composeLLMService — cost-tracker delta', () => {
 	it('cost-tracker delta is non-zero after a real provider call (drives REQ-REG-013 cost field)', async () => {
 		const logger = pino({ level: 'silent' });
 		const config = makeConfig();

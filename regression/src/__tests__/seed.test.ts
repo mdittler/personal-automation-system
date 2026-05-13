@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { verifyFixtureIntegrity } from '../runner/seed.js';
 
@@ -95,5 +96,13 @@ describe('verifyFixtureIntegrity', () => {
 		expect(reasons).toEqual(['mismatch', 'missing']);
 		const paths = result.failures.map((f) => f.path).sort();
 		expect(paths).toEqual(['missing.png', 'tampered.png']);
+	});
+
+	it('the committed chatbot/seed.sha256 matches the committed seed.json', async () => {
+		const here = fileURLToPath(import.meta.url);
+		const manifest = resolve(here, '../../../fixtures/chatbot/seed.sha256');
+		const result = await verifyFixtureIntegrity(manifest);
+		expect(result.ok).toBe(true);
+		expect(result.failures).toEqual([]);
 	});
 });

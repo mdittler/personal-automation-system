@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildClassifierAdapters, type CostMeterSource } from '../runner/dispatch.js';
+import {
+	type CostMeterSource,
+	buildClassifierAdapters,
+	buildRecallAdapter,
+} from '../runner/dispatch.js';
+import { StubLLMService } from './_stub-provider.js';
 
 const MODEL_IDS = {
 	fast: 'claude-fast-1',
@@ -213,5 +218,96 @@ describe('pas adapter — DATA_QUERY_PREFILTER path', () => {
 		expect(JSON.parse(r.raw).pasRelated).toBe(true);
 		expect(llm.complete).toHaveBeenCalledTimes(1);
 		expect(r.meter.costUsd).toBeCloseTo(0.00003, 7);
+	});
+});
+
+const minLogger = {
+	warn: () => {},
+	info: () => {},
+	debug: () => {},
+	error: () => {},
+};
+
+describe('buildRecallAdapter', () => {
+	it('forwards the per-call today to classifyRecallIntent and returns the verdict', async () => {
+		const stub = new StubLLMService().queue(
+			'{"shouldRecall": true, "query": "leak", "timeAnchor": null, "reason": "explicit"}',
+		);
+		let cost = 0;
+		const tracker = { getMonthlyTotalCost: () => cost };
+		const adapter = buildRecallAdapter({
+			llm: stub as never,
+			logger: minLogger,
+			costTracker: tracker,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			defaultToday: '2026-05-11',
+		});
+		const originalComplete = stub.complete.bind(stub);
+		stub.complete = async (p, o) => {
+			cost = 0.0005;
+			return originalComplete(p, o);
+		};
+
+		const r = await adapter.recall('what did we say about the leak earlier?', '2026-05-11');
+		expect(JSON.parse(r.raw).shouldRecall).toBe(true);
+		expect(r.meter.costUsd).toBeCloseTo(0.0005, 6);
+		expect(r.meter.model).toBe('fast-m');
+		// The forwarded `today` appears in the rendered system prompt.
+		expect(stub.lastPrompt.length).toBeGreaterThan(0);
+		const lastOpts = stub.lastOptions as { systemPrompt?: string };
+		expect(lastOpts.systemPrompt).toContain('2026-05-11');
+	});
+
+	it('falls back to defaultToday when the caller passes undefined', async () => {
+		const stub = new StubLLMService().queue(
+			'{"shouldRecall": false, "query": null, "timeAnchor": null, "reason": "none"}',
+		);
+		const adapter = buildRecallAdapter({
+			llm: stub as never,
+			logger: minLogger,
+			costTracker: { getMonthlyTotalCost: () => 0 },
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			defaultToday: '2026-05-11',
+		});
+		await adapter.recall('a long enough message to bypass the prefilter', undefined);
+		const lastOpts = stub.lastOptions as { systemPrompt?: string };
+		expect(lastOpts.systemPrompt).toContain('2026-05-11');
+	});
+
+	it('zero-meters when the pre-filter skips the LLM call', async () => {
+		const stub = new StubLLMService(); // queue empty — would throw if called
+		const tracker = { getMonthlyTotalCost: () => 999 }; // even with non-zero delta, prefilter forces zero
+		const adapter = buildRecallAdapter({
+			llm: stub as never,
+			logger: minLogger,
+			costTracker: tracker,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			defaultToday: '2026-05-11',
+		});
+		const r = await adapter.recall('hi', '2026-05-11');
+		expect(r.meter.costUsd).toBe(0);
+		const parsed = JSON.parse(r.raw);
+		expect(parsed.shouldRecall).toBe(false);
+		expect(parsed.reason).toMatch(/prefilter|short|greeting/i);
+		expect(stub.calls).toBe(0);
+	});
+
+	it('surfaces classifier LLM failure as a fail-open verdict (matches production behaviour)', async () => {
+		const stub = new StubLLMService(); // empty → complete() throws
+		const tracker = { getMonthlyTotalCost: () => 0 };
+		const adapter = buildRecallAdapter({
+			llm: stub as never,
+			logger: minLogger,
+			costTracker: tracker,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			defaultToday: '2026-05-11',
+		});
+		const r = await adapter.recall(
+			'a long-enough message to bypass the prefilter and hit the LLM',
+			'2026-05-11',
+		);
+		const parsed = JSON.parse(r.raw);
+		expect(parsed.shouldRecall).toBe(false);
+		expect(parsed.reason).toBe('llm-error');
 	});
 });

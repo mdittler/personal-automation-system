@@ -1,9 +1,19 @@
 import { execSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LLMService } from '@core/types/llm.js';
+import type { RecallAdapter } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
+import { StubLLMService } from './_stub-provider.js';
+
+const noopLogger = {
+	warn: () => {},
+	info: () => {},
+	debug: () => {},
+	error: () => {},
+};
 
 let repoRoot: string;
 let casesDir: string;
@@ -115,6 +125,19 @@ describe('runSuite — cache lifecycle', () => {
 		await runSuite(opts);
 		await runSuite({ ...opts, rerunIds: new Set(['a-id']) });
 		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(2);
+	});
+
+	it('noCache=true forces fresh dispatch for every case (Batch 0)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const opts = baseOpts();
+		await runSuite(opts);
+		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(2);
+
+		// noCache: true — every case must be redispatched
+		const second = await runSuite({ ...opts, noCache: true });
+		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(4);
+		expect(second.results.every((r) => r.source === 'fresh')).toBe(true);
 	});
 });
 
@@ -348,5 +371,355 @@ describe('runCli', () => {
 		const r = await runCli([], baseOpts(), { stdout: (s) => out.push(s) });
 		expect(r.exitCode).toBe(0);
 		expect(out.join('')).toMatch(/below floor/i);
+	});
+});
+
+describe('runSuite — recall bucket', () => {
+	let tmp: string;
+	let recallCasesDir: string;
+	let recallCacheDir: string;
+
+	beforeEach(async () => {
+		// realpath() resolves the macOS /var → /private/var symlink so the
+		// repoRoot here matches what `import.meta.url` reports from the
+		// dynamically-loaded `buildCases()` module (Node resolves symlinks on
+		// import). Without this, `relative(repoRoot, filePath)` produces a
+		// `../../private/...` prefix that `assertRepoRelative` rejects.
+		tmp = await realpath(await mkdtemp(join(tmpdir(), 'orch-recall-')));
+		// Initialize a git repo + stub coverage file so cache-key computation
+		// (which calls `git ls-files` / readFile under tmp) succeeds for the
+		// `coverage: ['core/.../recall-classifier.ts']` path referenced in the
+		// inlined case fixture below.
+		execSync('git init -q', { cwd: tmp });
+		execSync('git config user.email t@t', { cwd: tmp });
+		execSync('git config user.name T', { cwd: tmp });
+		await mkdir(join(tmp, 'core', 'src', 'services', 'conversation-retrieval'), {
+			recursive: true,
+		});
+		await writeFile(
+			join(tmp, 'core', 'src', 'services', 'conversation-retrieval', 'recall-classifier.ts'),
+			'// stub coverage file\n',
+		);
+		recallCasesDir = join(tmp, 'cases', 'recall');
+		recallCacheDir = join(tmp, 'cache');
+		await mkdir(recallCasesDir, { recursive: true });
+		await mkdir(recallCacheDir, { recursive: true });
+	});
+	afterEach(async () => {
+		await rm(tmp, { recursive: true, force: true });
+	});
+
+	async function writeRecallCaseFile(payload: string): Promise<void> {
+		// Inline a buildCases() module so the loader picks it up via index.ts.
+		const src = `
+			import { fileURLToPath } from 'node:url';
+			export function buildCases() {
+				const filePath = fileURLToPath(import.meta.url);
+				return [{
+					case: {
+						id: 'orch-recall-smoke',
+						description: 'smoke',
+						bucket: 'recall',
+						coverage: ['core/src/services/conversation-retrieval/recall-classifier.ts'],
+						inputs: [{
+							payload: ${JSON.stringify(payload)},
+							today: '2026-05-11',
+							expected: { schema: { type: 'object', required: ['shouldRecall'], properties: { shouldRecall: { const: true } } } },
+						}],
+						oracle: 'structural',
+						budgetUsd: 0.05,
+					},
+					filePath,
+				}];
+			}
+		`;
+		await writeFile(join(recallCasesDir, 'index.ts'), src, 'utf8');
+	}
+
+	it('dispatches recall cases through the recall adapter and writes the cache file', async () => {
+		await writeRecallCaseFile('what did we say about the leak earlier?');
+		const recallCalls: Array<{ msg: string; today?: string }> = [];
+		const recallAdapter: RecallAdapter = {
+			recall: async (msg, today) => {
+				recallCalls.push({ msg, today });
+				return {
+					raw: '{"shouldRecall": true, "query": "leak", "timeAnchor": null, "reason": "x"}',
+					meter: { model: 'fast-m', tokenIn: 0, tokenOut: 0, costUsd: 0.0003 },
+				};
+			},
+		};
+		const outcome = await runSuite({
+			casesDir: join(tmp, 'cases'),
+			cacheDir: recallCacheDir,
+			repoRoot: tmp,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			maxRunBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			classifiers: { foodShadow: vi.fn(), sessionControl: vi.fn(), pas: vi.fn() } as never,
+			logger: noopLogger,
+			recallAdapter,
+		});
+		expect(outcome.results).toHaveLength(1);
+		const r = outcome.results[0]!;
+		expect(r.verdict).toBe('pass');
+		expect(r.source).toBe('fresh');
+		expect(recallCalls).toHaveLength(1);
+		expect(recallCalls[0]!.today).toBe('2026-05-11');
+		// Cache file written (CacheStore wraps as `{ result: RunResult }`).
+		const cacheFile = join(recallCacheDir, 'orch-recall-smoke', `${r.cacheKey}.json`);
+		const persisted = JSON.parse(await readFile(cacheFile, 'utf8'));
+		expect(persisted.result.caseId).toBe('orch-recall-smoke');
+	});
+
+	it('skips dispatch when a recall case is in cache (cache hit; source=cached)', async () => {
+		await writeRecallCaseFile('what did we say about the leak earlier?');
+		const recallAdapter: RecallAdapter = {
+			recall: vi.fn(async () => {
+				throw new Error('adapter must not be invoked on cache hit');
+			}),
+		};
+		// First run writes cache
+		await runSuite({
+			casesDir: join(tmp, 'cases'),
+			cacheDir: recallCacheDir,
+			repoRoot: tmp,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			maxRunBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			classifiers: { foodShadow: vi.fn(), sessionControl: vi.fn(), pas: vi.fn() } as never,
+			logger: noopLogger,
+			recallAdapter: {
+				recall: async () => ({
+					raw: '{"shouldRecall": true, "query": "leak", "timeAnchor": null, "reason": "x"}',
+					meter: { model: 'fast-m', tokenIn: 0, tokenOut: 0, costUsd: 0 },
+				}),
+			},
+		});
+		// Second run must hit cache
+		const outcome2 = await runSuite({
+			casesDir: join(tmp, 'cases'),
+			cacheDir: recallCacheDir,
+			repoRoot: tmp,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			maxRunBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			classifiers: { foodShadow: vi.fn(), sessionControl: vi.fn(), pas: vi.fn() } as never,
+			logger: noopLogger,
+			recallAdapter,
+		});
+		expect(outcome2.results[0]!.source).toBe('cached');
+		expect(recallAdapter.recall).not.toHaveBeenCalled();
+	});
+
+	it('emits onResult exactly once per dispatched recall case', async () => {
+		await writeRecallCaseFile('what did we discuss?');
+		const events: string[] = [];
+		await runSuite({
+			casesDir: join(tmp, 'cases'),
+			cacheDir: recallCacheDir,
+			repoRoot: tmp,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			maxRunBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			classifiers: { foodShadow: vi.fn(), sessionControl: vi.fn(), pas: vi.fn() } as never,
+			logger: noopLogger,
+			recallAdapter: {
+				recall: async () => ({
+					raw: '{"shouldRecall": true, "query": "x", "timeAnchor": null, "reason": "x"}',
+					meter: { model: 'fast-m', tokenIn: 0, tokenOut: 0, costUsd: 0 },
+				}),
+			},
+			onResult: (r) => events.push(r.caseId),
+		});
+		expect(events).toEqual(['orch-recall-smoke']);
+	});
+});
+
+describe('runSuite — chatbot bucket', () => {
+	let tmp: string;
+	let chatbotCasesDir: string;
+	let chatbotCacheDir: string;
+
+	beforeEach(async () => {
+		tmp = await mkdtemp(join(tmpdir(), 'orch-chatbot-'));
+		chatbotCasesDir = join(tmp, 'cases', 'chatbot');
+		chatbotCacheDir = join(tmp, 'cache');
+		await mkdir(chatbotCasesDir, { recursive: true });
+		await mkdir(chatbotCacheDir, { recursive: true });
+		// computeCacheKey requires a git repo + coverage path
+		execSync('git init -q', { cwd: tmp });
+		execSync('git config user.email t@t', { cwd: tmp });
+		execSync('git config user.name T', { cwd: tmp });
+		await mkdir(join(tmp, 'core', 'src', 'services', 'conversation'), {
+			recursive: true,
+		});
+		await writeFile(
+			join(tmp, 'core', 'src', 'services', 'conversation', 'handle-message.ts'),
+			'// stub for cache key',
+			'utf8',
+		);
+		// realpath() resolves the macOS /var → /private/var symlink so the
+		// repoRoot here matches what `import.meta.url` reports from the
+		// dynamically-loaded `buildCases()` module.
+		tmp = await realpath(tmp);
+		chatbotCasesDir = join(tmp, 'cases', 'chatbot');
+		chatbotCacheDir = join(tmp, 'cache');
+	});
+	afterEach(async () => {
+		await rm(tmp, { recursive: true, force: true });
+	});
+
+	async function writeTwoChatbotCases(): Promise<void> {
+		const src = `
+			import { fileURLToPath } from 'node:url';
+			export function buildCases() {
+				const filePath = fileURLToPath(import.meta.url);
+				const base = {
+					bucket: 'chatbot',
+					coverage: ['core/src/services/conversation/handle-message.ts'],
+					oracle: 'rubric',
+					budgetUsd: 0.2,
+				};
+				return [
+					{ case: { ...base, id: 'cb-a', description: 'a', rubric: 'rubric a content', inputs: [{ payload: 'p1', expected: {} }] }, filePath },
+					{ case: { ...base, id: 'cb-b', description: 'b', rubric: 'rubric b content', inputs: [{ payload: 'p2', expected: {} }] }, filePath },
+				];
+			}
+		`;
+		await writeFile(join(chatbotCasesDir, 'index.ts'), src, 'utf8');
+	}
+
+	function fakeChatbotEnv() {
+		const sent: Array<{ userId: string; text: string }> = [];
+		let recordedHandler: string | null = null;
+		return {
+			userId: 'u',
+			householdId: 'h',
+			telegram: { sent },
+			runtime: {
+				services: {
+					router: {
+						routeMessage: vi.fn(async () => {
+							recordedHandler = 'chatbot-fallback';
+							sent.push({ userId: 'u', text: 'fake reply' });
+						}),
+					},
+				},
+			},
+			captureHandler: () => () => recordedHandler,
+			endActiveSession: vi.fn(async () => {
+				recordedHandler = null;
+			}),
+			dispose: vi.fn(async () => {}),
+		};
+	}
+
+	function chatbotBaseOpts(
+		extras: Partial<Parameters<typeof runSuite>[0]> = {},
+	): Parameters<typeof runSuite>[0] {
+		return {
+			casesDir: join(tmp, 'cases'),
+			cacheDir: chatbotCacheDir,
+			repoRoot: tmp,
+			modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
+			maxRunBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			classifiers: { foodShadow: vi.fn(), sessionControl: vi.fn(), pas: vi.fn() } as never,
+			logger: noopLogger,
+			...extras,
+		};
+	}
+
+	it('builds the chatbot environment once and reuses it across chatbot cases', async () => {
+		await writeTwoChatbotCases();
+		const judge = new StubLLMService()
+			.queue('{"score": 5, "explanation": "ok"}')
+			.queue('{"score": 5, "explanation": "ok"}');
+		const factory = vi.fn(async () => fakeChatbotEnv());
+		const outcome = await runSuite(
+			chatbotBaseOpts({
+				chatbotEnvFactory: factory,
+				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				costTracker: { getMonthlyTotalCost: () => 0 },
+			}),
+		);
+		expect(factory).toHaveBeenCalledTimes(1);
+		expect(outcome.results.map((r) => r.verdict)).toEqual(['pass', 'pass']);
+	});
+
+	it('disposes the env after the last chatbot case (try/finally)', async () => {
+		await writeTwoChatbotCases();
+		const env = fakeChatbotEnv();
+		const judge = new StubLLMService()
+			.queue('{"score": 5, "explanation": "ok"}')
+			.queue('{"score": 5, "explanation": "ok"}');
+		await runSuite(
+			chatbotBaseOpts({
+				chatbotEnvFactory: async () => env,
+				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				costTracker: { getMonthlyTotalCost: () => 0 },
+			}),
+		);
+		expect(env.dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it('disposes the env even when a case throws mid-loop', async () => {
+		await writeTwoChatbotCases();
+		const env = fakeChatbotEnv();
+		env.runtime.services.router.routeMessage = vi.fn(async () => {
+			throw new Error('router exploded');
+		});
+		const judge = new StubLLMService();
+		await runSuite(
+			chatbotBaseOpts({
+				chatbotEnvFactory: async () => env,
+				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				costTracker: { getMonthlyTotalCost: () => 0 },
+			}),
+		);
+		expect(env.dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it('throws when a chatbot case is present and no chatbotEnvFactory is provided', async () => {
+		await writeTwoChatbotCases();
+		await expect(runSuite(chatbotBaseOpts())).rejects.toThrow(/chatbotEnvFactory|judgeLlm/i);
+	});
+
+	it('on env-factory failure marks ALL remaining chatbot cases as error without retrying the factory (Codex I3)', async () => {
+		await writeTwoChatbotCases();
+		const factory = vi.fn(async () => {
+			throw new Error('compose runtime failed');
+		});
+		const outcome = await runSuite(
+			chatbotBaseOpts({
+				chatbotEnvFactory: factory,
+				judgeLlm: new StubLLMService() as unknown as Pick<LLMService, 'complete'>,
+				costTracker: { getMonthlyTotalCost: () => 0 },
+			}),
+		);
+		expect(factory).toHaveBeenCalledTimes(1); // not retried per case
+		expect(outcome.results).toHaveLength(2);
+		for (const r of outcome.results) {
+			expect(r.verdict).toBe('error');
+			expect(r.oracleVerdicts[0]!.details).toMatch(/compose runtime failed|env-factory/);
+		}
+	});
+
+	it('emits onResult once per chatbot case in dispatch order', async () => {
+		await writeTwoChatbotCases();
+		const env = fakeChatbotEnv();
+		const judge = new StubLLMService()
+			.queue('{"score": 5, "explanation": "ok"}')
+			.queue('{"score": 5, "explanation": "ok"}');
+		const events: string[] = [];
+		await runSuite(
+			chatbotBaseOpts({
+				chatbotEnvFactory: async () => env,
+				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				costTracker: { getMonthlyTotalCost: () => 0 },
+				onResult: (r) => events.push(r.caseId),
+			}),
+		);
+		expect(events).toEqual(['cb-a', 'cb-b']); // sorted by id
 	});
 });

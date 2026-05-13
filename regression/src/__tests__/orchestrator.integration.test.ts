@@ -146,6 +146,8 @@ describe('orchestrator → adapters → FoodShadowClassifier integration', () =>
 		// adapter surfaces raw string → structural oracle returns verdict='error'
 		// (non-parseable JSON per spec line 180). The runner records error and
 		// the REQ-REG-011 gate counts it against accuracy.
+		// Batch 2 + simplify: empty-only retry policy — non-empty unparseable
+		// output (this case) does not retry, so exactly 1 LLM call.
 		expect(outcome.results[0]!.verdict).toBe('error');
 		expect(stubLLM.calls).toBe(1);
 	});

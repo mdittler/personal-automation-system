@@ -66,10 +66,6 @@ describe('validatePersonaCase', () => {
 		);
 	});
 
-	it('rejects oracle: rubric in Chunk A', () => {
-		expect(() => validatePersonaCase({ ...valid, oracle: 'rubric' })).toThrow(/rubric|chunk c/i);
-	});
-
 	it('rejects oracle: judge always (REQ-REG-014)', () => {
 		expect(() => validatePersonaCase({ ...valid, oracle: 'judge' })).toThrow(/judge|reserved/i);
 	});
@@ -131,5 +127,71 @@ describe('validatePersonaCase — routingTarget (Chunk B)', () => {
 			routingTarget: 'food-shadow',
 		};
 		expect(() => validatePersonaCase(c)).toThrow(/routingTarget.*only.*routing/i);
+	});
+});
+
+describe('Chunk C — rubric oracle rules', () => {
+	const baseChatbot: Omit<PersonaCase, 'oracle' | 'rubric'> = {
+		id: 'cb-rubric-test',
+		description: 'rubric validation test',
+		bucket: 'chatbot',
+		coverage: ['core/src/services/conversation/handle-message.ts'],
+		inputs: [{ payload: 'hi', expected: {} }],
+		budgetUsd: 0.1,
+	};
+
+	it('accepts oracle="rubric" on a chatbot case with a non-empty rubric', () => {
+		expect(() =>
+			validatePersonaCase({
+				...baseChatbot,
+				oracle: 'rubric',
+				rubric: 'Reply must mention X. Reply must not say Y.',
+			}),
+		).not.toThrow();
+	});
+
+	it('rejects oracle="rubric" without a rubric field', () => {
+		expect(() =>
+			validatePersonaCase({ ...baseChatbot, oracle: 'rubric' } as PersonaCase),
+		).toThrow(/rubric.*required/i);
+	});
+
+	it('rejects oracle="rubric" with an empty rubric string', () => {
+		expect(() =>
+			validatePersonaCase({ ...baseChatbot, oracle: 'rubric', rubric: '   ' }),
+		).toThrow(/rubric.*non-empty/i);
+	});
+
+	it('rejects oracle="rubric" on a non-chatbot bucket (recall)', () => {
+		expect(() =>
+			validatePersonaCase({
+				...baseChatbot,
+				bucket: 'recall',
+				oracle: 'rubric',
+				rubric: 'some rubric',
+			}),
+		).toThrow(/rubric.*only.*chatbot/i);
+	});
+
+	it('rejects oracle="rubric" on a routing bucket', () => {
+		expect(() =>
+			validatePersonaCase({
+				...baseChatbot,
+				bucket: 'routing',
+				routingTarget: 'food-shadow',
+				oracle: 'rubric',
+				rubric: 'some rubric',
+			}),
+		).toThrow(/rubric.*only.*chatbot/i);
+	});
+
+	it('still rejects oracle="judge" (REQ-REG-014)', () => {
+		expect(() =>
+			validatePersonaCase({
+				...baseChatbot,
+				oracle: 'judge' as 'rubric',
+				rubric: 'whatever',
+			}),
+		).toThrow(/judge.*reserved/i);
 	});
 });

@@ -66,6 +66,9 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			messages,
 			max_tokens: options?.maxTokens ?? 1024,
 			temperature: options?.temperature,
+			...(options?.responseFormat === 'json'
+				? { response_format: { type: 'json_object' as const } }
+				: {}),
 		});
 
 		const text = response.choices[0]?.message?.content ?? '';

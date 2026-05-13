@@ -361,4 +361,194 @@ describe('ModelSelector', () => {
 			expect(selector.getReasoningRef()).toEqual(defaultReasoning);
 		});
 	});
+
+	describe('applyTransientOverride()', () => {
+		// Regression: --judge-model / --model-matrix CLI overrides used to be
+		// silently dropped by load(), because load() unconditionally overwrites
+		// in-memory tier refs with whatever the persisted YAML contains.
+		// applyTransientOverride freezes a tier so load() and reconcile()
+		// cannot clobber it.
+
+		it('load() does NOT overwrite a tier frozen via applyTransientOverride (override-before-load)', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+				}),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+
+			selector.applyTransientOverride('standard', { provider: 'ollama', model: 'gemma4:26b' });
+			await selector.load();
+
+			expect(selector.getStandardRef()).toEqual({ provider: 'ollama', model: 'gemma4:26b' });
+			expect(selector.getFastRef().provider).toBe('anthropic'); // load() did update non-frozen tier
+		});
+
+		it('load() does NOT overwrite a tier frozen via applyTransientOverride (load-before-override)', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+				}),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+
+			await selector.load();
+			selector.applyTransientOverride('standard', { provider: 'ollama', model: 'gemma4:26b' });
+
+			expect(selector.getStandardRef()).toEqual({ provider: 'ollama', model: 'gemma4:26b' });
+		});
+
+		it('reconcile() THROWS when a frozen tier references an unregistered provider', () => {
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+
+			selector.applyTransientOverride('standard', { provider: 'ollama', model: 'gemma4:26b' });
+
+			expect(() => selector.reconcile(new Set(['anthropic']))).toThrow(
+				/transient override.*standard.*ollama.*not available/i,
+			);
+		});
+
+		it('reconcile() does NOT throw for an unfrozen tier (existing revert-to-default behavior preserved)', async () => {
+			const savedDir = join(tempDir, 'system');
+			await ensureDir(savedDir);
+			await writeFile(
+				join(savedDir, 'model-selection.yaml'),
+				stringify({
+					standard: { provider: 'openai', model: 'gpt-4.1' },
+					fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+				}),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			// 'openai' unavailable but no override is in place — old fallback path applies.
+			expect(() => selector.reconcile(new Set(['anthropic']))).not.toThrow();
+			expect(selector.getStandardRef().provider).toBe('anthropic');
+		});
+
+		it('reconcile() succeeds when frozen tier provider IS registered', () => {
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+
+			selector.applyTransientOverride('fast', { provider: 'ollama', model: 'gemma4:e4b' });
+
+			expect(() => selector.reconcile(new Set(['anthropic', 'ollama']))).not.toThrow();
+			expect(selector.getFastRef()).toEqual({ provider: 'ollama', model: 'gemma4:e4b' });
+		});
+
+		it('V1 migration: override-before-load preserves override AND does not persist it', async () => {
+			// V1 (bare strings) on disk. With an override set BEFORE load(), the
+			// migration path used to clobber the override's model AND save() the
+			// override to V2 YAML. Both should be prevented.
+			await ensureDir(join(tempDir, 'system'));
+			const yamlPath = join(tempDir, 'system', 'model-selection.yaml');
+			await writeFile(
+				yamlPath,
+				stringify({ standard: 'claude-opus-4-6', fast: 'claude-sonnet-4-6' }),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			selector.applyTransientOverride('standard', { provider: 'ollama', model: 'gemma4:26b' });
+			await selector.load();
+
+			// In-memory: override survives, non-frozen tier picks up V1 value.
+			expect(selector.getStandardRef()).toEqual({ provider: 'ollama', model: 'gemma4:26b' });
+			expect(selector.getFastRef()).toEqual({
+				provider: 'anthropic',
+				model: 'claude-sonnet-4-6',
+			});
+
+			// On-disk: override NOT persisted. File remains in V1 format
+			// (migration deferred until a non-override run).
+			const content = await readFile(yamlPath, 'utf-8');
+			expect(content).not.toContain('ollama');
+			expect(content).not.toContain('gemma4:26b');
+		});
+
+		it('V1 migration: no override → save() runs and writes V2 (existing happy path)', async () => {
+			await ensureDir(join(tempDir, 'system'));
+			const yamlPath = join(tempDir, 'system', 'model-selection.yaml');
+			await writeFile(
+				yamlPath,
+				stringify({ standard: 'claude-opus-4-6', fast: 'claude-sonnet-4-6' }),
+				'utf-8',
+			);
+
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await selector.load();
+
+			// Without overrides, migration completes and file is rewritten in V2.
+			const content = await readFile(yamlPath, 'utf-8');
+			expect(content).toContain('provider: anthropic');
+		});
+
+		it('applyTransientOverride is non-persistent (does not write YAML)', async () => {
+			const selector = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			selector.applyTransientOverride('standard', { provider: 'ollama', model: 'gemma4:26b' });
+
+			// A fresh selector reading the same dir should NOT see the override.
+			const fresh = new ModelSelector({
+				dataDir: tempDir,
+				defaultStandard,
+				defaultFast,
+				logger,
+			});
+			await fresh.load();
+			expect(fresh.getStandardRef()).toEqual(defaultStandard);
+		});
+	});
 });

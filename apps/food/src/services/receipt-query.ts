@@ -290,7 +290,12 @@ export function extractPriceItem(text: string, storeNames: readonly string[] = [
 	}
 
 	const patterns = [
-		/\bcheapest\b.*?\bbuy\s+(.+)$/i,
+		// Batch 3 — broadened "cheapest X" pattern. Old: required `buy\s+` directly
+		// after `cheapest`, which missed phrases like "cheapest blueberries among
+		// the stores...". New: optional "(place (to|for))? (get|buy|find)" prefix;
+		// captures lazily until a trailing prepositional phrase (at/from/among/
+		// in/near/for) or end-of-string.
+		/\bcheapest\b\s+(?:place\s+(?:to|for)\s+(?:get|buy|find)\s+|(?:to\s+)?(?:get|buy|find)\s+)?(.+?)(?:\s+(?:at|from|among|in|near|for)\b|$)/i,
 		/\bhow\s+much\s+(?:are|is|was|were)\s+(.+?)(?:\s+\bat\b|\s+\bfrom\b|$)/i,
 		/\b(?:price|cost)\s+(?:of|for)\s+(.+?)(?:\s+\bat\b|\s+\bfrom\b|$)/i,
 	];

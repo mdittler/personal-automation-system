@@ -85,6 +85,18 @@ export interface LLMCompletionOptions {
 
 	/** App ID for cost attribution. Injected by LLMGuard — apps should not set this. */
 	_appId?: string;
+
+	/**
+	 * Provider-specific JSON-mode hint. When set to `'json'`:
+	 *   - Ollama: passes `format: 'json'` to the generate call.
+	 *   - Google Gemini: sets `responseMimeType: 'application/json'`.
+	 *   - OpenAI-compatible: sets `response_format: { type: 'json_object' }`.
+	 *   - Anthropic: no-op (Claude reliably emits JSON when the prompt asks).
+	 *
+	 * Use for classifier prompts that must return parseable JSON. Helps Gemma
+	 * and other local models avoid empty-string responses for ambiguous prompts.
+	 */
+	responseFormat?: 'json';
 }
 
 // ---------------------------------------------------------------------------

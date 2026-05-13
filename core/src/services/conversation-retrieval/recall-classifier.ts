@@ -12,6 +12,7 @@
  */
 
 import type { LLMCompletionOptions } from '../../types/llm.js';
+import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '../../utils/json-strip-fences.js';
 import { isCalendarStrict } from '../../utils/temporal.js';
 import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
@@ -94,7 +95,8 @@ const CLASSIFIER_SYSTEM_PROMPT_BASE =
 	'Rules:\n' +
 	'  shouldRecall=true ONLY if the user explicitly asks about past conversations, prior discussions, or things discussed before.\n' +
 	'  query = key topic/phrase to search for (1-5 words), null if shouldRecall=false.\n' +
-	'  timeAnchor = use absolute for specific days, window for ranges, null if not time-specified.\n' +
+	'  timeAnchor = use absolute for specific days, window for ranges, null if the user did not name a date, weekday, month, holiday, or count of days/weeks/months ago.\n' +
+	'  Vague recall words ("earlier", "before", "previously", "last time", "a while back", "recently", "the other day") are NOT time references — return null.\n' +
 	'  All dates must be YYYY-MM-DD format, in the past, and not more than 365 days before today.\n' +
 	'  reason = brief explanation (under 20 words).';
 
@@ -249,6 +251,14 @@ function buildExamples(today: string): string {
 		`  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"${twoWeeksStart}","before":"${twoWeeksEnd}"},"reason":"~14 days ago, ±3-day spread"}\n` +
 		`- "what's the weather"\n` +
 		`  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}\n` +
+		// Batch 3 — vague-temporal negative examples (Chunk C evidence).
+		// "earlier", "last time", "before", "previously" are NOT time references
+		// unless followed by a calendar/weekday/duration. Without these examples
+		// Gemma 4 e4b adds a windowed timeAnchor; production schema expects null.
+		`- "what did we say about the leak earlier?"\n` +
+		`  → {"shouldRecall":true,"query":"leak","timeAnchor":null,"reason":"\\"earlier\\" alone is vague, not a date"}\n` +
+		`- "what did we decide last time"\n` +
+		`  → {"shouldRecall":true,"query":"decision","timeAnchor":null,"reason":"\\"last time\\" is vague, not a date"}\n` +
 		`\n<phrasing reference> (today = ${today}, ${dayName})\n` +
 		`- "last Friday" → ${lastFriday} (absolute)\n` +
 		`- "the day before yesterday" → ${dayBeforeYesterday} (absolute)\n` +
@@ -424,33 +434,59 @@ export async function classifyRecallIntent(
 
 	const maxWindowDays = deps.maxWindowDays ?? 365;
 	const systemPrompt = buildClassifierPrompt(deps.today, maxWindowDays);
+	const sanitized = sanitizeInput(message);
 
+	// First call.
 	let raw: string;
 	try {
-		raw = await deps.llm.complete(sanitizeInput(message), {
+		raw = await deps.llm.complete(sanitized, {
 			tier: 'fast',
 			systemPrompt,
 			maxTokens: 150,
 			temperature: 0,
+			responseFormat: 'json',
 		});
 	} catch (err) {
 		deps.logger.warn({ err }, 'recall classifier LLM call failed');
 		return { shouldRecall: false, query: null, timeAnchor: null, reason: 'llm-error' };
 	}
 
-	// Strip markdown code fences if present
-	const json = raw
-		.replace(/^```(?:json)?\s*/i, '')
-		.replace(/\s*```\s*$/i, '')
-		.trim();
+	const firstParsed = tryParseJsonStripFences(raw);
+	if (firstParsed !== UNPARSEABLE_JSON) {
+		return parseRecallVerdict(firstParsed, { today: deps.today, maxWindowDays });
+	}
 
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(json);
-	} catch {
-		deps.logger.warn('recall classifier: failed to parse LLM response');
+	// Retry ONLY on empty output — the specific failure mode Codex's Chunk C
+	// verification surfaced (Gemma returns "" for ambiguous prompts even with
+	// JSON mode). Non-empty-but-unparseable output is rarer and the safe-default
+	// path is sufficient; retrying it adds load + LLM calls without changing
+	// the verdict for stub/mock scenarios. Hard cap at 2 LLM calls.
+	if (raw.trim().length > 0) {
+		deps.logger.warn('recall classifier: failed to parse LLM response (non-empty, no retry)');
 		return RECALL_SAFE_DEFAULT;
 	}
 
-	return parseRecallVerdict(parsed, { today: deps.today, maxWindowDays });
+	let raw2: string;
+	try {
+		raw2 = await deps.llm.complete(`${sanitized}${RECALL_REPAIR_SUFFIX}`, {
+			tier: 'fast',
+			systemPrompt,
+			maxTokens: 150,
+			temperature: 0,
+			responseFormat: 'json',
+		});
+	} catch (err) {
+		deps.logger.warn({ err }, 'recall classifier LLM retry failed');
+		return { shouldRecall: false, query: null, timeAnchor: null, reason: 'llm-error' };
+	}
+
+	const secondParsed = tryParseJsonStripFences(raw2);
+	if (secondParsed === UNPARSEABLE_JSON) {
+		deps.logger.warn('recall classifier: failed to parse LLM response (after retry)');
+		return RECALL_SAFE_DEFAULT;
+	}
+	return parseRecallVerdict(secondParsed, { today: deps.today, maxWindowDays });
 }
+
+const RECALL_REPAIR_SUFFIX =
+	'\n\nYour previous response was empty or invalid. Reply with ONLY the JSON object specified in the system instructions above.';

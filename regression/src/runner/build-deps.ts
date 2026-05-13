@@ -23,16 +23,31 @@ import { createProvider } from '@core/services/llm/providers/provider-factory.js
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import type { TierModelSnapshot } from '@core/types/regression.js';
 import { type Logger, pino } from 'pino';
-import { buildClassifierAdapters } from './dispatch.js';
+import type { CliOptions } from './args.js';
+import { type TierOverride, createChatbotEnvironment } from './chatbot-environment.js';
+import { buildClassifierAdapters, buildRecallAdapter } from './dispatch.js';
 import type { RunCliDeps } from './index.js';
 
 const DEFAULT_MAX_RUN_BUDGET_USD = 5.0;
+
+/**
+ * Apply CLI tier overrides AFTER `ModelSelector.load()` so persisted YAML
+ * cannot silently clobber `--judge-model` / `--model-matrix`. Same call pattern
+ * used by `composeLLMService` and `resolveTierModelIds`.
+ */
+function applyAllTransientOverrides(selector: ModelSelector, override?: TierOverride): void {
+	if (override?.fast) selector.applyTransientOverride('fast', override.fast);
+	if (override?.standard) selector.applyTransientOverride('standard', override.standard);
+	if (override?.reasoning) selector.applyTransientOverride('reasoning', override.reasoning);
+}
 
 interface RepoPaths {
 	repoRoot: string;
 	casesDir: string;
 	cacheDir: string;
 	configPath: string;
+	chatbotSeedJsonPath: string;
+	chatbotSeedShaPath: string;
 }
 
 function resolveRepoPaths(): RepoPaths {
@@ -42,34 +57,129 @@ function resolveRepoPaths(): RepoPaths {
 		casesDir: resolve(repoRoot, 'regression', 'src', 'cases'),
 		cacheDir: resolve(repoRoot, 'data', 'system', 'regression-cache'),
 		configPath: resolve(repoRoot, 'config', 'pas.yaml'),
+		chatbotSeedJsonPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.json'),
+		chatbotSeedShaPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.sha256'),
 	};
 }
 
-export async function buildProductionDeps(): Promise<RunCliDeps> {
+export interface ProductionDepsOptions {
+	tierOverride?: TierOverride;
+}
+
+/** YYYY-MM-DD in the supplied timezone — matches the format production
+ * `todayInTimezone` produces (used by recall-classifier as `today`). */
+function todayInTimezone(timezone: string): string {
+	const fmt = new Intl.DateTimeFormat('en-CA', {
+		timeZone: timezone,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	});
+	return fmt.format(new Date());
+}
+
+export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise<RunCliDeps> {
 	const paths = resolveRepoPaths();
 	// Codex I3: route logs to stderr so stdout stays NDJSON-clean for `--json`.
 	const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' }, process.stderr);
 
 	const config = await loadSystemConfig({ configPath: paths.configPath, mode: 'strict' });
 
+	// Apply tier override BEFORE composing LLM service so `llm.complete({tier:'fast'})`
+	// actually resolves to the override model. Without this, the override would only
+	// reach `modelIds` (cache-key metadata) but LLMService would still resolve every
+	// tier through the original `config.llm.tiers` — Codex correction.
+	if (opts?.tierOverride && config.llm) {
+		config.llm = {
+			...config.llm,
+			tiers: {
+				fast: opts.tierOverride.fast ?? config.llm.tiers.fast,
+				standard: opts.tierOverride.standard ?? config.llm.tiers.standard,
+				...(opts.tierOverride.reasoning !== undefined
+					? { reasoning: opts.tierOverride.reasoning }
+					: config.llm.tiers.reasoning !== undefined
+						? { reasoning: config.llm.tiers.reasoning }
+						: {}),
+			},
+		};
+	}
+
 	const costTracker = new CostTracker(config.dataDir, logger.child({ service: 'cost-tracker' }));
 	await costTracker.loadMonthlyCache();
 
-	const llm = await composeLLMService(config, costTracker, logger);
-	const modelIds = await resolveTierModelIds(config, logger);
+	// Compose a shared ProviderRegistry once — the LLM service AND the chatbot
+	// environment both reuse it so CostTracker delta metering stays coherent.
+	const registry = new ProviderRegistry(logger.child({ service: 'provider-registry' }));
+	const llmConfig = config.llm;
+	if (llmConfig) {
+		for (const [id, providerConfig] of Object.entries(llmConfig.providers)) {
+			const provider = createProvider(
+				id,
+				providerConfig,
+				logger.child({ service: `provider-${id}` }),
+				costTracker,
+			);
+			if (provider) registry.register(provider);
+		}
+	}
+
+	// Compose LLM service + resolve tier IDs in parallel — both read the same
+	// model-selection.yaml independently and have no other shared state.
+	const [llm, modelIds] = await Promise.all([
+		composeLLMService(config, costTracker, logger, registry, opts?.tierOverride),
+		resolveTierModelIds(config, logger, opts?.tierOverride),
+	]);
 	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
+
+	const minimalLogger = {
+		warn: (...args: unknown[]) => logger.warn(...(args as Parameters<typeof logger.warn>)),
+		info: (...args: unknown[]) => logger.info(...(args as Parameters<typeof logger.info>)),
+		debug: (...args: unknown[]) => logger.debug(...(args as Parameters<typeof logger.debug>)),
+		error: (...args: unknown[]) => logger.error(...(args as Parameters<typeof logger.error>)),
+	};
 
 	const classifiers = buildClassifierAdapters({
 		llm,
-		logger: {
-			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),
-			info: (...args) => logger.info(...(args as Parameters<typeof logger.info>)),
-			debug: (...args) => logger.debug(...(args as Parameters<typeof logger.debug>)),
-			error: (...args) => logger.error(...(args as Parameters<typeof logger.error>)),
-		},
+		logger: minimalLogger,
 		costTracker,
 		modelIds,
 	});
+
+	const recallAdapter = buildRecallAdapter({
+		llm,
+		logger: minimalLogger,
+		costTracker,
+		modelIds,
+		defaultToday: todayInTimezone(config.timezone || 'UTC'),
+	});
+
+	const chatbotEnvFactory = async () => {
+		const env = await createChatbotEnvironment({
+			seedJsonPath: paths.chatbotSeedJsonPath,
+			seedShaPath: paths.chatbotSeedShaPath,
+			productionConfigPath: paths.configPath,
+			providerRegistry: registry,
+			...(opts?.tierOverride ? { tierOverride: opts.tierOverride } : {}),
+			logger,
+		});
+		// `captureHandler` + `endActiveSession` real-runtime plumbing lands with
+		// Task 14 (chatSessions/eventBus are not currently surfaced on
+		// RuntimeServices). For now, captureHandler returns a null handler id
+		// (rubric oracle treats unknown handler as "no assertion") and
+		// endActiveSession is a no-op so chatbot cases dispatch cleanly via
+		// the existing routeMessage pipeline.
+		return {
+			userId: env.userId,
+			householdId: env.householdId,
+			telegram: env.telegram,
+			runtime: env.runtime as unknown as {
+				services: { router: { routeMessage: (ctx: unknown) => Promise<void> } };
+			},
+			captureHandler: () => () => null,
+			endActiveSession: async () => undefined,
+			dispose: env.dispose,
+		};
+	};
 
 	return {
 		casesDir: paths.casesDir,
@@ -79,6 +189,10 @@ export async function buildProductionDeps(): Promise<RunCliDeps> {
 		maxRunBudgetUsd,
 		estimateUsd: (call) => costTracker.estimateCost(modelIds.fast, call.tokenIn, call.tokenOut),
 		classifiers,
+		recallAdapter,
+		chatbotEnvFactory,
+		judgeLlm: llm,
+		costTracker,
 		logger,
 	};
 }
@@ -96,6 +210,7 @@ export async function composeLLMService(
 	costTracker: CostTracker,
 	logger: Logger,
 	registryOverride?: ProviderRegistry,
+	tierOverride?: TierOverride,
 ): Promise<LLMServiceImpl> {
 	const llmConfig = config.llm;
 	const registry =
@@ -133,6 +248,7 @@ export async function composeLLMService(
 		logger: logger.child({ service: 'model-selector' }),
 	});
 	await modelSelector.load();
+	applyAllTransientOverrides(modelSelector, tierOverride);
 	modelSelector.reconcile(new Set(registry.getProviderIds()));
 
 	// ModelCatalog is wired by composeRuntime; the regression CLI doesn't need
@@ -173,6 +289,16 @@ export function buildDryRunDeps(): RunCliDeps {
 			'dry-run deps: classifier adapter invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
 		);
 	};
+	const throwOnRecall = async (): Promise<never> => {
+		throw new Error(
+			'dry-run deps: recall adapter invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
+		);
+	};
+	const throwOnChatbotEnv = async (): Promise<never> => {
+		throw new Error(
+			'dry-run deps: chatbot env factory invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
+		);
+	};
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
@@ -187,6 +313,10 @@ export function buildDryRunDeps(): RunCliDeps {
 			sessionControl: async () => throwOnDispatch(),
 			pas: async () => throwOnDispatch(),
 		},
+		recallAdapter: {
+			recall: throwOnRecall,
+		},
+		chatbotEnvFactory: throwOnChatbotEnv,
 		logger: {
 			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),
 			info: (...args) => logger.info(...(args as Parameters<typeof logger.info>)),
@@ -251,9 +381,10 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
  * has reconciled against the registered providers. The returned snapshot
  * feeds the cache key — a tier-model swap invalidates cached runs.
  */
-async function resolveTierModelIds(
+export async function resolveTierModelIds(
 	config: Awaited<ReturnType<typeof loadSystemConfig>>,
 	logger: Logger,
+	tierOverride?: TierOverride,
 ): Promise<TierModelSnapshot> {
 	const llmConfig = config.llm;
 	const modelSelector = new ModelSelector({
@@ -270,8 +401,50 @@ async function resolveTierModelIds(
 		logger: logger.child({ service: 'model-selector-resolve' }),
 	});
 	await modelSelector.load();
+	applyAllTransientOverrides(modelSelector, tierOverride);
 	const fast = modelSelector.getTierRef('fast')?.model ?? 'unknown';
 	const standard = modelSelector.getTierRef('standard')?.model ?? 'unknown';
 	const reasoning = modelSelector.getTierRef('reasoning')?.model ?? null;
 	return { fast, standard, reasoning };
+}
+
+/**
+ * Substitute tier model IDs from a `--model-matrix=<list>` override into the
+ * deps. Only `modelIds` are rewritten; the chatbot environment factory must
+ * be re-built with `tierOverride` separately if the override needs to flow
+ * into the live LLMService composed inside the chatbot runtime (see
+ * `buildProductionDeps({ tierOverride })`). For routing / recall buckets the
+ * `modelIds` substitution alone is sufficient because the cache key reflects
+ * the override and the adapters dispatch through the shared LLMService.
+ *
+ * Returns a NEW deps object — does not mutate `deps.modelIds` in place.
+ */
+export function applyModelMatrixOverride(
+	deps: RunCliDeps,
+	matrix: NonNullable<CliOptions['modelMatrix']>,
+): RunCliDeps {
+	const newModelIds: TierModelSnapshot = {
+		fast: matrix.fast?.model ?? deps.modelIds.fast,
+		standard: matrix.standard?.model ?? deps.modelIds.standard,
+		reasoning: matrix.reasoning?.model ?? deps.modelIds.reasoning,
+	};
+	return { ...deps, modelIds: newModelIds };
+}
+
+/**
+ * Substitute the rubric oracle's judge model. The rubric oracle reads its
+ * model id from `deps.modelIds.standard`, so swapping that field is enough
+ * to force a specific judge — the existing `judgeLlm` continues to dispatch
+ * through the shared LLMService, which routes by tier.
+ *
+ * Returns a NEW deps object — does not mutate.
+ */
+export function applyJudgeModelOverride(
+	deps: RunCliDeps,
+	judgeRef: { provider: string; model: string },
+): RunCliDeps {
+	return {
+		...deps,
+		modelIds: { ...deps.modelIds, standard: judgeRef.model },
+	};
 }

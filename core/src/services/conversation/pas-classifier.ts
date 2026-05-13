@@ -142,6 +142,38 @@ const DATA_QUERY_PREFILTER =
 	/\b(cheapest|cheaper|lowest price|last trip|last visit|last shop|previous receipt|spent at)\b|how much.{0,50}\bat\b|\bprice.{0,30}(changed|change|difference|increased|decreased)\b/i;
 
 /**
+ * Batch 3 — Deterministic SETTINGS prefilter. Codex correction #6: evidenced
+ * Chunk C failures showed Gemma 4 e4b incorrectly classifying these phrases as
+ * NO_PAS.
+ *
+ * Narrow on purpose: requires a possessive ("my") to indicate the user is
+ * referring to THEIR PAS configuration (not asking generically about AI). This
+ * keeps generic AI prose like "switch to a smarter model" from short-circuiting
+ * the LLM path. The evidenced phrasings ALL use "my":
+ *   - "change my fast model"
+ *   - "set my timezone to UTC"
+ *   - "what is my current standard model"
+ */
+const SETTINGS_KEYWORDS_RE =
+	/\b(?:switch|change|set|use|update|configure)\s+(?:the\s+|my\s+)\s*(?:fast|standard|reasoning|model|tier|timezone)\b|\b(?:switch|change|set|update)\s+my\s+\w+\s+(?:model|tier|timezone)\b|\bwhat\s+(?:is|are)\s+my\s+current\s+(?:fast|standard|reasoning|model|tier|timezone|setting)\b/i;
+
+/**
+ * Batch 3 — Deterministic SYSTEM-DATA prefilter. Narrow: only fires on
+ * phrases that explicitly name PAS-internal data. Does NOT match generic
+ * prose like "what apps do I have" (without "installed" suffix) which the
+ * existing test suite exercises through the LLM path.
+ */
+const SYSTEM_DATA_KEYWORDS_RE =
+	/\b(?:system\s+logs?|scheduled\s+alerts?|model\s+journal|installed\s+apps?|apps?\s+(?:do\s+)?i\s+have\s+installed)\b/i;
+
+/** Pre-filter table consulted in order — first matching pattern wins. */
+const PREFILTERS: ReadonlyArray<readonly [RegExp, PASClassification]> = [
+	[DATA_QUERY_PREFILTER, { pasRelated: true, dataQueryCandidate: true }],
+	[SETTINGS_KEYWORDS_RE, { pasRelated: true, settingsCandidate: true }],
+	[SYSTEM_DATA_KEYWORDS_RE, { pasRelated: true, dataQueryCandidate: true }],
+];
+
+/**
  * Classify a message as PAS-related using a fast-tier LLM call.
  *
  * Returns fail-open
@@ -161,9 +193,12 @@ export async function classifyPASMessage(
 ): Promise<PASClassification> {
 	if (!text.trim()) return { pasRelated: false };
 
-	// Deterministic short-circuit for price/receipt/trip queries — no LLM call needed.
-	if (DATA_QUERY_PREFILTER.test(text)) {
-		return { pasRelated: true, dataQueryCandidate: true };
+	// Deterministic prefilters — order matters: DATA_QUERY runs first because
+	// its keywords overlap with SYSTEM_DATA (e.g., "cheapest" is data-query;
+	// "system logs" is system-data). SETTINGS sits between because its verbs
+	// (change/set/etc.) overlap with neither.
+	for (const [pattern, verdict] of PREFILTERS) {
+		if (pattern.test(text)) return verdict;
 	}
 
 	// Build compact classifier prompt — no large app metadata.
@@ -186,11 +221,20 @@ export async function classifyPASMessage(
 		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
 		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.` +
 		` SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint}` +
-		` Reply with space-separated tokens (any order). Examples:\n` +
+		` Reply with space-separated tokens (any order). Token format:\n` +
 		`  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n` +
 		`  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n` +
 		`  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n` +
 		`  NO_PAS                        — not PAS-related\n` +
+		`Examples mapping input → tokens (Batch 3 — Gemma-friendly):\n` +
+		`  "change my fast model"             → YES_PAS YES_SETTINGS NO_DATA\n` +
+		`  "set my timezone to UTC"           → YES_PAS YES_SETTINGS NO_DATA\n` +
+		`  "what is my current standard model"→ YES_PAS YES_SETTINGS NO_DATA\n` +
+		`  "show me my system logs"           → YES_PAS NO_SETTINGS YES_DATA\n` +
+		`  "list my scheduled alerts"         → YES_PAS NO_SETTINGS YES_DATA\n` +
+		`  "what apps do I have installed"    → YES_PAS NO_SETTINGS NO_DATA\n` +
+		`  "what's in my pantry right now"    → YES_PAS NO_SETTINGS YES_DATA\n` +
+		`  "what's the weather"               → NO_PAS\n` +
 		`Backward-compat: bare YES/NO/YES_DATA tokens are also accepted.` +
 		contextHint;
 

@@ -23,6 +23,13 @@ export interface CliOptions {
 	json: boolean;
 	help: boolean;
 	listOnly: boolean;
+	/** Force fresh dispatch for every case (no cache reads). Equivalent to
+	 * passing `--rerun=<id>` for every loaded case. Used by Batch 5 verification. */
+	noCache: boolean;
+	modelMatrix?: Partial<
+		Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>
+	>;
+	judgeModel?: { provider: string; model: string };
 }
 
 export const HELP_TEXT = `\
@@ -37,6 +44,15 @@ Usage:
   pnpm test:regression -- --bucket=<b> Run only cases with bucket=<b> (routing|receipt|chatbot|recall).
   pnpm test:regression -- --rerun <id> Force fresh dispatch for case <id> (repeatable).
   pnpm test:regression -- --rerun=<id> Same, in equals form (used by GUI subprocess).
+  pnpm test:regression -- --model-matrix=<list>
+                                       Override tier model IDs. Forms:
+                                         provider/model[,provider/model[,provider/model]]
+                                           (positional — fast, standard, reasoning)
+                                         tier=provider/model[,tier=provider/model]
+                                           (tier is fast|standard|reasoning)
+  pnpm test:regression -- --judge-model=<provider/model>
+                                       Override the rubric-oracle judge model (standard tier).
+  pnpm test:regression -- --no-cache   Force fresh dispatch for every case (skip all cache reads).
 
 Exit code:
   0  REQ-REG-011 gate met (or below floor).
@@ -52,8 +68,61 @@ function validateRerunId(v: string): string {
 	return v;
 }
 
+function parseModelRef(s: string): { provider: string; model: string } {
+	const idx = s.indexOf('/');
+	if (idx <= 0 || idx === s.length - 1) {
+		throw new Error(`--model-matrix entry must be provider/model (got: ${JSON.stringify(s)})`);
+	}
+	return { provider: s.slice(0, idx), model: s.slice(idx + 1) };
+}
+
+function parseModelMatrixValue(v: string): NonNullable<CliOptions['modelMatrix']> {
+	if (!v) throw new Error('--model-matrix requires a value (empty string rejected)');
+	const out: NonNullable<CliOptions['modelMatrix']> = {};
+	const entries = v
+		.split(',')
+		.map((e) => e.trim())
+		.filter(Boolean);
+	const positional: Array<keyof NonNullable<CliOptions['modelMatrix']>> = [
+		'fast',
+		'standard',
+		'reasoning',
+	];
+	let positionalIdx = 0;
+	for (const entry of entries) {
+		const eqIdx = entry.indexOf('=');
+		if (eqIdx > 0) {
+			const tierStr = entry.slice(0, eqIdx);
+			if (tierStr !== 'fast' && tierStr !== 'standard' && tierStr !== 'reasoning') {
+				throw new Error(`--model-matrix tier must be fast/standard/reasoning (got ${tierStr})`);
+			}
+			out[tierStr] = parseModelRef(entry.slice(eqIdx + 1));
+		} else {
+			const tier = positional[positionalIdx++];
+			if (!tier) throw new Error('--model-matrix: too many positional entries (max 3)');
+			out[tier] = parseModelRef(entry);
+		}
+	}
+	return out;
+}
+
+function parseJudgeModelValue(v: string): { provider: string; model: string } {
+	if (!v) throw new Error('--judge-model requires a value (empty string rejected)');
+	const idx = v.indexOf('/');
+	if (idx <= 0 || idx === v.length - 1) {
+		throw new Error(`--judge-model requires provider/model (got: ${JSON.stringify(v)})`);
+	}
+	return { provider: v.slice(0, idx), model: v.slice(idx + 1) };
+}
+
 export function parseCliArgs(argv: readonly string[]): CliOptions {
-	const opts: CliOptions = { dryRun: false, json: false, help: false, listOnly: false };
+	const opts: CliOptions = {
+		dryRun: false,
+		json: false,
+		help: false,
+		listOnly: false,
+		noCache: false,
+	};
 	const rerunIds = new Set<string>();
 	let i = 0;
 	// pnpm's `--` separator is sometimes forwarded to the script depending on
@@ -80,6 +149,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		}
 		if (a === '--list') {
 			opts.listOnly = true;
+			i++;
+			continue;
+		}
+		if (a === '--no-cache') {
+			opts.noCache = true;
 			i++;
 			continue;
 		}
@@ -117,8 +191,62 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 			i += 2;
 			continue;
 		}
+		if (a.startsWith('--model-matrix=')) {
+			const v = a.slice('--model-matrix='.length);
+			opts.modelMatrix = parseModelMatrixValue(v);
+			i++;
+			continue;
+		}
+		if (a === '--model-matrix') {
+			const v = argv[i + 1];
+			if (v === undefined || v.startsWith('--')) {
+				throw new Error(
+					'--model-matrix requires a value (e.g. --model-matrix provider/model[,...])',
+				);
+			}
+			opts.modelMatrix = parseModelMatrixValue(v);
+			i += 2;
+			continue;
+		}
+		if (a.startsWith('--judge-model=')) {
+			const v = a.slice('--judge-model='.length);
+			opts.judgeModel = parseJudgeModelValue(v);
+			i++;
+			continue;
+		}
+		if (a === '--judge-model') {
+			const v = argv[i + 1];
+			if (v === undefined || v.startsWith('--')) {
+				throw new Error('--judge-model requires a provider/model value');
+			}
+			opts.judgeModel = parseJudgeModelValue(v);
+			i += 2;
+			continue;
+		}
 		throw new Error(`unknown flag: ${a}`);
 	}
 	if (rerunIds.size > 0) opts.rerunIds = rerunIds;
 	return opts;
+}
+
+/**
+ * Combine `--model-matrix` and `--judge-model` flags into a single
+ * `tierOverride` object for `buildProductionDeps`. `--judge-model` wins over
+ * `--model-matrix=standard=` for the standard slot (the rubric oracle is the
+ * primary consumer of standard tier in the regression run, so the dedicated
+ * flag takes precedence).
+ *
+ * Extracted from `cli-main.ts` so the precedence logic is unit-testable
+ * (Codex correction #3).
+ */
+export function buildTierOverrideFromCli(opts: CliOptions):
+	| Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>>
+	| undefined {
+	if (!opts.modelMatrix && !opts.judgeModel) return undefined;
+	const out: Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>> = {};
+	if (opts.modelMatrix?.fast) out.fast = opts.modelMatrix.fast;
+	if (opts.judgeModel) out.standard = opts.judgeModel;
+	else if (opts.modelMatrix?.standard) out.standard = opts.modelMatrix.standard;
+	if (opts.modelMatrix?.reasoning) out.reasoning = opts.modelMatrix.reasoning;
+	return out;
 }
