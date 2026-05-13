@@ -63,7 +63,9 @@ describe('classifier prompt content', () => {
 	});
 
 	it('classifier prompt describes PAS domains so real LLM can classify food questions', async () => {
-		await classifyPASMessage('what did I have for dinner last Tuesday?', services);
+		// Phrased to avoid DATA_QUERY_PREFILTER `what did i (eat|have)` short-circuit
+		// so the LLM classifier path is exercised. The prefilter is independently tested.
+		await classifyPASMessage('is pasta a good dinner option tonight?', services);
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
 		// Prompt must describe the food/grocery/health domain
@@ -163,7 +165,9 @@ describe('PAS-related user messages route to app-aware prompt', () => {
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce('YES') // classifier — food log query = PAS
 			.mockResolvedValueOnce('Last Tuesday you had pasta for dinner.');
-		const ctx = createTestMessageContext({ text: 'what did I eat last week?' });
+		// NOTE: phrased to avoid the DATA_QUERY_PREFILTER `what did i eat` short-circuit
+		// so the LLM classifier path is exercised. The prefilter is independently tested.
+		const ctx = createTestMessageContext({ text: 'tell me about my food log from last week' });
 
 		await makeConversationService(services).handleMessage(ctx);
 

@@ -313,13 +313,13 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 	});
 
 	describe('SYSTEM_DATA_KEYWORDS_RE prefilter — short-circuit LLM (Batch 3)', () => {
-		// PAS-internal data only — food-domain data (pantry, recipes, meal plan)
-		// stays on the food-app path and goes through the LLM classifier.
+		// PAS-internal data only — DataQueryService can return these.
+		// Meta-questions about the PAS installation itself (e.g. "what apps are
+		// installed") are PAS_META_RE-routed — see PAS_META_RE tests below.
 		const dataPrompts = [
 			'show me my system logs',
 			'list my scheduled alerts',
 			'what does my model journal say',
-			'what apps do I have installed',
 		];
 		for (const prompt of dataPrompts) {
 			it(`"${prompt}" → dataQueryCandidate=true without LLM call`, async () => {
@@ -331,6 +331,30 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 				});
 				expect(result.pasRelated).toBe(true);
 				expect(result.dataQueryCandidate).toBe(true);
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+		}
+	});
+
+	describe('PAS_META_RE prefilter — pasRelated only, no dataQueryCandidate', () => {
+		// Meta-questions about the PAS installation itself. DataQueryService has
+		// no useful response, so we return just pasRelated:true.
+		const metaPrompts = [
+			'what apps do I have installed',
+			'what apps are installed',
+			'how do I install a new app',
+			'how to add an app',
+		];
+		for (const prompt of metaPrompts) {
+			it(`"${prompt}" → pasRelated only, no LLM call`, async () => {
+				const services = createMockCoreServices();
+				const result = await classifyPASMessage(prompt, {
+					llm: services.llm,
+					appMetadata: services.appMetadata,
+					logger: services.logger,
+				});
+				expect(result.pasRelated).toBe(true);
+				expect(result.dataQueryCandidate).toBeFalsy();
 				expect(services.llm.complete).not.toHaveBeenCalled();
 			});
 		}
