@@ -23,6 +23,9 @@ export interface CliOptions {
 	json: boolean;
 	help: boolean;
 	listOnly: boolean;
+	/** Force fresh dispatch for every case (no cache reads). Equivalent to
+	 * passing `--rerun=<id>` for every loaded case. Used by Batch 5 verification. */
+	noCache: boolean;
 	modelMatrix?: Partial<
 		Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>
 	>;
@@ -49,6 +52,7 @@ Usage:
                                            (tier is fast|standard|reasoning)
   pnpm test:regression -- --judge-model=<provider/model>
                                        Override the rubric-oracle judge model (standard tier).
+  pnpm test:regression -- --no-cache   Force fresh dispatch for every case (skip all cache reads).
 
 Exit code:
   0  REQ-REG-011 gate met (or below floor).
@@ -112,7 +116,13 @@ function parseJudgeModelValue(v: string): { provider: string; model: string } {
 }
 
 export function parseCliArgs(argv: readonly string[]): CliOptions {
-	const opts: CliOptions = { dryRun: false, json: false, help: false, listOnly: false };
+	const opts: CliOptions = {
+		dryRun: false,
+		json: false,
+		help: false,
+		listOnly: false,
+		noCache: false,
+	};
 	const rerunIds = new Set<string>();
 	let i = 0;
 	// pnpm's `--` separator is sometimes forwarded to the script depending on
@@ -139,6 +149,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		}
 		if (a === '--list') {
 			opts.listOnly = true;
+			i++;
+			continue;
+		}
+		if (a === '--no-cache') {
+			opts.noCache = true;
 			i++;
 			continue;
 		}
@@ -212,4 +227,26 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 	}
 	if (rerunIds.size > 0) opts.rerunIds = rerunIds;
 	return opts;
+}
+
+/**
+ * Combine `--model-matrix` and `--judge-model` flags into a single
+ * `tierOverride` object for `buildProductionDeps`. `--judge-model` wins over
+ * `--model-matrix=standard=` for the standard slot (the rubric oracle is the
+ * primary consumer of standard tier in the regression run, so the dedicated
+ * flag takes precedence).
+ *
+ * Extracted from `cli-main.ts` so the precedence logic is unit-testable
+ * (Codex correction #3).
+ */
+export function buildTierOverrideFromCli(opts: CliOptions):
+	| Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>>
+	| undefined {
+	if (!opts.modelMatrix && !opts.judgeModel) return undefined;
+	const out: Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>> = {};
+	if (opts.modelMatrix?.fast) out.fast = opts.modelMatrix.fast;
+	if (opts.judgeModel) out.standard = opts.judgeModel;
+	else if (opts.modelMatrix?.standard) out.standard = opts.modelMatrix.standard;
+	if (opts.modelMatrix?.reasoning) out.reasoning = opts.modelMatrix.reasoning;
+	return out;
 }

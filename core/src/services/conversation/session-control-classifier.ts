@@ -66,10 +66,35 @@ export const SESSION_CONTROL_NL_EXAMPLES: readonly string[] = [
 	'start a new conversation',
 ];
 
+/**
+ * Batch 3 — Meta-question deterministic short-circuit. Phrases like
+ * "what does /newchat do?" / "what is /reset" are NOT new-session requests;
+ * they're help-style questions about the commands. Without this gate, Gemma
+ * 4 e4b classifies them as new_session (evidenced in Chunk C verification).
+ *
+ * Pattern: `what (does|is|do)` followed by a slash-word — narrow enough to
+ * avoid false positives on natural prose.
+ */
+const META_QUESTION_RE = /\bwhat\s+(?:does|is|do)\s+\/\w+/i;
+
 export function preFilterSessionControl(
 	text: string,
-): { matched: true; confidence: 1.0; reason: string } | { matched: false } {
+):
+	| { matched: true; confidence: 1.0; reason: string; intent?: 'new_session' | 'continue' }
+	| { matched: false } {
 	const lower = text.trim().toLowerCase();
+	// Meta-question check FIRST — beats command-equality so "what does /newchat do?"
+	// (which contains the literal "/newchat" substring) doesn't get treated as
+	// a session-control command. The command loop below uses strict equality so
+	// the regex match here is the only path that catches meta-questions.
+	if (META_QUESTION_RE.test(lower)) {
+		return {
+			matched: true,
+			confidence: 1.0,
+			reason: 'meta-question about a command',
+			intent: 'continue',
+		};
+	}
 	for (const cmd of SESSION_CONTROL_COMMANDS) {
 		if (lower === cmd) {
 			return { matched: true, confidence: 1.0, reason: `command: ${cmd}` };
@@ -96,7 +121,11 @@ const CLASSIFIER_SYSTEM_PROMPT =
 	`{"intent":"new_session"|"continue"|"unclear","confidence":0.0-1.0,"reason":"brief reason"}\n\n` +
 	`- "new_session": user wants to start fresh, reset, begin a new conversation\n` +
 	`- "continue": user is continuing the current conversation (most messages)\n` +
-	`- "unclear": could go either way`;
+	`- "unclear": could go either way\n\n` +
+	`Examples:\n` +
+	`- "start fresh" → {"intent":"new_session","confidence":0.95,"reason":"explicit start-over phrasing"}\n` +
+	`- "what does /newchat do?" → {"intent":"continue","confidence":0.95,"reason":"meta-question about a command, not a session-reset request"}\n` +
+	`- "don't start over" → {"intent":"continue","confidence":0.9,"reason":"negation of reset"}`;
 
 export async function classifySessionControl(
 	text: string,
@@ -186,7 +215,7 @@ export async function detectSessionControl(
 	const preFilter = preFilterSessionControl(text);
 	if (preFilter.matched) {
 		return {
-			intent: 'new_session',
+			intent: preFilter.intent ?? 'new_session',
 			confidence: 1.0,
 			reason: preFilter.reason,
 			source: 'prefilter',

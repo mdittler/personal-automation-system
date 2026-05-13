@@ -69,6 +69,12 @@ export function parseShadowResponse(raw: string, labels: readonly string[]): Sha
     }
 }
 
+/** Repair suffix appended to the original prompt on retry. Codex correction #5:
+ * preserve the full original context (label list + user message) so the model
+ * can produce a valid response rather than a shorter no-context retry. */
+const REPAIR_SUFFIX =
+    '\n\nYour previous response was empty or invalid. Reply with ONLY the JSON object specified above.';
+
 export class FoodShadowClassifier {
     constructor(private readonly opts: FoodShadowClassifierOptions) {}
 
@@ -84,20 +90,46 @@ export class FoodShadowClassifier {
         if (rate < 1 && Math.random() >= rate) return { kind: 'skipped-sample' };
 
         const prompt = buildShadowClassifierPrompt(trimmed, this.opts.labels);
+        // First call.
         let raw: string;
         try {
-            raw = await this.opts.llm.complete(prompt, {
-                tier: 'fast',
-                temperature: 0,
-                maxTokens: 80,
-            });
+            raw = await this.callLLM(prompt);
         } catch (err) {
-            let category = 'unknown';
-            try { category = classifyLLMError(err).category; }
-            catch { /* classifyLLMError is expected never to throw; defense-in-depth */ }
-            this.opts.logger.warn('FoodShadowClassifier: LLM call failed — %s', String(err));
-            return { kind: 'llm-error', category };
+            return this.handleLLMError(err);
         }
-        return parseShadowResponse(raw, this.opts.labels);
+
+        const first = parseShadowResponse(raw, this.opts.labels);
+        if (first.kind === 'ok') return first;
+
+        // Retry ONLY when the first call returned empty output. Non-empty
+        // unparseable output (rare) likely repeats on retry and the
+        // parse-failed sentinel is the right outcome — mirrors recall-classifier.
+        // Hard cap at 2 LLM calls.
+        if (raw.trim().length > 0) return first;
+
+        let raw2: string;
+        try {
+            raw2 = await this.callLLM(prompt + REPAIR_SUFFIX);
+        } catch (err) {
+            return this.handleLLMError(err);
+        }
+        return parseShadowResponse(raw2, this.opts.labels);
+    }
+
+    private async callLLM(prompt: string): Promise<string> {
+        return this.opts.llm.complete(prompt, {
+            tier: 'fast',
+            temperature: 0,
+            maxTokens: 80,
+            responseFormat: 'json',
+        });
+    }
+
+    private handleLLMError(err: unknown): ShadowResult {
+        let category = 'unknown';
+        try { category = classifyLLMError(err).category; }
+        catch { /* classifyLLMError is expected never to throw; defense-in-depth */ }
+        this.opts.logger.warn('FoodShadowClassifier: LLM call failed — %s', String(err));
+        return { kind: 'llm-error', category };
     }
 }

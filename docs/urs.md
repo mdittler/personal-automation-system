@@ -9462,7 +9462,7 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 **Phase:** Chunk C | **Status:** Implemented
 
-`regression/src/oracles/rubric.ts` exports `runRubricOracle()`. The judge prompt fences the actual response inside a `<memory-context label="rubric-response">` block via the production helper `buildMemoryContextBlock` (from `core/src/services/prompt-assembly/memory-context.ts`). This neutralises hostile inputs that attempt to break out of the fence: `sanitizeContextContent` (called internally) strips zero-width / bidi control chars, collapses 3+ backtick runs to 1, and escapes the leading `<` of role-like tags (`memory-context|system|user|assistant`) to `&lt;`. The judge call uses `tier: 'standard'`, `temperature: 0`, `maxTokens: 200`. Judge output is treated as untrusted per testing-standards trust-boundary rule 1: non-parseable JSON, NaN/Infinity scores, or scores outside `[0, 5]` map to `verdict: 'error'` (not `'fail'`) so a misbehaving judge cannot silently flip a real failure to pass. Scores ≥ 4 emit `verdict: 'pass'`; scores 0–3 emit `verdict: 'fail'`. Cost is metered via the CostTracker delta around the judge call.
+`regression/src/oracles/rubric.ts` exports `runRubricOracle()`. The judge prompt fences the actual response inside a `<memory-context label="rubric-response">` block via the production helper `buildMemoryContextBlock` (from `core/src/services/prompt-assembly/memory-context.ts`). This neutralises hostile inputs that attempt to break out of the fence: `sanitizeContextContent` (called internally) strips zero-width / bidi control chars, collapses 3+ backtick runs to 1, and escapes the leading `<` of role-like tags (`memory-context|system|user|assistant`) to `&lt;`. The judge call uses `tier: 'standard'`, `temperature: 0`, `maxTokens: 400`, and `responseFormat: 'json'` so local-model providers (Ollama) emit valid JSON (Chunk C correction phase, 2026-05-12 — pre-fix, Gemma 26b returned empty strings for the judge prompt). Parsing reuses the shared `tryParseJsonStripFences` helper from `core/src/utils/json-strip-fences.ts`. Judge output is treated as untrusted per testing-standards trust-boundary rule 1: non-parseable JSON, NaN/Infinity scores, or scores outside `[0, 5]` map to `verdict: 'error'` (not `'fail'`) so a misbehaving judge cannot silently flip a real failure to pass. Scores ≥ 4 emit `verdict: 'pass'`; scores 0–3 emit `verdict: 'fail'`. Cost is metered via the CostTracker delta around the judge call.
 
 **Standard tests:**
 - `rubric-oracle.test.ts` > runRubricOracle > passes when judge score >= 4
@@ -9485,6 +9485,8 @@ The regression workspace is registered as a pnpm package but not listed in the r
 - `rubric-oracle.test.ts` > runRubricOracle > strips zero-width characters from actualResponse before fencing (Codex I7 / testing-standards rule 1)
 - `rubric-oracle.test.ts` > runRubricOracle > strips bidi-override characters from actualResponse before fencing
 - `rubric-oracle.test.ts` > runRubricOracle > neutralises case-variant fence tag attempts
+- `rubric-oracle.test.ts` > runRubricOracle > passes responseFormat: 'json' to the judge LLM call (Codex P1 follow-up, 2026-05-12)
+- `rubric-oracle.test.ts` > runRubricOracle > returns verdict=error when judge returns empty string (Gemma JSON-mode regression guard)
 - `chatbot-runner.test.ts` > runChatbotCase > fails when the rubric judge returns score < 4
 - `chatbot-runner.test.ts` > runChatbotCase > errors when the rubric judge returns a non-finite score
 - `chatbot-runner.test.ts` > runChatbotCase > aborts with budget-exceeded before invoking routeMessage when over budget
@@ -9778,6 +9780,8 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
+
+**Chunk C Correction Phase (2026-05-12) traceability note:** the correction phase introduced framework-level implementation fixes — `ModelSelector.applyTransientOverride` + `--no-cache` CLI flag + `LLMCompletionOptions.responseFormat` plumbing + classifier opt-in + deterministic PAS / session-control prefilters — that restore the intended behavior of existing REQ-REG-* contracts but do not add new behavioral requirements. Tests for these changes live under `model-selector.test.ts`, `build-deps.test.ts`, `args.test.ts`, `llm-service.test.ts`, the four `*-provider.test.ts` files, `shadow-classifier.test.ts`, `recall-classifier.test.ts`, `pas-classifier.test.ts`, `session-control-classifier.test.ts`, and `rubric-oracle.test.ts` (Codex P1 follow-up — +2 entries for REQ-REG-005). No new REQ-REG row was created; the changes harden the implementation of REQ-REG-001/005 and restore correct semantics under `--judge-model` / `--model-matrix` override flags. **Codex P2/P3 review (2026-05-12) extends the same note:** `cli-main.ts` drain-before-exit + `ModelSelector.load()` V1 migration override-safety + retracted Costco-21-items resolution claim in findings doc + reconciled stale numbers in `open-items.md`. Test additions: `model-selector.test.ts` +2 V1 migration cases (override-before-load preserves override AND defers V2 persist; no-override path still rewrites V2 — REQ-REG-001 implementation); new `json-strip-fences.test.ts` (22 direct tests for the shared utility used by recall classifier + rubric oracle — supports REQ-REG-005). Still no new REQ-REG row.
 
 | Requirement | Test File(s) | Std | Edge | Status |
 |-------------|-------------|-----|------|--------|
@@ -10246,7 +10250,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-001 | (workspace exclusion verified by vitest config) | 0 | 0 | Implemented |
 | REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts, codex-corrections.test.ts | 8 | 5 | Implemented |
 | REQ-REG-004 | structural-oracle.test.ts, routing-runner.test.ts | 14 | 9 | Implemented |
-| REQ-REG-005 | rubric-oracle.test.ts, chatbot-runner.test.ts, chatbot-cases.test.ts, validate-case.test.ts | 9 | 19 | Implemented |
+| REQ-REG-005 | rubric-oracle.test.ts, chatbot-runner.test.ts, chatbot-cases.test.ts, validate-case.test.ts | 11 | 19 | Implemented |
 | REQ-REG-006 | seed.test.ts, chatbot-environment.test.ts, orchestrator.test.ts | 6 | 5 | Implemented |
 | REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts | 5 | 4 | Implemented |
 | REQ-REG-009 | budget.test.ts, pas-yaml-schema.test.ts, orchestrator.test.ts | 5 | 3 | Implemented |

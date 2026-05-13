@@ -7,6 +7,20 @@
 
 ---
 
+## ⚠️ Correction (2026-05-12, post-Codex review)
+
+Codex reviewed this doc against the on-disk regression cache and found three defects that this addendum corrects in-place rather than rewriting the body:
+
+1. **Judge model was NOT Gemma 26b.** The Step 14.3 command line ran with `--judge-model=ollama/gemma4:26b`, but every cached chatbot result shows `modelIds.standard: "claude-sonnet-4-6"`. Root cause: `ModelSelector.load()` (core/src/services/llm/model-selector.ts:88-104) read `data/system/model-selection.yaml` AFTER the constructor and unconditionally overwrote the override-injected default tier. The persisted file had `standard: claude-sonnet-4-6`, so every "Gemma judge" call actually dispatched to Claude. The C1 fix mutated `config.llm.tiers` BEFORE `composeLLMService` but did not anticipate that `load()` would then mutate the ModelSelector AFTER the constructor. Fixed in `regression/chunk-c` correction phase Batch 0 via `ModelSelector.applyTransientOverride()` called after `load()` and before `reconcile()`. Same shape of bug affected `--model-matrix`; `fast` only "worked" because the persisted YAML happened to match (`gemma4:e4b`).
+
+2. **Missing 5th chatbot failure: `chatbot-costco-21-items`.** Step 14.3 lists 5 failures in the summary table (line 148) but only documents 4 by name (lines 161-169). Cached result for `chatbot-costco-21-items` shows verdict=`fail`, judge reason "judge score 2: response only mentions 2 of the required 5+ Costco items." This is a real food-app handler defect (reply enumerated updated/new items rather than all 21 items the user explicitly asked for) and is distinct from the rubric-judge-misclassification defect that affects the other 4 failures.
+
+3. **Ollama provider lacked `format: 'json'` plumbing.** `LLMCompletionOptions` had no `responseFormat` field, and `OllamaProvider.complete()` never passed `format: 'json'` to the Ollama SDK. This is why Gemma returned empty strings for the food-shadow classifier (all 27 cases) and 3 of 5 recall failures. Fixed in correction phase Batch 1 (4 providers gain JSON-mode plumbing) and Batch 2 (food-shadow + recall classifiers opt in and add empty-output retry-once).
+
+The body of this doc below is preserved as the historical record of the run; the corrections above amend it where it conflicts with the cache.
+
+---
+
 ## Pre-conditions (verified)
 
 - `ollama serve` healthy at `http://localhost:11434` (3 models available: `gemma4:e4b`, `gemma4:26b`, `gemma4:31b`)
@@ -148,25 +162,27 @@ pnpm test:regression -- --bucket=chatbot --model-matrix=ollama/gemma4:e4b --judg
 | Fail | 5 |
 | Error | 0 |
 | Budget-exceeded | 0 |
-| Total cost | $0.022 (Gemma judge — ollama free; cost from CostTracker is fast-tier Anthropic baseline charges that leaked in via cached ProviderRegistry probes during dispatch) |
+| Total cost | $0.022 (judge ran on `claude-sonnet-4-6` — see Correction #1 at top of doc; `--judge-model=ollama/gemma4:26b` was silently dropped by `ModelSelector.load()`) |
 | Total duration | 312 s |
 
-**Passing cases (full Gemma-judged success):**
+**Passing cases (judge was claude-sonnet-4-6, not Gemma — see Correction #1):**
 - `chatbot-costco-last-items` — full 21-item Costco receipt list, judge score 5
 - `chatbot-grocery-list-empty` — empty list with helpful prompt, judge score 5
 - `chatbot-last-costco-trip` — date 2026-05-01 + $306.77, judge score 5
 - `chatbot-new-receipt-items` — identifies both updated (Spindrift) and new (Blueberries) items, judge score 5
 - `chatbot-receipt-items-and-total` — 21 items + total, judge score 5
 
-**Failing cases (replies look correct; judge is the failure mode):**
+**Failing cases (5 of 5):**
 
-- `chatbot-blueberries-at-costco` — system replied `"Costco: Blueberries is $7.69 (updated 2026-05-01)."`. Judge scored 2 with reason: "The response contains only a memory-context block with the relevant data (mentioning Costco and $7.69) but does not constitute an actual assistant reply." **Judge mis-classified the fenced reply as data-only.** Real reply quality is good.
+- `chatbot-blueberries-at-costco` — system replied `"Costco: Blueberries is $7.69 (updated 2026-05-01)."`. Judge scored 2 with reason: "The response contains only a memory-context block with the relevant data (mentioning Costco and $7.69) but does not constitute an actual assistant reply." **Judge (claude-sonnet-4-6) mis-classified the fenced reply as data-only.** Real reply quality is good.
 
-- `chatbot-cheapest-blueberries` — system replied `"Which grocery item should I look up?"`. Genuine routing/intent miss — food's price-lookup heuristics flagged the prompt as too vague and asked a clarifying question instead of doing the comparison. Real failure.
+- `chatbot-cheapest-blueberries` — system replied `"Which grocery item should I look up?"`. Genuine routing/intent miss — food's price-lookup heuristics flagged the prompt as too vague and asked a clarifying question instead of doing the comparison. Real failure. Addressed in correction phase Batch 3 (regex broadening for "cheapest X" phrasings).
 
 - `chatbot-receipt-vs-meal-plan` — system replied with the full Costco receipt. Judge said "No actual assistant response was provided to evaluate—only the receipt context was given." **Same judge mis-classification.** Real reply quality is good.
 
 - `chatbot-store-spending` — system replied `"Grocery spending by store: Costco: avg $306.77 per trip across 1 trip (total $306.77, last 2026-05-01) Trader Joes: avg $18.47 per trip across 1 trip (total $18.47, last 2026-04-29)"`. Judge said "no actual reply." **Same judge mis-classification.** Real reply quality is excellent.
+
+- `chatbot-costco-21-items` (added by Correction #2) — user asked for the FULL 21-item Costco receipt list with prices. System replied with only the updated/new items: `"Costco receipt (2026-05-01) price updates: 1 updated, 1 new\n- Spindrift -> Spindrift Sparkling Water: $19.69 (updated)\n- Blueberries: $7.69 (new)\nTotal receipt spend: $306.77"`. Judge scored 2: "response only mentions 2 of the required 5+ Costco items, failing criterion 1." This is a **real food-app handler defect** distinct from the judge-misclassification class above — the handler should have rendered the full line-item table (or at least the requested item count) when the user explicitly asked for all items.
 
 **Classification of failures:**
 
@@ -177,15 +193,20 @@ pnpm test:regression -- --bucket=chatbot --model-matrix=ollama/gemma4:e4b --judg
 
 **The chatbot bucket framework works end-to-end** — composeRuntime spins, real household is materialized, food app dispatches, telegram.sent captures replies, judge oracle runs, verdicts land. The remaining failures are surface-level rubric/intent defects that are now visible thanks to the regression suite.
 
-## Step 14.4 — Claude-judge calibration (deferred)
+## Step 14.4 — Claude-judge calibration (effectively executed; see Correction #1)
 
-A second run with `--judge-model=anthropic/claude-sonnet-4-7` would calibrate the Gemma-judge disagreement rate above. Deferred because (a) the 3-of-5 fails are clearly judge-prompt issues, not chatbot quality issues, and (b) the cost of a 10-case Claude-judge run is small but non-zero. Schedule once the rubric oracle prompt is hardened or the project decides to default to Claude judge for chatbot.
+Per Correction #1 at the top of this doc, the judge model for the Step 14.3 run was `claude-sonnet-4-6` — not Gemma 4 26b as the command suggested. So this step's intended calibration goal (Claude-vs-Gemma judge disagreement rate) is effectively the inverse of what was planned: the doc's "Gemma scored these as fails" was actually Claude. The remaining deferred work is the genuine Gemma-judge run, which is now part of the Batch 5 mandatory re-run in the correction phase (post-`applyTransientOverride` fix).
 
 ---
 
 ## Step 14.5 — Findings + follow-up classification
 
-**Framework defects identified:** none. The harness behaved correctly under every failure observed. The C1 fix was load-bearing: pre-C1 the matrix override would have left every "Gemma" call dispatching through the production tier, and these findings would have been false negatives. Post-C1 the model resolution is real.
+**Framework defects identified (corrected by Correction #1, #3 at top of doc):**
+
+1. `--judge-model` / `--model-matrix` override is silently dropped by `ModelSelector.load()` when `data/system/model-selection.yaml` has a persisted value for that tier. Affected every chatbot-bucket judge call in Step 14.3 (and would have affected `--model-matrix=fast=` runs except `fast` happened to match the persisted value). Fixed in correction phase Batch 0 (`applyTransientOverride`).
+2. Ollama provider lacked `format: 'json'` plumbing through `LLMCompletionOptions`. Caused all 27 food-shadow cases (106 inputs) to return empty raw output and 3 of 5 recall failures. Fixed in correction phase Batches 1+2.
+
+The C1 fix was load-bearing for the food-tier override (`fast` matched the persisted YAML by coincidence), but did NOT extend to `standard` (judge) — that's what Correction #1 closes.
 
 **Model-compatibility gaps (prompt-tightening opportunities):**
 
@@ -211,12 +232,96 @@ The chatbot env `captureHandler`/`endActiveSession` placeholder limitation remai
 
 - [x] Routing bucket run executed; results recorded above.
 - [x] Recall bucket run executed; results recorded above.
-- [ ] Chatbot bucket run deferred — see Step 14.3 + 14.4 note above.
+- [x] Chatbot bucket run executed (judge model differs from doc command — `--judge-model=ollama/gemma4:26b` silently dropped; actual judge was `claude-sonnet-4-6`; see Correction #1).
 - [x] Each anomaly classified.
 - [x] Follow-up entries added to `docs/open-items.md`.
 - [x] Findings doc committed.
+- [x] Codex review applied as Corrections #1, #2, #3 (2026-05-12).
 
 ```bash
 git add docs/superpowers/plans/findings/2026-05-11-chunk-c-local-model-verification.md docs/open-items.md
 git commit -m "docs(regression-C.C3): local-model verification — routing + recall findings"
 ```
+
+---
+
+## Post-Correction Fresh-Evidence Re-Run (2026-05-12, Batch 5)
+
+After the Chunk C Correction Phase Batches 0-4 landed (framework + JSON-mode + classifier opt-in + prompt hardening), the three buckets were re-run with `--no-cache` against the same local Gemma stack. Precheck verified: `ollama serve` healthy, `gemma4:e4b` + `gemma4:26b` both available, `ANTHROPIC_API_KEY` set.
+
+### Routing bucket (post-correction)
+
+```bash
+pnpm test:regression -- --bucket=routing --model-matrix=ollama/gemma4:e4b --no-cache --json
+```
+
+| Metric | Pre-correction | Post-correction |
+|---|---|---|
+| Pass | 4 | **25** |
+| Fail | 5 | 11 |
+| **Error** | **27** | **0** |
+| Routing accuracy (food-shadow) | 0.00% | **89.62%** |
+| Total duration | 363 s | 165 s |
+
+**Food-shadow:** 18/27 pass (was 0/27 pass + 27 error). JSON-mode plumbing verified — every Gemma classification call now returns parseable JSON. Remaining 9 failures are legitimate label-mismatch errors (Gemma picks the wrong label, not the wrong format) — these are model-strength signals, not framework bugs.
+
+**PAS classifier:** 4/6 pass (was 2/6 pass). `pas-pas-related-positive` and `session-control-continue` flipped from FAIL to PASS thanks to the deterministic prefilters (Batch 3) and JSON-mode retry.
+
+**Session-control:** 3/3 pass (was 2/3 pass). `session-control-continue` flipped to PASS via the new few-shot examples + meta-question regex.
+
+REQ-REG-011 at 89.62% is still below the 95% threshold — but that's a Gemma-model-quality gate, not a framework gate. The framework now works correctly; remaining failures are honest model-compatibility signal.
+
+### Recall bucket (post-correction)
+
+```bash
+pnpm test:regression -- --bucket=recall --model-matrix=ollama/gemma4:e4b --no-cache --json
+```
+
+| Metric | Pre-correction | Post-correction |
+|---|---|---|
+| Pass | 20 | **24** |
+| Fail | 5 | 1 |
+| Error | 0 | 0 |
+| Total duration | 46 s | 40 s |
+
+Four of the 5 prior failures flipped to PASS via JSON-mode + retry-on-empty (Batch 2) and the vague-temporal few-shots (Batch 3). The remaining failure is **`recall-true-yesterday`**, where the actual still ends in `reason:"parse-failed"`. The Codex post-review (2026-05-12) flagged that the original phrasing of this section mis-attributed the residual to "temporal over-anchoring"; the cache evidence shows it is a genuine parse-failed case. The empty-only retry guard introduced in the post-Batch-2 simplify pass means non-empty unparseable Gemma output now falls straight to safe-default; a follow-up open-item tracks this (see open-items.md).
+
+### Chatbot bucket (post-correction, Gemma 26b judge)
+
+```bash
+pnpm test:regression -- --bucket=chatbot --model-matrix=ollama/gemma4:e4b --judge-model=ollama/gemma4:26b --no-cache --json
+```
+
+| Metric | Pre-correction (Claude judge per Correction #1) | Post-correction (Gemma 26b judge — real) |
+|---|---|---|
+| Pass | 5 | 0 |
+| Fail | 5 | 0 |
+| **Error** | **0** | **10** |
+| `modelIds.standard` in cache | `claude-sonnet-4-6` | **`gemma4:26b`** ← Batch 0 fix verified |
+
+**Override fix verified end-to-end.** Every fresh cache file shows `modelIds.standard: "gemma4:26b"` (vs `claude-sonnet-4-6` pre-correction). The `--judge-model=ollama/gemma4:26b` flag now genuinely propagates through to the rubric oracle's judge LLM.
+
+**Codex P1 follow-up (2026-05-12) — rubric JSON-mode added:** the first Batch 5 pass left `regression/src/oracles/rubric.ts` without `responseFormat: 'json'` on its judge call, so all 10 chatbot cases errored with empty Gemma output. The follow-up correction added the option (mirroring Batch 2), reused the shared `tryParseJsonStripFences` helper, and added two regression-guard tests. Re-run result: **3/10 pass, 0 fail, 7 error.** The 7 errors are now a different class of Gemma 26b failure: the model emits the opening `{"score": N,` correctly but then collapses into degenerate token-repetition (whitespace loops, `amount_amount_amount`, etc.), producing unparseable JSON even at `maxTokens: 400`. This is an honest model-quality signal — the framework correctly refuses to grade a misbehaving judge response.
+
+**Important:** the chatbot food-app replies are *mixed*. Cases that prompt for a plain item dump (`chatbot-receipt-items-and-total`: "List the items and total from my most recent Costco receipt." → full 21-item list with subtotal/tax/total) and the routing-guard case (`chatbot-receipt-vs-meal-plan`: full receipt content, no meal-plan deflection) post excellent handler output.
+
+`chatbot-costco-21-items` is NOT resolved (Codex 2026-05-12). The cache for that case (`data/system/regression-cache/chatbot-costco-21-items/edeebd9c…json`) shows the reply is a *diff view* — "1 updated, 1 new" (Spindrift, Blueberries) with the receipt total — not the full 21-item list the rubric requires (`MUST mention at least 5 of [Spindrift, Blueberries, Chicken, Eggs, Strawberries, Avocados, Coffee, Salmon, Yogurt, Olive Oil]`). The prompt's "call out which are new entries" framing routes to a different food handler (`new_receipt_items`-ish) that emphasizes the diff over the full list. The judge `verdict: 'error'` (Gemma 26b token-repetition) masked this handler defect. Tracked as a food/chatbot follow-up in `open-items.md`.
+
+### Acceptance gate scorecard (after Codex P1 follow-up)
+
+| Gate | Required | Actual | Result |
+|---|---|---|---|
+| (a) chatbot cache `modelIds.standard: "gemma4:26b"` on every fresh file | ✓ | ✓ (10/10) | **PASS** |
+| (b) ≥5 of 27 food-shadow cases non-`parse-failed` | ≥5 | 27/27 non-parse-failed (18 pass) | **PASS** |
+| (c) Recall bucket has zero `parse-failed` outcomes | 0 | **1 (`recall-true-yesterday`)** | **PARTIAL** — Codex correction; tracked in open-items.md |
+| (d) PAS prefilter behavioral: e.g. "change my fast model" passes WITHOUT LLM call | ✓ | Unit-tested in `pas-classifier.test.ts` Batch 3 block | **PASS** |
+| (e) Session-control prefilter: "what does /newchat do?" → `continue` with `source:'prefilter'` | ✓ | Unit-tested in `session-control-classifier.test.ts` Batch 3 block; live `session-control-continue` case now PASS | **PASS** |
+
+**Framework gates (a)(b)(d)(e) pass.** Gate (c) is mostly green (24/25 recall pass) with one residual parse-failed case kept open in `docs/open-items.md`. The chatbot bucket shifted from "0/10 errors (rubric JSON-mode missing)" to "3/10 pass, 7 error (Gemma 26b token-repetition loops)" — the framework plumbing is correct; the residual is honest local-model signal.
+
+### Follow-ups surfaced (tracked in `docs/open-items.md`)
+
+1. ~~Rubric oracle JSON-mode plumbing~~ ✓ Fixed in Codex P1 follow-up (rubric.ts now passes `responseFormat: 'json'` and reuses `tryParseJsonStripFences`). 2 new regression-guard tests.
+2. **Recall residual parse-failed case (`recall-true-yesterday`)** — 1 of 25 recall cases still ends in `reason:"parse-failed"`. The empty-only retry guard (Codex simplify pass) means non-empty unparseable Gemma output now falls straight to safe-default. Two options for the next iteration: (a) loosen retry to fire on parse-failure too (but then re-trigger the F9 flake the simplify pass was tightening), or (b) tighten `tryParseJsonStripFences` to handle more Gemma quirks (e.g., trailing prose after a valid object). Open-item tracks resolution.
+3. **Chatbot bucket — 7/10 Gemma 26b judge errors are token-repetition loops, not framework bugs** — Gemma 26b begins emitting valid JSON (`{"score": N,`) and then degenerates into whitespace/word loops within the explanation field, producing unparseable output even at `maxTokens: 400`. Open-item tracks: try `top_p`/`repeat_penalty` Ollama options, or switch judge to a different local model when the rubric oracle gets a chance to expose those knobs through `LLMCompletionOptions`.
+4. **Remaining 9 food-shadow label-mismatch failures under Gemma 4 e4b** — these are honest model-strength signals (not framework bugs). REQ-REG-011 at 89.62% means production flip of shadow classifier still gates on the higher-quality model.

@@ -5,7 +5,11 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Receipt, StorePriceData } from '../../types.js';
-import { formatCheapestPriceAnswer, formatReceiptDetails } from '../receipt-query.js';
+import {
+	extractPriceItem,
+	formatCheapestPriceAnswer,
+	formatReceiptDetails,
+} from '../receipt-query.js';
 
 function makeBigReceipt(): Receipt {
 	const name = (i: number) =>
@@ -455,5 +459,47 @@ describe('formatCheapestPriceAnswer — unit-price comparison (REQ-FOOD-PRICE-00
 		expect(result).not.toContain('/100g');
 		expect(result).not.toContain('/100ml');
 		expect(result).not.toContain('/ct');
+	});
+});
+
+// Batch 3 — Food "cheapest X" NL intent gap (Chunk C evidence).
+// The cached failing prompt from `chatbot-cheapest-blueberries`:
+//   "Where can I get the cheapest blueberries among the stores I have saved prices for?"
+// The old regex required `\bbuy\s+` after `cheapest`, missing this phrasing.
+describe('extractPriceItem — cheapest-X NL broadening (Batch 3)', () => {
+	it('extracts item from EXACT cached failing prompt: "cheapest blueberries among the stores..."', () => {
+		expect(
+			extractPriceItem(
+				'Where can I get the cheapest blueberries among the stores I have saved prices for?',
+			),
+		).toBe('blueberry');
+	});
+
+	it('extracts item from "cheapest place to buy blueberries"', () => {
+		expect(extractPriceItem("what's the cheapest place to buy blueberries?")).toBe('blueberry');
+	});
+
+	it('extracts item from "cheapest place to get blueberries"', () => {
+		expect(extractPriceItem('cheapest place to get blueberries')).toBe('blueberry');
+	});
+
+	it('extracts item from "cheapest milk at Costco"', () => {
+		expect(extractPriceItem('cheapest milk at Costco')).toBe('milk');
+	});
+
+	it('extracts item from bare "cheapest blueberries"', () => {
+		expect(extractPriceItem('cheapest blueberries')).toBe('blueberry');
+	});
+
+	// Negative — non-item prose may produce a token, but it should NOT match a
+	// real grocery item. The regex's job is to extract a candidate; the
+	// downstream `findPriceMatches` returns null for unknown items. Contract
+	// here: the regex broadening doesn't return a known grocery item like
+	// "blueberry" or "milk" on non-grocery prose.
+	it('does NOT return a known grocery item for "the cheapest option was great"', () => {
+		const r = extractPriceItem('the cheapest option was great');
+		expect(r).not.toBe('blueberry');
+		expect(r).not.toBe('milk');
+		expect(r).not.toBe('bread');
 	});
 });

@@ -121,6 +121,14 @@ describe('AnthropicProvider', () => {
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.5 }));
 	});
 
+	it("accepts responseFormat: 'json' without sending any extra SDK fields (Batch 1 — Claude reliably returns JSON when asked)", async () => {
+		const provider = makeProvider();
+		await provider.complete('return json', { responseFormat: 'json' });
+		const callArgs = mockCreate.mock.calls[0]?.[0];
+		expect(callArgs).not.toHaveProperty('response_format');
+		expect(callArgs).not.toHaveProperty('responseFormat');
+	});
+
 	it('passes system prompt when provided', async () => {
 		const provider = makeProvider();
 		await provider.complete('hi', { systemPrompt: 'You are a bot.' });

@@ -30,6 +30,17 @@ import type { RunCliDeps } from './index.js';
 
 const DEFAULT_MAX_RUN_BUDGET_USD = 5.0;
 
+/**
+ * Apply CLI tier overrides AFTER `ModelSelector.load()` so persisted YAML
+ * cannot silently clobber `--judge-model` / `--model-matrix`. Same call pattern
+ * used by `composeLLMService` and `resolveTierModelIds`.
+ */
+function applyAllTransientOverrides(selector: ModelSelector, override?: TierOverride): void {
+	if (override?.fast) selector.applyTransientOverride('fast', override.fast);
+	if (override?.standard) selector.applyTransientOverride('standard', override.standard);
+	if (override?.reasoning) selector.applyTransientOverride('reasoning', override.reasoning);
+}
+
 interface RepoPaths {
 	repoRoot: string;
 	casesDir: string;
@@ -112,8 +123,12 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		}
 	}
 
-	const llm = await composeLLMService(config, costTracker, logger, registry);
-	const modelIds = await resolveTierModelIds(config, logger);
+	// Compose LLM service + resolve tier IDs in parallel — both read the same
+	// model-selection.yaml independently and have no other shared state.
+	const [llm, modelIds] = await Promise.all([
+		composeLLMService(config, costTracker, logger, registry, opts?.tierOverride),
+		resolveTierModelIds(config, logger, opts?.tierOverride),
+	]);
 	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
 
 	const minimalLogger = {
@@ -195,6 +210,7 @@ export async function composeLLMService(
 	costTracker: CostTracker,
 	logger: Logger,
 	registryOverride?: ProviderRegistry,
+	tierOverride?: TierOverride,
 ): Promise<LLMServiceImpl> {
 	const llmConfig = config.llm;
 	const registry =
@@ -232,6 +248,7 @@ export async function composeLLMService(
 		logger: logger.child({ service: 'model-selector' }),
 	});
 	await modelSelector.load();
+	applyAllTransientOverrides(modelSelector, tierOverride);
 	modelSelector.reconcile(new Set(registry.getProviderIds()));
 
 	// ModelCatalog is wired by composeRuntime; the regression CLI doesn't need
@@ -364,9 +381,10 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
  * has reconciled against the registered providers. The returned snapshot
  * feeds the cache key — a tier-model swap invalidates cached runs.
  */
-async function resolveTierModelIds(
+export async function resolveTierModelIds(
 	config: Awaited<ReturnType<typeof loadSystemConfig>>,
 	logger: Logger,
+	tierOverride?: TierOverride,
 ): Promise<TierModelSnapshot> {
 	const llmConfig = config.llm;
 	const modelSelector = new ModelSelector({
@@ -383,6 +401,7 @@ async function resolveTierModelIds(
 		logger: logger.child({ service: 'model-selector-resolve' }),
 	});
 	await modelSelector.load();
+	applyAllTransientOverrides(modelSelector, tierOverride);
 	const fast = modelSelector.getTierRef('fast')?.model ?? 'unknown';
 	const standard = modelSelector.getTierRef('standard')?.model ?? 'unknown';
 	const reasoning = modelSelector.getTierRef('reasoning')?.model ?? null;

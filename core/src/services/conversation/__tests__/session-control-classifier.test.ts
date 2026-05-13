@@ -107,8 +107,16 @@ describe('preFilterSessionControl', () => {
 		expect(preFilterSessionControl("don't start over").matched).toBe(false);
 	});
 
-	it('returns not-matched for "what does /new do?"', () => {
-		expect(preFilterSessionControl('what does /new do?').matched).toBe(false);
+	// Batch 3: this used to be a "no-match → goes to LLM" case. Now the
+	// meta-question prefilter catches it and returns intent:'continue'. Old
+	// LLM-pathing behavior preserved for non-meta NL phrases (see "new chat"
+	// case above).
+	it('matches "what does /new do?" as a meta-question (Batch 3 — was previously unmatched)', () => {
+		const result = preFilterSessionControl('what does /new do?');
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			expect(result.intent).toBe('continue');
+		}
 	});
 });
 
@@ -220,5 +228,69 @@ describe('classifySessionControl', () => {
 		expect(result.confidence).toBe(0);
 		expect(result.source).toBe('llm');
 		expect(result.reason).toBe('parse error');
+	});
+});
+
+// ─── Batch 3 — Meta-question prefilter ────────────────────────────────────────
+// Evidence: chunk-c verification showed "what does /newchat do?" classified as
+// `new_session` by Gemma 4 e4b. Deterministic prefilter shortcuts the LLM for
+// these meta-questions.
+
+describe('preFilterSessionControl — meta-question short-circuit (Batch 3)', () => {
+	it('matches "what does /newchat do?" → intent: continue', () => {
+		const result = preFilterSessionControl('what does /newchat do?');
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			expect(result.intent).toBe('continue');
+			expect(result.reason).toMatch(/meta/i);
+		}
+	});
+
+	it('matches "what is /reset" → intent: continue', () => {
+		const result = preFilterSessionControl('what is /reset');
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			expect(result.intent).toBe('continue');
+		}
+	});
+
+	it('matches "what do /new commands do?" → intent: continue', () => {
+		const result = preFilterSessionControl('what do /new commands do?');
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			expect(result.intent).toBe('continue');
+		}
+	});
+
+	it('does NOT match plain "new chat" (no meta-pattern, goes to LLM)', () => {
+		const result = preFilterSessionControl('new chat');
+		expect(result.matched).toBe(false);
+	});
+
+	it('does NOT match the bare command "/newchat" (preserves new_session semantics)', () => {
+		const result = preFilterSessionControl('/newchat');
+		expect(result.matched).toBe(true);
+		if (result.matched) {
+			// Existing semantics: bare command → new_session (intent omitted → defaulted in detectSessionControl)
+			expect(result.intent === undefined || result.intent === 'new_session').toBe(true);
+		}
+	});
+});
+
+describe('detectSessionControl — meta-question avoids LLM call (Batch 3)', () => {
+	it('"what does /newchat do?" returns continue WITHOUT calling LLM', async () => {
+		const deps = makeDeps('this should never be returned');
+		const result = await detectSessionControl('what does /newchat do?', deps);
+		expect(result.intent).toBe('continue');
+		expect(result.source).toBe('prefilter');
+		expect(deps.llm.complete).not.toHaveBeenCalled();
+	});
+
+	it('"what does /reset do?" returns continue WITHOUT calling LLM', async () => {
+		const deps = makeDeps('this should never be returned');
+		const result = await detectSessionControl('what does /reset do?', deps);
+		expect(result.intent).toBe('continue');
+		expect(result.source).toBe('prefilter');
+		expect(deps.llm.complete).not.toHaveBeenCalled();
 	});
 });

@@ -971,3 +971,77 @@ describe('FoodShadowClassifier.classify — never throws to caller', () => {
         expect(r.kind).toBe('parse-failed');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Batch 2 — responseFormat: 'json' + callWithRetry helper
+// ---------------------------------------------------------------------------
+
+/** Helper: an LLM whose .complete() returns a queue of responses in order. */
+function queuedLLM(responses: string[]): LLMService {
+    let i = 0;
+    return {
+        complete: vi.fn().mockImplementation(async () => {
+            if (i >= responses.length) throw new Error('queuedLLM: exhausted');
+            return responses[i++]!;
+        }),
+        classify: vi.fn(),
+        extractStructured: vi.fn(),
+        getModelForTier: vi.fn(),
+    } as unknown as LLMService;
+}
+
+describe('FoodShadowClassifier.classify — JSON mode + retry-on-empty (Batch 2)', () => {
+    it('passes responseFormat: "json" to llm.complete on the first call', async () => {
+        const label = 'user wants to add items to the grocery list';
+        const llm = mockLLM(makeOkJson(label, 0.9));
+        const c = makeClassifier({ llm });
+        await c.classify('add milk', 1.0);
+        const callOptions = vi.mocked(llm.complete).mock.calls[0]?.[1];
+        expect(callOptions).toMatchObject({ responseFormat: 'json' });
+    });
+
+    it('retries once with full-context repair when first response is empty', async () => {
+        const label = 'user wants to add items to the grocery list';
+        const llm = queuedLLM(['', makeOkJson(label, 0.95)]);
+        const c = makeClassifier({ llm });
+
+        const r = await c.classify('add milk to my list', 1.0);
+
+        expect(r).toEqual({ kind: 'ok', action: label, confidence: 0.95 });
+        expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(2);
+
+        // Second call must contain the original label list AND the original message
+        // AND a repair suffix — Codex correction #5 (no truncated repair prompt).
+        const secondPrompt = vi.mocked(llm.complete).mock.calls[1]?.[0];
+        expect(secondPrompt).toContain(`"${label}"`); // label list preserved
+        expect(secondPrompt).toContain('add milk to my list'); // original message preserved
+        expect(secondPrompt).toMatch(/previous response.*empty|invalid/i); // repair suffix
+        // responseFormat 'json' set on retry too
+        const retryOptions = vi.mocked(llm.complete).mock.calls[1]?.[1];
+        expect(retryOptions).toMatchObject({ responseFormat: 'json' });
+    });
+
+    it('does NOT retry on non-empty invalid JSON (matches recall classifier policy)', async () => {
+        const llm = queuedLLM(['not json at all']);
+        const c = makeClassifier({ llm });
+        const r = await c.classify('add milk', 1.0);
+        expect(r.kind).toBe('parse-failed');
+        expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+    });
+
+    it('hard cap: maximum 2 LLM calls (empty twice → parse-failed)', async () => {
+        const llm = queuedLLM(['', '']);
+        const c = makeClassifier({ llm });
+        const r = await c.classify('add milk', 1.0);
+        expect(r.kind).toBe('parse-failed');
+        expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT retry when first call returns valid JSON', async () => {
+        const label = 'user wants to add items to the grocery list';
+        const llm = mockLLM(makeOkJson(label, 0.92));
+        const c = makeClassifier({ llm });
+        await c.classify('add milk', 1.0);
+        expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+    });
+});

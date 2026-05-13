@@ -24,6 +24,7 @@ import {
 	buildDryRunDeps,
 	buildMetadataDeps,
 	composeLLMService,
+	resolveTierModelIds,
 } from '../runner/build-deps.js';
 
 let tempDir: string;
@@ -208,6 +209,101 @@ describe('build-deps — Chunk C wiring', () => {
 		// provider-id wrapping convention.
 		expect(llm.getModelForTier?.('fast')).toContain('gemma4:e4b-mock');
 		expect(llm.getModelForTier?.('standard')).toContain('gemma4:26b-mock');
+	});
+});
+
+describe('composeLLMService — transient override (Batch 0)', () => {
+	// Regression for the Codex-reviewed bug: persisted `model-selection.yaml`
+	// overrides used to silently clobber `--judge-model` / `--model-matrix`.
+	// composeLLMService now calls applyTransientOverride AFTER load() to freeze
+	// override tiers so neither load() nor reconcile() can revert them.
+
+	it('tierOverride survives a persisted model-selection.yaml that disagrees', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+
+		// Persist a saved selection that, without the fix, would silently win.
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+
+		const llm = await composeLLMService(config, costTracker, logger, stubRegistry, {
+			standard: { provider: 'stub', model: 'override-standard' },
+			fast: { provider: 'stub', model: 'override-fast' },
+		});
+
+		expect(llm.getModelForTier?.('standard')).toContain('override-standard');
+		expect(llm.getModelForTier?.('fast')).toContain('override-fast');
+	});
+
+	it('tierOverride with an unregistered provider causes reconcile() to throw (not silently fall back)', async () => {
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		const costTracker = new CostTracker(config.dataDir, logger);
+		await costTracker.loadMonthlyCache();
+
+		// Stub registry registers only 'stub'. The override points at 'ollama'
+		// which is NOT registered — must throw.
+		const stubRegistry = createStubProviderRegistry(costTracker, logger, {
+			classificationCategory: 'chatbot',
+			completionText: 'ok',
+			p50Ms: 0,
+			p95Ms: 1,
+			capMs: 2,
+		});
+
+		await expect(
+			composeLLMService(config, costTracker, logger, stubRegistry, {
+				standard: { provider: 'ollama', model: 'gemma4:26b' },
+			}),
+		).rejects.toThrow(/transient override.*standard.*ollama.*not available/i);
+	});
+});
+
+describe('resolveTierModelIds — transient override (Batch 0)', () => {
+	// Codex correction: deps.modelIds.standard must reflect the override, not
+	// the persisted value. Pre-fix, the cache key would echo the persisted
+	// standard tier even when --judge-model was set, masking the bug.
+
+	it('returns persisted values when no override is supplied', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const ids = await resolveTierModelIds(config, logger);
+		expect(ids.standard).toBe('persisted-standard');
+		expect(ids.fast).toBe('persisted-fast');
+	});
+
+	it('returns override values when tierOverride is supplied (cache-key reflects truth)', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		// Persist a saved selection; the override must still win.
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'stub', model: 'persisted-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const ids = await resolveTierModelIds(config, logger, {
+			standard: { provider: 'stub', model: 'override-standard' },
+		});
+		expect(ids.standard).toBe('override-standard');
+		expect(ids.fast).toBe('persisted-fast'); // non-overridden tier untouched
 	});
 });
 

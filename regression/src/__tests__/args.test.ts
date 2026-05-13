@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseCliArgs } from '../runner/args.js';
+import { buildTierOverrideFromCli, parseCliArgs } from '../runner/args.js';
 
 describe('parseCliArgs', () => {
-	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help, no list', () => {
+	it('defaults to all buckets, no rerun, no dry-run, no JSON, no help, no list, no no-cache', () => {
 		expect(parseCliArgs([])).toEqual({
 			bucketFilter: undefined,
 			rerunIds: undefined,
@@ -10,6 +10,7 @@ describe('parseCliArgs', () => {
 			json: false,
 			help: false,
 			listOnly: false,
+			noCache: false,
 		});
 	});
 
@@ -98,6 +99,7 @@ describe('parseCliArgs', () => {
 			json: true,
 			help: false,
 			listOnly: false,
+			noCache: false,
 		});
 	});
 
@@ -146,5 +148,77 @@ describe('--model-matrix + --judge-model parsing', () => {
 
 	it('rejects --judge-model without a value', () => {
 		expect(() => parseCliArgs(['--judge-model'])).toThrow(/judge-model requires/i);
+	});
+});
+
+describe('--no-cache flag', () => {
+	it('default is noCache: false', () => {
+		expect(parseCliArgs([]).noCache).toBe(false);
+	});
+
+	it('parses --no-cache to noCache: true', () => {
+		expect(parseCliArgs(['--no-cache']).noCache).toBe(true);
+	});
+
+	it('combines with other flags', () => {
+		const o = parseCliArgs(['--no-cache', '--bucket=routing', '--json']);
+		expect(o.noCache).toBe(true);
+		expect(o.bucketFilter).toBe('routing');
+		expect(o.json).toBe(true);
+	});
+});
+
+describe('buildTierOverrideFromCli', () => {
+	// Codex correction #3 + plan Batch 0 test: --judge-model must win over
+	// --model-matrix=standard= for the standard slot.
+	it('returns undefined when neither modelMatrix nor judgeModel is set', () => {
+		expect(buildTierOverrideFromCli({ dryRun: false, json: false, help: false, listOnly: false, noCache: false })).toBeUndefined();
+	});
+
+	it('builds override from --model-matrix only', () => {
+		const opts = parseCliArgs(['--model-matrix=ollama/gemma4:e4b']);
+		expect(buildTierOverrideFromCli(opts)).toEqual({
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+		});
+	});
+
+	it('builds override from --judge-model only (lands in standard slot)', () => {
+		const opts = parseCliArgs(['--judge-model=ollama/gemma4:26b']);
+		expect(buildTierOverrideFromCli(opts)).toEqual({
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+	});
+
+	it('--judge-model WINS over --model-matrix=standard= for the standard slot', () => {
+		const opts = parseCliArgs([
+			'--judge-model=ollama/gemma4:26b',
+			'--model-matrix=standard=anthropic/claude-sonnet-4-6',
+		]);
+		expect(buildTierOverrideFromCli(opts)).toEqual({
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+	});
+
+	it('combines --model-matrix fast + --judge-model standard', () => {
+		const opts = parseCliArgs([
+			'--model-matrix=ollama/gemma4:e4b',
+			'--judge-model=ollama/gemma4:26b',
+		]);
+		expect(buildTierOverrideFromCli(opts)).toEqual({
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+		});
+	});
+
+	it('preserves model-matrix reasoning even when judge-model takes standard', () => {
+		const opts = parseCliArgs([
+			'--model-matrix=fast=ollama/gemma4:e4b,reasoning=anthropic/claude-opus-4-7',
+			'--judge-model=ollama/gemma4:26b',
+		]);
+		expect(buildTierOverrideFromCli(opts)).toEqual({
+			fast: { provider: 'ollama', model: 'gemma4:e4b' },
+			standard: { provider: 'ollama', model: 'gemma4:26b' },
+			reasoning: { provider: 'anthropic', model: 'claude-opus-4-7' },
+		});
 	});
 });

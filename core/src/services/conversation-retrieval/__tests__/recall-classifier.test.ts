@@ -331,3 +331,102 @@ describe('classifyRecallIntent — maxWindowDays threading', () => {
 		expect(result.shouldRecall).toBe(true);
 	});
 });
+
+// ─── Batch 2 — responseFormat: 'json' + retry-on-empty ────────────────────────
+
+/** Helper: LLM that returns a queued sequence of responses, one per call. */
+function makeQueuedDeps(responses: string[]) {
+	let i = 0;
+	return {
+		llm: {
+			complete: vi.fn().mockImplementation(async () => {
+				if (i >= responses.length) throw new Error('queuedLLM: exhausted');
+				return responses[i++]!;
+			}),
+		},
+		logger: { warn: vi.fn() },
+		today: TODAY,
+	};
+}
+
+describe('classifyRecallIntent — JSON mode + retry-on-empty (Batch 2)', () => {
+	it('passes responseFormat: "json" to llm.complete', async () => {
+		const deps = makeDeps(JSON.stringify({ shouldRecall: false, query: null, timeAnchor: null, reason: 'r' }));
+		await classifyRecallIntent('what did we talk about yesterday?', deps);
+		const callOptions = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
+		expect(callOptions).toMatchObject({ responseFormat: 'json' });
+	});
+
+	it('retries once with full-context repair when first response is empty', async () => {
+		const good = JSON.stringify({
+			shouldRecall: true,
+			query: 'pasta',
+			timeAnchor: null,
+			reason: 'recovered on retry',
+		});
+		const deps = makeQueuedDeps(['', good]);
+		const result = await classifyRecallIntent('did we discuss pasta?', deps);
+
+		expect(result.shouldRecall).toBe(true);
+		expect(result.query).toBe('pasta');
+		expect(deps.llm.complete).toHaveBeenCalledTimes(2);
+
+		// Retry must include the original user message (Codex correction #5)
+		const retryPrompt = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]?.[0];
+		expect(retryPrompt).toContain('did we discuss pasta?');
+		// responseFormat: 'json' on retry too
+		const retryOptions = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[1]?.[1];
+		expect(retryOptions).toMatchObject({ responseFormat: 'json' });
+	});
+
+	it('hard cap: max 2 LLM calls (empty twice → safe default)', async () => {
+		const deps = makeQueuedDeps(['', '']);
+		const result = await classifyRecallIntent('did we talk about pasta?', deps);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(2);
+	});
+
+	it('does NOT retry when first call returns valid JSON', async () => {
+		const good = JSON.stringify({
+			shouldRecall: true,
+			query: 'pasta',
+			timeAnchor: null,
+			reason: 'first-call success',
+		});
+		const deps = makeDeps(good);
+		await classifyRecallIntent('did we discuss pasta?', deps);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('does NOT retry on non-empty invalid JSON (only retries on empty output)', async () => {
+		// Codex evidence is specifically about empty output from Gemma. Non-empty
+		// unparseable output (rare, and any retry would likely produce the same
+		// garbage) falls through to safe default without a second call.
+		const deps = makeDeps('not valid json at all');
+		const result = await classifyRecallIntent('hello', deps);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ─── Batch 3 — Vague-temporal prompt-tightening (Chunk C evidence) ────────────
+
+describe('buildClassifierPrompt — vague-temporal guidance (Batch 3)', () => {
+	it('prompt explicitly lists vague recall words as NOT time references', () => {
+		const prompt = buildClassifierPrompt(TODAY);
+		expect(prompt).toMatch(/vague recall words.*earlier.*last time.*not time references/i);
+	});
+
+	it('prompt contains the "earlier?" negative example with timeAnchor:null', () => {
+		const prompt = buildClassifierPrompt(TODAY);
+		expect(prompt).toContain('what did we say about the leak earlier?');
+		// The example must show timeAnchor:null for this phrasing
+		expect(prompt).toMatch(/leak[\s\S]{0,200}"timeAnchor":null/);
+	});
+
+	it('prompt contains the "last time" negative example with timeAnchor:null', () => {
+		const prompt = buildClassifierPrompt(TODAY);
+		expect(prompt).toContain('what did we decide last time');
+		expect(prompt).toMatch(/decision[\s\S]{0,200}"timeAnchor":null/);
+	});
+});

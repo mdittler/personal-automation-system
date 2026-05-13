@@ -23,6 +23,7 @@
 import type { CallMeter, OracleVerdict } from '../shared/types.js';
 import type { LLMService } from '@core/types/llm.js';
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
+import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '@core/utils/json-strip-fences.js';
 
 const PASS_THRESHOLD = 4;
 const MIN_SCORE = 0;
@@ -83,8 +84,13 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	try {
 		raw = await deps.llm.complete(prompt, {
 			tier: 'standard',
-			maxTokens: 200,
+			// 200 was tight for verbose local judges (Gemma 26b): truncating the
+			// JSON mid-`"explanation"` produced unparseable output. 400 fits
+			// frontier judges comfortably (their replies are ~100 tokens) and
+			// gives local judges room to close the JSON envelope.
+			maxTokens: 400,
 			temperature: 0,
+			responseFormat: 'json',
 		});
 	} catch (err) {
 		const after = deps.costMeter.getMonthlyTotalCost();
@@ -110,19 +116,12 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 		costUsd: Math.max(0, after - before),
 	};
 
-	const stripped = raw
-		.replace(/^```(?:json)?\s*/i, '')
-		.replace(/\s*```\s*$/i, '')
-		.trim();
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(stripped);
-	} catch (err) {
+	const parsed = tryParseJsonStripFences(raw);
+	if (parsed === UNPARSEABLE_JSON) {
 		return {
 			verdict: {
 				verdict: 'error',
-				details: `judge JSON parse failed: ${(err as Error).message}; raw="${raw.slice(0, 200)}"`,
+				details: `judge JSON parse failed (empty or invalid); raw="${raw.slice(0, 200)}"`,
 			},
 			meter,
 			score: null,

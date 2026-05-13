@@ -79,6 +79,9 @@ export interface RunSuiteOptions {
 	logger: MinimalLogger;
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
 	rerunIds?: Set<string>;
+	/** Force fresh dispatch for every case (skip all cache reads). Plumbs the
+	 * `--no-cache` CLI flag through. */
+	noCache?: boolean;
 	dryRun?: boolean;
 	onResult?: (result: RunResult) => void;
 }
@@ -125,6 +128,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 	const cacheReads = await Promise.all(
 		filtered.map((lc, i) => {
 			if (opts.dryRun) return Promise.resolve(null);
+			if (opts.noCache) return Promise.resolve(null);
 			if (opts.rerunIds?.has(lc.case.id)) return Promise.resolve(null);
 			return cache.read(lc.case.id, cacheKeys[i]!);
 		}),
@@ -301,7 +305,10 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
  * run via `opts.onResult`, then a final `{type:'summary', summary}` line.
  * The GUI subprocess (Chunk B.2) consumes this stream verbatim.
  */
-export type RunCliDeps = Omit<RunSuiteOptions, 'bucketFilter' | 'rerunIds' | 'dryRun' | 'onResult'>;
+export type RunCliDeps = Omit<
+	RunSuiteOptions,
+	'bucketFilter' | 'rerunIds' | 'noCache' | 'dryRun' | 'onResult'
+>;
 
 export interface RunCliResult {
 	exitCode: 0 | 1;
@@ -323,7 +330,7 @@ export async function runCli(
 		return {
 			exitCode: 1,
 			outcome: null,
-			options: { dryRun: false, json: false, help: false, listOnly: false },
+			options: { dryRun: false, json: false, help: false, listOnly: false, noCache: false },
 		};
 	}
 	if (cli.help) {
@@ -339,6 +346,7 @@ export async function runCli(
 		...deps,
 		bucketFilter: cli.bucketFilter,
 		rerunIds: cli.rerunIds,
+		noCache: cli.noCache,
 		dryRun: cli.dryRun,
 		onResult: cli.json
 			? (r) => write(`${JSON.stringify({ type: 'case-result', result: r })}\n`)

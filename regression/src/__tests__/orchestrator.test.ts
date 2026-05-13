@@ -126,6 +126,19 @@ describe('runSuite — cache lifecycle', () => {
 		await runSuite({ ...opts, rerunIds: new Set(['a-id']) });
 		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(2);
 	});
+
+	it('noCache=true forces fresh dispatch for every case (Batch 0)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const opts = baseOpts();
+		await runSuite(opts);
+		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(2);
+
+		// noCache: true — every case must be redispatched
+		const second = await runSuite({ ...opts, noCache: true });
+		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(4);
+		expect(second.results.every((r) => r.source === 'fresh')).toBe(true);
+	});
 });
 
 describe('runSuite — RunBudget hard-abort (REQ-REG-009)', () => {

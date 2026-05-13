@@ -18,7 +18,7 @@
  * supported.
  */
 
-import { parseCliArgs } from './args.js';
+import { buildTierOverrideFromCli, parseCliArgs } from './args.js';
 import type { CliOptions } from './args.js';
 import {
 	applyJudgeModelOverride,
@@ -50,30 +50,14 @@ try {
 } catch {
 	// Surface the parse error inside `runCli` (which prints HELP_TEXT). For
 	// the peek-and-build phase, fall back to an empty CliOptions.
-	peeked = { dryRun: false, json: false, help: false, listOnly: false };
+	peeked = { dryRun: false, json: false, help: false, listOnly: false, noCache: false };
 }
 
-// Combine --model-matrix and --judge-model into a single tier override so
-// `buildProductionDeps` can push it into `config.llm.tiers` BEFORE composing the
-// LLM service. `--judge-model` overrides the standard tier specifically; if the
-// operator also passes `--model-matrix=...,standard=...`, judge-model wins for
-// the standard slot (the rubric oracle is the primary consumer of standard tier
-// in the regression run). Codex correction: previously the override only
-// reached `modelIds` metadata and never affected the actual LLMService dispatch.
-const tierOverride =
-	peeked.modelMatrix || peeked.judgeModel
-		? {
-				...(peeked.modelMatrix?.fast ? { fast: peeked.modelMatrix.fast } : {}),
-				...(peeked.judgeModel
-					? { standard: peeked.judgeModel }
-					: peeked.modelMatrix?.standard
-						? { standard: peeked.modelMatrix.standard }
-						: {}),
-				...(peeked.modelMatrix?.reasoning
-					? { reasoning: peeked.modelMatrix.reasoning }
-					: {}),
-			}
-		: undefined;
+// Combine --model-matrix and --judge-model into a single tier override.
+// `--judge-model` wins over `--model-matrix=standard=` for the standard slot
+// (the rubric oracle is the primary consumer of standard tier). The combiner
+// lives in `args.ts` so the precedence is unit-testable (Codex correction #3).
+const tierOverride = buildTierOverrideFromCli(peeked);
 
 let deps = isList
 	? await buildMetadataDeps()
@@ -92,4 +76,9 @@ if ((isDryRun || isList) && peeked.judgeModel) {
 }
 
 const { exitCode } = await runCli(argv, deps);
-process.exit(exitCode);
+// Drain stdout before exiting. On POSIX, `process.stdout` is async when piped
+// (which is how the GUI subprocess + tests consume `--list` NDJSON), so calling
+// `process.exit()` immediately after the final `write()` can truncate buffered
+// output. Empty-write + callback is the canonical drain idiom: the callback
+// fires only after all preceding writes have been flushed to the pipe.
+process.stdout.write('', () => process.exit(exitCode));

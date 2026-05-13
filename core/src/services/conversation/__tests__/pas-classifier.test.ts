@@ -17,7 +17,11 @@ describe('classifyPASMessage', () => {
 	it('returns pasRelated=true when LLM responds YES (PAS)', async () => {
 		const services = createMockCoreServices();
 		vi.mocked(services.llm.complete).mockResolvedValue('YES');
-		const result = await classifyPASMessage('what apps do I have', {
+		// Batch 3: prompt previously was "what apps do I have", but the new
+		// SYSTEM_DATA_KEYWORDS_RE prefilter (Batch 3) catches that phrasing.
+		// Use a non-prefiltered general PAS question so the LLM path is
+		// genuinely exercised.
+		const result = await classifyPASMessage('does this system run locally', {
 			llm: services.llm,
 			appMetadata: services.appMetadata,
 			logger: services.logger,
@@ -94,7 +98,11 @@ describe('classifyPASMessage', () => {
 	it('fail-open: returns settingsCandidate=false when LLM throws', async () => {
 		const services = createMockCoreServices();
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM down'));
-		const result = await classifyPASMessage('can I change my memory setting?', services);
+		// Batch 3: "change my memory setting" used here previously, but the new
+		// SETTINGS_KEYWORDS_RE prefilter (Batch 3) catches that phrasing before
+		// the LLM is invoked. Use a phrase that requires the LLM path so the
+		// fail-open contract is genuinely tested.
+		const result = await classifyPASMessage('can I tweak how memory works?', services);
 		expect(result.pasRelated).toBe(true);
 		expect(result.settingsCandidate).toBe(false);
 	});
@@ -270,6 +278,88 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 		});
 		// Regression guard — must NOT be a data query candidate
 		expect(result.dataQueryCandidate).toBeFalsy();
+	});
+
+	// ── Batch 3: deterministic prefilters for evidenced PAS gaps ──────────────
+	// Chunk C verification showed Gemma 4 e4b miscategorizing these as NO_PAS.
+	// Codex correction #6: deterministic prefilters are the primary fix;
+	// few-shots in the system prompt are backup for the LLM fallback path.
+
+	describe('SETTINGS_KEYWORDS_RE prefilter — short-circuit LLM (Batch 3)', () => {
+		// Narrow on purpose: requires possessive ("my") on phrasings that
+		// reference a PAS-internal setting. Generic AI prose ("switch to a
+		// smarter model") flows through the LLM path.
+		const settingsPrompts = [
+			'change my fast model',
+			'change my standard model',
+			'set my timezone to UTC',
+			'update my reasoning tier',
+			'what is my current standard model',
+			'what is my current fast model',
+		];
+		for (const prompt of settingsPrompts) {
+			it(`"${prompt}" → settingsCandidate=true without LLM call`, async () => {
+				const services = createMockCoreServices();
+				const result = await classifyPASMessage(prompt, {
+					llm: services.llm,
+					appMetadata: services.appMetadata,
+					logger: services.logger,
+				});
+				expect(result.pasRelated).toBe(true);
+				expect(result.settingsCandidate).toBe(true);
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+		}
+	});
+
+	describe('SYSTEM_DATA_KEYWORDS_RE prefilter — short-circuit LLM (Batch 3)', () => {
+		// PAS-internal data only — food-domain data (pantry, recipes, meal plan)
+		// stays on the food-app path and goes through the LLM classifier.
+		const dataPrompts = [
+			'show me my system logs',
+			'list my scheduled alerts',
+			'what does my model journal say',
+			'what apps do I have installed',
+		];
+		for (const prompt of dataPrompts) {
+			it(`"${prompt}" → dataQueryCandidate=true without LLM call`, async () => {
+				const services = createMockCoreServices();
+				const result = await classifyPASMessage(prompt, {
+					llm: services.llm,
+					appMetadata: services.appMetadata,
+					logger: services.logger,
+				});
+				expect(result.pasRelated).toBe(true);
+				expect(result.dataQueryCandidate).toBe(true);
+				expect(services.llm.complete).not.toHaveBeenCalled();
+			});
+		}
+	});
+
+	describe('Prefilter negative cases — LLM IS called for non-matching prose (Batch 3)', () => {
+		const negativePrompts = ["what's the weather", 'tell me a joke', 'how are you'];
+		for (const prompt of negativePrompts) {
+			it(`"${prompt}" → no short-circuit, LLM is called`, async () => {
+				const services = createMockCoreServices();
+				vi.mocked(services.llm.complete).mockResolvedValue('NO_PAS');
+				await classifyPASMessage(prompt, {
+					llm: services.llm,
+					appMetadata: services.appMetadata,
+					logger: services.logger,
+				});
+				expect(services.llm.complete).toHaveBeenCalled();
+			});
+		}
+	});
+
+	it('system prompt contains few-shot examples for settings/data positives (Batch 3 backup)', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO_PAS');
+		await classifyPASMessage('hello', services);
+		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
+		const systemPrompt = (callArgs?.[1]?.systemPrompt ?? '') as string;
+		// Check that at least one few-shot pattern is in the prompt (backup defense).
+		expect(systemPrompt).toMatch(/change my fast model|set my timezone|installed apps/i);
 	});
 });
 

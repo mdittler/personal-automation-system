@@ -205,4 +205,28 @@ describe('runRubricOracle', () => {
 		expect(result.meter.costUsd).toBeCloseTo(0.0021, 6);
 		expect(result.meter.model).toBe('claude-sonnet-4-7');
 	});
+
+	// Codex P1: rubric oracle must pass `responseFormat: 'json'` so local
+	// Gemma judges (which need provider JSON mode to emit valid output)
+	// can score reliably. Pre-fix, Gemma 26b returned "" for every judge call.
+	it("passes responseFormat: 'json' to the judge LLM call", async () => {
+		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}');
+		await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: baseDeps(stub),
+		});
+		expect(stub.lastOptions).toMatchObject({ responseFormat: 'json' });
+	});
+
+	it('returns verdict=error when judge returns empty string (Gemma JSON-mode regression guard)', async () => {
+		const stub = new StubLLMService().queue('');
+		const result = await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: baseDeps(stub),
+		});
+		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.details).toMatch(/empty or invalid/i);
+	});
 });
