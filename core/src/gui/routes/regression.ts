@@ -74,6 +74,27 @@ const VERDICT_ICON: Record<Verdict, DisplayedCase['statusIcon']> = {
 	error: '◆',
 };
 
+/**
+ * Normalize + validate an optional model-spec body field. Returns either the
+ * trimmed string (or `undefined` for "no override") OR an error message ready
+ * for a 400 response. Centralizes the two near-identical try/catch blocks the
+ * POST handler would otherwise need for `modelMatrix` and `judgeModel`.
+ */
+function validateOptionalModelField(
+	raw: unknown,
+	fieldName: string,
+	parser: (v: string) => unknown,
+): { value: string | undefined; error: null } | { value: null; error: string } {
+	try {
+		const v = normalizeOptionalModelSpec(raw);
+		if (v !== undefined) parser(v);
+		return { value: v, error: null };
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return { value: null, error: `invalid ${fieldName}: ${msg}` };
+	}
+}
+
 function buildDisplayedCase(listed: ListedCase, display: DisplayResult | null): DisplayedCase {
 	if (!display) {
 		return {
@@ -310,29 +331,14 @@ export function registerRegressionRoutes(
 				}
 			}
 
-			// REQ-REG-GUI-OV-005 / 002: validate optional model overrides.
-			// Reuses the same parsers the CLI uses (REQ-REG-GUI-OV-003) so the
-			// GUI and CLI accept exactly the same value set.
-			let modelMatrixRaw: string | undefined;
-			let judgeModelRaw: string | undefined;
-			try {
-				modelMatrixRaw = normalizeOptionalModelSpec(body.modelMatrix);
-				if (modelMatrixRaw !== undefined) {
-					parseModelMatrixValue(modelMatrixRaw);
-				}
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return reply.status(400).send({ error: `invalid modelMatrix: ${msg}` });
-			}
-			try {
-				judgeModelRaw = normalizeOptionalModelSpec(body.judgeModel);
-				if (judgeModelRaw !== undefined) {
-					parseJudgeModelValue(judgeModelRaw);
-				}
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return reply.status(400).send({ error: `invalid judgeModel: ${msg}` });
-			}
+			// REQ-REG-GUI-OV-003/005: same parser as the CLI; non-string body
+			// values throw before discovery runs.
+			const mm = validateOptionalModelField(body.modelMatrix, 'modelMatrix', parseModelMatrixValue);
+			if (mm.error) return reply.status(400).send({ error: mm.error });
+			const jm = validateOptionalModelField(body.judgeModel, 'judgeModel', parseJudgeModelValue);
+			if (jm.error) return reply.status(400).send({ error: jm.error });
+			const modelMatrixRaw = mm.value;
+			const judgeModelRaw = jm.value;
 
 			const discovery = await caseDiscovery.discover();
 			if (discovery.error) {

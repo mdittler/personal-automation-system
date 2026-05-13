@@ -16,10 +16,10 @@
 
 import {
 	type ModelMatrix,
-	type ModelRef,
 	parseJudgeModelValue,
 	parseModelMatrixValue,
 } from '@core/services/regression/model-spec.js';
+import type { ModelRef } from '@core/types/llm.js';
 import { VALID_BUCKETS, isValidBucket } from '../shared/types.js';
 
 /** Mirrors `validatePersonaCase`'s ID_RE so a `--rerun=<id>` value cannot

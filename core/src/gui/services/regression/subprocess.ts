@@ -50,30 +50,34 @@ export function validateSpawnArgs(args: readonly string[]): void {
 			i++;
 			continue;
 		}
-		// REQ-REG-GUI-OV-004: --model-matrix and --judge-model (equals form only,
-		// re-validated through the shared parser for defense in depth).
-		if (a.startsWith(ALLOWED_MODEL_MATRIX_PREFIX)) {
-			const v = a.slice(ALLOWED_MODEL_MATRIX_PREFIX.length);
-			try {
-				parseModelMatrixValue(v);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				throw new Error(`spawn allowlist: invalid --model-matrix "${v}": ${msg}`);
-			}
-			continue;
-		}
-		if (a.startsWith(ALLOWED_JUDGE_MODEL_PREFIX)) {
-			const v = a.slice(ALLOWED_JUDGE_MODEL_PREFIX.length);
-			try {
-				parseJudgeModelValue(v);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				throw new Error(`spawn allowlist: invalid --judge-model "${v}": ${msg}`);
-			}
-			continue;
-		}
+		// REQ-REG-GUI-OV-004: defense-in-depth re-validation through the same
+		// shared parser the POST handler used.
+		if (revalidatePrefixedArg(a, ALLOWED_MODEL_MATRIX_PREFIX, parseModelMatrixValue)) continue;
+		if (revalidatePrefixedArg(a, ALLOWED_JUDGE_MODEL_PREFIX, parseJudgeModelValue)) continue;
 		throw new Error(`spawn allowlist: forbidden arg "${a}"`);
 	}
+}
+
+/**
+ * If `arg` starts with `prefix`, slice off the value, run it through `parser`,
+ * and return `true` (caller should `continue`). Throws a `spawn allowlist:`
+ * error on parser failure. Returns `false` when the arg doesn't match the
+ * prefix, leaving caller to fall through to the next check.
+ */
+function revalidatePrefixedArg(
+	arg: string,
+	prefix: string,
+	parser: (v: string) => unknown,
+): boolean {
+	if (!arg.startsWith(prefix)) return false;
+	const v = arg.slice(prefix.length);
+	try {
+		parser(v);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`spawn allowlist: invalid ${prefix.replace(/=$/, '')} "${v}": ${msg}`);
+	}
+	return true;
 }
 
 export type SpawnProcLike = EventEmitter & {

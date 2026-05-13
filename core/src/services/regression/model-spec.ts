@@ -8,14 +8,19 @@
  * Tightened semantics (REQ-REG-GUI-OV-002): provider/model parts are matched
  * against explicit allow-list regexes. Shell metacharacters, traversal
  * sequences, whitespace, control characters, and HTML payloads are all
- * rejected — closing the defense-in-depth gap Codex flagged on the original
- * "verbatim copy" plan.
+ * rejected.
  */
 
+import type { ModelRef, ModelTier } from '../../types/llm.js';
+
 export const MAX_MODEL_SPEC_CHARS = 256;
+const SINGLE_REF_MAX_CHARS = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
 
 // Provider: lowercase alpha first char, then lowercase alphanumeric + hyphens.
 // Captures real-world identifiers like "anthropic", "openai-compat", "ollama".
+// Deliberately tighter than `llm-usage.ts PROVIDER_ID_PATTERN` (which permits
+// uppercase + underscores) so the regression surface cannot be tricked by
+// case-folding tricks in the spawn allowlist re-validation.
 const PROVIDER_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
 // Model: alphanumeric first char, then alphanumeric + dot/colon/hyphen/underscore.
@@ -23,14 +28,7 @@ const PROVIDER_RE = /^[a-z][a-z0-9-]{0,31}$/;
 // "gemma4:e4b", "gemini-2.0-flash", "gpt-4o".
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-const TIER_NAMES = new Set(['fast', 'standard', 'reasoning'] as const);
-
-export type ModelTier = 'fast' | 'standard' | 'reasoning';
-
-export interface ModelRef {
-	provider: string;
-	model: string;
-}
+const TIER_NAMES: ReadonlySet<ModelTier> = new Set(['fast', 'standard', 'reasoning']);
 
 export type ModelMatrix = Partial<Record<ModelTier, ModelRef>>;
 
@@ -44,9 +42,8 @@ export function parseModelRef(s: string): ModelRef {
 	if (typeof s !== 'string') {
 		throw new TypeError('model ref must be a string');
 	}
-	const singleCap = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
-	if (s.length > singleCap) {
-		throw new RangeError(`model ref exceeds ${singleCap} chars`);
+	if (s.length > SINGLE_REF_MAX_CHARS) {
+		throw new RangeError(`model ref exceeds ${SINGLE_REF_MAX_CHARS} chars`);
 	}
 	const idx = s.indexOf('/');
 	if (idx < 0) {
@@ -155,10 +152,6 @@ export function parseModelMatrixValue(v: string): ModelMatrix {
 export function parseJudgeModelValue(v: string): ModelRef {
 	if (typeof v !== 'string') {
 		throw new TypeError('judge-model value must be a string');
-	}
-	const singleCap = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
-	if (v.length > singleCap) {
-		throw new RangeError(`judge-model value exceeds ${singleCap} chars`);
 	}
 	if (!v) {
 		throw new Error('--judge-model requires a value (empty string rejected)');
