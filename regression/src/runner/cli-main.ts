@@ -1,21 +1,20 @@
 #!/usr/bin/env tsx
 /**
- * CLI entry — invoked via `pnpm test:regression`.
+ * CLI entry — `pnpm test:regression`.
  *
- * Peeks at argv to decide between three dep factories:
- *  - `--list`: `buildMetadataDeps()` — loads pas.yaml + resolves real
- *    tier model IDs via `ModelSelector` so the emitted `currentCacheKey`
- *    matches what `runSuite()` would later write to cache (Chunk B.2
- *    Codex C1). Does NOT compose providers or LLMService.
- *  - `--dry-run`: `buildDryRunDeps()` — no env, no real LLM, just enough
- *    to load cases and render an estimate.
- *  - otherwise: `buildProductionDeps()` — loads pas.yaml + composes the
- *    real LLMService stack (requires production env vars).
+ * Peeks at argv to pick the dep factory:
+ *  - `--list`     → `buildMetadataDeps()`: resolves real tier IDs without
+ *                   composing providers, so emitted `currentCacheKey`s match
+ *                   what `runSuite()` would write to cache.
+ *  - `--dry-run`  → `buildDryRunDeps()`: no env, no LLM, estimate only.
+ *  - otherwise    → `buildProductionDeps()`: real LLMService stack.
  *
- * Also peeks at argv for `--model-matrix=<list>` and `--judge-model=<ref>`
- * so the chatbot env factory can capture the tier override at factory-build
- * time (Task 12). Both `--flag=value` and `--flag value` forms are
- * supported.
+ * Also peeks at `--model-matrix` / `--judge-model` so the chatbot env factory
+ * captures the tier override at factory-build time.
+ *
+ * Manifest defaults (runId + manifestDir) are resolved by `runner-options.ts`
+ * — kept here as a thin wrapper so the precedence + DATA_DIR logic is
+ * unit-testable without the top-level-await dance.
  */
 
 import { buildTierOverrideFromCli, parseCliArgs } from './args.js';
@@ -28,6 +27,7 @@ import {
 	buildProductionDeps,
 } from './build-deps.js';
 import { runCli } from './index.js';
+import { resolveManifestDefaults } from './runner-options.js';
 
 // Silence dotenv's `[dotenv@x.y.z] injecting env (N) from .env` banner so
 // stdout is strictly NDJSON whenever `--json` is set. Honour an explicit
@@ -50,7 +50,14 @@ try {
 } catch {
 	// Surface the parse error inside `runCli` (which prints HELP_TEXT). For
 	// the peek-and-build phase, fall back to an empty CliOptions.
-	peeked = { dryRun: false, json: false, help: false, listOnly: false, noCache: false };
+	peeked = {
+		dryRun: false,
+		json: false,
+		help: false,
+		listOnly: false,
+		noCache: false,
+		noManifest: false,
+	};
 }
 
 // Combine --model-matrix and --judge-model into a single tier override.
@@ -75,7 +82,12 @@ if ((isDryRun || isList) && peeked.judgeModel) {
 	deps = applyJudgeModelOverride(deps, peeked.judgeModel);
 }
 
-const { exitCode } = await runCli(argv, deps);
+// Resolve manifest defaults BEFORE runCli so pure CLI sweeps (no --run-id)
+// still write a RunManifest the GUI leaderboard can pick up. --list/--dry-run
+// don't dispatch, so the manifest write inside runSuite is naturally a no-op.
+const manifestDefaults = resolveManifestDefaults(peeked, process.env, deps.repoRoot);
+
+const { exitCode } = await runCli(argv, deps, undefined, manifestDefaults);
 // Drain stdout before exiting. On POSIX, `process.stdout` is async when piped
 // (which is how the GUI subprocess + tests consume `--list` NDJSON), so calling
 // `process.exit()` immediately after the final `write()` can truncate buffered

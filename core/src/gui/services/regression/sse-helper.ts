@@ -1,20 +1,15 @@
 /**
- * Fastify SSE helper (Codex I8).
+ * Fastify SSE helper. Canonical implementation — no reference pattern
+ * elsewhere in `core/src/gui/`.
  *
- * No reference SSE pattern exists elsewhere in `core/src/gui/`, so this
- * module is the canonical implementation. The contract:
+ * `openSseStream` hijacks the reply, writes SSE headers + an initial
+ * `retry:` directive, registers cleanup on close/error, and starts a
+ * keep-alive interval. `writeSseEvent` writes one frame; the optional
+ * `id` is what the browser caches as `Last-Event-ID` for reconnect.
+ * `channel.close()` is idempotent.
  *
- *   1. `openSseStream(request, reply, opts)` — hijacks the reply, writes
- *      SSE headers, registers a `request.raw.on('close')` cleanup, and
- *      starts a keep-alive interval. Returns an `SseChannel`.
- *   2. `writeSseEvent(channel, event)` — writes one SSE frame
- *      (`event: <type>\ndata: <single-line-json>\n\n`).
- *   3. `channel.close()` — clears the keep-alive interval and ends the
- *      raw response. Idempotent. Subsequent `writeSseEvent` calls are
- *      no-ops.
- *
- * `data:` values are `JSON.stringify`-ed so embedded newlines become
- * `\n` escapes and the SSE frame remains single-line per the spec.
+ * 15s keep-alive is half the typical reverse-proxy idle window
+ * (30–60s); the comment ping is a single byte so wire cost is trivial.
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -37,7 +32,8 @@ export interface OpenSseOptions {
 	onClose?: () => void;
 }
 
-const DEFAULT_KEEPALIVE_MS = 25_000;
+export const DEFAULT_KEEPALIVE_MS = 15_000;
+const RETRY_AFTER_MS = 3000;
 
 export function openSseStream(
 	request: FastifyRequest,
@@ -57,6 +53,14 @@ export function openSseStream(
 		Connection: 'keep-alive',
 		'X-Accel-Buffering': 'no',
 	});
+
+	// Initial retry directive: browsers cache it for the lifetime of the
+	// EventSource and reuse across every built-in reconnect.
+	try {
+		raw.write(`retry: ${RETRY_AFTER_MS}\n\n`);
+	} catch {
+		/* connection already gone — cleanup runs via request close/error listeners */
+	}
 
 	let closed = false;
 	const keepAliveMs = options.keepAliveMs ?? DEFAULT_KEEPALIVE_MS;
@@ -105,6 +109,9 @@ export function openSseStream(
 export interface SseEvent {
 	type: string;
 	data: unknown;
+	/** Browser caches this as `Last-Event-ID` for reconnect. Omit for
+	 *  synthetic control frames like `gap`. */
+	id?: number;
 }
 
 export function writeSseEvent(channel: SseChannel, event: SseEvent): void {
@@ -112,5 +119,6 @@ export function writeSseEvent(channel: SseChannel, event: SseEvent): void {
 	// JSON.stringify ensures embedded newlines become `\n` so the SSE
 	// frame remains a single `data:` line per the spec.
 	const payload = JSON.stringify(event.data ?? null);
-	channel.write(`event: ${event.type}\ndata: ${payload}\n\n`);
+	const idLine = event.id !== undefined ? `id: ${event.id}\n` : '';
+	channel.write(`${idLine}event: ${event.type}\ndata: ${payload}\n\n`);
 }

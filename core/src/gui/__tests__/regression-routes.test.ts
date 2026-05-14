@@ -63,6 +63,7 @@ function makeHouseholdService(): HouseholdService {
 const HEX64 = (c: string): string => c.repeat(64);
 
 function makeListedCase(overrides: Partial<ListedCase> = {}): ListedCase {
+	const inputs = overrides.inputs ?? [{ label: 'i1', payload: 'hi', expected: { intent: 'x' } }];
 	return {
 		caseId: 'demo-case',
 		bucket: 'routing',
@@ -70,7 +71,8 @@ function makeListedCase(overrides: Partial<ListedCase> = {}): ListedCase {
 		description: 'a demo case',
 		oracle: 'structural',
 		coverage: ['x.ts'],
-		inputs: [{ label: 'i1', payload: 'hi', expected: { intent: 'x' } }],
+		inputs,
+		inputCount: overrides.inputCount ?? inputs.length,
 		budgetUsd: 0.05,
 		currentCacheKey: HEX64('a'),
 		...overrides,
@@ -508,12 +510,8 @@ describe('GET /gui/regression — model-override form inputs (REQ-REG-GUI-OV-008
 			const res = await getAuthed(app, '/gui/regression?view=compare');
 			// One of: <label>Model matrix override<input ...></label>
 			//       or <input ... aria-label="Model matrix override">
-			expect(res.body).toMatch(
-				/aria-label="Model matrix override"|>\s*Model matrix override\s*</i,
-			);
-			expect(res.body).toMatch(
-				/aria-label="Judge model override"|>\s*Judge model override\s*</i,
-			);
+			expect(res.body).toMatch(/aria-label="Model matrix override"|>\s*Model matrix override\s*</i);
+			expect(res.body).toMatch(/aria-label="Judge model override"|>\s*Judge model override\s*</i);
 		} finally {
 			await app.close();
 		}
@@ -809,6 +807,27 @@ describe('GET /gui/regression — client wiring (Codex P1)', () => {
 			await app.close();
 		}
 	});
+
+	it('client wrapper includes reconnect + gap + 3-strike banner wiring (REQ-REG-GUI-V2-021/024)', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.statusCode).toBe(200);
+			// Open handler resets failure counter on successful reconnect.
+			expect(res.body).toMatch(/addEventListener\(['"]open['"]/);
+			// Gap event triggers a full page reload.
+			expect(res.body).toMatch(/addEventListener\(['"]gap['"]/);
+			expect(res.body).toContain('window.location.reload');
+			// Error handler increments failureCount and shows the "Lost connection" banner.
+			expect(res.body).toMatch(/addEventListener\(['"]error['"]/);
+			expect(res.body).toContain('failureCount');
+			expect(res.body).toContain('Lost connection');
+			// Terminal-state guard prevents reconnect after run end.
+			expect(res.body).toContain('terminalReached');
+		} finally {
+			await app.close();
+		}
+	});
 });
 
 describe('GET /gui/regression/estimate', () => {
@@ -833,6 +852,76 @@ describe('GET /gui/regression/estimate', () => {
 			expect(body.perBucketUsd.routing).toBeGreaterThan(0);
 			expect(body.perBucketUsd.receipt).toBe(0);
 			expect(body.ceilingUsd).toBe(5);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('returns totalInputs (REQ-REG-GUI-V2-023) — all-bucket query', async () => {
+		// Two cases with 4 + 3 inputs = 7 total. Mirrors FOOD_PERSONAS fan-out
+		// where the per-case input count is higher than 1.
+		const inputs4 = [1, 2, 3, 4].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const inputs3 = [1, 2, 3].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing', inputs: inputs4 }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing', inputs: inputs3 }),
+			],
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({ method: 'GET', url: '/gui/regression/estimate', cookies });
+			const body = JSON.parse(res.body) as { totalCases: number; totalInputs: number };
+			expect(body.totalCases).toBe(2);
+			expect(body.totalInputs).toBe(7);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('returns totalInputs (REQ-REG-GUI-V2-023) — bucket-filtered query', async () => {
+		const inputs5 = [1, 2, 3, 4, 5].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const inputs2 = [1, 2].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing', inputs: inputs5 }),
+				makeListedCase({
+					caseId: 'p1',
+					bucket: 'receipt',
+					routingTarget: undefined,
+					inputs: inputs2,
+				}),
+			],
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/regression/estimate?bucket=receipt',
+				cookies,
+			});
+			const body = JSON.parse(res.body) as { totalCases: number; totalInputs: number };
+			expect(body.totalCases).toBe(1);
+			expect(body.totalInputs).toBe(2);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Run tab renders "N cases / M inputs" summary (REQ-REG-GUI-V2-023)', async () => {
+		const inputs4 = [1, 2, 3, 4].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const inputs3 = [1, 2, 3].map((i) => ({ payload: `p${i}`, expected: {} }));
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing', inputs: inputs4 }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing', inputs: inputs3 }),
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=run');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('data-testid="case-input-count"');
+			expect(res.body).toMatch(/2 cases \/ 7 inputs/);
 		} finally {
 			await app.close();
 		}

@@ -1,15 +1,23 @@
 <script>
-// Regression suite client wiring (Codex P1). Intercepts Run / Re-run / Force-fresh
-// form submits, runs the estimate → confirm → POST /runs flow, opens EventSource,
-// fetches per-case row partials on case-completed, renders terminal banners, and
-// exposes a Cancel button while the run is active. Pure vanilla JS — htmx auto-
-// injects the CSRF header on hx-* requests but we make our own POSTs so we set
-// X-CSRF-Token explicitly.
+// Regression suite client wiring. Intercepts the run forms, runs the
+// estimate → confirm → POST /runs flow, opens EventSource, fetches per-case
+// row partials on case-completed, renders terminal banners, exposes a Cancel
+// button. Vanilla JS — htmx auto-injects CSRF on hx-* requests but our own
+// POSTs set X-CSRF-Token explicitly.
+//
+// Reconnect: the browser's EventSource auto-retries using the server's
+// `retry:` directive and sends `Last-Event-ID` on each reconnect so missed
+// events replay. After 3 consecutive `error`s with no intervening `open`,
+// show "Lost connection — reload". A `gap` event (server's ring buffer
+// evicted the requested id) reloads the page. Terminal events close the
+// EventSource explicitly so no reconnect fires after the run ends.
 (function () {
 	const live = document.getElementById('regression-live');
 	if (!live) return;
 	let es = null;
 	let activeRunId = null;
+	let failureCount = 0;
+	let terminalReached = false;
 
 	function csrfHeader() {
 		const meta = document.querySelector('meta[name="csrf-token"]');
@@ -30,12 +38,14 @@
 			'<strong>Run ' + runId.slice(0, 8) + '</strong> — <span class="run-state">starting</span> ' +
 			'<button type="button" class="cancel-btn outline secondary">Cancel</button>' +
 			'<div class="terminal-msg" hidden></div>' +
+			'<div class="connection-msg" hidden></div>' +
 			'</article>';
 		const btn = live.querySelector('.cancel-btn');
 		btn.addEventListener('click', cancelActive);
 	}
 
 	function showTerminal(state, msg) {
+		terminalReached = true;
 		setState(state);
 		const btn = live.querySelector('.cancel-btn');
 		if (btn) btn.disabled = true;
@@ -48,10 +58,55 @@
 		if (es) { es.close(); es = null; }
 	}
 
+	function showLostConnection() {
+		const m = live.querySelector('.connection-msg');
+		if (!m) return;
+		m.hidden = false;
+		m.className = 'connection-msg connection-lost';
+		// Built via DOM APIs to keep the page CSP-friendly (no inline script,
+		// no javascript: URLs) and to avoid an innerHTML write that future
+		// linters might flag.
+		m.textContent = '';
+		m.appendChild(document.createTextNode('Lost connection — '));
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'reload-btn outline';
+		btn.textContent = 'Reload';
+		btn.addEventListener('click', function () { window.location.reload(); });
+		m.appendChild(btn);
+	}
+
 	function attach(runId, eventsUrl) {
 		showRunBanner(runId);
+		failureCount = 0;
+		terminalReached = false;
 		if (es) es.close();
 		es = new EventSource(eventsUrl);
+		es.addEventListener('open', function () {
+			// Successful (re)connection — reset the failure counter so a single
+			// transient blip during a long run doesn't trip the 3-strike banner.
+			failureCount = 0;
+		});
+		es.addEventListener('gap', function () {
+			// Server-side ring buffer evicted the requested Last-Event-ID.
+			// Full reload re-renders the page with current cached state and
+			// re-attaches with no Last-Event-ID (full replay from current log).
+			window.location.reload();
+		});
+		es.addEventListener('error', function () {
+			if (terminalReached) {
+				// EventSource may fire `error` after we close it on a terminal
+				// event. Ignore — we don't want to reconnect or show a banner.
+				return;
+			}
+			failureCount += 1;
+			if (failureCount >= 3) {
+				showLostConnection();
+				if (es) { es.close(); es = null; }
+			}
+			// Otherwise let the browser auto-retry using the server's `retry:`
+			// directive (3000ms).
+		});
 		es.addEventListener('case-completed', async function (e) {
 			let payload;
 			try { payload = JSON.parse(e.data); } catch (_) { return; }
@@ -164,7 +219,13 @@
 			const total = est && typeof est.totalUsd === 'number' ? est.totalUsd.toFixed(2) : '?';
 			const cap = est && typeof est.ceilingUsd === 'number' ? est.ceilingUsd.toFixed(2) : '?';
 			const cases = est && typeof est.totalCases === 'number' ? est.totalCases : '?';
-			if (!confirm('Run ' + cases + ' case(s)? Estimated cost ≈ $' + total + ' (cap $' + cap + ').')) {
+			const inputs = est && typeof est.totalInputs === 'number' ? est.totalInputs : null;
+			// REQ-REG-GUI-V2-023: show both case + input counts so operators know
+			// the real dispatch fan-out (FOOD_PERSONAS = 27 cases × ~4 inputs).
+			const summary = inputs !== null
+				? 'Run ' + inputs + ' input(s) across ' + cases + ' case(s)?'
+				: 'Run ' + cases + ' case(s)?';
+			if (!confirm(summary + ' Estimated cost ≈ $' + total + ' (cap $' + cap + ').')) {
 				return;
 			}
 		} catch (_) {

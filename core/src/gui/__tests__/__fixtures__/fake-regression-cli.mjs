@@ -33,12 +33,14 @@ switch (mode) {
 			oracle: 'structural',
 			coverage: ['x.ts'],
 			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 1,
 			budgetUsd: 0.05,
 			currentCacheKey: 'a'.repeat(64),
 		});
 		emit({
 			type: 'case-list-end',
 			totalCases: 1,
+			totalInputs: 1,
 			modelIds: { fast: 'fake-fast', standard: 'fake-std', reasoning: null },
 		});
 		process.exit(0);

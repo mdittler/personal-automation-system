@@ -82,7 +82,9 @@ interface CaseListLine {
 	coverage?: string[];
 	currentCacheKey?: string;
 	inputs?: Array<{ label?: string; payload: unknown; expected: unknown }>;
+	inputCount?: number;
 	totalCases?: number;
+	totalInputs?: number;
 	modelIds?: TierModelSnapshot;
 }
 
@@ -162,6 +164,39 @@ describe('runCli --list', () => {
 		expect(end).toBeDefined();
 		expect(end?.totalCases).toBe(1);
 		expect(end?.modelIds).toEqual(MODEL_IDS);
+	});
+
+	it('emits inputCount per case (REQ-REG-GUI-V2-023)', async () => {
+		const chunks: string[] = [];
+		await runCli(['--list', '--json'], buildListDeps(), { stdout: (s) => chunks.push(s) });
+		const lines = parseLines(chunks.join(''));
+		const entry = lines.find((l) => l.type === 'case-list-entry');
+		expect(entry?.inputCount).toBe(2);
+		expect(entry?.inputCount).toBe(entry?.inputs?.length);
+	});
+
+	it('emits totalInputs on case-list-end equal to sum of per-case inputCount (REQ-REG-GUI-V2-023)', async () => {
+		const chunks: string[] = [];
+		await runCli(['--list', '--json'], buildListDeps(), { stdout: (s) => chunks.push(s) });
+		const lines = parseLines(chunks.join(''));
+		const entries = lines.filter((l) => l.type === 'case-list-entry');
+		const end = lines.find((l) => l.type === 'case-list-end');
+		const sumInputCount = entries.reduce((acc, e) => acc + (e.inputCount ?? 0), 0);
+		expect(end?.totalInputs).toBe(sumInputCount);
+		// Specific to the SAMPLE_CASE_SRC: 1 case × 2 inputs = 2.
+		expect(end?.totalInputs).toBe(2);
+	});
+
+	it('totalInputs is 0 when there are zero cases (empty casesDir)', async () => {
+		await rm(join(casesDir, 'demo.case.ts'));
+		const chunks: string[] = [];
+		const result = await runCli(['--list', '--json'], buildListDeps(), {
+			stdout: (s) => chunks.push(s),
+		});
+		expect(result.exitCode).toBe(0);
+		const lines = parseLines(chunks.join(''));
+		const end = lines.find((l) => l.type === 'case-list-end');
+		expect(end?.totalInputs).toBe(0);
 	});
 
 	it('emits zero case-result lines (no dispatch)', async () => {

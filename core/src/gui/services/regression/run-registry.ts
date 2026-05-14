@@ -1,20 +1,14 @@
 /**
  * In-memory registry of regression-suite runs.
  *
- * - Single-active-run enforcement: a second `createRun()` while one is
- *   alive throws `RegistrationConflictError` exposing the active runId
- *   so the GUI can redirect to the live SSE stream instead of erroring.
- * - Per-run event buffer: new SSE clients attaching mid-run replay the
- *   full event sequence (orchestrator is sequential — replay order
- *   matches dispatch order).
- * - Terminal-state inference (Codex C3): `status` transitions from
- *   `running` → `complete | gate-failed | failed | cancelled` based on
- *   the final emitted event.
- * - Idempotent cancel + GC + shutdown.
- *
- * The registry is process-local; restart drops in-flight runs (logged
- * as accepted risk in docs/open-items.md). Cached per-case results
- * survive on disk per REQ-REG-010.
+ * Single-active-run enforcement, ring-buffered event log for SSE reconnect
+ * via `Last-Event-ID`, terminal-state inference, idempotent cancel/GC/shutdown.
+ * Process-local: restart drops in-flight runs (cached per-case results on
+ * disk survive). `getEventsAfter` returns events strictly newer than the
+ * client's last id, or `{gap: true}` if the buffer has evicted the next
+ * expected id; `attach` replays the buffer then registers for live events,
+ * `attachLive` skips the replay so the SSE route can replay-then-attach
+ * without double-dispatching on reconnect.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -36,14 +30,32 @@ export type RunStatus =
 	| 'failed'
 	| 'cancelled';
 
+export const TERMINAL_EVENT_TYPES = [
+	'complete',
+	'gate-failed',
+	'failed',
+	'cancelled',
+] as const;
+
+export type TerminalEventType = (typeof TERMINAL_EVENT_TYPES)[number];
+
+export function isTerminalEventType(t: RegressionEvent['type']): t is TerminalEventType {
+	return (TERMINAL_EVENT_TYPES as readonly string[]).includes(t);
+}
+
+export type RegistryListener = (event: RegressionEvent, id: number) => void;
+
+export const MAX_EVENT_LOG_ENTRIES = 1000;
+
 export interface RunState {
 	runId: string;
 	status: RunStatus;
 	startedAt: number;
 	endedAt?: number;
 	args: readonly string[];
-	events: RegressionEvent[];
-	listeners: Set<(e: RegressionEvent) => void>;
+	eventLog: Array<{ id: number; event: RegressionEvent }>;
+	nextEventId: number;
+	listeners: Set<RegistryListener>;
 	abort: AbortController;
 	whenComplete: Promise<void>;
 }
@@ -62,10 +74,9 @@ interface FakeRunHandleShape {
 export interface CreateRunOptions {
 	args: readonly string[];
 	/**
-	 * Factory invoked once `createRun()` has minted the runId. The third
-	 * argument is the registry-issued runId so the factory can pass it into
-	 * the spawned subprocess (`--run-id=<runId>`) without observing a
-	 * temporal-dead-zone capture of an outer `runId` variable.
+	 * Invoked once `createRun()` has minted the runId. The third argument is
+	 * the registry-issued runId — required so the subprocess can be tagged
+	 * with `--run-id=<runId>` without observing a TDZ-captured outer variable.
 	 */
 	runFactory: (
 		onEvent: (e: RegressionEvent) => void,
@@ -74,46 +85,31 @@ export interface CreateRunOptions {
 	) => Promise<FakeRunHandleShape | undefined> | FakeRunHandleShape | undefined;
 }
 
+export type ReplayResult = Array<{ id: number; event: RegressionEvent }> | { gap: true };
+
 export interface RunRegistry {
 	createRun(opts: CreateRunOptions): Promise<{ runId: string }>;
-	attach(runId: string, listener: (e: RegressionEvent) => void): (() => void) | null;
+	/** Replays the buffered event log to `listener`, then registers for live events. */
+	attach(runId: string, listener: RegistryListener): (() => void) | null;
+	/** Registers `listener` for live events WITHOUT replaying the buffer. */
+	attachLive(runId: string, listener: RegistryListener): (() => void) | null;
+	getEventsAfter(runId: string, lastEventId: number | null): ReplayResult;
 	cancel(runId: string): Promise<void>;
 	get(runId: string): RunState | undefined;
+	isTerminal(runId: string): boolean;
 	gc(opts: { maxAgeMs: number }): void;
 	shutdown(): Promise<void>;
 	waitForCompletion(runId: string): Promise<void>;
 	setNow(fn: () => number): void;
 	/**
-	 * Register a hook that fires once a run reaches a terminal status
-	 * (complete, gate-failed, failed, cancelled). The hook runs after the
-	 * SSE listeners have been dispatched and the registry state has been
-	 * marked terminal. Errors are swallowed so a misbehaving hook cannot
-	 * wedge other listeners.
+	 * Hook fired after a run reaches a terminal status. Runs after SSE
+	 * listeners are dispatched and state is marked terminal. Errors are
+	 * swallowed so a misbehaving hook cannot wedge other hooks.
 	 */
 	onTerminal(hook: (runId: string, status: RunStatus) => void): () => void;
 }
 
-const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set([
-	'complete',
-	'gate-failed',
-	'failed',
-	'cancelled',
-]);
-
-function inferTerminal(event: RegressionEvent): RunStatus | null {
-	switch (event.type) {
-		case 'complete':
-			return 'complete';
-		case 'gate-failed':
-			return 'gate-failed';
-		case 'failed':
-			return 'failed';
-		case 'cancelled':
-			return 'cancelled';
-		default:
-			return null;
-	}
-}
+const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(TERMINAL_EVENT_TYPES);
 
 export function createRunRegistry(options?: { now?: () => number }): RunRegistry {
 	const runs = new Map<string, RunState>();
@@ -122,22 +118,25 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 	let now: () => number = options?.now ?? (() => Date.now());
 
 	function dispatchEvent(state: RunState, event: RegressionEvent): void {
-		state.events.push(event);
+		const id = state.nextEventId++;
+		state.eventLog.push({ id, event });
+		while (state.eventLog.length > MAX_EVENT_LOG_ENTRIES) {
+			state.eventLog.shift();
+		}
 		for (const listener of state.listeners) {
 			try {
-				listener(event);
+				listener(event, id);
 			} catch {
 				/* listener errors do not affect other listeners */
 			}
 		}
-		const terminal = inferTerminal(event);
-		if (terminal) {
+		if (isTerminalEventType(event.type)) {
+			const terminal = event.type as TerminalEventType;
 			state.status = terminal;
 			state.endedAt = now();
 			if (activeRunId === state.runId) activeRunId = null;
-			// Defer hook invocation so a slow hook body (e.g. a manifest disk
-			// read before the auto-summarize kick-off) cannot block the
-			// synchronous SSE listener loop above.
+			// Defer hook invocation so a slow hook body cannot block the
+			// synchronous listener loop above.
 			const runId = state.runId;
 			for (const hook of terminalHooks) {
 				queueMicrotask(() => {
@@ -165,7 +164,8 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 				status: 'starting',
 				startedAt: now(),
 				args,
-				events: [],
+				eventLog: [],
+				nextEventId: 0,
 				listeners: new Set(),
 				abort,
 				whenComplete,
@@ -178,16 +178,13 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 				dispatchEvent(state, event);
 			};
 
-			// Codex P1: if runFactory rejects (e.g. spawnRegression throws on a
-			// bad cliPath), clear `activeRunId`, mark the state failed, resolve
-			// `whenComplete`, then rethrow. Without this, the registry would
-			// leave `activeRunId` set and `whenComplete` pending forever,
-			// wedging subsequent createRun() calls behind a phantom active.
+			// If runFactory rejects (e.g. spawnRegression throws on a bad
+			// cliPath), clear activeRunId + resolve whenComplete before
+			// rethrowing — otherwise subsequent createRun() calls would be
+			// rejected forever by a phantom active run.
 			let handle: FakeRunHandleShape | undefined;
 			try {
-				handle = (await runFactory(onEvent, abort.signal, runId)) as
-					| FakeRunHandleShape
-					| undefined;
+				handle = (await runFactory(onEvent, abort.signal, runId)) as FakeRunHandleShape | undefined;
 			} catch (err) {
 				state.status = 'failed';
 				state.endedAt = now();
@@ -200,10 +197,10 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 				(handle as FakeRunHandleShape).whenComplete.then(resolveComplete, resolveComplete);
 			} else {
 				// No external completion signal — resolve once a terminal event
-				// fires. Check the event directly rather than state.status, since
-				// listeners are invoked before dispatchEvent updates status.
+				// fires. Check the event directly: listeners run before
+				// dispatchEvent updates state.status.
 				const detach = (e: RegressionEvent): void => {
-					if (inferTerminal(e)) {
+					if (isTerminalEventType(e.type)) {
 						state.listeners.delete(detach);
 						resolveComplete();
 					}
@@ -217,9 +214,31 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 		attach(runId, listener) {
 			const state = runs.get(runId);
 			if (!state) return null;
-			for (const event of state.events) listener(event);
+			for (const { id, event } of state.eventLog) listener(event, id);
 			state.listeners.add(listener);
 			return () => state.listeners.delete(listener);
+		},
+
+		attachLive(runId, listener) {
+			const state = runs.get(runId);
+			if (!state) return null;
+			state.listeners.add(listener);
+			return () => state.listeners.delete(listener);
+		},
+
+		getEventsAfter(runId, lastEventId) {
+			const state = runs.get(runId);
+			if (!state) return [];
+			if (lastEventId === null || !Number.isFinite(lastEventId) || lastEventId < 0) {
+				return state.eventLog.slice();
+			}
+			// Gap when the next expected event has been evicted from the ring
+			// buffer: the client cannot catch up by appending and needs a reload.
+			const first = state.eventLog[0];
+			if (first !== undefined && first.id > lastEventId + 1) {
+				return { gap: true };
+			}
+			return state.eventLog.filter((entry) => entry.id > lastEventId);
 		},
 
 		async cancel(runId) {
@@ -233,6 +252,11 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 
 		get(runId) {
 			return runs.get(runId);
+		},
+
+		isTerminal(runId) {
+			const state = runs.get(runId);
+			return state !== undefined && TERMINAL_STATUSES.has(state.status);
 		},
 
 		gc({ maxAgeMs }) {

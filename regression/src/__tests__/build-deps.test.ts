@@ -24,6 +24,7 @@ import {
 	buildDryRunDeps,
 	buildMetadataDeps,
 	composeLLMService,
+	findRepoRoot,
 	resolveTierModelIds,
 } from '../runner/build-deps.js';
 
@@ -329,5 +330,30 @@ describe('composeLLMService — cost-tracker delta', () => {
 		// about: the LLM call completes and CostTracker.record() runs without
 		// throwing. Non-zero cost is provider-pricing-dependent.
 		expect(after).toBeGreaterThanOrEqual(before);
+	});
+});
+
+describe('findRepoRoot — workspace cwd independence', () => {
+	const originalCwd = process.cwd();
+	afterEach(() => {
+		process.chdir(originalCwd);
+	});
+
+	it('returns a path containing config/pas.yaml regardless of cwd', async () => {
+		const root = findRepoRoot();
+		const { existsSync } = await import('node:fs');
+		expect(existsSync(join(root, 'config', 'pas.yaml'))).toBe(true);
+	});
+
+	it('returns the same root from the regression workspace cwd', async () => {
+		const rootFromRepo = findRepoRoot();
+		process.chdir(join(rootFromRepo, 'regression'));
+		expect(findRepoRoot()).toBe(rootFromRepo);
+	});
+
+	it('returns the same root from a deeply nested cwd', async () => {
+		const rootFromRepo = findRepoRoot();
+		process.chdir(join(rootFromRepo, 'regression', 'src', 'runner'));
+		expect(findRepoRoot()).toBe(rootFromRepo);
 	});
 });

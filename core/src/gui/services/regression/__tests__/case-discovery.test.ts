@@ -55,7 +55,7 @@ function fakeSpawn(opts: {
 	};
 }
 
-const VALID_ENTRY = (caseId: string): string =>
+const VALID_ENTRY = (caseId: string, inputCount = 1): string =>
 	JSON.stringify({
 		type: 'case-list-entry',
 		caseId,
@@ -64,11 +64,19 @@ const VALID_ENTRY = (caseId: string): string =>
 		description: `${caseId} desc`,
 		oracle: 'structural',
 		coverage: ['regression/src/cases/x.case.ts'],
-		inputs: [{ payload: 'p', expected: { intent: 'x' } }],
+		inputs: Array.from({ length: inputCount }, (_, i) => ({
+			payload: `p${i}`,
+			expected: { intent: 'x' },
+		})),
+		inputCount,
 		budgetUsd: 0.05,
 		currentCacheKey: 'a'.repeat(64),
 	});
 
+// Note: `totalInputs` is intentionally omitted from this default fixture so
+// pre-totalInputs tests don't trigger the new sum-of-inputCount sanity check.
+// Tests asserting REQ-REG-GUI-V2-023 use `VALID_END_WITH(cases, inputs)` to
+// pin both fields and exercise the mismatch detection.
 const VALID_END = JSON.stringify({
 	type: 'case-list-end',
 	totalCases: 1,
@@ -214,12 +222,14 @@ describe('case-discovery — no TTL on cacheKey (C4)', () => {
 						oracle: 'structural',
 						coverage: ['x.ts'],
 						inputs: [{ payload: 'p', expected: {} }],
+						inputCount: 1,
 						budgetUsd: 0.05,
 						currentCacheKey: key,
 					}),
 					JSON.stringify({
 						type: 'case-list-end',
 						totalCases: 1,
+						totalInputs: 1,
 						modelIds: { fast: 'f', standard: 's', reasoning: null },
 					}),
 				],
@@ -280,9 +290,212 @@ describe('ListedCase shape', () => {
 			oracle: 'structural',
 			coverage: ['x'],
 			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 1,
 			budgetUsd: 0.05,
 			currentCacheKey: 'a'.repeat(64),
 		};
 		expect(minimal.caseId).toBe('a');
 	});
 });
+
+describe('case-discovery — inputCount + totalInputs (REQ-REG-GUI-V2-023)', () => {
+	it('parses inputCount per case and propagates it to ListedCase', async () => {
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [VALID_ENTRY('case-a', 3), VALID_END_WITH(1, 3)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toBeUndefined();
+		expect(out.cases[0]?.inputCount).toBe(3);
+	});
+
+	it('parses totalInputs on the terminator and exposes it on DiscoveryResult', async () => {
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [VALID_ENTRY('case-a', 4), VALID_ENTRY('case-b', 2), VALID_END_WITH(2, 6)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.totalInputs).toBe(6);
+		expect(out.totalCases).toBe(2);
+	});
+
+	it('fails closed when inputCount disagrees with inputs.length (fail-closed C11)', async () => {
+		const skewed = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'skewed',
+			bucket: 'routing',
+			routingTarget: 'food-shadow',
+			description: 'd',
+			oracle: 'structural',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }], // length=1
+			inputCount: 5, // claims 5 — mismatch
+			budgetUsd: 0.05,
+			currentCacheKey: 'a'.repeat(64),
+		});
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [skewed, VALID_END_WITH(1, 1)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toMatch(/inputCount.*disagrees/);
+		expect(out.cases).toEqual([]);
+	});
+
+	it('fails closed when totalInputs disagrees with sum of inputCount', async () => {
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [
+					VALID_ENTRY('case-a', 3),
+					VALID_END_WITH(1, 999), // wrong total
+				],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toMatch(/totalInputs.*disagrees/);
+		expect(out.cases).toEqual([]);
+	});
+
+	it('fails closed when inputCount is missing entirely', async () => {
+		const noCount = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'no-count',
+			bucket: 'routing',
+			routingTarget: 'food-shadow',
+			description: 'd',
+			oracle: 'structural',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }],
+			// no inputCount
+			budgetUsd: 0.05,
+			currentCacheKey: 'a'.repeat(64),
+		});
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [noCount, VALID_END_WITH(1, 1)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toMatch(/inputCount missing/);
+	});
+
+	it('fails closed when inputCount is non-integer (e.g. 2.5)', async () => {
+		const float = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'float',
+			bucket: 'routing',
+			routingTarget: 'food-shadow',
+			description: 'd',
+			oracle: 'structural',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 2.5,
+			budgetUsd: 0.05,
+			currentCacheKey: 'a'.repeat(64),
+		});
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [float, VALID_END_WITH(1, 1)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toMatch(/inputCount.*integer/);
+	});
+
+	it('accumulates multiple validation errors instead of surfacing only the last', async () => {
+		// Three malformed entries in a row — without accumulation we'd only see
+		// the last error and operators would chase the wrong drift symptom.
+		const noOracle = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'a',
+			bucket: 'routing',
+			routingTarget: 'food-shadow',
+			description: 'd',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 1,
+			budgetUsd: 0.05,
+			currentCacheKey: 'a'.repeat(64),
+		});
+		const noDescription = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'b',
+			bucket: 'routing',
+			oracle: 'structural',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 1,
+			budgetUsd: 0.05,
+			currentCacheKey: 'a'.repeat(64),
+		});
+		const noCacheKey = JSON.stringify({
+			type: 'case-list-entry',
+			caseId: 'c',
+			bucket: 'routing',
+			description: 'd',
+			oracle: 'structural',
+			coverage: ['x.ts'],
+			inputs: [{ payload: 'p', expected: {} }],
+			inputCount: 1,
+			budgetUsd: 0.05,
+		});
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [noOracle, noDescription, noCacheKey, VALID_END_WITH(3, 3)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toBeDefined();
+		expect(out.error).toContain('oracle missing');
+		expect(out.error).toContain('description missing');
+		expect(out.error).toContain('currentCacheKey missing or invalid');
+	});
+
+	it('caps accumulated validation errors at 5 with an overflow marker', async () => {
+		const malformedEntries = Array.from({ length: 8 }, (_, i) =>
+			JSON.stringify({
+				type: 'case-list-entry',
+				caseId: `case-${i}`,
+				bucket: 'routing',
+				description: 'd',
+				oracle: 'structural',
+				coverage: ['x.ts'],
+				inputs: [{ payload: 'p', expected: {} }],
+				inputCount: 1,
+				budgetUsd: 0.05,
+				// missing currentCacheKey → 8 instances of the same error
+			}),
+		);
+		const disc = createCaseDiscovery({
+			spawnFn: fakeSpawn({
+				stdoutLines: [...malformedEntries, VALID_END_WITH(8, 8)],
+				exitCode: 0,
+			}),
+		});
+		const out = await disc.discover();
+		expect(out.error).toBeDefined();
+		expect(out.error).toContain('additional entries beyond the first 5');
+		// First 5 errors appear; the 6th/7th/8th do NOT.
+		const matches = out.error!.match(/currentCacheKey missing or invalid/g);
+		expect(matches?.length).toBe(5);
+	});
+});
+
+function VALID_END_WITH(totalCases: number, totalInputs: number): string {
+	return JSON.stringify({
+		type: 'case-list-end',
+		totalCases,
+		totalInputs,
+		modelIds: { fast: 'f', standard: 's', reasoning: null },
+	});
+}
