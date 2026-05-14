@@ -21,7 +21,7 @@ PAS is under active development. The core infrastructure is stable, with a large
 - **Telegram bot interface** — send messages, commands, and photos to interact with your apps
 - **AI-powered routing** — free-text messages are classified and routed to the right app automatically, with grey-zone verification
 - **Multi-provider LLM** — Anthropic Claude, Google Gemini, Ollama (local), and any OpenAI-compatible endpoint, with tier-based routing (`fast` / `standard` / `reasoning`)
-- **Conversational AI fallback** — unmatched messages go to a built-in chatbot with long-term memory (see [Long-Term Memory](#long-term-memory-hermes) below)
+- **Conversational AI fallback** — unmatched messages go to a built-in chatbot with long-term memory (see [Long-Term Memory](#long-term-memory) below)
 - **App ecosystem** — scaffold new apps in minutes, share them as git repos, install with one command
 - **Reports & alerts** — user-defined recurring reports and condition-evaluated alerts with multiple action types (Telegram, webhook, audio, run-report, write-data)
 - **Management GUI** — web dashboard for configuration, LLM model management, cost tracking, settings, data browsing, and the regression test runner
@@ -249,9 +249,11 @@ pnpm test:regression -- --judge-model=anthropic/claude-haiku-4-5
 
 The `/gui/regression` admin page wraps this in a UI — a model-override form, a per-tier leaderboard, auto-generated weakness summaries, and performance-over-time charts. See [`regression/README.md`](regression/README.md) for full detail and [`docs/CREATING_AN_APP.md`](docs/CREATING_AN_APP.md#testing-model-behavior-with-the-regression-suite) for the app-developer perspective.
 
-## Long-Term Memory (Hermes)
+## Long-Term Memory
 
-PAS maintains per-user long-term memory on the local filesystem — no external service required. This layer is called **Hermes**. Each conversation is a Markdown transcript; a derived SQLite + FTS5 index powers full-text recall across sessions.
+PAS maintains per-user long-term memory on the local filesystem — no external service required. Each conversation is a Markdown transcript; a derived SQLite + FTS5 index powers full-text recall across sessions.
+
+The initial design was adapted from an evaluation of [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent) — its memory framework is the conceptual starting point for the layered snapshot/recall model below. (PAS's internal phase work on this system is codenamed "Hermes" after that inspiration; it is not a product name.)
 
 ### Layer model
 
@@ -314,6 +316,7 @@ Natural-language relative dates ("last week", "in March") are also understood by
 
 | Resource | License | What we borrowed |
 |---|---|---|
+| [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent) | (cited as influence) | Initial conceptual framework for the long-term memory system — the layered snapshot/recall model was adapted from an evaluation of this repo |
 | [Vercel AI SDK (`ai`)](https://github.com/vercel/ai) | Apache 2.0 | Tool-call substrate: `ToolLoopAgent`, per-step cost reservation, `activeTools` preselection (chatbot-primary phase) |
 | [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) | MIT | Local vector index virtual table for semantic recall (future) |
 | [Mert Cobanov — memory.cobanov.dev](https://memory.cobanov.dev/) | (cited as influence) | Working/episodic/semantic/procedural memory taxonomy; RRF hybrid retrieval; HyDE; supersession governance |
