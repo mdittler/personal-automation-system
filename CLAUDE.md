@@ -41,6 +41,7 @@ A local-first home automation platform where users interact through a single Tel
 - **Chatbot app** — full conversational AI fallback. Per-user conversation history (20 turns), context store integration, graceful LLM failure degradation
 - **`/ask` command** — app-aware system prompt with AppMetadataService + AppKnowledgeBase + SystemInfoService
 - **Model journal** — per-model markdown files at `data/model-journal/{model-slug}.md`, `<model-journal>` tag extraction from LLM responses
+- **"Hermes" is a codename, not a product name** — the long-term memory system's phase work (`Hermes P1`–`P9` etc., spec filenames, commit history) is codenamed "Hermes" after [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent), the repo whose memory framework was the conceptual starting point. The system itself is just "long-term memory" / the ConversationService stack. Public-facing docs should not call the system "Hermes"; internal phase labels stay as historical codenames.
 
 ### Reports, Alerts & Automation
 - **Reports** — user-defined recurring reports: 4 section types (changes, app-data, context, custom), optional LLM summary, Telegram delivery
