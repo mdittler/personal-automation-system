@@ -8,35 +8,39 @@ Home automation platforms tend to fall into two camps: monoliths that centralize
 
 ## What's distinctive
 
-Apps are loaded as TypeScript modules validated against a YAML manifest contract — they declare their intents, commands, schedules, and photo capabilities, and the infrastructure handles routing, cost tracking, and data isolation. All data is stored as markdown and YAML files on disk with no database, readable directly in Obsidian. External integrations are handled through n8n webhooks rather than per-app connectors. LLM access is multi-provider (Anthropic, Google Gemini, OpenAI, Ollama) with per-app rate limits and monthly cost caps. The whole system runs as a single Node.js process.
+Apps are loaded as TypeScript modules validated against a YAML manifest contract — they declare their intents, commands, schedules, photos, rules, and events, and the infrastructure handles routing, cost tracking, and data isolation. Apps never import LLM SDKs or touch the filesystem directly; install-time static analysis enforces that. Free-text messages flow through a routing priority — exact `/command` match, then photo classification, then LLM intent classification, then a conversational chatbot fallback. Canonical data is stored as markdown and YAML files on disk, readable directly in Obsidian; a derived SQLite/FTS index powers full-text recall and is rebuildable from the files at any time. External integrations are handled through n8n webhooks and a REST API rather than per-app connectors. LLM access is multi-provider (Anthropic, Google Gemini, OpenAI-compatible, Ollama) with tier-based routing and per-app rate limits and cost caps. The whole system runs as a single Node.js process and is multi-user, with per-user data isolation.
 
 ![Architecture](docs/images/architecture.svg)
 
 ## Status
 
-PAS is under active development. The core infrastructure is stable with over 4100 tests across 169 test files. Apps are in progress — a full-featured household food management app is complete. Currently running at household scale, shared publicly as a personal project with no production support offered.
+PAS is under active development. The core infrastructure is stable, with a large Vitest suite (several thousand tests) plus a separate real-LLM regression suite. Apps are in progress — a full-featured household food management app is complete. Currently running at household scale, shared publicly as a personal project with no production support offered.
 
 ## Features
 
 - **Telegram bot interface** — send messages, commands, and photos to interact with your apps
-- **AI-powered routing** — free-text messages are classified and routed to the right app automatically
-- **Multi-provider LLM** — supports Anthropic Claude, Google Gemini, OpenAI, Ollama (local), and any OpenAI-compatible endpoint
-- **Conversational AI fallback** — unmatched messages go to a built-in chatbot with conversation history and context awareness
+- **AI-powered routing** — free-text messages are classified and routed to the right app automatically, with grey-zone verification
+- **Multi-provider LLM** — Anthropic Claude, Google Gemini, Ollama (local), and any OpenAI-compatible endpoint, with tier-based routing (`fast` / `standard` / `reasoning`)
+- **Conversational AI fallback** — unmatched messages go to a built-in chatbot with long-term memory (see [Long-Term Memory](#long-term-memory-hermes) below)
 - **App ecosystem** — scaffold new apps in minutes, share them as git repos, install with one command
-- **Management GUI** — web dashboard for configuration, LLM model management, cost tracking, and data browsing
+- **Reports & alerts** — user-defined recurring reports and condition-evaluated alerts with multiple action types (Telegram, webhook, audio, run-report, write-data)
+- **Management GUI** — web dashboard for configuration, LLM model management, cost tracking, settings, data browsing, and the regression test runner
 - **Scheduling** — cron jobs and one-off scheduled tasks declared in app manifests
-- **Per-app cost controls** — rate limits and monthly cost caps enforced per app
+- **External REST API & n8n** — read/write app data over HTTP; cron triggers can dispatch to n8n; outbound webhooks on data changes
+- **Spaces & households** — named shared-data membership groups and multi-user household scoping
+- **Audio output** — text-to-speech via Piper, optionally cast to Chromecast
+- **Per-app cost controls** — rate limits and monthly cost caps enforced per app and per household
 - **Multi-user** — register multiple Telegram users with per-user app access and data isolation
-- **Local-first** — runs on modest hardware (Mac Mini), all data stored as files on disk (no database)
+- **Local-first** — runs on modest hardware (Mac Mini); canonical data is plain files on disk (the SQLite/FTS index is derived and rebuildable)
 
 ## Quick Start
 
 ### Prerequisites
 
 - **Node.js 22+** (see `.nvmrc`)
-- **pnpm** (`npm install -g pnpm`)
+- **pnpm 10+** (`npm install -g pnpm`)
 - **Telegram account** — you'll create a bot via [@BotFather](https://t.me/BotFather)
-- **Anthropic API key** — get one at [console.anthropic.com](https://console.anthropic.com)
+- **At least one LLM provider** — Anthropic, Google Gemini, any OpenAI-compatible endpoint, or a local Ollama install. Anthropic is the simplest default — get a key at [console.anthropic.com](https://console.anthropic.com).
 
 ### 1. Clone and install
 
@@ -59,10 +63,10 @@ Edit `.env` and set:
 | Variable | Where to get it |
 |----------|----------------|
 | `TELEGRAM_BOT_TOKEN` | Create a bot with [@BotFather](https://t.me/BotFather) on Telegram |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-| `GUI_AUTH_TOKEN` | Generate a random string (e.g., `openssl rand -hex 32`) |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) — or configure a different provider (`GOOGLE_AI_API_KEY`, `OPENAI_API_KEY` + `OPENAI_BASE_URL`, or `OLLAMA_URL`) |
+| `GUI_AUTH_TOKEN` | Generate a random string (e.g., `openssl rand -hex 32`). Used for first-run/admin bootstrap of the management GUI — see [GUI access](#4-build-and-run) below |
 
-All other env vars are optional. See `.env.example` for the full list with descriptions.
+All other env vars are optional. See `.env.example` for the full list with descriptions, including the other LLM provider keys.
 
 ### 3. Configure users
 
@@ -83,7 +87,7 @@ pnpm dev        # Local development (uses Telegram long polling, no tunnel neede
 
 Send a message to your bot on Telegram. If everything is configured correctly, the bot will respond.
 
-The management GUI is available at `http://localhost:3000/gui` (log in with your `GUI_AUTH_TOKEN`).
+The management GUI is available at `http://localhost:3000/gui`. Normal login is your Telegram user ID plus a password — set one with `pnpm auth:set-password`. The `GUI_AUTH_TOKEN` from `.env` is a bootstrap/recovery path: it is accepted only when exactly one admin user exists, so you can reach the GUI before any password is set.
 
 ## How Secrets Work
 
@@ -115,6 +119,9 @@ This generates a working app skeleton in `apps/my-app/` with manifest, source, a
 - [User Guide](docs/USER_GUIDE.md) — how to interact with PAS as an end user
 - [Creating an App](docs/CREATING_AN_APP.md) — step-by-step developer guide
 - [Manifest Reference](docs/MANIFEST_REFERENCE.md) — complete field reference for `manifest.yaml`
+- [Deployment](docs/DEPLOYMENT.md) — detailed deployment guide
+- [Operations](docs/OPERATIONS.md) — running and maintaining a live instance
+- [n8n Integration](docs/n8n-integration.md) — wiring PAS into n8n workflows
 
 **Example apps:**
 
@@ -122,8 +129,9 @@ This generates a working app skeleton in `apps/my-app/` with manifest, source, a
 |-----|-------------|
 | `apps/echo/` | Minimal example — echoes messages back (~30 lines) |
 | `apps/notes/` | Practical example — save, list, and summarize notes. Demonstrates commands, intents, LLM, data storage, and user config |
-| `apps/chatbot/` | Advanced example — conversational AI with context awareness, conversation history, and app metadata integration |
-| `apps/food/` | Full-featured app — household food management with recipes, meal planning, grocery lists, photos, cooking guidance, and cost tracking |
+| `apps/food/` | Full-featured app — household food management with recipes, grocery lists, pantry tracking, photo (receipt) handling, scheduled jobs, and cost tracking |
+
+The conversational AI fallback ("chatbot") is **not** an app — it is built into the infrastructure at `core/src/services/conversation/`.
 
 **Installing shared apps:**
 
@@ -170,26 +178,28 @@ For a public-facing bot with HTTPS webhook:
 apps/                    # App plugins (each has manifest.yaml + src/)
   echo/                  # Minimal example app
   notes/                 # Practical example app
-  chatbot/               # Built-in conversational AI fallback
   food/                  # Household food management app
 config/
   pas.yaml.example       # System config template (users, timezone, LLM settings)
 core/                    # Infrastructure package
   src/
     bootstrap.ts         # Composition root — wires everything together
-    services/            # Router, LLM, data store, scheduler, etc.
+    services/            # Router, LLM, data store, scheduler, conversation (chatbot), etc.
     gui/                 # Management web interface (Fastify + htmx)
     types/               # TypeScript interfaces (AppModule, CoreServices)
     schemas/             # Manifest JSON Schema
+regression/              # Persona regression suite (separate pnpm workspace; see Testing below)
 docs/
   CREATING_AN_APP.md     # App developer guide
   MANIFEST_REFERENCE.md  # Manifest field reference
 data/                    # Persistent data (gitignored, created at runtime)
 ```
 
+The conversational AI fallback is part of `core/src/services/conversation/`, not a separate app.
+
 ## Architecture
 
-PAS is a single-process Node.js application built with TypeScript (strict mode, ESM only). Apps are loaded as modules and receive infrastructure services via dependency injection — they never import LLM SDKs or access the filesystem directly. The infrastructure provides message routing, LLM access with cost tracking, scoped data storage, scheduling, and a management GUI. All data is stored as markdown and YAML files on disk (no database).
+PAS is a single-process Node.js application built with TypeScript (strict mode, ESM only). Apps are loaded as modules and receive infrastructure services via dependency injection — they never import LLM SDKs or access the filesystem directly. The infrastructure provides message routing, multi-provider LLM access with cost tracking, scoped data storage, scheduling, reports and alerts, a REST API, and a management GUI. Canonical data is markdown and YAML files on disk; a derived SQLite/FTS index provides full-text recall and is rebuildable from those files at any time.
 
 For full architecture details, see `CLAUDE.md`.
 
@@ -200,10 +210,44 @@ For full architecture details, see `CLAUDE.md`.
 | `pnpm dev` | Start in development mode (tsx watch + long polling) |
 | `pnpm build` | Compile TypeScript for all packages |
 | `pnpm test` | Run all tests (Vitest) |
+| `pnpm test:watch` | Run the test suite in watch mode |
+| `pnpm test:regression` | Run the persona regression suite (real LLM calls — see [Testing & Model Evaluation](#testing--model-evaluation)) |
+| `pnpm typecheck:fixtures` | Type-check test fixtures |
 | `pnpm lint` | Check code style (Biome) |
+| `pnpm lint:fix` | Fix auto-fixable lint issues |
 | `pnpm scaffold-app --name=<id>` | Generate a new app skeleton |
 | `pnpm install-app <git-url>` | Install a shared app from a git repo |
 | `pnpm uninstall-app <app-id>` | Remove an installed app |
+| `pnpm auth:set-password` | Set a GUI login password for a user |
+| `pnpm migrate-frontmatter` | One-time data migration for frontmatter format |
+| `pnpm load-test` | Run the LLM load-test harness |
+| `pnpm analyze-shadow-log` | Summarize shadow-classifier routing telemetry |
+| `pnpm analyze-session-control-log` | Summarize session-control classifier telemetry |
+| `pnpm chat-index-rebuild` | Rebuild the SQLite/FTS conversation index from transcripts |
+| `pnpm chat-index-prune` | Prune the conversation index per the retention policy |
+
+(`package.json` also defines `prepare`, an internal git-hook lifecycle script that runs automatically on `pnpm install` — not invoked directly.)
+
+## Testing & Model Evaluation
+
+Two separate test surfaces:
+
+- **`pnpm test`** — the Vitest unit/integration suite. Runs offline, on every change, and gates every push. This is the suite app developers extend.
+- **`pnpm test:regression`** — the **persona regression suite** in the `regression/` workspace: a fixture-backed, cached, real-LLM harness. It is deliberately excluded from `pnpm test` so it doesn't make API calls on every push.
+
+The regression suite's purpose is **evidence-based model selection** — swap an LLM model and measure the accuracy delta before committing to it. It has four fixed buckets (`routing`, `receipt`, `chatbot`, `recall`), each running real classifiers/handlers and grading output with an oracle (a JSON-schema/assertion check, or an LLM judge).
+
+```bash
+pnpm test:regression                                         # all buckets, respects the cache
+pnpm test:regression -- --dry-run                            # list cases + estimated cost, no LLM calls
+pnpm test:regression -- --bucket=routing                     # one bucket
+pnpm test:regression -- --model-matrix=ollama/gemma3:12b,anthropic/claude-sonnet-4-6
+pnpm test:regression -- --judge-model=anthropic/claude-haiku-4-5
+```
+
+`--model-matrix` overrides the tier models (positional `fast,standard,reasoning` or named `tier=provider/model`); `--judge-model` overrides the LLM-judge oracle's model. The result cache key is **model-ID-aware**, so each model gets its own cached results and comparisons stay clean. A routing-accuracy gate (≥ 0.95 across food-routing inputs) makes the suite exit non-zero when a model regresses routing quality.
+
+The `/gui/regression` admin page wraps this in a UI — a model-override form, a per-tier leaderboard, auto-generated weakness summaries, and performance-over-time charts. See [`regression/README.md`](regression/README.md) for full detail and [`docs/CREATING_AN_APP.md`](docs/CREATING_AN_APP.md#testing-model-behavior-with-the-regression-suite) for the app-developer perspective.
 
 ## Long-Term Memory (Hermes)
 

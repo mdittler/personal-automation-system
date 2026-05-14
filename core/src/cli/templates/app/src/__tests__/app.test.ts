@@ -48,14 +48,16 @@ describe('{{APP_NAME}}', () => {
 		it('should handle the command', async () => {
 			const ctx = createTestMessageContext();
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on app module
-			await app.handleCommand!('/{{APP_COMMAND}}', ['test'], ctx);
+			// The router strips the leading slash before dispatch — handleCommand
+			// receives the bare command name (e.g. '{{APP_COMMAND}}', not '/{{APP_COMMAND}}').
+			await app.handleCommand!('{{APP_COMMAND}}', ['test'], ctx);
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'test');
 		});
 
 		it('should append to log with frontmatter', async () => {
 			const ctx = createTestMessageContext();
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on app module
-			await app.handleCommand!('/{{APP_COMMAND}}', ['test'], ctx);
+			await app.handleCommand!('{{APP_COMMAND}}', ['test'], ctx);
 			const store = services.data.forUser('test-user');
 			expect(store.append).toHaveBeenCalledWith(
 				'log.md',
