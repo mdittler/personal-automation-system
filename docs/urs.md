@@ -10243,6 +10243,139 @@ Trends partial wraps the underlying-data `<table>` in `<details><summary>Underly
 
 ---
 
+### REQ-REG-GUI-V2-021 — SSE clients MUST auto-reconnect via `Last-Event-ID`; reconnect MUST NOT duplicate events
+
+**Phase:** Regression GUI Polish (2026-05-13) | **Status:** Implemented
+
+Every `event:` frame emitted by `GET /gui/regression/runs/:runId/events` is preceded by `id: <n>\n` where `n` is the registry's monotonic event id. The initial response also emits `retry: 3000\n\n` so the browser's `EventSource` auto-retries 3s after `error`. On reconnect, the browser sends `Last-Event-ID: <last-seen-id>`; the server replays only events with `id > <last-seen-id>` via `runRegistry.getEventsAfter()`, then registers the live listener via `runRegistry.attachLive()` (Codex C1 — `attachLive` does NOT replay the buffer, so events with `id > <last-seen-id>` from the live path don't double-up with the manual replay).
+
+The `?lastEventId=` query parameter is **not** honored. Native `EventSource` cannot mutate its URL during built-in auto-retry, so the query fallback would be dead weight (Codex C2). The header is the only path.
+
+Client wrapper (`regression-live.eta`) listens for `gap` event (server emits when ring buffer evicted the requested id) and reloads the page; listens for `error` event and increments a `failureCount` cleared on `open`; listens for terminal events (`complete`/`gate-failed`/`failed`/`cancelled`) and sets `terminalReached = true` so subsequent `error` events don't trigger reconnect.
+
+**Standard tests:**
+- `sse-helper.test.ts` > writes initial "retry: 3000\n\n" directive (REQ-REG-GUI-V2-021)
+- `sse-helper.test.ts` > writes "id: <n>\n" line when id is provided (REQ-REG-GUI-V2-021)
+- `sse-helper.test.ts` > default keep-alive is 15s (REQ-REG-GUI-V2-021)
+- `run-registry.test.ts` > dispatchEvent assigns monotonic ids starting at 0
+- `run-registry.test.ts` > attach replays events with monotonic ids
+- `run-registry.test.ts` > attachLive registers a listener WITHOUT replaying buffered events
+- `run-registry.test.ts` > getEventsAfter(<id>) returns only events with id > <id>
+- `run-registry.test.ts` > getEventsAfter(<latest id>) returns empty array (no new events)
+- `regression-routes-write.test.ts` > emits id: <n> header before each event line (REQ-REG-GUI-V2-021)
+- `regression-routes-write.test.ts` > Last-Event-ID: 1 replays only events with id > 1 (REQ-REG-GUI-V2-021)
+- `regression-routes-write.test.ts` > No Last-Event-ID header falls back to full replay (initial connect path)
+- `regression-routes-write.test.ts` > terminal-run replay emits all events then closes (no live attach, no duplicates)
+- `regression-routes.test.ts` > client wrapper includes reconnect + gap + 3-strike banner wiring (REQ-REG-GUI-V2-021/024)
+
+**Edge case tests:**
+- `sse-helper.test.ts` > omits "id:" line when id is undefined (synthetic frames like gap)
+- `sse-helper.test.ts` > handles id=0 (first event) — writes "id: 0" (no truthy-check bug)
+- `run-registry.test.ts` > attachLive returns null when runId unknown
+- `run-registry.test.ts` > getEventsAfter on empty log returns empty array (no gap)
+- `run-registry.test.ts` > getEventsAfter on unknown runId returns empty array (route handles 404 separately)
+- `run-registry.test.ts` > getEventsAfter treats NaN/negative lastEventId as null (full replay)
+- `regression-routes-write.test.ts` > Last-Event-ID newer than all events returns empty replay (no events lost)
+- `regression-routes-write.test.ts` > Non-numeric Last-Event-ID treated as null (full replay)
+- `run-registry.test.ts` > eventLog preserves raw event shape (no id field bleeds into the wrapped event)
+
+---
+
+### REQ-REG-GUI-V2-022 — Per-run event log MUST be ring-buffered at 1000 entries; older requests MUST return a gap signal
+
+**Phase:** Regression GUI Polish (2026-05-13) | **Status:** Implemented
+
+`RunState.eventLog` is bounded at `MAX_EVENT_LOG_ENTRIES = 1000`. When `dispatchEvent` would exceed the cap, the oldest entry is shifted off — the monotonic `id` survives so subsequent reconnects can detect "next expected event has been evicted". `getEventsAfter(runId, lastEventId)` returns `{gap: true}` when the earliest retained id is `> lastEventId + 1`. The SSE route writes `event: gap\ndata: {}\n\n` (no id field — `gap` is a control message, not a data event in the log) and closes the channel; the client wrapper handles `gap` by calling `window.location.reload()`. Subprocess hardening uses the same single-shot `finishOnce()` pattern (Codex C5) so multiple stream-error surfaces produce at most one terminal event.
+
+**Standard tests:**
+- `run-registry.test.ts` > getEventsAfter returns {gap: true} when next expected event has been evicted
+- `run-registry.test.ts` > getEventsAfter does NOT gap when last seen id is exactly earliest retained id - 1
+- `run-registry.test.ts` > ring buffer caps at MAX_EVENT_LOG_ENTRIES; ids continue past cap
+- `regression-routes-write.test.ts` > emits synthetic "gap" event when ring buffer evicted requested id (REQ-REG-GUI-V2-022)
+- `subprocess.test.ts` > stdout error during run → exactly one "failed" event dispatched
+- `subprocess.test.ts` > stderr error during run → exactly one "failed" event dispatched
+- `subprocess.test.ts` > proc.error (spawn failure) → exactly one "failed" event dispatched; whenComplete resolves
+- `subprocess.test.ts` > normal complete path still emits exactly one terminal "complete" event (regression guard)
+
+**Edge case tests:**
+- `subprocess.test.ts` > cancel-then-stream-error → cancelled wins; no second terminal event
+- `subprocess.test.ts` > multiple stream errors → only the first triggers a terminal event
+
+---
+
+### REQ-REG-GUI-V2-023 — GUI MUST display both case count AND input count consistently across run-tab, estimate endpoint, and confirm dialog
+
+**Phase:** Regression GUI Polish (2026-05-13) | **Status:** Implemented
+
+CLI `--list` mode emits per-case `inputCount` on every `case-list-entry` and `totalInputs` on the terminator. The GUI's `case-discovery` parses both and **fails closed** on mismatch between emitted `inputCount` and `inputs.length`, OR between terminator `totalInputs` and sum-of-`inputCount` (Codex C11 — `--list` is the authoritative source). `GET /gui/regression/estimate` returns `totalInputs` alongside `totalCases`. The Run tab template renders "N cases / M inputs" in the estimate banner; the client confirm dialog reads "Run M input(s) across N case(s)? Estimated cost ≈ $…" when both counts are available.
+
+**Standard tests:**
+- `list-mode.test.ts` > runCli --list > emits inputCount per case (REQ-REG-GUI-V2-023)
+- `list-mode.test.ts` > runCli --list > emits totalInputs on case-list-end equal to sum of per-case inputCount (REQ-REG-GUI-V2-023)
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs (REQ-REG-GUI-V2-023) > parses inputCount per case and propagates it to ListedCase
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs (REQ-REG-GUI-V2-023) > parses totalInputs on the terminator and exposes it on DiscoveryResult
+- `regression-routes.test.ts` > GET /gui/regression/estimate > returns totalInputs (REQ-REG-GUI-V2-023) — all-bucket query
+- `regression-routes.test.ts` > GET /gui/regression/estimate > returns totalInputs (REQ-REG-GUI-V2-023) — bucket-filtered query
+- `regression-routes.test.ts` > GET /gui/regression/estimate > Run tab renders "N cases / M inputs" summary (REQ-REG-GUI-V2-023)
+
+**Edge case tests:**
+- `list-mode.test.ts` > runCli --list > totalInputs is 0 when there are zero cases (empty casesDir)
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs > fails closed when inputCount disagrees with inputs.length (fail-closed C11)
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs > fails closed when totalInputs disagrees with sum of inputCount
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs > fails closed when inputCount is missing entirely
+- `case-discovery.test.ts` > case-discovery — inputCount + totalInputs > fails closed when inputCount is non-integer (e.g. 2.5)
+
+---
+
+### REQ-REG-GUI-V2-024 — After 3 consecutive reconnect failures the live view MUST surface a "Lost connection — reload" banner; the failure counter MUST reset on a successful `open` event
+
+**Phase:** Regression GUI Polish (2026-05-13) | **Status:** Implemented
+
+`regression-live.eta`'s wrapper tracks `failureCount` across `error` events. On `open` (every successful (re)connect) the counter resets to 0. When it reaches 3 — meaning three consecutive failed reconnects with no intervening `open` — the wrapper shows a "Lost connection — [reload]" inline banner using an anchor with `href="javascript:window.location.reload()"` (anchor survives htmx swaps that strip inline event listeners) and closes the EventSource to stop further auto-retry. The terminal-state guard (`terminalReached = true` set on `complete`/`gate-failed`/`failed`/`cancelled`) prevents the banner from appearing for the expected post-terminal close.
+
+**Standard tests:**
+- `regression-routes.test.ts` > client wrapper includes reconnect + gap + 3-strike banner wiring (REQ-REG-GUI-V2-021/024) — asserts `failureCount`, "Lost connection", `terminalReached` are present in the rendered page
+
+---
+
+### REQ-REG-CLI-MAN-001 — CLI MUST auto-generate `runId` + write `RunManifest` by default; `--no-manifest` opts out and takes precedence over `--run-id` and `--manifest-dir`
+
+**Phase:** Regression GUI Polish (2026-05-13) | **Status:** Implemented
+
+`regression/src/runner/runner-options.ts:resolveManifestDefaults(cli, env, repoRoot)` is the single source of truth. Precedence: (1) `cli.noManifest` short-circuits to `{runId: cli.runId ?? null, manifestDir: null}` — runId preserved for logging but manifest not written. (2) `cli.manifestDir` used as-is. (3) `env.DATA_DIR` → `<DATA_DIR>/system/regression-runs` (matches `loadSystemConfig`'s env var; Codex C6 — NOT `PAS_DATA_DIR`). (4) Fallback `<repoRoot>/data/system/regression-runs`. RunId is `cli.runId` if set, else `crypto.randomUUID()`.
+
+The resolver is extracted from `cli-main.ts` (Codex C7) because `cli-main.ts` has top-level await + `process.exit`, making direct test calls awkward. `runCli` accepts the resolved defaults as an optional 4th parameter; existing test callers that pass nothing continue to work (no manifest writing unless tests explicitly supply runId).
+
+**Standard tests:**
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > parses --no-manifest as boolean flag (no value)
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > parses --manifest-dir=<path> (equals form)
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > parses --manifest-dir <path> (space form)
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > parses both --no-manifest and --run-id (precedence asserted at resolver layer)
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > parses both --no-manifest and --manifest-dir (precedence asserted at resolver layer)
+- `runner-options.test.ts` > resolveManifestDefaults > defaults — manifest writing is on by default > no --run-id, no DATA_DIR → manifestDir under <repoRoot>/data/system/regression-runs; runId is a UUID
+- `runner-options.test.ts` > resolveManifestDefaults > defaults — manifest writing is on by default > explicit --run-id → that id used; default manifestDir
+- `runner-options.test.ts` > resolveManifestDefaults > defaults — manifest writing is on by default > DATA_DIR=/tmp/data → manifestDir under /tmp/data/system/regression-runs
+- `runner-options.test.ts` > resolveManifestDefaults > --manifest-dir explicit override > --manifest-dir=<path> → that path; DATA_DIR ignored
+- `runner-options.test.ts` > resolveManifestDefaults > --manifest-dir explicit override > --manifest-dir without --run-id → auto-generated UUID
+- `runner-options.test.ts` > resolveManifestDefaults > --no-manifest precedence — wins over runId AND manifestDir > --no-manifest alone → manifestDir null; runId null
+- `runner-options.test.ts` > resolveManifestDefaults > --no-manifest precedence — wins over runId AND manifestDir > --no-manifest + --run-id → manifestDir null; runId preserved (for logging)
+- `runner-options.test.ts` > resolveManifestDefaults > --no-manifest precedence — wins over runId AND manifestDir > --no-manifest + --manifest-dir → manifestDir null (no-manifest wins)
+- `runner-options.test.ts` > resolveManifestDefaults > --no-manifest precedence — wins over runId AND manifestDir > --no-manifest + --run-id + --manifest-dir → manifestDir null; runId preserved
+
+**Edge case tests:**
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir= with empty value
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir without a value
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir followed by another flag (eats the flag as a value)
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir=<path> with traversal segment
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir=<path> with nested traversal segment
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir=<path> with control character
+- `args.test.ts` > --no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001) > rejects --manifest-dir=<path> exceeding length cap
+- `runner-options.test.ts` > resolveManifestDefaults > --no-manifest precedence > --no-manifest + nothing else + DATA_DIR set → manifestDir null (env ignored)
+- `runner-options.test.ts` > resolveManifestDefaults > runId is UUID-shaped when auto-generated > successive calls produce different UUIDs
+- `runner-options.test.ts` > resolveManifestDefaults > runId is UUID-shaped when auto-generated > produces a UUIDv4-shaped string
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -10760,5 +10893,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-V2-018 | regression-routes-chunk-d.test.ts, regression-codex-followup.test.ts | 4 | 4 | Implemented |
 | REQ-REG-GUI-V2-019 | weakness-summarizer.test.ts, regression-routes-chunk-d.test.ts | 4 | 3 | Implemented |
 | REQ-REG-GUI-V2-020 | regression-routes.test.ts, regression-codex-followup.test.ts | 2 | 0 | Implemented |
+| REQ-REG-GUI-V2-021 | sse-helper.test.ts, run-registry.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 13 | 9 | Implemented |
+| REQ-REG-GUI-V2-022 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts | 8 | 2 | Implemented |
+| REQ-REG-GUI-V2-023 | list-mode.test.ts, case-discovery.test.ts, regression-routes.test.ts | 7 | 5 | Implemented |
+| REQ-REG-GUI-V2-024 | regression-routes.test.ts | 1 | 0 | Implemented |
+| REQ-REG-CLI-MAN-001 | args.test.ts, runner-options.test.ts | 14 | 10 | Implemented |
 
-| **Totals** | **250 test files** | **1888** | **2029** | **3917 tests** |
+| **Totals** | **251 test files** | **1931** | **2055** | **3986 tests** |

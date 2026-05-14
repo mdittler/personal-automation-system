@@ -26,11 +26,8 @@ import type { RunManifest } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
-import {
-	type RegressionEvent,
-	createRunRegistry,
-} from '../services/regression/run-registry.js';
 import { createRunHistoryStore } from '../services/regression/run-history-store.js';
+import { type RegressionEvent, createRunRegistry } from '../services/regression/run-registry.js';
 import {
 	type PersistedWeaknessSummary,
 	type WeaknessSummarizer,
@@ -147,12 +144,14 @@ async function buildApp(opts: BuildOpts = {}): Promise<BuiltApp> {
 					oracle: 'structural' as const,
 					coverage: [],
 					inputs: [],
+					inputCount: 0,
 					budgetUsd: 0.05,
 					currentCacheKey: 'a'.repeat(64),
 				},
 			],
 			modelIds: { fast: 'f', standard: 's', reasoning: null },
 			totalCases: 1,
+			totalInputs: 0,
 		}),
 	};
 	const runRegistry = createRunRegistry();
@@ -177,9 +176,7 @@ async function buildApp(opts: BuildOpts = {}): Promise<BuiltApp> {
 				complete: vi.fn().mockResolvedValue(
 					JSON.stringify({
 						summary: 'test summary',
-						failureCategories: [
-							{ label: 'lbl', count: 0, exampleCaseIds: [] },
-						],
+						failureCategories: [{ label: 'lbl', count: 0, exampleCaseIds: [] }],
 					}),
 				),
 			}) as never,
@@ -515,9 +512,7 @@ describe('GET /gui/regression/runs/:runId/summary (REQ-REG-GUI-V2-018)', () => {
 			generatedAt: '2026-05-13T12:30:00.000Z',
 			hadFailures: true,
 			summary: 'concrete weakness summary text',
-			failureCategories: [
-				{ label: 'sample category', count: 1, exampleCaseIds: ['case-1'] },
-			],
+			failureCategories: [{ label: 'sample category', count: 1, exampleCaseIds: ['case-1'] }],
 		};
 		const summarizerStub: WeaknessSummarizer = {
 			summarize: vi.fn(),
@@ -628,9 +623,7 @@ describe('POST /gui/regression/runs/:runId/summary (REQ-REG-GUI-V2-019)', () => 
 				payload: JSON.stringify({ _csrf: csrf }),
 			});
 			await new Promise((r) => setTimeout(r, 30));
-			expect(summarize).toHaveBeenCalledWith(
-				expect.objectContaining({ force: true }),
-			);
+			expect(summarize).toHaveBeenCalledWith(expect.objectContaining({ force: true }));
 		} finally {
 			await app.close();
 		}

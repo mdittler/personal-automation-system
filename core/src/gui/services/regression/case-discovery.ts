@@ -40,6 +40,9 @@ export interface ListedCase {
 	oracle: string;
 	coverage: string[];
 	inputs: Array<{ payload: unknown; expected: unknown; label?: string }>;
+	/** Number of dispatched inputs. Fail-closed when this disagrees with
+	 *  `inputs.length` — drift detection for the CLI/GUI wire protocol. */
+	inputCount: number;
 	budgetUsd: number;
 	currentCacheKey: string;
 }
@@ -48,6 +51,7 @@ export interface DiscoveryResult {
 	cases: ListedCase[];
 	modelIds?: TierModelSnapshot;
 	totalCases?: number;
+	totalInputs?: number;
 	error?: string;
 }
 
@@ -83,6 +87,7 @@ interface RawCaseEntry {
 	oracle?: unknown;
 	coverage?: unknown;
 	inputs?: unknown;
+	inputCount?: unknown;
 	budgetUsd?: unknown;
 	currentCacheKey?: unknown;
 }
@@ -100,6 +105,14 @@ function validateEntry(raw: RawCaseEntry): ListedCase | string {
 		return 'budgetUsd missing or not finite';
 	if (typeof raw.currentCacheKey !== 'string' || !SAFE_CACHE_KEY_RE.test(raw.currentCacheKey))
 		return 'currentCacheKey missing or invalid';
+	// Fail closed on inputCount/inputs.length mismatch — drift between CLI
+	// and GUI versions is a real-world failure mode worth surfacing loudly.
+	if (typeof raw.inputCount !== 'number' || !Number.isInteger(raw.inputCount)) {
+		return 'inputCount missing or not an integer';
+	}
+	if (raw.inputCount !== raw.inputs.length) {
+		return `inputCount ${raw.inputCount} disagrees with inputs.length ${raw.inputs.length}`;
+	}
 	const entry: ListedCase = {
 		caseId: raw.caseId,
 		bucket: raw.bucket as ListedCase['bucket'],
@@ -107,6 +120,7 @@ function validateEntry(raw: RawCaseEntry): ListedCase | string {
 		oracle: raw.oracle,
 		coverage: raw.coverage as string[],
 		inputs: raw.inputs as ListedCase['inputs'],
+		inputCount: raw.inputCount,
 		budgetUsd: raw.budgetUsd,
 		currentCacheKey: raw.currentCacheKey,
 	};
@@ -116,13 +130,17 @@ function validateEntry(raw: RawCaseEntry): ListedCase | string {
 	return entry;
 }
 
+const MAX_PARSE_ERRORS_REPORTED = 5;
+
 async function runOnce(spawnFn: SpawnFn): Promise<DiscoveryResult> {
 	const proc = spawnFn();
 	const cases: ListedCase[] = [];
 	let modelIds: TierModelSnapshot | undefined;
 	let totalCases: number | undefined;
+	let totalInputs: number | undefined;
 	let saw_end = false;
-	let parseError: string | undefined;
+	const parseErrors: string[] = [];
+	let parseErrorOverflow = false;
 	let stderrTail = '';
 
 	const reader = createInterface({ input: proc.stdout });
@@ -152,13 +170,18 @@ async function runOnce(spawnFn: SpawnFn): Promise<DiscoveryResult> {
 			if (t === 'case-list-entry') {
 				const validated = validateEntry(obj);
 				if (typeof validated === 'string') {
-					parseError = `case-list-entry validation: ${validated}`;
+					if (parseErrors.length < MAX_PARSE_ERRORS_REPORTED) {
+						parseErrors.push(validated);
+					} else {
+						parseErrorOverflow = true;
+					}
 					continue;
 				}
 				cases.push(validated);
 			} else if (t === 'case-list-end') {
 				saw_end = true;
 				if (typeof obj.totalCases === 'number') totalCases = obj.totalCases;
+				if (typeof obj.totalInputs === 'number') totalInputs = obj.totalInputs;
 				if (typeof obj.modelIds === 'object' && obj.modelIds !== null) {
 					modelIds = obj.modelIds as TierModelSnapshot;
 				}
@@ -180,13 +203,28 @@ async function runOnce(spawnFn: SpawnFn): Promise<DiscoveryResult> {
 			error: `regression --list exited ${exitCode}${stderrTail ? `: ${stderrTail.trim()}` : ''}`,
 		};
 	}
-	if (parseError) {
-		return { cases: [], error: parseError };
+	if (parseErrors.length > 0) {
+		const suffix = parseErrorOverflow ? ' (and additional entries beyond the first 5)' : '';
+		return {
+			cases: [],
+			error: `case-list-entry validation: ${parseErrors.join('; ')}${suffix}`,
+		};
 	}
 	if (!saw_end) {
 		return { cases: [], error: 'regression --list missing terminator (case-list-end)' };
 	}
-	return { cases, modelIds, totalCases };
+	// Cross-check the terminator's totalInputs against the sum of per-entry
+	// inputCounts — same drift-detection rationale as inputCount itself.
+	if (totalInputs !== undefined) {
+		const sumOfInputCounts = cases.reduce((acc, c) => acc + c.inputCount, 0);
+		if (totalInputs !== sumOfInputCounts) {
+			return {
+				cases: [],
+				error: `case-list-end totalInputs ${totalInputs} disagrees with sum-of-inputCount ${sumOfInputCounts}`,
+			};
+		}
+	}
+	return { cases, modelIds, totalCases, totalInputs };
 }
 
 export function createCaseDiscovery(options: CaseDiscoveryOptions): CaseDiscoveryService {

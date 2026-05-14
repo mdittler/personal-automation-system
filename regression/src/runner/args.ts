@@ -8,10 +8,19 @@
  *   --json           (emit line-delimited JSON events; used by the GUI subprocess)
  *   --list           (emit case-list NDJSON only; no dispatch — used by the GUI)
  *   --help           (print HELP_TEXT and exit 0)
+ *   --run-id=<uuid>  Tag this run with a UUID; writes a RunManifest.
+ *   --no-manifest    (REQ-REG-CLI-MAN-001) Suppress manifest writing; wins
+ *                    over both --run-id and --manifest-dir.
+ *   --manifest-dir=<path>  Override manifest output directory; otherwise
+ *                    resolved from `DATA_DIR` env or `<repoRoot>/data/system/regression-runs`.
  *
  * `--model-matrix` and `--judge-model` parsing lives in
  * `core/src/services/regression/model-spec.ts` — same parser is used by the
  * GUI POST handler (REQ-REG-GUI-OV-003).
+ *
+ * Default-manifest resolution (run-id + manifestDir) is handled in
+ * `runner-options.ts` (REQ-REG-CLI-MAN-001) so the precedence + DATA_DIR
+ * env logic is unit-testable separately from the CLI shell.
  */
 
 import {
@@ -41,18 +50,17 @@ export interface CliOptions {
 	json: boolean;
 	help: boolean;
 	listOnly: boolean;
-	/** Force fresh dispatch for every case (no cache reads). Equivalent to
-	 * passing `--rerun=<id>` for every loaded case. Used by Batch 5 verification. */
+	/** Force fresh dispatch for every case (no cache reads). */
 	noCache: boolean;
 	modelMatrix?: ModelMatrix;
 	judgeModel?: ModelRef;
-	/**
-	 * When set, the subprocess writes a `RunManifest` at terminal summary
-	 * (REQ-REG-GUI-V2-003). The GUI always passes this. Pure CLI invocations
-	 * leave it empty and no manifest is written — keeps interactive CLI use
-	 * free of disk-side-effects.
-	 */
+	/** Caller-supplied run UUID. When absent and `noManifest === false`,
+	 *  `resolveManifestDefaults` synthesizes one. */
 	runId?: string;
+	/** Suppress manifest writes. Wins over `runId` and `manifestDir`. */
+	noManifest: boolean;
+	/** Manifest output directory override. */
+	manifestDir?: string;
 }
 
 export const HELP_TEXT = `\
@@ -78,9 +86,17 @@ Usage:
   pnpm test:regression -- --no-cache   Force fresh dispatch for every case (skip all cache reads).
   pnpm test:regression -- --run-id=<uuid>
                                        Tag this run with a UUID; subprocess writes a RunManifest
-                                       JSON file at data/system/regression-runs/<uuid>.json so the
-                                       GUI leaderboard can attribute results to this run. The GUI
-                                       passes its registry UUID here automatically.
+                                       JSON file at $DATA_DIR/system/regression-runs/<uuid>.json so the
+                                       GUI leaderboard can attribute results to this run. When omitted,
+                                       a UUID is auto-generated (REQ-REG-CLI-MAN-001) — pass
+                                       --no-manifest to opt out.
+  pnpm test:regression -- --no-manifest
+                                       Suppress manifest writing for this run. Takes precedence over
+                                       --run-id and --manifest-dir.
+  pnpm test:regression -- --manifest-dir=<path>
+                                       Override the manifest output directory. Defaults to
+                                       $DATA_DIR/system/regression-runs (or <repoRoot>/data/system/regression-runs
+                                       when DATA_DIR is unset).
 
 Exit code:
   0  REQ-REG-011 gate met (or below floor).
@@ -96,6 +112,26 @@ function validateRerunId(v: string): string {
 	return v;
 }
 
+const MAX_MANIFEST_DIR_LEN = 1024;
+
+function validateManifestDirValue(v: string): string {
+	if (!v) throw new Error('--manifest-dir requires a non-empty path');
+	if (v.length > MAX_MANIFEST_DIR_LEN) {
+		throw new Error(`--manifest-dir value exceeds ${MAX_MANIFEST_DIR_LEN} chars`);
+	}
+	// Absolute paths are intentionally allowed — operators may want to write
+	// to a sibling artifact dir. The manifest-writer's atomic create handles
+	// missing parents.
+	if (v.split(/[\\/]/).includes('..')) {
+		throw new Error('--manifest-dir must not contain path-traversal segments (..)');
+	}
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: explicit guard
+	if (/[\x00-\x1f]/.test(v)) {
+		throw new Error('--manifest-dir must not contain control characters');
+	}
+	return v;
+}
+
 export function parseCliArgs(argv: readonly string[]): CliOptions {
 	const opts: CliOptions = {
 		dryRun: false,
@@ -103,6 +139,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		help: false,
 		listOnly: false,
 		noCache: false,
+		noManifest: false,
 	};
 	const rerunIds = new Set<string>();
 	let i = 0;
@@ -220,6 +257,25 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 				throw new Error(`--run-id requires a UUID (got: ${String(v)})`);
 			}
 			opts.runId = v;
+			i += 2;
+			continue;
+		}
+		if (a === '--no-manifest') {
+			opts.noManifest = true;
+			i++;
+			continue;
+		}
+		if (a.startsWith('--manifest-dir=')) {
+			opts.manifestDir = validateManifestDirValue(a.slice('--manifest-dir='.length));
+			i++;
+			continue;
+		}
+		if (a === '--manifest-dir') {
+			const v = argv[i + 1];
+			if (v === undefined || v.startsWith('--')) {
+				throw new Error('--manifest-dir requires a path value');
+			}
+			opts.manifestDir = validateManifestDirValue(v);
 			i += 2;
 			continue;
 		}

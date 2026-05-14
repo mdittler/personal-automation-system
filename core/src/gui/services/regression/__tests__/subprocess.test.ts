@@ -19,6 +19,11 @@ import {
 	spawnRegression,
 	validateSpawnArgs,
 } from '../subprocess.js';
+import { isTerminalEventType } from '../run-registry.js';
+
+function terminalEvents(evts: readonly RegressionEvent[]): RegressionEvent[] {
+	return evts.filter((e) => isTerminalEventType(e.type));
+}
 
 function fakeSpawnFactory(opts: {
 	stdoutLines: string[];
@@ -134,6 +139,182 @@ describe('spawnRegression — Pino-on-stdout / non-JSON tolerance (I3)', () => {
 		expect(terminal.type).toBe('failed');
 		expect(terminal.stderrTail?.length ?? 0).toBeLessThanOrEqual(4096);
 		expect(terminal.stderrTail).toContain('x');
+	});
+});
+
+describe('spawnRegression — finishOnce() terminal-event hardening (REQ-REG-GUI-V2-022)', () => {
+	function makeRunnableProc(): {
+		proc: SpawnProcLike;
+		stdout: Readable;
+		stderr: Readable;
+	} {
+		const proc = new EventEmitter() as SpawnProcLike;
+		const stdout = new Readable({ read() {} });
+		const stderr = new Readable({ read() {} });
+		proc.stdout = stdout;
+		proc.stderr = stderr;
+		proc.kill = () => true;
+		proc.pid = 1;
+		return { proc, stdout, stderr };
+	}
+
+	it('stdout error during run → exactly one "failed" event dispatched', async () => {
+		const { proc, stdout, stderr } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		setImmediate(() => {
+			stdout.emit('error', new Error('EPIPE'));
+			// Also push EOF + exit so whenComplete resolves cleanly.
+			stdout.push(null);
+			stderr.push(null);
+			proc.emit('exit', 1, null);
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('failed');
+		const failed = ts[0] as { type: 'failed'; stderrTail: string };
+		expect(failed.stderrTail).toContain('stdout error');
+	});
+
+	it('stderr error during run → exactly one "failed" event dispatched', async () => {
+		const { proc, stdout, stderr } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		setImmediate(() => {
+			stderr.emit('error', new Error('EBADF'));
+			stdout.push(null);
+			stderr.push(null);
+			proc.emit('exit', 1, null);
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		const failed = ts[0] as { type: 'failed'; stderrTail: string };
+		expect(failed.stderrTail).toContain('stderr error');
+	});
+
+	it('proc.error (spawn failure) → exactly one "failed" event dispatched; whenComplete resolves', async () => {
+		const { proc } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		// Spawn failure: proc.error fires; no exit event ever follows.
+		// terminatedPromise must short-circuit whenComplete or the test hangs.
+		setImmediate(() => {
+			proc.emit('error', new Error('ENOENT spawn'));
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('failed');
+	});
+
+	it('cancel-then-stream-error → cancelled wins; no second terminal event', async () => {
+		const { proc, stdout, stderr } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		proc.kill = () => {
+			setImmediate(() => {
+				stdout.push(null);
+				stderr.push(null);
+				proc.emit('exit', null, 'SIGTERM');
+			});
+			return true;
+		};
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		handle.cancel();
+		setImmediate(() => {
+			stdout.emit('error', new Error('post-cancel EPIPE'));
+			stderr.emit('error', new Error('post-cancel EBADF'));
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('cancelled');
+	});
+
+	it('stream error wins the race after cancel → cancelled (not failed)', async () => {
+		// Stream error fires BEFORE exit, AFTER cancel() has set the flag.
+		// Without the cancel-aware error path, this would surface as 'failed'.
+		const { proc, stdout, stderr } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		proc.kill = () => true;
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		handle.cancel();
+		setImmediate(() => {
+			stdout.emit('error', new Error('EPIPE during teardown'));
+			stderr.push(null);
+			stdout.push(null);
+			proc.emit('exit', null, 'SIGTERM');
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('cancelled');
+	});
+
+	it('proc.error post-cancel surfaces as cancelled (not failed)', async () => {
+		const { proc } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		proc.kill = () => true;
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		handle.cancel();
+		setImmediate(() => {
+			proc.emit('error', new Error('killed-by-signal'));
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('cancelled');
+	});
+
+	it('multiple stream errors → only the first triggers a terminal event', async () => {
+		const { proc, stdout } = makeRunnableProc();
+		const evts: RegressionEvent[] = [];
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+		});
+		// One stream error + normal exit — exercises the classic race where
+		// both the error path AND the exit path would otherwise emit terminal
+		// events. Multiple 'error' emits on a single Readable can become
+		// uncaught after the first (the stream destroys itself), so we use
+		// the cross-surface variant instead.
+		setImmediate(() => {
+			stdout.emit('error', new Error('stream-error'));
+			proc.emit('exit', 1, null);
+		});
+		await handle.whenComplete;
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('failed');
+	});
+
+	it('normal complete path still emits exactly one terminal "complete" event (regression guard)', async () => {
+		const evts = await runWith({
+			stdoutLines: [JSON.stringify({ type: 'summary', summary: { totalCases: 1 } })],
+			exitCode: 0,
+		});
+		const ts = terminalEvents(evts);
+		expect(ts).toHaveLength(1);
+		expect(ts[0]?.type).toBe('complete');
 	});
 });
 

@@ -78,6 +78,7 @@ interface BuiltApp {
 }
 
 function makeListedCase(over: Partial<ListedCase> = {}): ListedCase {
+	const inputs = over.inputs ?? [{ payload: 'p', expected: {} }];
 	return {
 		caseId: 'demo',
 		bucket: 'routing',
@@ -85,7 +86,8 @@ function makeListedCase(over: Partial<ListedCase> = {}): ListedCase {
 		description: 'demo',
 		oracle: 'structural',
 		coverage: ['x.ts'],
-		inputs: [{ payload: 'p', expected: {} }],
+		inputs,
+		inputCount: over.inputCount ?? inputs.length,
 		budgetUsd: 0.05,
 		currentCacheKey: 'a'.repeat(64),
 		...over,
@@ -498,6 +500,227 @@ describe('GET /gui/regression/runs/:runId/events — SSE', () => {
 			expect(res.body).toContain('"caseId":"demo"');
 			expect(res.body).not.toContain('"verdict":"pass"');
 			expect(res.body).toContain('event: complete');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('emits id: <n> header before each event line (REQ-REG-GUI-V2-021)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'summary', summary: {} });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			// Each event frame begins with id: <n>\n; ids start at 0 monotonically.
+			expect(res.body).toMatch(/id: 0\nevent: case-completed/);
+			expect(res.body).toMatch(/id: 1\nevent: summary/);
+			expect(res.body).toMatch(/id: 2\nevent: complete/);
+			// Initial retry directive lands first.
+			expect(res.body.indexOf('retry:')).toBeLessThan(res.body.indexOf('id: 0'));
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Last-Event-ID: 1 replays only events with id > 1 (REQ-REG-GUI-V2-021)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'b' } });
+			pendingRuns[0]?.emit({ type: 'summary', summary: {} });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+				headers: { 'Last-Event-ID': '1' },
+			});
+			// Should NOT replay id: 0 or id: 1; should replay id: 2 (summary) and id: 3 (complete).
+			expect(res.body).not.toMatch(/id: 0\n/);
+			expect(res.body).not.toMatch(/id: 1\n/);
+			expect(res.body).toContain('id: 2\nevent: summary');
+			expect(res.body).toContain('id: 3\nevent: complete');
+			// Only one case-completed frame should be missing (the second one, id=1).
+			const caseCompletedCount = (res.body.match(/event: case-completed/g) ?? []).length;
+			expect(caseCompletedCount).toBe(0);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Last-Event-ID newer than all events returns empty replay (no events lost)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+				headers: { 'Last-Event-ID': '5' },
+			});
+			// The replay loop should be empty (no events with id > 5), and since the
+			// run is already terminal, no live listener is registered. The response
+			// contains the initial retry directive but no data events.
+			expect(res.body).toContain('retry:');
+			expect(res.body).not.toContain('event: case-completed');
+			expect(res.body).not.toContain('event: complete');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('No Last-Event-ID header falls back to full replay (initial connect path)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			expect(res.body).toContain('id: 0\nevent: case-completed');
+			expect(res.body).toContain('id: 1\nevent: complete');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Non-numeric Last-Event-ID treated as null (full replay)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+				headers: { 'Last-Event-ID': 'not-a-number' },
+			});
+			// Should fall through to full replay since the header is non-numeric.
+			expect(res.body).toContain('id: 0\nevent: case-completed');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('emits synthetic "gap" event when ring buffer evicted requested id (REQ-REG-GUI-V2-022)', async () => {
+		const { app, pendingRuns, runRegistry } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			// Force ring-buffer overflow by emitting MAX+5 events. Earliest
+			// retained id = 5; client asking for last id=2 → gap.
+			const MAX = 1000; // MAX_EVENT_LOG_ENTRIES
+			for (let i = 0; i < MAX + 5; i++) {
+				pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: `c-${i}` } });
+			}
+			// Sanity check: registry should report a gap for last id < 4.
+			const state = runRegistry.get(runId);
+			expect(state?.eventLog[0]?.id).toBe(5);
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+				headers: { 'Last-Event-ID': '2' },
+			});
+			expect(res.body).toContain('event: gap');
+			// Gap event has no id field (it's a control message).
+			const frameAfterRetry = res.body.split('\n\n').find((f) => f.includes('event: gap'));
+			expect(frameAfterRetry).not.toMatch(/^id:/);
+			pendingRuns[0]?.finish();
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('terminal-run replay emits all events then closes (no live attach, no duplicates)', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			// Exactly one of each event type — no duplicates from a stray live attach.
+			const completedCount = (res.body.match(/event: case-completed/g) ?? []).length;
+			const terminalCount = (res.body.match(/event: complete\n/g) ?? []).length;
+			expect(completedCount).toBe(1);
+			expect(terminalCount).toBe(1);
 		} finally {
 			await app.close();
 		}

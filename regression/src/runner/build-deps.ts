@@ -13,7 +13,9 @@
  * passes `--dry-run`.
  */
 
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadSystemConfig } from '@core/services/config/index.js';
 import { CostTracker } from '@core/services/llm/cost-tracker.js';
 import { LLMServiceImpl } from '@core/services/llm/index.js';
@@ -45,19 +47,38 @@ interface RepoPaths {
 	repoRoot: string;
 	casesDir: string;
 	cacheDir: string;
-	manifestDir: string;
 	configPath: string;
 	chatbotSeedJsonPath: string;
 	chatbotSeedShaPath: string;
 }
 
+/**
+ * Locate the repo root by walking up from this module's filesystem location
+ * looking for `config/pas.yaml`. Independent of `process.cwd()` so that
+ * `pnpm --filter @pas/regression test:regression` (cwd = regression/) and
+ * root-invoked `pnpm test:regression` (cwd = repo) both resolve identically.
+ * Falls back to cwd if the marker is not found, which only happens if the
+ * regression workspace is installed outside the PAS repo.
+ */
+export function findRepoRoot(): string {
+	let dir = dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 10; i++) {
+		if (existsSync(resolve(dir, 'config', 'pas.yaml'))) {
+			return dir;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return resolve(process.cwd());
+}
+
 function resolveRepoPaths(): RepoPaths {
-	const repoRoot = resolve(process.cwd());
+	const repoRoot = findRepoRoot();
 	return {
 		repoRoot,
 		casesDir: resolve(repoRoot, 'regression', 'src', 'cases'),
 		cacheDir: resolve(repoRoot, 'data', 'system', 'regression-cache'),
-		manifestDir: resolve(repoRoot, 'data', 'system', 'regression-runs'),
 		configPath: resolve(repoRoot, 'config', 'pas.yaml'),
 		chatbotSeedJsonPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.json'),
 		chatbotSeedShaPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.sha256'),
@@ -186,7 +207,6 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
-		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
 		maxRunBudgetUsd,
@@ -305,7 +325,6 @@ export function buildDryRunDeps(): RunCliDeps {
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
-		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		// Stable placeholder model IDs — irrelevant for dry-run because no LLM
 		// call is made and the result's cache key is not persisted.
@@ -362,7 +381,6 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
-		manifestDir: paths.manifestDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
 		maxRunBudgetUsd,

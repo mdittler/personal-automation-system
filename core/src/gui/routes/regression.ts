@@ -11,8 +11,8 @@ import {
 	type RunResult,
 	SAFE_CASE_ID_RE,
 	SAFE_RUN_ID_RE,
-	type Verdict,
 	VERDICT_VALUES,
+	type Verdict,
 	isValidBucket,
 } from '../../types/regression.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
@@ -22,25 +22,23 @@ import {
 	readHistoryForCase,
 } from '../services/regression/cache-reader.js';
 import type { CaseDiscoveryService, ListedCase } from '../services/regression/case-discovery.js';
+import { renderLineChart, renderScatter } from '../services/regression/chart-svg.js';
 import { type EstimatedCase, estimateRunCostUsd } from '../services/regression/estimator.js';
-import {
-	renderLineChart,
-	renderScatter,
-} from '../services/regression/chart-svg.js';
 import {
 	type LeaderboardTier,
 	type PinOverrideKey,
 	aggregateLeaderboard,
 } from '../services/regression/leaderboard-aggregator.js';
-import { type TimeWindow, buildTrendData } from '../services/regression/trend-aggregator.js';
+import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 import {
 	RegistrationConflictError,
 	type RegressionEvent,
 	type RunRegistry,
+	isTerminalEventType,
 } from '../services/regression/run-registry.js';
-import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 import { openSseStream, writeSseEvent } from '../services/regression/sse-helper.js';
 import { type SpawnFn, spawnRegression } from '../services/regression/subprocess.js';
+import { type TimeWindow, buildTrendData } from '../services/regression/trend-aggregator.js';
 import type {
 	SummaryTier,
 	WeaknessSummarizer,
@@ -277,73 +275,67 @@ export function registerRegressionRoutes(
 	server.get<{
 		Params: { runId: string };
 		Querystring: { tier?: string };
-	}>(
-		'/regression/runs/:runId/summary',
-		platformAdminOnly,
-		async (request, reply) => {
-			const { runId } = request.params;
-			if (!isUuid(runId)) return reply.status(404).send('not found');
-			const tierRaw = request.query.tier;
-			if (!tierRaw || !isSummaryTier(tierRaw)) {
-				return reply.status(400).send({ error: 'tier query param required (fast|standard|reasoning)' });
-			}
-			if (!options.weaknessSummarizer) {
-				return reply.status(503).send({ error: 'summarizer not configured' });
-			}
-			const existing = await options.weaknessSummarizer.read(runId, tierRaw);
-			if (!existing) {
-				return reply.status(202).send({ status: 'pending' });
-			}
-			return reply.viewAsync('partials/regression-weakness-summary', {
-				summary: existing,
-			});
-		},
-	);
+	}>('/regression/runs/:runId/summary', platformAdminOnly, async (request, reply) => {
+		const { runId } = request.params;
+		if (!isUuid(runId)) return reply.status(404).send('not found');
+		const tierRaw = request.query.tier;
+		if (!tierRaw || !isSummaryTier(tierRaw)) {
+			return reply
+				.status(400)
+				.send({ error: 'tier query param required (fast|standard|reasoning)' });
+		}
+		if (!options.weaknessSummarizer) {
+			return reply.status(503).send({ error: 'summarizer not configured' });
+		}
+		const existing = await options.weaknessSummarizer.read(runId, tierRaw);
+		if (!existing) {
+			return reply.status(202).send({ status: 'pending' });
+		}
+		return reply.viewAsync('partials/regression-weakness-summary', {
+			summary: existing,
+		});
+	});
 
 	// ─────────────────── POST /gui/regression/runs/:runId/summary (REQ-REG-GUI-V2-019)
 	// Manual (re)generation. `?force=true` overwrites an existing file.
 	server.post<{
 		Params: { runId: string };
 		Querystring: { force?: string };
-	}>(
-		'/regression/runs/:runId/summary',
-		platformAdminOnly,
-		async (request, reply) => {
-			const { runId } = request.params;
-			if (!isUuid(runId)) return reply.status(404).send('not found');
-			if (!options.weaknessSummarizer || !options.runHistoryStore) {
-				return reply.status(503).send({ error: 'summarizer not configured' });
-			}
-			const manifest = await options.runHistoryStore.getById(runId);
-			if (!manifest) return reply.status(404).send({ error: 'unknown runId' });
-			const force = request.query.force === 'true';
-			// Kick off summarization for every tier present in the manifest. Run
-			// sequentially to avoid concurrent LLM bursts; the polled GET route
-			// will pick up the persisted files as they land.
-			const summarizer = options.weaknessSummarizer;
-			(async () => {
-				try {
-					const tiers: SummaryTier[] = ['fast', 'standard', 'reasoning'];
-					for (const tier of tiers) {
-						const modelForTier =
-							tier === 'fast'
-								? manifest.modelIds.fast
-								: tier === 'standard'
-									? manifest.modelIds.standard
-									: manifest.modelIds.reasoning;
-						if (!modelForTier) continue;
-						await summarizer.summarize({ manifest, tier, force });
-					}
-				} catch (err) {
-					logger.warn(
-						{ runId, err: (err as Error).message },
-						'regression-gui: summarizer background task failed',
-					);
+	}>('/regression/runs/:runId/summary', platformAdminOnly, async (request, reply) => {
+		const { runId } = request.params;
+		if (!isUuid(runId)) return reply.status(404).send('not found');
+		if (!options.weaknessSummarizer || !options.runHistoryStore) {
+			return reply.status(503).send({ error: 'summarizer not configured' });
+		}
+		const manifest = await options.runHistoryStore.getById(runId);
+		if (!manifest) return reply.status(404).send({ error: 'unknown runId' });
+		const force = request.query.force === 'true';
+		// Kick off summarization for every tier present in the manifest. Run
+		// sequentially to avoid concurrent LLM bursts; the polled GET route
+		// will pick up the persisted files as they land.
+		const summarizer = options.weaknessSummarizer;
+		(async () => {
+			try {
+				const tiers: SummaryTier[] = ['fast', 'standard', 'reasoning'];
+				for (const tier of tiers) {
+					const modelForTier =
+						tier === 'fast'
+							? manifest.modelIds.fast
+							: tier === 'standard'
+								? manifest.modelIds.standard
+								: manifest.modelIds.reasoning;
+					if (!modelForTier) continue;
+					await summarizer.summarize({ manifest, tier, force });
 				}
-			})();
-			return reply.status(202).send({ status: 'queued' });
-		},
-	);
+			} catch (err) {
+				logger.warn(
+					{ runId, err: (err as Error).message },
+					'regression-gui: summarizer background task failed',
+				);
+			}
+		})();
+		return reply.status(202).send({ status: 'queued' });
+	});
 
 	// ──────────────────────── GET /gui/regression/cases/:caseId  (drilldown)
 	server.get<{ Params: { caseId: string } }>(
@@ -458,11 +450,13 @@ export function registerRegressionRoutes(
 				filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
 				{ ceilingUsd: maxRunBudgetUsd },
 			);
+			const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
 			return reply.send({
 				totalUsd: out.estimateUsd,
 				ceilingUsd: out.ceilingUsd,
 				perBucketUsd: out.perBucketUsd,
 				totalCases: filtered.length,
+				totalInputs,
 			});
 		},
 	);
@@ -516,11 +510,7 @@ export function registerRegressionRoutes(
 			if (judgeFromDropdown !== undefined) {
 				judgeModelRaw = judgeFromDropdown;
 			} else {
-				const jm = validateOptionalModelField(
-					body.judgeModel,
-					'judgeModel',
-					parseJudgeModelValue,
-				);
+				const jm = validateOptionalModelField(body.judgeModel, 'judgeModel', parseJudgeModelValue);
 				if (jm.error !== null) return reply.status(400).send({ error: jm.error });
 				judgeModelRaw = jm.value ?? undefined;
 			}
@@ -554,9 +544,7 @@ export function registerRegressionRoutes(
 				try {
 					parseJudgeModelValue(judgeModelRaw);
 				} catch (err) {
-					return reply
-						.status(400)
-						.send({ error: `invalid judgeModel: ${(err as Error).message}` });
+					return reply.status(400).send({ error: `invalid judgeModel: ${(err as Error).message}` });
 				}
 			}
 
@@ -620,6 +608,9 @@ export function registerRegressionRoutes(
 	);
 
 	// ──────────────── GET /gui/regression/runs/:runId/events  (SSE)
+	// On reconnect the browser sends `Last-Event-ID`; we replay events
+	// strictly newer than it then attach for live updates. If the next
+	// expected id has been evicted, emit `event: gap` so the client reloads.
 	server.get<{ Params: { runId: string } }>(
 		'/regression/runs/:runId/events',
 		platformAdminOnly,
@@ -628,6 +619,15 @@ export function registerRegressionRoutes(
 			if (!SAFE_RUN_ID_RE.test(runId)) return reply.status(404).send('not found');
 			const state = runRegistry.get(runId);
 			if (!state) return reply.status(404).send('not found');
+
+			// Header is the only reconnect path: native `EventSource` cannot
+			// mutate URL query on auto-retry, so a `?lastEventId=` fallback
+			// would be dead weight.
+			const lastEventIdHeader = request.headers['last-event-id'];
+			let lastEventId: number | null = null;
+			if (typeof lastEventIdHeader === 'string' && /^\d+$/.test(lastEventIdHeader)) {
+				lastEventId = Number.parseInt(lastEventIdHeader, 10);
+			}
 
 			// Ensure the registry listener is detached when the client
 			// disconnects, the SSE write fails, OR a terminal event triggers
@@ -638,19 +638,42 @@ export function registerRegressionRoutes(
 				onClose: () => detach?.(),
 			});
 
-			const dispatch = (event: RegressionEvent): void => {
+			// Replay phase. The replay result is either a list of `{id, event}`
+			// pairs strictly newer than `lastEventId`, or `{gap: true}` when the
+			// ring buffer cannot satisfy the request.
+			const replay = runRegistry.getEventsAfter(runId, lastEventId);
+			if (Array.isArray(replay)) {
+				let replayedTerminal = false;
+				for (const { id, event } of replay) {
+					const sseEvent = toSseEvent(event, runId);
+					if (sseEvent) writeSseEvent(channel, { ...sseEvent, id });
+					if (isTerminalEventType(event.type)) {
+						replayedTerminal = true;
+					}
+				}
+				// Close immediately when the run has already reached terminal:
+				// either we just replayed the terminal event, OR the client's
+				// lastEventId was newer than all retained events and no new ones
+				// will arrive. Without this, attachLive would register a listener
+				// that never receives anything.
+				if (replayedTerminal || (replay.length === 0 && runRegistry.isTerminal(runId))) {
+					channel.close();
+					return;
+				}
+			} else {
+				writeSseEvent(channel, { type: 'gap', data: {} });
+				channel.close();
+				return;
+			}
+
+			const dispatch = (event: RegressionEvent, id: number): void => {
 				const sseEvent = toSseEvent(event, runId);
-				if (sseEvent) writeSseEvent(channel, sseEvent);
+				if (sseEvent) writeSseEvent(channel, { ...sseEvent, id });
 				if (isTerminalEventType(event.type)) {
 					channel.close();
 				}
 			};
-
-			// attach() replays buffered events synchronously, then forwards new ones.
-			// If the run was already terminal, the buffered replay ran above —
-			// `dispatch` will have called `channel.close()` which triggers `onClose`,
-			// which then calls `detach()` to remove the no-op listener we just added.
-			detach = runRegistry.attach(runId, dispatch);
+			detach = runRegistry.attachLive(runId, dispatch);
 		},
 	);
 
@@ -699,18 +722,14 @@ function toSseEvent(event: RegressionEvent, runId: string): { type: string; data
 	}
 }
 
-function isTerminalEventType(t: RegressionEvent['type']): boolean {
-	return t === 'complete' || t === 'gate-failed' || t === 'failed' || t === 'cancelled';
-}
-
 function findLiveResult(
 	state: ReturnType<RunRegistry['get']> | undefined,
 	caseId: string,
 ): RunResult | null {
 	if (!state) return null;
-	for (const event of state.events) {
-		if (event.type !== 'case-result') continue;
-		const r = event.result as RunResult | undefined;
+	for (const entry of state.eventLog) {
+		if (entry.event.type !== 'case-result') continue;
+		const r = entry.event.result as RunResult | undefined;
 		if (r && r.caseId === caseId) return r;
 	}
 	return null;
@@ -813,11 +832,13 @@ async function renderOverviewTab(
 	// real summary on first paint instead of an empty placeholder. The polling
 	// loop in regression-live.eta only runs after an SSE `complete` event, so
 	// without this prefetch a refreshed page would show "generating…" forever.
-	const summaryFetches: Array<Promise<{
-		runId: string;
-		tier: SummaryTier;
-		summary: Awaited<ReturnType<WeaknessSummarizer['read']>>;
-	}>> = [];
+	const summaryFetches: Array<
+		Promise<{
+			runId: string;
+			tier: SummaryTier;
+			summary: Awaited<ReturnType<WeaknessSummarizer['read']>>;
+		}>
+	> = [];
 	if (deps.weaknessSummarizer) {
 		const summarizer = deps.weaknessSummarizer;
 		for (const table of aggregated) {
@@ -872,7 +893,8 @@ async function renderRunTab(
 		logger: Logger;
 	},
 ): Promise<unknown> {
-	let modelGroups: Array<{ provider: string; models: Array<{ refId: string; label: string }> }> = [];
+	let modelGroups: Array<{ provider: string; models: Array<{ refId: string; label: string }> }> =
+		[];
 	let catalogError: string | null = null;
 	const availableRefIds = new Set<string>();
 	if (deps.modelCatalog) {
@@ -899,9 +921,11 @@ async function renderRunTab(
 		}
 	}
 
-	function tierConfigFor(
-		ref: { provider: string; model: string } | null | undefined,
-	): { currentRef: { provider: string; model: string } | null; currentRefId: string | null; currentAvailable: boolean } {
+	function tierConfigFor(ref: { provider: string; model: string } | null | undefined): {
+		currentRef: { provider: string; model: string } | null;
+		currentRefId: string | null;
+		currentAvailable: boolean;
+	} {
 		if (!ref) return { currentRef: null, currentRefId: null, currentAvailable: true };
 		const refId = `${ref.provider}/${ref.model}`;
 		return {
@@ -929,6 +953,8 @@ async function renderRunTab(
 		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
 		{ ceilingUsd: deps.maxRunBudgetUsd },
 	);
+	const totalCases = filtered.length;
+	const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
 
 	return reply.viewAsync('regression', {
 		title: 'Regression — Run — PAS',
@@ -943,6 +969,8 @@ async function renderRunTab(
 		estimate: {
 			totalUsd: estimate.estimateUsd.toFixed(2),
 			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+			totalCases,
+			totalInputs,
 		},
 	});
 }
@@ -1133,10 +1161,7 @@ function parseCompareFilters(q: {
 }): CompareFilters {
 	const out: CompareFilters = {};
 	if (typeof q.model === 'string' && q.model.trim()) out.model = q.model.trim();
-	if (
-		typeof q.verdict === 'string' &&
-		(VERDICT_VALUES as readonly string[]).includes(q.verdict)
-	) {
+	if (typeof q.verdict === 'string' && (VERDICT_VALUES as readonly string[]).includes(q.verdict)) {
 		out.verdict = q.verdict as Verdict;
 	}
 	if (typeof q.caseId === 'string' && SAFE_CASE_ID_RE.test(q.caseId)) out.caseId = q.caseId;
@@ -1242,15 +1267,11 @@ async function renderCompareTab(
 			}),
 		),
 	);
-	let cases: DisplayedCase[] = filtered.map((c, i) =>
-		buildDisplayedCase(c, displays[i] ?? null),
-	);
+	let cases: DisplayedCase[] = filtered.map((c, i) => buildDisplayedCase(c, displays[i] ?? null));
 	// Apply post-display filters (model + verdict). These need the resolved
 	// row data so they can't happen earlier.
 	if (filters.model) {
-		cases = cases.filter(
-			(c) => c.modelFast === filters.model || c.modelStandard === filters.model,
-		);
+		cases = cases.filter((c) => c.modelFast === filters.model || c.modelStandard === filters.model);
 	}
 	if (filters.verdict) {
 		cases = cases.filter((c) => c.verdictLabel === filters.verdict);

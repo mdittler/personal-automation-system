@@ -12,7 +12,12 @@
 
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type SseChannel, openSseStream, writeSseEvent } from '../sse-helper.js';
+import {
+	DEFAULT_KEEPALIVE_MS,
+	type SseChannel,
+	openSseStream,
+	writeSseEvent,
+} from '../sse-helper.js';
 
 interface FakeReply {
 	hijacked: boolean;
@@ -87,9 +92,35 @@ describe('openSseStream — connection setup', () => {
 		const req = makeRequest();
 		const reply = makeReply();
 		openSseStream(req as never, reply as never, { keepAliveMs: 1000 });
-		expect(reply.written.length).toBe(0);
+		// Initial `retry:` directive lands immediately (REQ-REG-GUI-V2-021).
+		// The keep-alive check is: AFTER that initial write, no further
+		// writes until keepAliveMs elapses; THEN a comment ping appears.
+		const initialWrites = reply.written.length;
+		expect(reply.written.join('')).toContain('retry:');
 		vi.advanceTimersByTime(1000);
-		expect(reply.written.some((c) => c.includes(':'))).toBe(true);
+		expect(reply.written.length).toBeGreaterThan(initialWrites);
+		const afterTick = reply.written.slice(initialWrites).join('');
+		expect(afterTick).toMatch(/^:\s*keepalive/);
+	});
+
+	it('writes initial "retry: 3000\\n\\n" directive (REQ-REG-GUI-V2-021)', () => {
+		const req = makeRequest();
+		const reply = makeReply();
+		openSseStream(req as never, reply as never, { keepAliveMs: 25_000 });
+		expect(reply.written.join('')).toContain('retry: 3000\n\n');
+	});
+
+	it('default keep-alive is 15s (REQ-REG-GUI-V2-021)', () => {
+		expect(DEFAULT_KEEPALIVE_MS).toBe(15_000);
+	});
+
+	it('with default keepAliveMs (no override), a ping fires at the 15s mark', () => {
+		const req = makeRequest();
+		const reply = makeReply();
+		openSseStream(req as never, reply as never);
+		const initialWrites = reply.written.length;
+		vi.advanceTimersByTime(15_000);
+		expect(reply.written.length).toBeGreaterThan(initialWrites);
 	});
 });
 
@@ -124,6 +155,35 @@ describe('writeSseEvent — payload format', () => {
 		const writtenBefore = reply.written.length;
 		writeSseEvent(channel, { type: 'late', data: {} });
 		expect(reply.written.length).toBe(writtenBefore);
+	});
+
+	it('writes "id: <n>\\n" line when id is provided (REQ-REG-GUI-V2-021)', () => {
+		const req = makeRequest();
+		const reply = makeReply();
+		const channel = openSseStream(req as never, reply as never, { keepAliveMs: 25_000 });
+		writeSseEvent(channel, { type: 'case-completed', data: { caseId: 'a' }, id: 7 });
+		const joined = reply.written.join('');
+		expect(joined).toContain('id: 7\nevent: case-completed\n');
+	});
+
+	it('omits "id:" line when id is undefined (synthetic frames like gap)', () => {
+		const req = makeRequest();
+		const reply = makeReply();
+		const channel = openSseStream(req as never, reply as never, { keepAliveMs: 25_000 });
+		writeSseEvent(channel, { type: 'gap', data: {} });
+		const joined = reply.written.join('');
+		// Find the frame after the initial retry directive:
+		const frames = joined.split('\n\n').filter((f) => f.includes('event:'));
+		expect(frames[0]).not.toMatch(/^id:/);
+		expect(frames[0]).toContain('event: gap');
+	});
+
+	it('handles id=0 (first event) — writes "id: 0" (no truthy-check bug)', () => {
+		const req = makeRequest();
+		const reply = makeReply();
+		const channel = openSseStream(req as never, reply as never, { keepAliveMs: 25_000 });
+		writeSseEvent(channel, { type: 'case-completed', data: { caseId: 'a' }, id: 0 });
+		expect(reply.written.join('')).toContain('id: 0\n');
 	});
 });
 

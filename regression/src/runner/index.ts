@@ -52,6 +52,7 @@ import {
 	formatDryRunMarkdown,
 	formatSummaryMarkdown,
 } from './markdown-report.js';
+import type { ManifestDefaults } from './runner-options.js';
 
 export interface RunSuiteOptions {
 	casesDir: string;
@@ -263,9 +264,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 						captureHandler: env.captureHandler,
 						endActiveSession: env.endActiveSession,
 						routeMessage: (ctx) =>
-							requestContext.run(
-								{ userId: env.userId, householdId: env.householdId },
-								() => env.runtime.services.router.routeMessage(ctx),
+							requestContext.run({ userId: env.userId, householdId: env.householdId }, () =>
+								env.runtime.services.router.routeMessage(ctx),
 							),
 					},
 					judgeLlm: opts.judgeLlm,
@@ -357,6 +357,7 @@ export type RunCliDeps = Omit<
 	| 'dryRun'
 	| 'onResult'
 	| 'runId'
+	| 'manifestDir'
 	| 'judgeOverrideApplied'
 >;
 
@@ -370,6 +371,7 @@ export async function runCli(
 	argv: readonly string[],
 	deps: RunCliDeps,
 	streams: { stdout?: (s: string) => void } = {},
+	manifestDefaults?: ManifestDefaults,
 ): Promise<RunCliResult> {
 	const write = streams.stdout ?? ((s: string) => process.stdout.write(s));
 	let cli: CliOptions;
@@ -380,7 +382,14 @@ export async function runCli(
 		return {
 			exitCode: 1,
 			outcome: null,
-			options: { dryRun: false, json: false, help: false, listOnly: false, noCache: false },
+			options: {
+				dryRun: false,
+				json: false,
+				help: false,
+				listOnly: false,
+				noCache: false,
+				noManifest: false,
+			},
 		};
 	}
 	if (cli.help) {
@@ -392,13 +401,23 @@ export async function runCli(
 		return { exitCode: 0, outcome: null, options: cli };
 	}
 
+	// When `manifestDefaults` is provided the resolver has already factored
+	// in --no-manifest, --manifest-dir, and DATA_DIR. Test callers that
+	// pass nothing get the legacy behavior: no manifest unless the test
+	// explicitly supplied `--run-id`.
+	const effectiveRunId =
+		manifestDefaults !== undefined ? (manifestDefaults.runId ?? undefined) : cli.runId;
+	const effectiveManifestDir =
+		manifestDefaults !== undefined ? (manifestDefaults.manifestDir ?? undefined) : undefined;
+
 	const outcome = await runSuite({
 		...deps,
 		bucketFilter: cli.bucketFilter,
 		rerunIds: cli.rerunIds,
 		noCache: cli.noCache,
 		dryRun: cli.dryRun,
-		runId: cli.runId,
+		runId: effectiveRunId,
+		manifestDir: effectiveManifestDir,
 		judgeOverrideApplied: cli.judgeModel !== undefined,
 		onResult: cli.json
 			? (r) => write(`${JSON.stringify({ type: 'case-result', result: r })}\n`)
@@ -453,8 +472,10 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 			}),
 		),
 	);
+	let totalInputs = 0;
 	for (let i = 0; i < loaded.length; i++) {
 		const c = loaded[i]!.case;
+		totalInputs += c.inputs.length;
 		const entry: Record<string, unknown> = {
 			type: 'case-list-entry',
 			caseId: c.id,
@@ -463,6 +484,7 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 			oracle: c.oracle,
 			coverage: c.coverage,
 			inputs: c.inputs,
+			inputCount: c.inputs.length,
 			budgetUsd: c.budgetUsd,
 			currentCacheKey: cacheKeys[i]!,
 		};
@@ -473,6 +495,7 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 		`${JSON.stringify({
 			type: 'case-list-end',
 			totalCases: loaded.length,
+			totalInputs,
 			modelIds: deps.modelIds,
 		})}\n`,
 	);

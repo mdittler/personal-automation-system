@@ -140,42 +140,88 @@ export async function spawnRegression(
 	let summaryReceived: unknown = undefined;
 	let stderrTail = '';
 
+	// Single-shot terminal-event latch. Stream errors race normal exit, cancel
+	// races with crashes, and spawn ENOENT fires proc.on('error') without ever
+	// producing an exit event. `finishOnce` lets every path call without fear
+	// of double-emit; `terminatedPromise` lets `whenComplete` short-circuit
+	// the normal exit-wait when an error path fires first; `resolveExit` lets
+	// finishOnce unstick `normalPath` (otherwise its closures leak until GC).
+	let finished = false;
+	let resolveTerminated!: () => void;
+	const terminatedPromise = new Promise<void>((res) => {
+		resolveTerminated = res;
+	});
+	let resolveExit!: (code: number) => void;
+	const exitPromise = new Promise<number>((resolve) => {
+		resolveExit = resolve;
+	});
+	function finishOnce(event: RegressionEvent): void {
+		if (finished) return;
+		finished = true;
+		options.onEvent(event);
+		resolveTerminated();
+		// Unstick the normal exit path so its closures can be GC'd. proc.error
+		// on spawn ENOENT fires no exit event, leaving normalPath pending forever.
+		// Promise.resolve is idempotent, so the real exit listener (if it does
+		// fire later) just no-ops.
+		resolveExit(1);
+	}
+	const onSurfaceError =
+		(label: string) =>
+		(err: Error): void => {
+			// If cancel is already in flight, downstream stream errors are
+			// expected (the child is being torn down). Report cancelled instead
+			// of failed so an operator-initiated cancel isn't misclassified.
+			if (cancelled) {
+				finishOnce({ type: 'cancelled' });
+				return;
+			}
+			finishOnce({ type: 'failed', exitCode: 1, stderrTail: `${label} error: ${err.message}` });
+		};
+
 	proc.stderr.on('data', (chunk: Buffer | string) => {
 		stderrTail = appendStderrTail(stderrTail, chunk);
 	});
 
+	proc.on('error', onSurfaceError('spawn'));
+	proc.stdout.on('error', onSurfaceError('stdout'));
+	proc.stderr.on('error', onSurfaceError('stderr'));
+
 	const reader = createInterface({ input: proc.stdout });
 	const linePromise = (async () => {
-		for await (const rawLine of reader) {
-			const line = rawLine.trim();
-			if (!line) continue;
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(line);
-			} catch {
-				// Codex I3: non-JSON line — skip silently. (We do not console.warn
-				// in tests because the harness flags it; production diagnostic logs
-				// route via the parent process's pino instance.)
-				continue;
+		try {
+			for await (const rawLine of reader) {
+				const line = rawLine.trim();
+				if (!line) continue;
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(line);
+				} catch {
+					continue;
+				}
+				if (typeof parsed !== 'object' || parsed === null) continue;
+				const obj = parsed as { type?: string; result?: unknown; summary?: unknown };
+				if (obj.type === 'case-result' && 'result' in obj) {
+					options.onEvent({ type: 'case-result', result: obj.result });
+				} else if (obj.type === 'summary' && 'summary' in obj) {
+					summaryReceived = obj.summary;
+					options.onEvent({ type: 'summary', summary: obj.summary });
+				}
 			}
-			if (typeof parsed !== 'object' || parsed === null) continue;
-			const obj = parsed as { type?: string; result?: unknown; summary?: unknown };
-			if (obj.type === 'case-result' && 'result' in obj) {
-				options.onEvent({ type: 'case-result', result: obj.result });
-			} else if (obj.type === 'summary' && 'summary' in obj) {
-				summaryReceived = obj.summary;
-				options.onEvent({ type: 'summary', summary: obj.summary });
+		} catch (err) {
+			if (cancelled) {
+				finishOnce({ type: 'cancelled' });
+				return;
 			}
-			// Unknown types ignored (Codex I3).
+			const msg = err instanceof Error ? err.message : String(err);
+			finishOnce({ type: 'failed', exitCode: 1, stderrTail: `reader error: ${msg}` });
 		}
 	})();
 
-	const exitPromise = new Promise<number>((resolve) => {
-		proc.on('exit', (code: number | null) => resolve(code ?? 1));
-	});
+	proc.on('exit', (code: number | null) => resolveExit(code ?? 1));
 
 	// SIGTERM with a SIGKILL fallback after `SIGKILL_GRACE_MS`. Both the
-	// AbortSignal path (Codex P1: registry-driven cancel) and the direct
+	// AbortSignal path (registry-driven cancel) and the direct
 	// `handle.cancel()` path share this helper; the timer is cleared when
 	// the child exits so well-behaved children never receive SIGKILL.
 	let killTimer: NodeJS.Timeout | null = null;
@@ -208,21 +254,36 @@ export async function spawnRegression(
 			cancelled = true;
 			sigtermWithSigkillFallback();
 		});
-		await linePromise;
-		const exitCode = await exitPromise;
-		if (cancelled) {
-			options.onEvent({ type: 'cancelled' });
-			return;
-		}
-		if (summaryReceived !== undefined) {
-			if (exitCode === 0) {
-				options.onEvent({ type: 'complete', summary: summaryReceived });
-			} else {
-				options.onEvent({ type: 'gate-failed', summary: summaryReceived, exitCode });
+		// Race the normal exit path against terminatedPromise so spawn ENOENT
+		// (proc.on('error') fires, exitPromise never resolves) doesn't hang.
+		const normalPath = (async () => {
+			await linePromise;
+			const exitCode = await exitPromise;
+			if (cancelled) {
+				finishOnce({ type: 'cancelled' });
+				return;
 			}
-			return;
+			if (summaryReceived !== undefined) {
+				if (exitCode === 0) {
+					finishOnce({ type: 'complete', summary: summaryReceived });
+				} else {
+					finishOnce({ type: 'gate-failed', summary: summaryReceived, exitCode });
+				}
+				return;
+			}
+			finishOnce({ type: 'failed', exitCode, stderrTail });
+		})();
+		try {
+			await Promise.race([normalPath, terminatedPromise]);
+		} finally {
+			// Backstop: guarantees `whenComplete` always corresponds to a
+			// dispatched terminal event, even on paths that bypass finishOnce.
+			finishOnce({
+				type: 'failed',
+				exitCode: 1,
+				stderrTail: 'subprocess ended without terminal event',
+			});
 		}
-		options.onEvent({ type: 'failed', exitCode, stderrTail });
 	})();
 
 	return {

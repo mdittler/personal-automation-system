@@ -11,9 +11,81 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			noManifest: false,
 			runId: undefined,
+			manifestDir: undefined,
 			modelMatrix: undefined,
 			judgeModel: undefined,
+		});
+	});
+
+	describe('--no-manifest + --manifest-dir (REQ-REG-CLI-MAN-001)', () => {
+		it('parses --no-manifest as boolean flag (no value)', () => {
+			const o = parseCliArgs(['--no-manifest']);
+			expect(o.noManifest).toBe(true);
+			expect(o.manifestDir).toBeUndefined();
+		});
+
+		it('parses --manifest-dir=<path> (equals form)', () => {
+			const o = parseCliArgs(['--manifest-dir=/tmp/manifests']);
+			expect(o.manifestDir).toBe('/tmp/manifests');
+			expect(o.noManifest).toBe(false);
+		});
+
+		it('parses --manifest-dir <path> (space form)', () => {
+			const o = parseCliArgs(['--manifest-dir', '/tmp/manifests']);
+			expect(o.manifestDir).toBe('/tmp/manifests');
+		});
+
+		it('parses both --no-manifest and --run-id (precedence asserted at resolver layer)', () => {
+			const o = parseCliArgs(['--no-manifest', '--run-id=550e8400-e29b-41d4-a716-446655440000']);
+			expect(o.noManifest).toBe(true);
+			expect(o.runId).toBe('550e8400-e29b-41d4-a716-446655440000');
+		});
+
+		it('parses both --no-manifest and --manifest-dir (precedence asserted at resolver layer)', () => {
+			const o = parseCliArgs(['--no-manifest', '--manifest-dir=/tmp/m']);
+			expect(o.noManifest).toBe(true);
+			expect(o.manifestDir).toBe('/tmp/m');
+		});
+
+		it('rejects --manifest-dir= with empty value', () => {
+			expect(() => parseCliArgs(['--manifest-dir='])).toThrow(/non-empty path/);
+		});
+
+		it('rejects --manifest-dir without a value', () => {
+			expect(() => parseCliArgs(['--manifest-dir'])).toThrow(/path value/);
+		});
+
+		it('rejects --manifest-dir followed by another flag (eats the flag as a value)', () => {
+			expect(() => parseCliArgs(['--manifest-dir', '--json'])).toThrow(/path value/);
+		});
+
+		it('rejects --manifest-dir=<path> with traversal segment', () => {
+			expect(() => parseCliArgs(['--manifest-dir=../../etc'])).toThrow(/traversal/);
+		});
+
+		it('rejects --manifest-dir=<path> with nested traversal segment', () => {
+			expect(() => parseCliArgs(['--manifest-dir=/safe/path/../etc'])).toThrow(/traversal/);
+		});
+
+		it('rejects --manifest-dir=<path> with control character', () => {
+			expect(() => parseCliArgs(['--manifest-dir=/tmp/has\nnewline'])).toThrow(/control/);
+			expect(() => parseCliArgs(['--manifest-dir=/tmp/has\x00null'])).toThrow(/control/);
+		});
+
+		it('rejects --manifest-dir=<path> exceeding length cap', () => {
+			expect(() => parseCliArgs([`--manifest-dir=/${'a'.repeat(1100)}`])).toThrow(/exceeds/);
+		});
+
+		it('accepts an absolute --manifest-dir (regression test: not all paths are traversal)', () => {
+			const o = parseCliArgs(['--manifest-dir=/var/lib/regression-runs']);
+			expect(o.manifestDir).toBe('/var/lib/regression-runs');
+		});
+
+		it('accepts a relative --manifest-dir', () => {
+			const o = parseCliArgs(['--manifest-dir=./local-manifests']);
+			expect(o.manifestDir).toBe('./local-manifests');
 		});
 	});
 
@@ -142,6 +214,7 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			noManifest: false,
 		});
 	});
 
@@ -214,7 +287,16 @@ describe('buildTierOverrideFromCli', () => {
 	// Codex correction #3 + plan Batch 0 test: --judge-model must win over
 	// --model-matrix=standard= for the standard slot.
 	it('returns undefined when neither modelMatrix nor judgeModel is set', () => {
-		expect(buildTierOverrideFromCli({ dryRun: false, json: false, help: false, listOnly: false, noCache: false })).toBeUndefined();
+		expect(
+			buildTierOverrideFromCli({
+				dryRun: false,
+				json: false,
+				help: false,
+				listOnly: false,
+				noCache: false,
+				noManifest: false,
+			}),
+		).toBeUndefined();
 	});
 
 	it('builds override from --model-matrix only', () => {

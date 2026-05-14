@@ -106,6 +106,9 @@
 
   <% if (it.estimate) { %>
     <p class="estimate-banner" data-testid="estimate">
+      <% if (typeof it.estimate.totalCases === 'number' && typeof it.estimate.totalInputs === 'number') { %>
+        <strong data-testid="case-input-count"><%= it.estimate.totalCases %> cases / <%= it.estimate.totalInputs %> inputs</strong> ·
+      <% } %>
       Estimated cost: <strong>$<%= it.estimate.totalUsd %></strong>
       (run budget ceiling $<%= it.estimate.ceilingUsd %>)
     </p>
