@@ -141,6 +141,8 @@ export const init: AppModule['init'] = async (s) => {
 };
 
 // Required: handles text messages routed to your app via intents.
+// Returns HandlerResult: void / {handled: true} means handled;
+// {handled: false} yields to the chatbot fallback (see below).
 export const handleMessage: AppModule['handleMessage'] = async (ctx) => {
   await services.telegram.send(ctx.userId, `Got: ${ctx.text}`);
 };
@@ -161,6 +163,31 @@ export const handleCommand: AppModule['handleCommand'] = async (command, args, c
 // export const shutdown: AppModule['shutdown'] = async () => { ... };
 ```
 
+### Handler Return Values
+
+`handleMessage` returns `Promise<HandlerResult>`, where `HandlerResult` is
+`void | { handled: boolean }` (defined in `core/src/types/handler-result.ts`):
+
+- Return `void` (i.e. just `return;` or fall off the end) or `{ handled: true }`
+  — the message was handled by your app; the router stops here.
+- Return `{ handled: false }` — your app declined the message; the router
+  **yields to the chatbot fallback** so the conversational AI can respond
+  instead. Use this when a message was routed to you but, on inspection, isn't
+  something your app should answer.
+
+```typescript
+export const handleMessage: AppModule['handleMessage'] = async (ctx) => {
+  if (!looksLikeANoteCommand(ctx.text)) {
+    return { handled: false }; // let the chatbot take it
+  }
+  await saveNote(ctx);
+  // falling off the end is equivalent to { handled: true }
+};
+```
+
+`handleCommand`, `handleCallbackQuery`, and `handleScheduledJob` return
+`Promise<void>` — there is no fallback for those dispatch paths.
+
 ### MessageContext
 
 Every message handler receives a `MessageContext`:
@@ -179,6 +206,27 @@ interface MessageContext {
 
 `spaceId` and `spaceName` are set by the router when the user has an active shared space (set via the `/space` command). If the user is not in a space, both are `undefined`. Use `spaceName` for user-facing labels; use `spaceId` with `services.data.forSpace(spaceId, userId)` to read/write space-scoped data.
 
+#### Users, households, and spaces — what an app developer needs to know
+
+PAS is multi-user. Three scoping concepts affect your app:
+
+- **User** — every message has a `userId`. Per-user data lives at
+  `data/users/<userId>/<appId>/` and is reached with `services.data.forUser(userId)`.
+- **Household** — users belong to a household (the multi-user grouping for a
+  deployment). Some data paths are household-scoped. You don't manage households
+  yourself — the infrastructure resolves the household from the active user.
+- **Space** — a named, opt-in membership group for sharing data between specific
+  users (created/joined via the `/space` command). When a user has an active
+  space, `ctx.spaceId` is set; use `services.data.forSpace(spaceId, userId)` for
+  space-scoped data. `forSpace()` throws `SpaceMembershipError` if the user is
+  not a member.
+
+You almost never thread `userId` through service calls manually:
+`services.config.get(...)` and other per-user behavior resolve the active user
+automatically via the infrastructure's `requestContext` (see [User Config](#user-config)).
+You only pass `userId` explicitly to the data store (`forUser` / `forSpace`),
+because data scope is an intentional choice your app makes.
+
 ### PhotoContext
 
 Apps declaring `accepts_photos: true` in the manifest receive a `PhotoContext`:
@@ -194,6 +242,28 @@ interface PhotoContext {
   messageId: number;    // Telegram message ID
 }
 ```
+
+**Return value — feeding the conversation transcript.** `handlePhoto` returns
+`Promise<undefined | PhotoHandlerResult>`. To make the photo visible to the
+chatbot's conversation memory, return a `PhotoSummary`:
+
+```typescript
+interface PhotoSummary {
+  userTurn: string;       // Synthetic user-side turn, e.g. '[Photo: receipt]'. Keep under 100 chars.
+  assistantTurn: string;  // Sanitized assistant-side confirmation, with any structured detail inline as text.
+}
+
+interface PhotoHandlerResult {
+  photoSummary?: PhotoSummary;
+}
+```
+
+When you return `{ photoSummary }`, the infrastructure appends a synthetic
+user/assistant turn pair to the active session transcript so later chatbot
+turns can reference what the photo contained. Both strings are plain text —
+`SessionTurn` does not preserve structured metadata, so inline any detail the
+chatbot might need. Returning `undefined` means the photo was handled but
+nothing is recorded in the transcript.
 
 ### CallbackContext
 
@@ -235,7 +305,7 @@ export const handleCallbackQuery: AppModule['handleCallbackQuery'] = async (data
 
 ## Using CoreServices
 
-You only receive the services declared in `requirements.services`. Undeclared services will be `undefined`. Four services are always provided regardless of declarations: `config`, `secrets`, `timezone`, and `logger` (see [Always-Provided Services](MANIFEST_REFERENCE.md#always-provided-services)).
+You only receive the services declared in `requirements.services`. Undeclared services will be `undefined`. Five values are always provided regardless of declarations: `config`, `secrets`, `timezone`, `dataDir`, and `logger` (see [Always-Provided Services](MANIFEST_REFERENCE.md#always-provided-services)). `dataDir` is the absolute path to the data root — you rarely need it directly; use `services.data` for scoped access.
 
 ### Sending Messages
 
@@ -288,7 +358,7 @@ for (const part of parts) {
 }
 ```
 
-See `apps/chatbot/src/index.ts` for the production `splitTelegramMessage()` implementation that the chatbot uses.
+See `core/src/services/conversation/telegram-format.ts` for the production `splitTelegramMessage()` implementation that the built-in chatbot uses.
 
 ### Storing Data
 
@@ -615,21 +685,25 @@ These enable Dataview queries like:
 
 Any frontmatter key is automatically queryable — add whatever fields make sense for your domain.
 
-### Cross-App Integration (Phase D2, upcoming)
+### Programmatic Data Discovery
 
-PAS has planned infrastructure for programmatic cross-app data discovery via the **FileIndexService** (Phase D2). While not yet implemented, designing your data with these conventions makes your app ready:
+PAS maintains an internal **FileIndexService** (`core/src/services/file-index/`)
+— a metadata index of markdown frontmatter across all apps, built at startup and
+refreshed on `data:changed` events. It is **infrastructure-only**: it is not
+exposed on `CoreServices`, so apps cannot call it directly.
 
-**FileIndexService (Phase D2)** — a metadata-based index of all markdown file frontmatter across all apps. Built from existing frontmatter at startup, updated via `data:changed` events. Will enable scope-aware natural language queries about your app's data:
+The **app-facing** way to search data is `services.dataQuery` (declare the
+`data-query` service). It runs natural-language queries over indexed data files
+and is the surface the chatbot's `/ask` and `/edit` flows use. See the
+[Other Available Services](#other-available-services) table above.
 
-```typescript
-// Future API (not yet available in D1)
-const recipes = await services.fileIndex.searchByTags(['ingredient/chicken'], userId);
-const backlinks = await services.fileIndex.getBacklinks('food-tracker/recipes/stir-fry.md', userId);
-```
+The index is derived and disposable — `.md` files are always the source of
+truth, and the index can be rebuilt from them at any time.
 
-The index is derived and disposable — `.md` files are always the source of truth, and the index can be rebuilt from them at any time.
-
-**What to do now:** Use wiki-links, hierarchical tags, aliases, and Dataview-friendly fields in your frontmatter. These work in Obsidian immediately and will be indexed by the FileIndexService when it ships in D2.
+**Why the conventions still matter:** Using wiki-links, hierarchical tags,
+aliases, and Dataview-friendly frontmatter fields makes your data work in
+Obsidian immediately *and* makes it discoverable by the file index and
+`services.dataQuery`. Well-structured frontmatter is the input both rely on.
 
 ### Using External APIs
 
@@ -708,6 +782,14 @@ These services are available to apps that declare them in `requirements.services
 | `services.appKnowledge` | `app-knowledge` | Full-text search over app help files and docs. `search(query, userId?)` — same index the `/ask` chatbot uses. |
 | `services.modelJournal` | `model-journal` | Persistent per-model markdown files the LLM can write to. `append(modelSlug, content)` and `read(modelSlug)`. Useful for apps that want the AI to keep notes across sessions. |
 | `services.systemInfo` | `system-info` | Read-only system introspection: `getTierAssignments()`, `getCostSummary()`, `getScheduledJobs()`, `getSystemStatus()`, `isUserAdmin(userId)`. Write: `setTierModel(tier, provider, model)`. |
+| `services.dataQuery` | `data-query` | Natural-language queries over your app's indexed data files. The app-facing data-search surface. **Optional** — `services.dataQuery` is `undefined` unless declared. |
+| `services.interactionContext` | `interaction-context` | Per-user in-memory buffer of recent file interactions, for building context-aware responses. **Optional** — `undefined` unless declared. |
+| `services.editService` | `edit-service` | LLM-assisted file editing with a propose/confirm flow and a SHA-256 stale-write guard. Powers the built-in `/edit` command. **Optional** — `undefined` unless declared. |
+
+The last three are optional services — guard for `undefined` before use, since
+an app that forgets to declare the manifest key will not receive them. See the
+type files (`core/src/types/data-query.ts`, `core/src/services/interaction-context/`,
+`core/src/services/edit/`) for full method signatures.
 
 ## Testing
 
@@ -761,6 +843,74 @@ pnpm test                              # All tests
 pnpm test apps/my-app                  # Just your app
 npx vitest run apps/my-app --watch     # Watch mode
 ```
+
+## Testing Model Behavior with the Regression Suite
+
+Vitest unit tests verify your app's *logic*. They don't tell you whether a
+change of LLM model still routes and answers correctly — that needs real LLM
+calls. PAS has a separate **regression suite** for that: a fixture-backed,
+cached, real-LLM harness in the top-level `regression/` workspace. It is
+deliberately excluded from `pnpm test` so it doesn't run on every push.
+
+### What it does
+
+The suite runs a set of *persona cases* through real classifiers/handlers and
+grades the output with an oracle (a JSON-schema/assertion check, or an
+LLM judge). Its main job is letting you **swap an LLM model and measure the
+accuracy delta** before committing to the change.
+
+Run it with:
+
+```bash
+pnpm test:regression                        # all cases, respects the cache
+pnpm test:regression -- --dry-run            # list selected cases + estimated cost, no LLM calls
+pnpm test:regression -- --list               # emit the case list (NDJSON), no dispatch
+pnpm test:regression -- --bucket=routing     # one bucket only
+pnpm test:regression -- --rerun <case-id>    # force a fresh dispatch for one case
+pnpm test:regression -- --no-cache           # force fresh dispatch for every case
+```
+
+### Swapping a model
+
+Point the suite at a different model with `--model-matrix` (overrides tier
+models) and `--judge-model` (overrides the LLM-judge oracle's model):
+
+```bash
+# Positional: fast, standard, reasoning — in order
+pnpm test:regression -- --model-matrix=anthropic/claude-haiku-4-5,anthropic/claude-sonnet-4-6
+
+# Named tiers (mix positional + named is allowed; named wins on conflict)
+pnpm test:regression -- --model-matrix=fast=ollama/gemma3:12b,standard=anthropic/claude-sonnet-4-6
+
+# Override just the judge model used by rubric oracles
+pnpm test:regression -- --judge-model=anthropic/claude-haiku-4-5
+```
+
+The cache key is **model-ID-aware**: a different model ID produces a different
+cache entry, so each model gets its own cached results and you can compare them
+cleanly. (Known caveat, tracked in `docs/open-items.md`: the cache key is not
+provider-qualified yet — the same model name under two different providers
+would collide. Provider-qualified keys are deferred.)
+
+The `/gui/regression` admin page wraps all of this in a UI: a model-override
+form, a per-tier leaderboard, auto-generated weakness summaries, and
+performance-over-time charts.
+
+### Feeding your app's cases into the suite — current state
+
+The suite's buckets are **fixed and core-level**: `routing`, `receipt`,
+`chatbot`, and `recall`. There is **no generic per-app extension API** yet — an
+app cannot register its own bucket or case directory.
+
+The one concrete pattern available today is **food-specific**: the food app
+contributes routing cases via shadow-classifier *personas*. Adding a label plus
+accept-phrases to `apps/food/src/routing/__tests__/shadow-classifier.personas.ts`
+auto-generates a routing regression case. See `regression/README.md`
+("Adding a new routing case") for the mechanics.
+
+If you are building an app that needs model-behavior regression coverage, this
+is a known gap — see the *"generic per-app test discovery"* proposal in
+`docs/open-items.md`.
 
 ## Requirement-Driven Development
 
@@ -970,4 +1120,8 @@ Apps must not import LLM SDKs or dangerous modules directly. These are detected 
 
 - **Echo** (`apps/echo/`) — minimal example: echoes messages back. ~30 lines of code.
 - **Notes** (`apps/notes/`) — practical example: save, list, and summarize notes. Demonstrates commands, intents, data storage, LLM, and user config.
-- **Chatbot** (`apps/chatbot/`) — advanced example: conversational AI with LLM-based message classification, household context injection, conversation history, app metadata integration, and Telegram message splitting.
+- **Food** (`apps/food/`) — full-featured example: household food management with recipes, grocery lists, pantry tracking, photo (receipt) handling, scheduled jobs, and cost tracking. The most complete reference for a real-world app.
+
+> The conversational AI fallback ("chatbot") is **not** an app — it is built
+> into the infrastructure at `core/src/services/conversation/`. There is no
+> `apps/chatbot/` directory.

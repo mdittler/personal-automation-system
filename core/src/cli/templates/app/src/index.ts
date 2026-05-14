@@ -23,6 +23,9 @@ export const init: AppModule['init'] = async (s) => {
 	services = s;
 };
 
+// handleMessage returns HandlerResult (void | { handled: boolean }).
+// Returning void / { handled: true } means handled; return { handled: false }
+// to yield to the chatbot fallback. See "Handler Return Values" in docs/CREATING_AN_APP.md.
 export const handleMessage: AppModule['handleMessage'] = async (ctx: MessageContext) => {
 	await services.telegram.send(ctx.userId, `Received: ${ctx.text}`);
 

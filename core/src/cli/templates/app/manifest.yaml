@@ -20,7 +20,13 @@ requirements:
   services:
     - telegram
     - data-store
-    # - event-bus    # Emit custom events (e.g., for n8n webhook integration)
+    # - event-bus            # Emit custom events (e.g., for n8n webhook integration)
+    # - llm                  # LLM access (classify / complete / extractStructured)
+    # - scheduler            # One-off job scheduling
+    # - context-store        # Per-user + system knowledge base
+    # - data-query           # NL queries over your app's indexed data files
+    # - interaction-context  # Per-user buffer of recent file interactions
+    # - edit-service         # LLM-assisted file editing (propose/confirm flow)
   # external_apis:
   #   - id: my-api
   #     description: "External API for data"

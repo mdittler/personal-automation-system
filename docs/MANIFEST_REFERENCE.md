@@ -114,7 +114,11 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 
 ### `rules`
 
-Condition evaluator rule files.
+Condition-evaluator rule files. Each file declares named conditions —
+deterministic (field comparisons against data files) or fuzzy (LLM-evaluated) —
+that the infrastructure can check on a schedule or on demand. Apps that declare
+the `condition-eval` service evaluate them via `services.conditionEvaluator`;
+alerts and reports can also reference them.
 
 ```yaml
 capabilities:
@@ -161,6 +165,9 @@ Infrastructure services your app needs. Only declared services are injected — 
 | `app-knowledge` | `appKnowledge` | Read-only app and infra documentation search |
 | `model-journal` | `modelJournal` | Persistent model journal (`read`, `append`, `listArchives`, `readArchive`, `listModels`) |
 | `system-info` | `systemInfo` | Read-only system introspection (models, costs, scheduling, status) + model switching |
+| `data-query` | `dataQuery` | Natural-language data queries over indexed app data files. Optional — `services.dataQuery` is `undefined` unless declared |
+| `interaction-context` | `interactionContext` | Per-user in-memory buffer of recent file interactions, for context-aware responses. Optional — `undefined` unless declared |
+| `edit-service` | `editService` | LLM-assisted file editing with a propose/confirm flow and stale-write guard. Optional — `undefined` unless declared |
 
 Legacy service IDs `llm:ollama` and `llm:claude` are still accepted but map to the same `llm` service.
 
@@ -173,6 +180,7 @@ The following services are **always injected** into every app, regardless of `re
 | `config` | `AppConfigService` | Per-user app configuration. Returns the calling user's override (set via the GUI) when present, otherwise the `user_config` default. The active userId is propagated transparently via the infrastructure's `requestContext`, so app code never needs to pass userId to `config.get(...)` |
 | `secrets` | `SecretsService` | External API credential access via `services.secrets.get(id)`. See `external_apis` below |
 | `timezone` | `string` | IANA timezone string from system config (e.g. `'America/New_York'`). Use with `Intl.DateTimeFormat` |
+| `dataDir` | `string` | Absolute path to the data root directory (e.g. `/home/user/pas/data`). Rarely needed directly — use `services.data` for scoped access |
 | `logger` | `AppLogger` | Scoped structured logger (Pino), automatically tagged with your app ID. Levels: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
 
 ### `data`
@@ -242,7 +250,10 @@ requirements:
 
 ## `user_config` Block
 
-Per-user configuration shown in the management GUI.
+Per-user configuration shown in the management GUI and the `/settings` surfaces.
+The first five fields are the minimum; the rest are optional metadata that
+control how the setting is presented, who can see it, and whether the chatbot
+may change it via natural language.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -251,6 +262,19 @@ Per-user configuration shown in the management GUI.
 | `default` | any | Yes | Default value |
 | `description` | string | Yes | Shown in GUI |
 | `options` | string[] | Conditional | Required when `type` is `select` |
+| `min` | number | No | Minimum value for `type: number` |
+| `max` | number | No | Maximum value for `type: number` |
+| `label` | string | No | Short display label shown in the settings list. Falls back to `description` if absent |
+| `help` | string | No | One-sentence help text shown beneath the control |
+| `helpDetail` | string | No | Extended tooltip / detail text shown on hover or expand |
+| `category` | string | No | Settings-UI grouping. One of: `personal`, `food`, `notes`, `memory-sessions`, `notifications`, `system`, `dangerous` |
+| `adminOnly` | boolean | No | If `true`, the setting is only visible to platform admins |
+| `dangerous` | boolean | No | If `true`, a confirmation prompt is shown before applying |
+| `dangerConfirmPrompt` | string | No | Confirmation prompt text shown when `dangerous` is `true` |
+| `hidden` | boolean | No | If `true`, hidden from all UI surfaces (but still settable via NL or API) |
+| `nlSafe` | boolean | No | If `true`, the chatbot may change this setting via natural language |
+| `nlIntentRegex` | string | No | Regex source string (compiled case-insensitive) used to detect NL intent to change this setting |
+| `systemConfigBackingKey` | string | No | Dot-path into `SystemConfig` (camelCase) used as the effective default when no user override exists |
 
 **Example:**
 
@@ -259,28 +283,56 @@ user_config:
   - key: notes_per_page
     type: number
     default: 10
+    min: 1
+    max: 100
     description: "Number of notes to show when listing"
+    label: "Notes per page"
+    help: "How many notes appear in a single /notes listing."
+    category: notes
   - key: theme
     type: select
     default: "light"
     description: "UI theme"
     options: ["light", "dark", "auto"]
+    category: personal
+  - key: purge_on_archive
+    type: boolean
+    default: false
+    description: "Permanently delete notes instead of archiving them"
+    category: dangerous
+    adminOnly: true
+    dangerous: true
+    dangerConfirmPrompt: "This permanently deletes notes — they cannot be recovered. Continue?"
 ```
 
 ## Platform Built-in Commands
 
-These commands are handled by the Router and do not need to be declared in app manifests. They are always available to users regardless of which apps are installed or toggled.
+These commands are handled by the Router and do not need to be declared in app
+manifests. They are always available regardless of which apps are installed or
+toggled. An app **cannot** declare a command name that collides with a built-in.
+
+**Conversation & settings built-ins** (the Router's `BUILTIN_COMMAND_NAMES` set):
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `/ask` | — | App-aware LLM assistant; answers questions using app knowledge + user context |
-| `/newchat`, `/reset` | — | End the active session and start a fresh one |
+| `/newchat` | `/reset` | End the active conversation session and start a fresh one |
 | `/title` | — | Display or set the title of the active session |
 | `/recall` | — | Full-text search across conversation transcripts |
-| `/refreshmemory` | `/refresh-memory` | Rebuild the active session's memory snapshot from current ContextStore |
-| `/edit` | — | Propose and confirm edits to app data |
+| `/refreshmemory` | `/refresh-memory` | Rebuild the active session's memory snapshot from the current ContextStore |
+| `/flushmemory` | `/flush-memory` | Summarize the active session and flush it to the ContextStore before resetting |
+| `/edit` | — | Propose and confirm LLM-assisted edits to app data files |
 | `/notes` | — | Toggle whether the chatbot logs to daily notes |
-| `/help` | — | List available commands |
+| `/settings` | — | View and change per-user app settings from Telegram |
+
+**Router / admin / space built-ins** (handled directly by the Router, not in the set above):
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Onboarding / bootstrap entry point for a new user |
+| `/help` | List available commands |
+| `/space` | Create, join, leave, or switch the active shared data space |
+| `/invite` | Generate or redeem an invite code |
 
 ---
 
