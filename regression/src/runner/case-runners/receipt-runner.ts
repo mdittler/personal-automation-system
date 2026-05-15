@@ -37,7 +37,11 @@ interface MinimalLogger {
 }
 
 export interface ReceiptRunnerDeps {
-	llm: Pick<LLMService, 'complete'>;
+	// Codex P1 (2026-05-15): the production parseReceiptFromPhoto switched
+	// to `completeWithMeta` so it can detect max-token truncation. The
+	// regression shim must expose the same method. `complete` is also kept
+	// because intermediate adapters in some stubs still rely on it.
+	llm: Pick<LLMService, 'complete' | 'completeWithMeta'>;
 	logger: MinimalLogger;
 	timezone: string;
 	modelIds: TierModelSnapshot;
@@ -140,7 +144,7 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 	const tokenOut = 0;
 
 	// Construct minimal CoreServices shim. parseReceiptFromPhoto reads:
-	//   services.llm.complete(prompt, options)
+	//   services.llm.completeWithMeta(prompt, options)
 	//   services.timezone
 	//   services.logger.warn(...)
 	// Other CoreServices fields are unused here; the cast is intentional.

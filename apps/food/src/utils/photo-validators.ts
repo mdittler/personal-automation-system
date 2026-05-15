@@ -179,7 +179,16 @@ export function validateReceiptIntegrity(
 			Number.isFinite(li.quantity) &&
 			Number.isFinite(li.unitPrice)
 		) {
+			// Discount / return / coupon lines often print with a positive
+			// unitPrice (the per-unit dollar value) and a negative totalPrice
+			// (because the line is a credit). The sign convention is not
+			// recoverable from the parsed fields alone, so we cannot validate
+			// the arithmetic — skip the check when the totalPrice sign
+			// disagrees with the q·u sign. Codex P2 (2026-05-15).
 			const expected = li.quantity * li.unitPrice;
+			const signsAgree =
+				(expected >= 0 && li.totalPrice >= 0) || (expected <= 0 && li.totalPrice <= 0);
+			if (!signsAgree) continue;
 			if (Math.abs(expected - li.totalPrice) > LINE_ARITHMETIC_TOLERANCE_USD) {
 				warnings.push('line_arithmetic_mismatch');
 				break; // one example is enough

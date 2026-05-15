@@ -235,6 +235,29 @@ describe('validateReceiptIntegrity (REQ-FOOD-RECEIPT-INTEGRITY-004 .. -006)', ()
 			};
 			expect(validateReceiptIntegrity(r, 'stop')).not.toContain('line_arithmetic_mismatch');
 		});
+
+		it('skips the check when sign disagrees (positive q*u + negative totalPrice — Codex P2)', () => {
+			// Real-world bottle-deposit return: receipt prints unitPrice=0.05
+			// (the deposit value per bottle), quantity=1, totalPrice=-0.50
+			// (the credit). The sign convention is not recoverable from the
+			// parsed fields alone, so the arithmetic check is skipped rather
+			// than producing a false-positive warning.
+			const r = {
+				...clean,
+				lineItems: [{ name: 'Deposit Return', quantity: 1, unitPrice: 0.05, totalPrice: -0.50 }],
+			};
+			expect(validateReceiptIntegrity(r, 'stop')).not.toContain('line_arithmetic_mismatch');
+		});
+
+		it('also skips when sign disagrees in the other direction (negative q*u + positive totalPrice)', () => {
+			// Synthetic — guards against the model emitting a negative unitPrice
+			// with a positive totalPrice. Cannot verify; skip.
+			const r = {
+				...clean,
+				lineItems: [{ name: 'Weird', quantity: 1, unitPrice: -5.0, totalPrice: 5.0 }],
+			};
+			expect(validateReceiptIntegrity(r, 'stop')).not.toContain('line_arithmetic_mismatch');
+		});
 	});
 
 	describe('empty lineItems — sum check is a no-op', () => {

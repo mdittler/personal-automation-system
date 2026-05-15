@@ -10530,13 +10530,13 @@ The validator previously didn't enforce `ReceiptLineItem.quantity: number` (the 
 
 ---
 
-### REQ-FOOD-RECEIPT-INTEGRITY-011 — Receipt frontmatter MUST persist verification_warnings only when non-empty
+### REQ-FOOD-RECEIPT-INTEGRITY-011 — Receipt YAML body MUST persist verification_warnings only when non-empty
 
-The persisted Receipt YAML contains a `verification_warnings:` array field iff `parsed.verification_warnings.length > 0`. Clean parses produce no field — no empty arrays in the data store.
+The persisted Receipt YAML body (the `stringify(receipt)` half of the receipts/${id}.yaml file, NOT the Obsidian-compat frontmatter block built by `generateFrontmatter`) contains a `verification_warnings:` array field iff `parsed.verification_warnings.length > 0`. Clean parses produce no field — no empty arrays in the data store. The frontmatter block is intentionally search/index-shaped (title, date, tags, type, entity_keys, app); warnings are data on the Receipt record, not search keys.
 
-**Implementation:** `apps/food/src/handlers/photo.ts:handleReceiptPhoto` constructs the receipt with a conditional spread.
+**Implementation:** `apps/food/src/handlers/photo.ts:handleReceiptPhoto` constructs the `Receipt` object with a conditional spread. The frontmatter call at the same site does NOT include warnings.
 
-**Tests:** `photo-handler.test.ts` > verification_warnings — frontmatter (2 cases: writes-when-present, omits-when-clean).
+**Tests:** `photo-handler.test.ts` > verification_warnings — frontmatter (2 cases: writes-when-present, omits-when-clean). Test name is historical; the actual write target is the YAML body.
 
 ---
 

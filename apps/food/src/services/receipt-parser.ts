@@ -254,6 +254,7 @@ export async function parseReceiptFromPhoto(
 	let body = parseReceiptResponse(first.text, todayISO, services, 'receipt parse');
 	const initialFinishReason = first.finishReason;
 	let continuationParsedOk = true;
+	let continuationTruncated = false;
 
 	if (initialFinishReason === 'length') {
 		services.logger.warn('Receipt parse output truncated; firing continuation pass: %o', {
@@ -268,6 +269,11 @@ export async function parseReceiptFromPhoto(
 				maxTokens: 8192,
 			},
 		);
+		// Codex P1: the continuation call's own finishReason matters. If it
+		// also hits 'length' the merged result is incomplete by construction —
+		// even if the partial enumeration happens to make the sum tie out, we
+		// owe the user a "still truncated" warning. Hard one-retry cap remains.
+		continuationTruncated = cont.finishReason === 'length';
 		try {
 			const contRaw = parseJsonResponse(cont.text, 'receipt continuation') as Record<
 				string,
@@ -295,7 +301,10 @@ export async function parseReceiptFromPhoto(
 
 	const warnings: ReceiptVerificationWarning[] = [...integrityWarnings];
 	if (initialFinishReason === 'length') {
-		const stillSuspect = !continuationParsedOk || integrityWarnings.includes('sum_mismatch');
+		const stillSuspect =
+			!continuationParsedOk ||
+			continuationTruncated ||
+			integrityWarnings.includes('sum_mismatch');
 		if (stillSuspect) {
 			if (!warnings.includes('output_truncated')) warnings.push('output_truncated');
 			if (!warnings.includes('continuation_unresolved')) warnings.push('continuation_unresolved');

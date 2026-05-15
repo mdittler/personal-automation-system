@@ -68,6 +68,30 @@ function makeLogger(): ReceiptRunnerDeps['logger'] {
 	};
 }
 
+/**
+ * Codex P1 (2026-05-15): parseReceiptFromPhoto uses LLMService.completeWithMeta,
+ * so the runner shim must provide both methods. This helper wires both to the
+ * same response payload so tests can assert against either one.
+ */
+function llmShim(text: string): ReceiptRunnerDeps['llm'] {
+	return {
+		complete: vi.fn().mockResolvedValue(text),
+		completeWithMeta: vi.fn().mockResolvedValue({ text, finishReason: 'stop' as const }),
+	};
+}
+
+function llmShimFromMock(
+	completeMock: ReturnType<typeof vi.fn>,
+): ReceiptRunnerDeps['llm'] {
+	return {
+		complete: completeMock,
+		completeWithMeta: vi.fn(async (...args: unknown[]) => ({
+			text: await completeMock(...args),
+			finishReason: 'stop' as const,
+		})),
+	};
+}
+
 describe('runReceiptCase — production parser integration', () => {
 	it('passes when LLM extraction matches sidecar exactly', async () => {
 		const photoPath = await stagePhoto('walmart');
@@ -94,7 +118,7 @@ describe('runReceiptCase — production parser integration', () => {
 			}),
 		);
 		const deps: ReceiptRunnerDeps = {
-			llm: { complete: llmComplete },
+			llm: llmShimFromMock(llmComplete),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -132,26 +156,19 @@ describe('runReceiptCase — production parser integration', () => {
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
 		const deps: ReceiptRunnerDeps = {
-			llm: {
-				complete: vi.fn().mockResolvedValue(
-					JSON.stringify({
-						store: 'Walmart',
-						date: '2026-04-15',
-						lineItems: [
-							{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
-							{
-								name: 'Hallucinated Caviar',
-								quantity: 1,
-								unitPrice: 100,
-								totalPrice: 100,
-							},
-						],
-						subtotal: 104.99,
-						tax: 0,
-						total: 104.99,
-					}),
-				),
-			},
+			llm: llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [
+						{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
+						{ name: 'Hallucinated Caviar', quantity: 1, unitPrice: 100, totalPrice: 100 },
+					],
+					subtotal: 104.99,
+					tax: 0,
+					total: 104.99,
+				}),
+			),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -173,7 +190,7 @@ describe('runReceiptCase — production parser integration', () => {
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
 		const deps: ReceiptRunnerDeps = {
-			llm: { complete: vi.fn().mockResolvedValue('not json{') },
+			llm: llmShim('not json{'),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -200,18 +217,16 @@ describe('runReceiptCase — production parser integration', () => {
 		// dates rejected).
 		const futureDate = '2099-12-31';
 		const deps: ReceiptRunnerDeps = {
-			llm: {
-				complete: vi.fn().mockResolvedValue(
-					JSON.stringify({
-						store: 'Walmart',
-						date: futureDate,
-						lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
-						subtotal: 4.99,
-						tax: 0,
-						total: 47.82,
-					}),
-				),
-			},
+			llm: llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: futureDate,
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 47.82,
+				}),
+			),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -245,7 +260,7 @@ describe('runReceiptCase — production parser integration', () => {
 			}),
 		);
 		const deps: ReceiptRunnerDeps = {
-			llm: { complete: llmComplete },
+			llm: llmShimFromMock(llmComplete),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -292,7 +307,7 @@ describe('runReceiptCase — production parser integration', () => {
 		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05 (would push 0.02+0.05=0.07 > 0.05)
 		let callIdx = 0;
 		const deps: ReceiptRunnerDeps = {
-			llm: { complete: llmComplete },
+			llm: llmShimFromMock(llmComplete),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,
@@ -336,7 +351,7 @@ describe('runReceiptCase — production parser integration', () => {
 			}),
 		);
 		const deps: ReceiptRunnerDeps = {
-			llm: { complete: llmComplete },
+			llm: llmShimFromMock(llmComplete),
 			logger: makeLogger(),
 			timezone: 'America/New_York',
 			modelIds: MODELS,

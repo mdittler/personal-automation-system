@@ -167,13 +167,21 @@ describe('parseReceiptFromPhoto — continuation pass (REQ-FOOD-RECEIPT-INTEGRIT
 		});
 	});
 
-	it('caps at one retry even when continuation also hits length', async () => {
+	it('caps at one retry even when continuation also hits length AND flags the merged result as suspect (Codex P1)', async () => {
+		// Continuation extracts the missing $10 item, so post-merge the sum
+		// ties out cleanly. But the continuation itself returned finishReason='length',
+		// which means there were MORE items past the continuation's cap that the
+		// model couldn't emit. The merged result is incomplete by construction.
 		const { services, completeWithMeta } = makeServices(
 			[firstTruncatedTwoItems, continuationOneItem],
 			['length', 'length'],
 		);
-		await parseReceiptFromPhoto(services, testPhoto, testMimeType);
-		expect(completeWithMeta).toHaveBeenCalledTimes(2); // NEVER 3
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(completeWithMeta).toHaveBeenCalledTimes(2); // NEVER 3 — hard cap
+		// Per REQ-FOOD-RECEIPT-INTEGRITY-008: continuation truncation surfaces
+		// both warnings even though sum mismatch resolves.
+		expect(result.verification_warnings).toContain('output_truncated');
+		expect(result.verification_warnings).toContain('continuation_unresolved');
 	});
 
 	it('does NOT fire continuation when first call returns finishReason=stop', async () => {
@@ -264,26 +272,31 @@ describe('parseReceiptFromPhoto — verification_warnings flow (REQ-FOOD-RECEIPT
 		expect(result.verification_warnings).toContain('sum_mismatch');
 	});
 
-	it('SELF-CONSISTENT FUDGING (documented limitation): parser cannot detect the reported bug shape', async () => {
-		// Reality was 3 items, $5 + $6 + $10 = $21. The model dropped item C and
-		// reported subtotal=$16 with two items summing to $16. Per-line arithmetic
-		// holds (q*u==total), aggregate sum ties to subtotal — parser sees a clean
-		// receipt. Only the regression suite's transcription oracle catches this.
+	it('SELF-CONSISTENT FUDGING (documented limitation): the exact reported bug shape passes', async () => {
+		// User-reported real-world failure: reality was 3 items A=$5, B=$6, C=$10
+		// (subtotal $21 printed). The model dropped item C and inflated B's price to
+		// $16 so the two remaining items sum to the truthfully-printed subtotal.
+		// Per-line arithmetic holds because the model fudged BOTH unitPrice AND
+		// totalPrice on the inflated item (q*u still equals total). The aggregate
+		// sum ties to the printed subtotal. From the parser's point of view this is
+		// a perfectly clean receipt. Only PR2's transcription-based multiset oracle
+		// can catch this.
 		const fudged = JSON.stringify({
 			store: 'X',
 			date: '2026-05-15',
 			lineItems: [
 				{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 },
-				{ name: 'B', quantity: 1, unitPrice: 11, totalPrice: 11 },
+				{ name: 'B', quantity: 1, unitPrice: 16, totalPrice: 16 }, // inflated from real $6
 			],
-			subtotal: 16,
+			subtotal: 21, // truthfully printed
 			tax: 0,
-			total: 16,
+			total: 21,
 		});
 		const { services } = makeServices(fudged);
 		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
 		// No warnings emitted — this is the limit of what the parser alone can detect.
-		// Acknowledged in docs/open-items.md and validateReceiptIntegrity's source.
+		// Documented in docs/open-items.md (accepted risk) and in
+		// validateReceiptIntegrity's JSDoc.
 		expect(result.verification_warnings).toBeUndefined();
 	});
 });
