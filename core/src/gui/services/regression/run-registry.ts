@@ -13,11 +13,14 @@
 
 import { randomUUID } from 'node:crypto';
 
+// Kept structurally in sync with `RegressionEvent` in `subprocess.ts` (events
+// flow subprocess → registry). `modelIds` rides the summary/terminal events as
+// an `unknown` sibling of `summary`, validated at the GUI boundary.
 export type RegressionEvent =
 	| { type: 'case-result'; result: unknown }
-	| { type: 'summary'; summary: unknown }
-	| { type: 'complete'; summary: unknown }
-	| { type: 'gate-failed'; summary: unknown; exitCode: number }
+	| { type: 'summary'; summary: unknown; modelIds?: unknown }
+	| { type: 'complete'; summary: unknown; modelIds?: unknown }
+	| { type: 'gate-failed'; summary: unknown; exitCode: number; modelIds?: unknown }
 	| { type: 'failed'; exitCode: number; stderrTail: string }
 	| { type: 'cancelled' };
 

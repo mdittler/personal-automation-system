@@ -448,6 +448,47 @@ table tbody tr:nth-child(even):hover {
 	color: var(--pas-success);
 }
 
+/* ----- 9b. Regression terminal banners ----- */
+/* `gate-failed` is a model result, not a crash — it must read amber/warning,
+   visibly distinct from the red `failed` (real error) state. */
+.terminal-msg {
+	margin-top: 0.6rem;
+	padding: 0.75rem 1rem;
+	border-radius: var(--pas-radius-sm);
+	border-left: 4px solid;
+}
+
+.terminal-msg strong {
+	display: block;
+	margin-bottom: 0.35rem;
+}
+
+.terminal-msg .terminal-hint {
+	margin-top: 0.35rem;
+	font-style: italic;
+}
+
+.terminal-gate-failed {
+	background: var(--pas-warning-light);
+	border-left-color: var(--pas-warning);
+}
+
+.terminal-failed {
+	background: var(--pas-danger-light);
+	border-left-color: var(--pas-danger);
+}
+
+.terminal-complete {
+	background: var(--pas-success-light);
+	border-left-color: var(--pas-success);
+}
+
+.terminal-cancelled {
+	background: var(--pas-surface);
+	border-left-color: var(--pas-text-muted);
+	color: var(--pas-text-muted);
+}
+
 /* ----- 10. Empty states ----- */
 .empty-state {
 	text-align: center;

@@ -98,6 +98,49 @@ describe('spawnRegression — terminal-state classification (Codex C3)', () => {
 	});
 });
 
+describe('spawnRegression — modelIds plumbing', () => {
+	const modelIds = { fast: 'gemma4:26b', standard: 'claude-sonnet-4-6', reasoning: null };
+
+	it('carries modelIds from the summary line into the "complete" event', async () => {
+		const evts = await runWith({
+			stdoutLines: [JSON.stringify({ type: 'summary', summary: { totalCases: 1 }, modelIds })],
+			exitCode: 0,
+		});
+		expect(evts.find((e) => e.type === 'complete')).toMatchObject({ type: 'complete', modelIds });
+	});
+
+	it('carries modelIds into the "gate-failed" event', async () => {
+		const evts = await runWith({
+			stdoutLines: [
+				JSON.stringify({ type: 'summary', summary: { routingAccuracy: 0.5 }, modelIds }),
+			],
+			exitCode: 1,
+		});
+		expect(evts.find((e) => e.type === 'gate-failed')).toMatchObject({
+			type: 'gate-failed',
+			modelIds,
+		});
+	});
+
+	it('carries modelIds on the "summary" event itself', async () => {
+		const evts = await runWith({
+			stdoutLines: [JSON.stringify({ type: 'summary', summary: { totalCases: 1 }, modelIds })],
+			exitCode: 0,
+		});
+		expect(evts.find((e) => e.type === 'summary')).toMatchObject({ type: 'summary', modelIds });
+	});
+
+	it('still produces valid terminal events when the summary line omits modelIds', async () => {
+		const evts = await runWith({
+			stdoutLines: [JSON.stringify({ type: 'summary', summary: { totalCases: 1 } })],
+			exitCode: 0,
+		});
+		const complete = evts.find((e) => e.type === 'complete');
+		expect(complete?.type).toBe('complete');
+		expect((complete as { modelIds?: unknown } | undefined)?.modelIds).toBeUndefined();
+	});
+});
+
 describe('spawnRegression — event ordering', () => {
 	it('emits case-result events in stream order, then summary, then complete', async () => {
 		const evts = await runWith({

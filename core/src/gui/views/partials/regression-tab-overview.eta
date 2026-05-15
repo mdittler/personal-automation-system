@@ -72,6 +72,9 @@
               <% } else { %>
                 <span class="badge" title="No routing cases in this row — gate not applicable">—</span>
               <% } %>
+              <% if (row.gateStatus !== null) { %>
+                <small><%= row.routingAccuracyFormatted %> / <%= row.routingInputsEvaluated %> inputs</small>
+              <% } %>
             </td>
             <td data-testid="weakness-summary-cell" data-runid="<%= row.runId %>" data-tier="<%= row.tier %>">
               <% if (row.persistedSummary) { %>

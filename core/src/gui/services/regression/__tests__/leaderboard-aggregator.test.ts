@@ -33,6 +33,8 @@ function manifest(opts: {
 	reasoning?: string | null;
 	judgeOverride?: boolean;
 	caseResults: ManifestCaseResult[];
+	routingAccuracy?: number | null;
+	routingInputsEvaluated?: number;
 }): RunManifest {
 	return {
 		runId: opts.runId,
@@ -52,8 +54,8 @@ function manifest(opts: {
 			fail: 0,
 			error: 0,
 			budgetExceeded: 0,
-			routingAccuracy: null,
-			routingInputsEvaluated: 0,
+			routingAccuracy: opts.routingAccuracy ?? null,
+			routingInputsEvaluated: opts.routingInputsEvaluated ?? 0,
 			totalCostUsd: opts.caseResults.reduce((s, c) => s + c.costUsd, 0),
 			totalDurationMs: 0,
 		},
@@ -237,6 +239,61 @@ describe('aggregateLeaderboard — counts and grouping', () => {
 		});
 		const rows = aggregateLeaderboard({ manifests: [m], tier: 'fast' });
 		expect(rows).toEqual([]);
+	});
+});
+
+describe('aggregateLeaderboard — routing accuracy attribution', () => {
+	it('fast-tier rows carry routingAccuracy + routingInputsEvaluated from the summary', () => {
+		const m = manifest({
+			runId: 'r1',
+			completedAt: '2026-05-13T11:00:00.000Z',
+			fast: 'A',
+			routingAccuracy: 0.906,
+			routingInputsEvaluated: 53,
+			caseResults: [cr({ caseId: 'c1', evaluatedTier: 'fast' })],
+		});
+		const row = aggregateLeaderboard({ manifests: [m], tier: 'fast' })[0]!;
+		expect(row.routingAccuracy).toBe(0.906);
+		expect(row.routingInputsEvaluated).toBe(53);
+	});
+
+	it('does NOT leak run-wide routing accuracy onto standard/reasoning rows', () => {
+		// Same manifest, non-null summary.routingAccuracy — but routing cases
+		// only ran on the fast tier, so standard/reasoning rows must read null/0.
+		const m = manifest({
+			runId: 'r1',
+			completedAt: '2026-05-13T11:00:00.000Z',
+			fast: 'A',
+			standard: 'S',
+			reasoning: 'R',
+			routingAccuracy: 0.906,
+			routingInputsEvaluated: 53,
+			caseResults: [
+				cr({ caseId: 'c1', evaluatedTier: 'fast', bucket: 'routing' }),
+				cr({ caseId: 'c2', evaluatedTier: 'standard', bucket: 'chatbot' }),
+				cr({ caseId: 'c3', evaluatedTier: 'reasoning', bucket: 'chatbot' }),
+			],
+		});
+		const standardRow = aggregateLeaderboard({ manifests: [m], tier: 'standard' })[0]!;
+		const reasoningRow = aggregateLeaderboard({ manifests: [m], tier: 'reasoning' })[0]!;
+		expect(standardRow.routingAccuracy).toBeNull();
+		expect(standardRow.routingInputsEvaluated).toBe(0);
+		expect(reasoningRow.routingAccuracy).toBeNull();
+		expect(reasoningRow.routingInputsEvaluated).toBe(0);
+	});
+
+	it('fast-tier row reads null when the summary routingAccuracy is null (below floor)', () => {
+		const m = manifest({
+			runId: 'r1',
+			completedAt: '2026-05-13T11:00:00.000Z',
+			fast: 'A',
+			routingAccuracy: null,
+			routingInputsEvaluated: 0,
+			caseResults: [cr({ caseId: 'c1', evaluatedTier: 'fast' })],
+		});
+		const row = aggregateLeaderboard({ manifests: [m], tier: 'fast' })[0]!;
+		expect(row.routingAccuracy).toBeNull();
+		expect(row.routingInputsEvaluated).toBe(0);
 	});
 });
 

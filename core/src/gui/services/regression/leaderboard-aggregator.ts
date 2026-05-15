@@ -48,6 +48,16 @@ export interface LeaderboardRow {
 	 * at run time. Only meaningful on the `standard` tier.
 	 */
 	judgeOverrideApplied: boolean;
+	/**
+	 * Per-input REQ-REG-011 routing accuracy from the run summary. Routing
+	 * cases evaluate on the fast tier, so this is populated only on `fast`
+	 * rows — copying the run-wide figure onto a standard/reasoning row would
+	 * misattribute the fast tier's result. `null` on non-fast rows and when
+	 * the run was below the food-shadow input floor.
+	 */
+	routingAccuracy: number | null;
+	/** Food-shadow inputs evaluated for `routingAccuracy`; 0 on non-fast rows. */
+	routingInputsEvaluated: number;
 }
 
 export interface PinOverrideKey {
@@ -121,6 +131,7 @@ function buildRow(
 	const passRate = total === 0 ? 0 : counts.pass / total;
 	const cached = tierResults.filter((cr) => cr.source === 'cached').length;
 	const totalCostUsd = tierResults.reduce((sum, cr) => sum + cr.costUsd, 0);
+	const isFast = tier === 'fast';
 	return {
 		tier,
 		modelId,
@@ -136,6 +147,8 @@ function buildRow(
 		totalCostUsd,
 		buckets,
 		judgeOverrideApplied: tier === 'standard' ? m.judgeOverrideApplied : false,
+		routingAccuracy: isFast ? m.summary.routingAccuracy : null,
+		routingInputsEvaluated: isFast ? m.summary.routingInputsEvaluated : 0,
 	};
 }
 

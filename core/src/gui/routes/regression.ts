@@ -8,6 +8,7 @@ import {
 	parseModelMatrixValue,
 } from '../../services/regression/model-spec.js';
 import {
+	ROUTING_ACCURACY_GATE,
 	type RunResult,
 	SAFE_CASE_ID_RE,
 	SAFE_RUN_ID_RE,
@@ -38,6 +39,10 @@ import {
 } from '../services/regression/run-registry.js';
 import { openSseStream, writeSseEvent } from '../services/regression/sse-helper.js';
 import { type SpawnFn, spawnRegression } from '../services/regression/subprocess.js';
+import {
+	buildCompleteBanner,
+	buildGateFailedBanner,
+} from '../services/regression/terminal-banner.js';
 import { type TimeWindow, buildTrendData } from '../services/regression/trend-aggregator.js';
 import type {
 	SummaryTier,
@@ -704,11 +709,30 @@ function toSseEvent(event: RegressionEvent, runId: string): { type: string; data
 		case 'summary':
 			return { type: 'summary', data: event.summary };
 		case 'complete':
-			return { type: 'complete', data: { summary: event.summary, runId } };
+			// The banner is formatted server-side (terminal-banner.ts) so the
+			// client only assembles DOM text nodes. The raw `summary` and
+			// `modelIds` ride alongside it so downstream consumers that read
+			// the summary directly (or future ones) keep working — `banner`
+			// is additive, not a replacement.
+			return {
+				type: 'complete',
+				data: {
+					banner: buildCompleteBanner(event.summary),
+					summary: event.summary,
+					modelIds: event.modelIds,
+					runId,
+				},
+			};
 		case 'gate-failed':
 			return {
 				type: 'gate-failed',
-				data: { summary: event.summary, exitCode: event.exitCode, runId },
+				data: {
+					banner: buildGateFailedBanner(event.summary, event.modelIds),
+					summary: event.summary,
+					modelIds: event.modelIds,
+					exitCode: event.exitCode,
+					runId,
+				},
 			};
 		case 'failed':
 			return {
@@ -791,17 +815,14 @@ function formatRunDate(iso: string): string {
 }
 
 /**
- * REQ-REG-011's 0.95 gate is routing-specific. Returns 'pass' or 'fail' only
- * when this row has routing-bucket cases; otherwise null (rendered as "—" by
- * the template).
+ * Routing gate status, computed from the *per-input* routing accuracy — the
+ * same metric the runner gates on (REQ-REG-011). Per-case counts gate nothing,
+ * so the badge must derive from `routingAccuracy`, not bucket pass/total.
+ * `null` accuracy (non-fast row, or below the food-shadow input floor) → "—".
  */
-function computeRoutingGate(
-	buckets: ReadonlyArray<{ bucket: string; pass: number; total: number }>,
-): 'pass' | 'fail' | null {
-	const routing = buckets.find((b) => b.bucket === 'routing');
-	if (!routing || routing.total === 0) return null;
-	const rate = routing.pass / routing.total;
-	return rate >= 0.95 ? 'pass' : 'fail';
+function computeRoutingGate(routingAccuracy: number | null): 'pass' | 'fail' | null {
+	if (routingAccuracy === null) return null;
+	return routingAccuracy >= ROUTING_ACCURACY_GATE ? 'pass' : 'fail';
 }
 
 async function renderOverviewTab(
@@ -866,10 +887,12 @@ async function renderOverviewTab(
 			completedAtFormatted: formatRunDate(r.completedAt),
 			passRateFormatted: `${(r.passRate * 100).toFixed(1)}%`,
 			totalCostFormatted: `$${r.totalCostUsd.toFixed(4)}`,
-			// REQ-REG-011's 0.95 gate is routing-specific. Rows without routing
-			// cases display "—" rather than being scored against an irrelevant
-			// threshold.
-			gateStatus: computeRoutingGate(r.buckets),
+			// Gate badge derives from the per-input routing accuracy — the metric
+			// REQ-REG-011 actually gates on — so it can never disagree with the
+			// runner. Rows without routing cases (routingAccuracy null) show "—".
+			gateStatus: computeRoutingGate(r.routingAccuracy),
+			routingAccuracyFormatted:
+				r.routingAccuracy === null ? null : `${(r.routingAccuracy * 100).toFixed(1)}%`,
 			persistedSummary: summaryByKey.get(`${r.runId}:${r.tier}`) ?? null,
 		})),
 	}));

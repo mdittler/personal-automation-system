@@ -425,7 +425,11 @@ export async function runCli(
 	});
 
 	if (cli.json) {
-		write(`${JSON.stringify({ type: 'summary', summary: outcome.summary })}\n`);
+		// `modelIds` rides as a sibling of `summary` (it is not part of
+		// `RunSummary`) so the GUI can name the model that was actually tested.
+		write(
+			`${JSON.stringify({ type: 'summary', summary: outcome.summary, modelIds: deps.modelIds })}\n`,
+		);
 	} else if (cli.dryRun) {
 		// Dry-run cases have empty oracleVerdicts and synthetic pass verdicts.
 		// Reporting them as pass/fail would mislead the operator — render the

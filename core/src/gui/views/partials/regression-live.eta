@@ -44,16 +44,42 @@
 		btn.addEventListener('click', cancelActive);
 	}
 
-	function showTerminal(state, msg) {
+	// `payload` is either a plain string (failed / cancelled) or a structured
+	// banner object {stateLabel, headline, lines[], hint?} formatted server-side
+	// (terminal-banner.ts). The CSS class is always `terminal-<stateClass>` —
+	// decoupled from the human-readable state label.
+	function showTerminal(stateClass, payload) {
 		terminalReached = true;
-		setState(state);
+		const isBanner = payload && typeof payload === 'object';
+		setState(isBanner ? (payload.stateLabel || stateClass) : stateClass);
 		const btn = live.querySelector('.cancel-btn');
 		if (btn) btn.disabled = true;
 		const m = live.querySelector('.terminal-msg');
 		if (m) {
 			m.hidden = false;
-			m.className = 'terminal-msg terminal-' + state;
-			m.textContent = msg;
+			m.className = 'terminal-msg terminal-' + stateClass;
+			// Built via DOM APIs (textContent per node) — never innerHTML — so
+			// server-formatted strings cannot inject markup.
+			m.textContent = '';
+			if (isBanner) {
+				const h = document.createElement('strong');
+				h.textContent = payload.headline || '';
+				m.appendChild(h);
+				const lines = Array.isArray(payload.lines) ? payload.lines : [];
+				lines.forEach(function (line) {
+					const d = document.createElement('div');
+					d.textContent = line;
+					m.appendChild(d);
+				});
+				if (payload.hint) {
+					const hint = document.createElement('div');
+					hint.className = 'terminal-hint';
+					hint.textContent = payload.hint;
+					m.appendChild(hint);
+				}
+			} else {
+				m.textContent = String(payload == null ? '' : payload);
+			}
 		}
 		if (es) { es.close(); es = null; }
 	}
@@ -121,8 +147,10 @@
 			if (row) row.outerHTML = html;
 		});
 		es.addEventListener('summary', function () { setState('finalising'); });
-		es.addEventListener('complete', function () {
-			showTerminal('complete', 'Run complete.');
+		es.addEventListener('complete', function (e) {
+			let banner = null;
+			try { banner = (JSON.parse(e.data) || {}).banner || null; } catch (_) {}
+			showTerminal('complete', banner || 'Run complete.');
 			// REQ-REG-GUI-V2-018: poll /summary for each visible tier cell once
 			// the run completes. The server's onTerminal hook has already
 			// scheduled summarization; the polled GET picks up the persisted
@@ -130,12 +158,11 @@
 			pollWeaknessSummaries(activeRunId);
 		});
 		es.addEventListener('gate-failed', function (e) {
-			let summary = {};
-			try { summary = (JSON.parse(e.data) || {}).summary || {}; } catch (_) {}
-			const acc = summary.routingAccuracy;
-			const msg = 'REQ-REG-011 gate failed' +
-				(typeof acc === 'number' ? ' (routing accuracy ' + (acc * 100).toFixed(1) + '%)' : '');
-			showTerminal('gate-failed', msg);
+			let banner = null;
+			try { banner = (JSON.parse(e.data) || {}).banner || null; } catch (_) {}
+			// gate-failed means the suite RAN — the model under test scored below
+			// the REQ-REG-011 bar. The server-formatted banner says exactly that.
+			showTerminal('gate-failed', banner || 'REQ-REG-011 accuracy gate not met.');
 			// Gate failure still produces a manifest (REQ-REG-011 ran but the
 			// gate fired); summarizing those failures is exactly the
 			// most-useful case for operators.
