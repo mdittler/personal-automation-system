@@ -21,6 +21,7 @@ import {
 } from '../../services/context/request-context.js';
 import type {
 	ClassifyResult,
+	LLMCompletionMeta,
 	LLMCompletionOptions,
 	LLMService,
 	ModelTier,
@@ -117,6 +118,15 @@ export class LLMGuard implements LLMService {
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
 		return this.guarded('complete', prompt, options?.maxTokens, options?.tier ?? this.tier, () =>
 			this.inner.complete(prompt, { ...options, _appId: this.appId }),
+		);
+	}
+
+	async completeWithMeta(
+		prompt: string,
+		options?: LLMCompletionOptions,
+	): Promise<LLMCompletionMeta> {
+		return this.guarded('complete', prompt, options?.maxTokens, options?.tier ?? this.tier, () =>
+			this.inner.completeWithMeta(prompt, { ...options, _appId: this.appId }),
 		);
 	}
 

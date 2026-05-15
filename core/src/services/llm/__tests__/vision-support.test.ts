@@ -62,6 +62,7 @@ class VisionProvider extends BaseProvider {
 			usage: { inputTokens: 100, outputTokens: 50 },
 			model: 'test-model',
 			provider: 'test',
+			finishReason: 'stop',
 		};
 	}
 
@@ -83,6 +84,7 @@ class TextOnlyProvider extends BaseProvider {
 			usage: { inputTokens: 10, outputTokens: 20 },
 			model: 'test-model',
 			provider: 'test',
+			finishReason: 'stop',
 		};
 	}
 

@@ -18,6 +18,7 @@ import type { Logger } from 'pino';
 import type {
 	ClassifyResult,
 	LLMClient,
+	LLMCompletionMeta,
 	LLMCompletionOptions,
 	LLMService,
 	ModelRef,
@@ -54,6 +55,14 @@ export class LLMServiceImpl implements LLMService {
 	}
 
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
+		const result = await this.completeWithMeta(prompt, options);
+		return result.text;
+	}
+
+	async completeWithMeta(
+		prompt: string,
+		options?: LLMCompletionOptions,
+	): Promise<LLMCompletionMeta> {
 		const ref = this.resolveModelRef(options);
 		const provider = this.registry.get(ref.provider);
 
@@ -71,7 +80,11 @@ export class LLMServiceImpl implements LLMService {
 			modelRef: ref,
 		});
 
-		return result.text;
+		return {
+			text: result.text,
+			finishReason: result.finishReason,
+			usage: result.usage,
+		};
 	}
 
 	async classify(text: string, categories: string[]): Promise<ClassifyResult> {

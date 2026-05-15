@@ -43,6 +43,7 @@ function mockResponse(overrides: Record<string, unknown> = {}) {
 	return {
 		content: [{ type: 'text', text: 'Hello world' }],
 		usage: { input_tokens: 10, output_tokens: 20 },
+		stop_reason: 'end_turn',
 		...overrides,
 	};
 }
@@ -99,6 +100,36 @@ describe('AnthropicProvider', () => {
 		expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
 		expect(result.model).toBe('claude-sonnet-4-20250514');
 		expect(result.provider).toBe('anthropic');
+	});
+
+	// --- finishReason mapping ---
+
+	describe('finishReason mapping (REQ-FOOD-RECEIPT-INTEGRITY-003)', () => {
+		it.each([
+			['end_turn', 'stop'],
+			['stop_sequence', 'stop'],
+			['max_tokens', 'length'],
+			['tool_use', 'other'],
+		] as const)('maps stop_reason=%s → %s', async (stopReason, expected) => {
+			mockCreate.mockResolvedValue(mockResponse({ stop_reason: stopReason }));
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi');
+			expect(result.finishReason).toBe(expected);
+		});
+
+		it('maps unknown stop_reason → other (forward-compat with future SDK values)', async () => {
+			mockCreate.mockResolvedValue(mockResponse({ stop_reason: 'some_future_value' }));
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi');
+			expect(result.finishReason).toBe('other');
+		});
+
+		it('maps missing/undefined stop_reason → other', async () => {
+			mockCreate.mockResolvedValue(mockResponse({ stop_reason: undefined }));
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi');
+			expect(result.finishReason).toBe('other');
+		});
 	});
 
 	it('passes maxTokens option (defaults to 1024)', async () => {

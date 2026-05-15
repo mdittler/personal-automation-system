@@ -16,6 +16,7 @@ class TestProvider extends BaseProvider {
 		usage: { inputTokens: 10, outputTokens: 20 },
 		model: 'test-model',
 		provider: 'test',
+		finishReason: 'stop',
 	};
 	doCompleteError?: Error;
 	doCompleteCalls: Array<{ prompt: string; options?: LLMCompletionOptions }> = [];

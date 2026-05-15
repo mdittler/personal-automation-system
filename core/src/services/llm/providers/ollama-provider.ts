@@ -10,9 +10,28 @@ import { Ollama } from 'ollama';
 import type {
 	LLMCompletionOptions,
 	LLMCompletionResult,
+	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Map Ollama `done_reason` (newer SDKs) to the unified LLMFinishReason.
+ * Older Ollama versions don't emit `done_reason`; callers fall back to comparing
+ * `eval_count` against the requested `maxTokens`.
+ */
+function mapOllamaDoneReason(doneReason: unknown): LLMFinishReason {
+	switch (doneReason) {
+		case 'stop':
+			return 'stop';
+		case 'length':
+			return 'length';
+		case 'load':
+			return 'other';
+		default:
+			return 'other';
+	}
+}
 
 export class OllamaProvider extends BaseProvider {
 	private readonly client: Ollama;
@@ -43,6 +62,21 @@ export class OllamaProvider extends BaseProvider {
 			},
 		});
 
+		// Prefer the explicit `done_reason` from newer Ollama SDKs. When absent
+		// (older versions), fall back to comparing eval_count against the
+		// requested cap as a best-effort truncation heuristic. If neither
+		// signal is available we return 'other' so the caller can detect "we
+		// don't know" rather than silently treating it as a clean stop.
+		const rawDoneReason = (response as { done_reason?: unknown }).done_reason;
+		let finishReason: LLMFinishReason;
+		if (typeof rawDoneReason === 'string') {
+			finishReason = mapOllamaDoneReason(rawDoneReason);
+		} else if (typeof options?.maxTokens === 'number' && typeof response.eval_count === 'number') {
+			finishReason = response.eval_count >= options.maxTokens ? 'length' : 'stop';
+		} else {
+			finishReason = 'other';
+		}
+
 		return {
 			text: response.response ?? '',
 			usage: {
@@ -51,6 +85,7 @@ export class OllamaProvider extends BaseProvider {
 			},
 			model,
 			provider: this.providerId,
+			finishReason,
 		};
 	}
 

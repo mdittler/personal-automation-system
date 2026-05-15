@@ -8,10 +8,29 @@ import { GoogleGenAI } from '@google/genai';
 import type {
 	LLMCompletionOptions,
 	LLMCompletionResult,
+	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Map Google Gemini `candidates[0].finishReason` to the unified LLMFinishReason.
+ * Unknown / missing values → 'other'.
+ */
+function mapGoogleFinishReason(finishReason: unknown): LLMFinishReason {
+	switch (finishReason) {
+		case 'STOP':
+			return 'stop';
+		case 'MAX_TOKENS':
+			return 'length';
+		case 'SAFETY':
+		case 'RECITATION':
+			return 'error';
+		default:
+			return 'other';
+	}
+}
 
 export class GoogleProvider extends BaseProvider {
 	override readonly supportsVision = true;
@@ -66,6 +85,10 @@ export class GoogleProvider extends BaseProvider {
 		});
 
 		const text = response.text ?? '';
+		const firstCandidate = Array.isArray(response.candidates) ? response.candidates[0] : undefined;
+		const finishReason: LLMFinishReason = firstCandidate
+			? mapGoogleFinishReason(firstCandidate.finishReason)
+			: 'other';
 
 		return {
 			text,
@@ -77,6 +100,7 @@ export class GoogleProvider extends BaseProvider {
 				: undefined,
 			model,
 			provider: this.providerId,
+			finishReason,
 		};
 	}
 

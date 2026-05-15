@@ -103,6 +103,23 @@ export interface LLMCompletionOptions {
 // Completion result (enriched with usage data)
 // ---------------------------------------------------------------------------
 
+/**
+ * Unified finish reason across all providers.
+ *
+ * Mappings (per provider):
+ * - Anthropic `stop_reason`: 'end_turn'|'stop_sequence' → 'stop'; 'max_tokens' → 'length'; 'tool_use' → 'other'.
+ * - OpenAI-compat `choices[0].finish_reason`: 'stop' → 'stop'; 'length' → 'length';
+ *   'content_filter' → 'error'; 'tool_calls'|'function_call' → 'other'.
+ * - Google `candidates[0].finishReason`: 'STOP' → 'stop'; 'MAX_TOKENS' → 'length';
+ *   'SAFETY'|'RECITATION' → 'error'; everything else → 'other'.
+ * - Ollama `done_reason` (newer SDKs): 'stop' → 'stop'; 'length' → 'length'; 'load' → 'other'.
+ *   Older SDKs lacking `done_reason` fall back to `eval_count >= options.maxTokens ? 'length' : 'stop'`.
+ *
+ * Unknown / missing source values map to `'other'` so callers can detect the
+ * "I don't know" case explicitly rather than silently assuming a clean stop.
+ */
+export type LLMFinishReason = 'stop' | 'length' | 'error' | 'other';
+
 /** Result from a provider completion, enriched with usage data. */
 export interface LLMCompletionResult {
 	/** Generated text. */
@@ -116,6 +133,8 @@ export interface LLMCompletionResult {
 	model: string;
 	/** Provider key that served this request. */
 	provider: string;
+	/** Why the model stopped generating. Required across all providers. */
+	finishReason: LLMFinishReason;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +200,19 @@ export interface ClassifyResult {
 // LLM service (public API for apps)
 // ---------------------------------------------------------------------------
 
+/** Full completion result returned by `LLMService.completeWithMeta`. */
+export interface LLMCompletionMeta {
+	/** Generated text. */
+	text: string;
+	/** Why the model stopped generating. */
+	finishReason: LLMFinishReason;
+	/** Token usage (when reported by the provider). */
+	usage?: {
+		inputTokens: number;
+		outputTokens: number;
+	};
+}
+
 /** LLM interface provided to apps via CoreServices. */
 export interface LLMService {
 	/**
@@ -194,6 +226,17 @@ export interface LLMService {
 	 * 5. Default — 'fast' tier
 	 */
 	complete(prompt: string, options?: LLMCompletionOptions): Promise<string>;
+
+	/**
+	 * Like `complete()` but returns the text alongside the model's finish reason
+	 * (and usage when reported). Use this when the caller needs to know whether
+	 * the output was cut off by `max_tokens` (`finishReason === 'length'`) so it
+	 * can re-prompt for continuation. Same model-selection priority as `complete()`.
+	 */
+	completeWithMeta(
+		prompt: string,
+		options?: LLMCompletionOptions,
+	): Promise<LLMCompletionMeta>;
 
 	/**
 	 * Classify text into one of the given categories.

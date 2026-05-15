@@ -43,6 +43,7 @@ describe('OllamaProvider — responseFormat plumbing (Batch 1)', () => {
 			response: '{"action":"price-lookup","confidence":0.9}',
 			prompt_eval_count: 12,
 			eval_count: 8,
+			done_reason: 'stop',
 		});
 	});
 
@@ -65,5 +66,74 @@ describe('OllamaProvider — responseFormat plumbing (Batch 1)', () => {
 		// @ts-expect-error — exercising defensive runtime behavior
 		await provider.complete('plain prompt', { responseFormat: 'xml' });
 		expect(mockGenerate.mock.calls[0]?.[0]).not.toHaveProperty('format');
+	});
+});
+
+describe('OllamaProvider — finishReason mapping (REQ-FOOD-RECEIPT-INTEGRITY-003)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it.each([
+		['stop', 'stop'],
+		['length', 'length'],
+		['load', 'other'],
+	] as const)('maps done_reason=%s → %s (newer Ollama)', async (input, expected) => {
+		mockGenerate.mockResolvedValue({
+			response: 'hi',
+			prompt_eval_count: 1,
+			eval_count: 1,
+			done_reason: input,
+		});
+		const provider = makeProvider();
+		const result = await provider.completeWithUsage('hi');
+		expect(result.finishReason).toBe(expected);
+	});
+
+	it('maps unknown done_reason → other', async () => {
+		mockGenerate.mockResolvedValue({
+			response: 'hi',
+			prompt_eval_count: 1,
+			eval_count: 1,
+			done_reason: 'something_new',
+		});
+		const provider = makeProvider();
+		const result = await provider.completeWithUsage('hi');
+		expect(result.finishReason).toBe('other');
+	});
+
+	describe('older Ollama fallback (no done_reason)', () => {
+		it('eval_count >= maxTokens → length', async () => {
+			mockGenerate.mockResolvedValue({
+				response: 'hi',
+				prompt_eval_count: 1,
+				eval_count: 100, // reached cap
+			});
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi', { maxTokens: 100 });
+			expect(result.finishReason).toBe('length');
+		});
+
+		it('eval_count < maxTokens → stop', async () => {
+			mockGenerate.mockResolvedValue({
+				response: 'hi',
+				prompt_eval_count: 1,
+				eval_count: 50,
+			});
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi', { maxTokens: 100 });
+			expect(result.finishReason).toBe('stop');
+		});
+
+		it('no maxTokens provided AND no done_reason → other (cannot infer)', async () => {
+			mockGenerate.mockResolvedValue({
+				response: 'hi',
+				prompt_eval_count: 1,
+				eval_count: 999,
+			});
+			const provider = makeProvider();
+			const result = await provider.completeWithUsage('hi');
+			expect(result.finishReason).toBe('other');
+		});
 	});
 });

@@ -123,6 +123,9 @@ export class StubProvider extends BaseProvider {
 			},
 			model,
 			provider: this.providerId,
+			// Stub always returns the clean finish reason — explicit so the field
+			// is present on every test fixture without forcing call sites to opt in.
+			finishReason: 'stop',
 		};
 	}
 

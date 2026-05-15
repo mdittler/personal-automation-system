@@ -10,10 +10,31 @@ import OpenAI from 'openai';
 import type {
 	LLMCompletionOptions,
 	LLMCompletionResult,
+	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Map OpenAI-compatible `finish_reason` to the unified LLMFinishReason.
+ * Unknown / null / undefined values → 'other'.
+ */
+function mapOpenAIFinishReason(finishReason: unknown): LLMFinishReason {
+	switch (finishReason) {
+		case 'stop':
+			return 'stop';
+		case 'length':
+			return 'length';
+		case 'content_filter':
+			return 'error';
+		case 'tool_calls':
+		case 'function_call':
+			return 'other';
+		default:
+			return 'other';
+	}
+}
 
 export class OpenAICompatibleProvider extends BaseProvider {
 	override readonly supportsVision = true;
@@ -72,6 +93,9 @@ export class OpenAICompatibleProvider extends BaseProvider {
 		});
 
 		const text = response.choices[0]?.message?.content ?? '';
+		const finishReason: LLMFinishReason = response.choices[0]
+			? mapOpenAIFinishReason(response.choices[0].finish_reason)
+			: 'other';
 
 		return {
 			text,
@@ -83,6 +107,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
 				: undefined,
 			model,
 			provider: this.providerId,
+			finishReason,
 		};
 	}
 
