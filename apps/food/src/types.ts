@@ -258,6 +258,26 @@ export interface ReceiptLineItem {
 	packageSize?: string | null;
 }
 
+/**
+ * Warning codes emitted by `validateReceiptIntegrity` when the parser's output
+ * fails an internal consistency check. Persisted on the Receipt frontmatter and
+ * surfaced as a single user-facing line on the Telegram confirmation (raw codes
+ * stay in logs).
+ *
+ * - `sum_mismatch`: Σ lineItems[].totalPrice differs materially from the
+ *   reference (subtotal preferred; falls back to total-tax then total).
+ * - `line_arithmetic_mismatch`: at least one line's |quantity·unitPrice − total| > $0.50.
+ * - `output_truncated`: the LLM call (or final continuation) finished with
+ *   `finishReason === 'length'` AND the merged result still looks suspect.
+ * - `continuation_unresolved`: the parser fired its single continuation pass
+ *   to recover truncated output but the merged receipt still mismatches.
+ */
+export type ReceiptVerificationWarning =
+	| 'sum_mismatch'
+	| 'line_arithmetic_mismatch'
+	| 'output_truncated'
+	| 'continuation_unresolved';
+
 export interface Receipt {
 	id: string;
 	store: string;
@@ -270,6 +290,8 @@ export interface Receipt {
 	photoPath: string; // path to original photo in data store
 	capturedAt: string; // ISO datetime — canonical sort authority
 	priceUpdates?: ReceiptPriceUpdate[];
+	/** Integrity-check warnings raised by validateReceiptIntegrity; omitted when clean. */
+	verification_warnings?: ReceiptVerificationWarning[];
 }
 
 export interface ReceiptPriceUpdate {

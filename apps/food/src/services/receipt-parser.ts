@@ -4,12 +4,13 @@
 
 import { getCurrentUserId } from '@pas/core/services/context/request-context';
 import type { CoreServices } from '@pas/core/types';
-import type { ReceiptLineItem } from '../types.js';
+import type { ReceiptLineItem, ReceiptVerificationWarning } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import {
 	isValidReceiptAmount,
 	isValidReceiptLineItem,
 	normalizeReceiptLineItem,
+	validateReceiptIntegrity,
 } from '../utils/photo-validators.js';
 import { fenceCaption } from '../utils/sanitize.js';
 import { parseJsonResponse } from './recipe-parser.js';
@@ -66,6 +67,8 @@ export interface ParsedReceipt {
 	subtotal: number | null;
 	tax: number | null;
 	total: number;
+	/** Integrity-check warnings; omitted when the parse is clean. */
+	verification_warnings?: ReceiptVerificationWarning[];
 }
 
 export function buildReceiptPrompt(todayISO: string): string {
@@ -121,7 +124,7 @@ export async function parseReceiptFromPhoto(
 ): Promise<ParsedReceipt> {
 	const todayISO = todayDate(services.timezone);
 	const captionContext = fenceCaption(caption);
-	const { text: result } = await services.llm.completeWithMeta(
+	const { text: result, finishReason } = await services.llm.completeWithMeta(
 		`${buildReceiptPrompt(todayISO)}${captionContext}\n\nExtract the receipt data from the attached photo.`,
 		{
 			tier: 'standard',
@@ -165,7 +168,7 @@ export async function parseReceiptFromPhoto(
 		});
 	}
 
-	return {
+	const partial = {
 		store: typeof parsed.store === 'string' ? parsed.store : 'Unknown',
 		date,
 		...(rawExtractedDate !== undefined ? { rawExtractedDate } : {}),
@@ -173,5 +176,10 @@ export async function parseReceiptFromPhoto(
 		subtotal: isValidReceiptAmount(parsed.subtotal) ? parsed.subtotal : null,
 		tax: isValidReceiptAmount(parsed.tax) ? parsed.tax : null,
 		total: parsed.total,
+	};
+	const warnings = validateReceiptIntegrity(partial, finishReason);
+	return {
+		...partial,
+		...(warnings.length > 0 ? { verification_warnings: warnings } : {}),
 	};
 }

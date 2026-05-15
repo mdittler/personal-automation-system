@@ -50,6 +50,8 @@ export type {
 	ModelTier,
 	ModelRef,
 	LLMCompletionResult,
+	LLMCompletionMeta,
+	LLMFinishReason,
 	LLMClient,
 	LLMProviderClient,
 	ProviderModel,

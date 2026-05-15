@@ -93,3 +93,59 @@ describe('parseReceiptFromPhoto — request shape (REQ-FOOD-RECEIPT-INTEGRITY-00
 		);
 	});
 });
+
+describe('parseReceiptFromPhoto — verification_warnings flow (REQ-FOOD-RECEIPT-INTEGRITY-004..-006)', () => {
+	it('clean receipt → verification_warnings omitted entirely', async () => {
+		const valid = JSON.stringify({
+			store: 'X',
+			date: '2026-05-15',
+			lineItems: [{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 }],
+			subtotal: 5,
+			tax: 0,
+			total: 5,
+		});
+		const { services } = makeServices(valid);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(result.verification_warnings).toBeUndefined();
+	});
+
+	it('sum_mismatch surfaces when subtotal does not tie to line items', async () => {
+		const mismatched = JSON.stringify({
+			store: 'X',
+			date: '2026-05-15',
+			lineItems: [
+				{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 },
+				{ name: 'B', quantity: 1, unitPrice: 11, totalPrice: 11 },
+			],
+			subtotal: 100,
+			tax: 0,
+			total: 100,
+		});
+		const { services } = makeServices(mismatched);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(result.verification_warnings).toContain('sum_mismatch');
+	});
+
+	it('SELF-CONSISTENT FUDGING (documented limitation): parser cannot detect the reported bug shape', async () => {
+		// Reality was 3 items, $5 + $6 + $10 = $21. The model dropped item C and
+		// reported subtotal=$16 with two items summing to $16. Per-line arithmetic
+		// holds (q*u==total), aggregate sum ties to subtotal — parser sees a clean
+		// receipt. Only the regression suite's transcription oracle catches this.
+		const fudged = JSON.stringify({
+			store: 'X',
+			date: '2026-05-15',
+			lineItems: [
+				{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 },
+				{ name: 'B', quantity: 1, unitPrice: 11, totalPrice: 11 },
+			],
+			subtotal: 16,
+			tax: 0,
+			total: 16,
+		});
+		const { services } = makeServices(fudged);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		// No warnings emitted — this is the limit of what the parser alone can detect.
+		// Acknowledged in docs/open-items.md and validateReceiptIntegrity's source.
+		expect(result.verification_warnings).toBeUndefined();
+	});
+});
