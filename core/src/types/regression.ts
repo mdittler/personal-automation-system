@@ -222,6 +222,14 @@ export const SAFE_RUN_ID_RE =
 
 export const VERDICT_VALUES: readonly Verdict[] = ['pass', 'fail', 'error', 'budget-exceeded'];
 
+/**
+ * REQ-REG-011 per-input routing-accuracy gate threshold. The regression
+ * workspace has a parallel `ACCURACY_GATE_THRESHOLD` in
+ * `regression/src/runner/markdown-report.ts` (core cannot import from the
+ * `regression/` workspace — the dependency only flows regression → core).
+ */
+export const ROUTING_ACCURACY_GATE = 0.95;
+
 export function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

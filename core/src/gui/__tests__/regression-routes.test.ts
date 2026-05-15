@@ -13,7 +13,7 @@
  *           clients fetch this rather than building HTML from payload.
  */
 
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
-import type { RunResult } from '../../types/regression.js';
+import type { ManifestCaseResult, RunManifest, RunResult } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
@@ -36,6 +36,7 @@ import {
 	type RunRegistry,
 	createRunRegistry,
 } from '../services/regression/run-registry.js';
+import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 
 const AUTH_TOKEN = 'test-token';
 const ADMIN_USER_ID = 'admin-1';
@@ -104,6 +105,7 @@ interface BuildOptions {
 	discoveryError?: string;
 	cachedResults?: Array<{ caseId: string; cacheKey: string; result: RunResult }>;
 	registry?: RunRegistry;
+	runHistoryStore?: RunHistoryStore;
 }
 
 interface BuiltApp {
@@ -164,6 +166,7 @@ async function buildApp(opts: BuildOptions = {}): Promise<BuiltApp> {
 				cacheDir,
 				maxRunBudgetUsd: 5,
 				logger,
+				...(opts.runHistoryStore ? { runHistoryStore: opts.runHistoryStore } : {}),
 			});
 		},
 		{ prefix: '/gui' },
@@ -803,6 +806,9 @@ describe('GET /gui/regression — client wiring (Codex P1)', () => {
 			expect(res.body).toContain('cancel-btn');
 			expect(res.body).toContain('/gui/regression/estimate?');
 			expect(res.body).toContain("'case-completed'");
+			// Terminal handlers read the server-formatted banner off `e.data`.
+			expect(res.body).toContain('.banner');
+			expect(res.body).toContain('payload.headline');
 		} finally {
 			await app.close();
 		}
@@ -968,5 +974,171 @@ describe('GET /gui/regression/estimate', () => {
 		} finally {
 			await app.close();
 		}
+	});
+});
+
+// ──────────────── Overview leaderboard — per-input routing accuracy display
+//
+// The gate badge must derive from the per-input routing accuracy (the metric
+// REQ-REG-011 actually gates on), and the figure must render next to it so
+// "30/33 pass" (per-case) and "FAIL" (per-input) can never look contradictory
+// without explanation. CSS guard: `gate-failed` is amber, not red.
+
+function manifestCase(over: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseResult {
+	return {
+		bucket: 'routing',
+		cacheKey: HEX64('a'),
+		evaluatedTier: 'fast',
+		verdict: 'pass',
+		source: 'fresh',
+		costUsd: 0.001,
+		timestamp: '2026-05-13T11:00:00.000Z',
+		...over,
+	};
+}
+
+function overviewManifest(opts: {
+	runId: string;
+	fast?: string;
+	standard?: string;
+	caseResults: ManifestCaseResult[];
+	routingAccuracy: number | null;
+	routingInputsEvaluated: number;
+}): RunManifest {
+	const pass = opts.caseResults.filter((c) => c.verdict === 'pass').length;
+	const fail = opts.caseResults.filter((c) => c.verdict === 'fail').length;
+	const error = opts.caseResults.filter((c) => c.verdict === 'error').length;
+	return {
+		runId: opts.runId,
+		startedAt: '2026-05-13T10:00:00.000Z',
+		completedAt: '2026-05-13T11:00:00.000Z',
+		modelIds: {
+			fast: opts.fast ?? 'gemma4:26b',
+			standard: opts.standard ?? 'claude-sonnet-4-6',
+			reasoning: null,
+		},
+		judgeOverrideApplied: false,
+		bucketsRequested: ['__all__'],
+		caseResults: opts.caseResults,
+		summary: {
+			totalCases: opts.caseResults.length,
+			pass,
+			fail,
+			error,
+			budgetExceeded: 0,
+			routingAccuracy: opts.routingAccuracy,
+			routingInputsEvaluated: opts.routingInputsEvaluated,
+			totalCostUsd: 0.003,
+			totalDurationMs: 1000,
+		},
+	};
+}
+
+function fakeHistoryStore(manifests: RunManifest[]): RunHistoryStore {
+	return {
+		list: async () => manifests,
+		getById: async (id) => manifests.find((m) => m.runId === id) ?? null,
+		latestPerTierAndModel: async () => new Map(),
+	};
+}
+
+describe('Overview leaderboard — per-input routing accuracy', () => {
+	it('fast row above the gate renders PASS with the per-input accuracy figure', async () => {
+		const manifest = overviewManifest({
+			runId: 'run-pass',
+			fast: 'gemma4:31b',
+			caseResults: [manifestCase({ caseId: 'c1' }), manifestCase({ caseId: 'c2' })],
+			routingAccuracy: 0.9811,
+			routingInputsEvaluated: 53,
+		});
+		const { app } = await buildApp({ runHistoryStore: fakeHistoryStore([manifest]) });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=overview');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('badge-ok');
+			expect(res.body).toContain('98.1% / 53 inputs');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('shows FAIL + per-input accuracy even when per-case counts look healthy', async () => {
+		// Contradiction case: every case passed (per-case 3/3) but the per-input
+		// routing accuracy is below the 0.95 gate. The badge must say FAIL and the
+		// 90.6% figure must sit next to it so the two numbers are reconcilable.
+		const manifest = overviewManifest({
+			runId: 'run-contradiction',
+			fast: 'gemma4:26b',
+			caseResults: [
+				manifestCase({ caseId: 'c1', verdict: 'pass' }),
+				manifestCase({ caseId: 'c2', verdict: 'pass' }),
+				manifestCase({ caseId: 'c3', verdict: 'pass' }),
+			],
+			routingAccuracy: 0.906,
+			routingInputsEvaluated: 53,
+		});
+		const { app } = await buildApp({ runHistoryStore: fakeHistoryStore([manifest]) });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=overview');
+			expect(res.body).toContain('badge-err');
+			expect(res.body).toContain('90.6% / 53 inputs');
+			// per-case count is still shown in the Cases column — both lenses visible
+			expect(res.body).toContain('3/3 pass');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('does not leak run-wide routing accuracy onto a standard-tier row', async () => {
+		// Standard-tier-only run; summary carries a routingAccuracy but routing
+		// cases evaluate on the fast tier — the standard row must show "—" and
+		// no "% / inputs" figure.
+		const manifest = overviewManifest({
+			runId: 'run-standard',
+			caseResults: [
+				manifestCase({ caseId: 's1', bucket: 'chatbot', evaluatedTier: 'standard' }),
+			],
+			routingAccuracy: 0.906,
+			routingInputsEvaluated: 53,
+		});
+		const { app } = await buildApp({ runHistoryStore: fakeHistoryStore([manifest]) });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=overview');
+			expect(res.body).not.toContain('90.6% / 53 inputs');
+			expect(res.body).toContain('gate not applicable');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('renders no accuracy figure when routingAccuracy is null (below floor)', async () => {
+		const manifest = overviewManifest({
+			runId: 'run-null',
+			caseResults: [manifestCase({ caseId: 'c1' })],
+			routingAccuracy: null,
+			routingInputsEvaluated: 0,
+		});
+		const { app } = await buildApp({ runHistoryStore: fakeHistoryStore([manifest]) });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=overview');
+			expect(res.body).not.toMatch(/\d+\.\d% \/ \d+ inputs/);
+			expect(res.body).toContain('gate not applicable');
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+describe('pas.css — terminal banner state styling', () => {
+	it('gate-failed uses the warning token and failed uses the danger token', async () => {
+		const css = await readFile(join(moduleDir, 'public', 'pas.css'), 'utf8');
+		const gateFailed = css.slice(css.indexOf('.terminal-gate-failed'));
+		expect(gateFailed).toMatch(/\.terminal-gate-failed\s*{[^}]*--pas-warning/);
+		const failed = css.slice(css.indexOf('.terminal-failed'));
+		expect(failed).toMatch(/\.terminal-failed\s*{[^}]*--pas-danger/);
+		// gate-failed must NOT borrow the danger token — it is not a crash.
+		expect(
+			/\.terminal-gate-failed\s*{[^}]*--pas-danger/.test(css),
+		).toBe(false);
 	});
 });

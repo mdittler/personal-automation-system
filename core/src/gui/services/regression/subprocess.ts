@@ -101,9 +101,9 @@ export type SpawnFn = () => SpawnProcLike;
 
 export type RegressionEvent =
 	| { type: 'case-result'; result: unknown }
-	| { type: 'summary'; summary: unknown }
-	| { type: 'complete'; summary: unknown }
-	| { type: 'gate-failed'; summary: unknown; exitCode: number }
+	| { type: 'summary'; summary: unknown; modelIds?: unknown }
+	| { type: 'complete'; summary: unknown; modelIds?: unknown }
+	| { type: 'gate-failed'; summary: unknown; exitCode: number; modelIds?: unknown }
 	| { type: 'failed'; exitCode: number; stderrTail: string }
 	| { type: 'cancelled' };
 
@@ -138,6 +138,10 @@ export async function spawnRegression(
 	const proc = spawnFn();
 	let cancelled = false;
 	let summaryReceived: unknown = undefined;
+	// `modelIds` rides the `summary` JSON line as a sibling of `summary` (it is
+	// not part of `RunSummary`). Captured here so the terminal `complete` /
+	// `gate-failed` events can name the model that was actually tested.
+	let modelIdsReceived: unknown = undefined;
 	let stderrTail = '';
 
 	// Single-shot terminal-event latch. Stream errors race normal exit, cancel
@@ -200,12 +204,18 @@ export async function spawnRegression(
 					continue;
 				}
 				if (typeof parsed !== 'object' || parsed === null) continue;
-				const obj = parsed as { type?: string; result?: unknown; summary?: unknown };
+				const obj = parsed as {
+					type?: string;
+					result?: unknown;
+					summary?: unknown;
+					modelIds?: unknown;
+				};
 				if (obj.type === 'case-result' && 'result' in obj) {
 					options.onEvent({ type: 'case-result', result: obj.result });
 				} else if (obj.type === 'summary' && 'summary' in obj) {
 					summaryReceived = obj.summary;
-					options.onEvent({ type: 'summary', summary: obj.summary });
+					if ('modelIds' in obj) modelIdsReceived = obj.modelIds;
+					options.onEvent({ type: 'summary', summary: obj.summary, modelIds: obj.modelIds });
 				}
 			}
 		} catch (err) {
@@ -265,9 +275,14 @@ export async function spawnRegression(
 			}
 			if (summaryReceived !== undefined) {
 				if (exitCode === 0) {
-					finishOnce({ type: 'complete', summary: summaryReceived });
+					finishOnce({ type: 'complete', summary: summaryReceived, modelIds: modelIdsReceived });
 				} else {
-					finishOnce({ type: 'gate-failed', summary: summaryReceived, exitCode });
+					finishOnce({
+						type: 'gate-failed',
+						summary: summaryReceived,
+						exitCode,
+						modelIds: modelIdsReceived,
+					});
 				}
 				return;
 			}

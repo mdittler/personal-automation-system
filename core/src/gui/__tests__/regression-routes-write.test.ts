@@ -756,6 +756,98 @@ describe('GET /gui/regression/runs/:runId/events — SSE', () => {
 			await app.close();
 		}
 	});
+
+	function sseFrameData(body: string, eventName: string): Record<string, unknown> {
+		const frame = body.split('\n\n').find((f) => f.includes(`event: ${eventName}`));
+		if (!frame) throw new Error(`no ${eventName} frame in SSE body`);
+		const dataLine = frame.split('\n').find((l) => l.startsWith('data: '));
+		if (!dataLine) throw new Error(`no data line in ${eventName} frame`);
+		return JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+	}
+
+	it('gate-failed SSE event carries a server-formatted banner naming the model', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({
+				type: 'summary',
+				summary: { pass: 30, totalCases: 33, routingAccuracy: 0.906, routingInputsEvaluated: 53 },
+				modelIds: { fast: 'gemma4:26b', standard: 'claude-sonnet-4-6', reasoning: null },
+			});
+			pendingRuns[0]?.emit({
+				type: 'gate-failed',
+				summary: { pass: 30, totalCases: 33, routingAccuracy: 0.906, routingInputsEvaluated: 53 },
+				exitCode: 1,
+				modelIds: { fast: 'gemma4:26b', standard: 'claude-sonnet-4-6', reasoning: null },
+			});
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			const data = sseFrameData(res.body, 'gate-failed');
+			const banner = data.banner as { stateLabel: string; headline: string; lines: string[] };
+			expect(banner.stateLabel).toBe('accuracy gate not met');
+			expect(banner.headline).toContain('not a crash');
+			expect(banner.lines.join(' ')).toContain('gemma4:26b');
+			expect(banner.lines.join(' ')).toContain('90.6%');
+			// banner is additive — raw summary + modelIds still ship alongside
+			// so existing/external consumers reading them directly keep working.
+			expect(data.summary).toMatchObject({ routingAccuracy: 0.906, routingInputsEvaluated: 53 });
+			expect(data.modelIds).toMatchObject({ fast: 'gemma4:26b' });
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('complete SSE event carries a server-formatted banner', async () => {
+		const { app, pendingRuns } = await buildApp();
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({
+				type: 'summary',
+				summary: { pass: 33, totalCases: 33, routingAccuracy: 0.99, routingInputsEvaluated: 53 },
+				modelIds: { fast: 'gemma4:31b', standard: 'claude-sonnet-4-6', reasoning: null },
+			});
+			pendingRuns[0]?.emit({
+				type: 'complete',
+				summary: { pass: 33, totalCases: 33, routingAccuracy: 0.99, routingInputsEvaluated: 53 },
+				modelIds: { fast: 'gemma4:31b', standard: 'claude-sonnet-4-6', reasoning: null },
+			});
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			const data = sseFrameData(res.body, 'complete');
+			const banner = data.banner as { stateLabel: string; headline: string; lines: string[] };
+			expect(banner.stateLabel).toBe('complete');
+			expect(banner.headline).toBe('Run complete.');
+			expect(banner.lines.join(' ')).toContain('33/33 cases passed');
+			expect(data.summary).toMatchObject({ pass: 33, totalCases: 33 });
+			expect(data.modelIds).toMatchObject({ fast: 'gemma4:31b' });
+		} finally {
+			await app.close();
+		}
+	});
 });
 
 describe('POST /gui/regression/runs/:runId/cancel — REQ-REG-016', () => {

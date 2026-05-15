@@ -10376,6 +10376,56 @@ The resolver is extracted from `cli-main.ts` (Codex C7) because `cli-main.ts` ha
 
 ---
 
+### REQ-REG-GUI-V2-025 — A `gate-failed` run's live banner MUST read as a model result (not a crash), name the tested fast-tier model, and show both the per-input routing accuracy and the per-case pass count
+
+**Phase:** Regression GUI — gate-failed clarity (2026-05-14) | **Status:** Implemented
+
+The terminal banner for `gate-failed` (and `complete`) runs is formatted server-side by `core/src/gui/services/regression/terminal-banner.ts` (`buildGateFailedBanner` / `buildCompleteBanner`) and shipped as a structured `{stateLabel, headline, lines[], hint?}` object on the SSE event payload (`toSseEvent` in `core/src/gui/routes/regression.ts`). `regression-live.eta`'s client only assembles DOM text nodes from it — no formatting logic in the inline script. The `gate-failed` state label is "accuracy gate not met"; the headline states the suite completed and "this is a result, not a crash"; the detail lines name the tested fast-tier model, show the per-input routing accuracy + input count against the ≥95% REQ-REG-011 bar, and show the per-case pass count with an explicit "the gate is measured per input, not per case" note. The tested model is sourced from `modelIds` carried on the subprocess terminal event — the runner emits it on the `--json` summary line (`regression/src/runner/index.ts`) and `subprocess.ts` forwards it through the `summary` / `complete` / `gate-failed` events, so it survives SSE replay/reconnect. `pas.css` styles `.terminal-gate-failed` with the `--pas-warning` token (amber), visibly distinct from `.terminal-failed` (`--pas-danger`, red).
+
+**Standard tests:**
+- `terminal-banner.test.ts` > buildGateFailedBanner > builds a model-result banner from a valid summary + modelIds
+- `terminal-banner.test.ts` > buildCompleteBanner > builds a success banner with the metric summary line
+- `subprocess.test.ts` > spawnRegression — modelIds plumbing > carries modelIds from the summary line into the "complete" event
+- `subprocess.test.ts` > spawnRegression — modelIds plumbing > carries modelIds into the "gate-failed" event
+- `subprocess.test.ts` > spawnRegression — modelIds plumbing > carries modelIds on the "summary" event itself
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — SSE > gate-failed SSE event carries a server-formatted banner naming the model
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — SSE > complete SSE event carries a server-formatted banner
+- `regression-routes.test.ts` > GET /gui/regression — client wiring (Codex P1) > renders the regression-live script block so the page is end-to-end wired
+
+**Edge case tests:**
+- `terminal-banner.test.ts` > buildGateFailedBanner > omits the accuracy line when routingAccuracy is null
+- `terminal-banner.test.ts` > buildGateFailedBanner > omits the model name when modelIds is missing
+- `terminal-banner.test.ts` > buildGateFailedBanner > treats a non-string modelIds.fast as absent
+- `terminal-banner.test.ts` > buildGateFailedBanner > falls back to headline + hint only when the summary is not an object
+- `terminal-banner.test.ts` > buildGateFailedBanner > omits the accuracy line for non-finite routingAccuracy
+- `terminal-banner.test.ts` > buildGateFailedBanner > omits the case line when pass/totalCases are not finite numbers
+- `terminal-banner.test.ts` > buildCompleteBanner > drops the routing-accuracy clause when routingAccuracy is null
+- `terminal-banner.test.ts` > buildCompleteBanner > falls back to the headline only when the summary is not an object
+- `terminal-banner.test.ts` > buildCompleteBanner > omits the metric line when pass/totalCases are not finite
+- `subprocess.test.ts` > spawnRegression — modelIds plumbing > still produces valid terminal events when the summary line omits modelIds
+- `regression-routes.test.ts` > pas.css — terminal banner state styling > gate-failed uses the warning token and failed uses the danger token
+
+---
+
+### REQ-REG-GUI-V2-026 — The Overview leaderboard gate badge MUST be computed from per-input routing accuracy, and that figure MUST be displayed beside the badge
+
+**Phase:** Regression GUI — gate-failed clarity (2026-05-14) | **Status:** Implemented
+
+The Overview leaderboard's PASS/FAIL routing gate badge is computed from `LeaderboardRow.routingAccuracy` — the per-input metric REQ-REG-011 actually gates on — not from per-case routing-bucket counts. `computeRoutingGate` in `core/src/gui/routes/regression.ts` takes `routingAccuracy: number | null` and uses the shared `ROUTING_ACCURACY_GATE` constant exported from `core/src/types/regression.ts` (imported by both this route and `terminal-banner.ts`). The regression workspace has a parallel `ACCURACY_GATE_THRESHOLD = 0.95` in `regression/src/runner/markdown-report.ts` because core cannot import from the `regression/` workspace (the dependency only flows regression → core). `aggregateLeaderboard` populates `routingAccuracy` / `routingInputsEvaluated` on `LeaderboardRow` from the manifest summary **for the fast tier only** — routing cases evaluate on the fast tier, so standard/reasoning rows read `null` / `0` and never display a borrowed figure. `regression-tab-overview.eta` renders the per-input accuracy (`routingAccuracyFormatted`) and input count next to the badge, so a high per-case pass count and a FAIL gate are reconcilable on screen.
+
+**Standard tests:**
+- `leaderboard-aggregator.test.ts` > aggregateLeaderboard — routing accuracy attribution > fast-tier rows carry routingAccuracy + routingInputsEvaluated from the summary
+- `regression-routes.test.ts` > Overview leaderboard — per-input routing accuracy > fast row above the gate renders PASS with the per-input accuracy figure
+
+**Edge case tests:**
+- `leaderboard-aggregator.test.ts` > aggregateLeaderboard — routing accuracy attribution > does NOT leak run-wide routing accuracy onto standard/reasoning rows
+- `leaderboard-aggregator.test.ts` > aggregateLeaderboard — routing accuracy attribution > fast-tier row reads null when the summary routingAccuracy is null (below floor)
+- `regression-routes.test.ts` > Overview leaderboard — per-input routing accuracy > shows FAIL + per-input accuracy even when per-case counts look healthy
+- `regression-routes.test.ts` > Overview leaderboard — per-input routing accuracy > does not leak run-wide routing accuracy onto a standard-tier row
+- `regression-routes.test.ts` > Overview leaderboard — per-input routing accuracy > renders no accuracy figure when routingAccuracy is null (below floor)
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -10897,6 +10947,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-V2-022 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts | 8 | 2 | Implemented |
 | REQ-REG-GUI-V2-023 | list-mode.test.ts, case-discovery.test.ts, regression-routes.test.ts | 7 | 5 | Implemented |
 | REQ-REG-GUI-V2-024 | regression-routes.test.ts | 1 | 0 | Implemented |
+| REQ-REG-GUI-V2-025 | terminal-banner.test.ts, subprocess.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 8 | 11 | Implemented |
+| REQ-REG-GUI-V2-026 | leaderboard-aggregator.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
 | REQ-REG-CLI-MAN-001 | args.test.ts, runner-options.test.ts | 14 | 10 | Implemented |
 
-| **Totals** | **251 test files** | **1931** | **2055** | **3986 tests** |
+| **Totals** | **252 test files** | **1941** | **2071** | **4012 tests** |

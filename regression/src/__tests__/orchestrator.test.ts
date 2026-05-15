@@ -296,7 +296,37 @@ describe('runCli', () => {
 		await runCli(['--json'], baseOpts(), { stdout: stdoutFn });
 		const events = lines.map((l) => JSON.parse(l));
 		expect(events.some((e) => e.type === 'case-result')).toBe(true);
-		expect(events[events.length - 1]!.type).toBe('summary');
+		const finalEvent = events.at(-1)!;
+		expect(finalEvent.type).toBe('summary');
+		// The summary line carries `modelIds` as a sibling of `summary` so the
+		// GUI's terminal banner can name the actually-tested model. This proves
+		// the runner emits it end-to-end (subprocess.ts just forwards what the
+		// runner writes).
+		expect(finalEvent.modelIds).toEqual({ fast: 'f', standard: 's', reasoning: null });
+	});
+
+	it('summary-line modelIds reflects an applied tier override', async () => {
+		// Different snapshot than the default baseOpts() so a regression that
+		// hard-codes defaults instead of plumbing `deps.modelIds` would fail
+		// here even when the previous test passes.
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const { runCli } = await import('../runner/index.js');
+		const lines: string[] = [];
+		const stdoutFn = (s: string) => {
+			for (const l of s.split('\n')) {
+				if (l) lines.push(l);
+			}
+		};
+		const overriddenSnapshot = {
+			fast: 'gemma4:31b',
+			standard: 'claude-sonnet-4-6',
+			reasoning: null,
+		};
+		await runCli(['--json'], baseOpts({ modelIds: overriddenSnapshot }), { stdout: stdoutFn });
+		const events = lines.map((l) => JSON.parse(l));
+		const finalEvent = events.at(-1)!;
+		expect(finalEvent.type).toBe('summary');
+		expect(finalEvent.modelIds).toEqual(overriddenSnapshot);
 	});
 
 	it('emits markdown summary table by default', async () => {
