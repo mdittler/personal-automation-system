@@ -58,6 +58,7 @@ function createMockServices(
 		services: {
 			llm: {
 				complete: vi.fn().mockResolvedValue(llmResponse),
+				completeWithMeta: vi.fn().mockResolvedValue({ text: llmResponse, finishReason: 'stop' }),
 				classify: vi.fn(),
 				extractStructured: vi.fn(),
 			},
@@ -313,7 +314,7 @@ describe('Photo Handler', () => {
 
 			await handlePhoto(services, ctx);
 
-			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock
+			const prompt = (services.llm.completeWithMeta as ReturnType<typeof vi.fn>).mock
 				.calls[0]?.[0] as string;
 			expect(prompt).toContain('Whole Foods');
 		});
@@ -624,18 +625,19 @@ describe('Photo Handler', () => {
 
 		it('persists per-item price update status on receipt after auto-updating prices', async () => {
 			const { services, sharedStore } = createMockServices(validReceiptJson);
-			vi.mocked(services.llm.complete)
-				.mockResolvedValueOnce(validReceiptJson)
-				.mockResolvedValueOnce(
-					JSON.stringify([
-						{
-							receiptName: 'Milk',
-							normalizedName: 'Milk (1 gal)',
-							department: 'Dairy',
-							unit: '1 gal',
-						},
-					]),
-				);
+			// Receipt parse already returns validReceiptJson via completeWithMeta (the default
+			// mock in createMockServices). The second LLM call is price-store normalization,
+			// which still uses services.llm.complete — only that one needs an override.
+			vi.mocked(services.llm.complete).mockResolvedValueOnce(
+				JSON.stringify([
+					{
+						receiptName: 'Milk',
+						normalizedName: 'Milk (1 gal)',
+						department: 'Dairy',
+						unit: '1 gal',
+					},
+				]),
+			);
 
 			await handlePhoto(services, createPhotoCtx('receipt'));
 
@@ -1157,12 +1159,13 @@ describe('Photo Handler', () => {
 		});
 
 		it('accepts exact single-word "receipt"', async () => {
-			const completeFn = vi
-				.fn()
-				.mockResolvedValueOnce('receipt')
-				.mockResolvedValueOnce(validReceiptJson);
+			// First call (vision classification) goes through complete; receipt parse
+			// goes through completeWithMeta.
 			const { services } = createMockServices('');
-			services.llm.complete = completeFn;
+			services.llm.complete = vi.fn().mockResolvedValue('receipt');
+			services.llm.completeWithMeta = vi
+				.fn()
+				.mockResolvedValue({ text: validReceiptJson, finishReason: 'stop' });
 
 			await handlePhoto(services, createPhotoCtx());
 

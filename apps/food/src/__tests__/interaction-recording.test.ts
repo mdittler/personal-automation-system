@@ -91,6 +91,7 @@ describe('interaction recording — receipt_captured', () => {
 		const services = {
 			llm: {
 				complete: vi.fn().mockResolvedValue(validReceiptJson),
+				completeWithMeta: vi.fn().mockResolvedValue({ text: validReceiptJson, finishReason: 'stop' }),
 				classify: vi.fn(),
 				extractStructured: vi.fn(),
 			},

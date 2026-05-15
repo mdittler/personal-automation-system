@@ -44,10 +44,15 @@ function mockServices(llmResponse: string | ((...args: unknown[]) => string)) {
 	const completeFn = typeof llmResponse === 'function'
 		? vi.fn(llmResponse)
 		: vi.fn().mockResolvedValue(llmResponse);
+	const completeWithMetaFn =
+		typeof llmResponse === 'function'
+			? vi.fn(async (...args: unknown[]) => ({ text: llmResponse(...args), finishReason: 'stop' as const }))
+			: vi.fn().mockResolvedValue({ text: llmResponse, finishReason: 'stop' });
 	return {
 		services: {
 			llm: {
 				complete: completeFn,
+				completeWithMeta: completeWithMetaFn,
 				classify: vi.fn(),
 				extractStructured: vi.fn(),
 			},
@@ -64,6 +69,7 @@ function mockServices(llmResponse: string | ((...args: unknown[]) => string)) {
 		} as unknown as CoreServices,
 		sharedStore,
 		completeFn,
+		completeWithMetaFn,
 	};
 }
 
@@ -341,20 +347,20 @@ describe('LLM prompt construction — what the model actually sees', () => {
 	});
 
 	it('receipt prompt asks for store name, line items, and total', async () => {
-		const { services, completeFn } = mockServices(receiptResponse);
+		const { services, completeWithMetaFn } = mockServices(receiptResponse);
 		await handlePhoto(services, photo('receipt'));
 
-		const prompt = promptSentToLLM(completeFn);
+		const prompt = promptSentToLLM(completeWithMetaFn);
 		expect(prompt).toContain('store');
 		expect(prompt).toContain('lineItems');
 		expect(prompt).toContain('total');
 	});
 
 	it('receipt prompt includes store hint from caption', async () => {
-		const { services, completeFn } = mockServices(receiptResponse);
+		const { services, completeWithMetaFn } = mockServices(receiptResponse);
 		await handlePhoto(services, photo('Costco receipt'));
 
-		const prompt = promptSentToLLM(completeFn);
+		const prompt = promptSentToLLM(completeWithMetaFn);
 		expect(prompt).toContain('Costco');
 	});
 

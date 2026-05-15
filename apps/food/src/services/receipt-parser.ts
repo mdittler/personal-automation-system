@@ -95,7 +95,19 @@ Rules:
     - count: ct, count, pack, pk, dozen (e.g. "60 ct", "1 pack", "2 dozen")
   Use null when the package size is not visible or not interpretable.
 - subtotal and tax can be null if not visible
-- total is REQUIRED — estimate from lineItems if necessary`;
+- total is REQUIRED — emit total exactly as printed on the receipt
+
+IMPORTANT — accuracy over reconciliation:
+- Do NOT adjust line item prices to make them sum to the printed subtotal or total.
+  It is acceptable for the line items not to sum to the subtotal — the user wants the
+  raw data as printed.
+- If a line item is partially obscured or you cannot read it confidently, omit it from
+  lineItems entirely. Do not guess prices, do not merge two items into one, and do not
+  redistribute missing items' cost across the other items.
+- Some lines may have a negative totalPrice (discounts, coupons, returns, bottle
+  deposits, tender adjustments). Emit those exactly as printed with the negative sign.
+- Emit total as printed on the receipt, even if it does not match the sum of your
+  extracted line items.`;
 }
 
 /**
@@ -109,11 +121,12 @@ export async function parseReceiptFromPhoto(
 ): Promise<ParsedReceipt> {
 	const todayISO = todayDate(services.timezone);
 	const captionContext = fenceCaption(caption);
-	const result = await services.llm.complete(
+	const { text: result } = await services.llm.completeWithMeta(
 		`${buildReceiptPrompt(todayISO)}${captionContext}\n\nExtract the receipt data from the attached photo.`,
 		{
 			tier: 'standard',
 			images: [{ data: photo, mimeType }],
+			maxTokens: 8192,
 		},
 	);
 
