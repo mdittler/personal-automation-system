@@ -12,9 +12,17 @@ import type {
 	LLMCompletionResult,
 	LLMFinishReason,
 	ProviderModel,
+	ProviderType,
 } from '../../../types/llm.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Sentinel API key used by providers that don't authenticate (llama.cpp's
+ * `llama-server`). The `openai` SDK requires a non-empty `apiKey` to construct,
+ * but the server ignores the value.
+ */
+const LOCAL_NO_AUTH_API_KEY = 'sk-no-auth-required';
 
 /**
  * Map OpenAI-compatible `finish_reason` to the unified LLMFinishReason.
@@ -40,15 +48,28 @@ export class OpenAICompatibleProvider extends BaseProvider {
 	override readonly supportsVision = true;
 	private readonly client: OpenAI;
 
-	constructor(options: Omit<BaseProviderOptions, 'providerType'>) {
-		super({ ...options, providerType: 'openai-compatible' });
+	constructor(
+		options: Omit<BaseProviderOptions, 'providerType'> & {
+			/**
+			 * Override the providerType. Defaults to 'openai-compatible'.
+			 * Subclasses that reuse this transport (e.g. LlamaCppProvider) pass
+			 * their own type so cost-tracking and routing logic can distinguish them.
+			 */
+			providerType?: ProviderType;
+		},
+	) {
+		const providerType: ProviderType = options.providerType ?? 'openai-compatible';
+		const noAuthRequired = providerType === 'llama-cpp';
+		const apiKey = options.apiKey || (noAuthRequired ? LOCAL_NO_AUTH_API_KEY : '');
 
-		if (!options.apiKey) {
+		super({ ...options, providerType, apiKey });
+
+		if (!apiKey) {
 			throw new Error(`API key is required for provider "${options.providerId}" but was empty`);
 		}
 
 		this.client = new OpenAI({
-			apiKey: options.apiKey,
+			apiKey,
 			baseURL: options.baseUrl,
 			timeout: 120_000, // 2 minute timeout
 		});

@@ -5,6 +5,7 @@ import {
 	estimateCallCost,
 	getModelPricing,
 	hasPricing,
+	isLocalProvider,
 } from '../model-pricing.js';
 
 describe('model-pricing', () => {
@@ -47,6 +48,14 @@ describe('model-pricing', () => {
 
 		it('returns 0 for an unknown ollama model', () => {
 			expect(estimateCallCost('nonexistent-model', 1000, 500, 'ollama')).toBe(0);
+		});
+
+		it('returns 0 for an unknown llama-cpp model (REQ-LLM-LLAMA-CPP-006)', () => {
+			expect(estimateCallCost('local-model', 1000, 500, 'llama-cpp')).toBe(0);
+		});
+
+		it('returns 0 for llama-cpp even if model name matches a priced remote model (REQ-LLM-LLAMA-CPP-006)', () => {
+			expect(estimateCallCost('gpt-4.1', 1000, 500, 'llama-cpp')).toBe(0);
 		});
 
 		it('returns fallback cost for unknown remote model (no providerType)', () => {
@@ -113,6 +122,36 @@ describe('model-pricing', () => {
 
 		it('returns true for known ollama-served model name', () => {
 			expect(hasPricing('llama3.2:3b', 'ollama')).toBe(true);
+		});
+
+		it('returns true for llama-cpp regardless of model name (REQ-LLM-LLAMA-CPP-006)', () => {
+			expect(hasPricing('any-local-model', 'llama-cpp')).toBe(true);
+		});
+	});
+
+	describe('isLocalProvider (REQ-LLM-LLAMA-CPP-006)', () => {
+		it('returns true for ollama', () => {
+			expect(isLocalProvider('ollama')).toBe(true);
+		});
+
+		it('returns true for llama-cpp', () => {
+			expect(isLocalProvider('llama-cpp')).toBe(true);
+		});
+
+		it('returns false for anthropic', () => {
+			expect(isLocalProvider('anthropic')).toBe(false);
+		});
+
+		it('returns false for google', () => {
+			expect(isLocalProvider('google')).toBe(false);
+		});
+
+		it('returns false for openai-compatible', () => {
+			expect(isLocalProvider('openai-compatible')).toBe(false);
+		});
+
+		it('returns false for undefined', () => {
+			expect(isLocalProvider(undefined)).toBe(false);
 		});
 	});
 

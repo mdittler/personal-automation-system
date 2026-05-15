@@ -10556,6 +10556,92 @@ The `complete(prompt, options): Promise<string>` signature is unchanged. Interna
 
 ---
 
+### REQ-LLM-LLAMA-CPP-001 — `llama-cpp` provider type registration
+
+`ProviderType` includes `'llama-cpp'`. The provider factory accepts `type: llama-cpp` configurations, requires a `base_url` (returns `null` without one), and falls back to `'local-model'` when `default_model` is empty. No API key env var is required.
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001) > constructs without an API key
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001) > reports providerType = "llama-cpp"
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001) > reports the configured providerId
+- `provider-factory.test.ts` > createProvider > creates a llama-cpp provider with baseUrl and no API key
+- `provider-factory.test.ts` > createProvider > llama-cpp creates with fallback model when defaultModel is empty
+
+**Edge case tests:**
+- `provider-factory.test.ts` > createProvider > returns null for llama-cpp without baseUrl
+
+---
+
+### REQ-LLM-LLAMA-CPP-002 — `OpenAICompatibleProvider` accepts a sentinel API key when `providerType` is `'llama-cpp'`
+
+`llama-server` does not authenticate. The shared `OpenAICompatibleProvider` constructor takes an optional `providerType` override; when set to `'llama-cpp'` and the caller passes an empty `apiKey`, the constructor substitutes a sentinel (`sk-no-auth-required`) instead of throwing. Default `providerType` remains `'openai-compatible'`, and the empty-key throw is preserved for that case.
+
+**Standard tests:**
+- `openai-compatible-provider.test.ts` > providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002) > defaults providerType to openai-compatible when override is not supplied
+- `openai-compatible-provider.test.ts` > providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002) > uses the supplied providerType when override is "llama-cpp"
+- `openai-compatible-provider.test.ts` > providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002) > accepts empty apiKey when providerType is "llama-cpp" (no throw)
+- `openai-compatible-provider.test.ts` > providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002) > completes a chat call with empty apiKey when providerType is "llama-cpp"
+
+**Edge case tests:**
+- `openai-compatible-provider.test.ts` > providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002) > still throws on empty apiKey when providerType is "openai-compatible" (default)
+
+---
+
+### REQ-LLM-LLAMA-CPP-003 — JSON mode plumbing for llama-cpp
+
+`LlamaCppProvider` inherits the OpenAI-compatible JSON mode pathway: when `LLMCompletionOptions.responseFormat === 'json'`, `response_format: { type: 'json_object' }` is set on the chat-completions request. When unset, no `response_format` field is sent.
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > returns response text and provider id
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > sets response_format: {type:'json_object'} when responseFormat is 'json'
+
+**Edge case tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > does NOT set response_format by default
+
+---
+
+### REQ-LLM-LLAMA-CPP-004 — finishReason mapping inherited from OpenAI-compatible transport
+
+`finish_reason: 'stop' | 'length' | 'content_filter'` from the chat-completions response is mapped to the unified `LLMFinishReason` (`'stop'`, `'length'`, `'error'` respectively) via the same path as `OpenAICompatibleProvider`.
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > maps finish_reason=stop → stop
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > maps finish_reason=length → length
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-LLAMA-CPP-004) > maps finish_reason=content_filter → error
+
+---
+
+### REQ-LLM-LLAMA-CPP-005 — Model listing via `/v1/models`
+
+`LlamaCppProvider.listModels()` reads the OpenAI-compatible `/v1/models` endpoint exposed by `llama-server`. Returns `ProviderModel` entries with `pricing: null`. Network errors yield `[]` (logged at warn level).
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005) > returns the loaded model with no pricing
+
+**Edge case tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005) > returns [] when the server is unreachable
+
+---
+
+### REQ-LLM-LLAMA-CPP-006 — Zero pricing for local providers
+
+A shared `isLocalProvider(providerType)` helper returns `true` for both `'ollama'` and `'llama-cpp'`. `hasPricing`, `estimateCallCost`, the `guardPriceLookup` in `compose-runtime.ts`, and the `/gui/llm` model list use the helper so llama.cpp is treated identically to Ollama: free local inference, no cap consumption, GUI shows `$0.00`.
+
+**Standard tests:**
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns true for ollama
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns true for llama-cpp
+- `model-pricing.test.ts` > hasPricing > returns true for llama-cpp regardless of model name (REQ-LLM-LLAMA-CPP-006)
+- `model-pricing.test.ts` > estimateCallCost > returns 0 for an unknown llama-cpp model (REQ-LLM-LLAMA-CPP-006)
+
+**Edge case tests:**
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for anthropic
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for google
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for openai-compatible
+- `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for undefined
+- `model-pricing.test.ts` > estimateCallCost > returns 0 for llama-cpp even if model name matches a priced remote model (REQ-LLM-LLAMA-CPP-006)
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -11093,5 +11179,11 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-RECEIPT-INTEGRITY-011 | photo-handler.test.ts | 1 | 1 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-012 | photo-handler.test.ts | 1 | 3 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-013 | llm-service.test.ts | 1 | 0 | Implemented |
+| REQ-LLM-LLAMA-CPP-001 | llama-cpp-provider.test.ts, provider-factory.test.ts | 5 | 1 | Implemented |
+| REQ-LLM-LLAMA-CPP-002 | openai-compatible-provider.test.ts | 4 | 1 | Implemented |
+| REQ-LLM-LLAMA-CPP-003 | llama-cpp-provider.test.ts | 2 | 1 | Implemented |
+| REQ-LLM-LLAMA-CPP-004 | llama-cpp-provider.test.ts | 3 | 0 | Implemented |
+| REQ-LLM-LLAMA-CPP-005 | llama-cpp-provider.test.ts | 1 | 1 | Implemented |
+| REQ-LLM-LLAMA-CPP-006 | model-pricing.test.ts | 4 | 5 | Implemented |
 
-| **Totals** | **252 test files** | **1941** | **2071** | **4012 tests** |
+| **Totals** | **253 test files** | **1960** | **2080** | **4040 tests** |

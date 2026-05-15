@@ -19,6 +19,7 @@ import {
 	DEFAULT_REMOTE_PRICING,
 	MODEL_PRICING,
 	getModelPricing,
+	isLocalProvider,
 } from '../../services/llm/model-pricing.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
@@ -479,12 +480,12 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 						const safeName = escapeHtml(model.displayName);
 
 						// Show the pricing that CostTracker will actually use for this model:
-						// catalog pricing > MODEL_PRICING table > DEFAULT_REMOTE_PRICING (for non-Ollama)
-						const isOllama = model.providerType === 'ollama';
+						// catalog pricing > MODEL_PRICING table > DEFAULT_REMOTE_PRICING (for remote)
+						const isLocal = isLocalProvider(model.providerType);
 						const knownPricing = model.pricing ?? getModelPricing(model.id);
 						let inputPrice: string;
 						let outputPrice: string;
-						if (isOllama) {
+						if (isLocal) {
 							inputPrice = '$0.00';
 							outputPrice = '$0.00';
 						} else if (knownPricing) {
