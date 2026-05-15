@@ -140,7 +140,26 @@ All infrastructure (phases 0–30), food app (H1–H12b), security remediation (
 
 Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`. See `docs/implementation-phases.md` for detailed phase history.
 
-### Current Priority: Regression GUI Polish — SSE Reconnect + Manifest Default + Doc Supersession (complete, branch `regression/gui-rework-v2`, 2026-05-13)
+### Current Priority: Receipt Parser Robustness — PR1 (complete, branch `worktree-food+receipt-robustness`, 2026-05-15)
+**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is the primary defense against the consistent-fudging case the parser cannot self-detect; PR2 is blocked on operator delivery of 5 receipt photos + transcriptions per the Chunk A.2 carry-forward in `docs/open-items.md`.
+
+**Approach:** Six TDD batches in `food/receipt-robustness` worktree, one commit each. Plan: `~/.claude/plans/yea-lets-start-a-foamy-pnueli.md`.
+
+**Batch 1 — `finishReason` plumbing:** new `LLMFinishReason` type + required field on `LLMCompletionResult`; per-provider mapping (Anthropic stop_reason, OpenAI choices[0].finish_reason, Google candidates[0].finishReason, Ollama done_reason with `eval_count >= maxTokens` fallback for older SDKs); unknown → 'other'; new `LLMService.completeWithMeta` (text + finishReason + usage); `complete()` unchanged for backward compat; `LLMGuard` + `SystemLLMGuard` implement the new method; stub-llm-provider + mock-services + every existing test fixture updated.
+
+**Batch 2 — Prompt + maxTokens + line-item normalization:** anti-reconciliation block appended to `buildReceiptPrompt` (don't adjust prices, omit unreadable items, emit total as printed, negative totals are real); parser switched to `completeWithMeta` with `maxTokens: 8192`; `isValidReceiptLineItem` accepts negative `totalPrice` (discount/coupon/return lines); `normalizeReceiptLineItem` defaults missing quantity to 1 and unitPrice to null.
+
+**Batch 3 — Post-parse integrity check:** `ReceiptVerificationWarning` enum (`sum_mismatch`, `line_arithmetic_mismatch`, `output_truncated`, `continuation_unresolved`); `validateReceiptIntegrity` with reference chain `subtotal → total-tax → total` (strict 1% tolerance for first two, loose 2% for `total` fallback); per-line `|q·u − total| > $0.50` check skipped when `unitPrice` is null; boundary tests at exactly $1, $1.01, $2-on-$1000; explicit documented-limitation test confirming the parser CANNOT detect self-consistent inflation (PR2's domain).
+
+**Batch 4 — Persist warnings + Telegram warning:** receipt YAML body (NOT the Obsidian frontmatter block, which is search/index shape) gains `verification_warnings:` array only when non-empty; Telegram confirmation appends `⚠️ I could not fully verify every line item on this receipt. Please double-check it.` (user-readable; raw codes never shown to user, logged at warn level instead with userId + receiptId).
+
+**Batch 5 — Continuation pass:** on first `finishReason === 'length'`, fires exactly one continuation call with the photo and the items already parsed; multiset merge by `(lowercased-name, totalPrice-cents)` preserves duplicates at different prices and dedupes accidental re-listings; successful continuation that resolves sum mismatch strips both `output_truncated` and `continuation_unresolved`; failed/unresolved continuation emits both; single-retry cap means at most two LLM calls per receipt.
+
+**Batch 6 — URS + docs:** 13 new REQ-FOOD-RECEIPT-INTEGRITY entries (001..013) with full traceability matrix rows; three accepted-risks entries in `docs/open-items.md` (single-shot continuation cap, self-consistent inflation parser blindness, Ollama heuristic false positives transparently resolved by continuation).
+
+**Tests:** 11,536 root tests pass (+36 from this phase across `core/src/services/llm/__tests__/providers/`, `core/src/services/llm/__tests__/llm-service.test.ts`, `apps/food/src/utils/__tests__/photo-validators.test.ts`, `apps/food/src/services/__tests__/receipt-parser.test.ts`, `apps/food/src/__tests__/photo-handler.test.ts`).
+
+### Previous Priority: Regression GUI Polish — SSE Reconnect + Manifest Default + Doc Supersession (complete, branch `regression/gui-rework-v2`, 2026-05-13)
 **Goal:** Three follow-on fixes that surfaced when the operator ran the suite end-to-end after the GUI rework. (1) Silent GUI timeouts on long runs — browser `EventSource` had no `onerror`/reconnect path. (2) Confusing case-vs-input count discrepancy (CLI showed ~116 inputs, GUI showed ~70 cases) AND pure-CLI sweeps weren't visible in the leaderboard because `RunManifest` was gated on `--run-id`. (3) The stale shadow-classifier production-flip gate in `docs/open-items.md:197` (≥95% from `pnpm analyze-shadow-log`) was superseded by REQ-REG-011 + Gemma 4 31B's 0.9811 sweep result but the doc still named the old criterion. Also captures the operator's interest in cascading models (Needle as tier-0 first model) as a proposal.
 
 **Approach:** Three independent batches, mergeable in any order. Continuous batch execution per the established cadence — single end-of-phase Codex review.

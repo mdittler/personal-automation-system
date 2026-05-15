@@ -9,10 +9,29 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
 	LLMCompletionOptions,
 	LLMCompletionResult,
+	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Map Anthropic stop_reason to the unified LLMFinishReason.
+ * Unknown / missing values → 'other'.
+ */
+function mapAnthropicStopReason(stopReason: unknown): LLMFinishReason {
+	switch (stopReason) {
+		case 'end_turn':
+		case 'stop_sequence':
+			return 'stop';
+		case 'max_tokens':
+			return 'length';
+		case 'tool_use':
+			return 'other';
+		default:
+			return 'other';
+	}
+}
 
 export class AnthropicProvider extends BaseProvider {
 	override readonly supportsVision = true;
@@ -76,6 +95,7 @@ export class AnthropicProvider extends BaseProvider {
 			},
 			model,
 			provider: this.providerId,
+			finishReason: mapAnthropicStopReason(response.stop_reason),
 		};
 	}
 

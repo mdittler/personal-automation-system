@@ -5,7 +5,7 @@
 | **Doc ID** | PAS-URS-APP-food |
 | **Purpose** | Functional and non-functional requirements with test coverage mapping |
 | **Status** | Active |
-| **Last Updated** | 2026-04-25 |
+| **Last Updated** | 2026-05-15 |
 
 ## Conventions
 
@@ -1541,6 +1541,7 @@ User sends photo of grocery receipt. LLM vision extracts total and key line item
 
 **Fixes:**
 - 2026-04-07: Caption now passed through to receipt parser for LLM context (sanitized)
+- 2026-05-15: Receipt parser robustness PR1 — anti-reconciliation prompt, 8192 maxTokens via `LLMService.completeWithMeta`, post-parse integrity check (`sum_mismatch` / `line_arithmetic_mismatch` / `output_truncated` / `continuation_unresolved`), single-shot continuation pass on `finishReason='length'`, negative `totalPrice` accepted for discount/coupon/return lines, user-readable `⚠️` line in the Telegram confirmation. Full requirement detail and traceability in root `docs/urs.md` REQ-FOOD-RECEIPT-INTEGRITY-001..013.
 
 ---
 

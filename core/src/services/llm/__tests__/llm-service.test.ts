@@ -19,6 +19,7 @@ function createMockProvider(providerId: string, response = 'provider response'):
 			usage: { inputTokens: 10, outputTokens: 20 },
 			model: 'test-model',
 			provider: providerId,
+			finishReason: 'stop',
 		} satisfies LLMCompletionResult),
 		listModels: vi.fn().mockResolvedValue([]),
 	};
@@ -80,6 +81,50 @@ function createMockCostTracker(): CostTracker {
 		readUsage: vi.fn().mockResolvedValue(''),
 	} as unknown as CostTracker;
 }
+
+describe('LLMServiceImpl — completeWithMeta (REQ-FOOD-RECEIPT-INTEGRITY-003)', () => {
+	it('returns text + finishReason + usage from the provider', async () => {
+		const provider = createMockProvider('anthropic', 'meta response');
+		(provider.completeWithUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+			text: 'meta response',
+			usage: { inputTokens: 5, outputTokens: 3 },
+			model: 'm',
+			provider: 'anthropic',
+			finishReason: 'length',
+		});
+		const registry = createMockRegistry({ anthropic: provider });
+		const selector = createMockSelector();
+
+		const service = new LLMServiceImpl({
+			registry,
+			modelSelector: selector,
+			costTracker: createMockCostTracker(),
+			logger,
+		});
+
+		const result = await service.completeWithMeta('go');
+		expect(result.text).toBe('meta response');
+		expect(result.finishReason).toBe('length');
+		expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+	});
+
+	it('complete() still returns only the string (backward compatibility — REQ-FOOD-RECEIPT-INTEGRITY-013)', async () => {
+		const provider = createMockProvider('anthropic', 'plain string');
+		const registry = createMockRegistry({ anthropic: provider });
+		const selector = createMockSelector();
+
+		const service = new LLMServiceImpl({
+			registry,
+			modelSelector: selector,
+			costTracker: createMockCostTracker(),
+			logger,
+		});
+
+		const result = await service.complete('go');
+		expect(typeof result).toBe('string');
+		expect(result).toBe('plain string');
+	});
+});
 
 describe('LLMServiceImpl (multi-provider)', () => {
 	it('routes to fast tier by default', async () => {

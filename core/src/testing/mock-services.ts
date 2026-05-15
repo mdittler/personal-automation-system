@@ -100,6 +100,7 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 
 	const llm: LLMService = {
 		complete: vi.fn().mockResolvedValue(''),
+		completeWithMeta: vi.fn().mockResolvedValue({ text: '', finishReason: 'stop' }),
 		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0 }),
 		extractStructured: vi.fn().mockResolvedValue({}),
 		getModelForTier: vi.fn().mockReturnValue('anthropic/mock-model'),
