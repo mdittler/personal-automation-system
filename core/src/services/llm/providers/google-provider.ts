@@ -78,9 +78,7 @@ export class GoogleProvider extends BaseProvider {
 				temperature: options?.temperature,
 				maxOutputTokens: options?.maxTokens ?? 1024,
 				...(options?.systemPrompt ? { systemInstruction: options.systemPrompt } : {}),
-				...(options?.responseFormat === 'json'
-					? { responseMimeType: 'application/json' }
-					: {}),
+				...(options?.responseFormat === 'json' ? { responseMimeType: 'application/json' } : {}),
 			},
 		});
 

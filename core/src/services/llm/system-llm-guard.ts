@@ -10,10 +10,7 @@
  */
 
 import type { Logger } from 'pino';
-import {
-	getCurrentHouseholdId,
-	getCurrentUserId,
-} from '../../services/context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../../services/context/request-context.js';
 import type {
 	ClassifyResult,
 	LLMCompletionMeta,

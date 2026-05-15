@@ -15,10 +15,7 @@
 
 import type { Logger } from 'pino';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
-import {
-	getCurrentHouseholdId,
-	getCurrentUserId,
-} from '../../services/context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../../services/context/request-context.js';
 import type {
 	ClassifyResult,
 	LLMCompletionMeta,

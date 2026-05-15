@@ -10426,6 +10426,136 @@ The Overview leaderboard's PASS/FAIL routing gate badge is computed from `Leader
 
 ---
 
+### REQ-FOOD-RECEIPT-INTEGRITY — Receipt parser robustness (PR1, 2026-05-15)
+
+**Context.** The user reported a real-world failure: parser dropped the last line item on a Costco receipt and inflated an earlier item's price so the printed total still tied out. Two root causes — hard truncation (provider default 1024 maxTokens), and "helpful reconciliation" bias from the vision model. PR1 hardens the parser; PR2's transcription oracle catches the consistent-fudging case that the parser cannot self-detect.
+
+### REQ-FOOD-RECEIPT-INTEGRITY-001 — Receipt prompt MUST forbid price reconciliation
+
+The receipt parse prompt MUST contain explicit instructions against (a) adjusting prices to make line items sum to subtotal/total, (b) merging items, and (c) redistributing missing items' cost. It MUST also acknowledge that negative `totalPrice` lines (discounts, coupons, returns, bottle deposits) are real and should be emitted verbatim.
+
+**Implementation:** `apps/food/src/services/receipt-parser.ts:buildReceiptPrompt` appends an "IMPORTANT — accuracy over reconciliation" block to the rules list.
+
+**Tests:** `apps/food/src/services/__tests__/receipt-parser.test.ts` > buildReceiptPrompt — anti-reconciliation guidance (4 cases: not-adjusting, omitting, not-summing, discount-mention).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-002 — Receipt parse MUST request maxTokens: 8192 via completeWithMeta
+
+The receipt parse call MUST use `LLMService.completeWithMeta` (not `complete`) and pass `maxTokens: 8192` so finishReason flows back and the model has headroom for long receipts.
+
+**Implementation:** `parseReceiptFromPhoto` first call uses `services.llm.completeWithMeta(..., { tier: 'standard', maxTokens: 8192, images: [...] })`.
+
+**Tests:** `receipt-parser.test.ts` > request shape (2 cases: uses-completeWithMeta-not-complete, passes-maxTokens-8192-with-photo).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-003 — LLM stack MUST surface finishReason across all four providers
+
+`LLMCompletionResult.finishReason` is `'stop' | 'length' | 'error' | 'other'`. Each provider maps its SDK-specific field; unknown / missing values map to `'other'` so callers can detect uncertainty.
+
+**Implementation:**
+- `core/src/types/llm.ts`: `LLMFinishReason` type + required field on `LLMCompletionResult`; `LLMService.completeWithMeta` returns `{text, finishReason, usage}`
+- `core/src/services/llm/providers/anthropic-provider.ts`: `stop_reason` → `mapAnthropicStopReason`
+- `core/src/services/llm/providers/openai-compatible-provider.ts`: `choices[0].finish_reason` → `mapOpenAIFinishReason`
+- `core/src/services/llm/providers/google-provider.ts`: `candidates[0].finishReason` → `mapGoogleFinishReason`
+- `core/src/services/llm/providers/ollama-provider.ts`: `done_reason` → `mapOllamaDoneReason`; fallback `eval_count >= maxTokens ? 'length' : 'stop'`
+- `core/src/services/llm/index.ts`: `LLMServiceImpl.completeWithMeta`; `complete()` delegates and returns `result.text` for backward compat
+- `core/src/services/llm/llm-guard.ts`, `system-llm-guard.ts`: implement `completeWithMeta` with same per-app safeguards
+
+**Tests:**
+- `anthropic-provider.test.ts` > finishReason mapping (6 cases incl. unknown→other, undefined→other)
+- `openai-compatible-provider.test.ts` > finishReason mapping (9 cases incl. null/undefined/unknown/missing-choices)
+- `google-provider.test.ts` > finishReason mapping (8 cases incl. missing-candidates, unknown)
+- `ollama-provider.test.ts` > finishReason mapping (8 cases incl. older-Ollama eval_count fallback)
+- `llm-service.test.ts` > completeWithMeta (2 cases: returns-meta, complete-returns-string)
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-004 — validateReceiptIntegrity MUST flag sum_mismatch using a fallback reference chain
+
+`Σ lineItems[].totalPrice` is compared to a reference. Reference chain priority: `subtotal` → `total - tax` (when both finite) → `total` alone. Thresholds: strict tolerance is `delta > max($1, 1% × |reference|)`. Loose tolerance for the `total`-only fallback is `delta > max($1, 2% × |reference|)`. Empty lineItems → no-op.
+
+**Implementation:** `apps/food/src/utils/photo-validators.ts:validateReceiptIntegrity` with `SUM_ABS_TOLERANCE_USD = 1.0`, `SUM_REL_TOLERANCE = 0.01`, `SUM_REL_TOLERANCE_LOOSE = 0.02`.
+
+**Tests:** `photo-validators.test.ts` > validateReceiptIntegrity (15 cases incl. boundary tests at exact $1.00 / $1.01 / $2-on-$1000 / fallback chain coverage / empty-lineItems).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-005 — validateReceiptIntegrity MUST flag line_arithmetic_mismatch
+
+When both `quantity` and `unitPrice` are finite numbers, `|quantity * unitPrice - totalPrice|` must be ≤ $0.50. Null `unitPrice` skips the check (cannot verify). Negative totals (discount lines) are checked normally.
+
+**Tests:** `photo-validators.test.ts` > validateReceiptIntegrity > line_arithmetic_mismatch (4 cases: flags-when->$0.50, no-flag-null-unitPrice, penny-rounding-tolerance, discount-lines).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-006 — validateReceiptIntegrity MUST flag output_truncated on finishReason='length'
+
+When the LLM call returned `finishReason === 'length'`, the warning is added. After successful continuation (Batch 5), this is stripped if the merged result is clean.
+
+**Tests:** `photo-validators.test.ts` > validateReceiptIntegrity (2 cases: flags-on-length, no-flag-on-stop/error/other); `receipt-parser.test.ts` > verification_warnings flow (3 cases).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-007 — Parser MUST fire exactly one continuation call when first finishReason is 'length'
+
+The continuation call passes the photo again, lists the items already parsed (as a numbered list), and instructs the model to list ONLY items not yet emitted. The merge uses multiset semantics: items with the same `(lowercased-trimmed-name, totalPrice-cents)` key are deduped; different `totalPrice` values for the same name are kept distinct.
+
+**Tests:** `receipt-parser.test.ts` > continuation pass (9 cases: fires-on-length, photo-passed, dedup-overlapping, multiset-different-prices, no-continuation-on-stop).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-008 — Continuation MUST be capped at one retry; failed/unresolved emits both warnings
+
+A continuation call that itself returns `finishReason='length'` does NOT trigger a third call. If the continuation parse fails (malformed JSON) OR the merged result still has `sum_mismatch`, both `output_truncated` AND `continuation_unresolved` warnings are emitted on the final result. Successful continuation that resolves the sum mismatch strips both warnings.
+
+**Tests:** `receipt-parser.test.ts` > continuation pass (4 cases: successful-strips-truncated, unresolved-emits-both, single-retry-cap, malformed-json-handled).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-009 — isValidReceiptLineItem MUST accept negative totalPrice
+
+Real receipts contain discount, coupon, return, and bottle-deposit lines with negative `totalPrice`. The guard rejects NaN / Infinity but allows negatives. Aggregate `isValidReceiptAmount` (used for `subtotal`/`tax`/`total`) remains non-negative.
+
+**Tests:** `photo-validators.test.ts` > isValidReceiptLineItem — negative totals allowed (7 cases incl. coupon line, deposit return, zero-totalPrice, name-validation, NaN/Infinity rejection).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-010 — normalizeReceiptLineItem MUST default missing quantity to 1 and unitPrice to null
+
+The validator previously didn't enforce `ReceiptLineItem.quantity: number` (the type required it but the guard didn't). Normalization: missing/non-finite `quantity` → 1; missing/non-finite `unitPrice` → null. Valid values (including zero and negatives) are preserved.
+
+**Tests:** `photo-validators.test.ts` > normalizeReceiptLineItem (10 cases incl. NaN/Infinity coercion, negative unitPrice preserved, packageSize round-trip).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-011 — Receipt frontmatter MUST persist verification_warnings only when non-empty
+
+The persisted Receipt YAML contains a `verification_warnings:` array field iff `parsed.verification_warnings.length > 0`. Clean parses produce no field — no empty arrays in the data store.
+
+**Implementation:** `apps/food/src/handlers/photo.ts:handleReceiptPhoto` constructs the receipt with a conditional spread.
+
+**Tests:** `photo-handler.test.ts` > verification_warnings — frontmatter (2 cases: writes-when-present, omits-when-clean).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-012 — Telegram confirmation MUST show a user-readable warning line when warnings present
+
+When `verification_warnings` is non-empty, the Telegram confirmation appends exactly one line: `⚠️ I could not fully verify every line item on this receipt. Please double-check it.` Raw warning codes are NOT shown to the user; they appear in the logger.warn entry alongside `userId` and `receiptId`.
+
+**Tests:** `photo-handler.test.ts` > verification_warnings — Telegram (4 cases: warning-line-present, no-raw-codes-shown, omitted-when-clean, raw-codes-logged-at-warn).
+
+---
+
+### REQ-FOOD-RECEIPT-INTEGRITY-013 — LLMService.complete() MUST continue returning a string (backward compatibility)
+
+The `complete(prompt, options): Promise<string>` signature is unchanged. Internally it calls `completeWithMeta` and returns only `result.text`. All existing callers that don't need finishReason continue to work without modification.
+
+**Tests:** `llm-service.test.ts` > completeWithMeta > complete() still returns only the string text.
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -10950,5 +11080,18 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-V2-025 | terminal-banner.test.ts, subprocess.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 8 | 11 | Implemented |
 | REQ-REG-GUI-V2-026 | leaderboard-aggregator.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
 | REQ-REG-CLI-MAN-001 | args.test.ts, runner-options.test.ts | 14 | 10 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-001 | receipt-parser.test.ts | 0 | 4 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-002 | receipt-parser.test.ts | 2 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-003 | anthropic-provider.test.ts, openai-compatible-provider.test.ts, google-provider.test.ts, ollama-provider.test.ts, llm-service.test.ts | 5 | 26 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-004 | photo-validators.test.ts, receipt-parser.test.ts | 5 | 10 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-005 | photo-validators.test.ts | 0 | 4 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-006 | photo-validators.test.ts, receipt-parser.test.ts | 2 | 1 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-007 | receipt-parser.test.ts | 4 | 5 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-008 | receipt-parser.test.ts | 0 | 4 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-009 | photo-validators.test.ts, photo-parsers.test.ts | 1 | 7 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-010 | photo-validators.test.ts | 3 | 7 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-011 | photo-handler.test.ts | 1 | 1 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-012 | photo-handler.test.ts | 1 | 3 | Implemented |
+| REQ-FOOD-RECEIPT-INTEGRITY-013 | llm-service.test.ts | 1 | 0 | Implemented |
 
 | **Totals** | **252 test files** | **1941** | **2071** | **4012 tests** |

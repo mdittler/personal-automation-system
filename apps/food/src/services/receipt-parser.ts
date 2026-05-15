@@ -194,9 +194,10 @@ function buildContinuationPrompt(parsed: ReceiptLineItem[], subtotal: number | n
 	const list = parsed
 		.map((li, i) => `${i + 1}. ${li.name} — $${li.totalPrice.toFixed(2)}`)
 		.join('\n');
-	return CONTINUATION_INSTRUCTION
-		.replace('{ALREADY_PARSED}', list || '(none)')
-		.replace('{SUBTOTAL}', subtotal != null ? `$${subtotal.toFixed(2)}` : 'not visible');
+	return CONTINUATION_INSTRUCTION.replace('{ALREADY_PARSED}', list || '(none)').replace(
+		'{SUBTOTAL}',
+		subtotal != null ? `$${subtotal.toFixed(2)}` : 'not visible',
+	);
 }
 
 /** Multiset key: normalized name + totalPrice in cents. Same name at different prices stays distinct. */
@@ -255,10 +256,10 @@ export async function parseReceiptFromPhoto(
 	let continuationParsedOk = true;
 
 	if (initialFinishReason === 'length') {
-		services.logger.warn(
-			'Receipt parse output truncated; firing continuation pass: %o',
-			{ userId: getCurrentUserId(), itemsSoFar: body.lineItems.length },
-		);
+		services.logger.warn('Receipt parse output truncated; firing continuation pass: %o', {
+			userId: getCurrentUserId(),
+			itemsSoFar: body.lineItems.length,
+		});
 		const cont = await services.llm.completeWithMeta(
 			buildContinuationPrompt(body.lineItems, body.subtotal),
 			{
@@ -268,7 +269,10 @@ export async function parseReceiptFromPhoto(
 			},
 		);
 		try {
-			const contRaw = parseJsonResponse(cont.text, 'receipt continuation') as Record<string, unknown>;
+			const contRaw = parseJsonResponse(cont.text, 'receipt continuation') as Record<
+				string,
+				unknown
+			>;
 			const contItems = Array.isArray(contRaw.lineItems)
 				? ((contRaw.lineItems as unknown[])
 						.filter(isValidReceiptLineItem)
@@ -277,10 +281,10 @@ export async function parseReceiptFromPhoto(
 			body = { ...body, lineItems: mergeLineItems(body.lineItems, contItems) };
 		} catch (err) {
 			continuationParsedOk = false;
-			services.logger.warn(
-				'Receipt continuation parse failed: %o',
-				{ userId: getCurrentUserId(), error: (err as Error).message },
-			);
+			services.logger.warn('Receipt continuation parse failed: %o', {
+				userId: getCurrentUserId(),
+				error: (err as Error).message,
+			});
 		}
 	}
 

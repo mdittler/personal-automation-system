@@ -39,7 +39,12 @@ export type LLMProvider = 'local' | 'claude';
 // ---------------------------------------------------------------------------
 
 /** Allowed image MIME types for vision requests. */
-export const VALID_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+export const VALID_IMAGE_MIME_TYPES = [
+	'image/jpeg',
+	'image/png',
+	'image/gif',
+	'image/webp',
+] as const;
 
 /** An image to include in a multimodal completion request. */
 export interface LLMImage {
@@ -233,10 +238,7 @@ export interface LLMService {
 	 * the output was cut off by `max_tokens` (`finishReason === 'length'`) so it
 	 * can re-prompt for continuation. Same model-selection priority as `complete()`.
 	 */
-	completeWithMeta(
-		prompt: string,
-		options?: LLMCompletionOptions,
-	): Promise<LLMCompletionMeta>;
+	completeWithMeta(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionMeta>;
 
 	/**
 	 * Classify text into one of the given categories.
