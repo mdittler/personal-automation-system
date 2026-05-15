@@ -113,27 +113,21 @@ IMPORTANT — accuracy over reconciliation:
   extracted line items.`;
 }
 
-/**
- * Parse a grocery receipt from a photo using LLM vision.
- */
-export async function parseReceiptFromPhoto(
-	services: CoreServices,
-	photo: Buffer,
-	mimeType: string,
-	caption?: string,
-): Promise<ParsedReceipt> {
-	const todayISO = todayDate(services.timezone);
-	const captionContext = fenceCaption(caption);
-	const { text: result, finishReason } = await services.llm.completeWithMeta(
-		`${buildReceiptPrompt(todayISO)}${captionContext}\n\nExtract the receipt data from the attached photo.`,
-		{
-			tier: 'standard',
-			images: [{ data: photo, mimeType }],
-			maxTokens: 8192,
-		},
-	);
+/** Parsed receipt data WITHOUT integrity warnings — internal staging shape. */
+type ParsedReceiptBody = Omit<ParsedReceipt, 'verification_warnings'>;
 
-	const parsed = parseJsonResponse(result, 'receipt parse') as Record<string, unknown>;
+/**
+ * Parse the raw JSON response from the receipt LLM call into the
+ * `ParsedReceiptBody` shape, applying date sanity checks and line-item
+ * normalization. Throws when the response is missing a usable `total`.
+ */
+function parseReceiptResponse(
+	rawText: string,
+	todayISO: string,
+	services: CoreServices,
+	context: string,
+): ParsedReceiptBody {
+	const parsed = parseJsonResponse(rawText, context) as Record<string, unknown>;
 
 	if (!isValidReceiptAmount(parsed.total)) {
 		throw new Error(
@@ -168,7 +162,7 @@ export async function parseReceiptFromPhoto(
 		});
 	}
 
-	const partial = {
+	return {
 		store: typeof parsed.store === 'string' ? parsed.store : 'Unknown',
 		date,
 		...(rawExtractedDate !== undefined ? { rawExtractedDate } : {}),
@@ -177,9 +171,135 @@ export async function parseReceiptFromPhoto(
 		tax: isValidReceiptAmount(parsed.tax) ? parsed.tax : null,
 		total: parsed.total,
 	};
-	const warnings = validateReceiptIntegrity(partial, finishReason);
+}
+
+const CONTINUATION_INSTRUCTION = `
+
+You previously parsed this receipt and emitted the following line items (do NOT repeat them):
+
+{ALREADY_PARSED}
+
+The receipt's printed subtotal is {SUBTOTAL}. Your previous output was truncated before you could enumerate every line item.
+
+List ONLY the items you have not yet emitted, in this JSON format:
+{ "lineItems": [ { "name": "...", "quantity": ..., "unitPrice": ..., "totalPrice": ..., "packageSize": "..." } ] }
+
+Rules:
+- Do NOT repeat items already in the list above.
+- Do NOT adjust prices to make the math tie out.
+- If you cannot read additional items clearly, return { "lineItems": [] }.
+- Emit ONLY valid JSON (no markdown, no commentary).`;
+
+function buildContinuationPrompt(parsed: ReceiptLineItem[], subtotal: number | null): string {
+	const list = parsed
+		.map((li, i) => `${i + 1}. ${li.name} — $${li.totalPrice.toFixed(2)}`)
+		.join('\n');
+	return CONTINUATION_INSTRUCTION
+		.replace('{ALREADY_PARSED}', list || '(none)')
+		.replace('{SUBTOTAL}', subtotal != null ? `$${subtotal.toFixed(2)}` : 'not visible');
+}
+
+/** Multiset key: normalized name + totalPrice in cents. Same name at different prices stays distinct. */
+function lineItemKey(li: ReceiptLineItem): string {
+	return `${li.name.toLowerCase().trim()}|${Math.round(li.totalPrice * 100)}`;
+}
+
+/**
+ * Merge first-call line items with continuation line items. Items whose
+ * multiset key already appears in the first call's output are dropped from
+ * the continuation (the model sometimes re-lists previously emitted items).
+ * Items with the same name but different totalPrice are kept distinct.
+ */
+function mergeLineItems(
+	first: ReceiptLineItem[],
+	continuation: ReceiptLineItem[],
+): ReceiptLineItem[] {
+	const seen = new Set<string>(first.map(lineItemKey));
+	const out = [...first];
+	for (const li of continuation) {
+		const key = lineItemKey(li);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(li);
+	}
+	return out;
+}
+
+/**
+ * Parse a grocery receipt from a photo using LLM vision.
+ *
+ * When the first call hits the model's max-output-tokens cap
+ * (`finishReason === 'length'`), fires exactly one continuation call asking
+ * the model for the items it didn't have room to emit. Merges by multiset.
+ * Single-retry cap — never makes a third call regardless of outcome.
+ */
+export async function parseReceiptFromPhoto(
+	services: CoreServices,
+	photo: Buffer,
+	mimeType: string,
+	caption?: string,
+): Promise<ParsedReceipt> {
+	const todayISO = todayDate(services.timezone);
+	const captionContext = fenceCaption(caption);
+	const first = await services.llm.completeWithMeta(
+		`${buildReceiptPrompt(todayISO)}${captionContext}\n\nExtract the receipt data from the attached photo.`,
+		{
+			tier: 'standard',
+			images: [{ data: photo, mimeType }],
+			maxTokens: 8192,
+		},
+	);
+
+	let body = parseReceiptResponse(first.text, todayISO, services, 'receipt parse');
+	const initialFinishReason = first.finishReason;
+	let continuationParsedOk = true;
+
+	if (initialFinishReason === 'length') {
+		services.logger.warn(
+			'Receipt parse output truncated; firing continuation pass: %o',
+			{ userId: getCurrentUserId(), itemsSoFar: body.lineItems.length },
+		);
+		const cont = await services.llm.completeWithMeta(
+			buildContinuationPrompt(body.lineItems, body.subtotal),
+			{
+				tier: 'standard',
+				images: [{ data: photo, mimeType }],
+				maxTokens: 8192,
+			},
+		);
+		try {
+			const contRaw = parseJsonResponse(cont.text, 'receipt continuation') as Record<string, unknown>;
+			const contItems = Array.isArray(contRaw.lineItems)
+				? ((contRaw.lineItems as unknown[])
+						.filter(isValidReceiptLineItem)
+						.map(normalizeReceiptLineItem) as ReceiptLineItem[])
+				: [];
+			body = { ...body, lineItems: mergeLineItems(body.lineItems, contItems) };
+		} catch (err) {
+			continuationParsedOk = false;
+			services.logger.warn(
+				'Receipt continuation parse failed: %o',
+				{ userId: getCurrentUserId(), error: (err as Error).message },
+			);
+		}
+	}
+
+	// Run integrity against the merged data. Pass 'stop' (not the initial
+	// finishReason) so output_truncated only fires when the merged state
+	// still looks suspect; we re-derive that below.
+	const integrityWarnings = validateReceiptIntegrity(body, 'stop');
+
+	const warnings: ReceiptVerificationWarning[] = [...integrityWarnings];
+	if (initialFinishReason === 'length') {
+		const stillSuspect = !continuationParsedOk || integrityWarnings.includes('sum_mismatch');
+		if (stillSuspect) {
+			if (!warnings.includes('output_truncated')) warnings.push('output_truncated');
+			if (!warnings.includes('continuation_unresolved')) warnings.push('continuation_unresolved');
+		}
+	}
+
 	return {
-		...partial,
+		...body,
 		...(warnings.length > 0 ? { verification_warnings: warnings } : {}),
 	};
 }

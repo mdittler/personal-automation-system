@@ -94,6 +94,144 @@ describe('parseReceiptFromPhoto — request shape (REQ-FOOD-RECEIPT-INTEGRITY-00
 	});
 });
 
+describe('parseReceiptFromPhoto — continuation pass (REQ-FOOD-RECEIPT-INTEGRITY-007, -008)', () => {
+	const firstTruncatedTwoItems = JSON.stringify({
+		store: 'Costco',
+		date: '2026-05-15',
+		lineItems: [
+			{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 },
+			{ name: 'B', quantity: 1, unitPrice: 6, totalPrice: 6 },
+		],
+		subtotal: 21,
+		tax: 0,
+		total: 21,
+	});
+	const continuationOneItem = JSON.stringify({
+		lineItems: [{ name: 'C', quantity: 1, unitPrice: 10, totalPrice: 10 }],
+	});
+
+	it('fires continuation when first call returns finishReason=length', async () => {
+		const { services, completeWithMeta } = makeServices(
+			[firstTruncatedTwoItems, continuationOneItem],
+			['length', 'stop'],
+		);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(completeWithMeta).toHaveBeenCalledTimes(2);
+		expect(result.lineItems.map((li) => li.name)).toEqual(['A', 'B', 'C']);
+	});
+
+	it('SUCCESSFUL continuation strips output_truncated from warnings', async () => {
+		const { services } = makeServices(
+			[firstTruncatedTwoItems, continuationOneItem],
+			['length', 'stop'],
+		);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(result.verification_warnings).toBeUndefined();
+	});
+
+	it('UNRESOLVED continuation emits BOTH output_truncated AND continuation_unresolved', async () => {
+		// first response: subtotal=50 but only 2 items summing to $11 — sum mismatch
+		// continuation: empty
+		const firstWithMismatch = JSON.stringify({
+			store: 'X',
+			date: '2026-05-15',
+			lineItems: [
+				{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 },
+				{ name: 'B', quantity: 1, unitPrice: 6, totalPrice: 6 },
+			],
+			subtotal: 50,
+			tax: 0,
+			total: 50,
+		});
+		const { services } = makeServices(
+			[firstWithMismatch, JSON.stringify({ lineItems: [] })],
+			['length', 'stop'],
+		);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(result.verification_warnings).toContain('output_truncated');
+		expect(result.verification_warnings).toContain('continuation_unresolved');
+		expect(result.verification_warnings).toContain('sum_mismatch');
+	});
+
+	it('passes the photo through to the continuation call', async () => {
+		const { services, completeWithMeta } = makeServices(
+			[firstTruncatedTwoItems, continuationOneItem],
+			['length', 'stop'],
+		);
+		await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		const continuationOpts = completeWithMeta.mock.calls[1]?.[1];
+		expect(continuationOpts).toMatchObject({
+			tier: 'standard',
+			maxTokens: 8192,
+			images: [{ data: testPhoto, mimeType: testMimeType }],
+		});
+	});
+
+	it('caps at one retry even when continuation also hits length', async () => {
+		const { services, completeWithMeta } = makeServices(
+			[firstTruncatedTwoItems, continuationOneItem],
+			['length', 'length'],
+		);
+		await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(completeWithMeta).toHaveBeenCalledTimes(2); // NEVER 3
+	});
+
+	it('does NOT fire continuation when first call returns finishReason=stop', async () => {
+		const { services, completeWithMeta } = makeServices(firstTruncatedTwoItems, ['stop']);
+		await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(completeWithMeta).toHaveBeenCalledTimes(1);
+	});
+
+	it('handles malformed continuation JSON gracefully (warnings flagged, no crash)', async () => {
+		const { services } = makeServices(
+			[firstTruncatedTwoItems, '{ this is not valid json'],
+			['length', 'stop'],
+		);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		expect(result.lineItems).toHaveLength(2); // only first call's items survive
+		// Sum is fine ($11 vs subtotal $21 → delta=$10, 47%) — mismatch persists,
+		// so continuation_unresolved + output_truncated both emit
+		expect(result.verification_warnings).toContain('continuation_unresolved');
+		expect(result.verification_warnings).toContain('output_truncated');
+	});
+
+	it('dedupes when continuation repeats items already in the first response', async () => {
+		const continuationOverlapping = JSON.stringify({
+			lineItems: [
+				{ name: 'B', quantity: 1, unitPrice: 6, totalPrice: 6 },
+				{ name: 'C', quantity: 1, unitPrice: 10, totalPrice: 10 },
+			],
+		});
+		const { services } = makeServices(
+			[firstTruncatedTwoItems, continuationOverlapping],
+			['length', 'stop'],
+		);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		// B should not be duplicated
+		expect(result.lineItems.map((li) => li.name)).toEqual(['A', 'B', 'C']);
+	});
+
+	it('preserves duplicate items at DIFFERENT prices across calls (BANANAS $1.77 + BANANAS $2.55)', async () => {
+		const firstBanana = JSON.stringify({
+			store: 'X',
+			date: '2026-05-15',
+			lineItems: [{ name: 'BANANAS', quantity: 1, unitPrice: 1.77, totalPrice: 1.77 }],
+			subtotal: 4.32,
+			tax: 0,
+			total: 4.32,
+		});
+		const continuationBanana = JSON.stringify({
+			lineItems: [{ name: 'BANANAS', quantity: 1, unitPrice: 2.55, totalPrice: 2.55 }],
+		});
+		const { services } = makeServices([firstBanana, continuationBanana], ['length', 'stop']);
+		const result = await parseReceiptFromPhoto(services, testPhoto, testMimeType);
+		// Both BANANAS preserved — different totalPrice means different multiset entry
+		expect(result.lineItems).toHaveLength(2);
+		const totals = result.lineItems.map((li) => li.totalPrice).sort();
+		expect(totals).toEqual([1.77, 2.55]);
+	});
+});
+
 describe('parseReceiptFromPhoto — verification_warnings flow (REQ-FOOD-RECEIPT-INTEGRITY-004..-006)', () => {
 	it('clean receipt → verification_warnings omitted entirely', async () => {
 		const valid = JSON.stringify({
