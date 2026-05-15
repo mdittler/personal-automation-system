@@ -664,6 +664,86 @@ describe('Photo Handler', () => {
 		});
 	});
 
+	// ─── Batch 4: verification_warnings → frontmatter + Telegram (REQ-FOOD-RECEIPT-INTEGRITY-011, -012) ─────
+
+	describe('verification_warnings — frontmatter + Telegram warning', () => {
+		const mismatchedReceiptJson = JSON.stringify({
+			store: 'Costco',
+			date: RECEIPT_DATE,
+			// sum of lineItems = $5 but subtotal claims $50 → sum_mismatch
+			lineItems: [{ name: 'Item', quantity: 1, unitPrice: 5, totalPrice: 5 }],
+			subtotal: 50,
+			tax: 0,
+			total: 50,
+		});
+
+		it('writes verification_warnings to frontmatter when present', async () => {
+			const { services, sharedStore } = createMockServices(mismatchedReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const receiptWrite = writeCalls.find(([path]) => path.includes('receipts/'));
+			expect(receiptWrite).toBeDefined();
+			expect(receiptWrite?.[1]).toContain('verification_warnings:');
+			expect(receiptWrite?.[1]).toContain('sum_mismatch');
+		});
+
+		it('omits verification_warnings from frontmatter when parse is clean', async () => {
+			const { services, sharedStore } = createMockServices(validReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const receiptWrite = writeCalls.find(([path]) => path.includes('receipts/'));
+			expect(receiptWrite).toBeDefined();
+			expect(receiptWrite?.[1]).not.toContain('verification_warnings');
+		});
+
+		it('appends user-readable warning line to Telegram message when warnings present', async () => {
+			const { services } = createMockServices(mismatchedReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const sendCall = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0];
+			const message = sendCall?.[1] as string;
+			expect(message).toMatch(/⚠️/);
+			expect(message).toMatch(/could not fully verify/i);
+			expect(message).toMatch(/double-check/i);
+		});
+
+		it('does NOT show raw warning codes in the Telegram message', async () => {
+			const { services } = createMockServices(mismatchedReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const sendCall = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0];
+			const message = sendCall?.[1] as string;
+			expect(message).not.toContain('sum_mismatch');
+			expect(message).not.toContain('output_truncated');
+			expect(message).not.toContain('line_arithmetic_mismatch');
+		});
+
+		it('omits warning line + emoji when no warnings', async () => {
+			const { services } = createMockServices(validReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			const sendCall = (services.telegram.send as ReturnType<typeof vi.fn>).mock.calls[0];
+			const message = sendCall?.[1] as string;
+			expect(message).not.toContain('⚠️');
+			expect(message).not.toMatch(/could not fully verify/i);
+		});
+
+		it('logs raw warning codes at warn level when warnings present', async () => {
+			const { services } = createMockServices(mismatchedReceiptJson);
+			await handlePhoto(services, createPhotoCtx('receipt'));
+
+			expect(services.logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					verification_warnings: expect.arrayContaining(['sum_mismatch']),
+					userId: 'user-1',
+				}),
+				expect.stringContaining('verification warnings'),
+			);
+		});
+	});
+
 	// ─── B3: capturedAt authority for receipt filename + rawExtractedDate ─────
 
 	describe('receipt filename + rawExtractedDate persistence (B3)', () => {

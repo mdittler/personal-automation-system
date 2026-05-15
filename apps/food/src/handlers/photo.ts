@@ -214,6 +214,20 @@ async function handleReceiptPhoto(
 	const capturedAt = isoNow();
 	const capturedDate = capturedAt.slice(0, 10);
 	const id = `${capturedDate}-${generateId()}`;
+	const hasWarnings =
+		parsed.verification_warnings !== undefined && parsed.verification_warnings.length > 0;
+	if (hasWarnings) {
+		services.logger.warn(
+			{
+				userId: ctx.userId,
+				verification_warnings: parsed.verification_warnings,
+				receiptId: id,
+				store: parsed.store,
+			},
+			'Receipt parsed with verification warnings',
+		);
+	}
+
 	const receipt: Receipt = {
 		id,
 		store: parsed.store,
@@ -225,6 +239,7 @@ async function handleReceiptPhoto(
 		total: parsed.total,
 		photoPath,
 		capturedAt,
+		...(hasWarnings ? { verification_warnings: parsed.verification_warnings } : {}),
 	};
 
 	// Save receipt — date is the display/receipt date; capturedAt is the sort authority
@@ -270,9 +285,12 @@ async function handleReceiptPhoto(
 	}
 
 	const photoSummary = buildReceiptSummary(parsed);
+	const warningLine = hasWarnings
+		? '\n⚠️ I could not fully verify every line item on this receipt. Please double-check it.'
+		: '';
 	await services.telegram.send(
 		ctx.userId,
-		`🧾 Receipt captured!\n\n*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n• ${parsed.lineItems.length} items\n• Total: $${parsed.total.toFixed(2)}\n${parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : ''}${priceUpdateMsg}`,
+		`🧾 Receipt captured!\n\n*${escapeMarkdown(parsed.store)}* — ${escapeMarkdown(parsed.date)}\n• ${parsed.lineItems.length} items\n• Total: $${parsed.total.toFixed(2)}\n${parsed.tax != null ? `• Tax: $${parsed.tax.toFixed(2)}\n` : ''}${warningLine}${priceUpdateMsg}`,
 	);
 
 	return { photoSummary };
