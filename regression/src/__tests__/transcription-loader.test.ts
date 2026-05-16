@@ -128,4 +128,25 @@ describe('loadTranscription — security', () => {
     const big = 'total: 1\nlineItems:\n' + Array(5000).fill('  - name: A\n    totalPrice: 1\n').join('');
     expect(() => loadTranscription(tempFixture(big))).toThrow(/size/i);
   });
+
+  it('rejects sha sidecar > 128 bytes (Codex round-2 #4)', () => {
+    // Stage a valid yaml then overwrite the sha sidecar with > 128 bytes of
+    // hex-looking data. Loader must throw before trusting either the size
+    // or the content of the oversized sidecar.
+    const dir = mkdtempSync(resolve(tmpdir(), 'pr2-trx-shabig-'));
+    const yaml = `total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n`;
+    const yamlPath = resolve(dir, 'fixture.transcription.yaml');
+    writeFileSync(yamlPath, yaml, 'utf8');
+    const bigSha = 'a'.repeat(2048);
+    writeFileSync(resolve(dir, 'fixture.transcription.sha256'), bigSha, 'utf8');
+    expect(() => loadTranscription(yamlPath)).toThrow(/sha.*size|sidecar.*size|exceeds maximum/i);
+  });
+
+  it('throws on relative transcription path (Codex round-2 #5)', () => {
+    expect(() => loadTranscription('./fixture.transcription.yaml')).toThrow(/absolute/i);
+  });
+
+  it('throws on path with .. segments (Codex round-2 #5)', () => {
+    expect(() => loadTranscription('/tmp/../etc/passwd')).toThrow(/traversal/i);
+  });
 });

@@ -1,5 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
-import { resolve, dirname, basename } from 'node:path';
+import { openSync, readSync, closeSync } from 'node:fs';
+import { resolve, dirname, basename, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import type {
@@ -16,7 +16,33 @@ export class TranscriptionLoadError extends Error {
 }
 
 const MAX_TRANSCRIPTION_BYTES = 64 * 1024;
+// SHA sidecar carries a single hex digest (sha256 is 64 chars) plus optional
+// trailing whitespace/newline. 128 bytes is roomy headroom; anything larger is
+// treated as malformed/hostile content and rejected fail-closed.
+const MAX_SHA_BYTES = 128;
 const CONFIDENCE_VALUES: ReadonlyArray<TranscriptionConfidence> = ['high', 'low'];
+
+/**
+ * Capped read that avoids the TOCTOU window between `statSync` and
+ * `readFileSync` — opens the file once, reads up to `max + 1` bytes, and
+ * reports truncation. Caller decides whether to fail-closed or truncate.
+ */
+function readCapped(
+  path: string,
+  max: number,
+): { content: string; truncated: boolean } {
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.alloc(max + 1);
+    const n = readSync(fd, buf, 0, max + 1, 0);
+    return {
+      content: buf.slice(0, Math.min(n, max)).toString('utf8'),
+      truncated: n > max,
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
@@ -65,23 +91,60 @@ function validateLineItem(raw: unknown, idx: number, path: string): Transcriptio
 }
 
 export function loadTranscription(yamlPath: string): ReceiptTranscription {
-  let stat;
+  // Path validation (Codex round-2 #5): only absolute, non-traversing paths
+  // are accepted. The loader is invoked from `buildCases()` and integration
+  // tests, both of which build absolute paths via `resolve()` — relative
+  // inputs are always a caller bug, never legitimate.
+  if (!isAbsolute(yamlPath)) {
+    throw new TranscriptionLoadError('transcription path must be absolute', yamlPath);
+  }
+  // Reject any `..` segment in the raw input. `normalize()` would collapse
+  // these silently (`/tmp/../etc/passwd` → `/etc/passwd`), letting an attacker
+  // escape an expected fixture root undetected — so we check the raw path
+  // BEFORE normalization. Both POSIX `/` and Windows `\` separators are
+  // considered so the check holds on any platform.
+  if (yamlPath.split(/[/\\]/).includes('..')) {
+    throw new TranscriptionLoadError(
+      'transcription path contains traversal segments',
+      yamlPath,
+    );
+  }
+
+  // Capped read (Codex round-2 #4): eliminates the stat→read TOCTOU window
+  // and enforces the 64 KiB ceiling without trusting `stat.size`.
+  let yamlRead: { content: string; truncated: boolean };
   try {
-    stat = statSync(yamlPath);
+    yamlRead = readCapped(yamlPath, MAX_TRANSCRIPTION_BYTES);
   } catch (err) {
-    throw new TranscriptionLoadError(`cannot stat file: ${(err as Error).message}`, yamlPath);
+    throw new TranscriptionLoadError(`cannot read file: ${(err as Error).message}`, yamlPath);
   }
-  if (stat.size > MAX_TRANSCRIPTION_BYTES) {
-    throw new TranscriptionLoadError(`transcription exceeds maximum size of ${MAX_TRANSCRIPTION_BYTES} bytes`, yamlPath);
+  if (yamlRead.truncated) {
+    throw new TranscriptionLoadError(
+      `transcription exceeds maximum size of ${MAX_TRANSCRIPTION_BYTES} bytes`,
+      yamlPath,
+    );
   }
-  const content = readFileSync(yamlPath, 'utf8');
+  const content = yamlRead.content;
 
   const shaPath = resolve(dirname(yamlPath), basename(yamlPath, '.yaml') + '.sha256');
   let expectedSha: string | undefined;
   try {
-    expectedSha = readFileSync(shaPath, 'utf8').trim();
-  } catch {
-    // SHA sidecar is optional in tests; committed fixtures enforce its presence via shape test.
+    const shaRead = readCapped(shaPath, MAX_SHA_BYTES);
+    if (shaRead.truncated) {
+      throw new TranscriptionLoadError(
+        `sha256 sidecar exceeds maximum size of ${MAX_SHA_BYTES} bytes`,
+        shaPath,
+      );
+    }
+    expectedSha = shaRead.content.trim();
+  } catch (err) {
+    // The TranscriptionLoadError from the truncated branch must propagate;
+    // ENOENT (sidecar absent) is acceptable and treated as "no SHA assertion".
+    if (err instanceof TranscriptionLoadError) {
+      throw err;
+    }
+    // SHA sidecar is optional in tests; committed fixtures enforce its
+    // presence via the shape test.
   }
   if (expectedSha !== undefined) {
     const actualSha = createHash('sha256').update(content).digest('hex');

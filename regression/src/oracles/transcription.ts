@@ -8,10 +8,17 @@ interface ParsedReceiptShape {
   total: number;
 }
 
-export type OracleVerdict = 'pass' | 'fail' | 'error';
+/**
+ * String-union status tag for the transcription oracle result. Named distinctly
+ * from the shared `OracleVerdict` interface in `core/src/types/regression.ts`
+ * (which is a labelled `{verdict, details, label?}` object) — this is just the
+ * `verdict` field's value space. The runner wraps the result into the shared
+ * shape when it pushes onto `oracleVerdicts[]`.
+ */
+export type TranscriptionVerdictTag = 'pass' | 'fail' | 'error';
 
 export interface TranscriptionOracleResult {
-  verdict: OracleVerdict;
+  verdict: TranscriptionVerdictTag;
   details: string;
 }
 

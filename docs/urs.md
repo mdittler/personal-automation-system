@@ -10696,6 +10696,8 @@ Any parsed line item not matched to any transcription row fails as a hallucinati
 
 Quantity tolerance is exact (0); unitPrice tolerance is $0.01 absolute. Checks are skipped entirely when transcription omits the field or parser reports `null`.
 
+**Note on the parser-null skip (Codex round-2 #6):** when transcription declares `unitPrice` but the parser emits `unitPrice: null` (no value extracted from the photo), the oracle skips the unitPrice check rather than failing. This is intentional — a `null` from the parser represents a real-world OCR shortcoming (the unit-price column was unreadable on the line) rather than malfeasance worth flagging in the oracle. Operators who want a tighter signal here should also declare `quantity` alongside `unitPrice` in the transcription: when the parser emits `quantity` inconsistent with the transcription's declared quantity, the quantity tolerance check still fires and the line still fails. In effect, declaring `quantity` alongside `unitPrice` closes the gap by giving the oracle a second arithmetic invariant on the same line.
+
 **Standard tests:**
 - `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > skips quantity check when transcription omits it
 - `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > skips unitPrice check when parser reports null
