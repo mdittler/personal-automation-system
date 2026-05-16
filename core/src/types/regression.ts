@@ -45,6 +45,13 @@ export interface PersonaCase {
 export interface OracleVerdict {
 	verdict: Exclude<Verdict, 'budget-exceeded'>;
 	details: string;
+	/**
+	 * Optional label distinguishing multiple oracles that ran on the same case.
+	 * The receipt-runner (PR2) emits `'structural'` + `'transcription'` entries
+	 * so per-oracle outcomes can be inspected independently. Legacy runners that
+	 * emit a single verdict omit the field; readers must tolerate `undefined`.
+	 */
+	label?: string;
 }
 
 /**

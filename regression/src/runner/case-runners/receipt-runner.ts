@@ -21,6 +21,8 @@ import { extname } from 'node:path';
 import type { CoreServices } from '@core/types/app-module.js';
 import type { LLMService } from '@core/types/llm.js';
 import { parseReceiptFromPhoto } from '@food/services/receipt-parser.js';
+import { loadTranscription } from '../../cases/receipt/transcription-loader.js';
+import { runTranscriptionOracle } from '../../oracles/transcription.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
 import { todayInTimezone } from '../../shared/cache-key.js';
 import type {
@@ -58,6 +60,15 @@ export interface ReceiptRunnerDeps {
 interface ReceiptPayload {
 	photoFixture: string;
 	sidecarFixture: string;
+	/**
+	 * Optional path to a YAML transcription file (with sibling `.sha256`).
+	 * When present AND `sidecar.expectRejection` is NOT true, the runner
+	 * invokes the transcription oracle in addition to the structural oracle.
+	 * Fail-closed: missing files and SHA mismatches produce
+	 * `verdict: 'error'` on the transcription verdict (and aggregate to case
+	 * verdict `'error'`).
+	 */
+	transcriptionFixture?: string;
 }
 
 interface ReceiptSidecar {
@@ -222,6 +233,7 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 			parsed = await parseReceiptFromPhoto(services, photoBuf, mimeFor(payload.photoFixture));
 		} catch (err) {
 			oracleVerdicts.push({
+				label: 'structural',
 				verdict: 'error',
 				details: `parser threw: ${(err as Error).message}`,
 			});
@@ -234,11 +246,59 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		// Successful call charges the budget. Failed calls don't.
 		costUsd += projectedNextCost;
 
+		// Collect the verdicts produced for THIS input (structural always,
+		// transcription conditionally) so the aggregation pass can apply
+		// set-based AND without revisiting verdicts from prior inputs.
+		const perInputVerdicts: OracleVerdict[] = [];
+
+		// ---- Structural oracle: sidecar-based ground truth. ----
 		const expectation = buildExpectation(sidecar, today);
-		const ov = runStructuralOracle(JSON.stringify(parsed), expectation);
-		oracleVerdicts.push(ov);
-		if (ov.verdict === 'fail' && aggregateVerdict === 'pass') aggregateVerdict = 'fail';
-		if (ov.verdict === 'error') aggregateVerdict = 'error';
+		const structuralOv = runStructuralOracle(JSON.stringify(parsed), expectation);
+		const structuralLabeled: OracleVerdict = { ...structuralOv, label: 'structural' };
+		oracleVerdicts.push(structuralLabeled);
+		perInputVerdicts.push(structuralLabeled);
+
+		// ---- Transcription oracle (PR2 Batch 3): operator-authored ground
+		// truth for receipt line items. Skips when `sidecar.expectRejection`
+		// is true (the parser exercised its rejection branch — no useful
+		// transcription comparison) or when the case doesn't carry a
+		// transcription fixture path. Fail-closed: a load error (missing
+		// file, SHA mismatch, malformed YAML) produces verdict='error'.
+		const trxPath = payload.transcriptionFixture;
+		if (!sidecar.expectRejection && typeof trxPath === 'string' && trxPath.length > 0) {
+			let trxLabeled: OracleVerdict;
+			try {
+				const trx = loadTranscription(trxPath);
+				const trxOv = runTranscriptionOracle(parsed, trx);
+				trxLabeled = {
+					label: 'transcription',
+					verdict: trxOv.verdict,
+					details: trxOv.details,
+				};
+			} catch (err) {
+				trxLabeled = {
+					label: 'transcription',
+					verdict: 'error',
+					details: `transcription load failed: ${(err as Error).message}`,
+				};
+			}
+			oracleVerdicts.push(trxLabeled);
+			perInputVerdicts.push(trxLabeled);
+		}
+
+		// ---- Set-based aggregation for THIS input only. ----
+		// Order: any error → error; else any fail → fail; else pass-through.
+		// `aggregateVerdict` is monotonic: never demote `error` to `fail` or
+		// `fail` to `pass`.
+		for (const ov of perInputVerdicts) {
+			if (ov.verdict === 'error') {
+				aggregateVerdict = 'error';
+				break;
+			}
+			if (ov.verdict === 'fail' && aggregateVerdict === 'pass') {
+				aggregateVerdict = 'fail';
+			}
+		}
 	}
 
 	return {
