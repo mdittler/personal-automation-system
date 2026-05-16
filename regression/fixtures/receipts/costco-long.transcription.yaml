@@ -1,0 +1,81 @@
+# Ground-truth transcription for costco-long.jpg
+# Source: regression/fixtures/receipts/costco-long.true.md
+# 23 line items including two negative-priced "instant savings" discount lines
+# (rows 3 & 6 cross-referencing SKUs from rows 2 & 5). Multiplier handling N/A
+# — Costco prints each unit on its own line. Duplicate-row handling: rows
+# 22 & 23 (PE GRANOLA at $10.99) are two distinct physical lines.
+store: Costco
+date: '2026-04-27'
+subtotal: 293.69
+tax: 13.08
+total: 306.77
+lineItems:
+  - name: SPINDRIFT
+    totalPrice: 19.69
+    confidence: high
+  - name: Q-TIPS
+    totalPrice: 9.99
+    confidence: high
+  - name: /1896208
+    totalPrice: -2.00
+    confidence: high
+  - name: HUG PU 3T-4T
+    totalPrice: 39.99
+    confidence: high
+  - name: HUMM M/P CAN
+    totalPrice: 12.99
+    confidence: high
+  - name: /1569515
+    totalPrice: -4.60
+    confidence: high
+  - name: ORAL-B X-FIL
+    totalPrice: 54.99
+    confidence: high
+  - name: KS VANILLA
+    totalPrice: 9.99
+    confidence: high
+  - name: PEET'S BLEND
+    totalPrice: 21.69
+    confidence: high
+  - name: CHERRIES
+    totalPrice: 10.79
+    confidence: high
+  - name: KS BLUEBERRY
+    totalPrice: 9.29
+    confidence: high
+  - name: ORG GRE BEAN
+    totalPrice: 6.49
+    confidence: high
+  - name: MOZZARELLA
+    totalPrice: 9.99
+    confidence: high
+  - name: ST LOUIS RIB
+    totalPrice: 29.39
+    confidence: high
+  - name: BLACKBERRIES
+    totalPrice: 6.99
+    confidence: high
+  - name: BLUEBERRIES
+    totalPrice: 7.69
+    confidence: high
+  - name: MANDARINS
+    totalPrice: 3.99
+    confidence: high
+  - name: ORG ATAULFO
+    totalPrice: 8.99
+    confidence: high
+  - name: ORG CHIA
+    totalPrice: 8.99
+    confidence: high
+  - name: BANANAS
+    totalPrice: 1.49
+    confidence: high
+  - name: ORG SPINACH
+    totalPrice: 4.89
+    confidence: high
+  - name: PE GRANOLA
+    totalPrice: 10.99
+    confidence: high
+  - name: PE GRANOLA     # duplicate of row 22
+    totalPrice: 10.99
+    confidence: high

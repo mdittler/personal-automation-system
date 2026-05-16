@@ -63,18 +63,36 @@ export function buildCases(): LoadedCase[] {
 	return FIXTURES.map((fx) => {
 		const photoFixture = join(FIXTURES_DIR, `${fx.slug}.jpg`);
 		const sidecarFixture = join(FIXTURES_DIR, `${fx.slug}.expected.json`);
+		// Synthetic `expired-90d` is the rejection-mode case: the runner branch
+		// validates `rawExtractedDate` preservation and never reaches the
+		// transcription oracle (gated on `sidecar.expectRejection !== true`).
+		const isRejectionCase = fx.slug === 'expired-90d';
+		const transcriptionFixture = isRejectionCase
+			? undefined
+			: join(FIXTURES_DIR, `${fx.slug}.transcription.yaml`);
+		const coverage: string[] = [
+			...SHARED_COVERAGE,
+			`regression/fixtures/receipts/${fx.slug}.jpg`,
+			`regression/fixtures/receipts/${fx.slug}.expected.json`,
+		];
+		if (!isRejectionCase) {
+			coverage.push(
+				`regression/fixtures/receipts/${fx.slug}.transcription.yaml`,
+				`regression/fixtures/receipts/${fx.slug}.transcription.sha256`,
+			);
+		}
+		const payload: Record<string, unknown> = { photoFixture, sidecarFixture };
+		if (transcriptionFixture !== undefined) {
+			payload.transcriptionFixture = transcriptionFixture;
+		}
 		const c: PersonaCase = {
 			id: `receipt-${fx.slug}`,
 			description: fx.description,
 			bucket: 'receipt',
-			coverage: [
-				...SHARED_COVERAGE,
-				`regression/fixtures/receipts/${fx.slug}.jpg`,
-				`regression/fixtures/receipts/${fx.slug}.expected.json`,
-			],
+			coverage,
 			inputs: [
 				{
-					payload: { photoFixture, sidecarFixture },
+					payload,
 					expected: { kind: 'sidecar' },
 				},
 			],
