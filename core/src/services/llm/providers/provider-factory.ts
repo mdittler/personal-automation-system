@@ -84,9 +84,21 @@ export function createProvider(
 				logger.debug({ providerId }, 'llama-cpp provider skipped — no base URL');
 				return null;
 			}
+			// llama.cpp has no model registry — model id is whatever the loaded GGUF
+			// advertises or the operator set with `--alias`. The 'local-model'
+			// fallback only works if one of those matches; warn the operator so
+			// they don't silently misroute requests.
+			let defaultModel = config.defaultModel;
+			if (!defaultModel) {
+				defaultModel = 'local-model';
+				logger.warn(
+					{ providerId, fallbackModel: defaultModel },
+					'llama-cpp provider has no default_model configured; falling back to "local-model" (requires llama-server started with --alias local-model or a matching GGUF id). Set default_model in pas.yaml to silence this warning.',
+				);
+			}
 			return new LlamaCppProvider({
 				providerId,
-				defaultModel: config.defaultModel || 'local-model',
+				defaultModel,
 				logger,
 				costTracker,
 				baseUrl: config.baseUrl,

@@ -59,6 +59,13 @@ describe('LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001)', () => {
 		expect(provider.providerId).toBe('llama-cpp');
 	});
 
+	it('reports supportsVision = false by default (REQ-LLM-LLAMA-CPP-009)', () => {
+		// Default llama-server has no multimodal projector; vision input would fail
+		// at the server. Reject at the provider layer instead of leaking through.
+		const provider = makeProvider();
+		expect(provider.supportsVision).toBe(false);
+	});
+
 	it('passes baseURL and a non-empty sentinel key to the OpenAI SDK (REQ-LLM-LLAMA-CPP-002)', () => {
 		makeProvider({ baseUrl: 'http://localhost:8080' });
 		expect(mockOpenAIConstructor).toHaveBeenCalledTimes(1);

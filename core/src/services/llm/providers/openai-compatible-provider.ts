@@ -51,7 +51,7 @@ function mapOpenAIFinishReason(finishReason: unknown): LLMFinishReason {
 }
 
 export class OpenAICompatibleProvider extends BaseProvider {
-	override readonly supportsVision = true;
+	override readonly supportsVision: boolean = true;
 	private readonly client: OpenAI;
 
 	constructor(

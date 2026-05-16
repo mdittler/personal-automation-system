@@ -10640,6 +10640,8 @@ A shared `isLocalProvider(providerType)` helper returns `true` for both `'ollama
 - `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for undefined
 - `model-pricing.test.ts` > estimateCallCost > returns 0 for llama-cpp even if model name matches a priced remote model (REQ-LLM-LLAMA-CPP-006)
 - `llama-cpp-provider.test.ts` > listModels (REQ-LLM-LLAMA-CPP-005) > forces pricing=null even when the model name collides with a priced remote model
+- `cost-tracker.test.ts` > does not warn for llama-cpp models even when model id matches a priced remote model (REQ-LLM-LLAMA-CPP-006)
+- `llm-usage.test.ts` > GET /gui/llm/available-models > renders $0.00 for llama-cpp models even when id matches a priced remote model (REQ-LLM-LLAMA-CPP-006)
 
 ---
 
@@ -10653,6 +10655,7 @@ A shared `isLocalProvider(providerType)` helper returns `true` for both `'ollama
 - `config.test.ts` > loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007) > loads pas.yaml containing the llama-cpp example block without throwing
 - `config.test.ts` > loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007) > accepts explicit tier pinned to llama-cpp without a GROQ-style API key
 - `llama-cpp-compose-runtime.integration.test.ts` > llama.cpp via composeRuntime (REQ-LLM-LLAMA-CPP-007) > registers a llama-cpp provider when present in config.llm.providers
+- `config.test.ts` > loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007) > auto-assigns both fast and standard tier to llama-cpp when it is the only available provider
 
 **Edge case tests:**
 - `pas-yaml-schema.test.ts` > PasYamlConfigSchema > rejects LLM provider missing api_key_env (preserved — anthropic still requires it)
@@ -10667,6 +10670,15 @@ When `LlamaCppProvider` is instantiated, the underlying `openai` SDK constructor
 
 **Standard tests:**
 - `llama-cpp-provider.test.ts` > LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001) > passes baseURL and a non-empty sentinel key to the OpenAI SDK (REQ-LLM-LLAMA-CPP-002)
+
+---
+
+### REQ-LLM-LLAMA-CPP-009 — llama.cpp defaults to text-only (vision opt-in only)
+
+Default `llama-server` installations are text-only; multimodal projectors must be loaded explicitly via `--mmproj` and there's currently no PAS configuration surface for that. `LlamaCppProvider` overrides the inherited `supportsVision = true` from `OpenAICompatibleProvider` and sets `supportsVision = false`. `BaseProvider.complete()` rejects images at the provider layer (`'images supplied but provider does not support vision'`) instead of letting requests reach the server.
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001) > reports supportsVision = false by default (REQ-LLM-LLAMA-CPP-009)
 
 ---
 
@@ -11212,8 +11224,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-003 | llama-cpp-provider.test.ts | 2 | 1 | Implemented |
 | REQ-LLM-LLAMA-CPP-004 | llama-cpp-provider.test.ts | 3 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-005 | llama-cpp-provider.test.ts | 1 | 2 | Implemented |
-| REQ-LLM-LLAMA-CPP-006 | model-pricing.test.ts | 4 | 5 | Implemented |
-| REQ-LLM-LLAMA-CPP-007 | pas-yaml-schema.test.ts, config.test.ts, llama-cpp-compose-runtime.integration.test.ts | 5 | 3 | Implemented |
+| REQ-LLM-LLAMA-CPP-006 | model-pricing.test.ts, cost-tracker.test.ts, llm-usage.test.ts | 4 | 7 | Implemented |
+| REQ-LLM-LLAMA-CPP-007 | pas-yaml-schema.test.ts, config.test.ts, llama-cpp-compose-runtime.integration.test.ts | 6 | 3 | Implemented |
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
+| REQ-LLM-LLAMA-CPP-009 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 
-| **Totals** | **254 test files** | **1966** | **2083** | **4049 tests** |
+| **Totals** | **254 test files** | **1968** | **2085** | **4053 tests** |

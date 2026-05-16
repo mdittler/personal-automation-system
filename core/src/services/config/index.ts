@@ -32,7 +32,8 @@ import { DEFAULT_PROVIDERS } from './default-providers.js';
 interface YamlProviderConfig {
 	type: string;
 	name: string;
-	api_key_env: string;
+	/** Optional for local providers (ollama, llama-cpp); required for remote. */
+	api_key_env?: string;
 	base_url?: string;
 	default_model?: string;
 }
@@ -336,13 +337,15 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 		providers.ollama.defaultModel = env.OLLAMA_MODEL;
 	}
 
-	// Merge custom providers from pas.yaml (custom providers override built-in)
+	// Merge custom providers from pas.yaml (custom providers override built-in).
+	// Empty string apiKeyEnvVar signals "no env var" — matches DEFAULT_PROVIDERS.ollama
+	// and is what getAvailableProviderIds treats as no-auth for local providers.
 	if (yamlLLM?.providers) {
 		for (const [id, yamlProvider] of Object.entries(yamlLLM.providers)) {
 			providers[id] = {
 				type: yamlProvider.type as LLMProviderConfig['type'],
 				name: yamlProvider.name,
-				apiKeyEnvVar: yamlProvider.api_key_env,
+				apiKeyEnvVar: yamlProvider.api_key_env ?? '',
 				baseUrl: yamlProvider.base_url,
 				defaultModel: yamlProvider.default_model,
 			};

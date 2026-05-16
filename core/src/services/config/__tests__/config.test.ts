@@ -971,4 +971,22 @@ describe('loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007)', () =
 			}),
 		).rejects.toThrow(/llama-cpp/);
 	});
+
+	it('auto-assigns both fast and standard tier to llama-cpp when it is the only available provider', async () => {
+		// Strip every remote API key so llama-cpp is the only available provider.
+		// Built-in providers (anthropic, google, openai) get auto-skipped without keys.
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
+		vi.stubEnv('GOOGLE_AI_API_KEY', '');
+		vi.stubEnv('OPENAI_API_KEY', '');
+		vi.stubEnv('OLLAMA_URL', '');
+
+		const config = await loadConfigFromYamlObj({
+			llm: { providers: { 'llama-cpp': llamaCppProvider } },
+		});
+
+		expect(config.llm?.tiers.fast).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+		expect(config.llm?.tiers.standard).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+
+		vi.unstubAllEnvs();
+	});
 });
