@@ -14,7 +14,8 @@
 
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runReceiptCase } from '../runner/case-runners/receipt-runner.js';
+import { combineVerdicts, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
+import type { Verdict } from '../shared/types.js';
 import {
 	llmShim,
 	llmShimFromMock,
@@ -1013,5 +1014,19 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 		const labels = result.oracleVerdicts.map((v) => v.label);
 		expect(labels).toContain('structural');
 		expect(labels).not.toContain('transcription');
+	});
+});
+
+describe('combineVerdicts', () => {
+	it.each([
+		['pass', 'pass', 'pass'],
+		['pass', 'fail', 'fail'],
+		['fail', 'pass', 'fail'],
+		['pass', 'error', 'error'],
+		['error', 'pass', 'error'],
+		['fail', 'error', 'error'],
+		['error', 'fail', 'error'],
+	])('combine(%s, %s) === %s', (a, b, expected) => {
+		expect(combineVerdicts(a as Verdict, b as Verdict)).toBe(expected);
 	});
 });

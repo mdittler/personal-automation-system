@@ -1,7 +1,7 @@
 /**
  * Shared test helpers for receipt-runner integration / adversarial-persona
- * tests. Factored out of `receipt-runner.test.ts` (Batch 3) so PR2's Batch 5
- * persona-driven scenarios can reuse the same wiring.
+ * tests. Used by transcription-oracle integration scenarios and by the
+ * receipt-runner unit tests.
  *
  * - `stagePhoto` / `stageSidecar` / `stageTranscription` author files in a
  *   caller-managed temp dir (`tempDir`).
@@ -10,7 +10,7 @@
  * - `makeReceiptDeps` returns a ready-to-pass `ReceiptRunnerDeps` with sane
  *   defaults; tests inject only the variable bit (the LLM stub).
  * - `makeCase` / `makeCaseWithTranscription` build the matching `PersonaCase`.
- * - `buildCase` is the high-level Batch 5 entry point. With
+ * - `buildCase` is the high-level adversarial-persona entry point. With
  *   `{ useRealFixture: 'costco-long', stubParsed }` it wires the REAL fixture
  *   absolute paths into the payload and stubs the LLM to return `stubParsed`.
  *   No temp-dir authoring is required for that mode.
@@ -85,9 +85,9 @@ export async function stageTranscription(
 // ─── LLM shim helpers ──────────────────────────────────────────────────────
 
 /**
- * Codex P1 (2026-05-15): parseReceiptFromPhoto uses LLMService.completeWithMeta,
- * so the runner shim must provide both methods. This helper wires both to the
- * same response payload so tests can assert against either one.
+ * parseReceiptFromPhoto uses LLMService.completeWithMeta, so the runner shim
+ * must provide both methods. This helper wires both to the same response
+ * payload so tests can assert against either one.
  */
 export function llmShim(text: string): ReceiptRunnerDeps['llm'] {
 	return {
@@ -185,7 +185,7 @@ export function makeCaseWithTranscription(
 	};
 }
 
-// ─── high-level Batch 5 builder ────────────────────────────────────────────
+// ─── high-level adversarial-persona builder ───────────────────────────────
 
 /**
  * Adversarial-persona integration entry point.

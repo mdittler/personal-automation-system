@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { ParsedReceipt } from '@food/services/receipt-parser.js';
 import { runTranscriptionOracle } from '../oracles/transcription.js';
 import type { ReceiptTranscription, TranscriptionLineItem } from '../types/transcription.js';
 
-interface ParsedLineItem { name: string; quantity: number; unitPrice: number | null; totalPrice: number; }
-interface ParsedReceiptShape { lineItems: ParsedLineItem[]; subtotal: number | null; tax: number | null; total: number; }
+type ParsedReceiptShape = Pick<ParsedReceipt, 'lineItems' | 'subtotal' | 'tax' | 'total'>;
 
 const p = (over: Partial<ParsedReceiptShape>): ParsedReceiptShape =>
   ({ lineItems: [], subtotal: null, tax: null, total: 0, ...over });

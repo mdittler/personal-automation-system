@@ -63,7 +63,7 @@ function validateLineItem(raw: unknown, idx: number, path: string): Transcriptio
   if (!isFiniteNumber(obj.totalPrice)) {
     throw new TranscriptionLoadError(`lineItems[${idx}].totalPrice missing or not a finite number`, path);
   }
-  // Note: per-line totalPrice MAY be negative (discount lines per PR1 Batch 2). Aggregate totals may not.
+  // Note: per-line totalPrice MAY be negative (discount lines). Aggregate totals may not.
   const rawConfidence = obj.confidence ?? 'high';
   if (!CONFIDENCE_VALUES.includes(rawConfidence as TranscriptionConfidence)) {
     throw new TranscriptionLoadError(`lineItems[${idx}].confidence must be 'high' or 'low'`, path);
@@ -91,10 +91,10 @@ function validateLineItem(raw: unknown, idx: number, path: string): Transcriptio
 }
 
 export function loadTranscription(yamlPath: string): ReceiptTranscription {
-  // Path validation (Codex round-2 #5): only absolute, non-traversing paths
-  // are accepted. The loader is invoked from `buildCases()` and integration
-  // tests, both of which build absolute paths via `resolve()` — relative
-  // inputs are always a caller bug, never legitimate.
+  // Only absolute, non-traversing paths are accepted. The loader is invoked
+  // from `buildCases()` and integration tests, both of which build absolute
+  // paths via `resolve()` — relative inputs are always a caller bug, never
+  // legitimate.
   if (!isAbsolute(yamlPath)) {
     throw new TranscriptionLoadError('transcription path must be absolute', yamlPath);
   }
@@ -110,8 +110,8 @@ export function loadTranscription(yamlPath: string): ReceiptTranscription {
     );
   }
 
-  // Capped read (Codex round-2 #4): eliminates the stat→read TOCTOU window
-  // and enforces the 64 KiB ceiling without trusting `stat.size`.
+  // Capped read: eliminates the stat→read TOCTOU window and enforces the
+  // 64 KiB ceiling without trusting `stat.size`.
   let yamlRead: { content: string; truncated: boolean };
   try {
     yamlRead = readCapped(yamlPath, MAX_TRANSCRIPTION_BYTES);

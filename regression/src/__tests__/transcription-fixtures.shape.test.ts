@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadTranscription } from '../cases/receipt/transcription-loader.js';
+import type { ReceiptTranscription } from '../types/transcription.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(here, '../../fixtures/receipts');
@@ -13,6 +14,11 @@ describe.each(FIXTURES)('%s.transcription.yaml', (name) => {
 	const yamlPath = resolve(FIXTURES_DIR, `${name}.transcription.yaml`);
 	const shaPath = resolve(FIXTURES_DIR, `${name}.transcription.sha256`);
 
+	let trx: ReceiptTranscription;
+	beforeAll(() => {
+		trx = loadTranscription(yamlPath);
+	});
+
 	it('yaml file exists', () => {
 		expect(existsSync(yamlPath)).toBe(true);
 	});
@@ -21,6 +27,8 @@ describe.each(FIXTURES)('%s.transcription.yaml', (name) => {
 	});
 
 	it('sha256 matches yaml content', () => {
+		// Re-reads from disk to verify integrity, not just shape — independent
+		// of the cached `loadTranscription` result.
 		const yaml = readFileSync(yamlPath, 'utf8');
 		const expected = readFileSync(shaPath, 'utf8').trim();
 		const actual = createHash('sha256').update(yaml).digest('hex');
@@ -32,12 +40,10 @@ describe.each(FIXTURES)('%s.transcription.yaml', (name) => {
 	});
 
 	it('has at least one high-confidence line item', () => {
-		const trx = loadTranscription(yamlPath);
 		expect(trx.lineItems.some((li) => li.confidence === 'high')).toBe(true);
 	});
 
 	it('sum of line-item totalPrice equals subtotal within $0.01 (when subtotal present)', () => {
-		const trx = loadTranscription(yamlPath);
 		if (trx.subtotal !== undefined) {
 			const sum = trx.lineItems.reduce((acc, li) => acc + li.totalPrice, 0);
 			expect(Math.abs(sum - trx.subtotal)).toBeLessThanOrEqual(0.011);
@@ -45,7 +51,6 @@ describe.each(FIXTURES)('%s.transcription.yaml', (name) => {
 	});
 
 	it('subtotal + tax equals total within $0.01 (when both subtotal and tax present)', () => {
-		const trx = loadTranscription(yamlPath);
 		if (trx.subtotal !== undefined && trx.tax !== undefined) {
 			expect(Math.abs(trx.subtotal + trx.tax - trx.total)).toBeLessThanOrEqual(0.011);
 		}

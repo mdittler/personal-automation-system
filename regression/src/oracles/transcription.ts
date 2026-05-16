@@ -1,24 +1,10 @@
+import type { ParsedReceipt } from '@food/services/receipt-parser.js';
+import type { ReceiptLineItem } from '@food/types.js';
+import { VERDICT, type Verdict } from '../shared/types.js';
 import type { ReceiptTranscription, TranscriptionLineItem } from '../types/transcription.js';
 
-interface ParsedLineItem { name: string; quantity: number; unitPrice: number | null; totalPrice: number; }
-interface ParsedReceiptShape {
-  lineItems: ParsedLineItem[];
-  subtotal: number | null;
-  tax: number | null;
-  total: number;
-}
-
-/**
- * String-union status tag for the transcription oracle result. Named distinctly
- * from the shared `OracleVerdict` interface in `core/src/types/regression.ts`
- * (which is a labelled `{verdict, details, label?}` object) — this is just the
- * `verdict` field's value space. The runner wraps the result into the shared
- * shape when it pushes onto `oracleVerdicts[]`.
- */
-export type TranscriptionVerdictTag = 'pass' | 'fail' | 'error';
-
 export interface TranscriptionOracleResult {
-  verdict: TranscriptionVerdictTag;
+  verdict: Exclude<Verdict, 'budget-exceeded'>;
   details: string;
 }
 
@@ -26,6 +12,7 @@ export interface TranscriptionOracleResult {
 const MONEY_TOLERANCE_USD = 0.01;
 const QTY_TOLERANCE = 0;
 const UNIT_PRICE_TOLERANCE_USD = 0.01;
+const EPSILON_USD = 1e-9; // micro-epsilon for boundary fairness on USD comparisons
 
 function normalizeName(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -35,15 +22,11 @@ function priceCents(usd: number): number {
   return Math.round(usd * 100);
 }
 
-function isFin(n: number): boolean {
-  return Number.isFinite(n);
-}
-
 function withinMoney(actual: number, expected: number, tolerance = MONEY_TOLERANCE_USD): boolean {
-  return Math.abs(actual - expected) <= tolerance + 1e-9; // micro-epsilon for boundary fairness
+  return Math.abs(actual - expected) <= tolerance + EPSILON_USD;
 }
 
-function lineSatisfies(p: ParsedLineItem, t: TranscriptionLineItem): { ok: boolean; reason?: string } {
+function lineSatisfies(p: ReceiptLineItem, t: TranscriptionLineItem): { ok: boolean; reason?: string } {
   if (normalizeName(p.name) !== normalizeName(t.name)) {
     return { ok: false, reason: 'name' };
   }
@@ -54,7 +37,7 @@ function lineSatisfies(p: ParsedLineItem, t: TranscriptionLineItem): { ok: boole
     return { ok: false, reason: 'quantity' };
   }
   if (t.unitPrice !== undefined && t.unitPrice !== null && p.unitPrice !== null) {
-    if (Math.abs(p.unitPrice - (t.unitPrice as number)) > UNIT_PRICE_TOLERANCE_USD + 1e-9) {
+    if (Math.abs(p.unitPrice - (t.unitPrice as number)) > UNIT_PRICE_TOLERANCE_USD + EPSILON_USD) {
       return { ok: false, reason: 'unitPrice' };
     }
   }
@@ -62,22 +45,22 @@ function lineSatisfies(p: ParsedLineItem, t: TranscriptionLineItem): { ok: boole
 }
 
 export function runTranscriptionOracle(
-  parsed: ParsedReceiptShape,
+  parsed: Pick<ParsedReceipt, 'lineItems' | 'subtotal' | 'tax' | 'total'>,
   transcription: ReceiptTranscription,
 ): TranscriptionOracleResult {
   // ---- error preconditions ----
-  if (!isFin(parsed.total)) return { verdict: 'error', details: `parsed.total not finite (${parsed.total})` };
+  if (!Number.isFinite(parsed.total)) return { verdict: VERDICT.error, details: `parsed.total not finite (${parsed.total})` };
   for (const li of parsed.lineItems) {
-    if (!isFin(li.totalPrice)) return { verdict: 'error', details: `parsed totalPrice not finite for ${li.name}` };
-    if (!isFin(li.quantity)) return { verdict: 'error', details: `parsed quantity not finite for ${li.name}` };
-    if (li.unitPrice !== null && !isFin(li.unitPrice)) return { verdict: 'error', details: `parsed unitPrice not finite for ${li.name}` };
+    if (!Number.isFinite(li.totalPrice)) return { verdict: VERDICT.error, details: `parsed totalPrice not finite for ${li.name}` };
+    if (!Number.isFinite(li.quantity)) return { verdict: VERDICT.error, details: `parsed quantity not finite for ${li.name}` };
+    if (li.unitPrice !== null && !Number.isFinite(li.unitPrice)) return { verdict: VERDICT.error, details: `parsed unitPrice not finite for ${li.name}` };
   }
 
   const failures: string[] = [];
 
   // find-first-satisfying-row matcher — mirrors structural.ts multisetRows.
   const trxRemaining: TranscriptionLineItem[] = [...transcription.lineItems];
-  const unmatchedParsed: ParsedLineItem[] = [];
+  const unmatchedParsed: ReceiptLineItem[] = [];
   for (const pli of parsed.lineItems) {
     let matchedIdx = -1;
     for (let i = 0; i < trxRemaining.length; i++) {
@@ -131,7 +114,7 @@ export function runTranscriptionOracle(
   }
 
   if (failures.length === 0) {
-    return { verdict: 'pass', details: 'transcription oracle: all checks passed' };
+    return { verdict: VERDICT.pass, details: 'transcription oracle: all checks passed' };
   }
-  return { verdict: 'fail', details: failures.join('\n') };
+  return { verdict: VERDICT.fail, details: failures.join('\n') };
 }

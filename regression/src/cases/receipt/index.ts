@@ -76,10 +76,11 @@ export function buildCases(): LoadedCase[] {
 			`regression/fixtures/receipts/${fx.slug}.expected.json`,
 		];
 		if (!isRejectionCase) {
-			coverage.push(
-				`regression/fixtures/receipts/${fx.slug}.transcription.yaml`,
-				`regression/fixtures/receipts/${fx.slug}.transcription.sha256`,
-			);
+			// The .transcription.sha256 file is deterministically derived from
+			// the .transcription.yaml content; including both in the cache key
+			// would be redundant. The loader still verifies the SHA at runtime
+			// so integrity is preserved.
+			coverage.push(`regression/fixtures/receipts/${fx.slug}.transcription.yaml`);
 		}
 		const payload: Record<string, unknown> = { photoFixture, sidecarFixture };
 		if (transcriptionFixture !== undefined) {

@@ -1,5 +1,5 @@
 /**
- * PR2 Batch 5 — adversarial-persona integration tests.
+ * Adversarial-persona integration tests for the transcription oracle.
  *
  * Drives the real `runReceiptCase` pipeline (production
  * `parseReceiptFromPhoto` + structural oracle + transcription oracle +
@@ -7,10 +7,10 @@
  * only the parser output via an LLM stub.
  *
  * Each scenario crafts a `ParsedReceipt` shape FROM the loaded transcription
- * (Codex #12: single source of truth for line-item names) and mutates it to
- * simulate a specific persona of LLM misbehavior. The case asserts the
- * aggregate verdict and, for `expectMatch` scenarios, the transcription
- * oracle's diagnostic substring.
+ * (single source of truth for line-item names) and mutates it to simulate a
+ * specific persona of LLM misbehavior. The case asserts the aggregate verdict
+ * and, for `expectMatch` scenarios, the transcription oracle's diagnostic
+ * substring.
  *
  * The structural oracle's `multisetRows` uses strict byte-equal name match;
  * the transcription oracle's `lineSatisfies` lower-cases and trims+collapses
@@ -75,13 +75,13 @@ interface Scenario {
 	expected: 'pass' | 'fail';
 	expectMatch?: RegExp;
 	/**
-	 * Codex round-2 #2: per-oracle expected verdicts. When set, the test
-	 * asserts that the corresponding entry on `oracleVerdicts[]` matches.
-	 * Catches regressions where the aggregate verdict still happens to be
-	 * `'fail'` (because one oracle still fails) even though a different
-	 * oracle has silently regressed (e.g. transcription becoming strict
-	 * byte-match would still make scenarios 5/6 fail, masking the
-	 * regression to normalize-then-compare semantics).
+	 * Per-oracle expected verdicts. When set, the test asserts that the
+	 * corresponding entry on `oracleVerdicts[]` matches. Catches regressions
+	 * where the aggregate verdict still happens to be `'fail'` (because one
+	 * oracle still fails) even though a different oracle has silently
+	 * regressed (e.g. transcription becoming strict byte-match would still
+	 * make scenarios 5/6 fail, masking the regression to normalize-then-
+	 * compare semantics).
 	 */
 	expectedStructural?: 'pass' | 'fail' | 'error';
 	expectedTranscription?: 'pass' | 'fail' | 'error';
@@ -125,7 +125,7 @@ const SCENARIOS: Scenario[] = [
 		expectedTranscription: 'fail',
 	},
 
-	// --- SELF-CONSISTENT INFLATION (#3, Codex round-2 #3) ---
+	// --- SELF-CONSISTENT INFLATION (#3) ---
 	// "Drop last + over-inflate first + bump subtotal/total to match": the
 	// parser claims a HIGHER total than reality AND the line items sum to
 	// that higher total AND subtotal/tax/total are arithmetically consistent
@@ -176,12 +176,12 @@ const SCENARIOS: Scenario[] = [
 	},
 
 	// --- NAME VARIATION (#5–#7) ---
-	// Codex round-2 #2 (per-oracle): scenarios 5 and 6 are the divergence
-	// witnesses — they prove the transcription oracle's normalize-then-
-	// compare semantics. If transcription ever regressed to strict byte
-	// matching, the aggregate would still be 'fail' (structural still
-	// fails), masking the regression. The per-oracle assertions below pin
-	// transcription = 'pass' so any regression there will break the test.
+	// Scenarios 5 and 6 are the divergence witnesses — they prove the
+	// transcription oracle's normalize-then-compare semantics. If
+	// transcription ever regressed to strict byte matching, the aggregate
+	// would still be 'fail' (structural still fails), masking the regression.
+	// The per-oracle assertions below pin transcription = 'pass' so any
+	// regression there will break the test.
 	{
 		name: 'parser uses lowercase names — fails on structural strict-byte name match',
 		mutator: (p) => {
@@ -325,10 +325,7 @@ const SCENARIOS: Scenario[] = [
 describe.each(SCENARIOS)('transcription oracle integration — $name', (scenario) => {
 	it(`case verdict is ${scenario.expected}`, async () => {
 		// Clone the baseline before mutating so scenarios stay independent.
-		const baseParsed = happyParsed();
-		const stubParsed = scenario.mutator(
-			JSON.parse(JSON.stringify(baseParsed)) as ParsedReceipt,
-		);
+		const stubParsed = scenario.mutator(structuredClone(happyParsed()));
 
 		const { case_, deps } = buildCase({
 			useRealFixture: 'costco-long',
@@ -349,8 +346,8 @@ describe.each(SCENARIOS)('transcription oracle integration — $name', (scenario
 			`aggregate verdict mismatch — structural=${structuralEntry?.verdict} (${structuralEntry?.details ?? '—'}); transcription=${transcriptionEntry?.verdict} (${transcriptionEntry?.details ?? '—'})`,
 		).toBe(scenario.expected);
 
-		// Codex round-2 #2: per-oracle verdict assertions. The aggregate and
-		// per-oracle checks must agree for any scenario that declares them.
+		// Per-oracle verdict assertions. The aggregate and per-oracle checks
+		// must agree for any scenario that declares them.
 		if (scenario.expectedStructural !== undefined) {
 			expect(
 				structuralEntry?.verdict,
