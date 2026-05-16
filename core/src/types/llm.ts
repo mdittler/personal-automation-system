@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported provider backend types. */
-export type ProviderType = 'anthropic' | 'google' | 'openai-compatible' | 'ollama';
+export type ProviderType = 'anthropic' | 'google' | 'openai-compatible' | 'ollama' | 'llama-cpp';
 
 /** Semantic model tiers — apps request a tier, infrastructure picks the model. */
 export type ModelTier = 'fast' | 'standard' | 'reasoning';

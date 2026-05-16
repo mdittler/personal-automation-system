@@ -32,6 +32,18 @@ const requiredEnvVars = {
 	GUI_AUTH_TOKEN: 'test-gui-token-789',
 };
 
+/**
+ * Write the given object to pas.yaml + default env vars to .env, then load.
+ * Reuses the same tempDir from beforeEach.
+ */
+async function loadConfigFromYamlObj(yamlObj: unknown) {
+	const envPath = join(tempDir, '.env');
+	const yamlPath = join(tempDir, 'pas.yaml');
+	await writeEnvFile(envPath, requiredEnvVars);
+	await writeFile(yamlPath, stringify(yamlObj), 'utf-8');
+	return loadSystemConfig({ envPath, configPath: yamlPath });
+}
+
 describe('loadSystemConfig', () => {
 	it('loads config from .env and pas.yaml', async () => {
 		const envPath = join(tempDir, '.env');
@@ -381,15 +393,7 @@ describe('loadSystemConfig', () => {
 		expect(config.llm?.safeguards?.globalMonthlyCostCap).toBe(25.0);
 	});
 
-	// --- Household safeguard config tests ---
-
-	async function loadConfigFromYamlObj(yamlObj: unknown) {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(yamlPath, stringify(yamlObj), 'utf-8');
-		return loadSystemConfig({ envPath, configPath: yamlPath });
-	}
+	// --- Household safeguard config tests (uses module-scope loadConfigFromYamlObj) ---
 
 	it('parses household safeguard fields from pas.yaml', async () => {
 		const config = await loadConfigFromYamlObj({
@@ -916,5 +920,73 @@ describe('loadSystemConfig', () => {
 			chat: { recall: { max_window_days: 30 } },
 		});
 		expect(config.chat?.recall?.max_window_days).toBe(30);
+	});
+});
+
+describe('loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007)', () => {
+	const llamaCppProvider = {
+		type: 'llama-cpp',
+		name: 'llama.cpp',
+		base_url: 'http://localhost:8080',
+		default_model: 'local-model',
+	};
+	const anthropicStandard = { provider: 'anthropic', model: 'claude-sonnet-4-20250514' };
+
+	it('loads pas.yaml containing the llama-cpp example block without throwing', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: { providers: { 'llama-cpp': llamaCppProvider } },
+		});
+
+		expect(config.llm?.providers['llama-cpp']).toBeDefined();
+		expect(config.llm?.providers['llama-cpp'].type).toBe('llama-cpp');
+		expect(config.llm?.providers['llama-cpp'].baseUrl).toBe('http://localhost:8080');
+	});
+
+	it('accepts explicit tier pinned to llama-cpp without a GROQ-style API key', async () => {
+		const config = await loadConfigFromYamlObj({
+			llm: {
+				providers: { 'llama-cpp': llamaCppProvider },
+				tiers: {
+					fast: { provider: 'llama-cpp', model: 'local-model' },
+					standard: anthropicStandard,
+				},
+			},
+		});
+
+		expect(config.llm?.tiers.fast).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+	});
+
+	it('rejects llama-cpp pinned tier when base_url is omitted (no creds, not available)', async () => {
+		await expect(
+			loadConfigFromYamlObj({
+				llm: {
+					providers: {
+						'llama-cpp': { ...llamaCppProvider, base_url: undefined },
+					},
+					tiers: {
+						fast: { provider: 'llama-cpp', model: 'local-model' },
+						standard: anthropicStandard,
+					},
+				},
+			}),
+		).rejects.toThrow(/llama-cpp/);
+	});
+
+	it('auto-assigns both fast and standard tier to llama-cpp when it is the only available provider', async () => {
+		// Strip every remote API key so llama-cpp is the only available provider.
+		// Built-in providers (anthropic, google, openai) get auto-skipped without keys.
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
+		vi.stubEnv('GOOGLE_AI_API_KEY', '');
+		vi.stubEnv('OPENAI_API_KEY', '');
+		vi.stubEnv('OLLAMA_URL', '');
+
+		const config = await loadConfigFromYamlObj({
+			llm: { providers: { 'llama-cpp': llamaCppProvider } },
+		});
+
+		expect(config.llm?.tiers.fast).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+		expect(config.llm?.tiers.standard).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+
+		vi.unstubAllEnvs();
 	});
 });

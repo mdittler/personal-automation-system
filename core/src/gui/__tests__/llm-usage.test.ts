@@ -905,6 +905,47 @@ describe('LLM Usage Routes', () => {
 			expect(res.body).toContain('other');
 			expect(res.body).toContain('not in API');
 		});
+
+		it('renders $0.00 for llama-cpp models even when id matches a priced remote model (REQ-LLM-LLAMA-CPP-006)', async () => {
+			// A local GGUF served by llama-server as 'gpt-4.1' would map to paid
+			// pricing via MODEL_PRICING; the route MUST consult isLocalProvider and
+			// render $0.00 instead.
+			const models: CatalogModel[] = [
+				{
+					id: 'gpt-4.1',
+					displayName: 'gpt-4.1 (local GGUF)',
+					createdAt: '',
+					pricing: { input: 2.0, output: 8.0 },
+					provider: 'llama-cpp',
+					providerType: 'llama-cpp',
+				},
+				{
+					id: 'local-model',
+					displayName: 'local-model',
+					createdAt: '',
+					pricing: null,
+					provider: 'llama-cpp',
+					providerType: 'llama-cpp',
+				},
+			];
+
+			const built = await buildApp({ modelCatalog: createMockCatalog(models) });
+			app = built.app;
+
+			const res = await authenticatedGet(app, '/gui/llm/available-models');
+
+			expect(res.statusCode).toBe(200);
+			// Both llama-cpp rows render exactly $0.00 — even gpt-4.1 which would
+			// otherwise inherit paid pricing via MODEL_PRICING. Scope to the row
+			// shape so the assertion isn't fooled by the auto-injected "other"
+			// pricing-table-fallback section that lists priced remote models.
+			expect(res.body).toContain(
+				'<code>gpt-4.1</code></td><td>gpt-4.1 (local GGUF)</td><td>$0.00</td><td>$0.00</td>',
+			);
+			expect(res.body).toContain(
+				'<code>local-model</code></td><td>local-model</td><td>$0.00</td><td>$0.00</td>',
+			);
+		});
 	});
 });
 

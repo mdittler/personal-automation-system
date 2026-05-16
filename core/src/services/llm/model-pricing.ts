@@ -54,18 +54,30 @@ export function getModelPricing(modelId: string): ModelPricing | null {
 }
 
 /**
- * Returns true when the model has a known price entry, or is a local Ollama model.
+ * Returns true for providers that run inference locally and don't bill per
+ * token (Ollama, llama.cpp). Used to short-circuit pricing lookups.
+ *
+ * Accepts a wider input than `ProviderType | undefined` so callers holding a
+ * `string | undefined` (e.g. GUI render helpers operating on synthetic catalog
+ * rows) don't have to narrow first.
+ */
+export function isLocalProvider(providerType: ProviderType | string | undefined): boolean {
+	return providerType === 'ollama' || providerType === 'llama-cpp';
+}
+
+/**
+ * Returns true when the model has a known price entry, or is a local model.
  * Returns false when cost-tracking will fall back to DEFAULT_REMOTE_PRICING.
  */
 export function hasPricing(modelId: string, providerType?: ProviderType): boolean {
-	if (providerType === 'ollama') return true; // Ollama is always free
+	if (isLocalProvider(providerType)) return true;
 	return MODEL_PRICING[modelId] !== undefined;
 }
 
 /**
  * Estimate cost for a single API call.
  *
- * - Ollama models (providerType === 'ollama') are always $0 — locally hosted.
+ * - Local providers (Ollama, llama.cpp) are always $0 — inference runs locally.
  * - Known models use the MODEL_PRICING table.
  * - Unknown remote models use DEFAULT_REMOTE_PRICING as a conservative estimate
  *   so that cost caps remain effective.
@@ -76,8 +88,7 @@ export function estimateCallCost(
 	outputTokens: number,
 	providerType?: ProviderType,
 ): number {
-	// Ollama is locally hosted — always free regardless of model name
-	if (providerType === 'ollama') return 0;
+	if (isLocalProvider(providerType)) return 0;
 
 	const pricing = getModelPricing(modelId) ?? DEFAULT_REMOTE_PRICING;
 	const raw = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;

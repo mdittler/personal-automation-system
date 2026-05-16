@@ -71,6 +71,14 @@ defaults:
 #       base_url: https://api.groq.com/openai/v1
 #       default_model: mixtral-8x7b-32768
 #
+#     # Local llama.cpp via `llama-server` (no API key required, free local inference).
+#     # Start with: llama-server -m /path/to/model.gguf --port 8080
+#     llama-cpp:
+#       type: llama-cpp
+#       name: "llama.cpp"
+#       base_url: http://localhost:8080
+#       default_model: local-model
+#
 #   # Tier assignments (optional — auto-assigned based on available API keys)
 #   tiers:
 #     fast:

@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { isLocalProvider } from '../llm/model-pricing.js';
 import {
 	IDLE_MINUTES_MAX,
 	IDLE_MINUTES_MIN,
@@ -31,11 +32,20 @@ const YamlProviderConfigSchema = z
 	.object({
 		type: z.string().min(1),
 		name: z.string().min(1),
-		api_key_env: z.string().min(1),
+		api_key_env: z.string().min(1).optional(),
 		base_url: z.string().optional(),
 		default_model: z.string().optional(),
 	})
-	.passthrough();
+	.passthrough()
+	.superRefine((data, ctx) => {
+		if (!isLocalProvider(data.type) && !data.api_key_env) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['api_key_env'],
+				message: `api_key_env is required for provider type "${data.type}"`,
+			});
+		}
+	});
 
 const YamlTierSchema = z
 	.object({

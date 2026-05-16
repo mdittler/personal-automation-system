@@ -115,3 +115,77 @@ describe('OpenAICompatibleProvider — finishReason mapping (REQ-FOOD-RECEIPT-IN
 		expect(result.finishReason).toBe('other');
 	});
 });
+
+describe('OpenAICompatibleProvider — providerType override + llama-cpp dummy key (REQ-LLM-LLAMA-CPP-002)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+			usage: { prompt_tokens: 1, completion_tokens: 1 },
+		});
+	});
+
+	it('defaults providerType to openai-compatible when override is not supplied', () => {
+		const provider = new OpenAICompatibleProvider({
+			providerId: 'openai',
+			apiKey: 'sk-test',
+			defaultModel: 'gpt-4o-mini',
+			logger,
+			costTracker: makeCostTracker() as never,
+		});
+		expect(provider.providerType).toBe('openai-compatible');
+	});
+
+	it('uses the supplied providerType when override is "llama-cpp"', () => {
+		const provider = new OpenAICompatibleProvider({
+			providerId: 'llama-cpp',
+			apiKey: '',
+			defaultModel: 'local-model',
+			logger,
+			costTracker: makeCostTracker() as never,
+			providerType: 'llama-cpp',
+		});
+		expect(provider.providerType).toBe('llama-cpp');
+	});
+
+	it('accepts empty apiKey when providerType is "llama-cpp" (no throw)', () => {
+		expect(
+			() =>
+				new OpenAICompatibleProvider({
+					providerId: 'llama-cpp',
+					apiKey: '',
+					defaultModel: 'local-model',
+					logger,
+					costTracker: makeCostTracker() as never,
+					providerType: 'llama-cpp',
+				}),
+		).not.toThrow();
+	});
+
+	it('still throws on empty apiKey when providerType is "openai-compatible" (default)', () => {
+		expect(
+			() =>
+				new OpenAICompatibleProvider({
+					providerId: 'openai',
+					apiKey: '',
+					defaultModel: 'gpt-4o-mini',
+					logger,
+					costTracker: makeCostTracker() as never,
+				}),
+		).toThrow(/API key is required/);
+	});
+
+	it('completes a chat call with empty apiKey when providerType is "llama-cpp"', async () => {
+		const provider = new OpenAICompatibleProvider({
+			providerId: 'llama-cpp',
+			apiKey: '',
+			defaultModel: 'local-model',
+			logger,
+			costTracker: makeCostTracker() as never,
+			providerType: 'llama-cpp',
+		});
+		const result = await provider.completeWithUsage('hi');
+		expect(result.text).toBe('ok');
+		expect(result.provider).toBe('llama-cpp');
+	});
+});
