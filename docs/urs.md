@@ -10564,6 +10564,258 @@ The `complete(prompt, options): Promise<string>` signature is unchanged. Interna
 
 ---
 
+### REQ-FOOD-RECEIPT-TRANSCRIPTION — Receipt transcription oracle (PR2, 2026-05-15)
+
+**Context.** PR1 hardened the parser against single-line truncation + reconciliation bias. The remaining attack the parser cannot self-detect is **self-consistent inflation** — the LLM fudges `unitPrice` AND `totalPrice` AND `subtotal` together so every parser-side check passes. The structural `multisetRows` oracle already catches today's drop-and-inflate bug shape (`structural-catches-inflation.characterization.test.ts`), but a buggy parser output could be silently baselined into `.expected.json`. PR2 adds an independent transcription oracle whose ground truth is operator-authored `.transcription.yaml` derived from physical-receipt photographs — preventing silent baseline regeneration and adding per-item confidence tiers.
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-001 — Cases declare `transcriptionFixture` payload
+
+**Phase:** PR2 (Receipt Transcription Oracle) | **Status:** Implemented
+
+Receipt regression cases declare a `transcriptionFixture` payload pointing at a `.transcription.yaml` sidecar (absolute path, parallel to `photoFixture`/`sidecarFixture`). The case loader and `buildCases` index propagate the payload through `LoadedCase` so the receipt-runner can read it at dispatch.
+
+**Standard tests:**
+- `transcription-fixtures.shape.test.ts` > "%s.transcription.yaml" > yaml file exists (×4 fixtures via `describe.each`)
+- `transcription-oracle.integration.test.ts` > "transcription oracle integration — oracle passes when stub returns exactly the transcription" > case verdict is pass
+
+**Edge case tests:**
+- `transcription-fixtures.shape.test.ts` > "%s.transcription.yaml" > sha256 sidecar exists
+- `transcription-fixtures.shape.test.ts` > "%s.transcription.yaml" > loads via loadTranscription without error
+- `transcription-fixtures.shape.test.ts` > per-fixture invariants > costco-long: 23 line items, includes negative discount line
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-002 — `loadTranscription` validates schema, enforces 64 KiB cap, optional SHA256
+
+**Phase:** PR2 | **Status:** Implemented
+
+`loadTranscription` validates required fields (`total >= 0`, non-empty `lineItems`), rejects wrong-type optional fields (`store`/`date` non-string, negative `subtotal`/`tax`), enforces a 64 KiB file-size cap, and optionally verifies a `.sha256` sidecar (matching, mismatching, or absent — only mismatching fails).
+
+**Standard tests:**
+- `transcription-loader.test.ts` > loadTranscription — happy path > loads a minimal valid transcription
+- `transcription-loader.test.ts` > loadTranscription — happy path > defaults missing confidence to "high"
+- `transcription-loader.test.ts` > loadTranscription — happy path > preserves optional store, date, subtotal, tax, quantity, unitPrice
+- `transcription-loader.test.ts` > loadTranscription — happy path > accepts negative totalPrice on a line item (discount line)
+- `transcription-loader.test.ts` > loadTranscription — SHA256 fingerprint > passes when sidecar SHA matches
+- `transcription-loader.test.ts` > loadTranscription — SHA256 fingerprint > passes when sidecar SHA file is absent (optional in temp fixtures)
+
+**Edge case tests:**
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on missing total
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on negative top-level total
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on negative subtotal
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on negative tax
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on empty lineItems
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on missing line-item name
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on non-numeric totalPrice
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on invalid confidence value
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on wrong-type optional store (number instead of string)
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on wrong-type optional date (number)
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on malformed YAML
+- `transcription-loader.test.ts` > loadTranscription — validation failures > throws on file not found
+
+**Security tests:**
+- `transcription-loader.test.ts` > loadTranscription — security > rejects yaml > 64 KiB
+- `transcription-loader.test.ts` > loadTranscription — SHA256 fingerprint > throws when sidecar SHA does not match content hash
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-003 — `runTranscriptionOracle` uses find-first-satisfying-row multiset matching
+
+**Phase:** PR2 | **Status:** Implemented
+
+`runTranscriptionOracle` matches parser line items to transcription rows via a find-first-satisfying-row algorithm — name + totalPrice required match; quantity/unitPrice checked only when declared by transcription; mirrors structural `multisetRows` semantics. Name comparison is case-insensitive with whitespace collapsed (transcription only — structural is strict byte-equal).
+
+**Standard tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — happy path > passes when parser exactly matches transcription
+- `transcription-oracle.test.ts` > runTranscriptionOracle — happy path > passes with case-insensitive name match
+- `transcription-oracle.test.ts` > runTranscriptionOracle — happy path > passes with whitespace-collapsed name match
+- `transcription-oracle.test.ts` > runTranscriptionOracle — multiset duplicates with find-first-satisfying-row > preserves duplicate counts at same name+price
+- `transcription-oracle.test.ts` > runTranscriptionOracle — multiset duplicates with find-first-satisfying-row > distinguishes same name at different prices
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — multiset duplicates with find-first-satisfying-row > fails when parser merges duplicates
+- `transcription-oracle.test.ts` > runTranscriptionOracle — multiset duplicates with find-first-satisfying-row > find-first-satisfying-row prevents order-sensitive false-pass when duplicates have different quantities
+- `transcription-oracle.test.ts` > runTranscriptionOracle — security and determinism > produces deterministic verdict regardless of parser line-item ordering
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > passes on duplicate-named line items at same price (two PE GRANOLA $10.99)
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > disambiguates same-name different-price duplicates (two Grocery non-taxable lines)
+
+**Security tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — security and determinism > does not interpret transcription names as regex or shell
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-004 — Confidence tiers: `high` mandatory, `low` optional, default `high`
+
+**Phase:** PR2 | **Status:** Implemented
+
+Items declared `confidence: high` are mandatory (missing → fail). Items `confidence: low` are optional (missing → no failure). The default when the field is omitted is `high`.
+
+**Standard tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — confidence: low (optional items) > passes when low-confidence item is absent from parser
+- `transcription-oracle.test.ts` > runTranscriptionOracle — confidence: low (optional items) > passes when low-confidence item is present at the exact spec
+- `transcription-loader.test.ts` > loadTranscription — happy path > defaults missing confidence to "high"
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — missing high-confidence items (drift-resistance) > fails when parser drops a single high-confidence item
+- `transcription-oracle.test.ts` > runTranscriptionOracle — missing high-confidence items (drift-resistance) > reports ALL missing high-confidence items
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-005 — Hallucinated parser items always fail; near-misses report specific field
+
+**Phase:** PR2 | **Status:** Implemented
+
+Any parsed line item not matched to any transcription row fails as a hallucination regardless of confidence tier. Near-misses (same name + price, mismatched q/u) are reported as the specific field mismatch (e.g., "quantity mismatch for ITEM"), not as hallucinations.
+
+**Standard tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — hallucinated items > fails when parser has an item not in transcription
+- `transcription-oracle.test.ts` > runTranscriptionOracle — hallucinated items > hallucinated item fails even when transcription has equivalent low-confidence entry IF prices differ
+- `transcription-oracle.integration.test.ts` > "parser hallucinates an extra line item" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "parser expands single-item into duplicate — fails on hallucinated duplicate" > case verdict is fail
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > fails when quantity differs but totalPrice matches (multiplier collapse)
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > fails when LLM hallucinates a line item (set-equality)
+- `transcription-oracle.integration.test.ts` > "parser typos an item name — fails (no fuzzy matching)" > case verdict is fail
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-006 — Quantity exact, unitPrice $0.01 tolerance, both skipped when undeclared
+
+**Phase:** PR2 | **Status:** Implemented
+
+Quantity tolerance is exact (0); unitPrice tolerance is $0.01 absolute. Checks are skipped entirely when transcription omits the field or parser reports `null`.
+
+**Standard tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > skips quantity check when transcription omits it
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > skips unitPrice check when parser reports null
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > passes when unitPrice differs by exactly $0.01 (boundary)
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > passes when parser emits matching quantity + unitPrice for multiplier line
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > fails when unitPrice differs by more than $0.01
+- `transcription-oracle.test.ts` > runTranscriptionOracle — quantity and unitPrice > fails when quantity differs but totalPrice matches (multiplier collapse)
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > fails when parser collapses multiplier into quantity=1 unitPrice=totalPrice
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-007 — Direct $0.01 money tolerance on subtotal/tax/total (no chain, no percentage)
+
+**Phase:** PR2 | **Status:** Implemented
+
+Subtotal/tax/total are checked at $0.01 absolute tolerance — no percentage threshold, no `validateReceiptIntegrity` fallback chain. Operator-authored printed values are exact ground truth.
+
+**Standard tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > passes when total differs by exactly $0.01 (boundary)
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > skips subtotal/tax checks when transcription omits them
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > skips subtotal/tax checks when parser reports null
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > passes when subtotal + tax + total all match within tolerance
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > fails when total differs by more than $0.01
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > catches $0.70 vs $1.50 tax discrepancy (the Codex-flagged old tolerance hole)
+- `transcription-oracle.test.ts` > runTranscriptionOracle — aggregate totals (direct money tolerance) > fails when subtotal differs
+- `transcription-oracle.integration.test.ts` > "parser line-items correct but subtotal off by $0.50 — fails" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "parser line-items correct but tax differs by $0.80 — fails" > case verdict is fail
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > fails when parser returns wrong subtotal even though total matches
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > fails when parser returns wrong tax even though total + subtotal match
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-008 — Receipt-runner emits labeled `oracleVerdicts[]`; case verdict is set-based AND
+
+**Phase:** PR2 | **Status:** Implemented
+
+Receipt-runner emits a `transcription` entry into `RunResult.oracleVerdicts[]` (`label === 'transcription'`) alongside the existing `'structural'` entry. The case verdict is the set-based AND of both verdicts (both pass → pass; any fail → fail; any error → error per precedence).
+
+**Standard tests:**
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 1. PASS: oracleVerdicts has both labels, both pass (happy path)
+- `transcription-oracle.integration.test.ts` > "oracle passes when stub returns exactly the transcription" > case verdict is pass
+
+**Edge case tests:**
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 2. FAIL when structural passes but transcription fails (drift resistance)
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 3. FAIL when transcription passes but structural fails
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 4. FAIL with both verdicts populated when both oracles fail
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 8. charges budget only once per dispatch even with two oracles
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-009 — Rejection-mode cases skip the transcription oracle
+
+**Phase:** PR2 | **Status:** Implemented
+
+When the case sidecar declares `expectRejection: true`, the receipt-runner skips the transcription oracle entirely; `oracleVerdicts` contains only `structural`. This preserves the existing rejection-mode contract (parser overwrites date to today + preserves `rawExtractedDate`).
+
+**Standard tests:**
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 5. skips transcription oracle when sidecar declares expectRejection:true
+
+**Edge case tests:**
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > expectRejection=true: parser overwrites date to today, preserves rawExtractedDate
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > expectRejection sidecar with rejectedDate asserts rawExtractedDate matches
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-010 — Missing/mismatched transcription file fails closed with `verdict: 'error'`
+
+**Phase:** PR2 | **Status:** Implemented
+
+A missing transcription file or SHA256 mismatch produces `oracleVerdicts.transcription.verdict = 'error'`; the case verdict is `'error'` (fail-closed). Error verdicts take precedence over fail per the existing verdict precedence rules.
+
+**Standard tests:**
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 6. ERROR when transcription file is referenced but missing (fail-closed)
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 7. ERROR on SHA mismatch (fail-closed)
+
+**Edge case tests:**
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 9. error verdict precedence — error trumps fail when both occur on the same input
+- `receipt-runner.test.ts` > runReceiptCase — transcription oracle (Batch 3) > 10. omits transcription label entirely when payload.transcriptionFixture is undefined
+
+**Security tests:**
+- `transcription-loader.test.ts` > loadTranscription — SHA256 fingerprint > throws when sidecar SHA does not match content hash
+
+**Fixes:** (none — first implementation)
+
+---
+
+### REQ-FOOD-RECEIPT-TRANSCRIPTION-011 — Two-oracle drift resistance: structural baseline + operator-authored ground truth
+
+**Phase:** PR2 | **Status:** Implemented
+
+The structural oracle's `.expected.json` baseline can be silently regenerated from a buggy parser output, but the transcription oracle's `.transcription.yaml` is operator-authored physical-receipt ground truth. Together they prevent silent regression baselining: any parser regression that flips `.expected.json` is still caught by the transcription oracle. The structural oracle ALREADY catches today's primary bug shape (proven via `structural-catches-inflation.characterization.test.ts`); PR2's distinct value is drift resistance + confidence tiers.
+
+**Standard tests:**
+- `structural-catches-inflation.characterization.test.ts` > Characterization: structural multisetRows oracle catches drop-and-inflate today > drop-and-inflate: structural reports both missing C and extra B-at-inflated-price
+- `transcription-oracle.integration.test.ts` > "drop-last-item + inflate-second-last-by-same-amount (drift resistance)" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "full self-consistent fudge: drop + inflate (subtotal/tax remain matching)" > case verdict is fail
+
+**Edge case tests:**
+- `transcription-oracle.test.ts` > runTranscriptionOracle — missing high-confidence items (drift-resistance) > catches drift scenario: drop-C-inflate-B (proves PR2 catches what a drifted .expected.json would miss)
+- `transcription-oracle.integration.test.ts` > "parser drops a non-last line item entirely — fails on missing transcription line" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "parser deduplicates two identical line items into one" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "parser drops the negative discount lines — fails" > case verdict is fail
+- `transcription-fixtures.shape.test.ts` > cross-reference with .expected.json (Codex #12) > %s: every high-confidence transcription name appears in .expected.json (byte-exact)
+
+**Fixes:** (none — first implementation)
+
+---
+
 ### REQ-LLM-LLAMA-CPP-001 — `llama-cpp` provider type registration
 
 `ProviderType` includes `'llama-cpp'`. The provider factory accepts `type: llama-cpp` configurations, requires a `base_url` (returns `null` without one), and falls back to `'local-model'` when `default_model` is empty. No API key env var is required.
@@ -11227,6 +11479,17 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-RECEIPT-INTEGRITY-011 | photo-handler.test.ts | 1 | 1 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-012 | photo-handler.test.ts | 1 | 3 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-013 | llm-service.test.ts | 1 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-001 | transcription-fixtures.shape.test.ts, transcription-oracle.integration.test.ts | 2 | 3 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-002 | transcription-loader.test.ts | 6 | 12 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-003 | transcription-oracle.test.ts, receipt-runner.test.ts | 5 | 6 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-004 | transcription-oracle.test.ts, transcription-loader.test.ts | 3 | 2 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-005 | transcription-oracle.test.ts, transcription-oracle.integration.test.ts, receipt-runner.test.ts | 4 | 3 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-006 | transcription-oracle.test.ts, receipt-runner.test.ts | 4 | 3 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-007 | transcription-oracle.test.ts, transcription-oracle.integration.test.ts, receipt-runner.test.ts | 4 | 7 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-008 | receipt-runner.test.ts, transcription-oracle.integration.test.ts | 2 | 4 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-009 | receipt-runner.test.ts | 1 | 2 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-010 | receipt-runner.test.ts, transcription-loader.test.ts | 2 | 3 | Implemented |
+| REQ-FOOD-RECEIPT-TRANSCRIPTION-011 | structural-catches-inflation.characterization.test.ts, transcription-oracle.integration.test.ts, transcription-oracle.test.ts, transcription-fixtures.shape.test.ts | 3 | 5 | Implemented |
 | REQ-LLM-LLAMA-CPP-001 | llama-cpp-provider.test.ts, provider-factory.test.ts | 5 | 1 | Implemented |
 | REQ-LLM-LLAMA-CPP-002 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 5 | 1 | Implemented |
 | REQ-LLM-LLAMA-CPP-003 | llama-cpp-provider.test.ts | 2 | 1 | Implemented |
@@ -11237,4 +11500,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-009 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 
-| **Totals** | **254 test files** | **1968** | **2085** | **4053 tests** |
+| **Totals** | **371 test files** | **2567** | **2622** | **5189 tests** |
