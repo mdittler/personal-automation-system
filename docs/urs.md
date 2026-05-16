@@ -9453,13 +9453,16 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 **Phase:** Chunk A.1 | **Status:** Implemented
 
-`runStructuralOracle` parses the raw LLM output, validates against the supplied AJV strict-mode JSON schema, then runs targeted assertions (string equality, set equality, scalar tolerance, keyed scalar tolerance, calendar-strict date ranges). Non-parseable JSON returns `verdict: 'error'`; schema violations return `verdict: 'fail'`.
+`runStructuralOracle` parses the raw LLM output, validates against the supplied AJV strict-mode JSON schema, then runs targeted assertions: string equality, set equality, **multiset equality on `(string, number)` tuples preserving duplicate counts** (Chunk A.2 addition for receipt line items — two `PE GRANOLA $10.99` lines must match two such actuals, not collapse via Set semantics), scalar tolerance, keyed scalar tolerance, calendar-strict date ranges. Non-parseable JSON returns `verdict: 'error'`; schema violations return `verdict: 'fail'`. The multiset operative uses a two-pointer merge-with-tolerance over sorted lists per string key bucket, so same-name same-price duplicates count correctly AND same-name different-price duplicates disambiguate by value.
 
 **Standard tests:**
 - `structural-oracle.test.ts` > emits error on non-JSON
 - `structural-oracle.test.ts` > rejects schema violations
 - `structural-oracle.test.ts` > rejects set-equality mismatches
 - `structural-oracle.test.ts` > rejects scalar out-of-tolerance
+- `structural-oracle.test.ts` > multiset operative: duplicate-name happy path, miscount, disambiguation, tolerance edge, NaN strict-fail
+- `receipt-runner.test.ts` > multiset duplicate handling, rejectedDate assertion, quantity/unitPrice multiset
+- `receipt-cases.shape.test.ts` > 5 fixture shape contracts (4 happy-path + 1 rejection-mode)
 - `routing-runner.test.ts` > trust-boundary table (NaN/Infinity-equivalent, missing fields, wrong root types)
 
 ---
@@ -9506,11 +9509,15 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 ---
 
-### REQ-REG-006 — Fixture integrity MUST be verified via SHA-256 checksum before any chatbot-bucket run
+### REQ-REG-006 — Fixture integrity MUST be verified via SHA-256 checksum (runtime for chatbot env; test-time for receipt fixtures)
 
-**Phase:** Chunk A.1 + C | **Status:** Implemented
+**Phase:** Chunk A.1 + C + A.2 | **Status:** Implemented
 
-`verifyFixtureIntegrity(manifestPath)` parses a `<sha256>  <relpath>` manifest, rejects absolute paths and traversals at parse time, and verifies each listed file's SHA-256 in parallel. Returns `FixtureCheckResult` with per-file failures (`mismatch` or `missing`) for diagnostics. Chunk C ships the enforcement point: `chatbot-environment.ts` calls `verifyFixtureIntegrity(seedShaPath)` before any temp directory is written and before any LLM call. A tampered `seed.json` aborts environment creation; the orchestrator marks all chatbot cases in the run as `verdict: 'error'` with a synthesized oracle verdict pointing at the integrity failure.
+Two enforcement points share the same SHA-256 contract:
+
+1. **Chatbot env (runtime).** `verifyFixtureIntegrity(manifestPath)` parses a `<sha256>  <relpath>` manifest, rejects absolute paths and traversals at parse time, and verifies each listed file's SHA-256 in parallel. `chatbot-environment.ts` calls it before any temp directory is written and before any LLM call. A tampered `seed.json` aborts environment creation; the orchestrator marks all chatbot cases in the run as `verdict: 'error'` with a synthesized oracle verdict pointing at the integrity failure.
+
+2. **Receipt fixtures (test-time, Chunk A.2 addition).** Each receipt photo has a sibling `<name>.sha256` manifest. `receipt-cases.shape.test.ts` reads the photo bytes, computes SHA-256, and asserts the recorded manifest hash matches (parsing only the first whitespace-delimited token, so basename-vs-relative-path differences don't matter). Receipt fixtures are committed artifacts; runtime verification would add no signal beyond what the test catches at CI time, where it can fail fast before any LLM dispatch.
 
 **Standard tests:**
 - `seed.test.ts` > verifies matching hashes
@@ -9519,6 +9526,7 @@ The regression workspace is registered as a pnpm package but not listed in the r
 - `seed.test.ts` > rejects manifest line with absolute path
 - `seed.test.ts` > the committed chatbot/seed.sha256 matches the committed seed.json
 - `chatbot-environment.test.ts` > createChatbotEnvironment > throws when the fixture sha256 manifest does not match
+- `receipt-cases.shape.test.ts` > per-fixture > photo SHA-256 matches the recorded .sha256 manifest (5 fixtures)
 
 **Edge case tests:**
 - `orchestrator.test.ts` > runSuite — chatbot bucket > on env-factory failure marks ALL remaining chatbot cases as error without retrying the factory (Codex I3)
@@ -11028,12 +11036,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 
 | REQ-REG-001 | (workspace exclusion verified by vitest config) | 0 | 0 | Implemented |
 | REQ-REG-002 | validate-case.test.ts, cache-key.test.ts, cache-invalidation.test.ts, codex-corrections.test.ts | 8 | 5 | Implemented |
-| REQ-REG-004 | structural-oracle.test.ts, routing-runner.test.ts | 14 | 9 | Implemented |
+| REQ-REG-004 | structural-oracle.test.ts (multiset operative coverage), routing-runner.test.ts, receipt-runner.test.ts, receipt-cases.shape.test.ts, orchestrator-receipt-dispatch.test.ts | 27 | 16 | Implemented |
 | REQ-REG-005 | rubric-oracle.test.ts, chatbot-runner.test.ts, chatbot-cases.test.ts, validate-case.test.ts | 11 | 19 | Implemented |
-| REQ-REG-006 | seed.test.ts, chatbot-environment.test.ts, orchestrator.test.ts | 6 | 5 | Implemented |
-| REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts | 5 | 4 | Implemented |
+| REQ-REG-006 | seed.test.ts, chatbot-environment.test.ts, orchestrator.test.ts, receipt-cases.shape.test.ts | 10 | 7 | Implemented |
+| REQ-REG-008 | budget.test.ts, receipt-runner.test.ts, routing-runner.test.ts, orchestrator-receipt-dispatch.test.ts | 7 | 5 | Implemented |
 | REQ-REG-009 | budget.test.ts, pas-yaml-schema.test.ts, orchestrator.test.ts | 5 | 3 | Implemented |
-| REQ-REG-010 | cache.test.ts, cache-invalidation.test.ts | 6 | 2 | Implemented |
+| REQ-REG-010 | cache.test.ts, cache-invalidation.test.ts, cache-key.test.ts (extraSalt coverage), orchestrator-receipt-dispatch.test.ts (date-salt invalidation) | 11 | 4 | Implemented |
 | REQ-REG-011 | markdown-report.test.ts, cases.contract.test.ts, orchestrator.test.ts, routing-runner.test.ts, dispatch.test.ts | 18 | 8 | Implemented |
 | REQ-REG-012 | chatbot-environment.test.ts, orchestrator.test.ts | 5 | 2 | Implemented |
 | REQ-REG-003 | cache-reader.test.ts, case-discovery.test.ts, regression-routes.test.ts | 3 | 4 | Implemented |

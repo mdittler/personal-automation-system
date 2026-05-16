@@ -22,6 +22,7 @@ import type { CoreServices } from '@core/types/app-module.js';
 import type { LLMService } from '@core/types/llm.js';
 import { parseReceiptFromPhoto } from '@food/services/receipt-parser.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
+import { todayInTimezone } from '../../shared/cache-key.js';
 import type {
 	OracleVerdict,
 	PersonaCase,
@@ -65,8 +66,29 @@ interface ReceiptSidecar {
 	total?: number;
 	subtotal?: number;
 	tax?: number;
-	lineItems?: Array<{ name: string; totalPrice: number }>;
+	/**
+	 * Per-line ground truth. The multiset oracle preserves duplicate counts
+	 * by comparing `(name, totalPrice)` tuples — two entries with the same
+	 * name and same price match two such actuals; two entries with the same
+	 * name and different prices are disambiguated by value. `quantity` and
+	 * `unitPrice` are optional; when present, they become additional
+	 * multiset assertions on `(name, quantity)` and `(name, unitPrice)`.
+	 */
+	lineItems?: Array<{
+		name: string;
+		totalPrice: number;
+		quantity?: number;
+		unitPrice?: number | null;
+	}>;
 	expectRejection?: boolean;
+	/**
+	 * The exact date string the parser is expected to have extracted from the
+	 * photo before `isValidReceiptDate` rejected it. When set (in
+	 * `expectRejection: true` sidecars), `buildExpectation` adds a string
+	 * assertion on the parsed `rawExtractedDate` field — proving the parser
+	 * preserved the original LLM extraction for audit.
+	 */
+	rejectedDate?: string;
 }
 
 function mimeFor(path: string): string {
@@ -76,16 +98,6 @@ function mimeFor(path: string): string {
 	if (e === '.webp') return 'image/webp';
 	if (e === '.gif') return 'image/gif';
 	return 'image/png';
-}
-
-function todayInTimezone(timezone: string): string {
-	const fmt = new Intl.DateTimeFormat('en-CA', {
-		timeZone: timezone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-	});
-	return fmt.format(new Date()); // YYYY-MM-DD
 }
 
 function buildExpectation(sidecar: ReceiptSidecar, today: string): StructuralExpectation {
@@ -104,29 +116,64 @@ function buildExpectation(sidecar: ReceiptSidecar, today: string): StructuralExp
 	if (sidecar.expectRejection) {
 		// The parser overwrites the rejected date to today; assert that.
 		exp.dates = [{ path: 'date', minIso: today, maxIso: today }];
-		if (sidecar.store) exp.strings = [{ path: 'store', expectedCaseInsensitive: sidecar.store }];
+		const strings: NonNullable<StructuralExpectation['strings']> = [];
+		if (sidecar.store) {
+			strings.push({ path: 'store', expectedCaseInsensitive: sidecar.store });
+		}
+		if (sidecar.rejectedDate) {
+			// Prove the parser preserved the LLM's original date extraction
+			// in `rawExtractedDate` for audit.
+			strings.push({
+				path: 'rawExtractedDate',
+				expectedCaseInsensitive: sidecar.rejectedDate,
+			});
+		}
+		if (strings.length > 0) exp.strings = strings;
 		return exp;
 	}
 	if (sidecar.store) exp.strings = [{ path: 'store', expectedCaseInsensitive: sidecar.store }];
 	if (sidecar.date) exp.dates = [{ path: 'date', minIso: sidecar.date, maxIso: sidecar.date }];
+	// Assert subtotal/tax when the sidecar provides them, not just total.
+	// The receipt-parser's integrity-check warnings catch some drift via
+	// `verification_warnings`, but the regression suite is where ground-truth
+	// comparison happens.
+	const scalars: NonNullable<StructuralExpectation['scalars']> = [];
 	if (typeof sidecar.total === 'number') {
-		exp.scalars = [{ path: 'total', expected: sidecar.total, tolerance: 0.01 }];
+		scalars.push({ path: 'total', expected: sidecar.total, tolerance: 0.01 });
 	}
+	if (typeof sidecar.subtotal === 'number') {
+		scalars.push({ path: 'subtotal', expected: sidecar.subtotal, tolerance: 0.01 });
+	}
+	if (typeof sidecar.tax === 'number') {
+		scalars.push({ path: 'tax', expected: sidecar.tax, tolerance: 0.01 });
+	}
+	if (scalars.length > 0) exp.scalars = scalars;
 	if (sidecar.lineItems && sidecar.lineItems.length > 0) {
-		exp.setEquality = [
-			{
-				path: 'lineItems',
-				keyField: 'name',
-				expected: sidecar.lineItems.map((li) => li.name),
-			},
+		// Row-level multiset: keeps each line's (totalPrice, [quantity], [unitPrice])
+		// fields glued together so the parser can't pass by emitting the right
+		// totalPrice with a wrong multiplier. `quantity`/`unitPrice` are only
+		// added to the valueFields list when at least one sidecar row declares
+		// them; expected rows that omit a field skip that field's check.
+		const valueFields: NonNullable<StructuralExpectation['multisetRows']>[0]['valueFields'] = [
+			{ field: 'totalPrice', tolerance: 0.01 },
 		];
-		exp.keyedScalars = [
+		if (sidecar.lineItems.some((li) => typeof li.quantity === 'number')) {
+			valueFields.push({ field: 'quantity', tolerance: 0.001 });
+		}
+		if (sidecar.lineItems.some((li) => typeof li.unitPrice === 'number')) {
+			valueFields.push({ field: 'unitPrice', tolerance: 0.01 });
+		}
+		exp.multisetRows = [
 			{
 				path: 'lineItems',
 				keyField: 'name',
-				valueField: 'totalPrice',
-				tolerance: 0.01,
-				expected: Object.fromEntries(sidecar.lineItems.map((li) => [li.name, li.totalPrice])),
+				valueFields,
+				expected: sidecar.lineItems.map((li) => {
+					const row: Record<string, unknown> = { name: li.name, totalPrice: li.totalPrice };
+					if (typeof li.quantity === 'number') row.quantity = li.quantity;
+					if (typeof li.unitPrice === 'number') row.unitPrice = li.unitPrice;
+					return row;
+				}),
 			},
 		];
 	}

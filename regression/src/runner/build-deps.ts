@@ -25,6 +25,7 @@ import { createProvider } from '@core/services/llm/providers/provider-factory.js
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import type { TierModelSnapshot } from '@core/types/regression.js';
 import { type Logger, pino } from 'pino';
+import { todayInTimezone } from '../shared/cache-key.js';
 import type { CliOptions } from './args.js';
 import { type TierOverride, createChatbotEnvironment } from './chatbot-environment.js';
 import { buildClassifierAdapters, buildRecallAdapter } from './dispatch.js';
@@ -87,18 +88,6 @@ function resolveRepoPaths(): RepoPaths {
 
 export interface ProductionDepsOptions {
 	tierOverride?: TierOverride;
-}
-
-/** YYYY-MM-DD in the supplied timezone — matches the format production
- * `todayInTimezone` produces (used by recall-classifier as `today`). */
-function todayInTimezone(timezone: string): string {
-	const fmt = new Intl.DateTimeFormat('en-CA', {
-		timeZone: timezone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-	});
-	return fmt.format(new Date());
 }
 
 export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise<RunCliDeps> {
@@ -215,6 +204,10 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		recallAdapter,
 		chatbotEnvFactory,
 		judgeLlm: llm,
+		// Receipt bucket uses the same production LLMService instance — the
+		// receipt-runner reads `complete` + `completeWithMeta`.
+		receiptLlm: llm,
+		timezone: config.timezone || 'UTC',
 		costTracker,
 		logger,
 	};
@@ -322,6 +315,11 @@ export function buildDryRunDeps(): RunCliDeps {
 			'dry-run deps: chatbot env factory invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
 		);
 	};
+	const throwOnReceipt = async (): Promise<never> => {
+		throw new Error(
+			'dry-run deps: receipt LLM invoked. Orchestrator should short-circuit on dryRun=true before dispatch.',
+		);
+	};
 	return {
 		casesDir: paths.casesDir,
 		cacheDir: paths.cacheDir,
@@ -340,6 +338,14 @@ export function buildDryRunDeps(): RunCliDeps {
 			recall: throwOnRecall,
 		},
 		chatbotEnvFactory: throwOnChatbotEnv,
+		// Defense in depth: dry-run never reaches the receipt arm (the
+		// orchestrator short-circuits at `dryRun: true`), but stub throws
+		// in case a future change accidentally routes through here.
+		receiptLlm: {
+			complete: throwOnReceipt,
+			completeWithMeta: throwOnReceipt,
+		},
+		timezone: 'UTC',
 		logger: {
 			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),
 			info: (...args) => logger.info(...(args as Parameters<typeof logger.info>)),
@@ -390,6 +396,9 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 			sessionControl: async () => throwOnDispatch(),
 			pas: async () => throwOnDispatch(),
 		},
+		// List mode needs the same timezone production runs would use, so the
+		// receipt-bucket cache-key salt agrees.
+		timezone: config.timezone || 'UTC',
 		logger: {
 			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),
 			info: (...args) => logger.info(...(args as Parameters<typeof logger.info>)),

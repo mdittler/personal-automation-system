@@ -105,6 +105,258 @@ describe('structural — scalar with NaN/null guards (LLM-output untrust)', () =
 	});
 });
 
+describe('structural — multisetRows operative (row-level correlation + duplicate preservation)', () => {
+	it('pass on happy path with single valueField (totalPrice only)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"Eggs","totalPrice":4.99},{"name":"Milk","totalPrice":3.49}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+						expected: [
+							{ name: 'Eggs', totalPrice: 4.99 },
+							{ name: 'Milk', totalPrice: 3.49 },
+						],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('pass');
+	});
+
+	it('pass on row-correlated quantity + unitPrice (matched per row)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"BANANA EACH","quantity":8,"unitPrice":0.23,"totalPrice":1.84}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [
+							{ field: 'totalPrice', tolerance: 0.01 },
+							{ field: 'quantity', tolerance: 0.001 },
+							{ field: 'unitPrice', tolerance: 0.01 },
+						],
+						expected: [{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 }],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('pass');
+	});
+
+	// The critical case: same-name duplicates with DIFFERENT multipliers
+	// must not cross-pair. Without row-level correlation, separate
+	// `(name, quantity)` and `(name, unitPrice)` multisets could pass with
+	// values distributed across the wrong rows.
+	it('fail when row-level correlation breaks (same name, swapped quantity/unitPrice across actuals)', () => {
+		const v = runStructuralOracle(
+			// Two BANANA rows, but the parser swapped (quantity, unitPrice) across them.
+			// Expected: { q=8, u=0.23, total=1.84 } AND { q=5, u=0.30, total=1.50 }
+			// Actual:   { q=5, u=0.23, total=1.84 } AND { q=8, u=0.30, total=1.50 }
+			'{"lineItems":[{"name":"BANANA EACH","quantity":5,"unitPrice":0.23,"totalPrice":1.84},{"name":"BANANA EACH","quantity":8,"unitPrice":0.30,"totalPrice":1.50}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [
+							{ field: 'totalPrice', tolerance: 0.01 },
+							{ field: 'quantity', tolerance: 0.001 },
+							{ field: 'unitPrice', tolerance: 0.01 },
+						],
+						expected: [
+							{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 },
+							{ name: 'BANANA EACH', quantity: 5, unitPrice: 0.30, totalPrice: 1.50 },
+						],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('fail');
+		expect(v.details).toMatch(/BANANA EACH/);
+	});
+
+	it('expected rows that omit a valueField only assert declared fields', () => {
+		// Sidecar declares quantity for one line but NOT for the other.
+		// The undeclared field should not be asserted.
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"BANANA EACH","quantity":8,"unitPrice":0.23,"totalPrice":1.84},{"name":"Eggs","quantity":42,"unitPrice":99,"totalPrice":4.99}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [
+							{ field: 'totalPrice', tolerance: 0.01 },
+							{ field: 'quantity', tolerance: 0.001 },
+							{ field: 'unitPrice', tolerance: 0.01 },
+						],
+						expected: [
+							// BANANA EACH asserts all three fields
+							{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 },
+							// Eggs asserts ONLY totalPrice — the parser's wildly wrong
+							// quantity (42) and unitPrice (99) should NOT cause failure
+							// because the sidecar doesn't declare them for this row.
+							{ name: 'Eggs', totalPrice: 4.99 },
+						],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('pass');
+	});
+
+	it('fails when actual numeric field is NaN-equivalent (null)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"X","totalPrice":null,"quantity":1}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+						expected: [{ name: 'X', totalPrice: 1.0 }],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('fail');
+		expect(v.details).toMatch(/not finite|totalPrice/i);
+	});
+
+	it('errors when expected row missing the keyField (operator misconfig)', () => {
+		const v = runStructuralOracle('{"lineItems":[]}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+					expected: [{ totalPrice: 1.0 } as Record<string, unknown>],
+				},
+			],
+		});
+		expect(v.verdict).toBe('error');
+		expect(v.details).toMatch(/missing string key/i);
+	});
+
+	it('fails on extra actual rows (hallucinated line)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"Eggs","totalPrice":4.99},{"name":"Caviar","totalPrice":99}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+						expected: [{ name: 'Eggs', totalPrice: 4.99 }],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('fail');
+		expect(v.details).toMatch(/hallucinated|caviar/i);
+	});
+
+	it('fails when path is not an array', () => {
+		const v = runStructuralOracle('{"lineItems":"not an array"}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+					expected: [{ name: 'X', totalPrice: 1 }],
+				},
+			],
+		});
+		expect(v.verdict).toBe('fail');
+		expect(v.details).toMatch(/not an array/);
+	});
+
+	it('pass on duplicate same-name same-price (preserves count for Costco PE GRANOLA case)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"PE GRANOLA","totalPrice":10.99},{"name":"PE GRANOLA","totalPrice":10.99}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+						expected: [
+							{ name: 'PE GRANOLA', totalPrice: 10.99 },
+							{ name: 'PE GRANOLA', totalPrice: 10.99 },
+						],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('pass');
+	});
+
+	it('fail on missing duplicate (expected 2 PE GRANOLA, actual 1)', () => {
+		const v = runStructuralOracle(
+			'{"lineItems":[{"name":"PE GRANOLA","totalPrice":10.99}]}',
+			{
+				schema: { type: 'object' },
+				multisetRows: [
+					{
+						path: 'lineItems',
+						keyField: 'name',
+						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+						expected: [
+							{ name: 'PE GRANOLA', totalPrice: 10.99 },
+							{ name: 'PE GRANOLA', totalPrice: 10.99 },
+						],
+					},
+				],
+			},
+		);
+		expect(v.verdict).toBe('fail');
+		expect(v.details).toMatch(/PE GRANOLA/);
+	});
+
+	it('pass at tolerance edge (diff 0.004 with tolerance 0.005)', () => {
+		const v = runStructuralOracle('{"lineItems":[{"name":"X","totalPrice":1.004}]}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.005 }],
+					expected: [{ name: 'X', totalPrice: 1.0 }],
+				},
+			],
+		});
+		expect(v.verdict).toBe('pass');
+	});
+
+	it('fail just outside tolerance (diff 0.006 with tolerance 0.005)', () => {
+		const v = runStructuralOracle('{"lineItems":[{"name":"X","totalPrice":1.006}]}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.005 }],
+					expected: [{ name: 'X', totalPrice: 1.0 }],
+				},
+			],
+		});
+		expect(v.verdict).toBe('fail');
+	});
+});
+
 describe('structural — calendar-strict date validation', () => {
 	it('fail on calendar-invalid date (Feb 30)', () => {
 		const v = runStructuralOracle('{"date":"2026-02-30"}', {
