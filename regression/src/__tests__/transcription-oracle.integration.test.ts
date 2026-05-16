@@ -74,6 +74,17 @@ interface Scenario {
 	mutator: Mutator;
 	expected: 'pass' | 'fail';
 	expectMatch?: RegExp;
+	/**
+	 * Codex round-2 #2: per-oracle expected verdicts. When set, the test
+	 * asserts that the corresponding entry on `oracleVerdicts[]` matches.
+	 * Catches regressions where the aggregate verdict still happens to be
+	 * `'fail'` (because one oracle still fails) even though a different
+	 * oracle has silently regressed (e.g. transcription becoming strict
+	 * byte-match would still make scenarios 5/6 fail, masking the
+	 * regression to normalize-then-compare semantics).
+	 */
+	expectedStructural?: 'pass' | 'fail' | 'error';
+	expectedTranscription?: 'pass' | 'fail' | 'error';
 }
 
 const SCENARIOS: Scenario[] = [
@@ -82,6 +93,11 @@ const SCENARIOS: Scenario[] = [
 		name: 'oracle passes when stub returns exactly the transcription',
 		mutator: (p) => p,
 		expected: 'pass',
+		// Both oracles must agree: parser output matches both the sidecar
+		// (structural ground truth) and the transcription (operator ground
+		// truth).
+		expectedStructural: 'pass',
+		expectedTranscription: 'pass',
 	},
 
 	// --- PRIMARY DRIFT SCENARIO (#2) ---
@@ -101,24 +117,47 @@ const SCENARIOS: Scenario[] = [
 		},
 		expected: 'fail',
 		expectMatch: /missing high-confidence|hallucinated/i,
+		// Structural multiset fails because the dropped line is missing from
+		// the actuals AND the inflated line's totalPrice no longer matches.
+		// Transcription oracle fails identically (and produces the diagnostic
+		// the expectMatch regex picks up).
+		expectedStructural: 'fail',
+		expectedTranscription: 'fail',
 	},
 
-	// --- FULL SELF-CONSISTENT FUDGE (#3) ---
-	// Drop the last item; inflate lineItems[0] by the same amount so the
-	// subtotal/tax/total still tie. The transcription oracle's name-aware
-	// matcher catches both the missing PE GRANOLA and the inflated SPINDRIFT.
+	// --- SELF-CONSISTENT INFLATION (#3, Codex round-2 #3) ---
+	// "Drop last + over-inflate first + bump subtotal/total to match": the
+	// parser claims a HIGHER total than reality AND the line items sum to
+	// that higher total AND subtotal/tax/total are arithmetically consistent
+	// with one another. No internal inconsistency exists for the parser's
+	// integrity check to catch — only an external ground truth (the
+	// transcription) reveals the lie.
+	//
+	// Structural catches via row-level multiset (inflated first row +
+	// missing last row); transcription catches via per-line drift AND
+	// subtotal/total mismatch against the operator-authored figures.
 	{
-		name: 'full self-consistent fudge: drop + inflate (subtotal/tax remain matching)',
+		name: 'self-consistent inflation: drop + over-inflate + bump subtotal/total to match',
 		mutator: (p) => {
 			const dropped = p.lineItems.pop();
 			if (!dropped) return p;
 			const head = p.lineItems[0];
 			if (!head) return p;
-			head.totalPrice += dropped.totalPrice;
+			// Over-inflate by $5 beyond the dropped amount.
+			const inflation = dropped.totalPrice + 5;
+			head.totalPrice += inflation;
 			head.unitPrice = head.totalPrice;
+			// Bump subtotal + total so the parser's self-claim balances.
+			// (subtotal − dropped + dropped + 5 = subtotal + 5; total = same
+			// delta because tax stays put.)
+			if (p.subtotal !== null) p.subtotal += 5;
+			p.total += 5;
 			return p;
 		},
 		expected: 'fail',
+		expectMatch: /total|subtotal|hallucinated|missing high-confidence/i,
+		expectedStructural: 'fail',
+		expectedTranscription: 'fail',
 	},
 
 	// --- HALLUCINATIONS (#4) ---
@@ -130,13 +169,19 @@ const SCENARIOS: Scenario[] = [
 		},
 		expected: 'fail',
 		expectMatch: /hallucinated/i,
+		// Structural multiset fails on the unexpected extra row; transcription
+		// fails with the "hallucinated parser item" diagnostic (regex above).
+		expectedStructural: 'fail',
+		expectedTranscription: 'fail',
 	},
 
 	// --- NAME VARIATION (#5–#7) ---
-	// #5 — structural's `multisetRows.keyField` uses strict byte equality on
-	// name. Even though the transcription oracle normalizes case+whitespace
-	// and would pass, structural fails, so the aggregate verdict is 'fail'.
-	// This is documented intentional behavior; see the file-level comment.
+	// Codex round-2 #2 (per-oracle): scenarios 5 and 6 are the divergence
+	// witnesses — they prove the transcription oracle's normalize-then-
+	// compare semantics. If transcription ever regressed to strict byte
+	// matching, the aggregate would still be 'fail' (structural still
+	// fails), masking the regression. The per-oracle assertions below pin
+	// transcription = 'pass' so any regression there will break the test.
 	{
 		name: 'parser uses lowercase names — fails on structural strict-byte name match',
 		mutator: (p) => {
@@ -144,6 +189,8 @@ const SCENARIOS: Scenario[] = [
 			return p;
 		},
 		expected: 'fail',
+		expectedStructural: 'fail',
+		expectedTranscription: 'pass',
 	},
 	{
 		name: 'parser collapses single-spaces into triple-spaces in names — fails on structural strict-byte name match',
@@ -155,6 +202,8 @@ const SCENARIOS: Scenario[] = [
 			return p;
 		},
 		expected: 'fail',
+		expectedStructural: 'fail',
+		expectedTranscription: 'pass',
 	},
 	{
 		name: 'parser typos an item name — fails (no fuzzy matching)',
@@ -164,6 +213,11 @@ const SCENARIOS: Scenario[] = [
 			return p;
 		},
 		expected: 'fail',
+		// Both oracles fail on a typo: structural strict-byte name mismatch;
+		// transcription normalized-name mismatch (typos aren't normalized
+		// away). Confirms the divergence is bounded to case + whitespace.
+		expectedStructural: 'fail',
+		expectedTranscription: 'fail',
 	},
 
 	// --- DROPPED LINE (#8) ---
@@ -235,6 +289,11 @@ const SCENARIOS: Scenario[] = [
 		},
 		expected: 'fail',
 		expectMatch: /missing high-confidence/i,
+		// Structural multiset fails on the missing discount rows; transcription
+		// fails with the "missing high-confidence transcription item"
+		// diagnostic (which the expectMatch regex captures).
+		expectedStructural: 'fail',
+		expectedTranscription: 'fail',
 	},
 
 	// --- AGGREGATE FUDGING (#14–#15) ---
@@ -289,6 +348,21 @@ describe.each(SCENARIOS)('transcription oracle integration — $name', (scenario
 			result.verdict,
 			`aggregate verdict mismatch — structural=${structuralEntry?.verdict} (${structuralEntry?.details ?? '—'}); transcription=${transcriptionEntry?.verdict} (${transcriptionEntry?.details ?? '—'})`,
 		).toBe(scenario.expected);
+
+		// Codex round-2 #2: per-oracle verdict assertions. The aggregate and
+		// per-oracle checks must agree for any scenario that declares them.
+		if (scenario.expectedStructural !== undefined) {
+			expect(
+				structuralEntry?.verdict,
+				`structural verdict mismatch — details: ${structuralEntry?.details ?? '—'}`,
+			).toBe(scenario.expectedStructural);
+		}
+		if (scenario.expectedTranscription !== undefined) {
+			expect(
+				transcriptionEntry?.verdict,
+				`transcription verdict mismatch — details: ${transcriptionEntry?.details ?? '—'}`,
+			).toBe(scenario.expectedTranscription);
+		}
 
 		if (scenario.expectMatch) {
 			expect(transcriptionEntry?.details ?? '').toMatch(scenario.expectMatch);
