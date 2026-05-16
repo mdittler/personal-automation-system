@@ -22,8 +22,8 @@ import type { CoreServices } from '@core/types/app-module.js';
 import type { LLMService } from '@core/types/llm.js';
 import { parseReceiptFromPhoto } from '@food/services/receipt-parser.js';
 import { loadTranscription } from '../../cases/receipt/transcription-loader.js';
-import { runTranscriptionOracle } from '../../oracles/transcription.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
+import { runTranscriptionOracle } from '../../oracles/transcription.js';
 import { todayInTimezone } from '../../shared/cache-key.js';
 import {
 	ORACLE_LABEL,

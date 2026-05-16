@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { ParsedReceipt } from '@food/services/receipt-parser.js';
+import { describe, expect, it } from 'vitest';
 import { runTranscriptionOracle } from '../oracles/transcription.js';
 import type { ReceiptTranscription, TranscriptionLineItem } from '../types/transcription.js';
 
@@ -275,21 +275,21 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 describe('runTranscriptionOracle — error verdicts', () => {
   it('returns verdict "error" on NaN totalPrice in parsed', () => {
     const r = runTranscriptionOracle(
-      p({ total: 5, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: NaN }] }),
+      p({ total: 5, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: Number.NaN }] }),
       t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
     );
     expect(r.verdict).toBe('error');
   });
   it('returns verdict "error" on Infinity in parsed totals', () => {
     const r = runTranscriptionOracle(
-      p({ total: Infinity, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 }] }),
+      p({ total: Number.POSITIVE_INFINITY, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 }] }),
       t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
     );
     expect(r.verdict).toBe('error');
   });
   it('returns verdict "error" on NaN quantity in parsed', () => {
     const r = runTranscriptionOracle(
-      p({ total: 5, lineItems: [{ name: 'A', quantity: NaN, unitPrice: 5, totalPrice: 5 }] }),
+      p({ total: 5, lineItems: [{ name: 'A', quantity: Number.NaN, unitPrice: 5, totalPrice: 5 }] }),
       t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
     );
     expect(r.verdict).toBe('error');

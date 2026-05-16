@@ -1,8 +1,8 @@
-import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { loadTranscription } from '../cases/receipt/transcription-loader.js';
 import type { ReceiptTranscription } from '../types/transcription.js';
 

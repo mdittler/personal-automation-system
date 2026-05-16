@@ -1,11 +1,11 @@
-import { openSync, readSync, closeSync } from 'node:fs';
-import { resolve, dirname, basename, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
+import { closeSync, openSync, readSync } from 'node:fs';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type {
   ReceiptTranscription,
-  TranscriptionLineItem,
   TranscriptionConfidence,
+  TranscriptionLineItem,
 } from '../../types/transcription.js';
 
 export class TranscriptionLoadError extends Error {
@@ -145,7 +145,7 @@ export function loadTranscription(yamlPath: string): ReceiptTranscription {
   }
   const content = yamlRead.content;
 
-  const shaPath = resolve(dirname(yamlPath), basename(yamlPath, '.yaml') + '.sha256');
+  const shaPath = resolve(dirname(yamlPath), `${basename(yamlPath, '.yaml')}.sha256`);
   let expectedSha: string | undefined;
   try {
     const shaRead = readCapped(shaPath, MAX_SHA_BYTES);
@@ -179,27 +179,27 @@ export function loadTranscription(yamlPath: string): ReceiptTranscription {
     throw new TranscriptionLoadError(`yaml parse error: ${(err as Error).message}`, yamlPath);
   }
   if (parsed === null || typeof parsed !== 'object') {
-    throw new TranscriptionLoadError(`yaml root must be an object`, yamlPath);
+    throw new TranscriptionLoadError('yaml root must be an object', yamlPath);
   }
   const root = parsed as Record<string, unknown>;
 
   if (!isNonNegFinite(root.total)) {
-    throw new TranscriptionLoadError(`total missing, not finite, or negative`, yamlPath);
+    throw new TranscriptionLoadError('total missing, not finite, or negative', yamlPath);
   }
   if (!Array.isArray(root.lineItems) || root.lineItems.length === 0) {
-    throw new TranscriptionLoadError(`lineItems must be a non-empty array`, yamlPath);
+    throw new TranscriptionLoadError('lineItems must be a non-empty array', yamlPath);
   }
   if (root.store !== undefined && typeof root.store !== 'string') {
-    throw new TranscriptionLoadError(`store must be a string if present`, yamlPath);
+    throw new TranscriptionLoadError('store must be a string if present', yamlPath);
   }
   if (root.date !== undefined && typeof root.date !== 'string') {
-    throw new TranscriptionLoadError(`date must be a string if present`, yamlPath);
+    throw new TranscriptionLoadError('date must be a string if present', yamlPath);
   }
   if (root.subtotal !== undefined && !isNonNegFinite(root.subtotal)) {
-    throw new TranscriptionLoadError(`subtotal must be a non-negative finite number if present`, yamlPath);
+    throw new TranscriptionLoadError('subtotal must be a non-negative finite number if present', yamlPath);
   }
   if (root.tax !== undefined && !isNonNegFinite(root.tax)) {
-    throw new TranscriptionLoadError(`tax must be a non-negative finite number if present`, yamlPath);
+    throw new TranscriptionLoadError('tax must be a non-negative finite number if present', yamlPath);
   }
 
   const lineItems = root.lineItems.map((item, idx) => validateLineItem(item, idx, yamlPath));

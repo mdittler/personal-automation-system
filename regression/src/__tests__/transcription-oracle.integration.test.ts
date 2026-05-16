@@ -22,10 +22,10 @@
  */
 
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { runReceiptCase } from '../runner/case-runners/receipt-runner.js';
-import { loadTranscription } from '../cases/receipt/transcription-loader.js';
 import type { ParsedReceipt } from '@food/services/receipt-parser.js';
+import { describe, expect, it } from 'vitest';
+import { loadTranscription } from '../cases/receipt/transcription-loader.js';
+import { runReceiptCase } from '../runner/case-runners/receipt-runner.js';
 import {
 	REAL_FIXTURES_DIR,
 	buildCase,
