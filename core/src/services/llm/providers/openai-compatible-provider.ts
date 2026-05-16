@@ -12,9 +12,15 @@ import type {
 	LLMCompletionResult,
 	LLMFinishReason,
 	ProviderModel,
-	ProviderType,
 } from '../../../types/llm.js';
-import { getModelPricing } from '../model-pricing.js';
+
+/**
+ * Provider types that may reuse OpenAICompatibleProvider's transport. Narrower
+ * than the full ProviderType union so subclasses can't accidentally inherit
+ * the OpenAI chat-completions path under a foreign type tag.
+ */
+type CompatibleProviderType = 'openai-compatible' | 'llama-cpp';
+import { getModelPricing, isLocalProvider } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 /**
@@ -55,10 +61,10 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			 * Subclasses that reuse this transport (e.g. LlamaCppProvider) pass
 			 * their own type so cost-tracking and routing logic can distinguish them.
 			 */
-			providerType?: ProviderType;
+			providerType?: CompatibleProviderType;
 		},
 	) {
-		const providerType: ProviderType = options.providerType ?? 'openai-compatible';
+		const providerType: CompatibleProviderType = options.providerType ?? 'openai-compatible';
 		const noAuthRequired = providerType === 'llama-cpp';
 		const apiKey = options.apiKey || (noAuthRequired ? LOCAL_NO_AUTH_API_KEY : '');
 
@@ -137,8 +143,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			const models: ProviderModel[] = [];
 			const response = await this.client.models.list();
 
+			// Local providers (llama.cpp) always report null pricing regardless of
+			// the model id — a GGUF served as 'gpt-4.1' is still free inference.
+			const localProvider = isLocalProvider(this.providerType);
+
 			for await (const model of response) {
-				const pricing = getModelPricing(model.id);
+				const pricing = localProvider ? null : getModelPricing(model.id);
 				models.push({
 					id: model.id,
 					displayName: model.id,

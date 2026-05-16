@@ -918,3 +918,96 @@ describe('loadSystemConfig', () => {
 		expect(config.chat?.recall?.max_window_days).toBe(30);
 	});
 });
+
+describe('loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007)', () => {
+	it('loads pas.yaml containing the llama-cpp example block without throwing', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					providers: {
+						'llama-cpp': {
+							type: 'llama-cpp',
+							name: 'llama.cpp',
+							base_url: 'http://localhost:8080',
+							default_model: 'local-model',
+						},
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.llm?.providers['llama-cpp']).toBeDefined();
+		expect(config.llm?.providers['llama-cpp'].type).toBe('llama-cpp');
+		expect(config.llm?.providers['llama-cpp'].baseUrl).toBe('http://localhost:8080');
+	});
+
+	it('accepts explicit tier pinned to llama-cpp without a GROQ-style API key', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					providers: {
+						'llama-cpp': {
+							type: 'llama-cpp',
+							name: 'llama.cpp',
+							base_url: 'http://localhost:8080',
+							default_model: 'local-model',
+						},
+					},
+					tiers: {
+						fast: { provider: 'llama-cpp', model: 'local-model' },
+						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+
+		expect(config.llm?.tiers.fast).toEqual({ provider: 'llama-cpp', model: 'local-model' });
+	});
+
+	it('rejects llama-cpp pinned tier when base_url is omitted (no creds, not available)', async () => {
+		const envPath = join(tempDir, '.env');
+		const yamlPath = join(tempDir, 'pas.yaml');
+
+		await writeEnvFile(envPath, requiredEnvVars);
+		await writeFile(
+			yamlPath,
+			stringify({
+				llm: {
+					providers: {
+						'llama-cpp': {
+							type: 'llama-cpp',
+							name: 'llama.cpp',
+							// base_url omitted intentionally
+							default_model: 'local-model',
+						},
+					},
+					tiers: {
+						fast: { provider: 'llama-cpp', model: 'local-model' },
+						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+					},
+				},
+			}),
+			'utf-8',
+		);
+
+		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+			/llama-cpp/,
+		);
+	});
+});

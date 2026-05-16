@@ -5,11 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockChatCreate = vi.fn();
 const mockModelsList = vi.fn();
+const mockOpenAIConstructor = vi.fn();
 
 vi.mock('openai', () => {
 	class MockOpenAI {
 		chat = { completions: { create: mockChatCreate } };
 		models = { list: mockModelsList };
+		constructor(options: unknown) {
+			mockOpenAIConstructor(options);
+		}
 	}
 	return { default: MockOpenAI };
 });
@@ -53,6 +57,15 @@ describe('LlamaCppProvider — construction (REQ-LLM-LLAMA-CPP-001)', () => {
 	it('reports the configured providerId', () => {
 		const provider = makeProvider();
 		expect(provider.providerId).toBe('llama-cpp');
+	});
+
+	it('passes baseURL and a non-empty sentinel key to the OpenAI SDK (REQ-LLM-LLAMA-CPP-002)', () => {
+		makeProvider({ baseUrl: 'http://localhost:8080' });
+		expect(mockOpenAIConstructor).toHaveBeenCalledTimes(1);
+		const opts = mockOpenAIConstructor.mock.calls[0]?.[0] as { apiKey: string; baseURL: string };
+		expect(opts.baseURL).toBe('http://localhost:8080');
+		expect(opts.apiKey).toBeTruthy();
+		expect(opts.apiKey.length).toBeGreaterThan(0);
 	});
 });
 
@@ -131,5 +144,24 @@ describe('LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005)', () => {
 		const provider = makeProvider();
 		const models = await provider.listModels();
 		expect(models).toEqual([]);
+	});
+
+	it('forces pricing=null even when the model name collides with a priced remote model (Codex finding #4)', async () => {
+		// A local GGUF served by llama-server as 'gpt-4.1' (or any other remote model
+		// name) MUST NOT report paid pricing — llama.cpp is free local inference.
+		async function* iter() {
+			yield { id: 'gpt-4.1' };
+			yield { id: 'claude-sonnet-4-6' };
+			yield { id: 'gemini-2.5-pro' };
+		}
+		mockModelsList.mockResolvedValue(iter());
+
+		const provider = makeProvider();
+		const models = await provider.listModels();
+		expect(models).toHaveLength(3);
+		for (const model of models) {
+			expect(model.pricing).toBeNull();
+			expect(model.providerType).toBe('llama-cpp');
+		}
 	});
 });

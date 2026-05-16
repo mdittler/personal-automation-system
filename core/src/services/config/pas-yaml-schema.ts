@@ -27,15 +27,31 @@ const YamlUserSchema = z
 	})
 	.passthrough();
 
+/**
+ * Provider types that run inference locally and don't authenticate. These
+ * providers may omit `api_key_env` in pas.yaml. Kept in sync with
+ * `isLocalProvider()` in `services/llm/model-pricing.ts`.
+ */
+const NO_AUTH_PROVIDER_TYPES = new Set(['ollama', 'llama-cpp']);
+
 const YamlProviderConfigSchema = z
 	.object({
 		type: z.string().min(1),
 		name: z.string().min(1),
-		api_key_env: z.string().min(1),
+		api_key_env: z.string().min(1).optional(),
 		base_url: z.string().optional(),
 		default_model: z.string().optional(),
 	})
-	.passthrough();
+	.passthrough()
+	.superRefine((data, ctx) => {
+		if (!NO_AUTH_PROVIDER_TYPES.has(data.type) && !data.api_key_env) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['api_key_env'],
+				message: `api_key_env is required for provider type "${data.type}"`,
+			});
+		}
+	});
 
 const YamlTierSchema = z
 	.object({

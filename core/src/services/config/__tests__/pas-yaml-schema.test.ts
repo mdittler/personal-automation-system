@@ -97,6 +97,55 @@ describe('PasYamlConfigSchema', () => {
 		expect(result.success).toBe(false);
 	});
 
+	it('accepts llama-cpp provider without api_key_env (REQ-LLM-LLAMA-CPP-007)', () => {
+		const result = PasYamlConfigSchema.safeParse({
+			llm: {
+				providers: {
+					'llama-cpp': {
+						type: 'llama-cpp',
+						name: 'llama.cpp',
+						base_url: 'http://localhost:8080',
+						default_model: 'local-model',
+					},
+				},
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it('accepts ollama provider without api_key_env (parity with llama-cpp, REQ-LLM-LLAMA-CPP-007)', () => {
+		const result = PasYamlConfigSchema.safeParse({
+			llm: {
+				providers: {
+					ollama: {
+						type: 'ollama',
+						name: 'Ollama',
+						base_url: 'http://localhost:11434',
+						default_model: 'llama3.2:3b',
+					},
+				},
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it('accepts the exact pas.yaml.example llama-cpp block (REQ-LLM-LLAMA-CPP-007)', () => {
+		// Mirrors the commented block at config/pas.yaml.example
+		const result = PasYamlConfigSchema.safeParse({
+			llm: {
+				providers: {
+					'llama-cpp': {
+						type: 'llama-cpp',
+						name: 'llama.cpp',
+						base_url: 'http://localhost:8080',
+						default_model: 'local-model',
+					},
+				},
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+
 	it('rejects webhook with invalid URL', () => {
 		const result = PasYamlConfigSchema.safeParse({
 			webhooks: [{ id: 'hook1', url: 'not-a-url', events: ['report:completed'] }],
