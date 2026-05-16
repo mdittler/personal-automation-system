@@ -29,7 +29,8 @@ describe('loadTranscription — happy path', () => {
 
   it('defaults missing confidence to "high"', () => {
     const path = tempFixture(`total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n`);
-    expect(loadTranscription(path).lineItems[0].confidence).toBe('high');
+    const r = loadTranscription(path);
+    expect(r.lineItems[0]?.confidence).toBe('high');
   });
 
   it('preserves optional store, date, subtotal, tax, quantity, unitPrice', () => {
@@ -39,15 +40,15 @@ describe('loadTranscription — happy path', () => {
     expect(r.date).toBe('2026-05-15');
     expect(r.subtotal).toBe(4.98);
     expect(r.tax).toBe(0.40);
-    expect(r.lineItems[0].quantity).toBe(2);
-    expect(r.lineItems[0].unitPrice).toBe(2.49);
+    expect(r.lineItems[0]?.quantity).toBe(2);
+    expect(r.lineItems[0]?.unitPrice).toBe(2.49);
   });
 
   it('accepts negative totalPrice on a line item (discount line)', () => {
     const r = loadTranscription(tempFixture(
       `total: 0\nlineItems:\n  - name: DISCOUNT\n    totalPrice: -5\n  - name: A\n    totalPrice: 5\n`,
     ));
-    expect(r.lineItems[0].totalPrice).toBe(-5);
+    expect(r.lineItems[0]?.totalPrice).toBe(-5);
   });
 });
 

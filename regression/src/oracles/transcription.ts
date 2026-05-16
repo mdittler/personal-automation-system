@@ -74,7 +74,9 @@ export function runTranscriptionOracle(
   for (const pli of parsed.lineItems) {
     let matchedIdx = -1;
     for (let i = 0; i < trxRemaining.length; i++) {
-      const probe = lineSatisfies(pli, trxRemaining[i]);
+      const candidate = trxRemaining[i];
+      if (candidate === undefined) continue;
+      const probe = lineSatisfies(pli, candidate);
       if (probe.ok) { matchedIdx = i; break; }
     }
     if (matchedIdx >= 0) {
