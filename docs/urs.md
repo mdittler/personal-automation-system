@@ -10805,7 +10805,7 @@ The structural oracle's `.expected.json` baseline can be silently regenerated fr
 **Standard tests:**
 - `structural-catches-inflation.characterization.test.ts` > Characterization: structural multisetRows oracle catches drop-and-inflate today > drop-and-inflate: structural reports both missing C and extra B-at-inflated-price
 - `transcription-oracle.integration.test.ts` > "drop-last-item + inflate-second-last-by-same-amount (drift resistance)" > case verdict is fail
-- `transcription-oracle.integration.test.ts` > "full self-consistent fudge: drop + inflate (subtotal/tax remain matching)" > case verdict is fail
+- `transcription-oracle.integration.test.ts` > "self-consistent inflation: drop + over-inflate + bump subtotal/total to match" > case verdict is fail
 
 **Edge case tests:**
 - `transcription-oracle.test.ts` > runTranscriptionOracle — missing high-confidence items (drift-resistance) > catches drift scenario: drop-C-inflate-B (proves PR2 catches what a drifted .expected.json would miss)

@@ -161,10 +161,10 @@ Spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`
 
 **The parser positive regression test at `apps/food/src/services/__tests__/receipt-parser.test.ts:275` is preserved** — the parser still accepts self-consistent inflation as clean; the regression suite is what catches it.
 
-**Codex review round 1 (15 items)** applied in-plan. Regression workspace: 590 tests / 38 files. Closes the parser-blindness accepted-risk entry.
+**Codex review rounds 1, 2, 3** applied in-plan. Regression workspace: 605 tests / 38 files. Closes the parser-blindness accepted-risk entry.
 
 ### Previous Priority: Receipt Parser Robustness — PR1 (complete, branch `worktree-food+receipt-robustness`, 2026-05-15)
-**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is the primary defense against the consistent-fudging case the parser cannot self-detect; PR2 is blocked on operator delivery of 5 receipt photos + transcriptions per the Chunk A.2 carry-forward in `docs/open-items.md`.
+**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is implemented (branch `food/receipt-transcription-oracle`) and provides regression-suite drift resistance — preventing silent `.expected.json` regeneration when the LLM fudges `unitPrice`/`totalPrice`/`subtotal` self-consistently — plus per-line confidence tiers. PR2's value over the existing structural oracle is operator-authored ground truth (`.transcription.yaml`) anchored to physical receipts, so a buggy parser output cannot be silently baselined.
 
 **Approach:** Six TDD batches in `food/receipt-robustness` worktree, one commit each. Plan: `~/.claude/plans/yea-lets-start-a-foamy-pnueli.md`.
 
