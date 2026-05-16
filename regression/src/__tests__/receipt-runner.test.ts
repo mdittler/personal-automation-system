@@ -12,106 +12,34 @@
  * later tasks.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type ReceiptRunnerDeps, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
-import type { PersonaCase, TierModelSnapshot } from '../shared/types.js';
-
-const MODELS: TierModelSnapshot = { fast: 'f', standard: 's', reasoning: 'r' };
-const HEX = 'a'.repeat(64);
+import { runReceiptCase } from '../runner/case-runners/receipt-runner.js';
+import {
+	llmShim,
+	llmShimFromMock,
+	makeCase,
+	makeReceiptDeps,
+	makeTempDir,
+	removeTempDir,
+	stagePhoto as stagePhotoIn,
+	stageSidecar as stageSidecarIn,
+} from './_buildcase-helper.js';
 
 let tempDir: string;
 beforeEach(async () => {
-	tempDir = await mkdtemp(join(tmpdir(), 'rrunner-'));
+	tempDir = await makeTempDir();
 });
 afterEach(async () => {
-	await rm(tempDir, { recursive: true, force: true });
+	await removeTempDir(tempDir);
 });
 
 async function stagePhoto(name: string): Promise<string> {
-	const fp = join(tempDir, `${name}.png`);
-	await writeFile(fp, Buffer.from('FAKE_PNG'));
-	return fp;
+	return stagePhotoIn(tempDir, name);
 }
 
 async function stageSidecar(name: string, sidecar: object): Promise<string> {
-	const fp = join(tempDir, `${name}.expected.json`);
-	await writeFile(fp, JSON.stringify(sidecar));
-	return fp;
-}
-
-function makeCase(photo: string, sidecar: string, idSuffix = ''): PersonaCase {
-	return {
-		id: `receipt-stub${idSuffix ? `-${idSuffix}` : ''}-1`,
-		description: 'd',
-		bucket: 'receipt',
-		coverage: ['apps/food/src/services/receipt-parser.ts'],
-		inputs: [
-			{
-				payload: { photoFixture: photo, sidecarFixture: sidecar },
-				expected: { kind: 'sidecar' },
-			},
-		],
-		oracle: 'structural',
-		budgetUsd: 0.05,
-	};
-}
-
-function makeLogger(): ReceiptRunnerDeps['logger'] {
-	return {
-		warn: vi.fn(),
-		info: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	};
-}
-
-/**
- * Codex P1 (2026-05-15): parseReceiptFromPhoto uses LLMService.completeWithMeta,
- * so the runner shim must provide both methods. This helper wires both to the
- * same response payload so tests can assert against either one.
- */
-function llmShim(text: string): ReceiptRunnerDeps['llm'] {
-	return {
-		complete: vi.fn().mockResolvedValue(text),
-		completeWithMeta: vi.fn().mockResolvedValue({ text, finishReason: 'stop' as const }),
-	};
-}
-
-function llmShimFromMock(
-	completeMock: ReturnType<typeof vi.fn>,
-): ReceiptRunnerDeps['llm'] {
-	return {
-		complete: completeMock,
-		completeWithMeta: vi.fn(async (...args: unknown[]) => ({
-			text: await completeMock(...args),
-			finishReason: 'stop' as const,
-		})),
-	};
-}
-
-/**
- * Returns a fully-formed `ReceiptRunnerDeps` with sane defaults. Each test
- * supplies the `llm` (the variable bit) and optionally overrides any other
- * field; the boilerplate (`logger`, `modelIds`, `cacheKey`, `caseBudgetUsd`,
- * `estimateUsd`, `timezone`) lives here.
- */
-function makeReceiptDeps(
-	llm: ReceiptRunnerDeps['llm'],
-	overrides: Partial<ReceiptRunnerDeps> = {},
-): ReceiptRunnerDeps {
-	return {
-		llm,
-		logger: makeLogger(),
-		timezone: 'America/New_York',
-		modelIds: MODELS,
-		cacheKey: HEX,
-		caseBudgetUsd: 0.05,
-		estimateUsd: () => 0.02,
-		...overrides,
-	};
+	return stageSidecarIn(tempDir, name, sidecar);
 }
 
 describe('runReceiptCase — production parser integration', () => {
@@ -669,70 +597,17 @@ describe('runReceiptCase — production parser integration', () => {
 //     file is referenced but missing OR when the SHA sidecar disagrees
 // =====================================================================
 
-import { createHash } from 'node:crypto';
-import { stringify as yamlStringify } from 'yaml';
+import {
+	makeCaseWithTranscription,
+	stageTranscription as stageTranscriptionIn,
+} from './_buildcase-helper.js';
 
-/**
- * Receipt payload type for tests below. Mirrors `ReceiptPayload` inside the
- * runner but adds the new `transcriptionFixture` field that Batch 3
- * introduces.
- */
-interface TestReceiptPayloadShape {
-	photoFixture: string;
-	sidecarFixture: string;
-	transcriptionFixture?: string;
-}
-
-/**
- * Authors a YAML transcription + a SHA sidecar at <tempDir>/<baseName>.
- * When `shaMode === 'mismatching'`, writes a bad SHA hex on purpose to
- * trigger the fail-closed loader path.
- *
- * Returns the absolute path to the YAML file (suitable for
- * `payload.transcriptionFixture`).
- */
 async function stageTranscription(
 	baseName: string,
 	transcription: Record<string, unknown>,
 	shaMode: 'matching' | 'mismatching' = 'matching',
 ): Promise<string> {
-	const yamlText = yamlStringify(transcription);
-	const yamlPath = join(tempDir, `${baseName}.transcription.yaml`);
-	const shaPath = join(tempDir, `${baseName}.transcription.sha256`);
-	await writeFile(yamlPath, yamlText, 'utf8');
-	const sha =
-		shaMode === 'matching'
-			? createHash('sha256').update(yamlText).digest('hex')
-			: 'b'.repeat(64);
-	await writeFile(shaPath, sha, 'utf8');
-	return yamlPath;
-}
-
-/**
- * Builds a `PersonaCase` whose `payload` carries `photoFixture`,
- * `sidecarFixture`, and (optionally) `transcriptionFixture`. We don't reuse
- * `makeCase()` because that helper hard-codes the payload shape without the
- * new field.
- */
-function makeCaseWithTranscription(
-	photo: string,
-	sidecar: string,
-	transcription: string | undefined,
-	idSuffix = '',
-): PersonaCase {
-	const payload: TestReceiptPayloadShape = { photoFixture: photo, sidecarFixture: sidecar };
-	if (transcription !== undefined) {
-		payload.transcriptionFixture = transcription;
-	}
-	return {
-		id: `receipt-trx${idSuffix ? `-${idSuffix}` : ''}-1`,
-		description: 'd',
-		bucket: 'receipt',
-		coverage: ['apps/food/src/services/receipt-parser.ts'],
-		inputs: [{ payload, expected: { kind: 'sidecar' } }],
-		oracle: 'structural',
-		budgetUsd: 0.05,
-	};
+	return stageTranscriptionIn(tempDir, baseName, transcription, shaMode);
 }
 
 describe('runReceiptCase — transcription oracle (Batch 3)', () => {
