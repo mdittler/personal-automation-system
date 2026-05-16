@@ -32,6 +32,18 @@ const requiredEnvVars = {
 	GUI_AUTH_TOKEN: 'test-gui-token-789',
 };
 
+/**
+ * Write the given object to pas.yaml + default env vars to .env, then load.
+ * Reuses the same tempDir from beforeEach.
+ */
+async function loadConfigFromYamlObj(yamlObj: unknown) {
+	const envPath = join(tempDir, '.env');
+	const yamlPath = join(tempDir, 'pas.yaml');
+	await writeEnvFile(envPath, requiredEnvVars);
+	await writeFile(yamlPath, stringify(yamlObj), 'utf-8');
+	return loadSystemConfig({ envPath, configPath: yamlPath });
+}
+
 describe('loadSystemConfig', () => {
 	it('loads config from .env and pas.yaml', async () => {
 		const envPath = join(tempDir, '.env');
@@ -381,15 +393,7 @@ describe('loadSystemConfig', () => {
 		expect(config.llm?.safeguards?.globalMonthlyCostCap).toBe(25.0);
 	});
 
-	// --- Household safeguard config tests ---
-
-	async function loadConfigFromYamlObj(yamlObj: unknown) {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(yamlPath, stringify(yamlObj), 'utf-8');
-		return loadSystemConfig({ envPath, configPath: yamlPath });
-	}
+	// --- Household safeguard config tests (uses module-scope loadConfigFromYamlObj) ---
 
 	it('parses household safeguard fields from pas.yaml', async () => {
 		const config = await loadConfigFromYamlObj({
@@ -920,29 +924,18 @@ describe('loadSystemConfig', () => {
 });
 
 describe('loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007)', () => {
+	const llamaCppProvider = {
+		type: 'llama-cpp',
+		name: 'llama.cpp',
+		base_url: 'http://localhost:8080',
+		default_model: 'local-model',
+	};
+	const anthropicStandard = { provider: 'anthropic', model: 'claude-sonnet-4-20250514' };
+
 	it('loads pas.yaml containing the llama-cpp example block without throwing', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(
-			yamlPath,
-			stringify({
-				llm: {
-					providers: {
-						'llama-cpp': {
-							type: 'llama-cpp',
-							name: 'llama.cpp',
-							base_url: 'http://localhost:8080',
-							default_model: 'local-model',
-						},
-					},
-				},
-			}),
-			'utf-8',
-		);
-
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+		const config = await loadConfigFromYamlObj({
+			llm: { providers: { 'llama-cpp': llamaCppProvider } },
+		});
 
 		expect(config.llm?.providers['llama-cpp']).toBeDefined();
 		expect(config.llm?.providers['llama-cpp'].type).toBe('llama-cpp');
@@ -950,64 +943,32 @@ describe('loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007)', () =
 	});
 
 	it('accepts explicit tier pinned to llama-cpp without a GROQ-style API key', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(
-			yamlPath,
-			stringify({
-				llm: {
-					providers: {
-						'llama-cpp': {
-							type: 'llama-cpp',
-							name: 'llama.cpp',
-							base_url: 'http://localhost:8080',
-							default_model: 'local-model',
-						},
-					},
-					tiers: {
-						fast: { provider: 'llama-cpp', model: 'local-model' },
-						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
-					},
+		const config = await loadConfigFromYamlObj({
+			llm: {
+				providers: { 'llama-cpp': llamaCppProvider },
+				tiers: {
+					fast: { provider: 'llama-cpp', model: 'local-model' },
+					standard: anthropicStandard,
 				},
-			}),
-			'utf-8',
-		);
-
-		const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			},
+		});
 
 		expect(config.llm?.tiers.fast).toEqual({ provider: 'llama-cpp', model: 'local-model' });
 	});
 
 	it('rejects llama-cpp pinned tier when base_url is omitted (no creds, not available)', async () => {
-		const envPath = join(tempDir, '.env');
-		const yamlPath = join(tempDir, 'pas.yaml');
-
-		await writeEnvFile(envPath, requiredEnvVars);
-		await writeFile(
-			yamlPath,
-			stringify({
+		await expect(
+			loadConfigFromYamlObj({
 				llm: {
 					providers: {
-						'llama-cpp': {
-							type: 'llama-cpp',
-							name: 'llama.cpp',
-							// base_url omitted intentionally
-							default_model: 'local-model',
-						},
+						'llama-cpp': { ...llamaCppProvider, base_url: undefined },
 					},
 					tiers: {
 						fast: { provider: 'llama-cpp', model: 'local-model' },
-						standard: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+						standard: anthropicStandard,
 					},
 				},
 			}),
-			'utf-8',
-		);
-
-		await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
-			/llama-cpp/,
-		);
+		).rejects.toThrow(/llama-cpp/);
 	});
 });

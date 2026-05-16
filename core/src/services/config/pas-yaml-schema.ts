@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { isLocalProvider } from '../llm/model-pricing.js';
 import {
 	IDLE_MINUTES_MAX,
 	IDLE_MINUTES_MIN,
@@ -27,13 +28,6 @@ const YamlUserSchema = z
 	})
 	.passthrough();
 
-/**
- * Provider types that run inference locally and don't authenticate. These
- * providers may omit `api_key_env` in pas.yaml. Kept in sync with
- * `isLocalProvider()` in `services/llm/model-pricing.ts`.
- */
-const NO_AUTH_PROVIDER_TYPES = new Set(['ollama', 'llama-cpp']);
-
 const YamlProviderConfigSchema = z
 	.object({
 		type: z.string().min(1),
@@ -44,7 +38,7 @@ const YamlProviderConfigSchema = z
 	})
 	.passthrough()
 	.superRefine((data, ctx) => {
-		if (!NO_AUTH_PROVIDER_TYPES.has(data.type) && !data.api_key_env) {
+		if (!isLocalProvider(data.type) && !data.api_key_env) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ['api_key_env'],

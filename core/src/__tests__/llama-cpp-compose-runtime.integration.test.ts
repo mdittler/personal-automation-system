@@ -1,11 +1,8 @@
 /**
  * llama.cpp provider — composeRuntime() registration integration test.
  *
- * Codex follow-up (finding #5): the existing llama-cpp provider unit tests
- * instantiate the class directly. They do NOT exercise the real config →
- * factory → registry path. This file plugs that gap by exercising the actual
- * composeRuntime() wiring with a YAML-derived config that includes the
- * llama-cpp block from `config/pas.yaml.example`.
+ * Exercises the real config → factory → registry path with a YAML-derived
+ * config that includes the llama-cpp block from `config/pas.yaml.example`.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -42,6 +39,7 @@ describe('llama.cpp via composeRuntime (REQ-LLM-LLAMA-CPP-007)', () => {
 	afterEach(async () => {
 		if (runtime) await runtime.dispose();
 		runtime = undefined;
+		vi.unstubAllEnvs();
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
@@ -106,24 +104,19 @@ describe('llama.cpp via composeRuntime (REQ-LLM-LLAMA-CPP-007)', () => {
 			},
 		};
 
-		// Stub the env var so the anthropic provider builds (anthropic provider's
-		// constructor doesn't make a network call; an empty-but-set key is fine).
-		const prev = process.env.ANTHROPIC_API_KEY_FAKE_FOR_TEST;
-		process.env.ANTHROPIC_API_KEY_FAKE_FOR_TEST = 'sk-ant-test-key';
-		try {
-			runtime = await composeRuntime({
-				dataDir: join(tempDir, 'data'),
-				configPath: seed.configPath,
-				config: seed.config,
-				telegramService: fakeTelegramService(),
-				logger,
-			});
+		// Anthropic provider's constructor doesn't make a network call; an
+		// empty-but-set key is fine. afterEach calls vi.unstubAllEnvs.
+		vi.stubEnv('ANTHROPIC_API_KEY_FAKE_FOR_TEST', 'sk-ant-test-key');
 
-			expect(runtime.services.providerRegistry.get('llama-cpp')).toBeUndefined();
-			expect(runtime.services.providerRegistry.get('anthropic')).toBeDefined();
-		} finally {
-			if (prev === undefined) delete process.env.ANTHROPIC_API_KEY_FAKE_FOR_TEST;
-			else process.env.ANTHROPIC_API_KEY_FAKE_FOR_TEST = prev;
-		}
+		runtime = await composeRuntime({
+			dataDir: join(tempDir, 'data'),
+			configPath: seed.configPath,
+			config: seed.config,
+			telegramService: fakeTelegramService(),
+			logger,
+		});
+
+		expect(runtime.services.providerRegistry.get('llama-cpp')).toBeUndefined();
+		expect(runtime.services.providerRegistry.get('anthropic')).toBeDefined();
 	});
 });

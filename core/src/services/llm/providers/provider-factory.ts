@@ -9,6 +9,7 @@ import type { Logger } from 'pino';
 import type { LLMProviderConfig } from '../../../types/config.js';
 import type { LLMProviderClient } from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
+import { isLocalProvider } from '../model-pricing.js';
 import { AnthropicProvider } from './anthropic-provider.js';
 import { GoogleProvider } from './google-provider.js';
 import { LlamaCppProvider } from './llama-cpp-provider.js';
@@ -27,9 +28,9 @@ export function createProvider(
 	logger: Logger,
 	costTracker: CostTracker,
 ): LLMProviderClient | null {
-	// Check if the API key env var is set (Ollama and llama.cpp don't need one)
+	// Check if the API key env var is set (local providers don't need one)
 	const apiKey = config.apiKeyEnvVar ? process.env[config.apiKeyEnvVar] : '';
-	const noAuthRequired = config.type === 'ollama' || config.type === 'llama-cpp';
+	const noAuthRequired = isLocalProvider(config.type);
 	if (!noAuthRequired && !apiKey) {
 		logger.debug({ providerId, envVar: config.apiKeyEnvVar }, 'Provider skipped — API key not set');
 		return null;

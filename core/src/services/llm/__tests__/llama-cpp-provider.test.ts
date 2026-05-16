@@ -146,9 +146,9 @@ describe('LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005)', () => {
 		expect(models).toEqual([]);
 	});
 
-	it('forces pricing=null even when the model name collides with a priced remote model (Codex finding #4)', async () => {
-		// A local GGUF served by llama-server as 'gpt-4.1' (or any other remote model
-		// name) MUST NOT report paid pricing — llama.cpp is free local inference.
+	it('forces pricing=null even when the model name collides with a priced remote model', async () => {
+		// A local GGUF served by llama-server as 'gpt-4.1' (or any other remote
+		// model name) MUST NOT report paid pricing — llama.cpp is free local inference.
 		async function* iter() {
 			yield { id: 'gpt-4.1' };
 			yield { id: 'claude-sonnet-4-6' };

@@ -13,6 +13,8 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { getModelPricing, isLocalProvider } from '../model-pricing.js';
+import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 /**
  * Provider types that may reuse OpenAICompatibleProvider's transport. Narrower
@@ -20,8 +22,6 @@ import type {
  * the OpenAI chat-completions path under a foreign type tag.
  */
 type CompatibleProviderType = 'openai-compatible' | 'llama-cpp';
-import { getModelPricing, isLocalProvider } from '../model-pricing.js';
-import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 /**
  * Sentinel API key used by providers that don't authenticate (llama.cpp's

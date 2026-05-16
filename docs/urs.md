@@ -10639,7 +10639,7 @@ A shared `isLocalProvider(providerType)` helper returns `true` for both `'ollama
 - `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for openai-compatible
 - `model-pricing.test.ts` > isLocalProvider (REQ-LLM-LLAMA-CPP-006) > returns false for undefined
 - `model-pricing.test.ts` > estimateCallCost > returns 0 for llama-cpp even if model name matches a priced remote model (REQ-LLM-LLAMA-CPP-006)
-- `llama-cpp-provider.test.ts` > listModels (REQ-LLM-LLAMA-CPP-005) > forces pricing=null even when the model name collides with a priced remote model (Codex finding #4)
+- `llama-cpp-provider.test.ts` > listModels (REQ-LLM-LLAMA-CPP-005) > forces pricing=null even when the model name collides with a priced remote model
 
 ---
 
@@ -10650,7 +10650,6 @@ A shared `isLocalProvider(providerType)` helper returns `true` for both `'ollama
 **Standard tests:**
 - `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts llama-cpp provider without api_key_env (REQ-LLM-LLAMA-CPP-007)
 - `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts ollama provider without api_key_env (parity with llama-cpp, REQ-LLM-LLAMA-CPP-007)
-- `pas-yaml-schema.test.ts` > PasYamlConfigSchema > accepts the exact pas.yaml.example llama-cpp block (REQ-LLM-LLAMA-CPP-007)
 - `config.test.ts` > loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007) > loads pas.yaml containing the llama-cpp example block without throwing
 - `config.test.ts` > loadSystemConfig — llama-cpp provider (REQ-LLM-LLAMA-CPP-007) > accepts explicit tier pinned to llama-cpp without a GROQ-style API key
 - `llama-cpp-compose-runtime.integration.test.ts` > llama.cpp via composeRuntime (REQ-LLM-LLAMA-CPP-007) > registers a llama-cpp provider when present in config.llm.providers
@@ -11214,7 +11213,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-004 | llama-cpp-provider.test.ts | 3 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-005 | llama-cpp-provider.test.ts | 1 | 2 | Implemented |
 | REQ-LLM-LLAMA-CPP-006 | model-pricing.test.ts | 4 | 5 | Implemented |
-| REQ-LLM-LLAMA-CPP-007 | pas-yaml-schema.test.ts, config.test.ts, llama-cpp-compose-runtime.integration.test.ts | 6 | 3 | Implemented |
+| REQ-LLM-LLAMA-CPP-007 | pas-yaml-schema.test.ts, config.test.ts, llama-cpp-compose-runtime.integration.test.ts | 5 | 3 | Implemented |
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 
-| **Totals** | **254 test files** | **1967** | **2083** | **4050 tests** |
+| **Totals** | **254 test files** | **1966** | **2083** | **4049 tests** |

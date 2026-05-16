@@ -24,6 +24,7 @@ import type { ModelRef } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
+import { isLocalProvider } from '../llm/model-pricing.js';
 import { parsePasYamlConfig } from './pas-yaml-schema.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
 
@@ -506,7 +507,7 @@ function getAvailableProviderIds(
 ): Set<string> {
 	const available = new Set<string>();
 	for (const [id, config] of Object.entries(providers)) {
-		if (config.type === 'ollama' || config.type === 'llama-cpp') {
+		if (isLocalProvider(config.type)) {
 			// Local providers need a base URL but no API key
 			if (config.baseUrl) available.add(id);
 		} else {
