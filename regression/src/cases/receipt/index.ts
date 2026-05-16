@@ -76,11 +76,19 @@ export function buildCases(): LoadedCase[] {
 			`regression/fixtures/receipts/${fx.slug}.expected.json`,
 		];
 		if (!isRejectionCase) {
-			// The .transcription.sha256 file is deterministically derived from
-			// the .transcription.yaml content; including both in the cache key
-			// would be redundant. The loader still verifies the SHA at runtime
-			// so integrity is preserved.
-			coverage.push(`regression/fixtures/receipts/${fx.slug}.transcription.yaml`);
+			// Include BOTH the transcription YAML and its SHA sidecar in the
+			// cache key. A cache hit short-circuits the loader's runtime SHA
+			// check, so if someone edits ONLY the SHA file (corruption,
+			// tampering, partial sync), the cache key would not change and the
+			// prior verdict would be served stale — the SHA mismatch never
+			// surfaces. Including both files means a SHA edit invalidates the
+			// cache → re-dispatch → loader catches mismatch → 'error' verdict
+			// surfaces correctly. (Codex round-3 #2: revert prior simplify-pass
+			// optimization, which made the wrong call here.)
+			coverage.push(
+				`regression/fixtures/receipts/${fx.slug}.transcription.yaml`,
+				`regression/fixtures/receipts/${fx.slug}.transcription.sha256`,
+			);
 		}
 		const payload: Record<string, unknown> = { photoFixture, sidecarFixture };
 		if (transcriptionFixture !== undefined) {

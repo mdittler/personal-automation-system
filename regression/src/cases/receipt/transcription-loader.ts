@@ -74,8 +74,14 @@ function validateLineItem(raw: unknown, idx: number, path: string): Transcriptio
     confidence: rawConfidence as TranscriptionConfidence,
   };
   if (obj.quantity !== undefined) {
-    if (!isFiniteNumber(obj.quantity)) {
-      throw new TranscriptionLoadError(`lineItems[${idx}].quantity not finite`, path);
+    // `quantity` is a printed multi-unit count — it must be strictly positive.
+    // Zero or negative values are nonsensical and would let a hallucinated
+    // zero-quantity parser line match a transcription row. Codex round-3 #7.
+    if (!isFiniteNumber(obj.quantity) || obj.quantity <= 0) {
+      throw new TranscriptionLoadError(
+        `lineItems[${idx}].quantity must be a positive finite number`,
+        path,
+      );
     }
     item.quantity = obj.quantity;
   }
@@ -90,6 +96,19 @@ function validateLineItem(raw: unknown, idx: number, path: string): Transcriptio
   return item;
 }
 
+/**
+ * Loads + validates a receipt transcription from a `.transcription.yaml` file.
+ *
+ * Trust boundary: the loader rejects relative paths and `..` segments to
+ * prevent traversal, but accepts any absolute path. Callers (currently only
+ * `buildCases()` in `regression/src/cases/receipt/index.ts`) are responsible
+ * for ensuring the path resolves inside the regression fixtures root. Tests
+ * use absolute paths into `os.tmpdir()`, which is intentional and trusted.
+ *
+ * Operator workflow note: editing a transcription YAML in the fixtures
+ * directory requires regenerating the matching .sha256 sidecar — otherwise
+ * the loader fails closed with verdict 'error'.
+ */
 export function loadTranscription(yamlPath: string): ReceiptTranscription {
   // Only absolute, non-traversing paths are accepted. The loader is invoked
   // from `buildCases()` and integration tests, both of which build absolute

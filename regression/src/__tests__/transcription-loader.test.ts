@@ -149,4 +149,47 @@ describe('loadTranscription — security', () => {
   it('throws on path with .. segments (Codex round-2 #5)', () => {
     expect(() => loadTranscription('/tmp/../etc/passwd')).toThrow(/traversal/i);
   });
+
+  // Codex round-3 #6: documents the caller-trust boundary. The loader only
+  // gates traversal + relative paths; resolving inside the fixtures root is
+  // the caller's responsibility. Integration tests use `os.tmpdir()` paths
+  // (which are external but absolute) and must continue to load successfully.
+  it('accepts absolute paths outside the fixtures root (caller-trust boundary)', () => {
+    const path = tempFixture(`total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n`);
+    expect(() => loadTranscription(path)).not.toThrow();
+  });
+});
+
+// Codex round-3 #7: `quantity` is a printed multi-unit count — zero or
+// negative values are nonsensical and could mask hallucinated parser lines.
+describe('loadTranscription — quantity sign (Codex round-3 #7)', () => {
+  it('throws on quantity: 0', () => {
+    expect(() =>
+      loadTranscription(
+        tempFixture(
+          `total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n    quantity: 0\n`,
+        ),
+      ),
+    ).toThrow(/quantity.*positive/);
+  });
+
+  it('throws on negative quantity', () => {
+    expect(() =>
+      loadTranscription(
+        tempFixture(
+          `total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n    quantity: -1\n`,
+        ),
+      ),
+    ).toThrow(/quantity.*positive/);
+  });
+
+  it('accepts quantity: 1 (smallest valid positive integer)', () => {
+    expect(() =>
+      loadTranscription(
+        tempFixture(
+          `total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n    quantity: 1\n`,
+        ),
+      ),
+    ).not.toThrow();
+  });
 });

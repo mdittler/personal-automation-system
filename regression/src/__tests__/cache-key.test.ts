@@ -239,4 +239,47 @@ describe('computeCacheKey', () => {
 			expect(ny).not.toBe(utc);
 		});
 	});
+
+	// Codex round-3 #2: SHA sidecar inclusion in cache coverage.
+	//
+	// Receipt cases include BOTH `.transcription.yaml` AND its companion
+	// `.transcription.sha256` in `coverage`. A cache hit short-circuits the
+	// loader's runtime SHA check, so if someone edits ONLY the SHA file
+	// (corruption, tampering, partial sync), the cache key would not change
+	// and the prior verdict would be served stale. With BOTH files in coverage,
+	// a SHA-only edit invalidates the cache → re-dispatch → loader catches the
+	// mismatch → 'error' verdict surfaces correctly.
+	describe('SHA sidecar coverage (transcription cache invalidation)', () => {
+		it('editing only the .sha256 sidecar produces a different cache key', async () => {
+			await track('a.ts', 'a\n');
+			// Simulate the transcription YAML + SHA sidecar pair as untracked
+			// coverage files (mirrors how the receipt-bucket fixtures live
+			// outside the test git repo and are picked up by `hashRepoRelative`'s
+			// SHA-256 fallback).
+			const yaml = 'total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n';
+			await writeFile(join(tempRepo, 'receipt.transcription.yaml'), yaml);
+			await writeFile(
+				join(tempRepo, 'receipt.transcription.sha256'),
+				'a'.repeat(64),
+			);
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: [
+					'a.ts',
+					'receipt.transcription.yaml',
+					'receipt.transcription.sha256',
+				],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const before = await computeCacheKey(base);
+			// Edit ONLY the SHA sidecar; YAML content untouched.
+			await writeFile(
+				join(tempRepo, 'receipt.transcription.sha256'),
+				'b'.repeat(64),
+			);
+			const after = await computeCacheKey(base);
+			expect(after).not.toBe(before);
+		});
+	});
 });

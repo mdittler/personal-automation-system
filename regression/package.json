@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"build": "pnpm run typecheck",
 		"test": "vitest run",
 		"test:watch": "vitest watch",
 		"test:regression": "tsx ./src/runner/cli-main.ts",

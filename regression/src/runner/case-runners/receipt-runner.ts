@@ -303,8 +303,11 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 
 		// ---- Set-based aggregation for THIS input only. ----
 		// `aggregateVerdict` is monotonic: never demote `error` to `fail` or
-		// `fail` to `pass`.
-		aggregateVerdict = perInputVerdicts.reduce(
+		// `fail` to `pass`. Explicit `Verdict` generic on `.reduce` prevents
+		// the accumulator from being narrowed to the initial value's literal
+		// type (`'pass'` or `'pass' | 'error'`), which would reject the `'fail'`
+		// branch of `combineVerdicts`'s return type.
+		aggregateVerdict = perInputVerdicts.reduce<Verdict>(
 			(acc, ov) => combineVerdicts(acc, ov.verdict),
 			aggregateVerdict,
 		);
