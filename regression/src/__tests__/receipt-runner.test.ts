@@ -12,106 +12,35 @@
  * later tasks.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type ReceiptRunnerDeps, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
-import type { PersonaCase, TierModelSnapshot } from '../shared/types.js';
-
-const MODELS: TierModelSnapshot = { fast: 'f', standard: 's', reasoning: 'r' };
-const HEX = 'a'.repeat(64);
+import { combineVerdicts, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
+import type { Verdict } from '../shared/types.js';
+import {
+	llmShim,
+	llmShimFromMock,
+	makeCase,
+	makeReceiptDeps,
+	makeTempDir,
+	removeTempDir,
+	stagePhoto as stagePhotoIn,
+	stageSidecar as stageSidecarIn,
+} from './_buildcase-helper.js';
 
 let tempDir: string;
 beforeEach(async () => {
-	tempDir = await mkdtemp(join(tmpdir(), 'rrunner-'));
+	tempDir = await makeTempDir();
 });
 afterEach(async () => {
-	await rm(tempDir, { recursive: true, force: true });
+	await removeTempDir(tempDir);
 });
 
 async function stagePhoto(name: string): Promise<string> {
-	const fp = join(tempDir, `${name}.png`);
-	await writeFile(fp, Buffer.from('FAKE_PNG'));
-	return fp;
+	return stagePhotoIn(tempDir, name);
 }
 
 async function stageSidecar(name: string, sidecar: object): Promise<string> {
-	const fp = join(tempDir, `${name}.expected.json`);
-	await writeFile(fp, JSON.stringify(sidecar));
-	return fp;
-}
-
-function makeCase(photo: string, sidecar: string, idSuffix = ''): PersonaCase {
-	return {
-		id: `receipt-stub${idSuffix ? `-${idSuffix}` : ''}-1`,
-		description: 'd',
-		bucket: 'receipt',
-		coverage: ['apps/food/src/services/receipt-parser.ts'],
-		inputs: [
-			{
-				payload: { photoFixture: photo, sidecarFixture: sidecar },
-				expected: { kind: 'sidecar' },
-			},
-		],
-		oracle: 'structural',
-		budgetUsd: 0.05,
-	};
-}
-
-function makeLogger(): ReceiptRunnerDeps['logger'] {
-	return {
-		warn: vi.fn(),
-		info: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	};
-}
-
-/**
- * Codex P1 (2026-05-15): parseReceiptFromPhoto uses LLMService.completeWithMeta,
- * so the runner shim must provide both methods. This helper wires both to the
- * same response payload so tests can assert against either one.
- */
-function llmShim(text: string): ReceiptRunnerDeps['llm'] {
-	return {
-		complete: vi.fn().mockResolvedValue(text),
-		completeWithMeta: vi.fn().mockResolvedValue({ text, finishReason: 'stop' as const }),
-	};
-}
-
-function llmShimFromMock(
-	completeMock: ReturnType<typeof vi.fn>,
-): ReceiptRunnerDeps['llm'] {
-	return {
-		complete: completeMock,
-		completeWithMeta: vi.fn(async (...args: unknown[]) => ({
-			text: await completeMock(...args),
-			finishReason: 'stop' as const,
-		})),
-	};
-}
-
-/**
- * Returns a fully-formed `ReceiptRunnerDeps` with sane defaults. Each test
- * supplies the `llm` (the variable bit) and optionally overrides any other
- * field; the boilerplate (`logger`, `modelIds`, `cacheKey`, `caseBudgetUsd`,
- * `estimateUsd`, `timezone`) lives here.
- */
-function makeReceiptDeps(
-	llm: ReceiptRunnerDeps['llm'],
-	overrides: Partial<ReceiptRunnerDeps> = {},
-): ReceiptRunnerDeps {
-	return {
-		llm,
-		logger: makeLogger(),
-		timezone: 'America/New_York',
-		modelIds: MODELS,
-		cacheKey: HEX,
-		caseBudgetUsd: 0.05,
-		estimateUsd: () => 0.02,
-		...overrides,
-	};
+	return stageSidecarIn(tempDir, name, sidecar);
 }
 
 describe('runReceiptCase — production parser integration', () => {
@@ -651,5 +580,453 @@ describe('runReceiptCase — production parser integration', () => {
 		expect(result.verdict).toBe('fail');
 		// Either the quantity multiset or the unitPrice multiset will surface the failure.
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/quantity|unitPrice/i);
+	});
+});
+
+// =====================================================================
+// PR2 Batch 3 — transcription oracle wiring tests.
+//
+// Each test wires the new `transcriptionFixture` payload field plus a YAML
+// transcription + SHA sidecar on disk. The runner is expected to:
+//   - emit a labeled 'structural' verdict (existing behavior)
+//   - emit a labeled 'transcription' verdict (new in Batch 3)
+//   - aggregate set-based: any 'error' → 'error', else any 'fail' → 'fail',
+//     else 'pass'
+//   - skip the transcription oracle entirely when `sidecar.expectRejection` is
+//     true
+//   - emit a `'transcription'` verdict with verdict='error' when the YAML
+//     file is referenced but missing OR when the SHA sidecar disagrees
+// =====================================================================
+
+import {
+	makeCaseWithTranscription,
+	stageTranscription as stageTranscriptionIn,
+} from './_buildcase-helper.js';
+
+async function stageTranscription(
+	baseName: string,
+	transcription: Record<string, unknown>,
+	shaMode: 'matching' | 'mismatching' = 'matching',
+): Promise<string> {
+	return stageTranscriptionIn(tempDir, baseName, transcription, shaMode);
+}
+
+describe('runReceiptCase — transcription oracle (Batch 3)', () => {
+	it('1. PASS: oracleVerdicts has both labels, both pass (happy path)', async () => {
+		const photoPath = await stagePhoto('walmart');
+		const sidecarPath = await stageSidecar('walmart-happy', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 8.48,
+			lineItems: [
+				{ name: 'Eggs', totalPrice: 4.99 },
+				{ name: 'Milk', totalPrice: 3.49 },
+			],
+		});
+		const trxPath = await stageTranscription('walmart-happy', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 8.48,
+			lineItems: [
+				{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' },
+				{ name: 'Milk', totalPrice: 3.49, confidence: 'high' },
+			],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [
+						{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
+						{ name: 'Milk', quantity: 1, unitPrice: 3.49, totalPrice: 3.49 },
+					],
+					subtotal: 8.48,
+					tax: 0,
+					total: 8.48,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'happy'),
+			deps,
+		);
+		expect(result.verdict).toBe('pass');
+		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(structuralEntry).toBeDefined();
+		expect(structuralEntry?.verdict).toBe('pass');
+		expect(transcriptionEntry).toBeDefined();
+		expect(transcriptionEntry?.verdict).toBe('pass');
+	});
+
+	it('2. FAIL when structural passes but transcription fails (drift resistance)', async () => {
+		// Parser output matches the sidecar AND adds a hallucinated item that's
+		// not in the transcription. Sidecar is intentionally lax (no lineItems
+		// or weaker line-items list) so structural passes; transcription
+		// catches the hallucination.
+		const photoPath = await stagePhoto('drift');
+		const sidecarPath = await stageSidecar('drift', {
+			// No lineItems on sidecar — only total. Structural oracle will pass.
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 10.0,
+		});
+		const trxPath = await stageTranscription('drift', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 10.0,
+			lineItems: [{ name: 'Eggs', totalPrice: 10.0, confidence: 'high' }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [
+						{ name: 'Eggs', quantity: 1, unitPrice: 10.0, totalPrice: 10.0 },
+						// Hallucinated — not in transcription. Structural won't
+						// notice because sidecar.lineItems is empty.
+						{ name: 'Truffle Oil', quantity: 1, unitPrice: 80.0, totalPrice: 80.0 },
+					],
+					subtotal: 10.0,
+					tax: 0,
+					total: 10.0,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'drift'),
+			deps,
+		);
+		expect(result.verdict).toBe('fail');
+		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(structuralEntry?.verdict).toBe('pass');
+		expect(transcriptionEntry?.verdict).toBe('fail');
+		expect(transcriptionEntry?.details ?? '').toMatch(/truffle|hallucinated/i);
+	});
+
+	it('3. FAIL when transcription passes but structural fails', async () => {
+		// Sidecar diverges (e.g., expects an extra line item) while the
+		// transcription matches the parser output exactly.
+		const photoPath = await stagePhoto('struct-fail');
+		const sidecarPath = await stageSidecar('struct-fail', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [
+				{ name: 'Eggs', totalPrice: 4.99 },
+				// Extra item — sidecar (ground truth) expects 2 items; parser
+				// emits only 1. Multiset oracle catches the missing one.
+				{ name: 'Milk', totalPrice: 3.49 },
+			],
+		});
+		const trxPath = await stageTranscription('struct-fail', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'struct-fail'),
+			deps,
+		);
+		expect(result.verdict).toBe('fail');
+		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(structuralEntry?.verdict).toBe('fail');
+		expect(transcriptionEntry?.verdict).toBe('pass');
+		expect(structuralEntry?.details ?? '').toMatch(/milk/i);
+	});
+
+	it('4. FAIL with both verdicts populated when both oracles fail', async () => {
+		// Parser diverges from BOTH sidecar AND transcription in different ways.
+		const photoPath = await stagePhoto('both-fail');
+		const sidecarPath = await stageSidecar('both-fail', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const trxPath = await stageTranscription('both-fail', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					// Same hallucinated item present in BOTH sidecar diff and
+					// transcription diff — structural fails (extra item),
+					// transcription fails (hallucinated item).
+					lineItems: [
+						{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 },
+						{ name: 'Caviar', quantity: 1, unitPrice: 200.0, totalPrice: 200.0 },
+					],
+					subtotal: 204.99,
+					tax: 0,
+					total: 204.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'both-fail'),
+			deps,
+		);
+		expect(result.verdict).toBe('fail');
+		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(structuralEntry?.verdict).toBe('fail');
+		expect(transcriptionEntry?.verdict).toBe('fail');
+	});
+
+	it('5. skips transcription oracle when sidecar declares expectRejection:true', async () => {
+		// expectRejection sidecars route the parser through the
+		// `isValidReceiptDate` rejection branch; transcription doesn't apply.
+		const photoPath = await stagePhoto('reject');
+		const sidecarPath = await stageSidecar('reject-skip', {
+			expectRejection: true,
+			store: 'Wegmans Food Markets',
+		});
+		// Even though we provide a transcription fixture path, the runner
+		// must NOT invoke the transcription oracle.
+		const trxPath = await stageTranscription('reject-skip', {
+			store: 'Wegmans Food Markets',
+			total: 2.49,
+			lineItems: [{ name: 'Bananas', totalPrice: 2.49, confidence: 'high' }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Wegmans Food Markets',
+					date: '2099-12-31',
+					lineItems: [{ name: 'Bananas', quantity: 1, unitPrice: 2.49, totalPrice: 2.49 }],
+					subtotal: 2.49,
+					tax: 0,
+					total: 2.49,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'reject-skip'),
+			deps,
+		);
+		const labels = result.oracleVerdicts.map((v) => v.label);
+		expect(labels).not.toContain('transcription');
+		// structural still ran
+		expect(labels).toContain('structural');
+	});
+
+	it('6. ERROR when transcription file is referenced but missing (fail-closed)', async () => {
+		const photoPath = await stagePhoto('missing-trx');
+		const sidecarPath = await stageSidecar('missing-trx', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Path that does NOT exist on disk.
+		const missingPath = join(tempDir, 'does-not-exist.transcription.yaml');
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, missingPath, 'missing'),
+			deps,
+		);
+		expect(result.verdict).toBe('error');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(transcriptionEntry).toBeDefined();
+		expect(transcriptionEntry?.verdict).toBe('error');
+		expect(transcriptionEntry?.details ?? '').toMatch(/load failed|cannot stat|does-not-exist/i);
+	});
+
+	it('7. ERROR on SHA mismatch (fail-closed)', async () => {
+		const photoPath = await stagePhoto('sha-mismatch');
+		const sidecarPath = await stageSidecar('sha-mismatch', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Author the YAML with a deliberately-bad SHA sidecar.
+		const trxPath = await stageTranscription(
+			'sha-mismatch',
+			{
+				store: 'Walmart',
+				date: '2026-04-15',
+				total: 4.99,
+				lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
+			},
+			'mismatching',
+		);
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'sha-mismatch'),
+			deps,
+		);
+		expect(result.verdict).toBe('error');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(transcriptionEntry?.verdict).toBe('error');
+		expect(transcriptionEntry?.details ?? '').toMatch(/sha256/i);
+	});
+
+	it('8. charges budget only once per dispatch even with two oracles', async () => {
+		// Both oracles are pure / no LLM. Cost should reflect exactly one
+		// parser dispatch, not two.
+		const photoPath = await stagePhoto('budget-once');
+		const sidecarPath = await stageSidecar('budget-once', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const trxPath = await stageTranscription('budget-once', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
+		});
+		const llmComplete = vi.fn().mockResolvedValue(
+			JSON.stringify({
+				store: 'Walmart',
+				date: '2026-04-15',
+				lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+				subtotal: 4.99,
+				tax: 0,
+				total: 4.99,
+			}),
+		);
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'budget-once'),
+			deps,
+		);
+		expect(result.verdict).toBe('pass');
+		// One parser call → one charge of the estimated $0.02 (see makeReceiptDeps).
+		expect(llmComplete).toHaveBeenCalledTimes(1);
+		expect(result.costUsd).toBeCloseTo(0.02, 4);
+	});
+
+	it('9. error verdict precedence — error trumps fail when both occur on the same input', async () => {
+		// Order-of-aggregation guard: a structural fail + a transcription
+		// error must yield case verdict 'error' (set-based AND with error
+		// dominant), not 'fail'.
+		const photoPath = await stagePhoto('err-precedence');
+		// Sidecar diverges (structural will fail) — extra item it expects.
+		const sidecarPath = await stageSidecar('err-precedence', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [
+				{ name: 'Eggs', totalPrice: 4.99 },
+				{ name: 'NotEmitted', totalPrice: 1.0 },
+			],
+		});
+		// Transcription file references a nonexistent path → error from loader.
+		const missingPath = join(tempDir, 'err-precedence.missing.transcription.yaml');
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, missingPath, 'err-prec'),
+			deps,
+		);
+		expect(result.verdict).toBe('error');
+		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
+		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
+		expect(structuralEntry?.verdict).toBe('fail');
+		expect(transcriptionEntry?.verdict).toBe('error');
+	});
+
+	it('10. omits transcription label entirely when payload.transcriptionFixture is undefined', async () => {
+		// Backwards-compat: a receipt case without a transcription file must
+		// continue to work — runner emits only the 'structural' verdict.
+		const photoPath = await stagePhoto('no-trx');
+		const sidecarPath = await stageSidecar('no-trx', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		const result = await runReceiptCase(
+			makeCaseWithTranscription(photoPath, sidecarPath, undefined, 'no-trx'),
+			deps,
+		);
+		expect(result.verdict).toBe('pass');
+		const labels = result.oracleVerdicts.map((v) => v.label);
+		expect(labels).toContain('structural');
+		expect(labels).not.toContain('transcription');
+	});
+});
+
+describe('combineVerdicts', () => {
+	it.each([
+		['pass', 'pass', 'pass'],
+		['pass', 'fail', 'fail'],
+		['fail', 'pass', 'fail'],
+		['pass', 'error', 'error'],
+		['error', 'pass', 'error'],
+		['fail', 'error', 'error'],
+		['error', 'fail', 'error'],
+	])('combine(%s, %s) === %s', (a, b, expected) => {
+		expect(combineVerdicts(a as Verdict, b as Verdict)).toBe(expected);
 	});
 });

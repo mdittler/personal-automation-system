@@ -21,6 +21,17 @@ export const VERDICT = {
 	budgetExceeded: 'budget-exceeded',
 } as const satisfies Record<string, Verdict>;
 
+/**
+ * Oracle label literal constants. Receipt-runner emits multiple oracles per
+ * case (`structural` + `transcription`); using a constant lets a typo fail
+ * at the type level rather than silently mis-routing a verdict.
+ */
+export const ORACLE_LABEL = {
+	structural: 'structural',
+	transcription: 'transcription',
+} as const;
+export type OracleLabel = (typeof ORACLE_LABEL)[keyof typeof ORACLE_LABEL];
+
 export type RoutingTarget = 'food-shadow' | 'session-control' | 'pas';
 
 export interface PersonaInput {
@@ -45,6 +56,13 @@ export interface PersonaCase {
 export interface OracleVerdict {
 	verdict: Exclude<Verdict, 'budget-exceeded'>;
 	details: string;
+	/**
+	 * Optional label distinguishing multiple oracles that ran on the same case.
+	 * The receipt-runner (PR2) emits `'structural'` + `'transcription'` entries
+	 * so per-oracle outcomes can be inspected independently. Legacy runners that
+	 * emit a single verdict omit the field; readers must tolerate `undefined`.
+	 */
+	label?: OracleLabel;
 }
 
 /**

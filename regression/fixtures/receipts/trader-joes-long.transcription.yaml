@@ -1,0 +1,101 @@
+# Ground-truth transcription for trader-joes-long.jpg
+# Source: regression/fixtures/receipts/trader-joes-long.true.md
+# 26 line items, 39 individual items. Multiplier lines (8, 19, 20, 25, 26)
+# carry explicit `N @ $unit_price` annotations on the printed receipt;
+# single-unit rows omit quantity/unitPrice (parser defaults quantity=1,
+# unitPrice=null per Batch 2). Duplicate-row handling: rows 16 & 17
+# (BROCCOLI CROWNS at $2.49) are two distinct physical lines.
+# Date omitted: cropped photo (Chunk A.2 carry-forward).
+store: Trader Joe's
+subtotal: 106.08
+tax: 2.12
+total: 108.20
+lineItems:
+  - name: MILK ORGANIC GALLON LOW
+    totalPrice: 7.49
+    confidence: high
+  - name: PEANUT BUTTER CREAMY SAL
+    totalPrice: 2.49
+    confidence: high
+  - name: MEAL THAI WHEAT NOODLES
+    totalPrice: 2.49
+    confidence: high
+  - name: WAFER COOKIE DOUBLE CHOC
+    totalPrice: 3.99
+    confidence: high
+  - name: BLACK BEANS
+    totalPrice: 0.99
+    confidence: high
+  - name: SAVORY THIN MINI CRACKER
+    totalPrice: 3.49
+    confidence: high
+  - name: TORTILLAS FLOUR CARB SAV
+    totalPrice: 2.99
+    confidence: high
+  - name: BANANA EACH
+    quantity: 8
+    unitPrice: 0.23
+    totalPrice: 1.84
+    confidence: high
+  - name: CARROTS CUT & PEELED ORG
+    totalPrice: 1.99
+    confidence: high
+  - name: SAUSAGE CHICKEN NAE SWEE
+    totalPrice: 6.49
+    confidence: high
+  - name: SHAVED STEAK
+    totalPrice: 12.64
+    confidence: high
+  - name: GROUND BEEF 96/4
+    totalPrice: 8.99
+    confidence: high
+  - name: ORGANIC BLACKBERRIES 120
+    totalPrice: 7.99
+    confidence: high
+  - name: RS SLICED ITALIAN DRY SA
+    totalPrice: 5.49
+    confidence: high
+  - name: R-STRAWBERRIES 2 LB
+    totalPrice: 6.99
+    confidence: high
+  - name: BROCCOLI CROWNS
+    totalPrice: 2.49
+    confidence: high
+  - name: BROCCOLI CROWNS     # duplicate of row 16
+    totalPrice: 2.49
+    confidence: high
+  - name: R-SQUASH ZUCCHINI 1.5 LB
+    totalPrice: 2.49
+    confidence: high
+  - name: APPLE EACH ORG FUJI
+    quantity: 4
+    unitPrice: 0.89
+    totalPrice: 3.56
+    confidence: high
+  - name: LIME EACH
+    quantity: 2
+    unitPrice: 0.49
+    totalPrice: 0.98
+    confidence: high
+  - name: ASPARAGUS 12 OZ
+    totalPrice: 3.49
+    confidence: high
+  - name: R-SALAD COMPLETE CRISPY
+    totalPrice: 3.99
+    confidence: high
+  - name: PEPPERS BELL TRICOLOR OR
+    totalPrice: 4.99
+    confidence: high
+  - name: GREEN ONIONS 6 OZ
+    totalPrice: 1.29
+    confidence: high
+  - name: APPLE + STRAWBERRY FRUIT
+    quantity: 2
+    unitPrice: 0.99
+    totalPrice: 1.98
+    confidence: high
+  - name: APPLE + MANGO FRUIT BAR
+    quantity: 2
+    unitPrice: 0.99
+    totalPrice: 1.98
+    confidence: high

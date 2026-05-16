@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"build": "pnpm run typecheck",
 		"test": "vitest run",
 		"test:watch": "vitest watch",
 		"test:regression": "tsx ./src/runner/cli-main.ts",
@@ -12,7 +13,8 @@
 	"dependencies": {
 		"@pas/core": "workspace:*",
 		"ajv": "^8.18.0",
-		"ajv-formats": "^3.0.1"
+		"ajv-formats": "^3.0.1",
+		"yaml": "^2.8.2"
 	},
 	"devDependencies": {
 		"vitest": "^3.0.0",
