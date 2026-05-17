@@ -159,13 +159,30 @@ export interface CoreServices {
 	logger: AppLogger;
 }
 
-/** Scoped logger interface for apps. Backed by Pino. */
+/**
+ * Scoped logger interface for apps. Backed by Pino.
+ *
+ * Each method supports two call shapes (both standard pino patterns):
+ *   - `(msg: string, ...args)` — printf-style message
+ *   - `(obj: object, msg?: string, ...args)` — structured fields + optional message
+ *
+ * Codex 2026-05-15 #2: the second overload was originally omitted, which made
+ * `apps/food/src/handlers/photo.ts:218` fail to typecheck (and blocked root
+ * `pnpm build`) even though the runtime call was a perfectly valid pino
+ * invocation. Widening matches what every caller actually does.
+ */
 export interface AppLogger {
+	trace(obj: object, msg?: string, ...args: unknown[]): void;
 	trace(msg: string, ...args: unknown[]): void;
+	debug(obj: object, msg?: string, ...args: unknown[]): void;
 	debug(msg: string, ...args: unknown[]): void;
+	info(obj: object, msg?: string, ...args: unknown[]): void;
 	info(msg: string, ...args: unknown[]): void;
+	warn(obj: object, msg?: string, ...args: unknown[]): void;
 	warn(msg: string, ...args: unknown[]): void;
+	error(obj: object, msg?: string, ...args: unknown[]): void;
 	error(msg: string, ...args: unknown[]): void;
+	fatal(obj: object, msg?: string, ...args: unknown[]): void;
 	fatal(msg: string, ...args: unknown[]): void;
 	/** Create a child logger with additional context. */
 	child(bindings: Record<string, unknown>): AppLogger;

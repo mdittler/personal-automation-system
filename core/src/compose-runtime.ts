@@ -80,7 +80,11 @@ import { HouseholdLLMLimiter } from './services/llm/household-llm-limiter.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
 import { ModelCatalog } from './services/llm/model-catalog.js';
-import { DEFAULT_REMOTE_PRICING, getModelPricing } from './services/llm/model-pricing.js';
+import {
+	DEFAULT_REMOTE_PRICING,
+	getModelPricing,
+	isLocalProvider,
+} from './services/llm/model-pricing.js';
 import { ModelSelector } from './services/llm/model-selector.js';
 import { createProvider } from './services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from './services/llm/providers/provider-registry.js';
@@ -379,7 +383,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			}
 
 			const providerType = providerRegistry.get(ref.provider)?.providerType;
-			if (providerType === 'ollama') {
+			if (isLocalProvider(providerType)) {
 				return { inputUsdPer1k: 0, outputUsdPer1k: 0 };
 			}
 

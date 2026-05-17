@@ -31,13 +31,14 @@ import {
 	type TierModelSnapshot,
 	VERDICT,
 } from '@core/types/regression.js';
-import { computeCacheKey } from '../shared/cache-key.js';
+import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
 import { runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
+import { runReceiptCase } from './case-runners/receipt-runner.js';
 import {
 	ESTIMATE_TOKENS,
 	type MinimalLogger,
@@ -76,6 +77,17 @@ export interface RunSuiteOptions {
 	}>;
 	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
 	judgeLlm?: Pick<LLMService, 'complete'>;
+	/**
+	 * LLM service for the receipt bucket. Required if any receipt case is in
+	 * the filtered set. Same instance as `judgeLlm` / production `llm` is fine.
+	 */
+	receiptLlm?: Pick<LLMService, 'complete' | 'completeWithMeta'>;
+	/**
+	 * Timezone for receipt-bucket "today" computation — feeds both the cache-key
+	 * salt and the receipt-runner's date-fallback assertion. Defaults to 'UTC'
+	 * when omitted.
+	 */
+	timezone?: string;
 	/** CostTracker proxy used by the rubric oracle to meter judge cost (and chatbot turn cost). */
 	costTracker?: { getMonthlyTotalCost: () => number };
 	logger: MinimalLogger;
@@ -125,16 +137,19 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 	// (all 27 FOOD_PERSONAS use the same 3) — the shared `hashCache` map
 	// coalesces repeated `git hash-object` spawns across calls.
 	const hashCache = new Map<string, Promise<string>>();
+	const tz = opts.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		filtered.map((lc) =>
-			computeCacheKey({
+		filtered.map((lc) => {
+			const salt = bucketCacheSalt(lc.case.bucket, tz);
+			return computeCacheKey({
 				casePath: relative(opts.repoRoot, lc.filePath),
 				coveragePaths: lc.case.coverage,
 				modelIds: opts.modelIds,
 				repoRoot: opts.repoRoot,
 				hashCache,
-			}),
-		),
+				...(salt !== undefined ? { extraSalt: salt } : {}),
+			});
+		}),
 	);
 
 	// Pre-read every cache entry in parallel for the cache-hit happy path.
@@ -277,10 +292,23 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					estimateUsd: opts.estimateUsd,
 					logger: opts.logger,
 				});
+			} else if (lc.case.bucket === 'receipt') {
+				if (!opts.receiptLlm) {
+					throw new Error(
+						`orchestrator: receiptLlm is required to dispatch receipt case "${lc.case.id}"`,
+					);
+				}
+				result = await runReceiptCase(lc.case, {
+					llm: opts.receiptLlm,
+					logger: opts.logger,
+					timezone: tz,
+					modelIds: opts.modelIds,
+					cacheKey,
+					caseBudgetUsd: lc.case.budgetUsd,
+					estimateUsd: opts.estimateUsd,
+				});
 			} else {
-				// Receipt bucket lands with Chunk A.2 carry-forward — orchestrator
-				// dispatch is intentionally not wired (the standalone receipt
-				// runner is invoked from a dedicated entry point).
+				// Fallback for any future bucket not yet wired here.
 				opts.logger.info(
 					{ caseId: lc.case.id, bucket: lc.case.bucket },
 					'orchestrator: bucket runner not wired yet — skipping case',
@@ -465,16 +493,22 @@ export async function runCli(
 async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promise<void> {
 	const loaded = await loadCases(deps.casesDir);
 	const hashCache = new Map<string, Promise<string>>();
+	// List-mode must apply the same bucket-specific salts the real run uses,
+	// or receipt-bucket `currentCacheKey` will silently diverge from the
+	// post-dispatch cache file the GUI looks up.
+	const tz = deps.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		loaded.map((lc) =>
-			computeCacheKey({
+		loaded.map((lc) => {
+			const salt = bucketCacheSalt(lc.case.bucket, tz);
+			return computeCacheKey({
 				casePath: relative(deps.repoRoot, lc.filePath),
 				coveragePaths: lc.case.coverage,
 				modelIds: deps.modelIds,
 				repoRoot: deps.repoRoot,
 				hashCache,
-			}),
-		),
+				...(salt !== undefined ? { extraSalt: salt } : {}),
+			});
+		}),
 	);
 	let totalInputs = 0;
 	for (let i = 0; i < loaded.length; i++) {

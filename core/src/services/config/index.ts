@@ -24,6 +24,7 @@ import type { ModelRef } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
+import { isLocalProvider } from '../llm/model-pricing.js';
 import { parsePasYamlConfig } from './pas-yaml-schema.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
 
@@ -31,7 +32,8 @@ import { DEFAULT_PROVIDERS } from './default-providers.js';
 interface YamlProviderConfig {
 	type: string;
 	name: string;
-	api_key_env: string;
+	/** Optional for local providers (ollama, llama-cpp); required for remote. */
+	api_key_env?: string;
 	base_url?: string;
 	default_model?: string;
 }
@@ -335,13 +337,15 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 		providers.ollama.defaultModel = env.OLLAMA_MODEL;
 	}
 
-	// Merge custom providers from pas.yaml (custom providers override built-in)
+	// Merge custom providers from pas.yaml (custom providers override built-in).
+	// Empty string apiKeyEnvVar signals "no env var" — matches DEFAULT_PROVIDERS.ollama
+	// and is what getAvailableProviderIds treats as no-auth for local providers.
 	if (yamlLLM?.providers) {
 		for (const [id, yamlProvider] of Object.entries(yamlLLM.providers)) {
 			providers[id] = {
 				type: yamlProvider.type as LLMProviderConfig['type'],
 				name: yamlProvider.name,
-				apiKeyEnvVar: yamlProvider.api_key_env,
+				apiKeyEnvVar: yamlProvider.api_key_env ?? '',
 				baseUrl: yamlProvider.base_url,
 				defaultModel: yamlProvider.default_model,
 			};
@@ -354,7 +358,7 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 	// Require at least one usable provider
 	if (available.size === 0) {
 		throw new Error(
-			'No LLM providers available. Set at least one of: ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, OPENAI_API_KEY, or configure Ollama via OLLAMA_URL.',
+			'No LLM providers available. Set at least one of: ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, OPENAI_API_KEY, configure Ollama via OLLAMA_URL, or add a llama-cpp provider with a base_url in pas.yaml.',
 		);
 	}
 
@@ -478,6 +482,7 @@ function autoAssignTiers(
 		'openai',
 		'google',
 		'ollama',
+		'llama-cpp',
 	]);
 
 	if (!standardRef) {
@@ -505,11 +510,11 @@ function getAvailableProviderIds(
 ): Set<string> {
 	const available = new Set<string>();
 	for (const [id, config] of Object.entries(providers)) {
-		if (config.type === 'ollama') {
-			// Ollama needs a base URL
+		if (isLocalProvider(config.type)) {
+			// Local providers need a base URL but no API key
 			if (config.baseUrl) available.add(id);
 		} else {
-			// Other providers need an API key
+			// Remote providers need an API key
 			const key = config.apiKeyEnvVar ? env[config.apiKeyEnvVar] : '';
 			if (key) available.add(id);
 		}

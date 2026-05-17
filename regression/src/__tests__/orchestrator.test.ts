@@ -208,13 +208,13 @@ describe('runSuite — bucket filter', () => {
 		expect(results[0]!.caseId).toBe('a-id');
 	});
 
-	it('skips non-routing buckets even without filter (B.1 only wires routing)', async () => {
+	it('throws when receipt case is present without receiptLlm dep (A.2 wired the arm)', async () => {
+		// Chunk A.2 wired the receipt-bucket dispatch arm. The "required iff
+		// used" guard mirrors how `chatbotEnvFactory` works for chatbot cases.
 		await writeFile(join(casesDir, 'r.case.ts'), oneReceiptCase('r-id'));
 		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
 		const opts = baseOpts();
-		const { results } = await runSuite(opts);
-		// Receipt case is filtered out at runner-level (no wired bucket runner)
-		expect(results.map((r) => r.caseId)).toEqual(['a-id']);
+		await expect(runSuite(opts)).rejects.toThrow(/receiptLlm.*r-id|r-id.*receiptLlm/i);
 	});
 });
 

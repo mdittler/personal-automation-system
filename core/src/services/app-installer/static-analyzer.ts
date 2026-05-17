@@ -36,6 +36,7 @@ const BANNED_IMPORTS: BannedImport[] = [
 	{ pattern: 'openai', reason: 'Apps must use CoreServices.llm for all LLM access.' },
 	{ pattern: '@google/genai', reason: 'Apps must use CoreServices.llm for all LLM access.' },
 	{ pattern: 'ollama', reason: 'Apps must use CoreServices.llm for all LLM access.' },
+	{ pattern: 'node-llama-cpp', reason: 'Apps must use CoreServices.llm for all LLM access.' },
 	{ pattern: 'child_process', reason: 'Arbitrary command execution is not allowed in apps.' },
 	{ pattern: 'node:child_process', reason: 'Arbitrary command execution is not allowed in apps.' },
 ];

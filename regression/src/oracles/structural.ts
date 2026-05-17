@@ -29,6 +29,28 @@ export interface StructuralExpectation {
 		tolerance: number;
 		expected: Record<string, number>;
 	}>;
+	/**
+	 * Row-level multiset equality with multi-field correlation. Preserves
+	 * duplicate counts AND keeps each row's fields glued together. Two actuals
+	 * with the same `keyField` value can be disambiguated by additional
+	 * numeric fields (e.g., two "BANANA EACH" rows with different
+	 * `(totalPrice, quantity, unitPrice)` triples). A row matches an
+	 * expected row when the `keyField` is byte-equal AND every numeric
+	 * field declared on the expected row is within the per-field tolerance.
+	 * Expected rows can omit fields the assertion shouldn't verify — only
+	 * declared fields are checked.
+	 *
+	 * For simple `(name, totalPrice)` line-item comparisons, supply a single
+	 * `valueField`. For receipt cases with quantity-multiplier lines, add
+	 * `quantity` and `unitPrice` so the parser can't pass by emitting the
+	 * right `totalPrice` with a wrong multiplier.
+	 */
+	multisetRows?: Array<{
+		path: string;
+		keyField: string;
+		valueFields: Array<{ field: string; tolerance: number }>;
+		expected: Array<Record<string, unknown>>;
+	}>;
 	dates?: Array<{ path: string; minIso: string; maxIso: string }>;
 }
 
@@ -99,6 +121,88 @@ export function runStructuralOracle(
 				verdict: 'fail',
 				details: `Hallucinated at ${set.path}: ${extra.join(', ')}`,
 			};
+		}
+	}
+
+	// 4.5. Multiset rows — N-field correlation per row, preserving duplicate
+	// counts. Runs before scalars so a line-item mismatch surfaces before a
+	// total mismatch (more diagnostic value for receipt cases).
+	for (const ms of expectation.multisetRows ?? []) {
+		const arr = getByPath(parsed, ms.path);
+		if (!Array.isArray(arr)) {
+			return { verdict: 'fail', details: `${ms.path} not an array` };
+		}
+		// Bucket expected rows by keyField value.
+		const expByKey = new Map<string, Array<Record<string, unknown>>>();
+		for (const row of ms.expected) {
+			const k = row[ms.keyField];
+			if (typeof k !== 'string') {
+				return {
+					verdict: 'error',
+					details: `multisetRows expected row missing string key '${ms.keyField}': ${JSON.stringify(row)}`,
+				};
+			}
+			const list = expByKey.get(k) ?? [];
+			list.push(row);
+			expByKey.set(k, list);
+		}
+		// Bucket actual rows. Skip non-object rows + rows without a string keyField.
+		// Reject non-finite numeric values strictly (LLM-untrust).
+		const actByKey = new Map<string, Array<Record<string, unknown>>>();
+		for (const item of arr) {
+			if (!item || typeof item !== 'object') continue;
+			const obj = item as Record<string, unknown>;
+			const k = obj[ms.keyField];
+			if (typeof k !== 'string') continue;
+			for (const vf of ms.valueFields) {
+				const v = obj[vf.field];
+				if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v))) {
+					return {
+						verdict: 'fail',
+						details: `Multiset row at ${ms.path}: ${vf.field} not finite (got ${JSON.stringify(v)})`,
+					};
+				}
+			}
+			const list = actByKey.get(k) ?? [];
+			list.push(obj);
+			actByKey.set(k, list);
+		}
+		// Per-bucket greedy assignment. For each expected row, find the first
+		// unconsumed actual row where every declared numeric field is within
+		// tolerance. If found, consume; otherwise the expected row is missing.
+		const missingRows: Array<Record<string, unknown>> = [];
+		const extraRows: Array<Record<string, unknown>> = [];
+		const allKeys = new Set<string>([...expByKey.keys(), ...actByKey.keys()]);
+		for (const key of allKeys) {
+			const expRows = expByKey.get(key) ?? [];
+			const actRows = (actByKey.get(key) ?? []).slice(); // mutable copy
+			for (const expRow of expRows) {
+				const idx = actRows.findIndex((actRow) => {
+					for (const vf of ms.valueFields) {
+						const expVal = expRow[vf.field];
+						if (expVal === undefined) continue;
+						const actVal = actRow[vf.field];
+						if (typeof expVal !== 'number' || typeof actVal !== 'number') return false;
+						if (!Number.isFinite(expVal) || !Number.isFinite(actVal)) return false;
+						if (Math.abs(expVal - actVal) > vf.tolerance) return false;
+					}
+					return true;
+				});
+				if (idx < 0) {
+					missingRows.push(expRow);
+				} else {
+					actRows.splice(idx, 1);
+				}
+			}
+			extraRows.push(...actRows);
+		}
+		if (missingRows.length > 0) {
+			const fmt = missingRows.map((r) => JSON.stringify(r)).join('; ');
+			return { verdict: 'fail', details: `Missing rows at ${ms.path}: ${fmt}` };
+		}
+		if (extraRows.length > 0) {
+			const fmt = extraRows.map((r) => JSON.stringify(r)).join('; ');
+			return { verdict: 'fail', details: `Hallucinated rows at ${ms.path}: ${fmt}` };
 		}
 	}
 

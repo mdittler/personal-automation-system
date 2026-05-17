@@ -174,4 +174,112 @@ describe('computeCacheKey', () => {
 			}),
 		).rejects.toThrow(/relative|absolute/i);
 	});
+
+	// Receipt bucket — `extraSalt` binds the cache key to today's date +
+	// timezone so the rejection-mode fixture re-exercises on date rollover.
+	describe('extraSalt (receipt-bucket date binding)', () => {
+		it('produces different keys for different extraSalt values', async () => {
+			await track('a.ts', 'a\n');
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: ['a.ts'],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const day1 = await computeCacheKey({ ...base, extraSalt: 'today:2026-05-15:tz:UTC' });
+			const day2 = await computeCacheKey({ ...base, extraSalt: 'today:2026-05-16:tz:UTC' });
+			expect(day1).not.toBe(day2);
+		});
+
+		it('omitted extraSalt produces the original (legacy) cache key — backward compat', async () => {
+			await track('a.ts', 'a\n');
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: ['a.ts'],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const legacy = await computeCacheKey(base);
+			const reRun = await computeCacheKey(base);
+			expect(legacy).toBe(reRun);
+			expect(legacy).not.toBe(
+				await computeCacheKey({ ...base, extraSalt: 'today:2026-05-15:tz:UTC' }),
+			);
+		});
+
+		it('empty-string extraSalt is distinct from omitted (defensive: "" is a real value)', async () => {
+			await track('a.ts', 'a\n');
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: ['a.ts'],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const omitted = await computeCacheKey(base);
+			const empty = await computeCacheKey({ ...base, extraSalt: '' });
+			expect(omitted).not.toBe(empty);
+		});
+
+		it('timezone change produces different key (DST-relevant edge: same date string, different tz)', async () => {
+			await track('a.ts', 'a\n');
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: ['a.ts'],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const ny = await computeCacheKey({
+				...base,
+				extraSalt: 'today:2026-05-15:tz:America/New_York',
+			});
+			const utc = await computeCacheKey({
+				...base,
+				extraSalt: 'today:2026-05-15:tz:UTC',
+			});
+			expect(ny).not.toBe(utc);
+		});
+	});
+
+	// Codex round-3 #2: SHA sidecar inclusion in cache coverage.
+	//
+	// Receipt cases include BOTH `.transcription.yaml` AND its companion
+	// `.transcription.sha256` in `coverage`. A cache hit short-circuits the
+	// loader's runtime SHA check, so if someone edits ONLY the SHA file
+	// (corruption, tampering, partial sync), the cache key would not change
+	// and the prior verdict would be served stale. With BOTH files in coverage,
+	// a SHA-only edit invalidates the cache → re-dispatch → loader catches the
+	// mismatch → 'error' verdict surfaces correctly.
+	describe('SHA sidecar coverage (transcription cache invalidation)', () => {
+		it('editing only the .sha256 sidecar produces a different cache key', async () => {
+			await track('a.ts', 'a\n');
+			// Simulate the transcription YAML + SHA sidecar pair as untracked
+			// coverage files (mirrors how the receipt-bucket fixtures live
+			// outside the test git repo and are picked up by `hashRepoRelative`'s
+			// SHA-256 fallback).
+			const yaml = 'total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n';
+			await writeFile(join(tempRepo, 'receipt.transcription.yaml'), yaml);
+			await writeFile(
+				join(tempRepo, 'receipt.transcription.sha256'),
+				'a'.repeat(64),
+			);
+			const base = {
+				casePath: 'a.ts',
+				coveragePaths: [
+					'a.ts',
+					'receipt.transcription.yaml',
+					'receipt.transcription.sha256',
+				],
+				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
+				repoRoot: tempRepo,
+			};
+			const before = await computeCacheKey(base);
+			// Edit ONLY the SHA sidecar; YAML content untouched.
+			await writeFile(
+				join(tempRepo, 'receipt.transcription.sha256'),
+				'b'.repeat(64),
+			);
+			const after = await computeCacheKey(base);
+			expect(after).not.toBe(before);
+		});
+	});
 });

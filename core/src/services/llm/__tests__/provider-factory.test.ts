@@ -44,6 +44,16 @@ vi.mock('../providers/ollama-provider.js', () => ({
 	})),
 }));
 
+vi.mock('../providers/llama-cpp-provider.js', () => ({
+	LlamaCppProvider: vi.fn().mockImplementation((opts) => ({
+		providerId: opts.providerId,
+		providerType: 'llama-cpp',
+		complete: vi.fn(),
+		completeWithUsage: vi.fn(),
+		listModels: vi.fn().mockResolvedValue([]),
+	})),
+}));
+
 const mockCostTracker = {
 	record: vi.fn(),
 	estimateCost: vi.fn().mockReturnValue(0),
@@ -191,6 +201,49 @@ describe('createProvider', () => {
 
 		expect(provider).not.toBeNull();
 		expect(provider?.providerType).toBe('ollama');
+	});
+
+	it('creates a llama-cpp provider with baseUrl and no API key', () => {
+		const config: LLMProviderConfig = {
+			type: 'llama-cpp',
+			name: 'llama.cpp',
+			apiKeyEnvVar: '',
+			baseUrl: 'http://localhost:8080',
+			defaultModel: 'local-model',
+		};
+
+		const provider = createProvider('llama-cpp', config, logger, mockCostTracker);
+
+		expect(provider).not.toBeNull();
+		expect(provider?.providerType).toBe('llama-cpp');
+	});
+
+	it('returns null for llama-cpp without baseUrl', () => {
+		const config: LLMProviderConfig = {
+			type: 'llama-cpp',
+			name: 'llama.cpp',
+			apiKeyEnvVar: '',
+			defaultModel: 'local-model',
+		};
+
+		const provider = createProvider('llama-cpp', config, logger, mockCostTracker);
+
+		expect(provider).toBeNull();
+	});
+
+	it('llama-cpp creates with fallback model when defaultModel is empty', () => {
+		const config: LLMProviderConfig = {
+			type: 'llama-cpp',
+			name: 'llama.cpp',
+			apiKeyEnvVar: '',
+			baseUrl: 'http://localhost:8080',
+			defaultModel: '',
+		};
+
+		const provider = createProvider('llama-cpp', config, logger, mockCostTracker);
+
+		expect(provider).not.toBeNull();
+		expect(provider?.providerType).toBe('llama-cpp');
 	});
 
 	it('returns null for unknown provider type', () => {

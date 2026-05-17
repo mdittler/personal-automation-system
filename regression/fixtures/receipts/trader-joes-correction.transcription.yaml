@@ -1,0 +1,37 @@
+# Ground-truth transcription for trader-joes-correction.jpg
+# Source: regression/fixtures/receipts/trader-joes-correction.true.md
+# Row 7 (ORG WHOLE WHEAT SPAGHETT) carries a handwritten "3.99 -" overlay
+# on the printed "1.99". Per the .true.md, the printed price is the OCR
+# signal; the handwriting is human commentary. The printed value remains
+# legible, so confidence stays 'high' — the assertion is that the parser
+# extracts the printed amount, not the annotation.
+# Rows 2 & 3 are both literally "Grocery non-taxable" (TJ's placeholder for
+# items missing from the SKU file) at different prices — duplicate names,
+# different totals, distinguished by the multiset oracle.
+store: Trader Joe's
+date: '2026-05-12'
+subtotal: 35.07
+tax: 0.70
+total: 35.77
+lineItems:
+  - name: R-SALAD HERB ORG 5 OZ
+    totalPrice: 2.49
+    confidence: high
+  - name: Grocery non-taxable
+    totalPrice: 10.07
+    confidence: high
+  - name: Grocery non-taxable
+    totalPrice: 9.35
+    confidence: high
+  - name: CUT GRATED PARMESAN (DOM
+    totalPrice: 6.19
+    confidence: high
+  - name: ORG APPLE CARROT CRUSHER
+    totalPrice: 2.99
+    confidence: high
+  - name: HERB PARSLEY BUNCH
+    totalPrice: 1.99
+    confidence: high
+  - name: ORG WHOLE WHEAT SPAGHETT
+    totalPrice: 1.99
+    confidence: high

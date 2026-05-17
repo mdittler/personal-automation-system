@@ -130,7 +130,9 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 All major phases — infrastructure, food app, security, deployment, conversation memory (Hermes), LLM enhancement, and Persona Regression — are complete. See `docs/implementation-phases.md` for the per-phase history. Most recent:
 
-- **Receipt Parser Robustness PR1** (2026-05-15) — anti-reconciliation prompt, `finishReason` plumbing, post-parse integrity check, single-shot continuation, user-readable Telegram warning. 13 URS REQ-FOOD-RECEIPT-INTEGRITY entries. PR2 (transcription oracle) blocked on operator photo delivery.
+- **Receipt Parser Robustness PR2 — Transcription Oracle** (2026-05-15) — independent operator-authored ground truth (`.transcription.yaml` + SHA256 sidecars) anchored to physical receipts; drift resistance + per-line confidence tiers. 11 URS REQ-FOOD-RECEIPT-TRANSCRIPTION entries; regression workspace 605 tests / 38 files. See Current Priority for full detail.
+- **Persona Regression Suite Chunk A.2** (2026-05-15) — 5 receipt fixtures (4 hand-verified real photographs + 1 synthetic expired-90d) wired into `runSuite` dispatch; new `multisetRows` operative on the structural oracle for row-level multi-field correlation; receipt-bucket cache key salted with today+timezone. URS REQ-REG-004/006/008/010 traceability updated.
+- **Receipt Parser Robustness PR1** (2026-05-15) — anti-reconciliation prompt, `finishReason` plumbing, post-parse integrity check, single-shot continuation, user-readable Telegram warning. 13 URS REQ-FOOD-RECEIPT-INTEGRITY entries. Demoted to Previous Priority below.
 - **llama.cpp provider** (2026-05-15) — `LlamaCppProvider extends OpenAICompatibleProvider`, free local inference, coexists with Ollama. 6 URS REQ-LLM-LLAMA-CPP entries.
 - **Open-Items Cleanup Batches 1–5** (2026-05-07) — `/flushmemory`, `SessionControlLogger` telemetry, `chat.recall.max_window_days`, GUI cleanup, food micro-fixes, P4 freeze integration coverage. ~470 test files / ~10,368 tests passing after the batch sweep.
 - **Hermes P6 + P6.next** (2026-05-05) — typed memory + temporal recall + NL temporal precision broadening + mid-session snapshot rebuild. 27 URS entries (REQ-CONV-KIND, REQ-CONV-TEMPORAL, REQ-CONV-MEMORY-013..022).
@@ -138,8 +140,31 @@ All major phases — infrastructure, food app, security, deployment, conversatio
 
 Original deployment-readiness spec: `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`.
 
-### Current Priority: Receipt Parser Robustness — PR1 (complete, branch `worktree-food+receipt-robustness`, 2026-05-15)
-**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is the primary defense against the consistent-fudging case the parser cannot self-detect; PR2 is blocked on operator delivery of 5 receipt photos + transcriptions per the Chunk A.2 carry-forward in `docs/open-items.md`.
+### Current Priority: Receipt Parser Robustness — PR2 (Transcription Oracle, complete, branch `food/receipt-transcription-oracle`, 2026-05-15)
+**Goal:** Regression-suite-side second line of defense for receipt parsing. The existing `structural` oracle ALREADY catches the primary self-consistent-inflation bug shape today (proven via `regression/src/__tests__/structural-catches-inflation.characterization.test.ts`); PR2 adds an independent **transcription oracle** for drift resistance + confidence tiers.
+
+**Approach:** Six TDD batches in `food/receipt-transcription-oracle` worktree, one commit each.
+
+**Batch 0/0a — Worktree + yaml dependency + characterization test** confirming the structural oracle already catches drop-and-inflate today.
+
+**Batch 1 — Transcription schema + loader:** `ReceiptTranscription` type, `TranscriptionLineItem` (with optional `quantity`/`unitPrice`, `confidence: 'high'|'low'` defaulting to 'high'), `loadTranscription(path)` with schema validation, 64 KiB cap, optional `.sha256` sidecar verification.
+
+**Batch 2 — Transcription oracle:** `regression/src/oracles/transcription.ts runTranscriptionOracle` with find-first-satisfying-row multiset matching (mirrors structural multisetRows); case-insensitive + whitespace-collapsed name comparison (transcription only — structural is strict byte-equal); $0.01 absolute money tolerance on subtotal/tax/total (no percentage chain, no validateReceiptIntegrity fallback); `confidence: high` items mandatory; `confidence: low` items optional; hallucinations always fail.
+
+**Batch 3 — Wire oracle into receipt-runner:** `RunResult.oracleVerdicts[]` carries labeled entries (`'structural'` and `'transcription'`); case verdict is set-based AND of both; rejection-mode cases (`expectRejection: true`) skip transcription; missing/SHA-mismatched transcription file fails closed with `verdict: 'error'`.
+
+**Batch 4 — Author 4 transcription YAML fixtures:** `costco-long`, `trader-joes-correction`, `trader-joes-long`, `trader-joes-short` derived from existing `.true.md` narratives; SHA256 sidecars; `buildCases` propagates `transcriptionFixture` through `LoadedCase`.
+
+**Batch 5 — 15 adversarial-persona integration scenarios:** drift resistance (drop-and-inflate), full self-consistent fudge, hallucinations, name variations (lowercase + whitespace expanded → structural strict-byte fails even though transcription would pass; documented divergence), duplicate preservation/dedupe, discount-line dropping, aggregate fudging (subtotal/tax off).
+
+**Batch 6 — URS + docs:** 11 new REQ-FOOD-RECEIPT-TRANSCRIPTION entries (001..011) with full traceability matrix rows; parser-blindness accepted-risk entry in `docs/open-items.md` marked closed (Codex review #1 finding: structural alone is sufficient for the bug shape; PR2's distinct value is drift resistance + confidence tiers).
+
+**The parser positive regression test at `apps/food/src/services/__tests__/receipt-parser.test.ts:275` is preserved** — the parser still accepts self-consistent inflation as clean; the regression suite is what catches it.
+
+**Codex review rounds 1, 2, 3** applied in-plan. Regression workspace: 605 tests / 38 files. Closes the parser-blindness accepted-risk entry.
+
+### Previous Priority: Receipt Parser Robustness — PR1 (complete, branch `worktree-food+receipt-robustness`, 2026-05-15)
+**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is implemented (branch `food/receipt-transcription-oracle`) and provides regression-suite drift resistance — preventing silent `.expected.json` regeneration when the LLM fudges `unitPrice`/`totalPrice`/`subtotal` self-consistently — plus per-line confidence tiers. PR2's value over the existing structural oracle is operator-authored ground truth (`.transcription.yaml`) anchored to physical receipts, so a buggy parser output cannot be silently baselined.
 
 **Approach:** Six TDD batches in `food/receipt-robustness` worktree, one commit each. Plan: `~/.claude/plans/yea-lets-start-a-foamy-pnueli.md`.
 
@@ -157,42 +182,7 @@ Original deployment-readiness spec: `docs/superpowers/specs/2026-04-13-deploymen
 
 **Tests:** 11,536 root tests pass (+36 from this phase across `core/src/services/llm/__tests__/providers/`, `core/src/services/llm/__tests__/llm-service.test.ts`, `apps/food/src/utils/__tests__/photo-validators.test.ts`, `apps/food/src/services/__tests__/receipt-parser.test.ts`, `apps/food/src/__tests__/photo-handler.test.ts`).
 
-### Previous Priority: Regression GUI Polish — SSE Reconnect + Manifest Default + Doc Supersession (complete, branch `regression/gui-rework-v2`, 2026-05-13)
-**Goal:** Three follow-on fixes that surfaced when the operator ran the suite end-to-end after the GUI rework. (1) Silent GUI timeouts on long runs — browser `EventSource` had no `onerror`/reconnect path. (2) Confusing case-vs-input count discrepancy (CLI showed ~116 inputs, GUI showed ~70 cases) AND pure-CLI sweeps weren't visible in the leaderboard because `RunManifest` was gated on `--run-id`. (3) The stale shadow-classifier production-flip gate in `docs/open-items.md:197` (≥95% from `pnpm analyze-shadow-log`) was superseded by REQ-REG-011 + Gemma 4 31B's 0.9811 sweep result but the doc still named the old criterion. Also captures the operator's interest in cascading models (Needle as tier-0 first model) as a proposal.
-
-**Approach:** Three independent batches, mergeable in any order. Continuous batch execution per the established cadence — single end-of-phase Codex review.
-
-**Batch A — SSE reconnect + subprocess hardening (REQ-REG-GUI-V2-021/022/024):**
-- `core/src/gui/services/regression/run-registry.ts`: added per-run ring-buffered `eventLog` (capped at `MAX_EVENT_LOG_ENTRIES = 1000`) with monotonic ids; new `getEventsAfter(runId, lastEventId)` returning `Array<{id, event}>` or `{gap: true}`; new `attachLive(runId, listener)` that registers without replay (Codex C1 — prevents double-dispatch when the SSE route does replay-then-attach). `eventLog` is the single source of truth for dispatched events (raw `state.events` was dropped in the simplify pass — see "Simplify pass" below); `state.eventLog[i].event` preserves the raw event payload with no `id:` field bleed-through. `registry.isTerminal(runId)` exposes terminal-status without leaking `state.status` to callers.
-- `core/src/gui/services/regression/sse-helper.ts`: writes initial `retry: 3000\n\n` directive (REQ-REG-GUI-V2-021); every event written with `id: <n>\n` so browsers cache `Last-Event-ID`; `DEFAULT_KEEPALIVE_MS` lowered 25_000 → 15_000.
-- `core/src/gui/routes/regression.ts`: SSE GET handler reads `Last-Event-ID` header (Codex C2 — no `?lastEventId=` query fallback because native `EventSource` cannot mutate URLs on auto-retry); calls `getEventsAfter` then `attachLive`; emits synthetic `event: gap` (no id field, control message) when ring buffer evicted the requested id; closes channel immediately when the run is already terminal AND no new events to replay (avoids hanging the SSE response).
-- `core/src/gui/views/partials/regression-live.eta`: new EventSource wrapper handles `open` (resets failureCount), `error` (3-strike "Lost connection — reload" banner per REQ-REG-GUI-V2-024), `gap` (`window.location.reload()`), terminal events (set `terminalReached=true`, close cleanly, suppress further reconnect).
-- `core/src/gui/services/regression/subprocess.ts`: centralized terminal emission behind `finishOnce(event)` closure with shared `terminatedPromise` (Codex C5). Added `proc.on('error')`, `proc.stdout.on('error')`, `proc.stderr.on('error')` listeners — each routes through `finishOnce` so the registry observes at most one terminal event per run. Try/catch wraps the readline `for await` loop. `whenComplete` races the normal exit path against `terminatedPromise` so error paths (spawn ENOENT) that never produce an `exit` event still resolve.
-
-**Batch B — Count display + CLI manifest default (REQ-REG-GUI-V2-023, REQ-REG-CLI-MAN-001):**
-- `regression/src/runner/index.ts`: `--list` output gains per-case `inputCount` and terminator `totalInputs`.
-- `regression/src/runner/args.ts`: new `--no-manifest` boolean flag + `--manifest-dir=<path>` with traversal/control-char/length-cap validation. Precedence locked at the resolver layer.
-- `regression/src/runner/runner-options.ts` (NEW): pure `resolveManifestDefaults(cli, env, repoRoot)` helper (Codex C7 — extracted from `cli-main.ts` because its top-level await + `process.exit` make direct testing awkward). Env var is `DATA_DIR` (matches `loadSystemConfig`, Codex C6 — NOT `PAS_DATA_DIR` which doesn't exist). `--no-manifest` wins over both `--run-id` and `--manifest-dir` (Codex C8).
-- `regression/src/runner/cli-main.ts`: thin wrapper — peeks argv, calls `resolveManifestDefaults`, passes to `runCli` as the new optional 4th parameter.
-- `regression/src/runner/index.ts:runCli`: optional `manifestDefaults` parameter; when set, its `runId` and `manifestDir` populate `runSuite`. Backwards-compatible: existing test callers (which pass no manifestDefaults) get the old behavior.
-- `core/src/gui/services/regression/case-discovery.ts`: parses new `inputCount` and `totalInputs` fields; **fail-closed** on mismatch between emitted `inputCount` and `inputs.length`, or between `totalInputs` and sum-of-inputCount (Codex C11).
-- `core/src/gui/routes/regression.ts`: `GET /estimate` returns `totalInputs`; run-tab view model exposes `totalCases` + `totalInputs`.
-- `core/src/gui/views/partials/regression-tab-run.eta`: renders "N cases / M inputs" in the estimate banner (Codex C10).
-- `core/src/gui/views/partials/regression-live.eta`: confirm-dialog text reads "Run M input(s) across N case(s)? Estimated cost ≈ $…" when both counts available.
-
-**Batch C — Doc supersession + Needle proposal + URS:**
-- `docs/open-items.md:197`: edited paragraph to record that production-flip is now governed by REQ-REG-011 (≥0.95, cleared by Gemma 4 31B at 0.9811), with `pnpm analyze-shadow-log` retained as supplementary signal only.
-- `docs/open-items.md` Proposals: NEW "Cascading-models routing (tier-0 fast model + escalation, 2026-05-13)" — captures Needle as preferred candidate, notes provider gap (not currently Ollama-supported), open questions about confidence signal + escalation contract. No design; trigger-gated.
-- `docs/open-items.md` Accepted Risks: 3 new entries — pre-fix CLI sweeps not in leaderboard (one-time historical gap); SSE event log + in-flight runs in-memory (in-flight runs lost on restart); client wrapper not DOM-unit-tested (jsdom not available in node-only vitest config; covered via server tests + manual smoke).
-- `docs/urs.md`: 5 new URS entries (REQ-REG-GUI-V2-021/022/023/024 + REQ-REG-CLI-MAN-001).
-
-**Codex review applied (in-plan, 14 items):** C1 attachLive prevents double-dispatch; C2 dropped `?lastEventId=` query fallback (native EventSource can't use it); C3 client-wrapper assertions in rendered-page tests; C4 raw `state.events` shape unchanged at this stage (later dropped in the simplify pass); C5 `finishOnce()` + `terminatedPromise` race; C6 env var is `DATA_DIR`; C7 pure helper extracted from cli-main; C8 `--no-manifest` precedence locked + tested; C9 list-mode tests for `inputCount`/`totalInputs`; C10 estimate endpoint + confirm dialog show both counts; C11 fail-closed on inputCount mismatch; C12 automated route tests are the primary proof (manual SSE not relied on); C13 accepted-risk wording: in-flight runs lost on restart; C14 URS entry for degraded-connection banner.
-
-**Post-review fixes (2026-05-13):** (P1) `findRepoRoot()` in `build-deps.ts` walks up from `import.meta.url` looking for `config/pas.yaml` instead of trusting `process.cwd()` — workspace CLI (`pnpm --filter @pas/regression test:regression`) now resolves 71 cases / 198 inputs from `regression/` cwd vs 0 before. (P1) `onSurfaceError` and the reader try/catch in `subprocess.ts` now check the `cancelled` flag and emit `cancelled` (not `failed`) when the operator-initiated teardown wins the race against a stream error or proc.error. (P2) `regression-live.eta` `showLostConnection` builds the reload button via DOM APIs (no `javascript:` URL, no `innerHTML` interpolation) — CSP-friendlier. (P3) `case-discovery.ts` accumulates up to 5 validation errors with an overflow marker instead of overwriting `parseError` per malformed entry. (P3) `subprocess.ts` finishOnce now calls `resolveExit(1)` so `normalPath` doesn't remain pending forever on spawn ENOENT.
-
-**Tests:** root core suite 7280 passing + 1 todo (+43 new); regression workspace 414 passing (+30 new). All new tests live alongside existing fixtures — no new test files except `runner-options.test.ts`.
-
-Earlier "Previous Priority" entries (Regression GUI Rework v2, model-override surface, stronger-routing-model sweep, Chunk C Codex correction phase) are archived in `docs/implementation-phases.md` under "Archived from CLAUDE.md (2026-05-15)".
+Earlier "Previous Priority" entries (Regression GUI Polish, Regression GUI Rework v2, model-override surface, stronger-routing-model sweep, Chunk C Codex correction phase) are archived in `docs/implementation-phases.md` under "Archived from CLAUDE.md".
 
 Spec / plan pointers:
 - LLM enhancement #2 plan: `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`

@@ -65,13 +65,20 @@ describe('Static Analyzer', () => {
 				`import OpenAI from 'openai';`,
 				`import { GoogleGenAI } from '@google/genai';`,
 				`import { Ollama } from 'ollama';`,
+				`import { LlamaModel } from 'node-llama-cpp';`,
 			].join('\n'),
 		);
 
 		const result = await analyzeApp(tempDir);
-		expect(result.violations).toHaveLength(4);
+		expect(result.violations).toHaveLength(5);
 		const imports = result.violations.map((v) => v.importName).sort();
-		expect(imports).toEqual(['@anthropic-ai/sdk', '@google/genai', 'ollama', 'openai']);
+		expect(imports).toEqual([
+			'@anthropic-ai/sdk',
+			'@google/genai',
+			'node-llama-cpp',
+			'ollama',
+			'openai',
+		]);
 	});
 
 	it('should detect child_process variants', async () => {

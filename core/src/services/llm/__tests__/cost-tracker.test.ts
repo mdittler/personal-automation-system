@@ -456,6 +456,31 @@ describe('CostTracker', () => {
 				expect.stringContaining('Unknown model pricing'),
 			);
 		});
+
+		it('does not warn for llama-cpp models even when model id matches a priced remote model (REQ-LLM-LLAMA-CPP-006)', async () => {
+			const warnLogger = pino({ level: 'silent' });
+			const warnSpy = vi.spyOn(warnLogger, 'warn');
+			const tracker = new CostTracker(tempDir, warnLogger);
+
+			// Local GGUF served as 'gpt-4.1' — must NOT trigger a pricing warning
+			// AND must record $0 cost.
+			await tracker.record({
+				model: 'gpt-4.1',
+				inputTokens: 100,
+				outputTokens: 50,
+				provider: 'llama-cpp',
+				providerType: 'llama-cpp',
+				appId: 'app-a',
+			});
+
+			expect(warnSpy).not.toHaveBeenCalledWith(
+				expect.anything(),
+				expect.stringContaining('Unknown model pricing'),
+			);
+
+			const costs = await tracker.getMonthlyAppCosts();
+			expect(costs.get('app-a') ?? 0).toBe(0);
+		});
 	});
 
 	describe('getMonthlyAppCosts', () => {

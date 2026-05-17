@@ -13,8 +13,22 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
-import { getModelPricing } from '../model-pricing.js';
+import { getModelPricing, isLocalProvider } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
+
+/**
+ * Provider types that may reuse OpenAICompatibleProvider's transport. Narrower
+ * than the full ProviderType union so subclasses can't accidentally inherit
+ * the OpenAI chat-completions path under a foreign type tag.
+ */
+type CompatibleProviderType = 'openai-compatible' | 'llama-cpp';
+
+/**
+ * Sentinel API key used by providers that don't authenticate (llama.cpp's
+ * `llama-server`). The `openai` SDK requires a non-empty `apiKey` to construct,
+ * but the server ignores the value.
+ */
+const LOCAL_NO_AUTH_API_KEY = 'sk-no-auth-required';
 
 /**
  * Map OpenAI-compatible `finish_reason` to the unified LLMFinishReason.
@@ -37,18 +51,31 @@ function mapOpenAIFinishReason(finishReason: unknown): LLMFinishReason {
 }
 
 export class OpenAICompatibleProvider extends BaseProvider {
-	override readonly supportsVision = true;
+	override readonly supportsVision: boolean = true;
 	private readonly client: OpenAI;
 
-	constructor(options: Omit<BaseProviderOptions, 'providerType'>) {
-		super({ ...options, providerType: 'openai-compatible' });
+	constructor(
+		options: Omit<BaseProviderOptions, 'providerType'> & {
+			/**
+			 * Override the providerType. Defaults to 'openai-compatible'.
+			 * Subclasses that reuse this transport (e.g. LlamaCppProvider) pass
+			 * their own type so cost-tracking and routing logic can distinguish them.
+			 */
+			providerType?: CompatibleProviderType;
+		},
+	) {
+		const providerType: CompatibleProviderType = options.providerType ?? 'openai-compatible';
+		const noAuthRequired = providerType === 'llama-cpp';
+		const apiKey = options.apiKey || (noAuthRequired ? LOCAL_NO_AUTH_API_KEY : '');
 
-		if (!options.apiKey) {
+		super({ ...options, providerType, apiKey });
+
+		if (!apiKey) {
 			throw new Error(`API key is required for provider "${options.providerId}" but was empty`);
 		}
 
 		this.client = new OpenAI({
-			apiKey: options.apiKey,
+			apiKey,
 			baseURL: options.baseUrl,
 			timeout: 120_000, // 2 minute timeout
 		});
@@ -116,8 +143,12 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			const models: ProviderModel[] = [];
 			const response = await this.client.models.list();
 
+			// Local providers (llama.cpp) always report null pricing regardless of
+			// the model id — a GGUF served as 'gpt-4.1' is still free inference.
+			const localProvider = isLocalProvider(this.providerType);
+
 			for await (const model of response) {
-				const pricing = getModelPricing(model.id);
+				const pricing = localProvider ? null : getModelPricing(model.id);
 				models.push({
 					id: model.id,
 					displayName: model.id,

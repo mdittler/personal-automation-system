@@ -1,6 +1,44 @@
 import { createHash } from 'node:crypto';
+import type { PersonaCase } from '@core/types/regression.js';
 import { hashRepoRelative } from './git-hash.js';
 import type { TierModelSnapshot } from './types.js';
+
+/**
+ * Today as YYYY-MM-DD in the supplied timezone. Shared between the cache
+ * key, the receipt-runner's date-fallback assertion, and `buildRecallAdapter`'s
+ * default `today`. Exported so the regression workspace doesn't have three
+ * byte-identical copies drifting.
+ */
+export function todayInTimezone(tz: string): string {
+	const fmt = new Intl.DateTimeFormat('en-CA', {
+		timeZone: tz,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	});
+	return fmt.format(new Date());
+}
+
+/**
+ * Bucket-specific cache-key salts. Today only the `receipt` bucket uses a
+ * salt — it binds the cache to today's date + timezone so the parser's
+ * `isValidReceiptDate` rejection branch (which depends on `today`) re-runs
+ * after a date rollover. Returning `undefined` means no salt is mixed in
+ * (the default behavior for routing / recall / chatbot).
+ *
+ * Both `runSuite()` and `emitCaseList()` call this so cache-key parity holds
+ * between `--list` (used by the GUI for the "currently-cached?" indicator)
+ * and the actual run.
+ */
+export function bucketCacheSalt(
+	bucket: PersonaCase['bucket'],
+	timezone: string,
+): string | undefined {
+	if (bucket === 'receipt') {
+		return `today:${todayInTimezone(timezone)}:tz:${timezone}`;
+	}
+	return undefined;
+}
 
 export interface ComputeCacheKeyArgs {
 	casePath: string; // repo-relative
@@ -15,6 +53,14 @@ export interface ComputeCacheKeyArgs {
 	 * still only pay the cost once.
 	 */
 	hashCache?: Map<string, Promise<string>>;
+	/**
+	 * Optional bucket-specific salt mixed into the hash before model/coverage
+	 * components. Used by the receipt bucket to bind cache keys to today's
+	 * date + timezone — same-day reruns still hit cache, but date rollover
+	 * invalidates so the date-fallback branch (`isValidReceiptDate` →
+	 * `rawExtractedDate`) re-exercises. Omitted for routing/recall/chatbot.
+	 */
+	extraSalt?: string;
 }
 
 export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string> {
@@ -39,5 +85,13 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 	h.update(coverageEntries.join('\n'));
 	h.update('\0');
 	h.update(modelStr);
+	// Salt is mixed in last with a distinguishing prefix. `extraSalt` omitted
+	// vs `extraSalt: ''` yields different keys (defensive: empty string is a
+	// real value, not "unsalted").
+	if (args.extraSalt !== undefined) {
+		h.update('\0');
+		h.update('salt:');
+		h.update(args.extraSalt);
+	}
 	return h.digest('hex');
 }
