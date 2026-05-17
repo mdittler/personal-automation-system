@@ -3143,13 +3143,47 @@ Three closely-related phases landed on 2026-05-15 in sequence: PR1 (parser harde
 
 **Deferred:** future-dated receipt fixture (operator declined — real-world risk negligible); operator may re-photograph the cropped trader-joes long/short to expose the printed date for sidecar date assertion.
 
-### Receipt Parser Robustness PR1 — full prose archived
+### Receipt Parser Robustness PR2 — Transcription Oracle (complete, branch `food/receipt-transcription-oracle`, 2026-05-15)
+**Goal:** Regression-suite-side second line of defense for receipt parsing. The existing `structural` oracle ALREADY catches the primary self-consistent-inflation bug shape today (proven via `regression/src/__tests__/structural-catches-inflation.characterization.test.ts`); PR2 adds an independent **transcription oracle** for drift resistance + confidence tiers.
 
-While PR1 was the Current Priority in CLAUDE.md as of 2026-05-15, see CLAUDE.md `### Previous Priority: Receipt Parser Robustness — PR1` for the full six-batch breakdown (`finishReason` plumbing, anti-reconciliation prompt + maxTokens, post-parse integrity check, persist warnings + Telegram warning, single-shot continuation, URS + docs). 13 new REQ-FOOD-RECEIPT-INTEGRITY entries; 11,536 root tests pass.
+**Approach:** Six TDD batches in `food/receipt-transcription-oracle` worktree, one commit each.
 
-### Receipt Parser Robustness PR2 — full prose in CLAUDE.md
+**Batch 0/0a — Worktree + yaml dependency + characterization test** confirming the structural oracle already catches drop-and-inflate today.
 
-PR2 (Transcription Oracle) is the **current** active priority in CLAUDE.md as of 2026-05-15. See CLAUDE.md `### Current Priority: Receipt Parser Robustness — PR2` for the full six-batch breakdown (transcription schema + loader, transcription oracle, wire into receipt-runner, author 4 transcription YAML fixtures, 15 adversarial-persona integration scenarios, URS + docs). 11 new REQ-FOOD-RECEIPT-TRANSCRIPTION entries; regression workspace 605 tests / 38 files. Closes the parser-blindness accepted-risk entry. PR2 will move into this archive section when the next phase takes its slot as Current Priority.
+**Batch 1 — Transcription schema + loader:** `ReceiptTranscription` type, `TranscriptionLineItem` (with optional `quantity`/`unitPrice`, `confidence: 'high'|'low'` defaulting to 'high'), `loadTranscription(path)` with schema validation, 64 KiB cap, optional `.sha256` sidecar verification.
+
+**Batch 2 — Transcription oracle:** `regression/src/oracles/transcription.ts runTranscriptionOracle` with find-first-satisfying-row multiset matching (mirrors structural multisetRows); case-insensitive + whitespace-collapsed name comparison (transcription only — structural is strict byte-equal); $0.01 absolute money tolerance on subtotal/tax/total (no percentage chain, no validateReceiptIntegrity fallback); `confidence: high` items mandatory; `confidence: low` items optional; hallucinations always fail.
+
+**Batch 3 — Wire oracle into receipt-runner:** `RunResult.oracleVerdicts[]` carries labeled entries (`'structural'` and `'transcription'`); case verdict is set-based AND of both; rejection-mode cases (`expectRejection: true`) skip transcription; missing/SHA-mismatched transcription file fails closed with `verdict: 'error'`.
+
+**Batch 4 — Author 4 transcription YAML fixtures:** `costco-long`, `trader-joes-correction`, `trader-joes-long`, `trader-joes-short` derived from existing `.true.md` narratives; SHA256 sidecars; `buildCases` propagates `transcriptionFixture` through `LoadedCase`.
+
+**Batch 5 — 15 adversarial-persona integration scenarios:** drift resistance (drop-and-inflate), full self-consistent fudge, hallucinations, name variations (lowercase + whitespace expanded → structural strict-byte fails even though transcription would pass; documented divergence), duplicate preservation/dedupe, discount-line dropping, aggregate fudging (subtotal/tax off).
+
+**Batch 6 — URS + docs:** 11 new REQ-FOOD-RECEIPT-TRANSCRIPTION entries (001..011) with full traceability matrix rows; parser-blindness accepted-risk entry in `docs/open-items.md` marked closed (Codex review #1 finding: structural alone is sufficient for the bug shape; PR2's distinct value is drift resistance + confidence tiers).
+
+**The parser positive regression test at `apps/food/src/services/__tests__/receipt-parser.test.ts:275` is preserved** — the parser still accepts self-consistent inflation as clean; the regression suite is what catches it.
+
+**Codex review rounds 1, 2, 3** applied in-plan. Regression workspace: 605 tests / 38 files. Closes the parser-blindness accepted-risk entry.
+
+### Receipt Parser Robustness PR1 (complete, branch `worktree-food+receipt-robustness`, 2026-05-15)
+**Goal:** Operator reported a real-world Costco-receipt failure: parser dropped the last line item AND inflated an earlier item's price so the printed total still tied out. PR1 layers defense — anti-reconciliation prompt, generous maxTokens, `finishReason` plumbed through all four providers, deterministic post-parse integrity check, single-shot continuation, user-readable Telegram warning. PR2 (transcription oracle in the regression suite) is implemented (branch `food/receipt-transcription-oracle`) and provides regression-suite drift resistance — preventing silent `.expected.json` regeneration when the LLM fudges `unitPrice`/`totalPrice`/`subtotal` self-consistently — plus per-line confidence tiers. PR2's value over the existing structural oracle is operator-authored ground truth (`.transcription.yaml`) anchored to physical receipts, so a buggy parser output cannot be silently baselined.
+
+**Approach:** Six TDD batches in `food/receipt-robustness` worktree, one commit each. Plan: `~/.claude/plans/yea-lets-start-a-foamy-pnueli.md`.
+
+**Batch 1 — `finishReason` plumbing:** new `LLMFinishReason` type + required field on `LLMCompletionResult`; per-provider mapping (Anthropic stop_reason, OpenAI choices[0].finish_reason, Google candidates[0].finishReason, Ollama done_reason with `eval_count >= maxTokens` fallback for older SDKs); unknown → 'other'; new `LLMService.completeWithMeta` (text + finishReason + usage); `complete()` unchanged for backward compat; `LLMGuard` + `SystemLLMGuard` implement the new method; stub-llm-provider + mock-services + every existing test fixture updated.
+
+**Batch 2 — Prompt + maxTokens + line-item normalization:** anti-reconciliation block appended to `buildReceiptPrompt` (don't adjust prices, omit unreadable items, emit total as printed, negative totals are real); parser switched to `completeWithMeta` with `maxTokens: 8192`; `isValidReceiptLineItem` accepts negative `totalPrice` (discount/coupon/return lines); `normalizeReceiptLineItem` defaults missing quantity to 1 and unitPrice to null.
+
+**Batch 3 — Post-parse integrity check:** `ReceiptVerificationWarning` enum (`sum_mismatch`, `line_arithmetic_mismatch`, `output_truncated`, `continuation_unresolved`); `validateReceiptIntegrity` with reference chain `subtotal → total-tax → total` (strict 1% tolerance for first two, loose 2% for `total` fallback); per-line `|q·u − total| > $0.50` check skipped when `unitPrice` is null; boundary tests at exactly $1, $1.01, $2-on-$1000; explicit documented-limitation test confirming the parser CANNOT detect self-consistent inflation (PR2's domain).
+
+**Batch 4 — Persist warnings + Telegram warning:** receipt YAML body (NOT the Obsidian frontmatter block, which is search/index shape) gains `verification_warnings:` array only when non-empty; Telegram confirmation appends `⚠️ I could not fully verify every line item on this receipt. Please double-check it.` (user-readable; raw codes never shown to user, logged at warn level instead with userId + receiptId).
+
+**Batch 5 — Continuation pass:** on first `finishReason === 'length'`, fires exactly one continuation call with the photo and the items already parsed; multiset merge by `(lowercased-name, totalPrice-cents)` preserves duplicates at different prices and dedupes accidental re-listings; successful continuation that resolves sum mismatch strips both `output_truncated` and `continuation_unresolved`; failed/unresolved continuation emits both; single-retry cap means at most two LLM calls per receipt.
+
+**Batch 6 — URS + docs:** 13 new REQ-FOOD-RECEIPT-INTEGRITY entries (001..013) with full traceability matrix rows; three accepted-risks entries in `docs/open-items.md` (single-shot continuation cap, self-consistent inflation parser blindness, Ollama heuristic false positives transparently resolved by continuation).
+
+**Tests:** 11,536 root tests pass (+36 from this phase across `core/src/services/llm/__tests__/providers/`, `core/src/services/llm/__tests__/llm-service.test.ts`, `apps/food/src/utils/__tests__/photo-validators.test.ts`, `apps/food/src/services/__tests__/receipt-parser.test.ts`, `apps/food/src/__tests__/photo-handler.test.ts`).
 
 ---
 
