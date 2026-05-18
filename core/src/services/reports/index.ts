@@ -26,7 +26,7 @@ import { formatDateTime } from '../../utils/cron-describe.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter } from '../../utils/frontmatter.js';
 import { readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
-import type { AppOutboundBridge } from '../app-outbound-bridge/index.js';
+import { type AppOutboundBridge, toAppMessageKind } from '../app-outbound-bridge/index.js';
 import type { ChangeLog } from '../data-store/change-log.js';
 import type { HouseholdService } from '../household/index.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
@@ -486,6 +486,7 @@ export class ReportService {
 	}
 
 	private async deliver(report: ReportDefinition, text: string): Promise<void> {
+		const kind = `report:${toAppMessageKind(report.id)}`;
 		for (const userId of report.delivery) {
 			try {
 				await this.telegram.send(userId, text);
@@ -494,7 +495,14 @@ export class ReportService {
 					{ error, reportId: report.id, userId },
 					'Failed to deliver report to user',
 				);
+				continue; // bridge call skipped: user never saw the message
 			}
+			await this.appOutboundBridge?.recordOutboundMessage({
+				userId,
+				appId: 'reports',
+				kind,
+				body: text,
+			});
 		}
 	}
 
