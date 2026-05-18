@@ -46,20 +46,15 @@ export class UserManager {
 	}
 
 	/**
-	 * Find a registered user by display name. Normalises via `normalizeDisplayName`
-	 * (trim + casefold) so login matches the uniqueness contract enforced by
-	 * `createInvite` and `scanForDuplicateNames`. Never matches against numeric
-	 * ids — a name like "8187111554" only matches a user whose `name` is that
-	 * string, not a user whose `id` is that string.
+	 * Find a registered user by display name. Uses `normalizeDisplayName` so
+	 * login matches the uniqueness contract enforced by `createInvite` and
+	 * `scanForDuplicateNames`. Never matches against numeric ids.
 	 */
 	findByName(name: string): RegisteredUser | undefined {
-		if (!name) return undefined;
 		const target = normalizeDisplayName(name);
 		if (!target) return undefined;
 		for (const user of this.users) {
-			if (normalizeDisplayName(user.name) === target) {
-				return user;
-			}
+			if (normalizeDisplayName(user.name) === target) return user;
 		}
 		return undefined;
 	}

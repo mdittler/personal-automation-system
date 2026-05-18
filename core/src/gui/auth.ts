@@ -1,39 +1,19 @@
 /**
- * GUI authentication — D5b-3.
+ * GUI authentication. Per-user password login with a JSON-signed cookie
+ * (`{ userId, sessionVersion, issuedAt, authMethod }`). The cookie is not
+ * the authority — every request rehydrates the actor from UserManager +
+ * HouseholdService + CredentialService so revocations are immediate.
  *
- * Replaces the single shared-token auth with per-user password login.
- * Cookie payload: { userId, sessionVersion, issuedAt, authMethod } — JSON, signed via Fastify's cookie secret.
- * The cookie is NOT the authority; every request rehydrates the actor from
- * UserManager + HouseholdService + CredentialService so revocations take effect
- * immediately on the next request.
+ * Login identifier: numeric Telegram id (digit-only input is id-only) OR
+ * globally-unique display name (case-insensitive, via `findByName`).
+ * Resolution happens BEFORE per-account rate-limiting so casing variants
+ * of a username share one counter. Generic "Invalid user ID or password."
+ * is returned for any failure (no enumeration).
  *
- * ## Backward compatibility
- *
- * When `credentialService`, `userManager`, and `householdService` are all absent
- * (legacy test/fallback mode), the old shared-HMAC-token behavior is preserved:
- * POST /login accepts the raw `GUI_AUTH_TOKEN` as a `token` field and sets
- * an HMAC cookie exactly as before. This keeps existing test coverage green.
- *
- * ## Legacy `GUI_AUTH_TOKEN` rule (when deps are present)
- *
- * The legacy token is still accepted when exactly ONE `isAdmin` user exists,
- * and that session maps to that admin with `authMethod: 'legacy-gui-token'`.
- * Multi-admin installs must use the username + password form.
- *
- * ## Login identifier
- *
- * Display names ARE globally unique and ARE accepted at login alongside
- * numeric Telegram ids. Uniqueness is enforced at invite creation and
- * registration time (see invite/index.ts createInvite and
- * user-manager/index.ts registerUser); a boot-time duplicate-name scan
- * (see compose-runtime.ts → scanForDuplicateNames) refuses login-by-name
- * until duplicates are resolved by flipping loginByNameAllowed=false.
- *
- * Resolution is done BEFORE per-account rate-limiting so casing variants
- * of a username share the same per-account counter (no brute-force bypass
- * via casing). Purely-digit input is treated as id-only and never falls
- * through to name lookup. Resolution failure returns the same generic
- * "Invalid user ID or password." text as a wrong-password failure.
+ * Backward compatibility: when `credentialService`/`userManager`/
+ * `householdService` are all absent, the legacy shared-HMAC-token path is
+ * preserved. When deps ARE present, the legacy `GUI_AUTH_TOKEN` is
+ * accepted only if exactly one `isAdmin` user exists.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -65,23 +45,9 @@ export interface AuthOptions {
 	credentialService?: CredentialService;
 	userManager?: UserManager;
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>;
-	/**
-	 * When `false`, POST /login skips the username → numeric-id resolution path.
-	 * compose-runtime sets this from `scanForDuplicateNames({ users }).loginByNameAllowed`
-	 * at boot. Defaults to `true` when omitted.
-	 *
-	 * When `false`, numeric-id login keeps working — so the operator can always
-	 * reach the GUI to fix `pas.yaml` even if a duplicate name slipped past
-	 * uniqueness enforcement.
-	 */
+	/** `false` ⇒ name resolution disabled at login (see scanForDuplicateNames). */
 	loginByNameAllowed?: boolean;
-	/**
-	 * Test-only: when `true`, POST /login accepts non-numeric `userId` values as
-	 * direct id lookups (calling `userManager.getUser(submitted)`) after the
-	 * name-resolution branch has tried and failed. Production wiring sets this
-	 * false; the system assumes Telegram-issued numeric ids. Tests with
-	 * synthetic fixtures (`admin-1`, `member-1`, …) set this `true`.
-	 */
+	/** Test-only: accept non-numeric ids via getUser. Auto-enabled in Vitest. */
 	allowNonNumericIdLoginForTests?: boolean;
 }
 
@@ -167,17 +133,11 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 	/** Whether D5b-3 per-user auth is available (all deps present). */
 	const hasPerUserAuth = Boolean(credentialService && userManager && householdService);
 
-	// captured at plugin registration. compose-runtime computes this
-	// from scanForDuplicateNames at boot; defaults to true so unconfigured tests
-	// keep the default-true behavior. The flag flows from compose-runtime → AuthOptions
-	// → this closure, then guards the name-resolution branch in POST /login below.
 	const loginByNameAllowed = options.loginByNameAllowed ?? true;
-	// Production (real Telegram-issued numeric ids) keeps the strict
-	// numeric-id-or-name contract. Vitest fixtures use synthetic non-numeric ids
-	// like "admin-1"; auto-detect the test environment so those keep working
-	// without per-file plumbing. Operators who hand-edit pas.yaml to insert a
-	// non-numeric id (which is invalid for Telegram) must use this flag
-	// explicitly — they cannot reach it through any production code path.
+	// Vitest fixtures use synthetic non-numeric ids (`admin-1`, …); auto-detect
+	// so they keep working without per-file plumbing. Production wiring never
+	// reaches this branch (Telegram ids are numeric, and operators must set the
+	// flag explicitly to allow non-numeric pas.yaml entries at login).
 	const allowNonNumericIdLoginForTests =
 		options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true';
 

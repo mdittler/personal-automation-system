@@ -30,11 +30,11 @@ afterEach(async () => {
 });
 
 function makeService(opts?: { knownUserIds?: Iterable<string> }): InviteService {
-	const ids = opts?.knownUserIds ?? [];
+	const ids = [...(opts?.knownUserIds ?? [])];
 	return new InviteService({
 		dataDir: tempDir,
 		logger,
-		knownUserIds: () => ids,
+		knownUsers: () => ids.map((id) => ({ id, name: `User ${id}` })),
 	});
 }
 
@@ -96,7 +96,7 @@ describe('createInvite name validation', () => {
 		).rejects.toThrow(/numeric-only|matches an existing user id/i);
 	});
 
-	it('works when knownUserIds option is omitted (no id check, but other guards still apply)', async () => {
+	it('works when knownUsers option is omitted (no id/name check, but other guards still apply)', async () => {
 		const svc = new InviteService({ dataDir: tempDir, logger });
 		// Numeric-only still rejected
 		await expect(svc.createInvite('12345', 'admin1', { householdId: 'h1' })).rejects.toThrow(

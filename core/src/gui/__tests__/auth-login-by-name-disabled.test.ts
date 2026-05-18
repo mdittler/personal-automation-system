@@ -22,7 +22,12 @@ import { Eta } from 'eta';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
+import { normalizeDisplayName } from '../../services/invite/normalize.js';
 import { registerAuth } from '../auth.js';
+import {
+	extractAuthCookie,
+	getCookieUserId as getCookieUserIdWithToken,
+} from './auth-test-helpers.js';
 
 const AUTH_TOKEN = 'test-secret-token';
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
@@ -39,9 +44,9 @@ function makeUserManager(users: MockUser[]) {
 		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
 		getAllUsers: () => users as ReadonlyArray<MockUser>,
 		findByName: (name: string) => {
-			if (!name) return undefined;
-			const target = name.toLocaleLowerCase();
-			return users.find((u) => u.name.toLocaleLowerCase() === target) ?? undefined;
+			const target = normalizeDisplayName(name);
+			if (!target) return undefined;
+			return users.find((u) => normalizeDisplayName(u.name) === target) ?? undefined;
 		},
 	};
 }
@@ -122,17 +127,7 @@ async function loginWithPassword(
 	});
 }
 
-function extractAuthCookie(res: { cookies: Array<{ name: string; value: string }> }) {
-	return res.cookies.find((c) => c.name === 'pas_auth');
-}
-
-async function getCookieUserId(rawValue: string): Promise<string> {
-	const { unsign } = await import('@fastify/cookie');
-	const result = unsign(rawValue, AUTH_TOKEN);
-	if (!result.valid || !result.value) throw new Error('Cookie failed to unsign');
-	const payload = JSON.parse(result.value) as { userId: string };
-	return payload.userId;
-}
+const getCookieUserId = (raw: string) => getCookieUserIdWithToken(raw, AUTH_TOKEN);
 
 describe('POST /login with loginByNameAllowed: false', () => {
 	let tmpDir: string;

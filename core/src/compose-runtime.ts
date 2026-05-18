@@ -494,14 +494,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	// boot-time duplicate-name scan.
 	// Disables login-by-name when pre-existing duplicate display names are detected
-	// in pas.yaml (e.g. legacy installs, hand-edited config). Numeric-id login still
-	// works so the operator can reach the GUI and fix the YAML; after the fix and a
-	// restart the scan re-enables name login. Pure function — see
-	// services/user-manager/scan-duplicate-names.ts.
-	const duplicateNameScan = scanForDuplicateNames({
+	// in pas.yaml. Numeric-id login still works so the operator can reach the GUI
+	// to fix the YAML; after the fix and a restart, name login re-enables.
+	const duplicateNameGroups = scanForDuplicateNames({
 		users: userManager.getAllUsers(),
 		logger: createChildLogger(logger, { service: 'duplicate-name-scan' }),
 	});
+	const loginByNameAllowed = duplicateNameGroups.length === 0;
 
 	// 8b-cred. Credential Service
 	const credentialService = new CredentialService({
@@ -535,15 +534,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'invite' }),
-		// createInvite rejects display names that exactly match an
-		// existing user's numeric Telegram id (defense-in-depth against the
-		// name/id ambiguity at login time). Re-evaluated on every call so newly
-		// registered users are visible immediately.
-		knownUserIds: () => userManager.getAllUsers().map((u) => u.id),
-		// createInvite ALSO rejects display names that case-insensitively
-		// collide with an existing user.name. Same closure pattern — re-evaluated
-		// per call so newly-registered users are visible immediately.
-		knownUsers: () => userManager.getAllUsers().map((u) => ({ id: u.id, name: u.name })),
+		// Re-evaluated per call so newly-registered users are visible immediately.
+		// createInvite uses these to reject name/id collisions and case-insensitive
+		// name duplicates.
+		knownUsers: () => userManager.getAllUsers(),
 	});
 	await inviteService.cleanup();
 
@@ -1557,9 +1551,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
-		// boot-scan result. When false, POST /login skips name resolution
-		// and only accepts numeric ids until the operator fixes pas.yaml + restarts.
-		loginByNameAllowed: duplicateNameScan.loginByNameAllowed,
+		loginByNameAllowed,
 	});
 
 	// 13b. External Data API (optional)

@@ -31,6 +31,7 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
+import { normalizeDisplayName } from '../../services/invite/normalize.js';
 import type { SystemConfig } from '../../types/config.js';
 import { safeJsonForScript } from '../../utils/escape-html.js';
 import { registerAuth } from '../auth.js';
@@ -66,9 +67,9 @@ function makeUserManager(users: MockUser[]) {
 		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
 		getAllUsers: () => users as ReadonlyArray<MockUser>,
 		findByName: (name: string) => {
-			if (!name) return undefined;
-			const target = name.toLocaleLowerCase();
-			return users.find((u) => u.name.toLocaleLowerCase() === target) ?? undefined;
+			const target = normalizeDisplayName(name);
+			if (!target) return undefined;
+			return users.find((u) => normalizeDisplayName(u.name) === target) ?? undefined;
 		},
 	};
 }

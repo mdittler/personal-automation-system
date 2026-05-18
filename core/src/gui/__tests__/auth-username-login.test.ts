@@ -23,8 +23,10 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { extractAuthCookie, getCookieUserId } from './auth-test-helpers.js';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
 import { CredentialService } from '../../services/credentials/index.js';
+import { normalizeDisplayName } from '../../services/invite/normalize.js';
 import { registerAuth } from '../auth.js';
 
 const AUTH_TOKEN = 'test-secret-token';
@@ -46,9 +48,9 @@ function makeUserManager(users: MockUser[]) {
 		getUser: (id: string) => users.find((u) => u.id === id) ?? null,
 		getAllUsers: () => users as ReadonlyArray<MockUser>,
 		findByName: (name: string) => {
-			if (!name) return undefined;
-			const target = name.toLocaleLowerCase();
-			return users.find((u) => u.name.toLocaleLowerCase() === target) ?? undefined;
+			const target = normalizeDisplayName(name);
+			if (!target) return undefined;
+			return users.find((u) => normalizeDisplayName(u.name) === target) ?? undefined;
 		},
 	};
 }
@@ -137,28 +139,7 @@ async function loginWithPassword(
 	});
 }
 
-function extractAuthCookie(res: { cookies: Array<{ name: string; value: string }> }) {
-	return res.cookies.find((c) => c.name === 'pas_auth');
-}
-
-function extractUserIdFromCookie(rawValue: string): string {
-	// Cookies in @fastify/cookie are signed with the secret; the unsigned value is JSON.
-	// We don't have direct access to unsign here without importing it, so duplicate the
-	// helper inline. See auth-d5b3.test.ts test #8 for the same pattern.
-	throw new Error(
-		`extractUserIdFromCookie should not be called — use the async helper instead. raw=${rawValue.slice(0, 8)}`,
-	);
-}
-// Tag-only export to silence "unused" lint; the real assertion is below via dynamic import.
-void extractUserIdFromCookie;
-
-async function getCookieUserId(rawValue: string): Promise<string> {
-	const { unsign } = await import('@fastify/cookie');
-	const result = unsign(rawValue, AUTH_TOKEN);
-	if (!result.valid || !result.value) throw new Error('Cookie failed to unsign');
-	const payload = JSON.parse(result.value) as { userId: string };
-	return payload.userId;
-}
+const getCookieUserIdWithAuthToken = (raw: string) => getCookieUserId(raw, AUTH_TOKEN);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -187,7 +168,7 @@ describe('POST /login accepts username or numeric id', () => {
 
 		const cookie = extractAuthCookie(res);
 		expect(cookie).toBeDefined();
-		const cookieUserId = await getCookieUserId(cookie!.value);
+		const cookieUserId = await getCookieUserIdWithAuthToken(cookie!.value);
 		expect(cookieUserId).toBe('111');
 
 		await app.close();
@@ -201,7 +182,7 @@ describe('POST /login accepts username or numeric id', () => {
 			const res = await loginWithPassword(app, casing, 'pw');
 			expect(res.statusCode).toBe(302);
 			const cookie = extractAuthCookie(res);
-			const cookieUserId = await getCookieUserId(cookie!.value);
+			const cookieUserId = await getCookieUserIdWithAuthToken(cookie!.value);
 			expect(cookieUserId).toBe('111');
 		}
 
@@ -215,7 +196,7 @@ describe('POST /login accepts username or numeric id', () => {
 		const res = await loginWithPassword(app, '111', 'pw');
 		expect(res.statusCode).toBe(302);
 		const cookie = extractAuthCookie(res);
-		const cookieUserId = await getCookieUserId(cookie!.value);
+		const cookieUserId = await getCookieUserIdWithAuthToken(cookie!.value);
 		expect(cookieUserId).toBe('111');
 
 		await app.close();

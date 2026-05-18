@@ -10,7 +10,7 @@ import type { RegisteredUser } from '../../types/users.js';
 import { withMultiFileLock } from '../../utils/file-mutex.js';
 import { syncUsersToConfig } from '../config/config-writer.js';
 import type { HouseholdService } from '../household/index.js';
-import { DISPLAY_NAME_LOCK_KEY } from '../invite/locks.js';
+import { DISPLAY_NAME_LOCK_KEY } from '../invite/index.js';
 import { normalizeDisplayName } from '../invite/normalize.js';
 import type { UserManager } from './index.js';
 
@@ -51,16 +51,8 @@ export class UserMutationService {
 			);
 		}
 
-		// defensive uniqueness check.
-		// Shared DISPLAY_NAME_LOCK_KEY (with InviteService.createInvite) serializes
-		// the create-vs-register race against the same uniqueness frontier.
-		//
-		// We deliberately do NOT include `this.configPath` in this acquisition:
-		// `syncUsersToConfig` → `mutatePasYaml` already calls
-		// `withFileLock(configPath, ...)` internally (see config/pas-yaml-mutator.ts),
-		// and the in-process AsyncLock is non-reentrant — pairing them here would
-		// deadlock. The DISPLAY_NAME_LOCK_KEY alone is sufficient to serialize the
-		// name-check-vs-persist sequence against concurrent createInvite calls.
+		// DISPLAY_NAME_LOCK_KEY only — syncUsersToConfig acquires configPath
+		// internally and AsyncLock is non-reentrant.
 		return withMultiFileLock([DISPLAY_NAME_LOCK_KEY], async () => {
 			const incomingNorm = normalizeDisplayName(user.name);
 			if (incomingNorm.length > 0) {

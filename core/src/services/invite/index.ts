@@ -14,8 +14,10 @@ import type { Logger } from 'pino';
 import { AsyncLock } from '../../utils/async-lock.js';
 import { withMultiFileLock } from '../../utils/file-mutex.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
-import { DISPLAY_NAME_LOCK_KEY } from './locks.js';
 import { normalizeDisplayName } from './normalize.js';
+
+/** Lock key shared with UserMutationService.registerUser so create-vs-register cannot interleave. */
+export const DISPLAY_NAME_LOCK_KEY = 'display-name:uniqueness';
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
@@ -44,30 +46,15 @@ export interface InviteServiceOptions {
 	dataDir: string;
 	logger: Logger;
 	/**
-	 * Optional callback returning the set of registered Telegram user ids.
-	 * Used by `createInvite` to reject display names that exactly match an
-	 * existing user's numeric id (defense in depth against name/id ambiguity
-	 * at login time). Re-evaluated on every call so newly-registered users
-	 * are visible immediately. When omitted, the id-equality check is skipped
-	 * but the blank/numeric-only guards still apply.
-	 */
-	knownUserIds?: () => Iterable<string>;
-	/**
-	 * Optional callback returning the registered users so
-	 * `createInvite` can reject names that collide (case-insensitive) with an
-	 * existing `user.name`. Re-evaluated on every call so newly-registered
-	 * users are visible immediately. When omitted, the user-name collision
-	 * check is skipped (active-invite collision check still applies).
+	 * Optional callback returning the registered users. Used by `createInvite`
+	 * to reject display names that collide with an existing `user.name`
+	 * (case-insensitive) or match an existing user's numeric id (defense in
+	 * depth at login time). Re-evaluated on every call so newly-registered
+	 * users are visible immediately. When omitted, those checks are skipped
+	 * (active-invite collision and the blank/numeric-only guards still apply).
 	 */
 	knownUsers?: () => Iterable<{ id: string; name: string }>;
-	/**
-	 * Clock injection. Defaults to `() => new Date()`. Lets tests
-	 * advance time without depending on wall-clock so the expired-invite
-	 * reuse path is verifiable. Threaded through every expiry comparison in
-	 * createInvite, validateCode, claimAndRedeem, and cleanup, and into the
-	 * persisted `createdAt` / `expiresAt` timestamps so test-controlled clocks
-	 * affect everything consistently.
-	 */
+	/** Clock injection. Defaults to `() => new Date()`. */
 	now?: () => Date;
 }
 
@@ -75,14 +62,12 @@ export class InviteService {
 	private readonly invitesPath: string;
 	private readonly logger: Logger;
 	private readonly lock = new AsyncLock();
-	private readonly knownUserIds: (() => Iterable<string>) | undefined;
 	private readonly knownUsers: (() => Iterable<{ id: string; name: string }>) | undefined;
 	private readonly now: () => Date;
 
 	constructor(options: InviteServiceOptions) {
 		this.invitesPath = join(options.dataDir, 'system', 'invites.yaml');
 		this.logger = options.logger;
-		this.knownUserIds = options.knownUserIds;
 		this.knownUsers = options.knownUsers;
 		this.now = options.now ?? (() => new Date());
 	}
@@ -105,30 +90,24 @@ export class InviteService {
 			enabledApps?: string[];
 		},
 	): Promise<string> {
-		// --- display-name ambiguity guards ---
-		// Trim FIRST so whitespace-padded strings (e.g. " 12345 ", " Sarah ") are
-		// normalized before any regex / equality checks. Reject blanks before any
-		// other guard so the operator sees a dedicated "must not be blank" error.
+		// Trim first so " 12345 " / " Sarah " normalize before any check.
 		const trimmedName = name.trim();
 		if (trimmedName.length === 0) {
 			throw new Error('Display name must not be blank.');
 		}
-		// Defense in depth against the *ambiguity-with-id-space* failure mode.
-		// Check id-equality BEFORE the numeric-only guard so the operator sees the
-		// more specific "matches an existing user id" error when they typed an id
-		// into the name field. Padding around an id (" 8187111554 ") is normalized
-		// to the bare id by the trim above, so this catches that variant too.
-		if (this.knownUserIds) {
-			const ids = new Set(this.knownUserIds());
-			if (ids.has(trimmedName)) {
-				throw new Error(
-					`Display name '${trimmedName}' matches an existing user id; choose a different name.`,
-				);
+		// Reject id-collisions before the all-digit guard so the operator sees
+		// the more specific message when they typed an id into the name field.
+		if (this.knownUsers) {
+			for (const u of this.knownUsers()) {
+				if (u.id === trimmedName) {
+					throw new Error(
+						`Display name '${trimmedName}' matches an existing user id; choose a different name.`,
+					);
+				}
 			}
 		}
-		// Even when knownUserIds is unwired (or the typed value happens not to match
-		// any *current* user's id), reject all-digit names — they would shadow the
-		// numeric Telegram id space and break the resolve-then-rate-limit path.
+		// Reject all-digit names regardless of knownUsers — they would shadow
+		// the numeric Telegram id space.
 		if (/^\d+$/.test(trimmedName)) {
 			throw new Error(
 				`Display name must not be numeric-only (would collide with Telegram id space): ${JSON.stringify(name)}.`,
