@@ -1,41 +1,18 @@
 /**
- * Doc-coverage gate (Batch 1F).
- *
- * Asserts that every slash command in the per-user effective catalog
- * (admin and non-admin views combined) is mentioned in the
- * AppKnowledgeBase-indexed help content — the same truncated 2000-char
- * slice the chatbot's runtime search sees. Aliases must each appear
- * independently. A structured allowlist in
- * `core/config/undocumented-commands.yaml` permits temporary exceptions
- * with required `command` / `reason` / `owner` fields, rejecting orphan
- * entries (command no longer in the catalog) and expired entries.
- *
- * Loader provenance: this test calls `loadIndexedEntries` directly so it
- * exercises exactly the same pipeline `AppKnowledgeBase.init()` uses at
- * runtime — including `MAX_CONTENT_LENGTH` truncation. Reimplementing
- * loading in the test would let the gate drift away from what the chatbot
- * actually sees.
- *
- * Enablement gate (Codex correction I4): in this doc-coverage path,
- * `buildLiveDeps` forces `isAppEnabledForUser: () => true` so the catalog
- * covers every command that could ever be dispatched, including apps a
- * particular live user has disabled. Per-user enablement filtering is
- * exercised separately by the prompt-injection tests (Batch 1B) and the
- * `/help` tests (Batch 1B+).
- *
- * Helper-sharing (Batch 1G): the doc-coverage check lives in
- * `validate-command-documentation.ts` and is consumed by both this test
- * and `compose-runtime.ts`'s boot-time soft warning. The two cannot
- * diverge because they share the same `validateCommandDocumentation` call.
+ * Build-failing doc-coverage gate: every effective router command must appear
+ * in the AppKnowledgeBase-indexed help content (the same 2000-char-truncated
+ * slice the chatbot sees). Aliases each required independently. The allowlist
+ * at `core/config/undocumented-commands.yaml` permits temporary exceptions
+ * with required fields and stale-entry detection.
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
-import * as yaml from 'yaml';
 import type { KnowledgeEntry } from '../../../types/app-knowledge.js';
+import { readYamlFile } from '../../../utils/yaml.js';
 import { loadIndexedEntries } from '../../app-knowledge/index.js';
 import type { RegisteredApp } from '../../app-registry/index.js';
 import type { CommandCatalogDeps } from '../command-catalog.js';
@@ -44,17 +21,13 @@ import {
 	validateCommandDocumentation,
 } from '../validate-command-documentation.js';
 
-// ESM equivalent of `__dirname` (this project is ESM-only).
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-// From this test file to the repo root: `__tests__` → `router` → `services`
-// → `src` → `core` → repo root. Five `..` segments.
+// __tests__ → router → services → src → core → <repo root>
 const REPO_ROOT = resolve(HERE, '..', '..', '..', '..', '..');
 const INFRA_DOCS = join(REPO_ROOT, 'core', 'docs', 'help');
 const APPS_DIR = join(REPO_ROOT, 'apps');
 const ALLOWLIST_PATH = join(REPO_ROOT, 'core', 'config', 'undocumented-commands.yaml');
 
-/** Minimal shape pulled out of `apps/<id>/manifest.yaml` for the doc-cov gate. */
 interface DiscoveredApp {
 	appId: string;
 	appDir: string;
@@ -79,12 +52,6 @@ interface AllowlistFile {
 	entries?: AllowlistEntry[];
 }
 
-/**
- * Discover apps from disk by walking `apps/*` and reading each
- * `manifest.yaml`. Mirrors the production `AppRegistry.loadAll()` shape
- * closely enough that `getEffectiveCommandCatalog` can consume it via the
- * registry-like wrapper in `buildLiveDeps`.
- */
 async function discoverApps(repoRoot: string): Promise<DiscoveredApp[]> {
 	let entries: string[];
 	try {
@@ -96,51 +63,33 @@ async function discoverApps(repoRoot: string): Promise<DiscoveredApp[]> {
 	const out: DiscoveredApp[] = [];
 	for (const entry of entries) {
 		const appDir = join(APPS_DIR, entry);
-		const manifestPath = join(appDir, 'manifest.yaml');
-		let raw: string;
-		try {
-			raw = await readFile(manifestPath, 'utf-8');
-		} catch {
-			continue;
-		}
-		const parsed = yaml.parse(raw) as DiscoveredApp['manifest'] | null;
-		const appId = parsed?.app?.id;
-		if (!parsed || typeof appId !== 'string' || appId.length === 0) continue;
-		out.push({ appId, appDir, manifest: parsed });
+		const manifest = await readYamlFile<DiscoveredApp['manifest']>(
+			join(appDir, 'manifest.yaml'),
+		);
+		const appId = manifest?.app?.id;
+		if (!manifest || typeof appId !== 'string' || appId.length === 0) continue;
+		out.push({ appId, appDir, manifest });
 	}
 	return out;
 }
 
-/**
- * Build live `CommandCatalogDeps` against the on-disk repo state.
- *
- * - `registry.getAll()` wraps the discovered apps in a minimal
- *   `RegisteredApp`-shaped object; we never instantiate the real registry.
- * - `isAppEnabledForUser` is hardcoded to `true` (see file-level note).
- * - `isUserAdmin` is parameterized so the test (or the helper, when used
- *   directly) can build both admin and non-admin catalogs and union them.
- */
 function buildLiveDeps(opts: { apps: DiscoveredApp[] }): CommandCatalogDeps {
 	const registered: RegisteredApp[] = opts.apps.map(
 		(a) =>
 			({
 				manifest: a.manifest,
 				appDir: a.appDir,
-				// `module` is unused by `getEffectiveCommandCatalog`; we never load app code.
 				module: undefined as never,
 			}) as unknown as RegisteredApp,
 	);
 	return {
 		registry: { getAll: () => registered },
-		// Overridden by `validateCommandDocumentation` to build both admin and
-		// non-admin catalogs. The value here is irrelevant.
 		isUserAdmin: () => true,
 		isAppEnabledForUser: () => true,
 		conversationServiceWired: true,
 	};
 }
 
-/** Load all indexed entries (production-truncated content) for live apps. */
 async function buildIndexedEntries(apps: DiscoveredApp[]): Promise<KnowledgeEntry[]> {
 	const indexedApps = apps.map((a) => ({ appId: a.appId, appDir: a.appDir }));
 	return loadIndexedEntries({
@@ -149,21 +98,13 @@ async function buildIndexedEntries(apps: DiscoveredApp[]): Promise<KnowledgeEntr
 	});
 }
 
-/** Parse and validate the allowlist file. Returns the raw entry list. */
 async function loadAllowlistRaw(path: string): Promise<AllowlistEntry[]> {
-	const raw = yaml.parse(await readFile(path, 'utf-8')) as AllowlistFile | null;
-	return raw?.entries ?? [];
+	const parsed = await readYamlFile<AllowlistFile>(path);
+	return parsed?.entries ?? [];
 }
 
-/**
- * Make a stub Pino logger that records `.warn` calls. Used by the Batch 1G
- * integration test in this file to assert the warning shape without booting
- * the runtime.
- */
 function makeStubLogger(): { logger: Logger; warn: ReturnType<typeof vi.fn> } {
 	const warn = vi.fn();
-	// We only need warn for `logDocCoverageWarnings`; the other Logger methods
-	// are typed as no-ops.
 	const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 	return { logger, warn };
 }
@@ -224,13 +165,7 @@ describe('command documentation coverage', () => {
 	});
 });
 
-describe('boot-time soft warning (Batch 1G integration)', () => {
-	/**
-	 * Fixture catalogDeps with a single registered app declaring known
-	 * commands. `isAppEnabledForUser` is forced true so the helper's
-	 * admin+non-admin union includes everything. The test asserts the
-	 * warning fires when a catalog command is missing from indexed content.
-	 */
+describe('boot-time soft warning integration', () => {
 	function fixtureDeps(appCommands: Array<{ name: string; description?: string }>) {
 		const apps: DiscoveredApp[] = [
 			{
@@ -245,15 +180,12 @@ describe('boot-time soft warning (Batch 1G integration)', () => {
 		return buildLiveDeps({ apps });
 	}
 
-	// A throwaway allowlist path — fall-back loader returns [] when the file
-	// can't be read, so this exercises the "no allowlist available" path.
+	// readYamlFile returns null when missing, so the loader yields [].
 	const ALLOWLIST_PATH_EMPTY = '/tmp/nonexistent-undocumented-commands.yaml';
 
 	it('logs a warning when a catalog command lacks docs at boot', async () => {
 		const { logger, warn } = makeStubLogger();
 		const result = await validateCommandDocumentation({
-			// Indexed content mentions no commands at all → every catalog token
-			// will be missing. We pick `/madeupcmd` for the assertion.
 			indexedEntries: [{ appId: 'fixture', source: 'fake.md', content: 'no command tokens here' }],
 			catalogDeps: fixtureDeps([{ name: '/madeupcmd', description: 'fixture only' }]),
 			allowlistPath: ALLOWLIST_PATH_EMPTY,
@@ -270,10 +202,6 @@ describe('boot-time soft warning (Batch 1G integration)', () => {
 
 	it('emits no warnings when coverage is clean', async () => {
 		const { logger, warn } = makeStubLogger();
-		// Indexed content mentions every command the catalog could produce:
-		// the four DIRECT_HANDLED entries, every builtin canonical and alias,
-		// and the fixture app command. Cheapest way to be exhaustive is to
-		// list them all explicitly.
 		const exhaustive = [
 			'/help',
 			'/start',

@@ -1,25 +1,11 @@
 /**
- * Per-user effective command catalog.
+ * Per-user effective command catalog: every slash command the Router would
+ * dispatch for a given user — directly-handled, service-gated builtins,
+ * and app-manifest commands filtered by per-user app toggles. Aliases are
+ * collapsed into one entry per canonical.
  *
- * Returns every slash command the Router would actually dispatch for a given
- * user — built-in conversation commands, directly-handled commands (/help,
- * /start, /space, /invite), admin-gated entries, and app-manifest commands
- * filtered by per-user app toggles. Aliases (e.g. /newchat <-> /reset) are
- * collapsed into a single entry per canonical command.
- *
- * Single source of truth for:
- *   - `/help` output (Batch 1B+)
- *   - `/ask` system-prompt injection (Batch 1B)
- *   - Doc-coverage test (Batch 1F)
- *   - Boot-time soft warning (Batch 1G)
- *
- * Drift guard: `ManifestCommand` from `core/src/types/manifest.ts` uses the
- * `name` field (e.g. `/note`), NOT `command`. The dependency type and the
- * implementation below must match the production manifest shape exactly.
- *
- * `BUILTIN_COMMAND_NAMES` lives here (instead of `router/index.ts`) so this
- * module has no cyclic dependency on the Router class. `router/index.ts`
- * re-exports it for backwards compatibility.
+ * `BUILTIN_COMMAND_NAMES` lives here (not in `router/index.ts`) to avoid a
+ * cyclic dependency with the Router class.
  */
 
 import { readdir } from 'node:fs/promises';
@@ -29,13 +15,7 @@ import type { ManifestCommand } from '../../types/manifest.js';
 import { readYamlFile } from '../../utils/yaml.js';
 import type { RegisteredApp } from '../app-registry/index.js';
 
-/**
- * Built-in command names the Router handles directly via the
- * ConversationService short-circuit (bypassing app manifest dispatch).
- *
- * Includes every alias token; downstream consumers should canonicalize via
- * `ALIAS_GROUPS` before deduping for display.
- */
+/** Built-in commands served by the ConversationService short-circuit. Includes every alias token. */
 export const BUILTIN_COMMAND_NAMES = new Set([
 	'/ask',
 	'/edit',
@@ -75,44 +55,25 @@ export interface CommandCatalogEntry {
 }
 
 /**
- * Dependencies for the catalog helper. Shape mirrors the production
- * `AppRegistry.getAll(): RegisteredApp[]` return type so test fakes can plug
- * in real manifest data without TypeScript drift.
- *
- * NOTE: `registry.getAll()` is typed via the real `RegisteredApp` shape (the
- * same type the production registry returns). This guards against
- * `name` vs `command` drift: a hand-crafted fixture that declares `command:`
- * would fail to typecheck against `ManifestCommand`.
+ * `registry.getAll()` is typed via the production `RegisteredApp` shape so
+ * fixtures cannot drift from `ManifestCommand.name` (vs the historical
+ * `command:` shape). When `conversationServiceWired` is false the catalog
+ * omits service-gated builtins (/ask, /edit, ...).
  */
 export interface CommandCatalogDeps {
 	registry: { getAll(): RegisteredApp[] };
-	/** Returns true iff the given user has the platform-admin flag. */
 	isUserAdmin(userId: string): boolean | Promise<boolean>;
-	/** Returns true iff the given app is enabled for the given user. */
 	isAppEnabledForUser(userId: string, appId: string): boolean | Promise<boolean>;
-	/**
-	 * True iff `ConversationService` is wired in this process. When false, the
-	 * router would never dispatch service-gated builtins (/ask, /edit, ...),
-	 * so the catalog omits them.
-	 */
 	conversationServiceWired: boolean;
 }
 
-/**
- * Alias groupings — canonical command → aliases. Mirrors the
- * `parsed.command === '/x' || parsed.command === '/y'` arms in
- * `router/index.ts::handleCommand`.
- *
- * Iteration order is insertion order; entries appear in the catalog in this
- * order after directly-handled commands.
- */
+/** Canonical → alias tokens. Mirrors the alias arms in `router/index.ts::handleCommand`. */
 const ALIAS_GROUPS: Record<string, string[]> = {
 	'/newchat': ['/reset'],
 	'/refreshmemory': ['/refresh-memory'],
 	'/flushmemory': ['/flush-memory'],
 };
 
-/** Reverse lookup: alias token → canonical. Built lazily for canonicalize(). */
 const ALIAS_TO_CANONICAL: Map<string, string> = (() => {
 	const m = new Map<string, string>();
 	for (const [canonical, aliases] of Object.entries(ALIAS_GROUPS)) {
@@ -128,15 +89,10 @@ function canonicalize(name: string): string {
 }
 
 /**
- * Directly-handled commands the Router dispatches via dedicated branches
- * outside `BUILTIN_COMMAND_NAMES`:
- *   - `/help`   → `Router::sendHelp` (router/index.ts:600)
- *   - `/start`  → onboarding entry (router/index.ts:607)
- *   - `/space`  → `Router::handleSpaceCommand` (router/index.ts:367)
- *   - `/invite` → `Router::handleInviteCommand` (router/index.ts:372, 1274)
- *
- * Source label is `'direct'` to distinguish them from the service-gated
- * conversation builtins (which carry `'builtin'`).
+ * Commands the Router dispatches via dedicated branches outside
+ * `BUILTIN_COMMAND_NAMES` (/help, /start, /space, /invite). Subcommand hints
+ * are embedded in descriptions so they reach both rendered `/help` output
+ * and the system-prompt injection.
  */
 const DIRECT_HANDLED: ReadonlyArray<{
 	canonical: string;
@@ -157,11 +113,6 @@ const DIRECT_HANDLED: ReadonlyArray<{
 	},
 	{
 		canonical: '/space',
-		// Subcommand hints are embedded in the description so they surface in
-		// both the rendered `/help` output and the system-prompt injection.
-		// Full subcommand reference: `/space`, `/space <id>`, `/space off`,
-		// `/space create <id> <name>`, `/space members`, `/space add`,
-		// `/space remove`.
 		description:
 			'Manage shared data spaces; subcommands: /space, /space <id>, /space off, /space create <id> <name>',
 		adminOnly: false,
@@ -174,7 +125,6 @@ const DIRECT_HANDLED: ReadonlyArray<{
 	},
 ];
 
-/** Descriptions for the service-gated conversation builtins. */
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 	'/ask': 'Ask PAS a question (forces app-aware mode)',
 	'/edit': 'LLM-assisted file edit',
@@ -188,16 +138,8 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
- * Compute the per-user effective command catalog.
- *
- * Order:
- *   1. Directly-handled commands (filtered by `adminOnly`)
- *   2. Service-gated conversation builtins (when wired)
- *   3. App-manifest commands (filtered by `isAppEnabledForUser`)
- *
- * Aliases are collapsed into a single entry per canonical command. Each entry
- * carries a `source` label so downstream renderers (help, prompt, doc-cov)
- * can group/style accordingly.
+ * Order: directly-handled (filtered by adminOnly) → service-gated builtins
+ * (when wired) → app-manifest commands (filtered by per-user toggle).
  */
 export async function getEffectiveCommandCatalog(
 	userId: string,
@@ -206,7 +148,6 @@ export async function getEffectiveCommandCatalog(
 	const isAdmin = await deps.isUserAdmin(userId);
 	const out: CommandCatalogEntry[] = [];
 
-	// 1. Directly-handled commands.
 	for (const entry of DIRECT_HANDLED) {
 		if (entry.adminOnly && !isAdmin) continue;
 		out.push({
@@ -219,7 +160,6 @@ export async function getEffectiveCommandCatalog(
 		});
 	}
 
-	// 2. Service-gated conversation builtins.
 	if (deps.conversationServiceWired) {
 		const seenCanonical = new Set<string>();
 		for (const name of BUILTIN_COMMAND_NAMES) {
@@ -236,7 +176,6 @@ export async function getEffectiveCommandCatalog(
 		}
 	}
 
-	// 3. App-manifest commands, filtered by per-user app toggle.
 	for (const app of deps.registry.getAll()) {
 		const appId = app.manifest.app.id;
 		const enabled = await deps.isAppEnabledForUser(userId, appId);
@@ -260,32 +199,16 @@ export async function getEffectiveCommandCatalog(
 }
 
 /**
- * A single shadow collision between an app's manifest command and either a
- * built-in command or another app's command. Surfaced by
- * `detectCommandShadowing()` and consumed by the shadowing test (build gate)
- * and the boot-time soft warning (Batch 1G).
+ * A collision between two declarations of the same slash command. `'builtin'`
+ * covers `BUILTIN_COMMAND_NAMES` and the directly-handled set; `` `app:${appId}` ``
+ * marks the first app to declare a name when two apps collide.
  */
 export interface ShadowCollision {
-	/** Full command name including the leading slash (e.g. `/notes`). */
 	command: string;
-	/**
-	 * `'builtin'` for collisions against `BUILTIN_COMMAND_NAMES` or the
-	 * directly-handled set. `` `app:${appId}` `` for the first app that declared
-	 * the same name when two apps collide.
-	 */
 	conflictWith: 'builtin' | `app:${string}`;
-	/** The app id that introduced the colliding declaration. */
 	detectedIn: string;
 }
 
-/**
- * Optional overrides for `detectCommandShadowing`. When omitted, builtins are
- * read from `BUILTIN_COMMAND_NAMES` + `DIRECT_HANDLED`, and manifests are
- * loaded off-disk via `loadAllManifests()`.
- *
- * Drift guard: `commands[].name` (NOT `command`) — must match the production
- * `ManifestCommand` shape from `core/src/types/manifest.ts`.
- */
 export interface ShadowingOverrides {
 	builtins: Set<string>;
 	manifests: Array<{
@@ -294,14 +217,7 @@ export interface ShadowingOverrides {
 	}>;
 }
 
-/**
- * Detect command-name shadowing across the install: any app-manifest command
- * that collides with a built-in (or directly-handled) command, or with another
- * app's already-declared command, becomes a `ShadowCollision`.
- *
- * Called by the shadowing test (build gate). Returns `[]` when no collisions
- * exist. Overrides exist purely for the test's negative cases.
- */
+/** Returns `[]` when no collisions exist. Overrides exist purely for test negative cases. */
 export async function detectCommandShadowing(
 	overrides?: ShadowingOverrides,
 ): Promise<ShadowCollision[]> {
@@ -336,16 +252,14 @@ export async function detectCommandShadowing(
 }
 
 /**
- * Load every `apps/*\/manifest.yaml` off disk and reduce each to the
- * `{ appId, commands }` shape consumed by `detectCommandShadowing`.
- *
- * Path resolution is anchored to the repo root via `import.meta.url`
- * (ESM-only). Returns `[]` if no `apps/` directory exists.
+ * Read every `apps/*\/manifest.yaml` off disk into `{ appId, commands }`.
+ * Returns `[]` if no `apps/` directory exists.
  */
-async function loadAllManifests(): Promise<Array<{ appId: string; commands: ManifestCommand[] }>> {
+export async function loadAllManifests(): Promise<
+	Array<{ appId: string; commands: ManifestCommand[] }>
+> {
 	const HERE = dirname(fileURLToPath(import.meta.url));
-	// command-catalog.ts lives at core/src/services/router/; the repo root is
-	// four levels up: router -> services -> src -> core -> <repo root>.
+	// router -> services -> src -> core -> <repo root>
 	const repoRoot = resolve(HERE, '..', '..', '..', '..');
 	const appsDir = join(repoRoot, 'apps');
 
@@ -369,11 +283,6 @@ async function loadAllManifests(): Promise<Array<{ appId: string; commands: Mani
 	return out;
 }
 
-/**
- * Local minimal manifest shape used by `loadAllManifests`. We deliberately do
- * not import the full `AppManifest` type here — `readYamlFile` returns
- * `unknown`-flavored data, and we only need the subset for collision detection.
- */
 interface AppManifestShape {
 	app?: { id?: string };
 	capabilities?: { messages?: { commands?: ManifestCommand[] } };

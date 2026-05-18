@@ -49,35 +49,28 @@ export interface LoadIndexedEntriesOptions {
 }
 
 /**
- * Pure helper: load infrastructure docs + every app's `help.md` and `docs/*.md`,
- * applying the same `MAX_CONTENT_LENGTH` truncation as `AppKnowledgeBase`.
- *
- * Used by:
- *   - `AppKnowledgeBase.init()` (runtime indexing)
- *   - `command-documentation.test.ts` (Batch 1F doc-coverage gate)
- *
- * Keeping a single loader guarantees the doc-coverage gate validates against
- * exactly the truncated content the chatbot's search sees.
+ * Loads infrastructure docs + every app's `help.md` and `docs/*.md`, applying
+ * the same `MAX_CONTENT_LENGTH` truncation as `AppKnowledgeBase`. Shared with
+ * the doc-coverage test so the gate validates against the same indexed content
+ * the runtime search sees.
  */
 export async function loadIndexedEntries(
 	opts: LoadIndexedEntriesOptions,
 ): Promise<KnowledgeEntry[]> {
-	const entries: KnowledgeEntry[] = [];
+	const [infraEntries, perApp] = await Promise.all([
+		loadDocsFromDir(INFRA_APP_ID, opts.infraDocsDir, opts.logger),
+		Promise.all(
+			opts.apps.map(async (app) => {
+				const [helpEntry, docsEntries] = await Promise.all([
+					loadSingleFile(app.appId, join(app.appDir, 'help.md'), 'help.md', opts.logger),
+					loadDocsFromDir(app.appId, join(app.appDir, 'docs'), opts.logger),
+				]);
+				return helpEntry ? [helpEntry, ...docsEntries] : docsEntries;
+			}),
+		),
+	]);
 
-	// Infrastructure docs
-	entries.push(...(await loadDocsFromDir(INFRA_APP_ID, opts.infraDocsDir, opts.logger)));
-
-	// Per-app docs: help.md + docs/*.md
-	for (const app of opts.apps) {
-		const helpPath = join(app.appDir, 'help.md');
-		const helpEntry = await loadSingleFile(app.appId, helpPath, 'help.md', opts.logger);
-		if (helpEntry) entries.push(helpEntry);
-
-		const docsDir = join(app.appDir, 'docs');
-		entries.push(...(await loadDocsFromDir(app.appId, docsDir, opts.logger)));
-	}
-
-	return entries;
+	return [...infraEntries, ...perApp.flat()];
 }
 
 export class AppKnowledgeBase implements AppKnowledgeBaseService {
@@ -120,15 +113,9 @@ export class AppKnowledgeBase implements AppKnowledgeBaseService {
 		this.logger.info({ count: entries.length, infra: infraCount }, 'App knowledge base indexed');
 	}
 
-	/**
-	 * Snapshot of indexed entries — the same truncated content the runtime
-	 * search uses. Defensive copy so callers cannot mutate the internal array.
-	 *
-	 * Consumed by `validateCommandDocumentation` at boot (Batch 1G) to assert
-	 * every catalog command appears in the indexed help content.
-	 */
-	public getEntries(): KnowledgeEntry[] {
-		return [...this.entries];
+	/** Snapshot of indexed entries — the truncated content the runtime search uses. */
+	public getEntries(): ReadonlyArray<KnowledgeEntry> {
+		return this.entries;
 	}
 
 	async search(query: string, userId?: string): Promise<KnowledgeEntry[]> {
