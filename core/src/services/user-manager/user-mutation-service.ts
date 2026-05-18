@@ -7,8 +7,11 @@
 
 import type { Logger } from 'pino';
 import type { RegisteredUser } from '../../types/users.js';
+import { withMultiFileLock } from '../../utils/file-mutex.js';
 import { syncUsersToConfig } from '../config/config-writer.js';
 import type { HouseholdService } from '../household/index.js';
+import { DISPLAY_NAME_LOCK_KEY } from '../invite/locks.js';
+import { normalizeDisplayName } from '../invite/normalize.js';
 import type { UserManager } from './index.js';
 
 export interface UserMutationServiceOptions {
@@ -48,18 +51,50 @@ export class UserMutationService {
 			);
 		}
 
-		this.userManager.addUser(user);
-		try {
-			await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
-		} catch (err) {
-			// Roll back in-memory state so the user doesn't appear registered after a restart
-			this.userManager.removeUser(user.id);
-			this.logger.error({ userId: user.id, err }, 'Config sync failed — registration rolled back');
-			throw err;
-		}
-		// Keep HouseholdService's in-memory userId→householdId map current
-		this.householdService?.syncUser(user);
-		this.logger.info({ userId: user.id, householdId: user.householdId ?? 'MISSING' }, 'User registered and config synced');
+		// Batch 2C: defensive uniqueness check.
+		// Shared DISPLAY_NAME_LOCK_KEY (with InviteService.createInvite) serializes
+		// the create-vs-register race against the same uniqueness frontier.
+		//
+		// We deliberately do NOT include `this.configPath` in this acquisition:
+		// `syncUsersToConfig` → `mutatePasYaml` already calls
+		// `withFileLock(configPath, ...)` internally (see config/pas-yaml-mutator.ts),
+		// and the in-process AsyncLock is non-reentrant — pairing them here would
+		// deadlock. The DISPLAY_NAME_LOCK_KEY alone is sufficient to serialize the
+		// name-check-vs-persist sequence against concurrent createInvite calls.
+		return withMultiFileLock([DISPLAY_NAME_LOCK_KEY], async () => {
+			const incomingNorm = normalizeDisplayName(user.name);
+			if (incomingNorm.length > 0) {
+				for (const existing of this.userManager.getAllUsers()) {
+					// Skip the same user id — re-registration of the same user (idempotent
+					// retry path) should not be blocked by its own name.
+					if (existing.id === user.id) continue;
+					if (normalizeDisplayName(existing.name) === incomingNorm) {
+						throw new Error(
+							`Display name '${user.name}' is already taken. Choose a different name.`,
+						);
+					}
+				}
+			}
+
+			this.userManager.addUser(user);
+			try {
+				await syncUsersToConfig(this.configPath, this.userManager.getAllUsers());
+			} catch (err) {
+				// Roll back in-memory state so the user doesn't appear registered after a restart
+				this.userManager.removeUser(user.id);
+				this.logger.error(
+					{ userId: user.id, err },
+					'Config sync failed — registration rolled back',
+				);
+				throw err;
+			}
+			// Keep HouseholdService's in-memory userId→householdId map current
+			this.householdService?.syncUser(user);
+			this.logger.info(
+				{ userId: user.id, householdId: user.householdId ?? 'MISSING' },
+				'User registered and config synced',
+			);
+		});
 	}
 
 	/**

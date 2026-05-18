@@ -64,6 +64,18 @@ export interface AuthOptions {
 	credentialService?: CredentialService;
 	userManager?: UserManager;
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>;
+	/**
+	 * Batch 2C — When `false`, POST /login skips the username → numeric-id
+	 * resolution path. compose-runtime sets this from
+	 * `scanForDuplicateNames({ users }).loginByNameAllowed` at boot. Defaults to
+	 * `true` when omitted (test fixtures that don't run the boot scan still get
+	 * the Batch 2A behavior).
+	 *
+	 * When `false`, numeric-id login keeps working — so the operator can always
+	 * reach the GUI to fix `pas.yaml` even if a duplicate name slipped past
+	 * uniqueness enforcement (e.g. a hand-edited config).
+	 */
+	loginByNameAllowed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +159,12 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 	/** Whether D5b-3 per-user auth is available (all deps present). */
 	const hasPerUserAuth = Boolean(credentialService && userManager && householdService);
+
+	// Batch 2C — captured at plugin registration. compose-runtime computes this
+	// from scanForDuplicateNames at boot; defaults to true so unconfigured tests
+	// keep the Batch 2A behavior. The flag flows from compose-runtime → AuthOptions
+	// → this closure, then guards the name-resolution branch in POST /login below.
+	const loginByNameAllowed = options.loginByNameAllowed ?? true;
 
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
@@ -264,11 +282,12 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		//    string ids (e.g. "admin-1") working, and a real submitted id can
 		//    never be a name (createInvite rejects numeric-only names).
 		//
-		//    `loginByNameAllowed` will be set by Batch 2C's boot-time duplicate-name
-		//    scan; until then, accept name lookups unconditionally. When the scan
-		//    detects a duplicate, it will flip this to false so login-by-name is
-		//    disabled until an operator resolves the duplicate.
-		const loginByNameAllowed = true; // Batch 2C wires this from a boot-time duplicate-name scan.
+		//    `loginByNameAllowed` is set at registerAuth time from
+		//    `AuthOptions.loginByNameAllowed`, which compose-runtime wires from the
+		//    boot-time duplicate-name scan (scanForDuplicateNames). When the scan
+		//    detects a duplicate, the flag is false here and name lookups are
+		//    skipped — numeric-id login still works so the operator can reach the
+		//    GUI and fix `pas.yaml`.
 		let resolvedUser: ReturnType<UserManager['getUser']> | undefined;
 		if (/^\d+$/.test(submitted)) {
 			resolvedUser = userManager!.getUser(submitted) ?? undefined;

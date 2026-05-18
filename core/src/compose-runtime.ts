@@ -122,6 +122,7 @@ import {
 	extractUserId,
 } from './services/telegram/message-adapter.js';
 import { UserManager } from './services/user-manager/index.js';
+import { scanForDuplicateNames } from './services/user-manager/scan-duplicate-names.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
@@ -491,6 +492,17 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
+	// Batch 2C: boot-time duplicate-name scan.
+	// Disables login-by-name when pre-existing duplicate display names are detected
+	// in pas.yaml (e.g. legacy installs, hand-edited config). Numeric-id login still
+	// works so the operator can reach the GUI and fix the YAML; after the fix and a
+	// restart the scan re-enables name login. Pure function — see
+	// services/user-manager/scan-duplicate-names.ts.
+	const duplicateNameScan = scanForDuplicateNames({
+		users: userManager.getAllUsers(),
+		logger: createChildLogger(logger, { service: 'duplicate-name-scan' }),
+	});
+
 	// 8b-cred. Credential Service
 	const credentialService = new CredentialService({
 		dataDir: config.dataDir,
@@ -528,6 +540,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		// name/id ambiguity at login time). Re-evaluated on every call so newly
 		// registered users are visible immediately.
 		knownUserIds: () => userManager.getAllUsers().map((u) => u.id),
+		// Batch 2C: createInvite ALSO rejects display names that case-insensitively
+		// collide with an existing user.name. Same closure pattern — re-evaluated
+		// per call so newly-registered users are visible immediately.
+		knownUsers: () => userManager.getAllUsers().map((u) => ({ id: u.id, name: u.name })),
 	});
 	await inviteService.cleanup();
 
@@ -1541,6 +1557,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
+		// Batch 2C — boot-scan result. When false, POST /login skips name resolution
+		// and only accepts numeric ids until the operator fixes pas.yaml + restarts.
+		loginByNameAllowed: duplicateNameScan.loginByNameAllowed,
 	});
 
 	// 13b. External Data API (optional)
