@@ -9,6 +9,7 @@ import {
 	assertNoMemoryContextBlock,
 } from './helpers/prompt-assertions.js';
 import {
+	APP_MESSAGE_GUIDANCE,
 	PHOTO_SUMMARY_GUIDANCE,
 	type PromptBuilderDeps,
 	buildAppAwareSystemPrompt,
@@ -1025,5 +1026,52 @@ describe('buildAppAwareSystemPrompt — command catalog injection', () => {
 		const deps = buildDeps({ getCommandCatalog: undefined });
 		const prompt = await runPrompt(deps);
 		expect(prompt).not.toContain('<reference-data type="commands">');
+	});
+});
+
+describe('PHOTO_SUMMARY_GUIDANCE rewrite (no retrieval promise)', () => {
+	it('PHOTO_SUMMARY_GUIDANCE no longer promises retrieval', async () => {
+		const deps = makeDeps();
+		const prompt = await buildSystemPrompt([], [], deps);
+		expect(prompt).toContain('photo summary'); // still emitted
+		expect(prompt).not.toContain('offer to retrieve'); // promise removed
+		expect(prompt).not.toContain('full data is on disk'); // promise removed
+	});
+
+	it('buildAppAwareSystemPrompt also drops the retrieval promise', async () => {
+		const deps = makeDeps();
+		const prompt = await buildAppAwareSystemPrompt('hi', 'user-0', [], [], deps);
+		expect(prompt).toContain('photo summary');
+		expect(prompt).not.toContain('offer to retrieve');
+		expect(prompt).not.toContain('full data is on disk');
+	});
+
+	it('PHOTO_SUMMARY_GUIDANCE constant matches new wording', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).toContain('Do not invent missing content');
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toContain('offer to retrieve');
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toContain('full data is on disk');
+	});
+});
+
+describe('APP_MESSAGE_GUIDANCE injection', () => {
+	it('basic system prompt includes APP_MESSAGE_GUIDANCE', async () => {
+		const deps = makeDeps();
+		const prompt = await buildSystemPrompt([], [], deps);
+		expect(prompt).toContain('[App: <app-id>] <kind>');
+		expect(prompt).toContain('NOT messages the user typed');
+		expect(prompt).not.toContain('offer to retrieve');
+	});
+
+	it('app-aware system prompt includes APP_MESSAGE_GUIDANCE', async () => {
+		const deps = makeDeps();
+		const prompt = await buildAppAwareSystemPrompt('hi', 'user-0', [], [], deps);
+		expect(prompt).toContain('[App: <app-id>] <kind>');
+		expect(prompt).toContain('NOT messages the user typed');
+	});
+
+	it('APP_MESSAGE_GUIDANCE constant describes proactive app notifications', () => {
+		expect(APP_MESSAGE_GUIDANCE).toContain('[App: <app-id>] <kind>');
+		expect(APP_MESSAGE_GUIDANCE).toContain('proactively');
+		expect(APP_MESSAGE_GUIDANCE).toContain('shared');
 	});
 });
