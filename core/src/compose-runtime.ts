@@ -96,6 +96,7 @@ import { N8nDispatcherImpl } from './services/n8n/index.js';
 import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
+import { getEffectiveCommandCatalog } from './services/router/command-catalog.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
 import {
 	createPendingSessionControlStore,
@@ -1133,6 +1134,22 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	const pendingSettingsConfirmStore = createPendingSettingsConfirmStore();
 
+	// Per-user effective command catalog binding (Batch 1B). Single binding,
+	// reused for prompt-injection here and (Batch 1B+) for /help rendering.
+	// `conversationServiceWired: true` is hardcoded — by the time this closure
+	// is invoked, the ConversationService instance below has been constructed
+	// (handlers only call it from request flow, never during composition).
+	const getCommandCatalogForUser = (userId: string) =>
+		getEffectiveCommandCatalog(userId, {
+			registry,
+			isUserAdmin: (uid) => Boolean(userManager.getUser(uid)?.isAdmin),
+			isAppEnabledForUser: (uid, appId) => {
+				const enabledApps = userManager.getUserApps(uid);
+				return appToggle.isEnabled(uid, appId, enabledApps);
+			},
+			conversationServiceWired: true,
+		});
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1162,6 +1179,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		appConfigResolver: settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
+		getCommandCatalog: getCommandCatalogForUser,
 	});
 	logger.info('ConversationService: initialized');
 
