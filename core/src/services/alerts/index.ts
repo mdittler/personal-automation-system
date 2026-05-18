@@ -383,6 +383,7 @@ export class AlertService {
 					router: this.router,
 					timezone: this.timezone,
 					householdService: this.householdService,
+					appOutboundBridge: this.appOutboundBridge,
 				},
 				{ data, alertName: alert.name },
 			);
