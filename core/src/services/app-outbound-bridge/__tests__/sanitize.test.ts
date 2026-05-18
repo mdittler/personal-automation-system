@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { sanitizeAppMessageField, MAX_FIELD_LEN } from '../sanitize.js';
+import { describe, expect, it } from 'vitest';
+import { MAX_FIELD_LEN, sanitizeAppMessageField } from '../sanitize.js';
 
 describe('sanitizeAppMessageField', () => {
 	it('returns empty string for null/undefined', () => {
@@ -29,6 +29,11 @@ describe('sanitizeAppMessageField', () => {
 	});
 	it('does NOT append ellipsis when input fits', () => {
 		expect(sanitizeAppMessageField('hello', 10)).toBe('hello');
+	});
+	it('does not truncate when input length equals maxLen exactly', () => {
+		const out = sanitizeAppMessageField('x'.repeat(10), 10);
+		expect(out).toBe('xxxxxxxxxx');
+		expect(out).toHaveLength(10);
 	});
 	it('exposes MAX_FIELD_LEN = 500', () => {
 		expect(MAX_FIELD_LEN).toBe(500);

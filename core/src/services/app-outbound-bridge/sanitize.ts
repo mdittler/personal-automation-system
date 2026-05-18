@@ -23,7 +23,7 @@ export function sanitizeAppMessageField(
 	// U+202A–U+202E: LRE through RLO
 	// U+2060–U+2069: word-joiner through bidi isolate controls (LRI/RLI/FSI/PDI)
 	// U+FEFF: BOM / ZWNBSP
-	s = s.replace(/[​-‏‪-‮⁠-⁩﻿]/g, '');
+	s = s.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '');
 	// Neutralize prompt-fence-like XML tags (including close tags)
 	s = s.replace(/<\/?(system|assistant|user|content|memory-context|memory-snapshot)[^>]*>/gi, '');
 	// Collapse whitespace
