@@ -279,6 +279,30 @@ describe.sequential('composeRuntime smoke', { timeout: SMOKE_TEST_TIMEOUT_MS }, 
 		expect(router.conversationService.constructor.name).toBe('ConversationService');
 	});
 
+	it('App-Message Bridge: late-bound proxy is bound and writes synthetic exchange', async () => {
+		const { buildSessionKey } = await import('../services/conversation-session/session-key.js');
+		const userId = 'user-0';
+		const householdId =
+			(runtime.services.householdService as any).getHouseholdForUser(userId) ?? undefined;
+		const sessionKey = buildSessionKey({
+			agent: 'main',
+			channel: 'telegram',
+			scope: 'dm',
+			chatId: userId,
+		});
+		await requestContext.run({ userId, householdId }, async () => {
+			await runtime.services.appOutboundBridge.recordOutboundMessage({
+				userId,
+				appId: 'food',
+				kind: 'compose-smoke',
+				body: 'compose-smoke-body',
+			});
+			const turns = await runtime.services.chatSessions.loadRecentTurns({ userId, sessionKey });
+			expect(turns.some((t) => t.content.includes('compose-smoke-body'))).toBe(true);
+			expect(turns.some((t) => t.content === '[App: food] compose-smoke')).toBe(true);
+		});
+	});
+
 	it('dispose() completes without throwing', async () => {
 		await expect(runtime.dispose()).resolves.not.toThrow();
 	});

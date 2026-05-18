@@ -29,6 +29,7 @@ import type { TelegramService } from '../../types/telegram.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter, stripFrontmatter } from '../../utils/frontmatter.js';
 import { readYamlFile, readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
+import type { AppOutboundBridge } from '../app-outbound-bridge/index.js';
 import { canFire, parseCooldown } from '../condition-evaluator/cooldown-tracker.js';
 import { evaluateDeterministic, evaluateFuzzy } from '../condition-evaluator/evaluator.js';
 import type { EvaluatorDeps } from '../condition-evaluator/evaluator.js';
@@ -75,6 +76,8 @@ export interface AlertServiceOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, space_id data_sources are resolved to household/collaboration paths. */
 	spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
+	/** Optional — when present, telegram_message and dispatch_message actions mirror into the user's chat transcript. Task 10 consumes this. */
+	appOutboundBridge?: AppOutboundBridge;
 }
 
 export class AlertService {
@@ -94,6 +97,7 @@ export class AlertService {
 	private router?: Router;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	private readonly spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
+	private readonly appOutboundBridge?: AppOutboundBridge;
 	private readonly eventSubscriptions = new Map<
 		string,
 		{ eventName: string; handler: EventHandler }
@@ -116,6 +120,7 @@ export class AlertService {
 		this.router = options.router;
 		this.householdService = options.householdService;
 		this.spaceService = options.spaceService;
+		this.appOutboundBridge = options.appOutboundBridge;
 	}
 
 	/**

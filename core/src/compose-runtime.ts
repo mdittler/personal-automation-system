@@ -34,6 +34,10 @@ import { HealthChecker } from './server/health-checks.js';
 import { createServer, registerHealthRoute, registerWebhookRoute } from './server/index.js';
 import { AlertService } from './services/alerts/index.js';
 import { AppKnowledgeBase } from './services/app-knowledge/index.js';
+import {
+	createAppOutboundBridge,
+	LateBoundAppOutboundBridge,
+} from './services/app-outbound-bridge/index.js';
 import { AppMetadataServiceImpl } from './services/app-metadata/index.js';
 import { AppRegistry, type ServiceFactory } from './services/app-registry/index.js';
 import { AppToggleStore } from './services/app-toggle/index.js';
@@ -214,6 +218,10 @@ export interface RuntimeServices {
 	};
 	settingsRegistry: SettingsRegistry;
 	settingsWriter: SettingsWriter;
+	/** Late-bound proxy; same instance handed to ReportService, AlertService, and per-app CoreServices factory. */
+	appOutboundBridge: LateBoundAppOutboundBridge;
+	/** Per-user chat transcript store; exposed so tests can verify bridge effects. */
+	chatSessions: ReturnType<typeof composeChatSessionStore>;
 	[key: string]: unknown;
 }
 
@@ -580,6 +588,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger.info({ url: config.n8n.dispatchUrl }, 'n8n dispatch mode enabled');
 	}
 
+	// 8c-pre. App-message bridge — late-bound proxy.
+	// Real impl needs chatSessions + chatbot AppConfigServiceImpl, both built later.
+	// Inject the proxy now so ReportService / AlertService / per-app CoreServices
+	// hold a stable reference; bind() is called after section 9c-pre once
+	// chatSessions and conversationAppConfig exist.
+	const appOutboundBridge = new LateBoundAppOutboundBridge();
+
 	// 8c. Report service
 	const reportService = new ReportService({
 		dataDir: config.dataDir,
@@ -595,6 +610,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		n8nDispatcher,
 		householdService,
 		spaceService,
+		appOutboundBridge,
 	});
 
 	// 8d. Alert service
@@ -612,6 +628,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		audioService: audio,
 		householdService,
 		spaceService,
+		appOutboundBridge,
 	});
 
 	// 8e. Rate limiters
@@ -838,6 +855,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 							return editServiceImpl.confirmEdit(proposal);
 						},
 					}
+				: undefined,
+			appOutboundBridge: declaredServices.has('app-outbound-bridge')
+				? appOutboundBridge
 				: undefined,
 			secrets,
 			config: appConfig,
@@ -1146,6 +1166,20 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'conversation-session' }),
 		index: chatTranscriptIndex,
 	});
+
+	// 9c-pre.bind. Bind the real AppOutboundBridge now that chatSessions and the
+	// chatbot AppConfigServiceImpl both exist. ReportService, AlertService, and
+	// every per-app CoreServices factory that ran during registry.loadAll() already
+	// hold a reference to the LateBoundAppOutboundBridge proxy — once bind() lands,
+	// their recordOutboundMessage() calls start flowing through to the real impl.
+	appOutboundBridge.bind(
+		createAppOutboundBridge({
+			chatSessions,
+			household: householdService,
+			conversationConfig: conversationAppConfig,
+			logger: createChildLogger(logger, { service: 'app-outbound-bridge' }),
+		}),
+	);
 
 	const titleService = new TitleService({
 		chatSessions,
@@ -1721,6 +1755,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsRegistry,
 		settingsWriter,
 		conversationRetrievalService,
+		appOutboundBridge,
+		chatSessions,
 	};
 
 	return {
