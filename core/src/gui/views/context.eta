@@ -4,7 +4,7 @@
 <p>Per-user knowledge base. The chatbot uses these entries to personalize responses.</p>
 
 <% for (const user of it.users) { %>
-  <h2><%= user.name %> <small>(<code><%= user.id %></code>)</small></h2>
+  <h2><%= user.name %> <small><code><%= user.id %></code></small></h2>
 
   <div hx-get="/gui/context/<%= user.id %>" hx-trigger="load" hx-swap="innerHTML">
     <p aria-busy="true">Loading entries...</p>

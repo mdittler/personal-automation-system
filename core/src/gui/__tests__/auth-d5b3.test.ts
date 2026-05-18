@@ -15,7 +15,12 @@
  * 8.  Cookie with issuedAt older than MAX_COOKIE_AGE_MS → redirect (contract #18).
  * 9.  Cookie for removed user → redirect.
  * 10. isAdmin revoked server-side → next request's request.user.isPlatformAdmin === false.
- * 11. Two users with same display name both log in with distinct Telegram IDs (contract #20).
+ * 11. Numeric-id login disambiguates users even when display names collide
+ *     (defensive guard: under the new uniqueness contract — see spec
+ *     2026-05-18-user-identity-and-invite-discoverability-design.md §2.3 —
+ *     duplicate names cannot be created via invite/registration, but a
+ *     hand-edited pas.yaml may still contain them and numeric-id login must
+ *     continue to identify each user correctly so the operator can fix it).
  * 12. request.user populated → requestContext.getCurrentHouseholdId() returns correct value.
  * 13. viewLocals.currentUser reaches every template (probe via a test-only debug route).
  * 14. Sliding session: a request 10h after login reissues cookie with fresh issuedAt.
@@ -209,7 +214,7 @@ describe('D5b-3 per-user auth', () => {
 
 		const loginRes = await loginWithPassword(app, '111', 'wrong-pw');
 		expect(loginRes.statusCode).toBe(401);
-		expect(loginRes.body).toContain('Invalid user ID or password');
+		expect(loginRes.body).toContain('Invalid login or password');
 
 		await app.close();
 	});
@@ -220,7 +225,7 @@ describe('D5b-3 per-user auth', () => {
 
 		const loginRes = await loginWithPassword(app, '999', 'whatever');
 		expect(loginRes.statusCode).toBe(401);
-		expect(loginRes.body).toContain('Invalid user ID or password');
+		expect(loginRes.body).toContain('Invalid login or password');
 
 		await app.close();
 	});
@@ -428,11 +433,16 @@ describe('D5b-3 per-user auth', () => {
 		await app2.close();
 	});
 
-	// ---------- Test 11: two users with same display name, distinct Telegram IDs ----------
-	it('11. two users with same display name login with distinct Telegram IDs (contract #20)', async () => {
+	// ---------- Test 11: numeric-id login disambiguates colliding display names ----------
+	// Defensive regression guard: the uniqueness contract (spec §2.3) prevents
+	// duplicate names from being created via the normal flows, but a
+	// hand-edited pas.yaml could still contain them. In that edge case the
+	// boot-time scan flips loginByNameAllowed=false; numeric-id login must
+	// still work so the operator can reach the GUI and fix the YAML.
+	it('11. numeric-id login distinguishes users even when display names collide (defensive)', async () => {
 		const users = [
 			{ id: '111', name: 'Alex', isAdmin: true },
-			{ id: '222', name: 'Alex', isAdmin: false }, // same display name, different id
+			{ id: '222', name: 'Alex', isAdmin: false }, // hand-edited duplicate; uniqueness normally prevents this
 		];
 		const userToHousehold = { '111': 'hh-1', '222': 'hh-1' };
 		const households = [{ id: 'hh-1', adminUserIds: ['111'] }];

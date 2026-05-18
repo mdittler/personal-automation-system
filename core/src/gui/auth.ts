@@ -1,29 +1,19 @@
 /**
- * GUI authentication — D5b-3.
+ * GUI authentication. Per-user password login with a JSON-signed cookie
+ * (`{ userId, sessionVersion, issuedAt, authMethod }`). The cookie is not
+ * the authority — every request rehydrates the actor from UserManager +
+ * HouseholdService + CredentialService so revocations are immediate.
  *
- * Replaces the single shared-token auth with per-user password login.
- * Cookie payload: { userId, sessionVersion, issuedAt, authMethod } — JSON, signed via Fastify's cookie secret.
- * The cookie is NOT the authority; every request rehydrates the actor from
- * UserManager + HouseholdService + CredentialService so revocations take effect
- * immediately on the next request.
+ * Login identifier: numeric Telegram id (digit-only input is id-only) OR
+ * globally-unique display name (case-insensitive, via `findByName`).
+ * Resolution happens BEFORE per-account rate-limiting so casing variants
+ * of a username share one counter. Generic "Invalid login or password."
+ * is returned for any failure (no enumeration).
  *
- * ## Backward compatibility
- *
- * When `credentialService`, `userManager`, and `householdService` are all absent
- * (legacy test/fallback mode), the old shared-HMAC-token behavior is preserved:
- * POST /login accepts the raw `GUI_AUTH_TOKEN` as a `token` field and sets
- * an HMAC cookie exactly as before. This keeps existing test coverage green.
- *
- * ## Legacy `GUI_AUTH_TOKEN` rule (when deps are present)
- *
- * The legacy token is still accepted when exactly ONE `isAdmin` user exists,
- * and that session maps to that admin with `authMethod: 'legacy-gui-token'`.
- * Multi-admin installs must use the username + password form.
- *
- * ## Login identifier
- *
- * Telegram user ID — unique, same as all existing data paths.
- * Display names are NOT unique and are NOT used for login.
+ * Backward compatibility: when `credentialService`/`userManager`/
+ * `householdService` are all absent, the legacy shared-HMAC-token path is
+ * preserved. When deps ARE present, the legacy `GUI_AUTH_TOKEN` is
+ * accepted only if exactly one `isAdmin` user exists.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -55,6 +45,10 @@ export interface AuthOptions {
 	credentialService?: CredentialService;
 	userManager?: UserManager;
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>;
+	/** `false` ⇒ name resolution disabled at login (see scanForDuplicateNames). */
+	loginByNameAllowed?: boolean;
+	/** Test-only: accept non-numeric ids via getUser. Auto-enabled in Vitest. */
+	allowNonNumericIdLoginForTests?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +132,16 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 	/** Whether D5b-3 per-user auth is available (all deps present). */
 	const hasPerUserAuth = Boolean(credentialService && userManager && householdService);
+
+	const loginByNameAllowed = options.loginByNameAllowed ?? true;
+	// Vitest fixtures use synthetic non-numeric ids (`admin-1`, …); auto-detect
+	// so they keep working without per-file plumbing. Hard-disabled when
+	// NODE_ENV=production so a stray VITEST env var on a production host can
+	// never weaken the contract.
+	const allowNonNumericIdLoginForTests =
+		process.env['NODE_ENV'] === 'production'
+			? false
+			: (options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true');
 
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
@@ -225,40 +229,75 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		}
 
 		// --- Password path ---
-		const userId = body?.['userId']?.trim() ?? '';
+		const submittedRaw = body?.['userId'] ?? '';
+		const submitted = submittedRaw.trim();
 		const password = body?.['password'] ?? '';
 
-		if (!userId || !password) {
-			return renderError('User ID and password are required.');
+		if (!submitted || !password) {
+			return renderError('Login and password are required.');
 		}
 
-		// Rate-limit by IP and by userId
+		// 1) IP limiter runs FIRST — unchanged from previous behavior. Throttles
+		//    bogus spray attempts even when no user resolves.
 		if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
 				error: 'Too many login attempts. Please try again later.',
 			});
 		}
-		if (loginRateLimiter && !loginRateLimiter.isAllowed(`user:${userId}`)) {
+
+		// 2) Resolve to canonical user BEFORE the per-account limiter, so casing
+		//    variants of a username share one counter (`user:${resolvedUser.id}`).
+		//    Numeric input is id-only; non-numeric input is name-only. Real
+		//    Telegram ids are always numeric and createInvite rejects numeric-only
+		//    names, so there is no ambiguous path. When the boot-time
+		//    `scanForDuplicateNames` detects a collision it flips
+		//    `loginByNameAllowed` false; numeric-id login still works so the
+		//    operator can reach the GUI to fix `pas.yaml`.
+		let resolvedUser: ReturnType<UserManager['getUser']> | undefined;
+		if (/^\d+$/.test(submitted)) {
+			resolvedUser = userManager!.getUser(submitted) ?? undefined;
+		} else {
+			if (loginByNameAllowed && typeof userManager!.findByName === 'function') {
+				resolvedUser = userManager!.findByName(submitted) ?? undefined;
+			}
+			if (!resolvedUser && allowNonNumericIdLoginForTests) {
+				resolvedUser = userManager!.getUser(submitted) ?? undefined;
+			}
+		}
+
+		// 3) Per-account limiter — keyed on the canonical id so casing variants
+		//    share a counter. When resolution fails, use a key that still binds to
+		//    the requesting IP and the lowercased submitted string, so brute-forcers
+		//    cannot bypass throttling via casing or by spraying many bogus names
+		//    from the same IP. (The IP limiter above already covered raw spray; this
+		//    keeps the per-account counter useful as a second line of defense.)
+		const userLimitKey = resolvedUser
+			? `user:${resolvedUser.id}`
+			: `unknown:${clientIp}:${submitted.toLocaleLowerCase()}`;
+		if (loginRateLimiter && !loginRateLimiter.isAllowed(userLimitKey)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
-				error: 'Too many login attempts for this user. Please try again later.',
+				error: 'Too many login attempts for this account. Please try again later.',
 			});
 		}
 
-		// Verify user exists — same error as wrong password to prevent enumeration
-		const user = userManager!.getUser(userId);
-		if (!user) {
-			return renderError('Invalid user ID or password.');
+		// 4) Generic error path — DO NOT reveal whether resolution or password
+		//    verification failed. Same wording either way ("Invalid user ID or
+		//    password.") to prevent username enumeration.
+		if (!resolvedUser) {
+			return renderError('Invalid login or password.');
 		}
 
-		const valid = await credentialService!.verifyPassword(userId, password);
+		const valid = await credentialService!.verifyPassword(resolvedUser.id, password);
 		if (!valid) {
-			return renderError('Invalid user ID or password.');
+			return renderError('Invalid login or password.');
 		}
 
-		const sessionVersion = await credentialService!.getSessionVersion(userId);
-		issueSessionCookie(reply, userId, sessionVersion, 'gui-password');
+		// 5) Session uses the canonical numeric id — cookie payload shape is unchanged
+		//    from D5b-3, so existing rehydration logic keeps working.
+		const sessionVersion = await credentialService!.getSessionVersion(resolvedUser.id);
+		issueSessionCookie(reply, resolvedUser.id, sessionVersion, 'gui-password');
 		return reply.redirect('/gui/');
 	});
 

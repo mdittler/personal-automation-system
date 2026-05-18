@@ -99,7 +99,7 @@ backup:
 5. **Set up GUI access + register users:**
    - Open the management GUI at `http://localhost:3000`
    - Log in with your `GUI_AUTH_TOKEN` (single-admin bridge — works until you set a password)
-   - Go to **Account → Change Password** to set a personal password, then log in with your Telegram user ID + password
+   - Go to **Account → Change Password** to set a personal password, then log in with your display name or Telegram user ID + password
    - Create an invite code under **Users → Invite Codes**
    - Share the code with new users — they send it to the bot (or `/start <code>`) and receive a guided welcome
    - New users set their own password at **Account → Change Password** after first contact
@@ -341,11 +341,11 @@ As of D5b (2026-04-15), the management GUI uses per-user password login and the 
 
 ### GUI Login
 
-The management GUI requires a Telegram user ID and password.
+The management GUI requires a display name (or Telegram user ID) plus a password. The Telegram user ID remains the canonical internal identifier; the display name is accepted at login as a friendlier alternative.
 
 1. **First login** — use the legacy `GUI_AUTH_TOKEN` (works when exactly one `is_admin: true` user is configured).
 2. **Set a password** — navigate to **Account → Change Password**, enter and confirm a new password. The GUI issues a fresh session cookie; the legacy token continues to work in parallel.
-3. **Subsequent logins** — enter your Telegram user ID and password on the login page.
+3. **Subsequent logins** — enter your display name (case-insensitive) or Telegram user ID, plus your password, on the login page.
 
 If `GUI_AUTH_TOKEN` login stops working, it means more than one admin user exists. All admins must log in with their personal passwords.
 

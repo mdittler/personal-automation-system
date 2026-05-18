@@ -103,6 +103,8 @@ export interface GuiOptions {
 	systemConfigWriter?: SystemConfigWriter;
 	/** Settings-C: Live SystemConfig reference for system-scope reads. */
 	systemConfig?: SystemConfig;
+	/** `false` ⇒ login-by-name disabled (see scanForDuplicateNames). Default `true`. */
+	loginByNameAllowed?: boolean;
 }
 
 /**
@@ -150,6 +152,7 @@ export async function registerGuiRoutes(
 					| Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>
 					| undefined,
 				loginRateLimiter,
+				loginByNameAllowed: options.loginByNameAllowed,
 			});
 
 			// CSRF protection (after auth, before content routes)

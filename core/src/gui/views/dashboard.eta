@@ -67,7 +67,6 @@
     <thead>
       <tr>
         <th>Name</th>
-        <th>ID</th>
         <th>Admin</th>
         <th>Enabled Apps</th>
       </tr>
@@ -75,8 +74,7 @@
     <tbody>
       <% for (const user of it.users) { %>
         <tr>
-          <td><%= user.name %></td>
-          <td><code><%= user.id %></code></td>
+          <td><%= user.name %> <small><code><%= user.id %></code></small></td>
           <td><%= user.isAdmin ? 'Yes' : 'No' %></td>
           <td><%= user.enabledApps.join(', ') %></td>
         </tr>

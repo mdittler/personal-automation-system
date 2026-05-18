@@ -10,6 +10,7 @@ import type { Logger } from 'pino';
 import type { SystemConfig } from '../../types/config.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import { normalizeDisplayName } from '../invite/normalize.js';
 
 export interface UserManagerOptions {
 	config: SystemConfig;
@@ -42,6 +43,20 @@ export class UserManager {
 	/** Look up a registered user by Telegram user ID. */
 	getUser(telegramId: string): RegisteredUser | null {
 		return this.userMap.get(telegramId) ?? null;
+	}
+
+	/**
+	 * Find a registered user by display name. Uses `normalizeDisplayName` so
+	 * login matches the uniqueness contract enforced by `createInvite` and
+	 * `scanForDuplicateNames`. Never matches against numeric ids.
+	 */
+	findByName(name: string): RegisteredUser | undefined {
+		const target = normalizeDisplayName(name);
+		if (!target) return undefined;
+		for (const user of this.users) {
+			if (normalizeDisplayName(user.name) === target) return user;
+		}
+		return undefined;
 	}
 
 	/** Check if a Telegram user ID is registered. */

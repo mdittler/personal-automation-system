@@ -171,11 +171,11 @@
         </div>
         <div id="ds-user-wrap-<%= i %>" class="grid">
           <label>
-            User ID
+            User
             <select name="ds_user_id_<%= i %>">
               <option value="">-- Select user --</option>
               <% if (it.users) { for (const user of it.users) { %>
-                <option value="<%= user.id %>" <%= ds.user_id === user.id ? 'selected' : '' %>><%= user.name %> (<%= user.id %>)</option>
+                <option value="<%= user.id %>" <%= ds.user_id === user.id ? 'selected' : '' %>><%= user.name %></option>
               <% } } %>
             </select>
           </label>
@@ -315,7 +315,7 @@ function buildAppSelect(name, selectedVal) {
 function buildUserSelect(name, selectedVal) {
   var html = '<select name="' + name + '"><option value="">-- Select user --</option>';
   PAS_USERS.forEach(function(u) {
-    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + ' (' + u.id + ')</option>';
+    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + '</option>';
   });
   html += '</select>';
   return html;
@@ -360,7 +360,7 @@ function addDataSource() {
   html += '<label style="display:inline-flex;align-items:center;gap:0.4rem"><input type="radio" name="ds_scope_' + i + '" value="space" onchange="toggleScope(' + i + ',\'ds\')" /> Space</label>';
   html += '</div></label>';
   html += '</div>';
-  html += '<div id="ds-user-wrap-' + i + '" class="grid"><label>User ID' + buildUserSelect('ds_user_id_' + i, '') + '</label></div>';
+  html += '<div id="ds-user-wrap-' + i + '" class="grid"><label>User' + buildUserSelect('ds_user_id_' + i, '') + '</label></div>';
   html += '<div id="ds-space-wrap-' + i + '" class="grid" style="display:none"><label>Space' + buildSpaceSelect('ds_space_id_' + i, '') + '</label></div>';
   html += '<div class="grid"><label>Path<input type="text" name="ds_path_' + i + '" required placeholder="daily-notes/" /><small>File or folder (reads most recent). Supports {today} and {yesterday}.</small></label></div>';
   html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'ds_path_' + i + '\',\'ds_app_id_' + i + '\',\'ds_scope_' + i + '\',\'ds_user_id_' + i + '\',\'ds_space_id_' + i + '\')">Browse files</button>';

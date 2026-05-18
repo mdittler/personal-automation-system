@@ -12,7 +12,12 @@ import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { AsyncLock } from '../../utils/async-lock.js';
+import { withMultiFileLock } from '../../utils/file-mutex.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
+import { normalizeDisplayName } from './normalize.js';
+
+/** Lock key shared with UserMutationService.registerUser so create-vs-register cannot interleave. */
+export const DISPLAY_NAME_LOCK_KEY = 'display-name:uniqueness';
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
@@ -40,16 +45,29 @@ export type InviteStore = Record<string, InviteCode>;
 export interface InviteServiceOptions {
 	dataDir: string;
 	logger: Logger;
+	/**
+	 * Returns the registered users. `createInvite` uses this to reject names
+	 * that collide with an existing `user.name` (case-insensitive) or match an
+	 * existing user's numeric id. Re-evaluated on every call so newly-registered
+	 * users are visible immediately. Pass `() => []` if no users exist yet.
+	 */
+	knownUsers: () => Iterable<{ id: string; name: string }>;
+	/** Clock injection. Defaults to `() => new Date()`. */
+	now?: () => Date;
 }
 
 export class InviteService {
 	private readonly invitesPath: string;
 	private readonly logger: Logger;
 	private readonly lock = new AsyncLock();
+	private readonly knownUsers: () => Iterable<{ id: string; name: string }>;
+	private readonly now: () => Date;
 
 	constructor(options: InviteServiceOptions) {
 		this.invitesPath = join(options.dataDir, 'system', 'invites.yaml');
 		this.logger = options.logger;
+		this.knownUsers = options.knownUsers;
+		this.now = options.now ?? (() => new Date());
 	}
 
 	/**
@@ -70,6 +88,30 @@ export class InviteService {
 			enabledApps?: string[];
 		},
 	): Promise<string> {
+		// Trim first so " 12345 " / " Sarah " normalize before any check.
+		const trimmedName = name.trim();
+		if (trimmedName.length === 0) {
+			throw new Error('Display name must not be blank.');
+		}
+		// Reject id-collisions before the all-digit guard so the operator sees
+		// the more specific message when they typed an id into the name field.
+		if (this.knownUsers) {
+			for (const u of this.knownUsers()) {
+				if (u.id === trimmedName) {
+					throw new Error(
+						`Display name '${trimmedName}' matches an existing user id; choose a different name.`,
+					);
+				}
+			}
+		}
+		// Reject all-digit names regardless of knownUsers — they would shadow
+		// the numeric Telegram id space.
+		if (/^\d+$/.test(trimmedName)) {
+			throw new Error(
+				`Display name must not be numeric-only (would collide with Telegram id space): ${JSON.stringify(name)}.`,
+			);
+		}
+
 		// Validate initialSpaces — each must be a valid SAFE_SEGMENT
 		const initialSpaces = opts?.initialSpaces ?? [];
 		for (const spaceId of initialSpaces) {
@@ -91,27 +133,65 @@ export class InviteService {
 			throw new Error(`Invalid householdId: ${JSON.stringify(householdId)}. Must match SAFE_SEGMENT pattern.`);
 		}
 
-		const code = randomBytes(4).toString('hex');
-		const now = new Date();
-		const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+		// locked uniqueness check + write.
+		// Shared lock key (DISPLAY_NAME_LOCK_KEY) is also held by registerUser, so
+		// concurrent create/register on the same name frontier are serialized.
+		// withMultiFileLock sorts keys canonically (see core/src/utils/file-mutex.ts)
+		// — deadlock-safe regardless of caller key order.
+		return withMultiFileLock([DISPLAY_NAME_LOCK_KEY, this.invitesPath], async () => {
+			const store = await this.readStore();
+			const norm = normalizeDisplayName(trimmedName);
+			const nowDate = this.now();
 
-		const store = await this.readStore();
-		store[code] = {
-			name,
-			createdBy,
-			createdAt: now.toISOString(),
-			expiresAt: expiresAt.toISOString(),
-			usedBy: null,
-			usedAt: null,
-			householdId,
-			role: opts?.role ?? 'member',
-			initialSpaces,
-			...(opts?.enabledApps !== undefined ? { enabledApps: opts.enabledApps } : {}),
-		};
+			// Reject collisions with existing user.name (case-insensitive).
+			if (this.knownUsers) {
+				for (const u of this.knownUsers()) {
+					if (normalizeDisplayName(u.name) === norm) {
+						throw new Error(
+							`Display name '${trimmedName}' is already taken. Choose a different name for the invite.`,
+						);
+					}
+				}
+			}
 
-		await this.writeStore(store);
-		this.logger.info({ code, name, createdBy, householdId }, 'Invite code created');
-		return code;
+			// Reject collisions with ACTIVE invites only:
+			//   - usedBy === null  (unredeemed)
+			//   - expiresAt > now  (unexpired)
+			// Used and expired invites do NOT block reuse — names are freed when an
+			// invite is consumed or lapses.
+			for (const [activeCode, invite] of Object.entries(store)) {
+				if (invite.usedBy !== null) continue;
+				if (new Date(invite.expiresAt) <= nowDate) continue;
+				if (normalizeDisplayName(invite.name) === norm) {
+					throw new Error(
+						`Display name '${trimmedName}' is already taken by an active invite (${activeCode}). Choose a different name.`,
+					);
+				}
+			}
+
+			const code = randomBytes(4).toString('hex');
+			const expiresAt = new Date(nowDate.getTime() + 24 * 60 * 60 * 1000);
+
+			store[code] = {
+				name: trimmedName,
+				createdBy,
+				createdAt: nowDate.toISOString(),
+				expiresAt: expiresAt.toISOString(),
+				usedBy: null,
+				usedAt: null,
+				householdId,
+				role: opts?.role ?? 'member',
+				initialSpaces,
+				...(opts?.enabledApps !== undefined ? { enabledApps: opts.enabledApps } : {}),
+			};
+
+			await this.writeStore(store);
+			this.logger.info(
+				{ code, name: trimmedName, createdBy, householdId },
+				'Invite code created',
+			);
+			return code;
+		});
 	}
 
 	/**
@@ -130,7 +210,7 @@ export class InviteService {
 			return { error: 'This invite code has already been used.' };
 		}
 
-		if (new Date(invite.expiresAt) <= new Date()) {
+		if (new Date(invite.expiresAt) <= this.now()) {
 			return {
 				error: 'This invite code has expired. Ask the admin for a new one.',
 			};
@@ -155,12 +235,12 @@ export class InviteService {
 				throw new Error(`Invite code already used: ${code}`);
 			}
 
-			if (new Date(invite.expiresAt) <= new Date()) {
+			if (new Date(invite.expiresAt) <= this.now()) {
 				throw new Error(`Invite code expired: ${code}`);
 			}
 
 			invite.usedBy = usedBy;
-			invite.usedAt = new Date().toISOString();
+			invite.usedAt = this.now().toISOString();
 
 			await this.writeStore(store);
 			this.logger.info({ code, usedBy }, 'Invite code redeemed');
@@ -192,14 +272,14 @@ export class InviteService {
 				return { error: 'This invite code has already been used.' };
 			}
 
-			if (new Date(invite.expiresAt) <= new Date()) {
+			if (new Date(invite.expiresAt) <= this.now()) {
 				return {
 					error: 'This invite code has expired. Ask the admin for a new one.',
 				};
 			}
 
 			invite.usedBy = usedBy;
-			invite.usedAt = new Date().toISOString();
+			invite.usedAt = this.now().toISOString();
 
 			await this.writeStore(store);
 			this.logger.info({ code, usedBy }, 'Invite code claimed and redeemed');
@@ -220,12 +300,13 @@ export class InviteService {
 	 */
 	async cleanup(): Promise<void> {
 		const store = await this.readStore();
-		const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+		const nowDate = this.now();
+		const cutoff = new Date(nowDate.getTime() - 7 * 24 * 60 * 60 * 1000);
 
 		let removed = 0;
 		for (const [code, invite] of Object.entries(store)) {
 			const isUsed = invite.usedBy !== null;
-			const isExpired = new Date(invite.expiresAt) <= new Date();
+			const isExpired = new Date(invite.expiresAt) <= nowDate;
 			const isOld = invite.usedAt !== null && new Date(invite.usedAt) <= cutoff;
 
 			if (isUsed && isExpired && isOld) {

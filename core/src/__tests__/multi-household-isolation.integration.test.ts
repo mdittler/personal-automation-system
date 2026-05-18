@@ -372,7 +372,7 @@ describe('Invite household binding', () => {
 	let inviteService: InviteService;
 
 	beforeAll(() => {
-		inviteService = new InviteService({ dataDir, logger: makeLogger() });
+		inviteService = new InviteService({ dataDir, logger: makeLogger(), knownUsers: () => [] });
 	});
 
 	it('10: invite created with householdId=hh-alpha registers redeemer into hh-alpha', async () => {

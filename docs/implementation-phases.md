@@ -3308,6 +3308,49 @@ The following Previous Priority blocks moved here from CLAUDE.md during slimming
 
 ---
 
+## Phase 2026-05-18 — User Identity Clarity (W2)
+
+**Status:** In review on `worktree-pas-w2-user-identity`
+**Depends on:** Phase 29 (User Management), Phase D5b-3 (per-user GUI auth)
+
+### Goal
+
+Replace the "numeric Telegram ID is the only login identifier and is shown everywhere" UX with display-name-or-id login plus operator-GUI surfaces that lead with `user.name`. The numeric ID remains the canonical internal identifier (filesystem paths, session cookies, Telegram delivery).
+
+### New Files
+
+- `core/src/services/invite/normalize.ts` — `normalizeDisplayName(raw)`: trim + locale-independent `toLowerCase`, shared by every uniqueness check.
+- `core/src/services/user-manager/scan-duplicate-names.ts` — boot-time duplicate-name detector. Returns `DuplicateNameGroup[]` (empty when clean); caller derives `loginByNameAllowed = duplicates.length === 0`.
+- `core/src/gui/__tests__/auth-test-helpers.ts` — shared `extractAuthCookie` + `getCookieUserId(value, secret)` for the GUI auth tests.
+- `core/src/gui/__tests__/auth-username-login.test.ts` — login-by-name + canonical-id cookie + production-rejects-non-numeric (11 tests)
+- `core/src/gui/__tests__/auth-login-by-name-disabled.test.ts` — duplicate-name boot scan disables login-by-name (5 tests)
+- `core/src/gui/__tests__/template-name-rendering.test.ts` — operator GUI surfaces `user.name`; numeric id only inside `<small>` (10 tests)
+- `core/src/services/invite/__tests__/invite-name-validation.test.ts` — name guards: numeric-only, blank, id-equality, padding (9 tests)
+- `core/src/services/invite/__tests__/invite-name-uniqueness.test.ts` — uniqueness, locking, active-only semantics, races (13 tests)
+- `core/src/services/user-manager/__tests__/register-user-uniqueness.test.ts` — defensive register-time check (6 tests)
+- `core/src/services/user-manager/__tests__/scan-duplicate-names.test.ts` — boot-scan detector (8 tests)
+
+### Changed Files
+
+- `core/src/gui/auth.ts` — resolve-then-rate-limit login; numeric-id-only OR display-name-only (no fallback); `loginByNameAllowed` flag from boot scan; production-hard `allowNonNumericIdLoginForTests` (refuses to enable under `NODE_ENV=production` regardless of `VITEST`); error copy "Login or password".
+- `core/src/gui/views/login.eta` — "Username or Telegram ID" label.
+- `core/src/services/user-manager/index.ts` — new `findByName(name)` using `normalizeDisplayName`.
+- `core/src/services/invite/index.ts` — name guards (blank / numeric-only / matches-existing-id); `withMultiFileLock([DISPLAY_NAME_LOCK_KEY, this.invitesPath], ...)` around create; required `knownUsers` callback; clock injection via `now?: () => Date`; `DISPLAY_NAME_LOCK_KEY` exported from this module (no separate locks.ts).
+- `core/src/services/user-manager/user-mutation-service.ts` — defensive uniqueness check inside `withMultiFileLock([DISPLAY_NAME_LOCK_KEY], ...)`; single-key lock because `syncUsersToConfig`'s inner `withFileLock(configPath, ...)` makes a paired acquisition deadlock (AsyncLock is non-reentrant).
+- `core/src/gui/views/{alert-edit,report-edit,data,config,context,dashboard}.eta`, `core/src/gui/views/account/index.eta`, `core/src/gui/views/users/reset-password.eta` — surface `user.name` as the primary label; numeric id only inside `<small>` on admin debug tables.
+- `core/src/gui/index.ts`, `core/src/compose-runtime.ts` — plumb `loginByNameAllowed` from boot scan through `GuiOptions` to `AuthOptions`.
+- `docs/USER_GUIDE.md`, `docs/DEPLOYMENT.md`, `docs/open-items.md`, `docs/urs.md` (REQ-USER-009/010/011/012) — operator-facing copy and traceability.
+
+### Codex Review
+
+Phase 2 went through two Codex review rounds. Round 1: 7 findings (non-numeric ID fallback weakens contract, stale "Telegram ID only" docs, account-page copy, locale-inconsistent normalization, "User ID" labels, open-items link drift, batch narration). Round 2 (on the simplify pass): 5 findings (optional `knownUsers` weakens service contract, URS/phase docs not updated, VITEST env sniff is a production runtime branch, `toLocaleLowerCase` is host-dependent, error copy still says "User ID"). All applied in-place.
+
+### Tests
+
+`@pas/core` 7388 → 7454 (+66 new tests across the 7 new test files plus extensions to `user-manager.test.ts`). Build + typecheck clean. URS: 4 new requirements (REQ-USER-009 through REQ-USER-012).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
