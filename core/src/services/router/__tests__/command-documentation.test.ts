@@ -22,20 +22,27 @@
  * particular live user has disabled. Per-user enablement filtering is
  * exercised separately by the prompt-injection tests (Batch 1B) and the
  * `/help` tests (Batch 1B+).
+ *
+ * Helper-sharing (Batch 1G): the doc-coverage check lives in
+ * `validate-command-documentation.ts` and is consumed by both this test
+ * and `compose-runtime.ts`'s boot-time soft warning. The two cannot
+ * diverge because they share the same `validateCommandDocumentation` call.
  */
 
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import type { Logger } from 'pino';
+import { describe, expect, it, vi } from 'vitest';
 import * as yaml from 'yaml';
+import type { KnowledgeEntry } from '../../../types/app-knowledge.js';
 import { loadIndexedEntries } from '../../app-knowledge/index.js';
 import type { RegisteredApp } from '../../app-registry/index.js';
+import type { CommandCatalogDeps } from '../command-catalog.js';
 import {
-	type CommandCatalogDeps,
-	type CommandCatalogEntry,
-	getEffectiveCommandCatalog,
-} from '../command-catalog.js';
+	logDocCoverageWarnings,
+	validateCommandDocumentation,
+} from '../validate-command-documentation.js';
 
 // ESM equivalent of `__dirname` (this project is ESM-only).
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -110,10 +117,10 @@ async function discoverApps(repoRoot: string): Promise<DiscoveredApp[]> {
  * - `registry.getAll()` wraps the discovered apps in a minimal
  *   `RegisteredApp`-shaped object; we never instantiate the real registry.
  * - `isAppEnabledForUser` is hardcoded to `true` (see file-level note).
- * - `isUserAdmin` is parameterized so the test can build both admin and
- *   non-admin catalogs and union them.
+ * - `isUserAdmin` is parameterized so the test (or the helper, when used
+ *   directly) can build both admin and non-admin catalogs and union them.
  */
-function buildLiveDeps(opts: { admin: boolean; apps: DiscoveredApp[] }): CommandCatalogDeps {
+function buildLiveDeps(opts: { apps: DiscoveredApp[] }): CommandCatalogDeps {
 	const registered: RegisteredApp[] = opts.apps.map(
 		(a) =>
 			({
@@ -125,57 +132,21 @@ function buildLiveDeps(opts: { admin: boolean; apps: DiscoveredApp[] }): Command
 	);
 	return {
 		registry: { getAll: () => registered },
-		isUserAdmin: () => opts.admin,
+		// Overridden by `validateCommandDocumentation` to build both admin and
+		// non-admin catalogs. The value here is irrelevant.
+		isUserAdmin: () => true,
 		isAppEnabledForUser: () => true,
 		conversationServiceWired: true,
 	};
 }
 
-/**
- * Concatenate every indexed entry's content. The doc-coverage check looks
- * for the literal `/cmdname` token anywhere in this joined string. Using
- * the exact `loadIndexedEntries` output guarantees the gate validates
- * against the truncated content the chatbot actually sees.
- */
-async function buildIndexedContent(apps: DiscoveredApp[]): Promise<string> {
+/** Load all indexed entries (production-truncated content) for live apps. */
+async function buildIndexedEntries(apps: DiscoveredApp[]): Promise<KnowledgeEntry[]> {
 	const indexedApps = apps.map((a) => ({ appId: a.appId, appDir: a.appDir }));
-	const entries = await loadIndexedEntries({
+	return loadIndexedEntries({
 		infraDocsDir: INFRA_DOCS,
 		apps: indexedApps,
 	});
-	return entries.map((e) => e.content).join('\n');
-}
-
-/**
- * Word-bounded, case-insensitive match for a literal slash command token.
- *
- * Why this shape: the chatbot's runtime search splits the user's question
- * into keywords, but the doc-coverage gate must verify that the literal
- * `/cmdname` slash form appears in the indexed content. Otherwise the
- * chatbot can't direct the user to the right command by name.
- *
- * Word-bounded matching is enforced by requiring a non-`[A-Za-z0-9_]`
- * character (or beginning/end of string) on each side of the match. This
- * prevents `/note` from matching the substring "footnote" — a real risk
- * given the truncated indexed content uses the same lowercased keyword
- * search downstream.
- */
-function tokenMatch(haystack: string, command: string): boolean {
-	const escaped = command.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-	const re = new RegExp(`(?:^|[^A-Za-z0-9_])${escaped}(?:$|[^A-Za-z0-9_])`, 'i');
-	return re.test(haystack);
-}
-
-/** Dedupe catalog entries by canonical command name, preserving first occurrence. */
-function dedupeByCanonical(entries: CommandCatalogEntry[]): CommandCatalogEntry[] {
-	const seen = new Set<string>();
-	const out: CommandCatalogEntry[] = [];
-	for (const entry of entries) {
-		if (seen.has(entry.canonical)) continue;
-		seen.add(entry.canonical);
-		out.push(entry);
-	}
-	return out;
 }
 
 /** Parse and validate the allowlist file. Returns the raw entry list. */
@@ -184,74 +155,54 @@ async function loadAllowlistRaw(path: string): Promise<AllowlistEntry[]> {
 	return raw?.entries ?? [];
 }
 
-/** Allowlist as a Set of accepted command tokens. */
-async function loadAllowlistTokens(path: string): Promise<Set<string>> {
-	const entries = await loadAllowlistRaw(path);
-	return new Set(entries.map((e) => e.command));
+/**
+ * Make a stub Pino logger that records `.warn` calls. Used by the Batch 1G
+ * integration test in this file to assert the warning shape without booting
+ * the runtime.
+ */
+function makeStubLogger(): { logger: Logger; warn: ReturnType<typeof vi.fn> } {
+	const warn = vi.fn();
+	// We only need warn for `logDocCoverageWarnings`; the other Logger methods
+	// are typed as no-ops.
+	const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
+	return { logger, warn };
 }
 
 describe('command documentation coverage', () => {
 	it('every catalog command (admin + non-admin) is documented', async () => {
 		const apps = await discoverApps(REPO_ROOT);
-		const indexed = await buildIndexedContent(apps);
-		const allowlist = await loadAllowlistTokens(ALLOWLIST_PATH);
-
-		const adminCatalog = await getEffectiveCommandCatalog(
-			'admin1',
-			buildLiveDeps({ admin: true, apps }),
-		);
-		const userCatalog = await getEffectiveCommandCatalog(
-			'user1',
-			buildLiveDeps({ admin: false, apps }),
-		);
-		const combined = dedupeByCanonical([...adminCatalog, ...userCatalog]);
-
-		const missing: string[] = [];
-		for (const entry of combined) {
-			const required = [entry.canonical, ...entry.aliases];
-			for (const token of required) {
-				if (tokenMatch(indexed, token)) continue;
-				if (allowlist.has(token)) continue;
-				missing.push(token);
-			}
-		}
-		expect(missing, `Undocumented commands: ${missing.join(', ')}`).toEqual([]);
+		const result = await validateCommandDocumentation({
+			indexedEntries: await buildIndexedEntries(apps),
+			catalogDeps: buildLiveDeps({ apps }),
+			allowlistPath: ALLOWLIST_PATH,
+		});
+		expect(
+			result.missing,
+			`Undocumented commands: ${result.missing.map((m) => m.command).join(', ')}`,
+		).toEqual([]);
 	});
 
 	it('allowlist contains no orphan entries', async () => {
 		const apps = await discoverApps(REPO_ROOT);
-		const allowlist = await loadAllowlistTokens(ALLOWLIST_PATH);
-		const adminCatalog = await getEffectiveCommandCatalog(
-			'admin1',
-			buildLiveDeps({ admin: true, apps }),
-		);
-		const userCatalog = await getEffectiveCommandCatalog(
-			'user1',
-			buildLiveDeps({ admin: false, apps }),
-		);
-
-		const known = new Set<string>();
-		for (const entry of [...adminCatalog, ...userCatalog]) {
-			known.add(entry.canonical);
-			for (const alias of entry.aliases) known.add(alias);
-		}
-
-		const orphans = [...allowlist].filter((cmd) => !known.has(cmd));
-		expect(orphans, `Orphan allowlist entries: ${orphans.join(', ')}`).toEqual([]);
+		const result = await validateCommandDocumentation({
+			indexedEntries: await buildIndexedEntries(apps),
+			catalogDeps: buildLiveDeps({ apps }),
+			allowlistPath: ALLOWLIST_PATH,
+		});
+		expect(
+			result.orphanAllowlist,
+			`Orphan allowlist entries: ${result.orphanAllowlist.join(', ')}`,
+		).toEqual([]);
 	});
 
 	it('allowlist contains no expired entries', async () => {
-		const entries = await loadAllowlistRaw(ALLOWLIST_PATH);
-		const now = new Date();
-		const expired = entries.filter((e) => {
-			if (!e.expires) return false;
-			const exp = new Date(e.expires);
-			return !Number.isNaN(exp.getTime()) && exp <= now;
+		const apps = await discoverApps(REPO_ROOT);
+		const result = await validateCommandDocumentation({
+			indexedEntries: await buildIndexedEntries(apps),
+			catalogDeps: buildLiveDeps({ apps }),
+			allowlistPath: ALLOWLIST_PATH,
 		});
-		expect(
-			expired.map((e) => e.command),
-			'Expired allowlist entries',
-		).toEqual([]);
+		expect(result.expiredAllowlist, 'Expired allowlist entries').toEqual([]);
 	});
 
 	it('rejects allowlist entries missing required fields', async () => {
@@ -270,5 +221,88 @@ describe('command documentation coverage', () => {
 				`owner required for ${entry.command}`,
 			).toBe(true);
 		}
+	});
+});
+
+describe('boot-time soft warning (Batch 1G integration)', () => {
+	/**
+	 * Fixture catalogDeps with a single registered app declaring known
+	 * commands. `isAppEnabledForUser` is forced true so the helper's
+	 * admin+non-admin union includes everything. The test asserts the
+	 * warning fires when a catalog command is missing from indexed content.
+	 */
+	function fixtureDeps(appCommands: Array<{ name: string; description?: string }>) {
+		const apps: DiscoveredApp[] = [
+			{
+				appId: 'fixture',
+				appDir: '/tmp/fixture-app',
+				manifest: {
+					app: { id: 'fixture' },
+					capabilities: { messages: { commands: appCommands } },
+				},
+			},
+		];
+		return buildLiveDeps({ apps });
+	}
+
+	// A throwaway allowlist path — fall-back loader returns [] when the file
+	// can't be read, so this exercises the "no allowlist available" path.
+	const ALLOWLIST_PATH_EMPTY = '/tmp/nonexistent-undocumented-commands.yaml';
+
+	it('logs a warning when a catalog command lacks docs at boot', async () => {
+		const { logger, warn } = makeStubLogger();
+		const result = await validateCommandDocumentation({
+			// Indexed content mentions no commands at all → every catalog token
+			// will be missing. We pick `/madeupcmd` for the assertion.
+			indexedEntries: [{ appId: 'fixture', source: 'fake.md', content: 'no command tokens here' }],
+			catalogDeps: fixtureDeps([{ name: '/madeupcmd', description: 'fixture only' }]),
+			allowlistPath: ALLOWLIST_PATH_EMPTY,
+		});
+		expect(result.missing.some((m) => m.command === '/madeupcmd')).toBe(true);
+
+		logDocCoverageWarnings(result, logger);
+
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ missing: expect.arrayContaining(['/madeupcmd']) }),
+			expect.stringContaining('Command documentation coverage gap'),
+		);
+	});
+
+	it('emits no warnings when coverage is clean', async () => {
+		const { logger, warn } = makeStubLogger();
+		// Indexed content mentions every command the catalog could produce:
+		// the four DIRECT_HANDLED entries, every builtin canonical and alias,
+		// and the fixture app command. Cheapest way to be exhaustive is to
+		// list them all explicitly.
+		const exhaustive = [
+			'/help',
+			'/start',
+			'/space',
+			'/invite',
+			'/ask',
+			'/edit',
+			'/notes',
+			'/newchat',
+			'/reset',
+			'/title',
+			'/recall',
+			'/refreshmemory',
+			'/refresh-memory',
+			'/flushmemory',
+			'/flush-memory',
+			'/settings',
+			'/fixturecmd',
+		].join(' ');
+		const result = await validateCommandDocumentation({
+			indexedEntries: [{ appId: 'fixture', source: 'fake.md', content: exhaustive }],
+			catalogDeps: fixtureDeps([{ name: '/fixturecmd', description: 'fixture only' }]),
+			allowlistPath: ALLOWLIST_PATH_EMPTY,
+		});
+		expect(result.missing).toEqual([]);
+		expect(result.orphanAllowlist).toEqual([]);
+		expect(result.expiredAllowlist).toEqual([]);
+
+		logDocCoverageWarnings(result, logger);
+		expect(warn).not.toHaveBeenCalled();
 	});
 });

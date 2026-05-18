@@ -97,6 +97,10 @@ import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wi
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
 import { getEffectiveCommandCatalog } from './services/router/command-catalog.js';
+import {
+	logDocCoverageWarnings,
+	validateCommandDocumentation,
+} from './services/router/validate-command-documentation.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
 import {
 	createPendingSessionControlStore,
@@ -914,6 +918,34 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
+
+	// 9c-i. Boot-time soft warning for command-documentation coverage (Batch 1G).
+	//
+	// Shares the same `validateCommandDocumentation` helper as the build-failing
+	// doc-coverage test (Batch 1F) so the two cannot diverge. This is a safety
+	// net for docs deleted post-merge or tests bypassed in CI — never refuses
+	// to boot. `isAppEnabledForUser: () => true` covers every command that
+	// could ever be dispatched, not what a specific live user has enabled.
+	try {
+		const docCoverage = await validateCommandDocumentation({
+			indexedEntries: appKnowledge.getEntries(),
+			catalogDeps: {
+				registry,
+				// `validateCommandDocumentation` overrides `isUserAdmin` internally
+				// to build both admin and non-admin catalogs. Value here is unused.
+				isUserAdmin: () => true,
+				isAppEnabledForUser: () => true,
+				conversationServiceWired: true,
+			},
+			allowlistPath: join(_repoRoot, 'core/config/undocumented-commands.yaml'),
+		});
+		logDocCoverageWarnings(docCoverage, logger);
+	} catch (err) {
+		logger.warn(
+			{ err },
+			'Command documentation coverage check failed to run; skipping boot-time warning',
+		);
+	}
 
 	// 9c-ii. File index — metadata-based graph over all data files
 	const appScopes = new Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>();

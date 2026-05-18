@@ -120,6 +120,17 @@ export class AppKnowledgeBase implements AppKnowledgeBaseService {
 		this.logger.info({ count: entries.length, infra: infraCount }, 'App knowledge base indexed');
 	}
 
+	/**
+	 * Snapshot of indexed entries — the same truncated content the runtime
+	 * search uses. Defensive copy so callers cannot mutate the internal array.
+	 *
+	 * Consumed by `validateCommandDocumentation` at boot (Batch 1G) to assert
+	 * every catalog command appears in the indexed help content.
+	 */
+	public getEntries(): KnowledgeEntry[] {
+		return [...this.entries];
+	}
+
 	async search(query: string, userId?: string): Promise<KnowledgeEntry[]> {
 		if (!query.trim()) return [];
 
