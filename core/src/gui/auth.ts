@@ -24,9 +24,10 @@
  *
  * Display names ARE globally unique and ARE accepted at login alongside
  * numeric Telegram ids. Uniqueness is enforced at invite creation and
- * registration time (see invite/index.ts createInvite); a boot-time
- * duplicate-name scan refuses login-by-name until duplicates are
- * resolved (see bootstrap/compose-runtime; landing in Batch 2C).
+ * registration time (see invite/index.ts createInvite and
+ * user-manager/index.ts registerUser); a boot-time duplicate-name scan
+ * (see compose-runtime.ts → scanForDuplicateNames) refuses login-by-name
+ * until duplicates are resolved by flipping loginByNameAllowed=false.
  *
  * Resolution is done BEFORE per-account rate-limiting so casing variants
  * of a username share the same per-account counter (no brute-force bypass
