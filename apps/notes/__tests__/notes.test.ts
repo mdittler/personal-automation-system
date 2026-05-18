@@ -113,7 +113,7 @@ describe('Notes App', () => {
 			});
 		});
 
-		describe('/notes', () => {
+		describe('/listnotes', () => {
 			it('should list recent notes', async () => {
 				const store = createMockScopedStore({
 					read: vi.fn().mockResolvedValue('- [10:00] First note\n- [11:00] Second note\n'),
@@ -122,7 +122,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('notes', [], ctx);
+				await notes.handleCommand!('listnotes', [], ctx);
 
 				const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
 				expect(sentMessage).toContain('First note');
@@ -138,7 +138,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('notes', [], ctx);
+				await notes.handleCommand!('listnotes', [], ctx);
 
 				expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'No notes today.');
 			});
@@ -156,7 +156,7 @@ describe('Notes App', () => {
 
 				const ctx = createTestMessageContext();
 				// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on notes module
-				await notes.handleCommand!('notes', [], ctx);
+				await notes.handleCommand!('listnotes', [], ctx);
 
 				const sentMessage = vi.mocked(services.telegram.send).mock.calls[0][1] as string;
 				expect(sentMessage).toContain('5/15');

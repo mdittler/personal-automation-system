@@ -22,6 +22,11 @@
  * re-exports it for backwards compatibility.
  */
 
+import { readdir } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { ManifestCommand } from '../../types/manifest.js';
+import { readYamlFile } from '../../utils/yaml.js';
 import type { RegisteredApp } from '../app-registry/index.js';
 
 /**
@@ -252,4 +257,124 @@ export async function getEffectiveCommandCatalog(
 	}
 
 	return out;
+}
+
+/**
+ * A single shadow collision between an app's manifest command and either a
+ * built-in command or another app's command. Surfaced by
+ * `detectCommandShadowing()` and consumed by the shadowing test (build gate)
+ * and the boot-time soft warning (Batch 1G).
+ */
+export interface ShadowCollision {
+	/** Full command name including the leading slash (e.g. `/notes`). */
+	command: string;
+	/**
+	 * `'builtin'` for collisions against `BUILTIN_COMMAND_NAMES` or the
+	 * directly-handled set. `` `app:${appId}` `` for the first app that declared
+	 * the same name when two apps collide.
+	 */
+	conflictWith: 'builtin' | `app:${string}`;
+	/** The app id that introduced the colliding declaration. */
+	detectedIn: string;
+}
+
+/**
+ * Optional overrides for `detectCommandShadowing`. When omitted, builtins are
+ * read from `BUILTIN_COMMAND_NAMES` + `DIRECT_HANDLED`, and manifests are
+ * loaded off-disk via `loadAllManifests()`.
+ *
+ * Drift guard: `commands[].name` (NOT `command`) — must match the production
+ * `ManifestCommand` shape from `core/src/types/manifest.ts`.
+ */
+export interface ShadowingOverrides {
+	builtins: Set<string>;
+	manifests: Array<{
+		appId: string;
+		commands: Array<Pick<ManifestCommand, 'name' | 'description'>>;
+	}>;
+}
+
+/**
+ * Detect command-name shadowing across the install: any app-manifest command
+ * that collides with a built-in (or directly-handled) command, or with another
+ * app's already-declared command, becomes a `ShadowCollision`.
+ *
+ * Called by the shadowing test (build gate). Returns `[]` when no collisions
+ * exist. Overrides exist purely for the test's negative cases.
+ */
+export async function detectCommandShadowing(
+	overrides?: ShadowingOverrides,
+): Promise<ShadowCollision[]> {
+	const builtins = overrides?.builtins ?? BUILTIN_COMMAND_NAMES;
+	const directHandled = new Set(DIRECT_HANDLED.map((d) => d.canonical));
+	const manifests = overrides?.manifests ?? (await loadAllManifests());
+
+	const collisions: ShadowCollision[] = [];
+	const firstSeen = new Map<string, string>(); // command -> appId
+
+	for (const manifest of manifests) {
+		for (const cmd of manifest.commands) {
+			if (builtins.has(cmd.name) || directHandled.has(cmd.name)) {
+				collisions.push({
+					command: cmd.name,
+					conflictWith: 'builtin',
+					detectedIn: manifest.appId,
+				});
+			} else if (firstSeen.has(cmd.name)) {
+				collisions.push({
+					command: cmd.name,
+					conflictWith: `app:${firstSeen.get(cmd.name)}`,
+					detectedIn: manifest.appId,
+				});
+			} else {
+				firstSeen.set(cmd.name, manifest.appId);
+			}
+		}
+	}
+
+	return collisions;
+}
+
+/**
+ * Load every `apps/*\/manifest.yaml` off disk and reduce each to the
+ * `{ appId, commands }` shape consumed by `detectCommandShadowing`.
+ *
+ * Path resolution is anchored to the repo root via `import.meta.url`
+ * (ESM-only). Returns `[]` if no `apps/` directory exists.
+ */
+async function loadAllManifests(): Promise<Array<{ appId: string; commands: ManifestCommand[] }>> {
+	const HERE = dirname(fileURLToPath(import.meta.url));
+	// command-catalog.ts lives at core/src/services/router/; the repo root is
+	// four levels up: router -> services -> src -> core -> <repo root>.
+	const repoRoot = resolve(HERE, '..', '..', '..', '..');
+	const appsDir = join(repoRoot, 'apps');
+
+	let entries: string[];
+	try {
+		entries = await readdir(appsDir);
+	} catch {
+		return [];
+	}
+
+	const out: Array<{ appId: string; commands: ManifestCommand[] }> = [];
+	for (const entry of entries) {
+		const manifestPath = join(appsDir, entry, 'manifest.yaml');
+		const manifest = await readYamlFile<AppManifestShape>(manifestPath);
+		if (!manifest) continue;
+		const appId = manifest.app?.id;
+		if (typeof appId !== 'string' || appId.length === 0) continue;
+		const commands = manifest.capabilities?.messages?.commands ?? [];
+		out.push({ appId, commands });
+	}
+	return out;
+}
+
+/**
+ * Local minimal manifest shape used by `loadAllManifests`. We deliberately do
+ * not import the full `AppManifest` type here — `readYamlFile` returns
+ * `unknown`-flavored data, and we only need the subset for collision detection.
+ */
+interface AppManifestShape {
+	app?: { id?: string };
+	capabilities?: { messages?: { commands?: ManifestCommand[] } };
 }

@@ -20,7 +20,7 @@ capabilities:
       - name: /note
         description: "Save a quick note"
         args: ["text"]
-      - name: /notes
+      - name: /listnotes
         description: "List recent notes"
       - name: /summarize
         description: "Summarize today's notes using AI"

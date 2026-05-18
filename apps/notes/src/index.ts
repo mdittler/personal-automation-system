@@ -53,7 +53,7 @@ export const handleCommand: AppModule['handleCommand'] = async (
 		case 'note':
 			await saveNote(args.join(' '), ctx);
 			break;
-		case 'notes':
+		case 'listnotes':
 			await listNotes(ctx);
 			break;
 		case 'summarize':
