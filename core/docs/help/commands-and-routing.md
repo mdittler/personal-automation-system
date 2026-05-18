@@ -23,3 +23,11 @@ When you send a photo, PAS classifies it by type and routes to the app that hand
 If no app matches your message, PAS has a configurable fallback:
 - **Chatbot mode** (default): A general-purpose AI assistant responds to your message
 - **Notes mode**: Your message is saved to daily notes for later review
+
+## See Also
+
+- `conversation-commands.md` — Built-in conversation commands (`/ask`, `/edit`, `/notes`, `/newchat`, `/title`, `/recall`, `/refreshmemory`, `/flushmemory`, `/settings`, `/start`, `/help`)
+- `inviting-users.md` — `/invite` flow and `/start <code>` redemption
+- `spaces.md` — `/space` commands for shared data spaces
+- `scheduling.md` — Scheduled and cron-based behavior
+- Per-app `help.md` files — e.g. `apps/food/help.md`, `apps/notes/help.md`, `apps/echo/help.md`
