@@ -27,6 +27,8 @@ function buildDeps(opts: Partial<CommandCatalogDeps> = {}): CommandCatalogDeps {
 		isUserAdmin: () => false,
 		isAppEnabledForUser: () => true,
 		conversationServiceWired: true,
+		spaceServiceWired: true,
+		inviteServiceWired: true,
 		...opts,
 	};
 }
@@ -107,9 +109,37 @@ describe('getEffectiveCommandCatalog', () => {
 		);
 		expect(catalog.find((c) => c.canonical === '/ask')).toBeUndefined();
 		expect(catalog.find((c) => c.canonical === '/edit')).toBeUndefined();
-		// /help and /space are not service-gated
+		// /help and /space are not conversation-gated
 		expect(catalog.find((c) => c.canonical === '/help')).toBeDefined();
 		expect(catalog.find((c) => c.canonical === '/space')).toBeDefined();
+	});
+
+	it('omits /space when SpaceService is not wired', async () => {
+		const catalog = await getEffectiveCommandCatalog(
+			'user1',
+			buildDeps({ spaceServiceWired: false }),
+		);
+		expect(catalog.find((c) => c.canonical === '/space')).toBeUndefined();
+		// /help still present
+		expect(catalog.find((c) => c.canonical === '/help')).toBeDefined();
+	});
+
+	it('omits /invite when InviteService is not wired (even for admins)', async () => {
+		const catalog = await getEffectiveCommandCatalog(
+			'admin1',
+			buildDeps({ isUserAdmin: () => true, inviteServiceWired: false }),
+		);
+		expect(catalog.find((c) => c.canonical === '/invite')).toBeUndefined();
+	});
+
+	it('shows /invite when InviteService is wired AND user is admin', async () => {
+		const catalog = await getEffectiveCommandCatalog(
+			'admin1',
+			buildDeps({ isUserAdmin: () => true, inviteServiceWired: true }),
+		);
+		const invite = catalog.find((c) => c.canonical === '/invite');
+		expect(invite).toBeDefined();
+		expect(invite!.adminOnly).toBe(true);
 	});
 
 	it('includes app-manifest commands for enabled apps and excludes them for disabled apps', async () => {

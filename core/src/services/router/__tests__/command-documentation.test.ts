@@ -41,17 +41,6 @@ interface DiscoveredApp {
 	};
 }
 
-interface AllowlistEntry {
-	command: string;
-	reason: string;
-	owner: string;
-	expires?: string;
-}
-
-interface AllowlistFile {
-	entries?: AllowlistEntry[];
-}
-
 async function discoverApps(repoRoot: string): Promise<DiscoveredApp[]> {
 	let entries: string[];
 	try {
@@ -87,6 +76,8 @@ function buildLiveDeps(opts: { apps: DiscoveredApp[] }): CommandCatalogDeps {
 		isUserAdmin: () => true,
 		isAppEnabledForUser: () => true,
 		conversationServiceWired: true,
+		spaceServiceWired: true,
+		inviteServiceWired: true,
 	};
 }
 
@@ -96,11 +87,6 @@ async function buildIndexedEntries(apps: DiscoveredApp[]): Promise<KnowledgeEntr
 		infraDocsDir: INFRA_DOCS,
 		apps: indexedApps,
 	});
-}
-
-async function loadAllowlistRaw(path: string): Promise<AllowlistEntry[]> {
-	const parsed = await readYamlFile<AllowlistFile>(path);
-	return parsed?.entries ?? [];
 }
 
 function makeStubLogger(): { logger: Logger; warn: ReturnType<typeof vi.fn> } {
@@ -146,22 +132,82 @@ describe('command documentation coverage', () => {
 		expect(result.expiredAllowlist, 'Expired allowlist entries').toEqual([]);
 	});
 
-	it('rejects allowlist entries missing required fields', async () => {
-		const entries = await loadAllowlistRaw(ALLOWLIST_PATH);
-		for (const entry of entries) {
-			expect(
-				typeof entry.command === 'string' && entry.command.length > 0,
-				'command required',
-			).toBe(true);
-			expect(
-				typeof entry.reason === 'string' && entry.reason.length > 0,
-				`reason required for ${entry.command}`,
-			).toBe(true);
-			expect(
-				typeof entry.owner === 'string' && entry.owner.length > 0,
-				`owner required for ${entry.command}`,
-			).toBe(true);
-		}
+	it('production allowlist has no malformed entries', async () => {
+		const apps = await discoverApps(REPO_ROOT);
+		const result = await validateCommandDocumentation({
+			indexedEntries: await buildIndexedEntries(apps),
+			catalogDeps: buildLiveDeps({ apps }),
+			allowlistPath: ALLOWLIST_PATH,
+		});
+		expect(
+			result.malformedAllowlist,
+			`Malformed allowlist entries: ${result.malformedAllowlist.join(', ')}`,
+		).toEqual([]);
+	});
+});
+
+describe('allowlist fixture validation', () => {
+	const FIXTURES_DIR = join(REPO_ROOT, 'core', 'src', 'services', 'router', '__tests__', 'fixtures');
+	const fixtureDeps = (): CommandCatalogDeps => ({
+		registry: { getAll: () => [] },
+		isUserAdmin: () => true,
+		isAppEnabledForUser: () => true,
+		conversationServiceWired: true,
+		spaceServiceWired: true,
+		inviteServiceWired: true,
+	});
+	// Indexed content that covers every catalog command so coverage gaps don't drown the signal.
+	const exhaustiveIndexed = [
+		{
+			appId: 'fixture',
+			source: 'fake.md',
+			content:
+				'/help /start /space /invite /ask /edit /notes /newchat /reset /title /recall ' +
+				'/refreshmemory /refresh-memory /flushmemory /flush-memory /settings',
+		},
+	];
+
+	it('flags entries missing required reason or owner fields', async () => {
+		const result = await validateCommandDocumentation({
+			indexedEntries: exhaustiveIndexed,
+			catalogDeps: fixtureDeps(),
+			allowlistPath: join(FIXTURES_DIR, 'allowlist-missing-fields.yaml'),
+		});
+		expect(result.malformedAllowlist).toEqual(
+			expect.arrayContaining(['/no-reason', '/no-owner', '<missing command>']),
+		);
+	});
+
+	it('flags orphan entries — command no longer in the catalog', async () => {
+		const result = await validateCommandDocumentation({
+			indexedEntries: exhaustiveIndexed,
+			catalogDeps: fixtureDeps(),
+			allowlistPath: join(FIXTURES_DIR, 'allowlist-orphan.yaml'),
+		});
+		expect(result.orphanAllowlist).toEqual(['/totally-gone']);
+		expect(result.malformedAllowlist).toEqual([]);
+	});
+
+	it('flags expired entries', async () => {
+		const result = await validateCommandDocumentation({
+			indexedEntries: exhaustiveIndexed,
+			catalogDeps: fixtureDeps(),
+			allowlistPath: join(FIXTURES_DIR, 'allowlist-expired.yaml'),
+		});
+		expect(result.expiredAllowlist).toEqual(['/help']);
+	});
+
+	it('treats malformed root (non-list entries:) as zero valid entries plus a malformed marker', async () => {
+		const result = await validateCommandDocumentation({
+			indexedEntries: [
+				{ appId: 'fixture', source: 'sparse.md', content: '/help /start' },
+			],
+			catalogDeps: fixtureDeps(),
+			allowlistPath: join(FIXTURES_DIR, 'allowlist-malformed-root.yaml'),
+		});
+		expect(result.malformedAllowlist).toEqual(['<root entries is not a list>']);
+		// Allowlist provides no valid entries → undocumented commands not whitelisted.
+		expect(result.missing.length).toBeGreaterThan(0);
 	});
 });
 

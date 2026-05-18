@@ -112,7 +112,7 @@ export interface HandleMessageDeps {
 	/**
 	 * Returns the per-user effective slash-command catalog. When supplied,
 	 * forwarded to `buildAppAwareSystemPrompt` for sandboxed catalog injection
-	 * (Batch 1B).
+	 *.
 	 */
 	getCommandCatalog?: (
 		userId: string,

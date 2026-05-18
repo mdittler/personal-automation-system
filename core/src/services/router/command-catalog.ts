@@ -56,15 +56,21 @@ export interface CommandCatalogEntry {
 
 /**
  * `registry.getAll()` is typed via the production `RegisteredApp` shape so
- * fixtures cannot drift from `ManifestCommand.name` (vs the historical
- * `command:` shape). When `conversationServiceWired` is false the catalog
- * omits service-gated builtins (/ask, /edit, ...).
+ * fixtures cannot drift from `ManifestCommand.name`.
+ *
+ * Service-availability flags gate directly-handled and service-gated commands
+ * so the catalog matches what the Router would actually dispatch:
+ *   - `conversationServiceWired` → /ask, /edit, /notes, /newchat, /title, /recall, /refreshmemory, /flushmemory, /settings
+ *   - `spaceServiceWired`        → /space
+ *   - `inviteServiceWired`       → /invite (admin-only on top of this)
  */
 export interface CommandCatalogDeps {
 	registry: { getAll(): RegisteredApp[] };
 	isUserAdmin(userId: string): boolean | Promise<boolean>;
 	isAppEnabledForUser(userId: string, appId: string): boolean | Promise<boolean>;
 	conversationServiceWired: boolean;
+	spaceServiceWired: boolean;
+	inviteServiceWired: boolean;
 }
 
 /** Canonical → alias tokens. Mirrors the alias arms in `router/index.ts::handleCommand`. */
@@ -94,36 +100,56 @@ function canonicalize(name: string): string {
  * are embedded in descriptions so they reach both rendered `/help` output
  * and the system-prompt injection.
  */
+type ServiceGate = 'always' | 'conversation' | 'space' | 'invite';
+
 const DIRECT_HANDLED: ReadonlyArray<{
 	canonical: string;
 	description: string;
 	adminOnly: boolean;
 	argSignature?: string;
+	requires: ServiceGate;
 }> = [
 	{
 		canonical: '/help',
 		description: 'List available commands',
 		adminOnly: false,
+		requires: 'always',
 	},
 	{
 		canonical: '/start',
 		description: 'Onboarding entry (also redeems invite codes)',
 		adminOnly: false,
 		argSignature: '[invite-code]',
+		requires: 'always',
 	},
 	{
 		canonical: '/space',
 		description:
 			'Manage shared data spaces; subcommands: /space, /space <id>, /space off, /space create <id> <name>',
 		adminOnly: false,
+		requires: 'space',
 	},
 	{
 		canonical: '/invite',
 		description: 'Generate an invite code for a new user',
 		adminOnly: true,
 		argSignature: '<name>',
+		requires: 'invite',
 	},
 ];
+
+function serviceAvailable(gate: ServiceGate, deps: CommandCatalogDeps): boolean {
+	switch (gate) {
+		case 'always':
+			return true;
+		case 'conversation':
+			return deps.conversationServiceWired;
+		case 'space':
+			return deps.spaceServiceWired;
+		case 'invite':
+			return deps.inviteServiceWired;
+	}
+}
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 	'/ask': 'Ask PAS a question (forces app-aware mode)',
@@ -150,6 +176,7 @@ export async function getEffectiveCommandCatalog(
 
 	for (const entry of DIRECT_HANDLED) {
 		if (entry.adminOnly && !isAdmin) continue;
+		if (!serviceAvailable(entry.requires, deps)) continue;
 		out.push({
 			canonical: entry.canonical,
 			aliases: [],

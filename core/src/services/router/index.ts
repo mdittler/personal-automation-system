@@ -1103,6 +1103,8 @@ export class Router {
 			isUserAdmin: () => Boolean(user?.isAdmin),
 			isAppEnabledForUser: (uid, appId) => this.isAppEnabled(uid, appId, enabledApps),
 			conversationServiceWired: Boolean(this.conversationService),
+			spaceServiceWired: Boolean(this.spaceService),
+			inviteServiceWired: Boolean(this.inviteService),
 		});
 	}
 

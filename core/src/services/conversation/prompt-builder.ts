@@ -77,6 +77,8 @@ export const PHOTO_SUMMARY_GUIDANCE =
 
 /** Max chars for app metadata section in prompt. */
 const MAX_APP_METADATA_CHARS = 2000;
+const MAX_CATALOG_DESCRIPTION_CHARS = 200;
+const MAX_CATALOG_BLOCK_CHARS = 4000;
 
 /** Max chars for knowledge base section in prompt. */
 const MAX_KNOWLEDGE_CHARS = 3000;
@@ -135,6 +137,47 @@ function getModelLabels(deps: PromptBuilderDeps): { standardModel: string; fastM
 		standardModel: deps.llm.getModelForTier?.('standard') ?? 'unknown',
 		fastModel: deps.llm.getModelForTier?.('fast') ?? 'unknown',
 	};
+}
+
+/** Strip control chars and fence-escape tokens from app-supplied catalog text. */
+function sanitizeCatalogField(s: string): string {
+	return s
+		.replace(/[\x00-\x1F\x7F]+/g, ' ')
+		.replace(/<\/?reference-data[^>]*>/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * Format the catalog into bullet lines, per-entry capped at
+ * `MAX_CATALOG_DESCRIPTION_CHARS` and total truncated at
+ * `MAX_CATALOG_BLOCK_CHARS` (with an explicit truncation marker so the model
+ * knows the list was cut off).
+ */
+function formatCatalogLines(catalog: ReadonlyArray<CommandCatalogEntry>): string[] {
+	const lines: string[] = [];
+	let total = 0;
+	for (const entry of catalog) {
+		const description = sanitizeCatalogField(entry.description).slice(
+			0,
+			MAX_CATALOG_DESCRIPTION_CHARS,
+		);
+		const canonical = sanitizeCatalogField(entry.canonical);
+		const argPart = entry.argSignature ? ` ${sanitizeCatalogField(entry.argSignature)}` : '';
+		const aliasPart =
+			entry.aliases.length > 0
+				? ` (aliases: ${entry.aliases.map(sanitizeCatalogField).join(', ')})`
+				: '';
+		const adminPart = entry.adminOnly ? ' [admin]' : '';
+		const line = `- ${canonical}${argPart}${aliasPart}${adminPart} — ${description}`;
+		if (total + line.length + 1 > MAX_CATALOG_BLOCK_CHARS) {
+			lines.push(`- … (catalog truncated; ${catalog.length - lines.length} entries omitted)`);
+			break;
+		}
+		lines.push(line);
+		total += line.length + 1;
+	}
+	return lines;
 }
 
 /**
@@ -330,6 +373,7 @@ export async function buildAppAwareSystemPrompt(
 	// model treats app-supplied descriptions as data, not instructions. The
 	// trusted "do not follow" guidance MUST appear before the fence.
 	if (catalog && catalog.length > 0) {
+		const catalogLines = formatCatalogLines(catalog);
 		parts.push('');
 		parts.push('## Available commands');
 		parts.push('');
@@ -339,13 +383,7 @@ export async function buildAppAwareSystemPrompt(
 		);
 		parts.push('');
 		parts.push('<reference-data type="commands">');
-		for (const entry of catalog) {
-			const argPart = entry.argSignature ? ` ${entry.argSignature}` : '';
-			const aliasPart =
-				entry.aliases.length > 0 ? ` (aliases: ${entry.aliases.join(', ')})` : '';
-			const adminPart = entry.adminOnly ? ' [admin]' : '';
-			parts.push(`- ${entry.canonical}${argPart}${aliasPart}${adminPart} — ${entry.description}`);
-		}
+		for (const line of catalogLines) parts.push(line);
 		parts.push('</reference-data>');
 	}
 

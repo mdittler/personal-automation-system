@@ -919,9 +919,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
 
-	// Soft warning if any router command lacks indexed help docs — the chatbot
-	// KB would not surface it. `isAppEnabledForUser: () => true` covers every
-	// command that could ever be dispatched, not what one user has enabled.
+	// Soft warning if any router command lacks indexed help docs. All service
+	// flags are forced true here so coverage assertions cover every command that
+	// could ever be dispatched, not what this particular composition happens to
+	// have wired.
 	const docCoverage = await validateCommandDocumentation({
 		indexedEntries: appKnowledge.getEntries(),
 		catalogDeps: {
@@ -929,6 +930,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 			isUserAdmin: () => true,
 			isAppEnabledForUser: () => true,
 			conversationServiceWired: true,
+			spaceServiceWired: true,
+			inviteServiceWired: true,
 		},
 		allowlistPath: join(_repoRoot, 'core/config/undocumented-commands.yaml'),
 	});
@@ -1153,14 +1156,17 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	const pendingSettingsConfirmStore = createPendingSettingsConfirmStore();
 
-	// `conversationServiceWired: true` is safe: this closure runs only at
-	// request time, by which point the ConversationService below exists.
+	// Service-wiring flags reflect the actual composition at request time.
+	// ConversationService is constructed just below; spaceService and
+	// inviteService are wired earlier in compose-runtime.
 	const getCommandCatalogForUser = (userId: string) =>
 		getEffectiveCommandCatalog(userId, {
 			registry,
 			isUserAdmin: (uid) => Boolean(userManager.getUser(uid)?.isAdmin),
 			isAppEnabledForUser: (uid, appId) => userManager.isAppEnabled(uid, appId),
 			conversationServiceWired: true,
+			spaceServiceWired: Boolean(spaceService),
+			inviteServiceWired: Boolean(inviteService),
 		});
 
 	const conversationService = new ConversationService({
@@ -1247,9 +1253,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		sessionControlClassifier: detectSessionControl,
 		pendingSessionControl,
 		sessionControlLogger,
-		// Batch 1B+: same per-user catalog binding the ConversationService uses
-		// for system-prompt injection. Reusing the closure (rather than building
-		// a second one) keeps /help and the prompt fence from drifting.
+		// Same binding the ConversationService uses for prompt injection so
+		// /help and the prompt fence cannot drift.
 		getCommandCatalog: getCommandCatalogForUser,
 		idleResetDeps: {
 			idleMinutes: config.chat?.sessions?.auto_reset_idle_minutes ?? null,

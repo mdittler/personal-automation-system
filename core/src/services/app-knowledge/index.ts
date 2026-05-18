@@ -35,7 +35,7 @@ export interface AppKnowledgeBaseOptions {
  * Inputs for the module-level `loadIndexedEntries` helper. Mirrors the slice of
  * `AppKnowledgeBaseOptions` required to produce the truncated knowledge
  * entries the chatbot's runtime search sees. Extracted from
- * `AppKnowledgeBase.init()` so the doc-coverage gate (Batch 1F) and any
+ * `AppKnowledgeBase.init()` so the doc-coverage gate and any
  * future caller can exercise exactly the same indexing pipeline without
  * instantiating the full service.
  */

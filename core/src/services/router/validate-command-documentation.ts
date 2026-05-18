@@ -27,9 +27,14 @@ export interface DocCoverageResult {
 	orphanAllowlist: string[];
 	/** Allowlist entries with `expires` in the past. */
 	expiredAllowlist: string[];
+	/**
+	 * Allowlist entries that failed schema validation (missing required fields,
+	 * malformed YAML, etc.). Reported with whichever rough identifier was
+	 * recoverable (`command` if present, else a fallback marker).
+	 */
+	malformedAllowlist: string[];
 }
 
-/** Schema for the YAML allowlist. Loader validates required fields lazily. */
 interface AllowlistEntry {
 	command: string;
 	reason: string;
@@ -38,7 +43,12 @@ interface AllowlistEntry {
 }
 
 interface AllowlistFile {
-	entries?: AllowlistEntry[];
+	entries?: unknown;
+}
+
+interface LoadedAllowlist {
+	valid: AllowlistEntry[];
+	malformed: string[];
 }
 
 /** Word-bounded, case-insensitive slash-token match — prevents `/note` matching `footnote`. */
@@ -48,9 +58,42 @@ function tokenMatch(haystack: string, command: string): boolean {
 	return re.test(haystack);
 }
 
-async function loadAllowlistRaw(path: string): Promise<AllowlistEntry[]> {
+function nonEmptyString(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0;
+}
+
+async function loadAllowlist(path: string): Promise<LoadedAllowlist> {
 	const parsed = await readYamlFile<AllowlistFile>(path);
-	return parsed?.entries ?? [];
+	const rawEntries = parsed?.entries;
+	if (rawEntries === undefined || rawEntries === null) {
+		return { valid: [], malformed: [] };
+	}
+	if (!Array.isArray(rawEntries)) {
+		return { valid: [], malformed: ['<root entries is not a list>'] };
+	}
+	const valid: AllowlistEntry[] = [];
+	const malformed: string[] = [];
+	for (const entry of rawEntries) {
+		if (entry === null || typeof entry !== 'object') {
+			malformed.push('<non-object entry>');
+			continue;
+		}
+		const e = entry as Record<string, unknown>;
+		const command = e.command;
+		const reason = e.reason;
+		const owner = e.owner;
+		const expires = e.expires;
+		if (!nonEmptyString(command) || !nonEmptyString(reason) || !nonEmptyString(owner)) {
+			malformed.push(nonEmptyString(command) ? command : '<missing command>');
+			continue;
+		}
+		if (expires !== undefined && !nonEmptyString(expires)) {
+			malformed.push(command);
+			continue;
+		}
+		valid.push({ command, reason, owner, expires: expires as string | undefined });
+	}
+	return { valid, malformed };
 }
 
 /**
@@ -77,14 +120,14 @@ export async function validateCommandDocumentation(
 
 	// Build the admin view (every admin-gated command included) and use it for
 	// coverage — `adminOnly` does not affect whether docs are required.
-	const [combined, allowlistRaw] = await Promise.all([
+	const [combined, allowlist] = await Promise.all([
 		getEffectiveCommandCatalog(bootUserId, {
 			...opts.catalogDeps,
 			isUserAdmin: () => true,
 		}),
-		loadAllowlistRaw(opts.allowlistPath),
+		loadAllowlist(opts.allowlistPath),
 	]);
-	const allowlistTokens = new Set(allowlistRaw.map((e) => e.command));
+	const allowlistTokens = new Set(allowlist.valid.map((e) => e.command));
 
 	const missing: MissingCommandRecord[] = [];
 	const known = new Set<string>();
@@ -104,7 +147,7 @@ export async function validateCommandDocumentation(
 	const orphanAllowlist = [...allowlistTokens].filter((cmd) => !known.has(cmd));
 
 	const now = new Date();
-	const expiredAllowlist = allowlistRaw
+	const expiredAllowlist = allowlist.valid
 		.filter((e) => {
 			if (!e.expires) return false;
 			const exp = new Date(e.expires);
@@ -112,7 +155,7 @@ export async function validateCommandDocumentation(
 		})
 		.map((e) => e.command);
 
-	return { missing, orphanAllowlist, expiredAllowlist };
+	return { missing, orphanAllowlist, expiredAllowlist, malformedAllowlist: allowlist.malformed };
 }
 
 /**
@@ -139,6 +182,12 @@ export function logDocCoverageWarnings(result: DocCoverageResult, logger: Logger
 		logger.warn(
 			{ expired: result.expiredAllowlist },
 			'undocumented-commands.yaml entries have expired',
+		);
+	}
+	if (result.malformedAllowlist.length > 0) {
+		logger.warn(
+			{ malformed: result.malformedAllowlist },
+			'undocumented-commands.yaml entries failed schema validation',
 		);
 	}
 }

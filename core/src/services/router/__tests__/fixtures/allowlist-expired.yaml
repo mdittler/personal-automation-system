@@ -1,0 +1,5 @@
+entries:
+  - command: /help
+    reason: stale exception that should have been removed by now
+    owner: test-fixture
+    expires: "2020-01-01"

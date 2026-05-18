@@ -1,0 +1,7 @@
+entries:
+  - command: /no-reason
+    owner: test-fixture
+  - command: /no-owner
+    reason: forgot to add the owner
+  - reason: completely missing command
+    owner: test-fixture

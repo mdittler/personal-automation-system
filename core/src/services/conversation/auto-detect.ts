@@ -12,13 +12,18 @@
 
 import type { Logger } from 'pino';
 import type { AppConfigService } from '../../types/config.js';
+import { CONVERSATION_USER_CONFIG } from './manifest.js';
 
-/**
- * Must mirror `CONVERSATION_USER_CONFIG.auto_detect_pas.default` in
- * `core/src/services/conversation/manifest.ts`. If the manifest default
- * changes, update this constant.
- */
-const MANIFEST_DEFAULT = true;
+/** Derive the manifest default so this constant can never drift from the source of truth. */
+const MANIFEST_DEFAULT: boolean = (() => {
+	const entry = CONVERSATION_USER_CONFIG.find((e) => e.key === 'auto_detect_pas');
+	if (!entry || typeof entry.default !== 'boolean') {
+		throw new Error(
+			'auto_detect_pas manifest entry missing or has non-boolean default — refusing to silently fall back',
+		);
+	}
+	return entry.default;
+})();
 
 export async function getAutoDetectSetting(
 	userId: string,
