@@ -76,7 +76,110 @@ const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
  * (tests and downstream consumers that imported it from `router/index.ts`).
  */
 export { BUILTIN_COMMAND_NAMES } from './command-catalog.js';
-import { BUILTIN_COMMAND_NAMES } from './command-catalog.js';
+import {
+	BUILTIN_COMMAND_NAMES,
+	type CommandCatalogEntry,
+	getEffectiveCommandCatalog,
+} from './command-catalog.js';
+
+// ---------------------------------------------------------------------------
+// /help rendering helpers (Batch 1B+)
+// ---------------------------------------------------------------------------
+// `sendHelp` walks `getEffectiveCommandCatalog`; these helpers turn the flat
+// catalog into the grouped Markdown output. Group titles and the alias-suffix
+// shape match the prior hand-rolled implementation so existing assertions
+// continue to hold.
+
+/**
+ * Grouped catalog buckets the help renderer iterates in order. The `app` map
+ * preserves registry iteration order so app sections appear in install order.
+ */
+interface HelpGroups {
+	spaces: CommandCatalogEntry[];
+	admin: CommandCatalogEntry[];
+	conversation: CommandCatalogEntry[];
+	app: Map<string, CommandCatalogEntry[]>;
+}
+
+/**
+ * Split a flat catalog into the four groups the help renderer emits.
+ *
+ * Skips `/help` and `/start` from the rendered output (mirrors legacy
+ * behavior — Telegram's own command menu already exposes /start, and
+ * /help has nothing to say about itself).
+ */
+function groupCatalogForHelp(catalog: CommandCatalogEntry[]): HelpGroups {
+	const groups: HelpGroups = {
+		spaces: [],
+		admin: [],
+		conversation: [],
+		app: new Map(),
+	};
+	// Track canonicals already emitted by the conversation (builtin) section so
+	// that an app manifest declaring the same command (e.g. legacy chatbot
+	// manifest with `/ask`, `/newchat`, `/title`) doesn't duplicate them in
+	// the rendered help. The legacy hand-rolled `sendHelp` did this via a
+	// `BUILTIN_COMMAND_NAMES` filter on the chatbot manifest entries.
+	const conversationCanonicals = new Set<string>();
+	for (const entry of catalog) {
+		if (entry.source === 'direct') {
+			if (entry.canonical === '/help' || entry.canonical === '/start') continue;
+			if (entry.canonical === '/space') {
+				groups.spaces.push(entry);
+				continue;
+			}
+			if (entry.adminOnly) {
+				groups.admin.push(entry);
+				continue;
+			}
+			// Any future non-admin direct command lands here — fall through to
+			// the conversation bucket so it still appears.
+			groups.conversation.push(entry);
+			conversationCanonicals.add(entry.canonical);
+			continue;
+		}
+		if (entry.source === 'builtin') {
+			groups.conversation.push(entry);
+			conversationCanonicals.add(entry.canonical);
+			for (const alias of entry.aliases) conversationCanonicals.add(alias);
+			continue;
+		}
+		// source === 'app' — suppress entries that duplicate a built-in
+		// (e.g. legacy chatbot manifest re-declaring /ask, /newchat, /title).
+		if (
+			conversationCanonicals.has(entry.canonical) ||
+			BUILTIN_COMMAND_NAMES.has(entry.canonical)
+		) {
+			continue;
+		}
+		const appId = entry.appId ?? '__unknown';
+		const bucket = groups.app.get(appId);
+		if (bucket) bucket.push(entry);
+		else groups.app.set(appId, [entry]);
+	}
+	return groups;
+}
+
+/**
+ * Render a single catalog entry as a help line body.
+ *
+ * Telegram legacy-Markdown control characters (`*_`[]()`) in catalog-supplied
+ * strings are escaped via `escapeMarkdown` so a description like
+ * `Read or write (subcommand)` renders literally rather than triggering
+ * "can't parse entities" errors. Aliases are rendered inline so a user sees
+ * both /newchat and /reset on the /newchat line.
+ */
+function formatHelpLine(entry: CommandCatalogEntry): string {
+	const left =
+		entry.argSignature && entry.argSignature.length > 0
+			? `${escapeMarkdown(entry.canonical)} ${escapeMarkdown(entry.argSignature)}`
+			: escapeMarkdown(entry.canonical);
+	const aliasSuffix =
+		entry.aliases.length > 0
+			? ` ${escapeMarkdown(`(alias: ${entry.aliases.join(', ')})`)}`
+			: '';
+	return `${left} — ${escapeMarkdown(entry.description)}${aliasSuffix}`;
+}
 
 // ---------------------------------------------------------------------------
 // Route info factory helpers
@@ -209,6 +312,17 @@ export interface RouterOptions {
 	idleResetDeps?: IdleResetHookDeps;
 	/** Optional — when present, writes structured telemetry for each session-control classification + confirmation. */
 	sessionControlLogger?: SessionControlLogger;
+	/**
+	 * Optional — per-user effective command catalog accessor (Batch 1B+).
+	 *
+	 * When provided, `sendHelp` walks this catalog rather than hand-rolling
+	 * the command list, so `/help` and the prompt-injection consumer never
+	 * drift. Production wiring (compose-runtime) supplies the same closure
+	 * used for system-prompt injection. When omitted, the Router falls back
+	 * to building a catalog from its own wired services so legacy test
+	 * fixtures don't need to change.
+	 */
+	getCommandCatalog?: (userId: string) => Promise<CommandCatalogEntry[]>;
 }
 
 export class Router {
@@ -237,6 +351,7 @@ export class Router {
 	private readonly pendingSessionControl?: PendingSessionControlStore;
 	private readonly idleResetDeps?: IdleResetHookDeps;
 	private readonly sessionControlLogger?: SessionControlLogger;
+	private readonly getCommandCatalog?: (userId: string) => Promise<CommandCatalogEntry[]>;
 
 	private commandMap = new Map<string, CommandMapEntry>();
 	private intentTable: IntentTableEntry[] = [];
@@ -266,6 +381,7 @@ export class Router {
 		this.pendingSessionControl = options.pendingSessionControl;
 		this.idleResetDeps = options.idleResetDeps;
 		this.sessionControlLogger = options.sessionControlLogger;
+		this.getCommandCatalog = options.getCommandCatalog;
 
 		this.intentClassifier = new IntentClassifier({
 			llm: options.llm,
@@ -592,7 +708,7 @@ export class Router {
 	): Promise<void> {
 		// Built-in /help command
 		if (parsed.command === '/help') {
-			await this.sendHelp(ctx.userId, enabledApps);
+			await this.sendHelp(ctx.userId);
 			return;
 		}
 
@@ -882,84 +998,63 @@ export class Router {
 		}
 	}
 
-	/** Generate and send the /help message. */
-	private async sendHelp(userId: string, enabledApps: string[]): Promise<void> {
+	/**
+	 * Generate and send the `/help` message.
+	 *
+	 * Walks the per-user effective command catalog (Batch 1B+) so the rendered
+	 * help and the system-prompt injection consumer share one source of truth.
+	 * Per-user admin/app-enable filtering happens inside the catalog; the
+	 * Router only owns layout (group titles, alias suffix, escape rules).
+	 *
+	 * Group gates mirror the legacy behavior: the *Spaces* and *Admin*
+	 * sections render only when the corresponding service is wired in this
+	 * process, even if the catalog itself would otherwise include their
+	 * entries. The *Conversation* section is implicitly empty when
+	 * `conversationServiceWired: false`, so no extra gate is needed.
+	 *
+	 * `/help` and `/start` are intentionally omitted from the rendered output
+	 * — the legacy implementation did not enumerate them, and that mirrors
+	 * Telegram's command menu conventions.
+	 */
+	private async sendHelp(userId: string): Promise<void> {
+		const catalog = await this.fetchCommandCatalog(userId);
+		const groups = groupCatalogForHelp(catalog);
 		const lines: string[] = ['*Available Commands*\n'];
 
-		// Built-in /space command
-		if (this.spaceService) {
+		if (this.spaceService && groups.spaces.length > 0) {
 			lines.push('*Spaces*');
-			lines.push('  /space — Show current mode and your spaces');
-			lines.push('  /space <id> — Enter a shared space');
-			lines.push('  /space off — Return to personal mode');
-			lines.push('  /space create <id> <name> — Create a new space');
+			for (const e of groups.spaces) lines.push(`  ${formatHelpLine(e)}`);
 			lines.push('');
 		}
 
-		// Admin-only invite command
-		if (this.inviteService) {
-			const caller = this.findUser(userId);
-			if (caller?.isAdmin) {
-				lines.push('*Admin*');
-				lines.push('  /invite <name> — Generate an invite code for a new user');
-				lines.push('');
-			}
+		if (this.inviteService && groups.admin.length > 0) {
+			lines.push('*Admin*');
+			for (const e of groups.admin) lines.push(`  ${formatHelpLine(e)}`);
+			lines.push('');
 		}
 
-		// Built-in conversation commands (always listed when ConversationService is wired;
-		// they bypass AppToggleStore so they appear regardless of chatbot toggle state).
-		if (this.conversationService) {
+		if (groups.conversation.length > 0) {
 			lines.push('*Conversation*');
-			lines.push('  /ask <question> — Ask about apps, costs, or system status');
-			lines.push('  /edit <description> — Propose an LLM-assisted file edit');
-			lines.push('  /notes [on|off|status] — Toggle daily-notes logging for your messages');
-			lines.push('  /newchat — Start a new conversation \\(alias: /reset\\)');
-			lines.push('  /title [title] — Show or set the current session title');
-			lines.push('  /recall <query> — Search your past conversations');
-			lines.push('  /refreshmemory — Rebuild memory snapshot for the active session');
-			lines.push('  /flushmemory — Save a summary of the current chat to long-term memory');
-			lines.push('  /settings — View or change your settings');
-			lines.push('  /settings <category> \\[key\\] \\[value\\] — Read or write a setting');
-			lines.push('  /settings reset <category> <key> — Reset a setting to its default');
-			lines.push('  /settings confirm <phrase> — Confirm a dangerous settings change');
+			for (const e of groups.conversation) lines.push(`  ${formatHelpLine(e)}`);
 			lines.push('');
 		}
 
-		// Group commands by app. Filter out the chatbot's own /ask, /edit, /notes, /newchat, /reset
-		// entries if conversationService is wired (they're now built-ins, not app commands).
-		const appCommands = new Map<string, Array<{ name: string; description: string }>>();
-
-		for (const [, entry] of this.commandMap) {
-			if (!(await this.isAppEnabled(userId, entry.appId, enabledApps))) continue;
-			// Skip chatbot-manifest entries for commands that are now Router built-ins
-			if (
-				this.conversationService &&
-				entry.appId === 'chatbot' &&
-				BUILTIN_COMMAND_NAMES.has(entry.command.name)
-			)
-				continue;
-
-			const app = this.registry.getApp(entry.appId);
-			if (!app) continue;
-
-			const appName = app.manifest.app.name;
-			if (!appCommands.has(appName)) appCommands.set(appName, []);
-			appCommands.get(appName)?.push({
-				name: entry.command.name,
-				description: entry.command.description,
-			});
-		}
-
-		for (const [appName, commands] of appCommands) {
-			lines.push(`*${escapeMarkdown(appName)}*`);
-			for (const cmd of commands) {
-				lines.push(`  ${escapeMarkdown(cmd.name)} — ${escapeMarkdown(cmd.description)}`);
-			}
+		for (const [appId, entries] of groups.app) {
+			if (entries.length === 0) continue;
+			const app = this.registry.getApp(appId);
+			const title = app?.manifest.app.name ?? appId;
+			lines.push(`*${escapeMarkdown(title)}*`);
+			for (const e of entries) lines.push(`  ${formatHelpLine(e)}`);
 			lines.push('');
 		}
 
+		const emptyHelp =
+			groups.spaces.length === 0 &&
+			groups.admin.length === 0 &&
+			groups.conversation.length === 0 &&
+			groups.app.size === 0;
 		if (
-			appCommands.size === 0 &&
+			emptyHelp &&
 			!this.conversationService &&
 			!this.spaceService &&
 			!this.inviteService
@@ -968,6 +1063,47 @@ export class Router {
 		}
 
 		await this.trySend(userId, lines.join('\n'));
+	}
+
+	/**
+	 * Resolve the per-user effective command catalog.
+	 *
+	 * Prefers the injected `getCommandCatalog` closure (production wiring
+	 * from `compose-runtime.ts` — same closure used for `/ask` prompt
+	 * injection). Falls back to building deps from the Router's own wired
+	 * services so legacy test fixtures that pre-date Batch 1B still work
+	 * unchanged.
+	 */
+	private async fetchCommandCatalog(userId: string): Promise<CommandCatalogEntry[]> {
+		if (this.getCommandCatalog) return this.getCommandCatalog(userId);
+		// Fallback: build deps from the Router's wired services. Mirrors the
+		// shape compose-runtime supplies. Some test fixtures cast partial
+		// AppRegistry stubs that omit `getAll` — adapt via `getLoadedAppIds`
+		// + `getApp` so legacy tests don't have to learn the new method.
+		const user = this.findUser(userId);
+		const enabledApps = user?.enabledApps ?? [];
+		const registryShim = {
+			getAll: () => {
+				const maybe = this.registry as Partial<AppRegistry> & {
+					getAll?: () => RegisteredApp[];
+				};
+				if (typeof maybe.getAll === 'function') return maybe.getAll();
+				const ids: string[] =
+					typeof maybe.getLoadedAppIds === 'function' ? maybe.getLoadedAppIds() : [];
+				const out: RegisteredApp[] = [];
+				for (const id of ids) {
+					const app = this.registry.getApp(id);
+					if (app) out.push(app);
+				}
+				return out;
+			},
+		};
+		return getEffectiveCommandCatalog(userId, {
+			registry: registryShim,
+			isUserAdmin: () => Boolean(user?.isAdmin),
+			isAppEnabledForUser: (uid, appId) => this.isAppEnabled(uid, appId, enabledApps),
+			conversationServiceWired: Boolean(this.conversationService),
+		});
 	}
 
 	/** Get the space service — guaranteed non-null when called from handleSpaceCommand. */

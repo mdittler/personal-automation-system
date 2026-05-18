@@ -1234,6 +1234,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		sessionControlClassifier: detectSessionControl,
 		pendingSessionControl,
 		sessionControlLogger,
+		// Batch 1B+: same per-user catalog binding the ConversationService uses
+		// for system-prompt injection. Reusing the closure (rather than building
+		// a second one) keeps /help and the prompt fence from drifting.
+		getCommandCatalog: getCommandCatalogForUser,
 		idleResetDeps: {
 			idleMinutes: config.chat?.sessions?.auto_reset_idle_minutes ?? null,
 			chatSessions,

@@ -152,9 +152,14 @@ const DIRECT_HANDLED: ReadonlyArray<{
 	},
 	{
 		canonical: '/space',
-		description: 'Manage shared data spaces',
+		// Subcommand hints are embedded in the description so they surface in
+		// both the rendered `/help` output and the system-prompt injection.
+		// Full subcommand reference: `/space`, `/space <id>`, `/space off`,
+		// `/space create <id> <name>`, `/space members`, `/space add`,
+		// `/space remove`.
+		description:
+			'Manage shared data spaces; subcommands: /space, /space <id>, /space off, /space create <id> <name>',
 		adminOnly: false,
-		argSignature: '<subcommand>',
 	},
 	{
 		canonical: '/invite',
@@ -169,7 +174,7 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 	'/ask': 'Ask PAS a question (forces app-aware mode)',
 	'/edit': 'LLM-assisted file edit',
 	'/notes': 'Toggle daily-notes logging',
-	'/newchat': 'Start a fresh chat session',
+	'/newchat': 'Start a new conversation',
 	'/title': 'Show or set the current session title',
 	'/recall': 'Search past conversations',
 	'/refreshmemory': 'Rebuild memory snapshot from current state',
