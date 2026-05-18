@@ -46,14 +46,12 @@ export interface InviteServiceOptions {
 	dataDir: string;
 	logger: Logger;
 	/**
-	 * Optional callback returning the registered users. Used by `createInvite`
-	 * to reject display names that collide with an existing `user.name`
-	 * (case-insensitive) or match an existing user's numeric id (defense in
-	 * depth at login time). Re-evaluated on every call so newly-registered
-	 * users are visible immediately. When omitted, those checks are skipped
-	 * (active-invite collision and the blank/numeric-only guards still apply).
+	 * Returns the registered users. `createInvite` uses this to reject names
+	 * that collide with an existing `user.name` (case-insensitive) or match an
+	 * existing user's numeric id. Re-evaluated on every call so newly-registered
+	 * users are visible immediately. Pass `() => []` if no users exist yet.
 	 */
-	knownUsers?: () => Iterable<{ id: string; name: string }>;
+	knownUsers: () => Iterable<{ id: string; name: string }>;
 	/** Clock injection. Defaults to `() => new Date()`. */
 	now?: () => Date;
 }
@@ -62,7 +60,7 @@ export class InviteService {
 	private readonly invitesPath: string;
 	private readonly logger: Logger;
 	private readonly lock = new AsyncLock();
-	private readonly knownUsers: (() => Iterable<{ id: string; name: string }>) | undefined;
+	private readonly knownUsers: () => Iterable<{ id: string; name: string }>;
 	private readonly now: () => Date;
 
 	constructor(options: InviteServiceOptions) {

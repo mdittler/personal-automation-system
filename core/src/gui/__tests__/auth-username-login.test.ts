@@ -9,7 +9,7 @@
  *    of a username share one counter and cannot be used to bypass throttling.
  *  - The IP limiter still throttles brute-force sprays even when no user resolves
  *    (unknown-username spray protection).
- *  - Resolution failure returns the same generic "Invalid user ID or password."
+ *  - Resolution failure returns the same generic "Invalid login or password."
  *    text as a wrong-password failure (no enumeration).
  */
 
@@ -202,13 +202,13 @@ describe('POST /login accepts username or numeric id', () => {
 		await app.close();
 	});
 
-	it('returns generic "Invalid user ID or password." for an unknown username (no info leak)', async () => {
+	it('returns generic "Invalid login or password." for an unknown username (no info leak)', async () => {
 		await credService.setPassword('111', 'pw');
 		const app = await buildApp({ credService });
 
 		const res = await loginWithPassword(app, 'NoSuchPerson', 'pw');
 		expect(res.statusCode).toBe(401);
-		expect(res.body).toContain('Invalid user ID or password');
+		expect(res.body).toContain('Invalid login or password');
 
 		await app.close();
 	});
@@ -223,8 +223,8 @@ describe('POST /login accepts username or numeric id', () => {
 		expect(wrongPw.statusCode).toBe(401);
 		expect(unknownUser.statusCode).toBe(401);
 		// Same wording — neither path reveals which side failed.
-		expect(wrongPw.body).toContain('Invalid user ID or password');
-		expect(unknownUser.body).toContain('Invalid user ID or password');
+		expect(wrongPw.body).toContain('Invalid login or password');
+		expect(unknownUser.body).toContain('Invalid login or password');
 
 		await app.close();
 	});
@@ -269,7 +269,7 @@ describe('POST /login accepts username or numeric id', () => {
 		// Even though there's a user with name "111", numeric input must not match it.
 		const res = await loginWithPassword(app, '111', 'pw');
 		expect(res.statusCode).toBe(401);
-		expect(res.body).toContain('Invalid user ID or password');
+		expect(res.body).toContain('Invalid login or password');
 
 		await app.close();
 	});

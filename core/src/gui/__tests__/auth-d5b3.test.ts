@@ -214,7 +214,7 @@ describe('D5b-3 per-user auth', () => {
 
 		const loginRes = await loginWithPassword(app, '111', 'wrong-pw');
 		expect(loginRes.statusCode).toBe(401);
-		expect(loginRes.body).toContain('Invalid user ID or password');
+		expect(loginRes.body).toContain('Invalid login or password');
 
 		await app.close();
 	});
@@ -225,7 +225,7 @@ describe('D5b-3 per-user auth', () => {
 
 		const loginRes = await loginWithPassword(app, '999', 'whatever');
 		expect(loginRes.statusCode).toBe(401);
-		expect(loginRes.body).toContain('Invalid user ID or password');
+		expect(loginRes.body).toContain('Invalid login or password');
 
 		await app.close();
 	});

@@ -142,7 +142,7 @@ describe('POST /login with loginByNameAllowed: false', () => {
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	it('username login returns the generic "Invalid user ID or password." (no info leak)', async () => {
+	it('username login returns the generic "Invalid login or password." (no info leak)', async () => {
 		// Two users with case-insensitively-duplicate names — the exact scenario
 		// scanForDuplicateNames would have flagged at boot.
 		await credService.setPassword('111', 'pw1');
@@ -158,7 +158,7 @@ describe('POST /login with loginByNameAllowed: false', () => {
 
 		const res = await loginWithPassword(app, 'Matt', 'pw1');
 		expect(res.statusCode).toBe(401);
-		expect(res.body).toContain('Invalid user ID or password');
+		expect(res.body).toContain('Invalid login or password');
 		// No cookie was issued.
 		expect(extractAuthCookie(res)).toBeUndefined();
 
@@ -231,7 +231,7 @@ describe('POST /login with loginByNameAllowed: false', () => {
 
 		const res = await loginWithPassword(app, 'Carol', 'pw3');
 		expect(res.statusCode).toBe(401);
-		expect(res.body).toContain('Invalid user ID or password');
+		expect(res.body).toContain('Invalid login or password');
 
 		await app.close();
 	});

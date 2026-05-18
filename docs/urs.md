@@ -1412,7 +1412,7 @@ The registry must support graceful shutdown of all loaded apps. Shutdown failure
 
 **Phase:** 9 | **Status:** Implemented
 
-The system must maintain a user registry loaded from configuration. Users must be lookupable by Telegram ID. The system must track user names, admin status, enabled apps, and shared scopes.
+The system must maintain a user registry loaded from configuration. Users must be lookupable by Telegram ID **and by display name** (case-insensitive, locale-independent — see REQ-USER-009). The system must track user names, admin status, enabled apps, and shared scopes.
 
 **Standard tests:**
 - `user-manager.test.ts` > getUser > returns user for known Telegram ID
@@ -1601,6 +1601,92 @@ A web GUI page must display all users in a table with app access checkboxes, edi
 - GUI route > rejects invalid group name characters
 
 **Fixes:** fix checkbox name mismatch (users.eta vs users.ts), fix groups cell ID mismatch
+
+### REQ-USER-009: GUI login accepts display name or Telegram ID
+
+**Phase:** 2026-05-18 (W2) | **Status:** Implemented
+
+The login form must accept either the user's display name (case-insensitive, locale-independent via `normalizeDisplayName`) or their numeric Telegram ID. Resolution to canonical numeric ID must occur BEFORE per-account rate limiting so casing variants of a username share one counter (no brute-force bypass via casing). Numeric input is id-only (never falls through to name lookup). Display names that are purely digits are rejected at invite creation. The IP rate limiter still throttles bogus sprays. Resolution failure returns the same generic "Invalid login or password." text as a wrong-password failure (no enumeration). The session cookie payload always carries the canonical numeric ID.
+
+**Standard tests:**
+- `auth-username-login.test.ts` > accepts a case-insensitive username and issues a session cookie with the canonical numeric id
+- `auth-username-login.test.ts` > accepts mixed-case usernames
+- `auth-username-login.test.ts` > still accepts the numeric id
+- `auth-username-login.test.ts` > rate-limits per canonical user id across casing variants
+- `user-manager.test.ts` > findByName > normalises padded input and stored names
+
+**Edge case tests:**
+- `auth-username-login.test.ts` > returns generic "Invalid login or password." for an unknown username
+- `auth-username-login.test.ts` > returns the same generic error for a wrong password as for an unknown user
+- `auth-username-login.test.ts` > production wiring refuses non-numeric ids at login (display name still works)
+- `auth-username-login.test.ts` > treats purely numeric input as id-only
+- `user-manager.test.ts` > findByName > does not match against numeric ids
+
+**Fixes:** None
+
+### REQ-USER-010: Globally-unique display names enforced at write paths
+
+**Phase:** 2026-05-18 (W2) | **Status:** Implemented
+
+Display names must be globally unique (case-insensitive, locale-independent) across the system. `InviteService.createInvite` and `UserMutationService.registerUser` must both serialize on a shared `DISPLAY_NAME_LOCK_KEY` (via `withMultiFileLock`) so concurrent create/register operations cannot interleave past the uniqueness check. `createInvite` must reject collisions against any existing `user.name`, any active (unredeemed, unexpired) invite name, names that are purely digits, names that equal an existing user's Telegram ID, blank names, and whitespace-padded variants of all the above. Used and expired invites must NOT block name reuse.
+
+**Standard tests:**
+- `invite-name-uniqueness.test.ts` > rejects a name that matches an existing user.name (case-insensitive)
+- `invite-name-uniqueness.test.ts` > rejects a name that matches an active invite
+- `invite-name-uniqueness.test.ts` > allows reuse of a name from a used invite
+- `invite-name-uniqueness.test.ts` > allows reuse of a name from an expired invite
+- `invite-name-uniqueness.test.ts` > concurrent createInvite calls — exactly one succeeds
+- `register-user-uniqueness.test.ts` > rejects registration of a name that already exists
+- `register-user-uniqueness.test.ts` > rejects two concurrent registrations of the same name
+
+**Edge case tests:**
+- `invite-name-validation.test.ts` > rejects names that are purely digits
+- `invite-name-validation.test.ts` > rejects names equal to an existing user's Telegram id
+- `invite-name-validation.test.ts` > rejects whitespace-padded numeric strings
+- `invite-name-validation.test.ts` > rejects empty / whitespace-only strings as blank
+- `invite-name-validation.test.ts` > accepts a padded ordinary name and stores it trimmed
+- `register-user-uniqueness.test.ts` > idempotent retry of the same user is not blocked by its own name
+
+**Fixes:** None
+
+### REQ-USER-011: Boot-time duplicate-name detection disables login-by-name
+
+**Phase:** 2026-05-18 (W2) | **Status:** Implemented
+
+At boot, `scanForDuplicateNames` must walk every configured user and report any case-insensitive duplicate display-name groups. When duplicates are found, a structured Pino error must be logged listing every offending group, and login-by-name must be disabled until the operator corrects `pas.yaml` and restarts. Numeric-id login must continue to work so the operator can always reach the GUI to make the correction. Blank names must be skipped (validateConfig already warns about them separately).
+
+**Standard tests:**
+- `scan-duplicate-names.test.ts` > returns [] with no logs when names are all unique
+- `scan-duplicate-names.test.ts` > returns duplicates and logs an error when a case-insensitive duplicate exists
+- `scan-duplicate-names.test.ts` > detects duplicates that differ only in whitespace padding
+- `scan-duplicate-names.test.ts` > groups 3+ duplicates under one entry
+- `auth-login-by-name-disabled.test.ts` > username login is refused when loginByNameAllowed=false
+- `auth-login-by-name-disabled.test.ts` > numeric-id login still works when loginByNameAllowed=false
+
+**Edge case tests:**
+- `scan-duplicate-names.test.ts` > returns [] for an empty users list
+- `scan-duplicate-names.test.ts` > returns [] for a single user
+- `scan-duplicate-names.test.ts` > skips blank names
+
+**Fixes:** None
+
+### REQ-USER-012: Operator GUI surfaces display names instead of numeric IDs
+
+**Phase:** 2026-05-18 (W2) | **Status:** Implemented
+
+Operator-facing GUI templates must render `user.name` as the primary identifier. Numeric IDs may appear only inside `<small>` elements on admin/debug tables for troubleshooting. Form-submit field values (e.g. delivery checkboxes) keep the numeric ID internally; the displayed label is `user.name` only. Affected templates: `data.eta` (sidebar), `alert-edit.eta` (delivery + data-source dropdowns), `report-edit.eta` (delivery + section-source dropdowns), `config.eta` / `context.eta` / `dashboard.eta` (admin tables), `users/reset-password.eta` (instruction text), and the `account/index.eta` password-setup copy.
+
+**Standard tests:**
+- `template-name-rendering.test.ts` > alert-edit delivery checkboxes show name and not numeric id
+- `template-name-rendering.test.ts` > report-edit delivery checkboxes show name only
+- `template-name-rendering.test.ts` > admin dashboard table shows name primary, id only inside <small>
+- `template-name-rendering.test.ts` > config.eta direct render shows name + small id
+- `template-name-rendering.test.ts` > after username login, session cookie payload still carries the numeric user id
+
+**Edge case tests:**
+- `template-name-rendering.test.ts` > checkbox value attribute still carries numeric id (form submit key)
+
+**Fixes:** None
 
 ---
 
@@ -11010,6 +11096,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-USER-006 | invite-command.test.ts, user-guard.test.ts, realistic-invite-journey.test.ts | 2 | 11 + 31 journey | Implemented |
 | REQ-USER-007 | user-mutation-service.test.ts, config-writer.test.ts | 6 | 11 | Implemented |
 | REQ-USER-008 | integration.test.ts (invite) | 3 | 3 | Implemented |
+| REQ-USER-009 | auth-username-login.test.ts, user-manager.test.ts | 5 | 5 | Implemented |
+| REQ-USER-010 | invite-name-uniqueness.test.ts, register-user-uniqueness.test.ts, invite-name-validation.test.ts | 7 | 6 | Implemented |
+| REQ-USER-011 | scan-duplicate-names.test.ts, auth-login-by-name-disabled.test.ts | 6 | 3 | Implemented |
+| REQ-USER-012 | template-name-rendering.test.ts | 5 | 1 | Implemented |
 | REQ-RATELIMIT-001 | rate-limiter.test.ts | 8 | 8 | Implemented |
 | REQ-TOGGLE-001 | app-toggle.test.ts | 7 | 3 | Implemented |
 | REQ-CTX-001 | context-store.test.ts | 4 | 7 | Implemented |

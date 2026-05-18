@@ -96,8 +96,8 @@ describe('createInvite name validation', () => {
 		).rejects.toThrow(/numeric-only|matches an existing user id/i);
 	});
 
-	it('works when knownUsers option is omitted (no id/name check, but other guards still apply)', async () => {
-		const svc = new InviteService({ dataDir: tempDir, logger });
+	it('still applies blank/numeric-only guards with an empty knownUsers list', async () => {
+		const svc = new InviteService({ dataDir: tempDir, logger, knownUsers: () => [] });
 		// Numeric-only still rejected
 		await expect(svc.createInvite('12345', 'admin1', { householdId: 'h1' })).rejects.toThrow(
 			/numeric-only/i,

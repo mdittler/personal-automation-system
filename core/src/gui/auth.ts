@@ -7,7 +7,7 @@
  * Login identifier: numeric Telegram id (digit-only input is id-only) OR
  * globally-unique display name (case-insensitive, via `findByName`).
  * Resolution happens BEFORE per-account rate-limiting so casing variants
- * of a username share one counter. Generic "Invalid user ID or password."
+ * of a username share one counter. Generic "Invalid login or password."
  * is returned for any failure (no enumeration).
  *
  * Backward compatibility: when `credentialService`/`userManager`/
@@ -135,11 +135,13 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 	const loginByNameAllowed = options.loginByNameAllowed ?? true;
 	// Vitest fixtures use synthetic non-numeric ids (`admin-1`, …); auto-detect
-	// so they keep working without per-file plumbing. Production wiring never
-	// reaches this branch (Telegram ids are numeric, and operators must set the
-	// flag explicitly to allow non-numeric pas.yaml entries at login).
+	// so they keep working without per-file plumbing. Hard-disabled when
+	// NODE_ENV=production so a stray VITEST env var on a production host can
+	// never weaken the contract.
 	const allowNonNumericIdLoginForTests =
-		options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true';
+		process.env['NODE_ENV'] === 'production'
+			? false
+			: (options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true');
 
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
@@ -232,7 +234,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		const password = body?.['password'] ?? '';
 
 		if (!submitted || !password) {
-			return renderError('User ID and password are required.');
+			return renderError('Login and password are required.');
 		}
 
 		// 1) IP limiter runs FIRST — unchanged from previous behavior. Throttles
@@ -284,12 +286,12 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		//    verification failed. Same wording either way ("Invalid user ID or
 		//    password.") to prevent username enumeration.
 		if (!resolvedUser) {
-			return renderError('Invalid user ID or password.');
+			return renderError('Invalid login or password.');
 		}
 
 		const valid = await credentialService!.verifyPassword(resolvedUser.id, password);
 		if (!valid) {
-			return renderError('Invalid user ID or password.');
+			return renderError('Invalid login or password.');
 		}
 
 		// 5) Session uses the canonical numeric id — cookie payload shape is unchanged
