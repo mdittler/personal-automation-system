@@ -175,7 +175,7 @@
             <select name="ds_user_id_<%= i %>">
               <option value="">-- Select user --</option>
               <% if (it.users) { for (const user of it.users) { %>
-                <option value="<%= user.id %>" <%= ds.user_id === user.id ? 'selected' : '' %>><%= user.name %> (<%= user.id %>)</option>
+                <option value="<%= user.id %>" <%= ds.user_id === user.id ? 'selected' : '' %>><%= user.name %></option>
               <% } } %>
             </select>
           </label>
@@ -315,7 +315,7 @@ function buildAppSelect(name, selectedVal) {
 function buildUserSelect(name, selectedVal) {
   var html = '<select name="' + name + '"><option value="">-- Select user --</option>';
   PAS_USERS.forEach(function(u) {
-    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + ' (' + u.id + ')</option>';
+    html += '<option value="' + u.id + '"' + (u.id === selectedVal ? ' selected' : '') + '>' + u.name + '</option>';
   });
   html += '</select>';
   return html;

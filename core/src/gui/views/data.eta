@@ -36,7 +36,7 @@
   <div class="data-sidebar">
     <% for (const user of it.userSections) { %>
     <details open>
-      <summary><strong><%= user.name %></strong> <small>(<%= user.id %>)</small></summary>
+      <summary><strong><%= user.name %></strong> <small>(<code><%= user.id %></code>)</small></summary>
       <ul>
         <% if (user.apps.length === 0) { %>
           <li><small><em>No app data yet</em></small></li>
