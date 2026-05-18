@@ -433,11 +433,17 @@ export async function handleAsk(
 	await sendSplitResponse(ctx.userId, responseWithConfirmations, deps);
 
 	const now = ctx.timestamp.toISOString();
-	const userTurn: SessionTurn = { role: 'user', content: `/ask ${question}`, timestamp: now };
+	const userTurn: SessionTurn = {
+		role: 'user',
+		content: `/ask ${question}`,
+		timestamp: now,
+		source: 'user',
+	};
 	const assistantTurn: SessionTurn = {
 		role: 'assistant',
 		content: responseWithConfirmations,
 		timestamp: now,
+		source: 'assistant',
 	};
 	let appendSucceeded = false;
 	try {

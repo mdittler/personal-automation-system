@@ -91,21 +91,18 @@ export function createAppOutboundBridge(deps: AppOutboundBridgeDeps): AppOutboun
 
 			try {
 				const now = new Date().toISOString();
-				// source: 'app' is added by Task 5a (which will extend SessionTurn).
-				// Cast through unknown until that schema change lands, so the field
-				// is already written and Task 5a doesn't have to touch this file.
-				const userTurn = {
+				const userTurn: SessionTurn = {
 					role: 'user',
 					content: `[App: ${opts.appId}] ${opts.kind}`,
 					timestamp: now,
 					source: 'app',
-				} as unknown as SessionTurn;
-				const assistantTurn = {
+				};
+				const assistantTurn: SessionTurn = {
 					role: 'assistant',
 					content: body + buttonFooter,
 					timestamp: now,
 					source: 'app',
-				} as unknown as SessionTurn;
+				};
 				await deps.chatSessions.appendExchange(
 					{ userId: opts.userId, sessionKey, householdId },
 					userTurn,

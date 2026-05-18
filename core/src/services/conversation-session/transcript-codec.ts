@@ -29,10 +29,14 @@ export function encodeNew(meta: ChatSessionFrontmatter): string {
 	return `---\n${frontmatter}---\n`;
 }
 
+/** Allowed values for the optional `source` provenance metadata line. */
+const VALID_SOURCES: ReadonlySet<string> = new Set(['user', 'assistant', 'photo', 'app']);
+
 export function encodeAppend(existingRaw: string, turn: SessionTurn): string {
 	const fenceLen = pickFenceLength(turn.content);
 	const fence = makeFence(fenceLen);
-	return `${existingRaw}\n### ${turn.role} ${EM_DASH} ${turn.timestamp}\n${fence}\n${turn.content}\n${fence}\n`;
+	const sourceLine = turn.source !== undefined ? `source: ${turn.source}\n` : '';
+	return `${existingRaw}\n### ${turn.role} ${EM_DASH} ${turn.timestamp}\n${sourceLine}${fence}\n${turn.content}\n${fence}\n`;
 }
 
 export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: SessionTurn[] } {
@@ -78,8 +82,11 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 		const timestamp = headerMatch[2]!;
 		i++;
 
-		// Find opening fence: first non-empty line after the header must be a fence.
+		// Find opening fence: first non-empty line after the header must be a fence
+		// or a recognized per-turn metadata line (currently only `source: <value>`).
+		// Unrecognized non-fence lines remain a corruption error.
 		let fenceStr = '';
+		let source: SessionTurn['source'];
 		while (i < lines.length) {
 			const l = lines[i]!.trim();
 			if (l === '') {
@@ -90,6 +97,17 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 				fenceStr = l;
 				i++;
 				break;
+			}
+			const sourceMatch = l.match(/^source:\s*(\S+)\s*$/);
+			if (sourceMatch) {
+				const value = sourceMatch[1];
+				// Forward-compat: unknown values are treated as undefined, not corrupt.
+				source =
+					value !== undefined && VALID_SOURCES.has(value)
+						? (value as SessionTurn['source'])
+						: undefined;
+				i++;
+				continue;
 			}
 			throw new CorruptTranscriptError(`Turn at ${timestamp} has no opening fence`);
 		}
@@ -114,7 +132,9 @@ export function decode(raw: string): { meta: ChatSessionFrontmatter; turns: Sess
 			throw new CorruptTranscriptError(`Turn at ${timestamp} has no closing fence`);
 		}
 
-		turns.push({ role, timestamp, content: contentLines.join('\n') });
+		const turn: SessionTurn = { role, timestamp, content: contentLines.join('\n') };
+		if (source !== undefined) turn.source = source;
+		turns.push(turn);
 	}
 
 	return { meta, turns };

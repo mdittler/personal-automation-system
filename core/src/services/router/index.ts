@@ -901,8 +901,8 @@ export class Router {
 					// parentSessionId stamps lineage on cold-mint when idle reset just fired.
 					...(parentSessionId != null ? { parentSessionId } : {}),
 				},
-				{ role: 'user', content: summary.userTurn, timestamp: now },
-				{ role: 'assistant', content: summary.assistantTurn, timestamp: now },
+				{ role: 'user', content: summary.userTurn, timestamp: now, source: 'photo' },
+				{ role: 'assistant', content: summary.assistantTurn, timestamp: now, source: 'photo' },
 			);
 		} catch (error) {
 			this.logger.warn(
