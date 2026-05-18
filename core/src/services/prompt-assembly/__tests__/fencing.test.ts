@@ -143,3 +143,67 @@ describe('formatConversationHistory — photo-summary truncation exemption', () 
 		expect(out[1].length).toBeLessThan(2300);
 	});
 });
+
+describe('formatConversationHistory — source-metadata cap-lift (new contract)', () => {
+	const longBody = 'B'.repeat(1800);
+
+	it('lifts cap when user turn has source: photo, regardless of content', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[Photo: receipt]', timestamp: '', source: 'photo' },
+			{ role: 'assistant', content: longBody, timestamp: '', source: 'photo' },
+		]);
+		expect(out[1]).toContain('B'.repeat(1800));
+	});
+
+	it('lifts cap when user turn has source: app', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[App: food] weekly-menu', timestamp: '', source: 'app' },
+			{ role: 'assistant', content: longBody, timestamp: '', source: 'app' },
+		]);
+		expect(out[1]).toContain('B'.repeat(1800));
+	});
+
+	it('does NOT lift cap when user typed exact [Photo: receipt] with source: user', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[Photo: receipt]', timestamp: '', source: 'user' },
+			{ role: 'assistant', content: longBody, timestamp: '', source: 'assistant' },
+		]);
+		expect(out[1].length).toBeLessThan(700);
+	});
+
+	it('does NOT lift cap when user typed exact [App: food] weekly-menu with source: user', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[App: food] weekly-menu', timestamp: '', source: 'user' },
+			{ role: 'assistant', content: longBody, timestamp: '', source: 'assistant' },
+		]);
+		expect(out[1].length).toBeLessThan(700);
+	});
+});
+
+describe('formatConversationHistory — legacy regex fallback (source: undefined)', () => {
+	const longBody = 'B'.repeat(1800);
+
+	it('lifts cap for legacy photo pair via content regex when source is undefined', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[Photo: receipt]', timestamp: '' },
+			{ role: 'assistant', content: longBody, timestamp: '' },
+		]);
+		expect(out[1]).toContain('B'.repeat(1800));
+	});
+
+	it('lifts cap for legacy app header via APP_HEADER_RE when source is undefined', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[App: food] weekly-menu', timestamp: '' },
+			{ role: 'assistant', content: longBody, timestamp: '' },
+		]);
+		expect(out[1]).toContain('B'.repeat(1800));
+	});
+
+	it('does NOT lift cap for embedded lookalike (no source, content does not exact-match)', () => {
+		const out = formatConversationHistory([
+			{ role: 'user', content: '[App: food] weekly-menu but I typed extra', timestamp: '' },
+			{ role: 'assistant', content: longBody, timestamp: '' },
+		]);
+		expect(out[1].length).toBeLessThan(700);
+	});
+});
