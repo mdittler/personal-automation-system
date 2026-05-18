@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Defensive uniqueness check at registration time.
+ * Defensive uniqueness check at registration time.
  *
  * `createInvite` is the first uniqueness frontier, but a concurrent registration
  * could in principle race past it. `UserMutationService.registerUser` therefore

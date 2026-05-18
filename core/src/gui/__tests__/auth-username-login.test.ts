@@ -1,5 +1,5 @@
 /**
- * Batch 2A: login accepts username OR numeric id.
+ * login accepts username OR numeric id.
  *
  * Verifies the resolve-then-rate-limit contract:
  *  - A case-insensitive `user.name` resolves to the canonical numeric id.
@@ -78,6 +78,8 @@ interface FixtureOptions {
 	households?: MockHousehold[];
 	credService: CredentialService;
 	loginRateLimiter?: RateLimiter;
+	/** Override the default Vitest auto-enable of non-numeric id login. */
+	allowNonNumericIdLoginForTests?: boolean;
 }
 
 async function buildApp(opts: FixtureOptions) {
@@ -111,6 +113,9 @@ async function buildApp(opts: FixtureOptions) {
 					typeof registerAuth
 				>[1]['householdService'],
 				loginRateLimiter: opts.loginRateLimiter,
+				...(opts.allowNonNumericIdLoginForTests !== undefined
+					? { allowNonNumericIdLoginForTests: opts.allowNonNumericIdLoginForTests }
+					: {}),
 			});
 		},
 		{ prefix: '/gui' },
@@ -316,4 +321,26 @@ describe('POST /login accepts username or numeric id', () => {
 
 		await app.close();
 	});
+
+	it('production wiring refuses non-numeric ids at login (display name still works)', async () => {
+		// Pin the flag false to simulate production wiring (Vitest auto-enables
+		// it for synthetic fixtures). A hand-edited pas.yaml could insert a
+		// non-numeric id; production must refuse it because Telegram never
+		// issues such ids.
+		await credService.setPassword('admin-1', 'pw');
+		const app = await buildApp({
+			credService,
+			users: [{ id: 'admin-1', name: 'Admin One', isAdmin: true }],
+			allowNonNumericIdLoginForTests: false,
+		});
+
+		const idAttempt = await loginWithPassword(app, 'admin-1', 'pw');
+		expect(idAttempt.statusCode).toBe(401);
+
+		const nameAttempt = await loginWithPassword(app, 'Admin One', 'pw');
+		expect(nameAttempt.statusCode).toBe(302);
+
+		await app.close();
+	});
+
 });

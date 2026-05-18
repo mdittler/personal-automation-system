@@ -53,7 +53,7 @@ export interface InviteServiceOptions {
 	 */
 	knownUserIds?: () => Iterable<string>;
 	/**
-	 * Batch 2C — Optional callback returning the registered users so
+	 * Optional callback returning the registered users so
 	 * `createInvite` can reject names that collide (case-insensitive) with an
 	 * existing `user.name`. Re-evaluated on every call so newly-registered
 	 * users are visible immediately. When omitted, the user-name collision
@@ -61,7 +61,7 @@ export interface InviteServiceOptions {
 	 */
 	knownUsers?: () => Iterable<{ id: string; name: string }>;
 	/**
-	 * Batch 2C — Clock injection. Defaults to `() => new Date()`. Lets tests
+	 * Clock injection. Defaults to `() => new Date()`. Lets tests
 	 * advance time without depending on wall-clock so the expired-invite
 	 * reuse path is verifiable. Threaded through every expiry comparison in
 	 * createInvite, validateCode, claimAndRedeem, and cleanup, and into the
@@ -105,7 +105,7 @@ export class InviteService {
 			enabledApps?: string[];
 		},
 	): Promise<string> {
-		// --- Batch 2A: display-name ambiguity guards ---
+		// --- display-name ambiguity guards ---
 		// Trim FIRST so whitespace-padded strings (e.g. " 12345 ", " Sarah ") are
 		// normalized before any regex / equality checks. Reject blanks before any
 		// other guard so the operator sees a dedicated "must not be blank" error.
@@ -156,7 +156,7 @@ export class InviteService {
 			throw new Error(`Invalid householdId: ${JSON.stringify(householdId)}. Must match SAFE_SEGMENT pattern.`);
 		}
 
-		// Batch 2C: locked uniqueness check + write.
+		// locked uniqueness check + write.
 		// Shared lock key (DISPLAY_NAME_LOCK_KEY) is also held by registerUser, so
 		// concurrent create/register on the same name frontier are serialized.
 		// withMultiFileLock sorts keys canonically (see core/src/utils/file-mutex.ts)

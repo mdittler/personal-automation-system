@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Shared lock key for display-name uniqueness.
+ * Shared lock key for display-name uniqueness.
  *
  * Both InviteService.createInvite and UserMutationService.registerUser must
  * acquire this same key (via withMultiFileLock alongside their own store path)

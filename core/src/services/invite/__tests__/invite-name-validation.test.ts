@@ -1,5 +1,5 @@
 /**
- * Batch 2A: Invite name validation tests.
+ * Invite name validation tests.
  *
  * Covers the *ambiguity-against-id-space* guards added to createInvite:
  *  - Names must not be blank (after trim).
@@ -7,7 +7,7 @@
  *  - Names must not equal an existing user's numeric Telegram id.
  *  - Names are stored trimmed.
  *
- * Real uniqueness vs. other `user.name` lands in Batch 2C.
+ * Real uniqueness vs. other `user.name` lives in `invite-name-uniqueness.test.ts`.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';

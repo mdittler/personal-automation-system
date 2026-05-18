@@ -51,7 +51,7 @@ export class UserMutationService {
 			);
 		}
 
-		// Batch 2C: defensive uniqueness check.
+		// defensive uniqueness check.
 		// Shared DISPLAY_NAME_LOCK_KEY (with InviteService.createInvite) serializes
 		// the create-vs-register race against the same uniqueness frontier.
 		//

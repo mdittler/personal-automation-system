@@ -127,7 +127,7 @@ When you are in a space, supported apps read and write that space's shared data.
 
 ## Management GUI
 
-Open the GUI at `http://<your-server>:3000/gui` and sign in with your Telegram user ID and GUI password.
+Open the GUI at `http://<your-server>:3000/gui` and sign in with your display name or Telegram user ID, plus your GUI password. Display names are globally unique and case-insensitive; the Telegram user ID remains the canonical internal identifier.
 
 ### First Admin Password Setup
 
@@ -137,7 +137,7 @@ On a new or migrated single-admin install, use the `GUI_AUTH_TOKEN` from `.env` 
 2. Expand **Single-admin install? Use authentication token**.
 3. Enter `GUI_AUTH_TOKEN`.
 4. PAS sends you to **Account**, where you can set your GUI password.
-5. After that, log in with your Telegram user ID and password.
+5. After that, log in with your display name or Telegram user ID, plus your password.
 
 If a stale browser session keeps showing 403, clear site data/cookies for the PAS host and log in again.
 

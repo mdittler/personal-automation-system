@@ -10,6 +10,7 @@ import type { Logger } from 'pino';
 import type { SystemConfig } from '../../types/config.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { AppToggleStore } from '../app-toggle/index.js';
+import { normalizeDisplayName } from '../invite/normalize.js';
 
 export interface UserManagerOptions {
 	config: SystemConfig;
@@ -45,16 +46,18 @@ export class UserManager {
 	}
 
 	/**
-	 * Find a registered user by display name (case-insensitive, exact match).
-	 * Returns undefined when no user matches. Never matches against numeric ids —
-	 * a name like "8187111554" only matches a user whose `name` is that string,
-	 * not a user whose `id` is that string.
+	 * Find a registered user by display name. Normalises via `normalizeDisplayName`
+	 * (trim + casefold) so login matches the uniqueness contract enforced by
+	 * `createInvite` and `scanForDuplicateNames`. Never matches against numeric
+	 * ids — a name like "8187111554" only matches a user whose `name` is that
+	 * string, not a user whose `id` is that string.
 	 */
 	findByName(name: string): RegisteredUser | undefined {
 		if (!name) return undefined;
-		const target = name.toLocaleLowerCase();
+		const target = normalizeDisplayName(name);
+		if (!target) return undefined;
 		for (const user of this.users) {
-			if (user.name.toLocaleLowerCase() === target) {
+			if (normalizeDisplayName(user.name) === target) {
 				return user;
 			}
 		}

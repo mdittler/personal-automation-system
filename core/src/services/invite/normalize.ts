@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Display-name normalization for uniqueness comparisons.
+ * Display-name normalization for uniqueness comparisons.
  *
  * Used by:
  *   - InviteService.createInvite — to compare incoming names against existing

@@ -492,7 +492,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
-	// Batch 2C: boot-time duplicate-name scan.
+	// boot-time duplicate-name scan.
 	// Disables login-by-name when pre-existing duplicate display names are detected
 	// in pas.yaml (e.g. legacy installs, hand-edited config). Numeric-id login still
 	// works so the operator can reach the GUI and fix the YAML; after the fix and a
@@ -535,12 +535,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'invite' }),
-		// Batch 2A: createInvite rejects display names that exactly match an
+		// createInvite rejects display names that exactly match an
 		// existing user's numeric Telegram id (defense-in-depth against the
 		// name/id ambiguity at login time). Re-evaluated on every call so newly
 		// registered users are visible immediately.
 		knownUserIds: () => userManager.getAllUsers().map((u) => u.id),
-		// Batch 2C: createInvite ALSO rejects display names that case-insensitively
+		// createInvite ALSO rejects display names that case-insensitively
 		// collide with an existing user.name. Same closure pattern — re-evaluated
 		// per call so newly-registered users are visible immediately.
 		knownUsers: () => userManager.getAllUsers().map((u) => ({ id: u.id, name: u.name })),
@@ -1557,7 +1557,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
-		// Batch 2C — boot-scan result. When false, POST /login skips name resolution
+		// boot-scan result. When false, POST /login skips name resolution
 		// and only accepts numeric ids until the operator fixes pas.yaml + restarts.
 		loginByNameAllowed: duplicateNameScan.loginByNameAllowed,
 	});

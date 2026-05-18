@@ -66,17 +66,23 @@ export interface AuthOptions {
 	userManager?: UserManager;
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>;
 	/**
-	 * Batch 2C — When `false`, POST /login skips the username → numeric-id
-	 * resolution path. compose-runtime sets this from
-	 * `scanForDuplicateNames({ users }).loginByNameAllowed` at boot. Defaults to
-	 * `true` when omitted (test fixtures that don't run the boot scan still get
-	 * the Batch 2A behavior).
+	 * When `false`, POST /login skips the username → numeric-id resolution path.
+	 * compose-runtime sets this from `scanForDuplicateNames({ users }).loginByNameAllowed`
+	 * at boot. Defaults to `true` when omitted.
 	 *
 	 * When `false`, numeric-id login keeps working — so the operator can always
 	 * reach the GUI to fix `pas.yaml` even if a duplicate name slipped past
-	 * uniqueness enforcement (e.g. a hand-edited config).
+	 * uniqueness enforcement.
 	 */
 	loginByNameAllowed?: boolean;
+	/**
+	 * Test-only: when `true`, POST /login accepts non-numeric `userId` values as
+	 * direct id lookups (calling `userManager.getUser(submitted)`) after the
+	 * name-resolution branch has tried and failed. Production wiring sets this
+	 * false; the system assumes Telegram-issued numeric ids. Tests with
+	 * synthetic fixtures (`admin-1`, `member-1`, …) set this `true`.
+	 */
+	allowNonNumericIdLoginForTests?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,11 +167,19 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 	/** Whether D5b-3 per-user auth is available (all deps present). */
 	const hasPerUserAuth = Boolean(credentialService && userManager && householdService);
 
-	// Batch 2C — captured at plugin registration. compose-runtime computes this
+	// captured at plugin registration. compose-runtime computes this
 	// from scanForDuplicateNames at boot; defaults to true so unconfigured tests
-	// keep the Batch 2A behavior. The flag flows from compose-runtime → AuthOptions
+	// keep the default-true behavior. The flag flows from compose-runtime → AuthOptions
 	// → this closure, then guards the name-resolution branch in POST /login below.
 	const loginByNameAllowed = options.loginByNameAllowed ?? true;
+	// Production (real Telegram-issued numeric ids) keeps the strict
+	// numeric-id-or-name contract. Vitest fixtures use synthetic non-numeric ids
+	// like "admin-1"; auto-detect the test environment so those keep working
+	// without per-file plumbing. Operators who hand-edit pas.yaml to insert a
+	// non-numeric id (which is invalid for Telegram) must use this flag
+	// explicitly — they cannot reach it through any production code path.
+	const allowNonNumericIdLoginForTests =
+		options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true';
 
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
@@ -272,23 +286,12 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 
 		// 2) Resolve to canonical user BEFORE the per-account limiter, so casing
 		//    variants of a username share one counter (`user:${resolvedUser.id}`).
-		//    Numeric input is id-only — never falls through to name lookup, even
-		//    defensively if some pathological user happens to have a digit-only
-		//    display name (createInvite rejects those at invite time).
-		//
-		//    For non-numeric input we first try `findByName`; if that returns
-		//    nothing we fall through to `getUser(submitted)`. In production every
-		//    user id is a numeric Telegram id, so the id fallback is a no-op for
-		//    non-numeric input — but it keeps test fixtures that use synthetic
-		//    string ids (e.g. "admin-1") working, and a real submitted id can
-		//    never be a name (createInvite rejects numeric-only names).
-		//
-		//    `loginByNameAllowed` is set at registerAuth time from
-		//    `AuthOptions.loginByNameAllowed`, which compose-runtime wires from the
-		//    boot-time duplicate-name scan (scanForDuplicateNames). When the scan
-		//    detects a duplicate, the flag is false here and name lookups are
-		//    skipped — numeric-id login still works so the operator can reach the
-		//    GUI and fix `pas.yaml`.
+		//    Numeric input is id-only; non-numeric input is name-only. Real
+		//    Telegram ids are always numeric and createInvite rejects numeric-only
+		//    names, so there is no ambiguous path. When the boot-time
+		//    `scanForDuplicateNames` detects a collision it flips
+		//    `loginByNameAllowed` false; numeric-id login still works so the
+		//    operator can reach the GUI to fix `pas.yaml`.
 		let resolvedUser: ReturnType<UserManager['getUser']> | undefined;
 		if (/^\d+$/.test(submitted)) {
 			resolvedUser = userManager!.getUser(submitted) ?? undefined;
@@ -296,9 +299,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			if (loginByNameAllowed && typeof userManager!.findByName === 'function') {
 				resolvedUser = userManager!.findByName(submitted) ?? undefined;
 			}
-			if (!resolvedUser) {
-				// Test-fixture / synthetic-id fallback. In production this is a no-op
-				// because every real user id is numeric (handled by the branch above).
+			if (!resolvedUser && allowNonNumericIdLoginForTests) {
 				resolvedUser = userManager!.getUser(submitted) ?? undefined;
 			}
 		}

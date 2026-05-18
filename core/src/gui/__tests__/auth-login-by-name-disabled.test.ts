@@ -1,5 +1,5 @@
 /**
- * Batch 2C: integration test for `loginByNameAllowed: false`.
+ * integration test for `loginByNameAllowed: false`.
  *
  * When `scanForDuplicateNames` detects pre-existing duplicate display names in
  * pas.yaml, compose-runtime sets `loginByNameAllowed: false` and threads it
@@ -8,7 +8,7 @@
  * can always reach the GUI to fix the duplicate.
  *
  * This test fixtures both branches end-to-end via Fastify's inject API,
- * paralleling the Batch 2A `auth-username-login.test.ts` setup.
+ * paralleling the `auth-username-login.test.ts` setup.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -255,7 +255,7 @@ describe('POST /login with loginByNameAllowed omitted (defaults to true)', () =>
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	it('default behavior matches Batch 2A — username login still works', async () => {
+	it('default behavior matches username login still works', async () => {
 		await credService.setPassword('111', 'pw');
 		const app = await buildApp({
 			credService,

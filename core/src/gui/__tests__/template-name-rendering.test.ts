@@ -1,5 +1,5 @@
 /**
- * Batch 2B: operator GUI templates surface `user.name`, not `user.id`.
+ * operator GUI templates surface `user.name`, not `user.id`.
  *
  * Render tests assert the new shape on every touched template:
  *   - Delivery checkbox labels (alert-edit, report-edit): label text contains
@@ -14,7 +14,7 @@
  *   - users/reset-password screen: the page shows the user's name; any rendered
  *     id appears only inside <small>.
  *
- * Plus a regression assertion for Batch 2A's cookie contract: after a
+ * Plus a regression assertion for the cookie contract: after a
  * username login, the signed session cookie payload still carries the
  * canonical numeric user id.
  */
@@ -297,7 +297,7 @@ function extractOptionsForSelect(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Batch 2B — operator GUI templates surface user.name, not user.id', () => {
+describe('operator GUI templates surface user.name, not user.id', () => {
 	let built: BuiltApp;
 
 	beforeEach(async () => {
@@ -618,7 +618,7 @@ describe('Batch 2B — operator GUI templates surface user.name, not user.id', (
 // shape as a regression guard.
 // ---------------------------------------------------------------------------
 
-describe('Batch 2B — config.eta direct render', () => {
+describe('config.eta direct render', () => {
 	it('renders user table with name primary and id inside <small>', async () => {
 		const eta = new Eta({ views: viewsDir, autoEscape: true });
 		const html = (await eta.renderAsync('config', {

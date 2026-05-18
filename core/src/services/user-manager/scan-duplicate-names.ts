@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Boot-time duplicate-name scan.
+ * Boot-time duplicate-name scan.
  *
  * Pure function — takes the configured users + a logger, returns
  * `{ loginByNameAllowed, duplicates }`. Used by compose-runtime to decide

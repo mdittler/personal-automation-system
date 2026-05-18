@@ -253,6 +253,24 @@ describe('UserManager', () => {
 
 			expect(mgr.findByName('')).toBeUndefined();
 		});
+
+		it('normalises padded input and stored names via normalizeDisplayName', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '111', name: '  Matt  ', isAdmin: false, enabledApps: [], sharedScopes: [] },
+					{ id: '222', name: 'Sarah', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			// Padded stored name matches non-padded input.
+			expect(mgr.findByName('matt')?.id).toBe('111');
+			// Padded input matches non-padded stored name.
+			expect(mgr.findByName('  sarah  ')?.id).toBe('222');
+			// Whitespace-only input is treated as empty.
+			expect(mgr.findByName('   ')).toBeUndefined();
+		});
 	});
 
 	describe('empty config', () => {

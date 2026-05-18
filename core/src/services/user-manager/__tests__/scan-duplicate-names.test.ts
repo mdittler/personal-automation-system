@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Boot-time duplicate-name scan tests.
+ * Boot-time duplicate-name scan tests.
  *
  * Verifies the pure function contract:
  *   - Returns `{ loginByNameAllowed: true }` when names are unique.

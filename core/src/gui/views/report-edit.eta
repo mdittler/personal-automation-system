@@ -160,7 +160,7 @@
             </div>
             <div id="section-user-wrap-<%= i %>" class="grid">
               <label>
-                User ID
+                User
                 <select name="section_user_id_<%= i %>">
                   <option value="">-- Select user --</option>
                   <% if (it.users) { for (const user of it.users) { %>
@@ -358,7 +358,7 @@ function addSection() {
     html += '<label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem"><input type="radio" name="section_scope_' + i + '" value="user" checked onchange="toggleScope(' + i + ',\'section\')" /> User</label>';
     html += '<label style="display:inline-flex;align-items:center;gap:0.4rem"><input type="radio" name="section_scope_' + i + '" value="space" onchange="toggleScope(' + i + ',\'section\')" /> Space</label>';
     html += '</div></label></div>';
-    html += '<div id="section-user-wrap-' + i + '" class="grid"><label>User ID' + buildUserSelect('section_user_id_' + i, '') + '</label></div>';
+    html += '<div id="section-user-wrap-' + i + '" class="grid"><label>User' + buildUserSelect('section_user_id_' + i, '') + '</label></div>';
     html += '<div id="section-space-wrap-' + i + '" class="grid" style="display:none"><label>Space' + buildSpaceSelect('section_space_id_' + i, '') + '</label></div>';
     html += '<div class="grid"><label>Path<input type="text" name="section_path_' + i + '" required placeholder="daily-notes/{today}.md" /><small>File or folder (reads most recent). Supports {today} and {yesterday} tokens.</small></label></div>';
     html += '<button type="button" class="outline" style="padding:0.15rem 0.4rem;font-size:0.8rem;margin-bottom:0.5rem" onclick="browseFiles(\'section_path_' + i + '\',\'section_app_id_' + i + '\',\'section_scope_' + i + '\',\'section_user_id_' + i + '\',\'section_space_id_' + i + '\')">Browse files</button>';

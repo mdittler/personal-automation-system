@@ -1,5 +1,5 @@
 /**
- * Batch 2C: Globally-unique display names — uniqueness contract.
+ * Globally-unique display names — uniqueness contract.
  *
  * createInvite rejects:
  *   - Names that collide (case-insensitive, trimmed) with an existing user.name.

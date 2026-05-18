@@ -104,9 +104,9 @@ export interface GuiOptions {
 	/** Settings-C: Live SystemConfig reference for system-scope reads. */
 	systemConfig?: SystemConfig;
 	/**
-	 * Batch 2C — When `false`, login-by-name is disabled at POST /login.
+	 * When `false`, login-by-name is disabled at POST /login.
 	 * compose-runtime sets this from `scanForDuplicateNames(...).loginByNameAllowed`
-	 * at boot. When omitted, defaults to `true` (matches Batch 2A test fixtures
+	 * at boot. When omitted, defaults to `true` (matches test fixtures
 	 * that don't run the boot scan).
 	 */
 	loginByNameAllowed?: boolean;
@@ -157,7 +157,7 @@ export async function registerGuiRoutes(
 					| Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'>
 					| undefined,
 				loginRateLimiter,
-				// Batch 2C — undefined means "Batch 2A default of true" inside registerAuth.
+				// undefined means "default of true" inside registerAuth.
 				...(options.loginByNameAllowed !== undefined
 					? { loginByNameAllowed: options.loginByNameAllowed }
 					: {}),
