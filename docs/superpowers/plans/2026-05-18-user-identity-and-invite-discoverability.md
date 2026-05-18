@@ -31,7 +31,15 @@ Steps:
 
 - [ ] **Step 1: Read the existing router-command surface.** Open `core/src/services/router/index.ts` and locate the dispatch arms for `/help` (~`:600`), `/space` (~`:367`, `:1012`), `/invite` (`:372`, `:1274`), and `/start` (`:607`). Note the admin-gating check for `/invite` (`:1282`: `user?.isAdmin`). Confirm `BUILTIN_COMMAND_NAMES` at `:73-86` matches what was discovered in the spec (12 names).
 
-- [ ] **Step 2: Read the manifest type to find app commands.** Open `core/src/types/app-manifest.ts` (or `core/src/schemas/app-manifest.schema.json`) and confirm the shape of `capabilities.messages.commands[]`. Each entry should have at minimum `command` (string with leading slash) and `description`. Note the actual property names — DO NOT assume.
+- [ ] **Step 2: Read the manifest type to find app commands.** `core/src/types/manifest.ts:63` defines `ManifestCommand` with these properties (CONFIRMED):
+```typescript
+export interface ManifestCommand {
+  name: string;         // includes leading slash, e.g. '/recipes'
+  description: string;
+  args?: string[];
+}
+```
+**Use `name`, never `command`, in every sketch, test, and implementation in this plan.** A bespoke fixture file that declares `command:` would parse but never match production, which is exactly the failure mode this plan is meant to prevent.
 
 - [ ] **Step 3: Read `AppMetadataService` / `AppRegistry`.** Find the method that returns all loaded manifests (likely `AppRegistry.getAll()` based on `app-knowledge/index.ts:62`). Confirm signature.
 
@@ -101,7 +109,7 @@ describe('getEffectiveCommandCatalog', () => {
         app: { id: 'food' },
         capabilities: {
           messages: {
-            commands: [{ command: '/recipes', description: 'List recipes' }],
+            commands: [{ name: '/recipes', description: 'List recipes' }],
           },
         },
       },
@@ -121,11 +129,24 @@ describe('getEffectiveCommandCatalog', () => {
     expect(catalog2.find((c) => c.canonical === '/recipes')).toBeUndefined();
   });
 
+  it('discovers production manifest commands (Notes /note must be present)', async () => {
+    // Load the real apps/notes/manifest.yaml off disk via the same registry-shape
+    // adapter the runtime uses. This guards against the test-vs-production
+    // shape drift Codex flagged: a fixture using {command:} would parse fine
+    // but never match production {name:}.
+    const fakeRegistry = await loadRealRegistryFixture('apps/notes');
+    const deps = buildDeps({ registry: fakeRegistry });
+    const catalog = await getEffectiveCommandCatalog('user1', deps);
+    expect(catalog.find((c) => c.canonical === '/note')).toBeDefined();
+  });
+
   it('catalog entries carry description and source labels', async () => {
     const catalog = await getEffectiveCommandCatalog('user1', buildDeps());
     const help = catalog.find((c) => c.canonical === '/help');
     expect(help!.description).toMatch(/.+/); // non-empty
-    expect(help!.source).toBe('builtin');
+    // /help, /start, /space, /invite are direct-handled (outside BUILTIN_COMMAND_NAMES);
+    // their source label is 'direct' to distinguish from the service-gated conversation builtins.
+    expect(help!.source).toBe('direct');
   });
 });
 ```
@@ -149,7 +170,8 @@ export interface CommandCatalogEntry {
 }
 
 export interface CommandCatalogDeps {
-  registry: { getAll(): Array<{ manifest: { app: { id: string }; capabilities?: { messages?: { commands?: Array<{ command: string; description?: string }> } } } }> };
+  // Mirrors ManifestCommand from core/src/types/manifest.ts — note the `name` field, NOT `command`.
+  registry: { getAll(): Array<{ manifest: { app: { id: string }; capabilities?: { messages?: { commands?: Array<{ name: string; description: string; args?: string[] }> } } } }> };
   isUserAdmin(userId: string): boolean | Promise<boolean>;
   isAppEnabledForUser(userId: string, appId: string): boolean | Promise<boolean>;
   conversationServiceWired: boolean;
@@ -236,12 +258,13 @@ export async function getEffectiveCommandCatalog(
     const cmds = app.manifest.capabilities?.messages?.commands ?? [];
     for (const cmd of cmds) {
       out.push({
-        canonical: cmd.command,
+        canonical: cmd.name,
         aliases: [],
-        description: cmd.description ?? cmd.command,
+        description: cmd.description ?? cmd.name,
         adminOnly: false,
         source: 'app',
         appId,
+        argSignature: cmd.args && cmd.args.length > 0 ? cmd.args.map((a) => `<${a}>`).join(' ') : undefined,
       });
     }
   }
@@ -305,18 +328,33 @@ getCommandCatalog?: (userId: string) => Promise<CommandCatalogEntry[]>;
 
 Wire it in the composition root (`core/src/bootstrap.ts`) by binding `getEffectiveCommandCatalog` with the live deps (registry, admin check via UserManager, app-toggle check, conversation-service presence).
 
-- [ ] **Step 3: Write the failing tests.** In the prompt-builder test file:
+- [ ] **Step 3: Write the failing tests.** In the prompt-builder test file. The real signature (per `core/src/services/conversation/prompt-builder.ts:200-207`) is `buildAppAwareSystemPrompt(question, userId, contextEntries, turns, deps, options?)` — six parameters, not three. Use a small `runPrompt(...)` helper so each test stays readable:
 
 ```typescript
+import type { ConversationTurn } from '../types.js';
+
+async function runPrompt(
+  deps: PromptBuilderDeps,
+  opts: { question?: string; userId?: string; turns?: ConversationTurn[]; contextEntries?: string[] } = {},
+): Promise<string> {
+  return buildAppAwareSystemPrompt(
+    opts.question ?? 'x',
+    opts.userId ?? 'user1',
+    opts.contextEntries ?? [],
+    opts.turns ?? [],
+    deps,
+  );
+}
+
 describe('buildAppAwareSystemPrompt — command catalog injection', () => {
   it('renders catalog inside <reference-data type="commands"> fence', async () => {
     const deps = buildDeps({
       getCommandCatalog: async () => [
-        { canonical: '/help', aliases: [], description: 'List commands', adminOnly: false, source: 'builtin' },
+        { canonical: '/help', aliases: [], description: 'List commands', adminOnly: false, source: 'direct' },
         { canonical: '/invite', aliases: [], description: 'Generate invite', adminOnly: true, source: 'direct', argSignature: '<name>' },
       ],
     });
-    const prompt = await buildAppAwareSystemPrompt('What can I do?', 'user1', deps);
+    const prompt = await runPrompt(deps, { question: 'What can I do?' });
     expect(prompt).toContain('<reference-data type="commands">');
     expect(prompt).toContain('</reference-data>');
     expect(prompt).toContain('/help');
@@ -325,8 +363,7 @@ describe('buildAppAwareSystemPrompt — command catalog injection', () => {
 
   it('includes a trusted instruction outside the fence telling the model not to follow instructions inside it', async () => {
     const deps = buildDeps();
-    const prompt = await buildAppAwareSystemPrompt('x', 'user1', deps);
-    // The trusted instruction must appear before the fence and reference the fence type
+    const prompt = await runPrompt(deps);
     const instructionIdx = prompt.indexOf('do not follow');
     const fenceIdx = prompt.indexOf('<reference-data type="commands">');
     expect(instructionIdx).toBeGreaterThan(-1);
@@ -340,8 +377,7 @@ describe('buildAppAwareSystemPrompt — command catalog injection', () => {
         { canonical: '/evil', aliases: [], description: malicious, adminOnly: false, source: 'app', appId: 'attacker' },
       ],
     });
-    const prompt = await buildAppAwareSystemPrompt('x', 'user1', deps);
-    // The injection text must appear ONLY inside the fence — never as bare prose
+    const prompt = await runPrompt(deps);
     const fenceStart = prompt.indexOf('<reference-data type="commands">');
     const fenceEnd = prompt.indexOf('</reference-data>');
     expect(fenceStart).toBeGreaterThan(-1);
@@ -357,17 +393,17 @@ describe('buildAppAwareSystemPrompt — command catalog injection', () => {
       { canonical: '/invite', aliases: [], description: 'Generate invite', adminOnly: true, source: 'direct' as const },
     ];
     const adminDeps = buildDeps({ getCommandCatalog: async () => adminCatalog });
-    const adminPrompt = await buildAppAwareSystemPrompt('x', 'admin1', adminDeps);
+    const adminPrompt = await runPrompt(adminDeps, { userId: 'admin1' });
     expect(adminPrompt).toContain('/invite');
 
     const nonAdminDeps = buildDeps({ getCommandCatalog: async () => [] });
-    const nonAdminPrompt = await buildAppAwareSystemPrompt('x', 'user2', nonAdminDeps);
+    const nonAdminPrompt = await runPrompt(nonAdminDeps, { userId: 'user2' });
     expect(nonAdminPrompt).not.toContain('/invite');
   });
 
   it('omits the section entirely when getCommandCatalog is not wired', async () => {
     const deps = buildDeps({ getCommandCatalog: undefined });
-    const prompt = await buildAppAwareSystemPrompt('x', 'user1', deps);
+    const prompt = await runPrompt(deps);
     expect(prompt).not.toContain('<reference-data type="commands">');
   });
 });
@@ -406,7 +442,7 @@ Splice `catalogSection` into the existing prompt structure — typically early, 
 
 - [ ] **Step 6: Run tests — confirm pass.** `pnpm --filter @pas/core test -- prompt-builder`.
 
-- [ ] **Step 7: Wire deps in bootstrap.** In `core/src/bootstrap.ts`, find where the conversation deps are assembled. Add:
+- [ ] **Step 7: Wire deps in compose-runtime.** The conversation composition happens in `core/src/compose-runtime.ts` (around `:915` where `appKnowledge.init()` runs and where conversation services are assembled), **not** `bootstrap.ts`. Find the section that builds the conversation/prompt-builder deps and add:
 
 ```typescript
 getCommandCatalog: (userId: string) => getEffectiveCommandCatalog(userId, {
@@ -420,6 +456,8 @@ getCommandCatalog: (userId: string) => getEffectiveCommandCatalog(userId, {
   conversationServiceWired: Boolean(conversationService),
 }),
 ```
+
+If `bootstrap.ts` needs the same `getCommandCatalog` binding (e.g. for the boot-time validation in 1G), expose it from `compose-runtime.ts`'s return value rather than re-creating it in bootstrap. Single source of binding.
 
 - [ ] **Step 8: Full suite + typecheck.** `pnpm --filter @pas/core build && pnpm --filter @pas/core test`. Expected zero failures.
 
@@ -437,6 +475,122 @@ within the fence. Filtered per-user (admin-only commands hidden from
 non-admins; disabled-app commands excluded). Resilient against
 manifest-supplied prompt-injection text — malicious descriptions
 appear inside the fence, never as trusted prose.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Batch 1B+: Refactor `sendHelp` to consume `getEffectiveCommandCatalog`
+
+**Goal:** Replace `sendHelp`'s hand-written, hardcoded command lists with rendering from the catalog. The spec promises four catalog consumers (`/help`, prompt injection, doc-coverage test, boot warning); this batch closes the gap on the first one. Without it the `/help` output and the chatbot's knowledge can drift independently — exactly the failure mode this plan is supposed to prevent.
+
+**Files:**
+- Modify: `core/src/services/router/index.ts` — replace the body of `sendHelp(userId, enabledApps)` at `:892-940` with catalog-driven rendering
+- Modify: `core/src/services/router/__tests__/router.help.test.ts` (or wherever existing `/help` tests live — find via grep first)
+- Reuse: `getEffectiveCommandCatalog` from Batch 1A
+
+Steps:
+
+- [ ] **Step 1: Find existing `/help` tests.** `rg "sendHelp|'\\/help'" core/src --type=ts -l` to locate any tests asserting on the rendered help text. Inventory them — these will need to be updated or replaced.
+
+- [ ] **Step 2: Write the failing tests** asserting the new contract:
+
+```typescript
+describe('Router /help rendering via getEffectiveCommandCatalog', () => {
+  it('renders /invite for an admin user', async () => {
+    const router = makeRouterFor({ user: { id: '1', name: 'A', isAdmin: true } });
+    const out = await captureSendHelp(router, '1', ['*']);
+    expect(out).toContain('/invite');
+  });
+
+  it('omits /invite for a non-admin user', async () => {
+    const router = makeRouterFor({ user: { id: '2', name: 'B', isAdmin: false } });
+    const out = await captureSendHelp(router, '2', ['*']);
+    expect(out).not.toContain('/invite');
+  });
+
+  it('omits commands from apps disabled for the user', async () => {
+    const router = makeRouterFor({
+      user: { id: '3', name: 'C', isAdmin: false, enabledApps: ['notes'] },
+      installedApps: ['notes', 'food'],
+    });
+    const out = await captureSendHelp(router, '3', ['notes']);
+    expect(out).not.toContain('/recipes'); // food disabled
+    expect(out).toContain('/note');         // notes enabled
+  });
+
+  it('renders all aliases for a built-in (e.g. /newchat and /reset both visible)', async () => {
+    const router = makeRouterFor({ user: { id: '4', name: 'D', isAdmin: false }, conversationServiceWired: true });
+    const out = await captureSendHelp(router, '4', ['*']);
+    expect(out).toContain('/newchat');
+    expect(out).toContain('/reset');
+  });
+
+  it('omits conversation commands when ConversationService is not wired', async () => {
+    const router = makeRouterFor({ user: { id: '5', name: 'E', isAdmin: false }, conversationServiceWired: false });
+    const out = await captureSendHelp(router, '5', ['*']);
+    expect(out).not.toContain('/ask');
+    expect(out).not.toContain('/recall');
+  });
+});
+```
+
+- [ ] **Step 3: Run — confirm failure.** New cases red.
+
+- [ ] **Step 4: Implement.** Replace the body of `sendHelp` with a single render pass that walks the catalog:
+
+```typescript
+private async sendHelp(userId: string, enabledApps: string[]): Promise<void> {
+  const catalog = await getEffectiveCommandCatalog(userId, this.commandCatalogDeps);
+  const groups = groupCatalogForHelp(catalog); // { admin, conversation, spaces, app: {appId -> entries[]} }
+  const lines: string[] = ['*Available Commands*\n'];
+
+  for (const section of ['spaces', 'admin', 'conversation'] as const) {
+    if (groups[section].length === 0) continue;
+    lines.push(`*${TITLE_FOR[section]}*`);
+    for (const entry of groups[section]) {
+      lines.push(`  ${formatHelpLine(entry)}`);
+    }
+    lines.push('');
+  }
+
+  for (const [appId, entries] of Object.entries(groups.app)) {
+    lines.push(`*${appIdToTitle(appId)}*`);
+    for (const entry of entries) {
+      lines.push(`  ${formatHelpLine(entry)}`);
+    }
+    lines.push('');
+  }
+
+  await this.trySend(userId, lines.join('\n'));
+}
+```
+
+`groupCatalogForHelp`, `TITLE_FOR`, `appIdToTitle`, `formatHelpLine` are small private helpers; keep them in the same file. `formatHelpLine` must Markdown-escape the args and description (per the existing escaped brackets in `sendHelp`, e.g. `\\[key\\]` at `:929`).
+
+- [ ] **Step 5: Plumb `commandCatalogDeps` onto the Router class.** Constructor accepts `deps.commandCatalogDeps`; the composition root (Batch 1B Step 7 wiring update) supplies the same bound deps used for the prompt injection.
+
+- [ ] **Step 6: Run — confirm pass.** New cases green; pre-existing `/help` assertions updated where the output shape changed.
+
+- [ ] **Step 7: Manual smoke.** `pnpm dev`; from the admin Telegram account, `/help` shows /invite. From a non-admin (mock or seeded second user), `/help` does not.
+
+- [ ] **Step 8: Full suite + typecheck.** Zero failures.
+
+- [ ] **Step 9: Commit.**
+
+```bash
+git add core/src/services/router/index.ts core/src/services/router/__tests__/router.help.test.ts
+git commit -m "$(cat <<'EOF'
+refactor(router): /help consumes getEffectiveCommandCatalog
+
+sendHelp() previously hand-rendered hardcoded command lists, allowing
+the rendered help to drift from the actual dispatch surface. It now
+walks the same catalog used for system-prompt injection, the doc-
+coverage test, and the boot warning. Admin/non-admin and enabled-app
+filtering automatically derive from the per-user catalog view.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -480,7 +634,7 @@ describe('command shadowing detection', () => {
     const collisions = detectCommandShadowing({
       builtins: new Set(['/notes']),
       manifests: [
-        { appId: 'fake', commands: [{ command: '/notes', description: 'x' }] },
+        { appId: 'fake', commands: [{ name: '/notes', description: 'x' }] },
       ],
     });
     expect(collisions).toHaveLength(1);
@@ -494,8 +648,8 @@ describe('command shadowing detection', () => {
     const collisions = detectCommandShadowing({
       builtins: new Set(),
       manifests: [
-        { appId: 'a', commands: [{ command: '/dup', description: 'a' }] },
-        { appId: 'b', commands: [{ command: '/dup', description: 'b' }] },
+        { appId: 'a', commands: [{ name: '/dup', description: 'a' }] },
+        { appId: 'b', commands: [{ name: '/dup', description: 'b' }] },
       ],
     });
     expect(collisions).toHaveLength(1);
@@ -525,7 +679,7 @@ export interface ShadowCollision {
 
 export interface ShadowingOverrides {
   builtins: Set<string>;
-  manifests: Array<{ appId: string; commands: Array<{ command: string; description?: string }> }>;
+  manifests: Array<{ appId: string; commands: Array<{ name: string; description?: string }> }>;
 }
 
 export async function detectCommandShadowing(overrides?: ShadowingOverrides): Promise<ShadowCollision[]> {
@@ -538,16 +692,16 @@ export async function detectCommandShadowing(overrides?: ShadowingOverrides): Pr
 
   for (const manifest of manifests) {
     for (const cmd of manifest.commands) {
-      if (builtins.has(cmd.command) || directHandled.has(cmd.command)) {
-        collisions.push({ command: cmd.command, conflictWith: 'builtin', detectedIn: manifest.appId });
-      } else if (firstSeen.has(cmd.command)) {
+      if (builtins.has(cmd.name) || directHandled.has(cmd.name)) {
+        collisions.push({ command: cmd.name, conflictWith: 'builtin', detectedIn: manifest.appId });
+      } else if (firstSeen.has(cmd.name)) {
         collisions.push({
-          command: cmd.command,
-          conflictWith: `app:${firstSeen.get(cmd.command)}`,
+          command: cmd.name,
+          conflictWith: `app:${firstSeen.get(cmd.name)}`,
           detectedIn: manifest.appId,
         });
       } else {
-        firstSeen.set(cmd.command, manifest.appId);
+        firstSeen.set(cmd.name, manifest.appId);
       }
     }
   }
@@ -555,9 +709,10 @@ export async function detectCommandShadowing(overrides?: ShadowingOverrides): Pr
   return collisions;
 }
 
-async function loadAllManifests(): Promise<Array<{ appId: string; commands: Array<{ command: string; description?: string }> }>> {
-  // Read every apps/*/manifest.yaml. Use the repo's existing YAML helper if there is one.
-  // The test runs in node so plain fs + yaml is fine.
+async function loadAllManifests(): Promise<Array<{ appId: string; commands: Array<{ name: string; description: string }> }>> {
+  // Read every apps/*/manifest.yaml using the repo's existing YAML helper
+  // (core/src/utils/yaml.ts → readYamlFile). Map the parsed manifests into
+  // the shape above using ManifestCommand from core/src/types/manifest.ts.
   // Return [] if no apps directory found.
   // ... implementation ...
 }
@@ -565,14 +720,14 @@ async function loadAllManifests(): Promise<Array<{ appId: string; commands: Arra
 
 - [ ] **Step 6: Run the shadowing test.** Expected: production case fails citing `/notes` colliding with builtin.
 
-- [ ] **Step 7: Rename `/notes` to `/listnotes` in Notes app.** Update `apps/notes/manifest.yaml`:
+- [ ] **Step 7: Rename `/notes` to `/listnotes` in Notes app.** Update `apps/notes/manifest.yaml` — note the real schema uses `name:`, not `command:`:
 
 ```yaml
 # Before:
-# - command: /notes
+# - name: /notes
 #   description: List recent notes
 # After:
-- command: /listnotes
+- name: /listnotes
   description: List recent notes
 ```
 
@@ -964,13 +1119,17 @@ entries: []
 // core/src/services/router/__tests__/command-documentation.test.ts
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as yaml from 'yaml';
 import { getEffectiveCommandCatalog } from '../command-catalog.js';
 import { loadIndexedEntries } from '../../app-knowledge/index.js';
 
+// ESM equivalent of __dirname (this project is ESM-only — `__dirname` is unavailable).
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 // Test against the live repo layout. Paths resolved from this test file.
-const REPO_ROOT = resolve(__dirname, '../../../../..');
+const REPO_ROOT = resolve(HERE, '../../../../..');
 const INFRA_DOCS = join(REPO_ROOT, 'core/docs/help');
 const ALLOWLIST_PATH = join(REPO_ROOT, 'core/config/undocumented-commands.yaml');
 
@@ -1051,7 +1210,15 @@ async function loadAllowlist(path: string): Promise<Set<string>> {
   return new Set((raw?.entries ?? []).map((e) => e.command));
 }
 
-// dedupeByCanonical, discoverApps, buildLiveDeps — implement using repo conventions
+// dedupeByCanonical, discoverApps, buildLiveDeps — implement using repo conventions.
+//
+// IMPORTANT for buildLiveDeps in the doc-coverage test ONLY: force
+// `isAppEnabledForUser: () => true` for every app/userId combination.
+// The doc-coverage gate's intent is "every command that could ever be
+// dispatched must be documented," which includes commands from apps
+// the live operator currently has disabled. Per-user enablement
+// filtering is exercised separately by the prompt-injection tests in
+// Batch 1B and the /help tests in Batch 1B+.
 ```
 
 - [ ] **Step 4: Run — confirm failure (or pass if 1E backfill was complete).** `pnpm --filter @pas/core test -- command-documentation`. Expected: all four cases pass IF the backfill in 1E covered every catalog command. If anything is missing, fix the help docs (or add to allowlist with full justification).
@@ -1147,18 +1314,18 @@ export function logDocCoverageWarnings(result: DocCoverageResult, logger: Logger
 
 - [ ] **Step 2: Refactor the 1F test to consume the helper.** Replace duplicated check logic with a call to `validateCommandDocumentation` and assertion on its result.
 
-- [ ] **Step 3: Wire boot-time call.** In `bootstrap.ts`, after `appKnowledge.init()` completes and after registries are built:
+- [ ] **Step 3: Wire boot-time call.** In `core/src/compose-runtime.ts` (the same file that calls `appKnowledge.init()` at `:915` — that's where the indexed entries become available), after init() completes and after registries are built:
 
 ```typescript
 const docCoverage = await validateCommandDocumentation({
   indexedEntries: appKnowledge.getEntries(), // expose if private; or stash inside loadIndexedEntries return
-  catalogDeps: { /* same deps as runtime prompt-injection wiring */ },
+  catalogDeps: { /* reuse the same binding as the prompt-injection wiring from Batch 1B Step 7 */ },
   allowlistPath: resolve(rootDir, 'core/config/undocumented-commands.yaml'),
 });
 logDocCoverageWarnings(docCoverage, logger);
 ```
 
-(If `AppKnowledgeBase.entries` is private and you don't want to expose it, have `loadIndexedEntries` return both the entries and let `init()` cache them — then add a `getEntries()` public getter that returns a defensive copy.)
+(If `AppKnowledgeBase.entries` is private and you don't want to expose it, have `loadIndexedEntries` return both the entries and let `init()` cache them — then add a `getEntries()` public getter that returns a defensive copy. Place that getter on `AppKnowledgeBase` in the same edit.)
 
 - [ ] **Step 4: Add an integration test** that asserts the warning fires when a doc is missing:
 
@@ -1289,18 +1456,29 @@ describe('createInvite name validation', () => {
 });
 ```
 
-- [ ] **Step 6: Implement name guards in `createInvite`.** Inject a `knownUserIds: () => Iterable<string>` dep so the service can check id equality without depending on UserManager directly (looser coupling; tests stay independent). Before generating the code, validate:
+- [ ] **Step 6: Implement name guards in `createInvite`.** Inject a `knownUserIds: () => Iterable<string>` dep so the service can check id equality without depending on UserManager directly (looser coupling; tests stay independent). **Trim and validate non-blank first**, otherwise whitespace-padded numeric names like `" 12345 "` slip past the regex:
 
 ```typescript
 // in createInvite, after the existing householdId validation
-if (/^\d+$/.test(name)) {
+const trimmed = name.trim();
+if (trimmed.length === 0) {
+  throw new Error('Display name must not be blank.');
+}
+if (/^\d+$/.test(trimmed)) {
   throw new Error(`Display name must not be numeric-only: ${JSON.stringify(name)}.`);
 }
 const ids = new Set(this.knownUserIds?.() ?? []);
-if (ids.has(name)) {
-  throw new Error(`Display name '${name}' matches an existing user id; choose a different name.`);
+if (ids.has(trimmed)) {
+  throw new Error(`Display name '${trimmed}' matches an existing user id; choose a different name.`);
 }
+// Use `trimmed` (not the raw `name`) for the rest of createInvite — write trimmed to storage.
 ```
+
+**Add tests for the padding/blank edge cases:**
+- `" 12345 "` → rejected as numeric-only
+- `""` → rejected as blank
+- `"   "` → rejected as blank
+- `" Sarah "` → accepted, stored as `Sarah`
 
 (Note: real uniqueness vs. existing `user.name` lands in Batch 2C — this batch only handles the *ambiguity* against numeric id space.)
 
@@ -1375,37 +1553,60 @@ describe('POST /login accepts username or numeric id', () => {
 });
 ```
 
-- [ ] **Step 8: Implement the new login flow.** In `auth.ts` POST `/login` handler:
+- [ ] **Step 8: Implement the new login flow.** The real rate-limiter API is `isAllowed(key)` and `check(key) → commit()` (see `core/src/middleware/rate-limiter.ts:47-91`). The existing login at `core/src/gui/auth.ts:230-262` already calls `loginRateLimiter.isAllowed(clientIp)` and `loginRateLimiter.isAllowed(\`user:\${userId}\`)` — the second call is the bug: `userId` there is the raw submitted string, so `MATT` and `matt` get separate counters. **Preserve the IP limiter and replace the user limiter to key on the canonical resolved id.** Resolve before the user limiter check; the IP limiter still runs first (unconditionally, against `clientIp`) so unknown-username sprays are still throttled.
 
 ```typescript
-// Resolve to canonical user before rate-limit lookup
-const submitted = body.userId?.trim() ?? '';
+// auth.ts POST /login (adapt to real surrounding code — this is the shape, not the verbatim insert)
+const submittedRaw = (body.userId ?? '').toString();
+const submitted = submittedRaw.trim();
 const password = body.password ?? '';
 
+if (!submitted || !password) {
+  return renderError('User ID and password are required.');
+}
+
+// 1) IP limiter runs FIRST — unchanged from current behavior. Throttles bogus sprays
+//    even when no user resolves.
+if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
+  return reply.status(429).viewAsync('login', { title: 'Login — PAS', error: 'Too many login attempts. Please try again later.' });
+}
+
+// 2) Resolve to canonical user. Numeric input → id-only lookup (never falls through to name).
+//    Non-numeric input → case-insensitive name lookup, gated on the loginByNameAllowed flag
+//    set by Batch 2C's boot-time duplicate-name scan.
 let resolvedUser: RegisteredUser | undefined;
 if (/^\d+$/.test(submitted)) {
   resolvedUser = userManager.getUser(submitted);
-} else {
+} else if (loginByNameAllowed) {
   resolvedUser = userManager.findByName(submitted);
 }
 
-const rateLimitKey = resolvedUser ? `user:${resolvedUser.id}` : `unknown:${hashForRateLimit(submitted, req.ip)}`;
-if (!rateLimiter.allow(rateLimitKey)) {
-  reply.code(429).send({ error: 'Too many attempts. Try again later.' });
-  return;
+// 3) Per-account limiter — keyed on canonical id. Casing variants of a username share
+//    the same counter. If resolution failed, we still throttle but on a different key
+//    space (the IP path above already covers spray throttling).
+const userLimitKey = resolvedUser
+  ? `user:${resolvedUser.id}`
+  : `unknown:${clientIp}:${submitted.toLowerCase()}`;
+if (loginRateLimiter && !loginRateLimiter.isAllowed(userLimitKey)) {
+  return reply.status(429).viewAsync('login', { title: 'Login — PAS', error: 'Too many login attempts for this account. Please try again later.' });
 }
 
-if (!resolvedUser || !(await verifyPassword(password, resolvedUser.passwordHash))) {
-  rateLimiter.bump(rateLimitKey);
-  reply.code(401).send({ error: 'Invalid credentials' });
-  return;
+// 4) Generic error path — DO NOT reveal whether the resolution failed or the password did.
+if (!resolvedUser) {
+  return renderError('Invalid credentials.');
+}
+const valid = await credentialService.verifyPassword(resolvedUser.id, password);
+if (!valid) {
+  return renderError('Invalid credentials.');
 }
 
-// Issue session with canonical numeric id (unchanged)
-issueSessionCookie(reply, { userId: resolvedUser.id, sessionVersion: resolvedUser.sessionVersion, issuedAt: Date.now() });
+// 5) Session uses the canonical numeric id (unchanged from current cookie payload shape).
+const sessionVersion = await credentialService.getSessionVersion(resolvedUser.id);
+issueSessionCookie(reply, resolvedUser.id, sessionVersion, 'gui-password');
+return reply.redirect('/gui/');
 ```
 
-(Adapt to the existing rate-limiter API — read it first; current behavior keys on raw `submitted` per `auth.ts:242`. The key change is the `user:${resolvedUser.id}` vs `unknown:...` decision.)
+**Add a test specifically for IP-spray throttling** (independent of username): hammer `/login` with N+1 different bogus usernames from the same IP and assert the (N+1)th gets 429 even though no individual user limiter ever tripped.
 
 - [ ] **Step 9: Update `login.eta` template.** Relabel the field "Username or Telegram ID" and update the placeholder. Read the current template first so the diff is minimal.
 
@@ -1487,24 +1688,35 @@ describe('operator GUI templates — name vs id rendering', () => {
     });
   });
 
-  it('alert-edit delivery dropdown shows name and not numeric id', async () => {
+  it('alert-edit delivery checkboxes show name and not numeric id', async () => {
     const resp = await app.inject({ method: 'GET', url: '/gui/alerts/new', headers: authedHeaders() });
-    // Match the <select name="deliveryTargets"> block specifically
-    const dropdown = extractSelectBlock(resp.body, 'deliveryTargets');
-    expect(dropdown).toContain('>Matt<');
-    expect(dropdown).not.toMatch(/>111</);
+    // The delivery UI is NOT a <select>. It's a flex row of <label> elements,
+    // each wrapping <input type="checkbox" class="delivery-cb" value="<%= user.id %>" />
+    // followed by the user's name. See alert-edit.eta:76-88.
+    // Extract every label whose checkbox carries class="delivery-cb" and assert on the label text.
+    const labels = extractDeliveryCbLabels(resp.body);
+    expect(labels).toHaveLength(1);
+    expect(labels[0].text).toContain('Matt');
+    expect(labels[0].text).not.toContain('111');
+    // The numeric id IS expected to remain in the checkbox value (it's a stable submit key);
+    // confirm it's the only place id appears, not in the rendered label text.
+    expect(labels[0].checkboxValue).toBe('111');
   });
 
   it('alert-edit source/data dropdown (around line 177) shows name only', async () => {
     const resp = await app.inject({ method: 'GET', url: '/gui/alerts/new', headers: authedHeaders() });
-    const dropdown = extractSelectBlock(resp.body, 'dataSource'); // confirm actual select name
-    expect(dropdown).not.toMatch(/>111</);
+    // Read alert-edit.eta around :177 first to confirm whether this is a <select> or
+    // another flex/label pattern; mirror the same DOM extraction approach.
+    const dataSource = extractDataSourceBlock(resp.body);
+    expect(dataSource).not.toContain('111');
   });
 
-  it('report-edit delivery dropdown shows name only', async () => {
+  it('report-edit delivery checkboxes show name only', async () => {
     const resp = await app.inject({ method: 'GET', url: '/gui/reports/new', headers: authedHeaders() });
-    const dropdown = extractSelectBlock(resp.body, 'deliveryTargets');
-    expect(dropdown).not.toMatch(/>111</);
+    // Same checkbox pattern as alert-edit (see report-edit.eta around :167).
+    const labels = extractDeliveryCbLabels(resp.body);
+    expect(labels[0].text).toContain('Matt');
+    expect(labels[0].text).not.toContain('111');
   });
 
   it('admin dashboard table shows name primary, id only inside <small>', async () => {
@@ -1525,12 +1737,25 @@ describe('operator GUI templates — name vs id rendering', () => {
 
 - [ ] **Step 4: Run — confirm failure.** Tests fail because templates still render the raw id.
 
-- [ ] **Step 5: Update templates.** For each delivery/source dropdown:
+- [ ] **Step 5: Update templates.** Delivery UI today uses checkbox labels, **not** `<option>` elements. Per `alert-edit.eta:76-88`:
 
 ```html
-<!-- Before -->
-<option value="<%= user.id %>"><%= user.name %> (<%= user.id %>)</option>
-<!-- After -->
+<!-- Current alert-edit.eta:80-87 — confirm shape before editing -->
+<% for (const user of it.users) { %>
+  <label style="margin-bottom:0">
+    <input type="checkbox" class="delivery-cb" value="<%= user.id %>"
+           <%= selectedDelivery.includes(user.id) ? 'checked' : '' %>
+           onchange="syncDelivery()" />
+    <%= user.name %>
+  </label>
+<% } %>
+```
+
+The label text **already** renders `user.name` only. If grep confirms zero `user.id` leaks in the displayed label text on `alert-edit.eta` and `report-edit.eta` delivery sections, those template edits are *no-ops* — the render test still belongs in the suite as a regression guard. Check the source/data dropdowns and other surfaces (likely real `<select>` or other patterns) for actual id leaks.
+
+If anywhere does use the `<option value="<%= user.id %>"><%= user.name %> (<%= user.id %>)</option>` pattern, flip to:
+
+```html
 <option value="<%= user.id %>"><%= user.name %></option>
 ```
 
@@ -1596,14 +1821,37 @@ Steps:
 
 - [ ] **Step 1: Read the existing `createInvite` to confirm the read-check-write shape.** It currently does `readStore` then `writeStore` without a lock spanning both. Plan to wrap the entire RMW in `withFileLock(this.invitesPath, ...)`.
 
-- [ ] **Step 2: Define name normalization** (shared helper).
+- [ ] **Step 2: Define name normalization and clock injection.**
 
 ```typescript
-// core/src/services/invite/normalize.ts (or in command-catalog/utility)
+// core/src/services/invite/normalize.ts (new)
 export function normalizeDisplayName(raw: string): string {
   return raw.trim().toLocaleLowerCase();
 }
 ```
+
+```typescript
+// core/src/services/invite/index.ts — extend InviteServiceOptions
+export interface InviteServiceOptions {
+  dataDir: string;
+  logger: Logger;
+  /** Clock injection — default () => new Date(). Lets tests advance time
+   *  without depending on real wall-clock. Threaded through expiry checks
+   *  in validateCode, claimAndRedeem, createInvite, and cleanup. */
+  now?: () => Date;
+  knownUserIds?: () => Iterable<string>;
+  knownUsers?: () => Iterable<{ id: string; name: string }>;
+}
+
+// In the constructor:
+this.now = options.now ?? (() => new Date());
+
+// Replace every `new Date()` call inside expiry/staleness comparisons with `this.now()`.
+// (createdAt / expiresAt strings are produced from this.now() too so the recorded
+//  timestamps stay consistent with the injected clock during tests.)
+```
+
+The `knownUserIds` injection was already established in Batch 2A Step 6; `knownUsers` is added here so the uniqueness check can compare against `user.name` (Step 4 below).
 
 - [ ] **Step 3: Write failing uniqueness tests.**
 
@@ -1633,9 +1881,13 @@ describe('createInvite name uniqueness', () => {
   });
 
   it('allows reuse of a name from an expired invite', async () => {
-    const service = makeInviteService({ now: () => new Date('2026-01-01') });
+    // Clock injection: InviteServiceOptions gains an optional `now?: () => Date` field
+    // (defaults to () => new Date()). The mutable closure here lets the test advance the
+    // clock between two createInvite calls without depending on real wall-clock time.
+    let nowMs = new Date('2026-01-01T00:00:00.000Z').getTime();
+    const service = makeInviteService({ now: () => new Date(nowMs) });
     await service.createInvite('Sarah', 'admin1', { householdId: 'h1' });
-    service.advanceTime(25 * 60 * 60 * 1000); // 25h
+    nowMs += 25 * 60 * 60 * 1000; // 25h elapsed; the first invite is now expired
     await expect(service.createInvite('Sarah', 'admin1', { householdId: 'h1' })).resolves.toBeTruthy();
   });
 
@@ -1654,11 +1906,19 @@ describe('createInvite name uniqueness', () => {
 });
 ```
 
-- [ ] **Step 4: Implement the locked uniqueness check.**
+- [ ] **Step 4: Implement the locked uniqueness check.** **`createInvite` and `registerUser` must use a *shared* name-uniqueness lock key**, otherwise the two checks can interleave and a name can pass both layers concurrently. Define one constant and use it via `withMultiFileLock` so each entry point also holds its own store lock:
+
+```typescript
+// core/src/services/invite/locks.ts (new)
+export const DISPLAY_NAME_LOCK_KEY = 'display-name:uniqueness';
+```
 
 ```typescript
 // inside createInvite
-return withFileLock(this.invitesPath, async () => {
+import { withMultiFileLock } from '../../utils/file-mutex.js';
+import { DISPLAY_NAME_LOCK_KEY } from './locks.js';
+
+return withMultiFileLock([DISPLAY_NAME_LOCK_KEY, this.invitesPath], async () => {
   const store = await this.readStore();
 
   const norm = normalizeDisplayName(name);
@@ -1669,8 +1929,8 @@ return withFileLock(this.invitesPath, async () => {
     }
   }
   for (const [code, invite] of Object.entries(store)) {
-    if (invite.usedBy !== null) continue;                    // used → does not block
-    if (new Date(invite.expiresAt) <= new Date()) continue;  // expired → does not block
+    if (invite.usedBy !== null) continue;                          // used → does not block
+    if (new Date(invite.expiresAt) <= this.now()) continue;        // expired → does not block (uses injected clock; see Step 5)
     if (normalizeDisplayName(invite.name) === norm) {
       throw new Error(`Name '${name}' is already taken by an active invite (${code}). Choose a different name.`);
     }
@@ -1679,6 +1939,8 @@ return withFileLock(this.invitesPath, async () => {
   // ... rest of the existing createInvite body (generate code, write store, log) ...
 });
 ```
+
+`withMultiFileLock` acquires keys in canonical sorted order (already deadlock-safe — see `core/src/utils/file-mutex.ts:21-30`), so it's safe to pass them in any source order.
 
 - [ ] **Step 5: Write defensive `registerUser` uniqueness test.**
 
@@ -1703,7 +1965,7 @@ describe('registerUser defensive uniqueness', () => {
 });
 ```
 
-- [ ] **Step 6: Implement defensive check in `registerUser`** (or wherever new users get added — likely `UserMutationService`). Same case-insensitive normalization; same lock key shared with createInvite (e.g. `withFileLock('user-name-uniqueness', ...)`).
+- [ ] **Step 6: Implement defensive check in `registerUser`** (or wherever new users get added — likely `UserMutationService`). **Use the same `DISPLAY_NAME_LOCK_KEY` constant** imported from `core/src/services/invite/locks.js`. Wrap the read-check-write in `withMultiFileLock([DISPLAY_NAME_LOCK_KEY, usersYamlPath], async () => { … })` so a concurrent `createInvite` cannot interleave between the check and the persist. Same case-insensitive normalization (`normalizeDisplayName`) as `createInvite`.
 
 - [ ] **Step 7: Write failing boot-scan test.**
 
@@ -1899,6 +2161,28 @@ EOF
 - `core/src/gui/views/dashboard.eta`
 - (Reset-password and any additional templates found in the 2B grep sweep)
 - `core/src/services/user-manager/index.ts` (`findByName`)
-- `core/src/services/invite/index.ts` (locked uniqueness; name guards)
+- `core/src/services/invite/index.ts` (locked uniqueness; name guards; clock injection)
+- `core/src/services/invite/locks.ts` (new — DISPLAY_NAME_LOCK_KEY constant)
 - `core/src/bootstrap.ts` (duplicate-name scan)
 - `core/src/gui/__tests__/auth-d5b3.test.ts:432` (contract change)
+
+---
+
+## Codex plan-review corrections — change table (v2)
+
+This plan went through one round of Codex review after first draft. All 12 findings (2 Critical, 8 Important, 2 Medium) were applied in-place above.
+
+| # | Severity | Codex finding (short) | Where applied |
+|---|---|---|---|
+| C1 | Critical | Manifest schema uses `name`, not `command` | Batch 1A Step 2 confirms the `ManifestCommand.name` shape; mock fixtures (`/recipes`), `CommandCatalogDeps` registry type, the `cmd.name` access in the helper sketch, and the shadowing-test mocks all flipped from `command:` to `name:`; new test case "discovers production manifest commands (Notes /note must be present)" loads `apps/notes/manifest.yaml` off disk |
+| C2 | Critical | `/help` consumer not actually refactored | New **Batch 1B+** added between 1B and 1C: refactors `sendHelp(userId, enabledApps)` at `router/index.ts:892-940` to walk `getEffectiveCommandCatalog`; tests admin vs non-admin, enabled-app filtering, alias presence, service-gated omission |
+| I1 | Important | `/help` source vocabulary mismatch (`builtin` vs `direct`) | Test in Batch 1A now asserts `help!.source === 'direct'`; sketch already emitted `'direct'`. Source labels: `'direct'` for the four directly-handled (`/help`, `/start`, `/space`, `/invite`); `'builtin'` for service-gated conversation commands; `'app'` for app-manifest commands |
+| I2 | Important | Prompt-builder test calls used wrong arity | Batch 1B Step 3 now uses the real `(question, userId, contextEntries, turns, deps, options?)` signature via a small `runPrompt(deps, opts)` helper |
+| I3 | Important | Wiring location is `compose-runtime.ts`, not `bootstrap.ts` | Batch 1B Step 7 and Batch 1G Step 3 both retargeted to `core/src/compose-runtime.ts` (the file that actually calls `appKnowledge.init()` at `:915`); bootstrap-side use, if any, consumes the binding exposed from compose-runtime |
+| I4 | Important | Doc-coverage test under-tests app commands with real enablement | Batch 1F adds explicit guidance: in the doc-coverage path, `buildLiveDeps` MUST set `isAppEnabledForUser: () => true` for every app/user combination. Per-user filtering is exercised by prompt-injection tests (1B) and `/help` tests (1B+) instead |
+| I5 | Important | ESM tests can't use `__dirname` | Batch 1F test imports `fileURLToPath` from `node:url` and `dirname` from `node:path`; `HERE = dirname(fileURLToPath(import.meta.url))` replaces `__dirname` for `REPO_ROOT` resolution |
+| I6 | Important | Login pseudocode dropped IP limiter and invented `allow()`/`bump()` APIs | Batch 2A Step 8 rewritten against the real `RateLimiter.isAllowed(key)` API (`core/src/middleware/rate-limiter.ts:72-91`). IP limiter still runs first (unchanged from current `auth.ts:236`), then per-account limiter runs against the canonical resolved id (`user:${resolvedUser.id}`) or `unknown:${clientIp}:${submitted.toLowerCase()}` when resolution fails. Added required test: unknown-username spray throttling by IP |
+| I7 | Important | Different lock keys between createInvite and registerUser | Batch 2C Step 2 introduces `core/src/services/invite/locks.ts` exporting `DISPLAY_NAME_LOCK_KEY`; Step 4 wraps `createInvite` in `withMultiFileLock([DISPLAY_NAME_LOCK_KEY, this.invitesPath], ...)`; Step 6 wraps `registerUser` in `withMultiFileLock([DISPLAY_NAME_LOCK_KEY, usersYamlPath], ...)`. The shared key serialises create-vs-register on the same uniqueness frontier |
+| I8 | Important | Tests assumed clock injection (`now`, `advanceTime`) that doesn't exist | Batch 2C Step 2 extends `InviteServiceOptions` with `now?: () => Date` (defaulting to `() => new Date()`), threaded through every expiry comparison and into `createInvite`'s persisted timestamps. The expired-invite test now advances a mutable `nowMs` closure between calls instead of calling a fictional `service.advanceTime` |
+| M1 | Medium | Numeric-only invite-name check doesn't trim | Batch 2A Step 6 now trims first, rejects blank, then applies the `/^\d+$/` test on the trimmed value; explicit test cases for `" 12345 "`, `""`, `"   "`, and `" Sarah "` added |
+| M2 | Medium | Delivery dropdowns are checkbox labels, not `<select>` | Batch 2B Steps 3 and 5 rewritten against the real `<label><input type="checkbox" class="delivery-cb" value="<%= user.id %>" /> <%= user.name %></label>` pattern from `alert-edit.eta:80-87`. Render tests now extract `.delivery-cb` labels and assert that the rendered label text is `Matt` while the checkbox `value` remains the numeric id (legitimate submit key). The template-edit step notes that these specific dropdowns may already be id-free in the displayed text — the test remains as a regression guard regardless |
