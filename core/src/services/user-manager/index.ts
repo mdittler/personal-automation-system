@@ -44,6 +44,23 @@ export class UserManager {
 		return this.userMap.get(telegramId) ?? null;
 	}
 
+	/**
+	 * Find a registered user by display name (case-insensitive, exact match).
+	 * Returns undefined when no user matches. Never matches against numeric ids —
+	 * a name like "8187111554" only matches a user whose `name` is that string,
+	 * not a user whose `id` is that string.
+	 */
+	findByName(name: string): RegisteredUser | undefined {
+		if (!name) return undefined;
+		const target = name.toLocaleLowerCase();
+		for (const user of this.users) {
+			if (user.name.toLocaleLowerCase() === target) {
+				return user;
+			}
+		}
+		return undefined;
+	}
+
 	/** Check if a Telegram user ID is registered. */
 	isRegistered(telegramId: string): boolean {
 		return this.userMap.has(telegramId);

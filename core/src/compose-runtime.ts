@@ -523,6 +523,11 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'invite' }),
+		// Batch 2A: createInvite rejects display names that exactly match an
+		// existing user's numeric Telegram id (defense-in-depth against the
+		// name/id ambiguity at login time). Re-evaluated on every call so newly
+		// registered users are visible immediately.
+		knownUserIds: () => userManager.getAllUsers().map((u) => u.id),
 	});
 	await inviteService.cleanup();
 

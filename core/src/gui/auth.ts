@@ -22,8 +22,17 @@
  *
  * ## Login identifier
  *
- * Telegram user ID — unique, same as all existing data paths.
- * Display names are NOT unique and are NOT used for login.
+ * Display names ARE globally unique and ARE accepted at login alongside
+ * numeric Telegram ids. Uniqueness is enforced at invite creation and
+ * registration time (see invite/index.ts createInvite); a boot-time
+ * duplicate-name scan refuses login-by-name until duplicates are
+ * resolved (see bootstrap/compose-runtime; landing in Batch 2C).
+ *
+ * Resolution is done BEFORE per-account rate-limiting so casing variants
+ * of a username share the same per-account counter (no brute-force bypass
+ * via casing). Purely-digit input is treated as id-only and never falls
+ * through to name lookup. Resolution failure returns the same generic
+ * "Invalid user ID or password." text as a wrong-password failure.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -225,40 +234,87 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		}
 
 		// --- Password path ---
-		const userId = body?.['userId']?.trim() ?? '';
+		const submittedRaw = body?.['userId'] ?? '';
+		const submitted = submittedRaw.trim();
 		const password = body?.['password'] ?? '';
 
-		if (!userId || !password) {
+		if (!submitted || !password) {
 			return renderError('User ID and password are required.');
 		}
 
-		// Rate-limit by IP and by userId
+		// 1) IP limiter runs FIRST — unchanged from previous behavior. Throttles
+		//    bogus spray attempts even when no user resolves.
 		if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
 				error: 'Too many login attempts. Please try again later.',
 			});
 		}
-		if (loginRateLimiter && !loginRateLimiter.isAllowed(`user:${userId}`)) {
+
+		// 2) Resolve to canonical user BEFORE the per-account limiter, so casing
+		//    variants of a username share one counter (`user:${resolvedUser.id}`).
+		//    Numeric input is id-only — never falls through to name lookup, even
+		//    defensively if some pathological user happens to have a digit-only
+		//    display name (createInvite rejects those at invite time).
+		//
+		//    For non-numeric input we first try `findByName`; if that returns
+		//    nothing we fall through to `getUser(submitted)`. In production every
+		//    user id is a numeric Telegram id, so the id fallback is a no-op for
+		//    non-numeric input — but it keeps test fixtures that use synthetic
+		//    string ids (e.g. "admin-1") working, and a real submitted id can
+		//    never be a name (createInvite rejects numeric-only names).
+		//
+		//    `loginByNameAllowed` will be set by Batch 2C's boot-time duplicate-name
+		//    scan; until then, accept name lookups unconditionally. When the scan
+		//    detects a duplicate, it will flip this to false so login-by-name is
+		//    disabled until an operator resolves the duplicate.
+		const loginByNameAllowed = true; // Batch 2C wires this from a boot-time duplicate-name scan.
+		let resolvedUser: ReturnType<UserManager['getUser']> | undefined;
+		if (/^\d+$/.test(submitted)) {
+			resolvedUser = userManager!.getUser(submitted) ?? undefined;
+		} else {
+			if (loginByNameAllowed && typeof userManager!.findByName === 'function') {
+				resolvedUser = userManager!.findByName(submitted) ?? undefined;
+			}
+			if (!resolvedUser) {
+				// Test-fixture / synthetic-id fallback. In production this is a no-op
+				// because every real user id is numeric (handled by the branch above).
+				resolvedUser = userManager!.getUser(submitted) ?? undefined;
+			}
+		}
+
+		// 3) Per-account limiter — keyed on the canonical id so casing variants
+		//    share a counter. When resolution fails, use a key that still binds to
+		//    the requesting IP and the lowercased submitted string, so brute-forcers
+		//    cannot bypass throttling via casing or by spraying many bogus names
+		//    from the same IP. (The IP limiter above already covered raw spray; this
+		//    keeps the per-account counter useful as a second line of defense.)
+		const userLimitKey = resolvedUser
+			? `user:${resolvedUser.id}`
+			: `unknown:${clientIp}:${submitted.toLocaleLowerCase()}`;
+		if (loginRateLimiter && !loginRateLimiter.isAllowed(userLimitKey)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
-				error: 'Too many login attempts for this user. Please try again later.',
+				error: 'Too many login attempts for this account. Please try again later.',
 			});
 		}
 
-		// Verify user exists — same error as wrong password to prevent enumeration
-		const user = userManager!.getUser(userId);
-		if (!user) {
+		// 4) Generic error path — DO NOT reveal whether resolution or password
+		//    verification failed. Same wording either way ("Invalid user ID or
+		//    password.") to prevent username enumeration.
+		if (!resolvedUser) {
 			return renderError('Invalid user ID or password.');
 		}
 
-		const valid = await credentialService!.verifyPassword(userId, password);
+		const valid = await credentialService!.verifyPassword(resolvedUser.id, password);
 		if (!valid) {
 			return renderError('Invalid user ID or password.');
 		}
 
-		const sessionVersion = await credentialService!.getSessionVersion(userId);
-		issueSessionCookie(reply, userId, sessionVersion, 'gui-password');
+		// 5) Session uses the canonical numeric id — cookie payload shape is unchanged
+		//    from D5b-3, so existing rehydration logic keeps working.
+		const sessionVersion = await credentialService!.getSessionVersion(resolvedUser.id);
+		issueSessionCookie(reply, resolvedUser.id, sessionVersion, 'gui-password');
 		return reply.redirect('/gui/');
 	});
 
