@@ -115,6 +115,13 @@ async function finalizePlan(
 	// Send finalized plan to all household members
 	for (const memberId of memberIds) {
 		await services.telegram.sendWithButtons(memberId, message, buttons);
+		await services.appOutboundBridge?.recordOutboundMessage({
+			userId: memberId,
+			appId: 'food',
+			kind: 'weekly-menu',
+			body: message,
+			buttons,
+		});
 	}
 }
 
@@ -143,6 +150,13 @@ export async function sendVotingMessages(
 		const buttons = buildVoteButtons(meal.date);
 		for (const memberId of household.members) {
 			await services.telegram.sendWithButtons(memberId, message, buttons);
+			await services.appOutboundBridge?.recordOutboundMessage({
+				userId: memberId,
+				appId: 'food',
+				kind: 'weekly-menu',
+				body: message,
+				buttons,
+			});
 		}
 	}
 }

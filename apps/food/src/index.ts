@@ -2173,8 +2173,21 @@ async function sendBatchPrepToMember(
 	if (batchButtons.length > 0) {
 		const sent = await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
 		setBatchFreezeRecipes(sent.chatId, sent.messageId, freezerFriendlyRecipes);
+		await services.appOutboundBridge?.recordOutboundMessage({
+			userId: memberId,
+			appId: 'food',
+			kind: 'batch-prep',
+			body: batchMsg,
+			buttons: batchButtons,
+		});
 	} else {
 		await services.telegram.send(memberId, batchMsg);
+		await services.appOutboundBridge?.recordOutboundMessage({
+			userId: memberId,
+			appId: 'food',
+			kind: 'batch-prep',
+			body: batchMsg,
+		});
 	}
 }
 
@@ -3492,7 +3505,14 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 			lines.push(`_${insight.disclaimer}_`);
 			lines.push('');
 		}
-		await services.telegram.send(userId, lines.join('\n').trimEnd());
+		const body = lines.join('\n').trimEnd();
+		await services.telegram.send(userId, body);
+		await services.appOutboundBridge?.recordOutboundMessage({
+			userId,
+			appId: 'food',
+			kind: 'weekly-health',
+			body,
+		});
 		return;
 	}
 
@@ -3532,8 +3552,16 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 			const location =
 				((await services.config.get<string>('location')) as string | undefined) ?? 'your area';
 			const message = formatPlanMessage(plan, recipes, location);
+			const planButtons = buildPlanButtons(plan);
 			for (const memberId of household.members) {
-				await services.telegram.sendWithButtons(memberId, message, buildPlanButtons(plan));
+				await services.telegram.sendWithButtons(memberId, message, planButtons);
+				await services.appOutboundBridge?.recordOutboundMessage({
+					userId: memberId,
+					appId: 'food',
+					kind: 'weekly-menu',
+					body: message,
+					buttons: planButtons,
+				});
 			}
 		}
 
