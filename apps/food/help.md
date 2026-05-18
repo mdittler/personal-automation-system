@@ -9,6 +9,7 @@ First, set up your household so family members can share recipes and grocery lis
 - `/household create Family Kitchen` — create a household
 - Share the join code with your partner
 - `/household join ABC123` — join an existing household
+- `/family` — manage child profiles and food introduction tracking (see Family section below)
 
 ## Recipes
 
