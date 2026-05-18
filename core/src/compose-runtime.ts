@@ -127,6 +127,7 @@ import {
 	extractUserId,
 } from './services/telegram/message-adapter.js';
 import { UserManager } from './services/user-manager/index.js';
+import { scanForDuplicateNames } from './services/user-manager/scan-duplicate-names.js';
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
@@ -496,6 +497,16 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'user-manager' }),
 	});
 
+	// boot-time duplicate-name scan.
+	// Disables login-by-name when pre-existing duplicate display names are detected
+	// in pas.yaml. Numeric-id login still works so the operator can reach the GUI
+	// to fix the YAML; after the fix and a restart, name login re-enables.
+	const duplicateNameGroups = scanForDuplicateNames({
+		users: userManager.getAllUsers(),
+		logger: createChildLogger(logger, { service: 'duplicate-name-scan' }),
+	});
+	const loginByNameAllowed = duplicateNameGroups.length === 0;
+
 	// 8b-cred. Credential Service
 	const credentialService = new CredentialService({
 		dataDir: config.dataDir,
@@ -528,6 +539,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const inviteService = new InviteService({
 		dataDir: config.dataDir,
 		logger: createChildLogger(logger, { service: 'invite' }),
+		// Re-evaluated per call so newly-registered users are visible immediately.
+		// createInvite uses these to reject name/id collisions and case-insensitive
+		// name duplicates.
+		knownUsers: () => userManager.getAllUsers(),
 	});
 	await inviteService.cleanup();
 
@@ -1576,6 +1591,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
+		loginByNameAllowed,
 	});
 
 	// 13b. External Data API (optional)

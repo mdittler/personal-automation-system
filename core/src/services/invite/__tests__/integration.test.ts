@@ -81,7 +81,7 @@ describe('Invite lifecycle integration', () => {
 		await writeFile(configPath, INITIAL_PAS_YAML, 'utf-8');
 
 		// Build real services
-		inviteService = new InviteService({ dataDir: tmpDir, logger: mockLogger });
+		inviteService = new InviteService({ dataDir: tmpDir, logger: mockLogger, knownUsers: () => [] });
 		userManager = new UserManager({
 			config: makeConfig(tmpDir),
 			appToggle: createMockAppToggle(),
@@ -229,7 +229,7 @@ describe('redeemInviteAndRegister with new fields', () => {
 		configPath = join(tmpDir, 'pas.yaml');
 		await writeFile(configPath, INITIAL_PAS_YAML, 'utf-8');
 
-		inviteService = new InviteService({ dataDir: tmpDir, logger: mockLogger });
+		inviteService = new InviteService({ dataDir: tmpDir, logger: mockLogger, knownUsers: () => [] });
 		userManager = new UserManager({
 			config: makeConfig(tmpDir),
 			appToggle: createMockAppToggle(),

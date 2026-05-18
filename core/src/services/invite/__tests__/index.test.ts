@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 function makeService(): InviteService {
-	return new InviteService({ dataDir: tempDir, logger });
+	return new InviteService({ dataDir: tempDir, logger, knownUsers: () => [] });
 }
 
 describe('InviteService', () => {

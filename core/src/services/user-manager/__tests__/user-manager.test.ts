@@ -202,6 +202,77 @@ describe('UserManager', () => {
 		});
 	});
 
+	describe('findByName', () => {
+		it('returns the user whose name matches case-insensitively', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '111', name: 'Matt', isAdmin: false, enabledApps: [], sharedScopes: [] },
+					{ id: '222', name: 'Sarah', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			expect(mgr.findByName('matt')?.id).toBe('111');
+			expect(mgr.findByName('MATT')?.id).toBe('111');
+			expect(mgr.findByName('Matt')?.id).toBe('111');
+		});
+
+		it('returns undefined when no name matches', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '111', name: 'Matt', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			expect(mgr.findByName('Sarah')).toBeUndefined();
+		});
+
+		it('does not match against numeric ids', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '8187111554', name: 'Matt', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			expect(mgr.findByName('8187111554')).toBeUndefined();
+		});
+
+		it('returns undefined for empty string', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '111', name: 'Matt', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			expect(mgr.findByName('')).toBeUndefined();
+		});
+
+		it('normalises padded input and stored names via normalizeDisplayName', () => {
+			const mgr = new UserManager({
+				config: createMockConfig([
+					{ id: '111', name: '  Matt  ', isAdmin: false, enabledApps: [], sharedScopes: [] },
+					{ id: '222', name: 'Sarah', isAdmin: false, enabledApps: [], sharedScopes: [] },
+				]),
+				appToggle: createMockAppToggle(),
+				logger: mockLogger,
+			});
+
+			// Padded stored name matches non-padded input.
+			expect(mgr.findByName('matt')?.id).toBe('111');
+			// Padded input matches non-padded stored name.
+			expect(mgr.findByName('  sarah  ')?.id).toBe('222');
+			// Whitespace-only input is treated as empty.
+			expect(mgr.findByName('   ')).toBeUndefined();
+		});
+	});
+
 	describe('empty config', () => {
 		it('works with zero users configured', () => {
 			const mgr = new UserManager({

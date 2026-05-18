@@ -22,7 +22,7 @@
       <% if (it.hasPassword) { %>
         Update your login password. Your current session will remain active; all other sessions will be invalidated.
       <% } else { %>
-        Set a password to enable GUI login with your Telegram user ID.
+        Set a password to enable GUI login with your display name or Telegram user ID.
       <% } %>
     </p>
     <form method="post" action="/gui/account/password">
