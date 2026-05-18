@@ -68,22 +68,15 @@ const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
 
 /**
  * Built-in command names that the Router handles directly (bypassing app manifest commands).
- * Exported so tests can assert membership without depending on /help output.
+ *
+ * The canonical Set lives in `./command-catalog.ts` so that module — the
+ * single source of truth for the per-user effective command catalog — can
+ * reference it without creating a circular import on this Router module.
+ * Re-exported here for backwards compatibility with existing call sites
+ * (tests and downstream consumers that imported it from `router/index.ts`).
  */
-export const BUILTIN_COMMAND_NAMES = new Set([
-	'/ask',
-	'/edit',
-	'/notes',
-	'/newchat',
-	'/reset',
-	'/title',
-	'/recall',
-	'/refreshmemory',
-	'/refresh-memory',
-	'/flushmemory',
-	'/flush-memory',
-	'/settings',
-]);
+export { BUILTIN_COMMAND_NAMES } from './command-catalog.js';
+import { BUILTIN_COMMAND_NAMES } from './command-catalog.js';
 
 // ---------------------------------------------------------------------------
 // Route info factory helpers
