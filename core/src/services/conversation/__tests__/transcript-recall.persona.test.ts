@@ -96,6 +96,11 @@ function makeService(opts: MakeServiceOpts) {
 	const services = createMockCoreServices();
 	const store = createMockScopedStore();
 	vi.mocked(services.data.forUser).mockReturnValue(store);
+	// Batch 1D: resolver honors manifest default `true` when key is unset.
+	// These recall-pipeline tests don't exercise auto-detect; pin it off so
+	// the PAS fast-tier classifier doesn't show up in `getFastTierCalls`
+	// (which is supposed to be measuring recall-classifier calls only).
+	vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
 
 	const chatSessions = makeChatSessions(activeSessionId ?? sessionId);
 
@@ -111,6 +116,7 @@ function makeService(opts: MakeServiceOpts) {
 		timezone: 'UTC',
 		chatSessions,
 		conversationRetrieval: retrieval,
+		config: services.config,
 	};
 	const svc = new ConversationService(deps);
 	return { svc, services, chatSessions, retrieval };
@@ -369,7 +375,7 @@ describe('S5 — Recall positive: auto_detect_pas off', () => {
 		await seedPantrySession(index, USER_A_ID);
 
 		const { svc, services } = makeService({ index });
-		// With auto_detect_pas off (no config mock returns false by default in mock services),
+		// With auto_detect_pas off (pinned via makeService),
 		// buildSystemPrompt is used (no PAS classifier call). Recall classifier still fires.
 		vi.mocked(services.llm.complete)
 			.mockResolvedValueOnce(RECALL_VERDICT_PANTRY) // recall classifier (fast tier)

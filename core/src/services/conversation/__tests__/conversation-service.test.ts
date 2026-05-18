@@ -57,7 +57,10 @@ function mockDeps(configOverrides: Record<string, unknown> | null = null): Conve
 	};
 	const config = {
 		get: vi.fn(),
-		getAll: vi.fn(),
+		// Batch 1D: resolver now honors manifest default `true` when key is
+		// unset. These tests don't exercise auto-detect; preserve their
+		// original intent by returning explicit `false` here.
+		getAll: vi.fn().mockResolvedValue({ auto_detect_pas: false }),
 		getOverrides: vi.fn().mockResolvedValue(configOverrides),
 		setAll: vi.fn().mockResolvedValue(undefined),
 		updateOverrides: vi.fn().mockResolvedValue(undefined),
@@ -311,6 +314,10 @@ describe('ConversationService handleMessage', () => {
 		services = createMockCoreServices();
 		vi.mocked(services.llm.complete).mockResolvedValue('Hello! How can I help?');
 		vi.mocked(services.contextStore.listForUser).mockResolvedValue([]);
+		// Batch 1D: resolver now honors manifest default `true`. These tests
+		// don't exercise auto-detect; pin it off so they don't observe an
+		// extra classifier LLM call inserted before the main response.
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
 	});
 
 	it('sends LLM response to user', async () => {
