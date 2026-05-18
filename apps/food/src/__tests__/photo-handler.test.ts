@@ -1099,8 +1099,11 @@ describe('Photo Handler', () => {
 		});
 
 		it('sanitizePhotoField truncates extremely long input', () => {
+			// The shared core sanitizer (re-exported as sanitizePhotoField) now defaults
+			// to MAX_FIELD_LEN=500; photo-summary composers pass an explicit 80-char cap.
+			// Pass an explicit cap here to exercise the truncation path consistently.
 			const hostile = 'x'.repeat(500);
-			const result = sanitizePhotoField(hostile);
+			const result = sanitizePhotoField(hostile, 80);
 			expect(result.length).toBeLessThan(100);
 		});
 
