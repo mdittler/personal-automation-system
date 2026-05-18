@@ -70,7 +70,11 @@ function makeDeps(opts: {
 		timezone: 'UTC',
 		config: {
 			get: vi.fn(),
-			getAll: vi.fn().mockResolvedValue({}),
+			// Batch 1D: resolver honors manifest default `true` when key is
+			// unset. These persona tests don't exercise auto-detect; pin it
+			// off so an unrelated fast-tier classifier call doesn't inflate
+			// the LLM call counts being asserted.
+			getAll: vi.fn().mockResolvedValue({ auto_detect_pas: false }),
 			getOverrides: vi.fn().mockResolvedValue(opts.configOverrides ?? null),
 			setAll: vi.fn(),
 			updateOverrides,

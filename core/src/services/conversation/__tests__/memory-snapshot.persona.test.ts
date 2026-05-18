@@ -203,14 +203,18 @@ describe('memory-snapshot persona — mid-session mutation isolation', () => {
 		const ctx1 = createTestMessageContext({ text: 'Turn 1' });
 		await requestContext.run({ userId: 'test-user' }, () => svc.handleMessage(ctx1));
 
-		const prompt1 = (vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '') as string;
+		// Batch 1D: resolver honors manifest default `true` when no config is
+		// passed, so a fast-tier classifier call may precede the main
+		// (standard) call. Use `getStandardPrompt` to filter for the
+		// standard-tier call.
+		const prompt1 = getStandardPrompt(services);
 
 		vi.mocked(services.llm.complete).mockClear();
 
 		const ctx2 = createTestMessageContext({ text: 'Turn 2' });
 		await requestContext.run({ userId: 'test-user' }, () => svc.handleMessage(ctx2));
 
-		const prompt2 = (vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '') as string;
+		const prompt2 = getStandardPrompt(services);
 
 		const extractBlock = (p: string) => {
 			const start = p.indexOf('<memory-context label="durable-memory">');

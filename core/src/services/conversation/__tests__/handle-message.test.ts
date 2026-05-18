@@ -199,6 +199,12 @@ describe('handleMessage — ensureActiveSession wiring', () => {
 			hasSessionSearch: vi.fn().mockReturnValue(false),
 		};
 
+		// Batch 1D: pin auto_detect_pas to false so this test (which inspects
+		// `mock.calls[0]` for the system prompt) still observes the main
+		// response as the first call. Without this, the resolver honors the
+		// manifest default `true` and inserts a fast-tier classifier call.
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
+
 		const ctx = createTestMessageContext({ text: 'hello' });
 		await handleMessage(ctx, {
 			llm: services.llm,
@@ -208,6 +214,7 @@ describe('handleMessage — ensureActiveSession wiring', () => {
 			timezone: 'UTC',
 			chatSessions,
 			conversationRetrieval: retrieval as never,
+			config: services.config,
 		});
 
 		const systemPrompt = vi.mocked(services.llm.complete).mock.calls[0]?.[1]?.systemPrompt ?? '';

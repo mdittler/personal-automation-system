@@ -54,7 +54,11 @@ function makeChatSessions(sessionId = 'session-1'): ChatSessionStore {
 function makeConfig(overrides: Record<string, unknown> = {}): AppConfigService {
 	return {
 		get: vi.fn(),
-		getAll: vi.fn(),
+		// Batch 1D: resolver honors manifest default `true` when the value is
+		// missing. These tests focus on the session-search pseudo-tool path
+		// and don't exercise auto-detect; pin it off so an unrelated
+		// classifier LLM call doesn't get inserted.
+		getAll: vi.fn().mockResolvedValue({ auto_detect_pas: false }),
 		getOverrides: vi.fn().mockResolvedValue(overrides),
 		setAll: vi.fn(),
 		updateOverrides: vi.fn().mockResolvedValue(undefined),
@@ -587,7 +591,14 @@ describe('session-search disabled / unavailable', () => {
 		expect(sentText).not.toContain('<session-search');
 	});
 
-	it('config=undefined: tag stripped, single LLM call', async () => {
+	it('config=undefined: tag stripped, no session-search execution (search not called)', async () => {
+		// Batch 1D: with config=undefined, the auto_detect_pas resolver
+		// short-circuits to the manifest default `true`, so the chatbot's
+		// fast-tier classifier still runs. What we're asserting here is the
+		// invariant that matters for the session-search tool path: without
+		// config, no search is executed and the tag is stripped from the
+		// reply (handleMessage.ts gates session-search execution on
+		// `deps.config !== undefined`).
 		const retrieval = makeRetrieval({ hasSearch: true });
 		const { services, chatSessions } = makeDeps({
 			firstResponse: 'Prose. <session-search query="pasta"/>',
@@ -599,7 +610,8 @@ describe('session-search disabled / unavailable', () => {
 			...makeHandleMessageDeps(services, chatSessions, { conversationRetrieval: retrieval }),
 		});
 
-		expect(services.llm.complete).toHaveBeenCalledTimes(1);
+		// Search must NOT be called when config is undefined.
+		expect(retrieval.searchSessions).not.toHaveBeenCalled();
 		const sentText = vi.mocked(services.telegram.send).mock.calls[0]?.[1] as string;
 		expect(sentText).not.toContain('<session-search');
 	});

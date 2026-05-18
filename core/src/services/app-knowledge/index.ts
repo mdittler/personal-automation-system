@@ -31,6 +31,48 @@ export interface AppKnowledgeBaseOptions {
 	logger: Logger;
 }
 
+/**
+ * Inputs for the module-level `loadIndexedEntries` helper. Mirrors the slice of
+ * `AppKnowledgeBaseOptions` required to produce the truncated knowledge
+ * entries the chatbot's runtime search sees. Extracted from
+ * `AppKnowledgeBase.init()` so the doc-coverage gate and any
+ * future caller can exercise exactly the same indexing pipeline without
+ * instantiating the full service.
+ */
+export interface LoadIndexedEntriesOptions {
+	/** Absolute path to `core/docs/help/`. */
+	infraDocsDir: string;
+	/** App descriptors to index. Mirrors `AppRegistry.getAll()` shape. */
+	apps: Array<{ appId: string; appDir: string }>;
+	/** Optional logger; only `warn` is consumed for read failures. */
+	logger?: Pick<Logger, 'warn'>;
+}
+
+/**
+ * Loads infrastructure docs + every app's `help.md` and `docs/*.md`, applying
+ * the same `MAX_CONTENT_LENGTH` truncation as `AppKnowledgeBase`. Shared with
+ * the doc-coverage test so the gate validates against the same indexed content
+ * the runtime search sees.
+ */
+export async function loadIndexedEntries(
+	opts: LoadIndexedEntriesOptions,
+): Promise<KnowledgeEntry[]> {
+	const [infraEntries, perApp] = await Promise.all([
+		loadDocsFromDir(INFRA_APP_ID, opts.infraDocsDir, opts.logger),
+		Promise.all(
+			opts.apps.map(async (app) => {
+				const [helpEntry, docsEntries] = await Promise.all([
+					loadSingleFile(app.appId, join(app.appDir, 'help.md'), 'help.md', opts.logger),
+					loadDocsFromDir(app.appId, join(app.appDir, 'docs'), opts.logger),
+				]);
+				return helpEntry ? [helpEntry, ...docsEntries] : docsEntries;
+			}),
+		),
+	]);
+
+	return [...infraEntries, ...perApp.flat()];
+}
+
 export class AppKnowledgeBase implements AppKnowledgeBaseService {
 	private readonly registry: AppRegistry;
 	private readonly appToggle: AppToggleStore;
@@ -52,33 +94,28 @@ export class AppKnowledgeBase implements AppKnowledgeBaseService {
 	 * Call after registry.loadAll() so all app dirs are known.
 	 */
 	async init(): Promise<void> {
-		const entries: KnowledgeEntry[] = [];
+		const apps = this.registry.getAll().map((app) => ({
+			appId: app.manifest.app.id,
+			appDir: app.appDir,
+		}));
 
-		// Load infrastructure docs
-		const infraEntries = await this.loadDocsFromDir(INFRA_APP_ID, this.infraDocsDir);
-		entries.push(...infraEntries);
+		const entries = await loadIndexedEntries({
+			infraDocsDir: this.infraDocsDir,
+			apps,
+			logger: this.logger,
+		});
 
-		// Load per-app docs
-		for (const app of this.registry.getAll()) {
-			const appDir = app.appDir;
-			const appId = app.manifest.app.id;
-
-			// Check for help.md
-			const helpPath = join(appDir, 'help.md');
-			const helpEntry = await this.loadSingleFile(appId, helpPath, 'help.md');
-			if (helpEntry) entries.push(helpEntry);
-
-			// Check for docs/*.md
-			const docsDir = join(appDir, 'docs');
-			const docEntries = await this.loadDocsFromDir(appId, docsDir);
-			entries.push(...docEntries);
-		}
+		// Recompute the infra count from the loaded entries so the log line
+		// preserves the original observable behavior.
+		const infraCount = entries.filter((e) => e.appId === INFRA_APP_ID).length;
 
 		this.entries = entries;
-		this.logger.info(
-			{ count: entries.length, infra: infraEntries.length },
-			'App knowledge base indexed',
-		);
+		this.logger.info({ count: entries.length, infra: infraCount }, 'App knowledge base indexed');
+	}
+
+	/** Snapshot of indexed entries — the truncated content the runtime search uses. */
+	public getEntries(): ReadonlyArray<KnowledgeEntry> {
+		return this.entries;
 	}
 
 	async search(query: string, userId?: string): Promise<KnowledgeEntry[]> {
@@ -118,57 +155,62 @@ export class AppKnowledgeBase implements AppKnowledgeBaseService {
 		scored.sort((a, b) => b.score - a.score);
 		return scored.slice(0, MAX_RESULTS).map((s) => s.entry);
 	}
+}
 
-	/** Load all .md files from a directory. */
-	private async loadDocsFromDir(appId: string, dir: string): Promise<KnowledgeEntry[]> {
-		const entries: KnowledgeEntry[] = [];
+/** Load all .md files from a directory (module-level for reuse by tests). */
+async function loadDocsFromDir(
+	appId: string,
+	dir: string,
+	logger?: Pick<Logger, 'warn'>,
+): Promise<KnowledgeEntry[]> {
+	const entries: KnowledgeEntry[] = [];
 
-		let files: string[];
-		try {
-			files = await readdir(dir);
-		} catch (error) {
-			if (isNodeError(error) && error.code === 'ENOENT') return [];
-			this.logger.warn({ dir, error }, 'Failed to read docs directory');
-			return [];
-		}
-
-		for (const file of files) {
-			if (!file.endsWith('.md')) continue;
-
-			const filePath = join(dir, file);
-
-			// Skip directories
-			try {
-				const fileStat = await stat(filePath);
-				if (!fileStat.isFile()) continue;
-			} catch {
-				continue;
-			}
-
-			const entry = await this.loadSingleFile(appId, filePath, file);
-			if (entry) entries.push(entry);
-		}
-
-		return entries;
+	let files: string[];
+	try {
+		files = await readdir(dir);
+	} catch (error) {
+		if (isNodeError(error) && error.code === 'ENOENT') return [];
+		logger?.warn({ dir, error }, 'Failed to read docs directory');
+		return [];
 	}
 
-	/** Load and truncate a single markdown file. */
-	private async loadSingleFile(
-		appId: string,
-		filePath: string,
-		source: string,
-	): Promise<KnowledgeEntry | null> {
+	for (const file of files) {
+		if (!file.endsWith('.md')) continue;
+
+		const filePath = join(dir, file);
+
+		// Skip directories
 		try {
-			let content = await readFile(filePath, 'utf-8');
-			if (content.length > MAX_CONTENT_LENGTH) {
-				content = content.slice(0, MAX_CONTENT_LENGTH);
-			}
-			return { appId, source, content };
-		} catch (error) {
-			if (isNodeError(error) && error.code === 'ENOENT') return null;
-			this.logger.warn({ appId, filePath, error }, 'Failed to read knowledge base file');
-			return null;
+			const fileStat = await stat(filePath);
+			if (!fileStat.isFile()) continue;
+		} catch {
+			continue;
 		}
+
+		const entry = await loadSingleFile(appId, filePath, file, logger);
+		if (entry) entries.push(entry);
+	}
+
+	return entries;
+}
+
+/** Load and truncate a single markdown file (module-level for reuse by tests). */
+async function loadSingleFile(
+	appId: string,
+	filePath: string,
+	source: string,
+	logger?: Pick<Logger, 'warn'>,
+): Promise<KnowledgeEntry | null> {
+	try {
+		let content = await readFile(filePath, 'utf-8');
+		if (content.length > MAX_CONTENT_LENGTH) {
+			content = content.slice(0, MAX_CONTENT_LENGTH);
+		}
+		return { appId, source, content };
+	} catch (error) {
+		if (isNodeError(error) && error.code === 'ENOENT') return null;
+		logger?.warn({ appId, filePath, error }, 'Failed to read knowledge base file');
+		return null;
 	}
 }
 

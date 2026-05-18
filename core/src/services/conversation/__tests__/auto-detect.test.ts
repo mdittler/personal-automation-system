@@ -1,14 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { CoreServices } from '../../../types/app-module.js';
+import type { ManifestUserConfig } from '../../../types/manifest.js';
+import { AppConfigServiceImpl } from '../../config/app-config-service.js';
 import { requestContext } from '../../context/request-context.js';
 import { getAutoDetectSetting } from '../auto-detect.js';
-import { makeConversationService } from '../../../testing/conversation-test-helpers.js';
-import {
-	expectBasicPrompt,
-	expectPasAwarePrompt,
-} from './helpers/prompt-assertions.js';
+import { expectBasicPrompt, expectPasAwarePrompt } from './helpers/prompt-assertions.js';
 
 describe('getAutoDetectSetting', () => {
 	it('returns true when config has auto_detect_pas=true', async () => {
@@ -32,15 +34,113 @@ describe('getAutoDetectSetting', () => {
 		expect(result).toBe(false);
 	});
 
-	it('returns false when config service is unavailable (graceful default)', async () => {
-		const result = await getAutoDetectSetting('user1', {});
+	// ── Manifest-default behavior (Batch 1D) ─────────────────────────────────
+	// The conversation manifest declares `default: true` for auto_detect_pas.
+	// The resolver must honor that default for unset / undefined / null /
+	// missing-service / throwing-service cases. Unexpected shapes also fall
+	// back to the manifest default with a logged warning.
+	it('returns true when the user has not set auto_detect_pas (manifest default)', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockResolvedValue({});
+		const result = await getAutoDetectSetting('user1', { config: services.config });
+		expect(result).toBe(true);
+	});
+
+	it('returns true when auto_detect_pas is undefined in the merged config', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: undefined });
+		const result = await getAutoDetectSetting('user1', { config: services.config });
+		expect(result).toBe(true);
+	});
+
+	it('returns true when auto_detect_pas is null in the merged config', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: null });
+		const result = await getAutoDetectSetting('user1', { config: services.config });
+		expect(result).toBe(true);
+	});
+
+	it('accepts string "false" for back-compat with config files', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: 'false' });
+		const result = await getAutoDetectSetting('user1', { config: services.config });
 		expect(result).toBe(false);
 	});
 
-	it('returns false when config.getAll throws', async () => {
+	it('falls back to manifest default with a logged warning if config layer throws', async () => {
 		const services = createMockCoreServices();
-		vi.mocked(services.config.getAll).mockRejectedValue(new Error('config error'));
+		vi.mocked(services.config.getAll).mockRejectedValue(new Error('boom'));
+		const logger = { warn: vi.fn() };
+		const result = await getAutoDetectSetting('user1', { config: services.config, logger });
+		expect(result).toBe(true);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+	});
+
+	it('falls back to manifest default with a logged warning on unexpected value shape', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: 42 });
+		const logger = { warn: vi.fn() };
+		const result = await getAutoDetectSetting('user1', { config: services.config, logger });
+		expect(result).toBe(true);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+	});
+
+	it('falls back to manifest default when deps.config is undefined', async () => {
+		const result = await getAutoDetectSetting('user1', {});
+		expect(result).toBe(true);
+	});
+
+	it('does not throw if no logger is supplied when the config layer throws', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.config.getAll).mockRejectedValue(new Error('boom'));
 		const result = await getAutoDetectSetting('user1', { config: services.config });
+		expect(result).toBe(true);
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration with the real AppConfigServiceImpl.
+// Construction pattern mirrors core/src/services/config/__tests__/
+// app-config-service.test.ts (dataDir + appId + defaults).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getAutoDetectSetting integration with AppConfigServiceImpl', () => {
+	const defaults: ManifestUserConfig[] = [
+		{
+			key: 'auto_detect_pas',
+			type: 'boolean',
+			default: true,
+			description: 'Smart chat detection',
+		},
+	];
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = await mkdtemp(join(tmpdir(), 'pas-autodetect-int-'));
+	});
+
+	afterEach(async () => {
+		await rm(tempDir, { recursive: true, force: true });
+	});
+
+	it('returns the manifest default true when no user override is set', async () => {
+		const config = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'chatbot',
+			defaults,
+		});
+		const result = await getAutoDetectSetting('user1', { config });
+		expect(result).toBe(true);
+	});
+
+	it('returns false when the user has explicitly set auto_detect_pas to false', async () => {
+		const config = new AppConfigServiceImpl({
+			dataDir: tempDir,
+			appId: 'chatbot',
+			defaults,
+		});
+		await config.setAll('user1', { auto_detect_pas: false });
+		const result = await getAutoDetectSetting('user1', { config });
 		expect(result).toBe(false);
 	});
 });
@@ -54,7 +154,7 @@ describe('auto-detect PAS questions', () => {
 		vi.mocked(services.contextStore.listForUser).mockResolvedValue([]);
 	});
 
-	it('uses regular prompt when auto-detect is off (default)', async () => {
+	it('uses regular prompt when auto-detect is off (explicit opt-out)', async () => {
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
@@ -124,18 +224,25 @@ describe('auto-detect PAS questions', () => {
 		expectPasAwarePrompt(mainPrompt);
 	});
 
-	it('defaults to false when config.getAll throws (no classifier call, basic prompt)', async () => {
+	it('defaults to true (manifest default) when config.getAll throws — classifier still runs', async () => {
+		// Batch 1D: auto_detect_pas resolver now honors the manifest default
+		// (`true`) when the config layer throws, instead of silently
+		// short-circuiting to the basic prompt.
 		vi.mocked(services.config.getAll).mockRejectedValue(new Error('config error'));
+		vi.mocked(services.appMetadata.getEnabledApps).mockResolvedValue([]);
+		// First call: classifier returns YES; second call: main response
+		vi.mocked(services.llm.complete)
+			.mockResolvedValueOnce('YES')
+			.mockResolvedValueOnce('I can help with that!');
 		const ctx = createTestMessageContext({ text: 'what apps do I have?' });
 
 		await requestContext.run({ userId: 'test-user' }, () =>
 			makeConversationService(services).handleMessage(ctx),
 		);
 
-		// auto_detect defaults to false on error → only one LLM call (no classifier)
-		expect(services.llm.complete).toHaveBeenCalledTimes(1);
-		const prompt = vi.mocked(services.llm.complete).mock.calls[0][1]?.systemPrompt ?? '';
-		expectBasicPrompt(prompt);
+		expect(services.llm.complete).toHaveBeenCalledTimes(2);
+		const mainPrompt = vi.mocked(services.llm.complete).mock.calls[1][1]?.systemPrompt ?? '';
+		expectPasAwarePrompt(mainPrompt);
 	});
 
 	it('uses app-aware prompt (fail-open) when classifier LLM call throws', async () => {

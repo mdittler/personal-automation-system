@@ -108,7 +108,11 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 	const complete = vi.fn().mockResolvedValue(opts.llmResponse ?? 'OK');
 	const config = {
 		get: vi.fn(),
-		getAll: vi.fn().mockResolvedValue({}),
+		// Batch 1D: resolver honors manifest default `true` when key is
+		// unset. Tests in this file inspect `calls[0]?.[1]?.systemPrompt` —
+		// pin auto-detect off so the first LLM call is the main response
+		// (not the inserted classifier call).
+		getAll: vi.fn().mockResolvedValue({ auto_detect_pas: false }),
 		getOverrides: vi.fn().mockResolvedValue(opts.configOverrides ?? null),
 		setAll: vi.fn(),
 		updateOverrides,

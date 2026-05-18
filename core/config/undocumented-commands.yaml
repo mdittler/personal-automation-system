@@ -1,0 +1,18 @@
+# Undocumented commands allowlist.
+#
+# Each entry temporarily exempts a command from the documentation coverage
+# check enforced by `command-documentation.test.ts` (Batch 1F) and the
+# boot-time soft warning in `compose-runtime.ts` (Batch 1G). The test also
+# rejects orphan entries (command no longer in the catalog) and expired
+# entries.
+#
+# Schema (every field required except `expires`):
+#   - command: string                # e.g. "/foo"
+#     reason: string                 # why undocumented (short rationale)
+#     owner: string                  # operator/dev responsible
+#     expires: YYYY-MM-DD (optional) # ISO date; entry fails the gate after this date
+#
+# Empty by default. Adding entries requires PR review — the right fix is
+# almost always improving the help docs, not exempting the command here.
+
+entries: []

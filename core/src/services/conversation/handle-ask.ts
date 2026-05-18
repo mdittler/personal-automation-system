@@ -105,6 +105,14 @@ export interface HandleAskDeps {
 	settingsWriter?: SettingsWriter;
 	/** Maximum recall window in days. Default 365. Wired from SystemConfig.chat.recall.max_window_days. */
 	recallMaxWindowDays?: number;
+	/**
+	 * Returns the per-user effective slash-command catalog. When supplied,
+	 * forwarded to `buildAppAwareSystemPrompt` for sandboxed catalog injection
+	 *.
+	 */
+	getCommandCatalog?: (
+		userId: string,
+	) => Promise<import('../router/command-catalog.js').CommandCatalogEntry[]>;
 }
 
 export async function handleAsk(

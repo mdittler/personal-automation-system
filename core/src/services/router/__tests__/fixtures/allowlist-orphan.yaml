@@ -1,0 +1,4 @@
+entries:
+  - command: /totally-gone
+    reason: this command was removed from the catalog
+    owner: test-fixture

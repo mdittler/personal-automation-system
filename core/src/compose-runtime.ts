@@ -96,6 +96,11 @@ import { N8nDispatcherImpl } from './services/n8n/index.js';
 import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
 import { ReportService } from './services/reports/index.js';
 import { FallbackHandler } from './services/router/fallback.js';
+import { getEffectiveCommandCatalog } from './services/router/command-catalog.js';
+import {
+	logDocCoverageWarnings,
+	validateCommandDocumentation,
+} from './services/router/validate-command-documentation.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
 import {
 	createPendingSessionControlStore,
@@ -929,6 +934,24 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	// 9c. Index app documentation after all apps are loaded
 	await appKnowledge.init();
 
+	// Soft warning if any router command lacks indexed help docs. All service
+	// flags are forced true here so coverage assertions cover every command that
+	// could ever be dispatched, not what this particular composition happens to
+	// have wired.
+	const docCoverage = await validateCommandDocumentation({
+		indexedEntries: appKnowledge.getEntries(),
+		catalogDeps: {
+			registry,
+			isUserAdmin: () => true,
+			isAppEnabledForUser: () => true,
+			conversationServiceWired: true,
+			spaceServiceWired: true,
+			inviteServiceWired: true,
+		},
+		allowlistPath: join(_repoRoot, 'core/config/undocumented-commands.yaml'),
+	});
+	logDocCoverageWarnings(docCoverage, logger);
+
 	// 9c-ii. File index — metadata-based graph over all data files
 	const appScopes = new Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>();
 	for (const app of registry.getAll()) {
@@ -1148,6 +1171,19 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 
 	const pendingSettingsConfirmStore = createPendingSettingsConfirmStore();
 
+	// Service-wiring flags reflect the actual composition at request time.
+	// ConversationService is constructed just below; spaceService and
+	// inviteService are wired earlier in compose-runtime.
+	const getCommandCatalogForUser = (userId: string) =>
+		getEffectiveCommandCatalog(userId, {
+			registry,
+			isUserAdmin: (uid) => Boolean(userManager.getUser(uid)?.isAdmin),
+			isAppEnabledForUser: (uid, appId) => userManager.isAppEnabled(uid, appId),
+			conversationServiceWired: true,
+			spaceServiceWired: Boolean(spaceService),
+			inviteServiceWired: Boolean(inviteService),
+		});
+
 	const conversationService = new ConversationService({
 		llm: conversationLLMGuard,
 		telegram: telegramService,
@@ -1177,6 +1213,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		appConfigResolver: settingsAppConfigResolver,
 		systemConfigWriter,
 		systemConfig: config,
+		getCommandCatalog: getCommandCatalogForUser,
 	});
 	logger.info('ConversationService: initialized');
 
@@ -1231,6 +1268,9 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		sessionControlClassifier: detectSessionControl,
 		pendingSessionControl,
 		sessionControlLogger,
+		// Same binding the ConversationService uses for prompt injection so
+		// /help and the prompt fence cannot drift.
+		getCommandCatalog: getCommandCatalogForUser,
 		idleResetDeps: {
 			idleMinutes: config.chat?.sessions?.auto_reset_idle_minutes ?? null,
 			chatSessions,

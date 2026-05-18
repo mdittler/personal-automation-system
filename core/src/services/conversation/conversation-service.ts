@@ -97,6 +97,9 @@ export class ConversationService {
 			...(this.deps.recallMaxWindowDays !== undefined
 				? { recallMaxWindowDays: this.deps.recallMaxWindowDays }
 				: {}),
+			...(this.deps.getCommandCatalog !== undefined
+				? { getCommandCatalog: this.deps.getCommandCatalog }
+				: {}),
 			chatLogToNotesDefault: this.deps.chatLogToNotesDefault ?? false,
 		};
 		return coreHandleAsk(args, ctx, askDeps);
