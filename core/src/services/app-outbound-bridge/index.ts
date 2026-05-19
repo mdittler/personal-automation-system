@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import type { AppConfigService } from '../../types/config.js';
 import type { InlineButton } from '../../types/telegram.js';
+import { getCurrentUserId, requestContext } from '../context/request-context.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
 import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { HouseholdService } from '../household/index.js';
@@ -103,11 +104,35 @@ export function createAppOutboundBridge(deps: AppOutboundBridgeDeps): AppOutboun
 					timestamp: now,
 					source: 'app',
 				};
-				await deps.chatSessions.appendExchange(
-					{ userId: opts.userId, sessionKey, householdId },
-					userTurn,
-					assistantTurn,
-				);
+				// Establish requestContext so chatSessions.appendExchange's downstream
+				// `data.forUser(opts.userId)` actor-vs-target check passes regardless
+				// of caller context. Callers that already wrap in requestContext (e.g.
+				// per-user-dispatch) supply the same values; the inner scope wins for
+				// ALS lookups (which is fine — userId/householdId match).
+				//
+				// Without this, infrastructure callers that fire from a 'system' cron
+				// (ReportService.executeCronJob, AlertService scheduled triggers) hit
+				// `UserBoundaryError: (no actor in context)` inside appendExchange and
+				// silently drop the bridge write via fail-open. See
+				// app-message-bridge.integration.test.ts I2/I3/I6 for end-to-end
+				// regression coverage.
+				const performAppend = async () => {
+					await deps.chatSessions.appendExchange(
+						{ userId: opts.userId, sessionKey, householdId },
+						userTurn,
+						assistantTurn,
+					);
+				};
+				const currentUser = getCurrentUserId();
+				if (currentUser === opts.userId) {
+					// Already in the right scope — re-entering would be a no-op.
+					await performAppend();
+				} else {
+					await requestContext.run(
+						{ userId: opts.userId, householdId },
+						performAppend,
+					);
+				}
 			} catch (error) {
 				deps.logger.warn(
 					{ error, userId: opts.userId, appId: opts.appId, kind: opts.kind },
