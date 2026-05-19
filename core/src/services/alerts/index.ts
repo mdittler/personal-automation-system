@@ -76,7 +76,7 @@ export interface AlertServiceOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, space_id data_sources are resolved to household/collaboration paths. */
 	spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
-	/** Optional — when present, telegram_message and dispatch_message actions mirror into the user's chat transcript. Task 10 consumes this. */
+	/** Optional — when present, successful telegram_message deliveries are mirrored into the user's chat transcript. */
 	appOutboundBridge?: AppOutboundBridge;
 }
 

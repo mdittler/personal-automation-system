@@ -55,7 +55,7 @@ export interface ReportServiceOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, space_id sections route to household-aware paths via getSpace() kind. */
 	spaceService?: { getSpace(id: string): SpaceDefinition | null };
-	/** Optional — when present, deliveries are mirrored into the user's chat transcript. Task 9 consumes this. */
+	/** Optional — when present, deliveries are mirrored into the user's chat transcript. */
 	appOutboundBridge?: AppOutboundBridge;
 }
 

@@ -4,6 +4,7 @@
  * identical to pre-P0 chatbot behavior (apps/chatbot/src/index.ts:533).
  */
 import { formatRelativeTime } from '../../utils/cron-describe.js';
+import { APP_HEADER_RE } from '../app-outbound-bridge/index.js';
 import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import { sanitizeInput } from './sanitization.js';
 
@@ -19,8 +20,6 @@ const PHOTO_TURN_HEADERS = new Set([
 	'[Photo: pantry]',
 	'[Photo: grocery list]',
 ]);
-
-const APP_HEADER_RE = /^\[App: [a-z0-9_-]{1,32}\] [a-z0-9_:-]{1,64}$/;
 
 function isLegacyPhotoHeader(content: string): boolean {
 	return PHOTO_TURN_HEADERS.has(content);

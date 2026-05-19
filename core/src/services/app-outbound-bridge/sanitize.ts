@@ -1,14 +1,11 @@
 export const MAX_FIELD_LEN = 500;
 
 /**
- * Strip control chars, zero-width/bidi chars, and prompt-fence-like tags.
- * Collapses whitespace and truncates. Used on every app-message-bridge body
- * (and on photo-summary fields via re-export from apps/food/src/handlers/
- * photo-summary.ts).
- *
- * Truncation appends a single ellipsis character — output is `maxLen + 1`
- * chars when truncation fires. This matches the existing photo-bridge
- * contract so both bridges' bodies look the same to the chatbot.
+ * Used on every app-message-bridge body (and on photo-summary fields via
+ * re-export from `apps/food/src/handlers/photo-summary.ts`). Truncation
+ * appends a single ellipsis character — output is `maxLen + 1` chars when
+ * truncation fires. Both bridges share this contract so their bodies look
+ * identical to the chatbot.
  */
 export function sanitizeAppMessageField(
 	input: string | undefined | null,

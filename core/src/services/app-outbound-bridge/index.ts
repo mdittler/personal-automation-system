@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import type { AppConfigService } from '../../types/config.js';
 import type { InlineButton } from '../../types/telegram.js';
-import { getCurrentUserId, requestContext } from '../context/request-context.js';
+import { requestContext } from '../context/request-context.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
 import { buildSessionKey } from '../conversation-session/session-key.js';
 import type { HouseholdService } from '../household/index.js';
@@ -11,8 +11,14 @@ import { sanitizeAppMessageField } from './sanitize.js';
  * so worst-case output is 1900 chars — comfortably under PHOTO_TURN_CAP (2000). */
 export const MAX_BODY_LEN = 1899;
 
-const APP_ID_RE = /^[a-z0-9_-]{1,32}$/;
-const KIND_RE = /^[a-z0-9_:-]{1,64}$/;
+/** Allowed characters and length for `appId`. Shared with fencing's APP_HEADER_RE. */
+export const APP_ID_RE = /^[a-z0-9_-]{1,32}$/;
+/** Allowed characters and length for `kind`. Shared with fencing's APP_HEADER_RE. */
+export const KIND_RE = /^[a-z0-9_:-]{1,64}$/;
+/** Exact-content match for app-bridge user-turn headers. Used by fencing's
+ *  legacy-fallback cap-lift (when `SessionTurn.source` is undefined). The
+ *  character classes mirror APP_ID_RE / KIND_RE so the two cannot drift. */
+export const APP_HEADER_RE = /^\[App: [a-z0-9_-]{1,32}\] [a-z0-9_:-]{1,64}$/;
 const MAX_BUTTON_LABEL_LEN = 50;
 
 /**
@@ -67,12 +73,11 @@ export function createAppOutboundBridge(deps: AppOutboundBridgeDeps): AppOutboun
 				return;
 			}
 
-			const overrides = await deps.conversationConfig.getAll(opts.userId);
-			const enabled = overrides.app_message_bridge_enabled;
-			if (enabled === false) return;
-
 			const body = sanitizeAppMessageField(opts.body, MAX_BODY_LEN);
 			if (body.length === 0) return;
+
+			const overrides = await deps.conversationConfig.getAll(opts.userId);
+			if (overrides.app_message_bridge_enabled === false) return;
 
 			const buttonLabels =
 				opts.buttons
@@ -104,35 +109,16 @@ export function createAppOutboundBridge(deps: AppOutboundBridgeDeps): AppOutboun
 					timestamp: now,
 					source: 'app',
 				};
-				// Establish requestContext so chatSessions.appendExchange's downstream
-				// `data.forUser(opts.userId)` actor-vs-target check passes regardless
-				// of caller context. Callers that already wrap in requestContext (e.g.
-				// per-user-dispatch) supply the same values; the inner scope wins for
-				// ALS lookups (which is fine — userId/householdId match).
-				//
-				// Without this, infrastructure callers that fire from a 'system' cron
-				// (ReportService.executeCronJob, AlertService scheduled triggers) hit
-				// `UserBoundaryError: (no actor in context)` inside appendExchange and
-				// silently drop the bridge write via fail-open. See
-				// app-message-bridge.integration.test.ts I2/I3/I6 for end-to-end
-				// regression coverage.
-				const performAppend = async () => {
-					await deps.chatSessions.appendExchange(
+				// Wrap appendExchange in requestContext so the downstream
+				// data.forUser(opts.userId) actor check passes when the bridge is
+				// invoked from a 'system' cron (no actor in caller scope).
+				await requestContext.run({ userId: opts.userId, householdId }, () =>
+					deps.chatSessions.appendExchange(
 						{ userId: opts.userId, sessionKey, householdId },
 						userTurn,
 						assistantTurn,
-					);
-				};
-				const currentUser = getCurrentUserId();
-				if (currentUser === opts.userId) {
-					// Already in the right scope — re-entering would be a no-op.
-					await performAppend();
-				} else {
-					await requestContext.run(
-						{ userId: opts.userId, householdId },
-						performAppend,
-					);
-				}
+					),
+				);
 			} catch (error) {
 				deps.logger.warn(
 					{ error, userId: opts.userId, appId: opts.appId, kind: opts.kind },

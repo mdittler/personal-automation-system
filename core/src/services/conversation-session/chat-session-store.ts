@@ -35,23 +35,24 @@ export interface ChatSessionFrontmatter {
 	};
 }
 
+/**
+ * Provenance label set by every new write path. Optional for back-compat with
+ * legacy transcripts written before this field existed.
+ *   - 'user' / 'assistant' — typed user-bot exchange (dispatchMessage / dispatchConversation / handle-message / handle-ask)
+ *   - 'photo'              — photo-handler PhotoSummary bridge (dispatchPhoto, both turns)
+ *   - 'app'                — AppOutboundBridge proactive-message bridge (both turns)
+ * The fencing layer uses this field to authorise cap-lift in
+ * `formatConversationHistory`. When undefined (legacy transcript only),
+ * fencing falls back to content-regex against PHOTO_TURN_HEADERS / APP_HEADER_RE.
+ */
+export type SessionTurnSource = 'user' | 'assistant' | 'photo' | 'app';
+
 export interface SessionTurn {
 	role: 'user' | 'assistant';
 	content: string;
 	timestamp: string;
 	tokens?: { input?: number; output?: number };
-	/**
-	 * Provenance label set by every NEW write path. Optional for back-compat
-	 * with legacy transcripts written before this field existed.
-	 *   - 'user'      — typed user message (dispatchMessage / dispatchConversation / handle-message / handle-ask user side)
-	 *   - 'assistant' — model reply to a typed message (same paths, assistant side)
-	 *   - 'photo'     — photo-handler PhotoSummary bridge (dispatchPhoto, both turns)
-	 *   - 'app'       — AppOutboundBridge proactive-message bridge (both turns)
-	 * The fencing layer uses this field to authorise cap-lift in
-	 * `formatConversationHistory`. When undefined (legacy transcript only),
-	 * fencing falls back to content-regex against PHOTO_TURN_HEADERS / APP_HEADER_RE.
-	 */
-	source?: 'user' | 'assistant' | 'photo' | 'app';
+	source?: SessionTurnSource;
 }
 
 export interface ChatSessionStore {

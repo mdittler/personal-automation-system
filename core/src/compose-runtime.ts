@@ -588,11 +588,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger.info({ url: config.n8n.dispatchUrl }, 'n8n dispatch mode enabled');
 	}
 
-	// 8c-pre. App-message bridge — late-bound proxy.
-	// Real impl needs chatSessions + chatbot AppConfigServiceImpl, both built later.
-	// Inject the proxy now so ReportService / AlertService / per-app CoreServices
-	// hold a stable reference; bind() is called after section 9c-pre once
-	// chatSessions and conversationAppConfig exist.
+	// Late-bound proxy. Real impl is bound below once chatSessions and the
+	// chatbot AppConfigServiceImpl exist; see the `appOutboundBridge.bind(...)` site.
 	const appOutboundBridge = new LateBoundAppOutboundBridge();
 
 	// 8c. Report service
