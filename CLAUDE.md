@@ -130,6 +130,7 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 All major phases — infrastructure, food app, security, deployment, conversation memory (Hermes), LLM enhancement, and Persona Regression — are complete. **Per-phase history (including the full batch-by-batch breakdown of every Current/Previous Priority) lives in `docs/implementation-phases.md`.** Most recent phases (one line each, newest first):
 
+- **App-Message Memory Bridge** (2026-05-18) — AppOutboundBridge routes proactive app-originated Telegram messages into the chatbot transcript; new `SessionTurn.source` provenance field fixes a latent photo-bridge spoof gap and powers metadata-driven fencing cap-lift; `PHOTO_SUMMARY_GUIDANCE` rewritten to drop the unbacked retrieval promise; late-bound proxy resolves compose-runtime construction-order seam; 14 REQ-CONV-APP-BRIDGE + 3 REQ-CONV-SESSION-SOURCE URS entries.
 - **Receipt Parser Robustness PR2 — Transcription Oracle** (2026-05-15) — operator-authored `.transcription.yaml` ground truth + SHA256 sidecars; drift resistance + confidence tiers. 11 REQ-FOOD-RECEIPT-TRANSCRIPTION URS entries.
 - **Receipt Parser Robustness PR1** (2026-05-15) — anti-reconciliation prompt, `finishReason` plumbing, integrity check, single-shot continuation, Telegram warning. 13 REQ-FOOD-RECEIPT-INTEGRITY URS entries.
 - **Persona Regression Suite Chunk A.2** (2026-05-15) — 5 receipt fixtures + `multisetRows` structural oracle + receipt-bucket cache key salting.

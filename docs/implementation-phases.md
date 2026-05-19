@@ -3351,6 +3351,37 @@ Phase 2 went through two Codex review rounds. Round 1: 7 findings (non-numeric I
 
 ---
 
+## App-Message Memory Bridge (2026-05-18)
+
+**Goal:** Make every PAS-app-originated outbound Telegram message visible to the chatbot's session transcript so users can naturally follow up about reports, alerts, weekly menus, batch-prep summaries, and health insights. Closes the gap where users would say "tell me about the weekly menu" and the chatbot had zero context.
+
+**Approach:** Mirror Hermes P9's photo-memory bridge. Introduce a new core service `AppOutboundBridge` that wraps `ChatSessionStore.appendExchange` with sanitization, opt-out gating, household resolution, and fail-open semantics. Add a `source` provenance field to `SessionTurn` so fencing can distinguish synthetic photo/app turns from user-typed lookalikes (this also fixes a pre-existing photo-bridge spoof gap surfaced during Codex Round-1 §5). Wire the bridge into six proactive call-sites (reports, alert `telegram_message`, four food scheduled-job helpers).
+
+**Per-task batch detail:**
+
+- **Tasks 1-4** — Core substrate: lift `sanitizePhotoField` to a shared core module as `sanitizeAppMessageField`; add `toAppMessageKind` slugifier; implement `AppOutboundBridge` interface, real impl, and `LateBoundAppOutboundBridge` proxy; integration test against real `AppConfigServiceImpl` proves opt-out works end-to-end.
+- **Task 5a** — Add optional `source: 'user' | 'assistant' | 'photo' | 'app'` field to `SessionTurn`; transcript codec round-trips it; every production `appendExchange` call site (`dispatchPhoto`, `dispatchMessage`/`dispatchConversation`, `handle-message`/`handle-ask`, bridge) sets it explicitly. This closes a latent anti-spoof gap on the photo bridge as well as enabling the new app bridge.
+- **Task 5** — `formatConversationHistory` uses metadata-driven cap-lift; content-regex against `PHOTO_TURN_HEADERS` / `APP_HEADER_RE` becomes a back-compat fallback for legacy transcripts only. User-typed `[Photo: receipt]` exactly no longer triggers cap-lift on new transcripts (source: 'user' beats content match).
+- **Task 6** — Rewrite `PHOTO_SUMMARY_GUIDANCE` to drop the "offer to retrieve it / full data is on disk" promise (which would require chatbot-primary T2 ToolRegistry to honor); add `APP_MESSAGE_GUIDANCE` to the system prompt with parallel wording; register `chat.app_message_bridge_enabled` (default `true`) in the chatbot virtual user-config.
+- **Tasks 7-8** — Wire `LateBoundAppOutboundBridge` through `compose-runtime`: proxy constructed at top of section 8c, real impl bound after `chatSessions` and chatbot `AppConfigServiceImpl` exist; manifest-gated per-app injection (`declaredServices.has('app-outbound-bridge')`). Add `"app-outbound-bridge"` to the manifest schema enum; declare it in `apps/food/manifest.yaml`. Mock service factory exposes a spy bridge for app tests.
+- **Tasks 9-10** — `ReportService.deliver()` and `executeTelegramMessage` call the bridge after successful telegram sends; `toAppMessageKind` slugifies report ids and alert names. `executeDispatchMessage` documented as internal-only (no bridge call to avoid double-recording).
+- **Task 11** — Food helpers: `handleWeeklyNutritionSummaryJob`, inline weekly-health correlation, `sendVotingMessages` (per-member fan-out), singleton-household meal-plan path, `sendBatchPrepToMember` all bridge their proactive sends.
+- **Tasks 12-13** — End-to-end integration coverage (6 of 7 scenarios: I1 weekly nutrition; I2 alert telegram_message; I3 report to multiple users; I4 opt-out respected; I5 household_id stamped; I6 telegram failure isolation; I-DISP deferred). Persona tests (P1-P3) assert the actual `systemPrompt` STRING contains the bridged header and body (Round-1 §9 — not just stub reply). Integration tests surfaced and fixed a real bug: bridge calls from cron jobs were silently dropping writes because `requestContext` wasn't set; bridge now wraps its `appendExchange` in `requestContext.run` when no actor is in context.
+- **Tasks 14-15** — Documentation: `docs/CREATING_AN_APP.md` gets a new "Proactive Messages and the Chatbot Bridge" section with the contract, manifest declaration, "when not to call" guidance, and bidirectional cross-references with the existing `PhotoSummary` doc.
+
+**Photo-bridge fixes surfaced and resolved in this phase** (Codex Round-1 review of the plan):
+
+- **§5 (anti-spoof regex insufficient):** Pre-existing — `PHOTO_TURN_HEADERS` was content-only. Fixed by `SessionTurn.source` field (Task 5a) and metadata-driven fencing (Task 5). Both photo and app bridges now immune to header spoofing on new transcripts.
+- **§11 (retrieval promise out of scope):** Pre-existing — `PHOTO_SUMMARY_GUIDANCE` promised "offer to retrieve it" which depends on chatbot-primary T2. Rewritten in Task 6 to drop the promise; new `APP_MESSAGE_GUIDANCE` written without it.
+
+**Codex review:** Round 1 (review of plan) — 14 items, all resolved in-place. Round 2 (review of implementation) — pending.
+
+**URS:** 14 new `REQ-CONV-APP-BRIDGE` entries (001-014) + 3 new `REQ-CONV-SESSION-SOURCE` entries (001-003).
+
+**Test counts:** 11761 passing total (delta of +90 over pre-phase baseline). New tests: sanitizer (8), slugifier (7), bridge unit (8), late-bound proxy (3), real-config integration (3), codec round-trip (6), fencing (7), prompt-builder (~5), compose-runtime wiring (1), reports (2), alerts (2), food helpers (6), end-to-end integration (6), persona (3).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
