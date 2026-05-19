@@ -293,6 +293,61 @@ describe('ReportService — run', () => {
 		expect(result).not.toBeNull();
 		expect(telegram.send).toHaveBeenCalledTimes(2);
 	});
+
+	it('deliver() calls appOutboundBridge per recipient with slugged kind, after successful send', async () => {
+		const userManager = makeUserManager(['123456789', '987654321']);
+		const recorded: Array<{ userId: string; appId: string; kind: string; body: string }> = [];
+		const appOutboundBridge = {
+			recordOutboundMessage: vi.fn(async (opts: any) => {
+				recorded.push(opts);
+			}),
+		};
+		const { service } = makeService({ userManager, appOutboundBridge });
+		await service.saveReport(
+			makeValidReport({
+				id: 'weekly-spend',
+				name: 'Weekly Spend',
+				delivery: ['123456789', '987654321'],
+			}),
+		);
+
+		await service.run('weekly-spend');
+
+		expect(appOutboundBridge.recordOutboundMessage).toHaveBeenCalledTimes(2);
+		expect(recorded).toHaveLength(2);
+		expect(recorded[0]).toMatchObject({
+			userId: '123456789',
+			appId: 'reports',
+			kind: 'report:weekly-spend',
+		});
+		expect(recorded[0].body).toContain('Weekly Spend');
+		expect(recorded[1]).toMatchObject({
+			userId: '987654321',
+			appId: 'reports',
+			kind: 'report:weekly-spend',
+		});
+	});
+
+	it('deliver() does NOT call bridge when telegram.send rejects', async () => {
+		const userManager = makeUserManager(['123456789', '987654321']);
+		const telegram = makeTelegram();
+		(telegram.send as any)
+			.mockResolvedValueOnce(undefined) // first user succeeds
+			.mockRejectedValueOnce(new Error('Network error')); // second fails
+		const appOutboundBridge = {
+			recordOutboundMessage: vi.fn().mockResolvedValue(undefined),
+		};
+		const { service } = makeService({ userManager, telegram, appOutboundBridge });
+		await service.saveReport(makeValidReport({ delivery: ['123456789', '987654321'] }));
+
+		await service.run('test-report');
+
+		// Bridge called only for the recipient that succeeded.
+		expect(appOutboundBridge.recordOutboundMessage).toHaveBeenCalledTimes(1);
+		expect(appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: '123456789', appId: 'reports' }),
+		);
+	});
 });
 
 describe('ReportService — LLM summarization', () => {

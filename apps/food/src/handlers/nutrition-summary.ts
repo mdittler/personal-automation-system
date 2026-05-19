@@ -86,6 +86,12 @@ export async function handleWeeklyNutritionSummaryJob(
 		const today = todayDate(services.timezone);
 		const summary = await generateWeeklyDigest(services, userStore, userId, targets, today);
 		await services.telegram.send(userId, summary);
+		await services.appOutboundBridge?.recordOutboundMessage({
+			userId,
+			appId: 'food',
+			kind: 'weekly-nutrition',
+			body: summary,
+		});
 	} catch (err) {
 		services.logger.error(`Weekly nutrition summary failed for user ${userId}`, err);
 	}

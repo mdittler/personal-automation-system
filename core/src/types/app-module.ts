@@ -9,6 +9,7 @@
  * Apps only receive the services they declared in requirements.services.
  */
 
+import type { AppOutboundBridge } from '../services/app-outbound-bridge/index.js';
 import type { EditService } from '../services/edit/index.js';
 import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { AppKnowledgeBaseService } from './app-knowledge.js';
@@ -149,6 +150,14 @@ export interface CoreServices {
 	interactionContext?: InteractionContextService;
 	/** File edit service (D2c). Only injected when app declares "edit-service". */
 	editService?: EditService;
+	/**
+	 * Records outbound app-generated messages into the user's chat transcript so
+	 * the chatbot can refer back to them. Only injected when an app declares
+	 * `"app-outbound-bridge"` in `manifest.requirements.services`.
+	 *
+	 * Fail-open: callers MUST NOT block on this — call it and continue.
+	 */
+	appOutboundBridge?: AppOutboundBridge;
 	/** Infrastructure-mediated access to declared external API secrets. */
 	secrets: SecretsService;
 	/** Absolute path to the data root directory (e.g. '/home/user/pas/data'). */

@@ -8,6 +8,7 @@
 
 import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
+import type { AppOutboundBridge } from '../services/app-outbound-bridge/index.js';
 import type { AppKnowledgeBaseService } from '../types/app-knowledge.js';
 import type { AppMetadataService } from '../types/app-metadata.js';
 import type { AppLogger, CoreServices } from '../types/app-module.js';

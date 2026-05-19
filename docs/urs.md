@@ -5123,6 +5123,33 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## App-Message Memory Bridge (2026-05-18)
+
+### REQ-CONV-APP-BRIDGE — App-Message Memory Bridge
+
+- **REQ-CONV-APP-BRIDGE-001:** `appOutboundBridge.recordOutboundMessage` appends a synthetic user+assistant exchange to the user's active session transcript via `ChatSessionStore.appendExchange`. Both turns are stamped `source: 'app'`.
+- **REQ-CONV-APP-BRIDGE-002:** User-turn content is exactly `[App: <appId>] <kind>` where `appId` matches `/^[a-z0-9_-]{1,32}$/` and `kind` matches `/^[a-z0-9_:-]{1,64}$/`. Malformed values cause the bridge to log a warning and return without appending.
+- **REQ-CONV-APP-BRIDGE-003:** Body sanitization via `sanitizeAppMessageField` strips XML system tags, control characters, ZWJ/ZWNJ/BOM, and bidi override codepoints; whitespace is collapsed; truncation at `maxLen` appends a single ellipsis character (output length is `maxLen + 1`).
+- **REQ-CONV-APP-BRIDGE-004:** Body is truncated to `MAX_BODY_LEN = 1899` characters (worst-case output 1900 including ellipsis, leaving headroom under fencing's `PHOTO_TURN_CAP` of 2000).
+- **REQ-CONV-APP-BRIDGE-005:** Per-user opt-out via `chat.app_message_bridge_enabled` (default `true`). When the user's resolved config value is `false`, the bridge returns without appending. Resolution uses `AppConfigService.getAll(userId)`.
+- **REQ-CONV-APP-BRIDGE-006:** Append failure is fail-open: errors from `ChatSessionStore.appendExchange` are caught, logged via `logger.warn`, and not propagated.
+- **REQ-CONV-APP-BRIDGE-007:** Bridge is NOT called when `services.telegram.send` rejects. Per-recipient sequencing: telegram send → bridge call, with a `continue` on send failure so the bridge sees only successful deliveries.
+- **REQ-CONV-APP-BRIDGE-008:** Chatbot system prompt contains `APP_MESSAGE_GUIDANCE` alongside the rewritten `PHOTO_SUMMARY_GUIDANCE`. Neither makes claims about retrieval capabilities.
+- **REQ-CONV-APP-BRIDGE-009:** `executeDispatchMessage` does NOT call the bridge. User-visible replies from the dispatched app flow through that app's own bridge participation, preventing double-recording.
+- **REQ-CONV-APP-BRIDGE-010:** `toAppMessageKind(rawName)` slugifies arbitrary names to `KIND_RE` format. Reports use `report:${toAppMessageKind(report.id)}`; alerts use `alert:${toAppMessageKind(vars.alertName)}:telegram`.
+- **REQ-CONV-APP-BRIDGE-011:** Apps receive `services.appOutboundBridge` only when their manifest declares `app-outbound-bridge` in `requirements.services`.
+- **REQ-CONV-APP-BRIDGE-012:** Button labels are derived from `InlineButton[][]` via `.flat().map(b => b.text)`; sanitized; empty labels filtered.
+- **REQ-CONV-APP-BRIDGE-013:** `LateBoundAppOutboundBridge.recordOutboundMessage` is a silent no-op before `bind()`; `bind()` called twice throws.
+- **REQ-CONV-APP-BRIDGE-014:** `ReportService`, `AlertService`, and per-app `CoreServices` factory all receive the same `LateBoundAppOutboundBridge` proxy instance from `compose-runtime`; the real impl is bound after `chatSessions` and the chatbot `AppConfigServiceImpl` exist.
+
+### REQ-CONV-SESSION-SOURCE — `SessionTurn` provenance field
+
+- **REQ-CONV-SESSION-SOURCE-001:** `SessionTurn` carries an optional `source: 'user' | 'assistant' | 'photo' | 'app'` provenance field. The transcript codec persists it as a `source: <value>` metadata line when defined; omits the line when undefined.
+- **REQ-CONV-SESSION-SOURCE-002:** All production `appendExchange` writers set `source` explicitly: `dispatchMessage`/`dispatchConversation`/`handle-message`/`handle-ask` use `'user'`/`'assistant'`; `dispatchPhoto` uses `'photo'`; `AppOutboundBridge` uses `'app'`.
+- **REQ-CONV-SESSION-SOURCE-003:** `formatConversationHistory` cap-lifts a turn to `PHOTO_TURN_CAP` when its `source` (or, for assistant turns, the previous turn's `source`) is `'photo'` or `'app'`. Content-regex against `PHOTO_TURN_HEADERS` / `APP_HEADER_RE` is a back-compat fallback ONLY when `source === undefined`. A user-typed exact header on a new transcript (with `source: 'user'`) does NOT cap-lift.
+
+---
+
 ## Batch 3 — Conversation Router Built-ins + Recall Config
 
 ### REQ-CONV-FLUSH-013 — `/flushmemory` and `/flush-memory` MUST trigger an immediate session-summary flush

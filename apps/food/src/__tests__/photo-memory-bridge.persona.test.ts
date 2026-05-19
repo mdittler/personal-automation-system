@@ -323,8 +323,12 @@ describe('Scenario 6: grocery list photo → ask about it', () => {
 // ─── Scenario 7: PHOTO_SUMMARY_GUIDANCE regression guard ─────────────────────
 
 describe('Scenario 7: PHOTO_SUMMARY_GUIDANCE regression guard', () => {
-	it('PHOTO_SUMMARY_GUIDANCE contains counter-instruction against invented truncation', () => {
-		expect(PHOTO_SUMMARY_GUIDANCE).toContain('do NOT invent reasons for the truncation');
+	it('PHOTO_SUMMARY_GUIDANCE contains counter-instruction against invented content', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).toContain('Do not invent missing content');
+	});
+	it('PHOTO_SUMMARY_GUIDANCE no longer promises retrieval', () => {
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toContain('offer to retrieve');
+		expect(PHOTO_SUMMARY_GUIDANCE).not.toContain('full data is on disk');
 	});
 });
 

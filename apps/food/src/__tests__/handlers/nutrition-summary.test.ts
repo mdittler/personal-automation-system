@@ -32,6 +32,9 @@ function createMockServices() {
 				exists: vi.fn().mockResolvedValue(false),
 			}),
 		},
+		appOutboundBridge: {
+			recordOutboundMessage: vi.fn().mockResolvedValue(undefined),
+		},
 		timezone: 'America/New_York',
 	};
 }
@@ -94,6 +97,29 @@ describe('weekly-nutrition-summary handler', () => {
 			expect.stringContaining('weekly-nutrition-summary'),
 		);
 		expect(services.telegram.send).not.toHaveBeenCalled();
+	});
+
+	it('bridges the weekly summary via appOutboundBridge with kind weekly-nutrition', async () => {
+		const services = createMockServices();
+		const sharedStore = services.data.forShared('shared');
+		sharedStore.read.mockImplementation((path: string) => {
+			if (path === 'household.yaml') return Promise.resolve(createHouseholdYaml());
+			return Promise.resolve(null);
+		});
+		const userStore = services.data.forUser('');
+		userStore.read.mockResolvedValue(
+			`month: "2026-04"\nuserId: user1\ndays:\n  - date: "2026-04-01"\n    meals: []\n    totals: { calories: 2000, protein: 100 }`,
+		);
+
+		await handleWeeklyNutritionSummaryJob(services as never, 'user1');
+
+		expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledTimes(1);
+		expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith({
+			userId: 'user1',
+			appId: 'food',
+			kind: 'weekly-nutrition',
+			body: expect.any(String),
+		});
 	});
 
 	it('handles errors gracefully', async () => {

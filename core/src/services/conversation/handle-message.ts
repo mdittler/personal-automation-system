@@ -435,8 +435,13 @@ export async function handleMessage(ctx: MessageContext, deps: HandleMessageDeps
 	await sendSplitResponse(ctx.userId, finalResponse, deps);
 
 	const now = ctx.timestamp.toISOString();
-	const userTurn: SessionTurn = { role: 'user', content: ctx.text, timestamp: now };
-	const assistantTurn: SessionTurn = { role: 'assistant', content: finalResponse, timestamp: now };
+	const userTurn: SessionTurn = { role: 'user', content: ctx.text, timestamp: now, source: 'user' };
+	const assistantTurn: SessionTurn = {
+		role: 'assistant',
+		content: finalResponse,
+		timestamp: now,
+		source: 'assistant',
+	};
 
 	let appendSucceeded = false;
 	try {

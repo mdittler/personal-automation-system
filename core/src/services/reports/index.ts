@@ -26,6 +26,7 @@ import { formatDateTime } from '../../utils/cron-describe.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter } from '../../utils/frontmatter.js';
 import { readYamlFileStrict, writeYamlFile } from '../../utils/yaml.js';
+import { type AppOutboundBridge, toAppMessageKind } from '../app-outbound-bridge/index.js';
 import type { ChangeLog } from '../data-store/change-log.js';
 import type { HouseholdService } from '../household/index.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
@@ -54,6 +55,8 @@ export interface ReportServiceOptions {
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, space_id sections route to household-aware paths via getSpace() kind. */
 	spaceService?: { getSpace(id: string): SpaceDefinition | null };
+	/** Optional — when present, deliveries are mirrored into the user's chat transcript. */
+	appOutboundBridge?: AppOutboundBridge;
 }
 
 export class ReportService {
@@ -72,6 +75,7 @@ export class ReportService {
 	private readonly n8nDispatcher?: N8nDispatcher;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	private readonly spaceService?: { getSpace(id: string): SpaceDefinition | null };
+	private readonly appOutboundBridge?: AppOutboundBridge;
 
 	constructor(options: ReportServiceOptions) {
 		this.dataDir = options.dataDir;
@@ -89,6 +93,7 @@ export class ReportService {
 		this.n8nDispatcher = options.n8nDispatcher;
 		this.householdService = options.householdService;
 		this.spaceService = options.spaceService;
+		this.appOutboundBridge = options.appOutboundBridge;
 	}
 
 	/**
@@ -481,6 +486,7 @@ export class ReportService {
 	}
 
 	private async deliver(report: ReportDefinition, text: string): Promise<void> {
+		const kind = `report:${toAppMessageKind(report.id)}`;
 		for (const userId of report.delivery) {
 			try {
 				await this.telegram.send(userId, text);
@@ -489,7 +495,14 @@ export class ReportService {
 					{ error, reportId: report.id, userId },
 					'Failed to deliver report to user',
 				);
+				continue; // bridge call skipped: user never saw the message
 			}
+			await this.appOutboundBridge?.recordOutboundMessage({
+				userId,
+				appId: 'reports',
+				kind,
+				body: text,
+			});
 		}
 	}
 

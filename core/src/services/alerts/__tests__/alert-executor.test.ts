@@ -167,4 +167,63 @@ describe('executeActions', () => {
 		expect(result.successCount).toBe(1);
 		expect(result.failureCount).toBe(1);
 	});
+
+	// --- AppOutboundBridge ---
+
+	it('executeTelegramMessage bridges per recipient with slugged alert kind', async () => {
+		const recorded: Array<{ userId: string; appId: string; kind: string; body: string }> = [];
+		const deps = makeDeps({
+			appOutboundBridge: {
+				recordOutboundMessage: vi.fn(async (opts: any) => {
+					recorded.push(opts);
+				}),
+			},
+		});
+		const actions: AlertAction[] = [
+			{ type: 'telegram_message', config: { message: 'Hi {data}' } },
+		];
+
+		const result = await executeActions(actions, ['u1'], deps, {
+			data: 'world',
+			alertName: 'Expiry Warning!',
+		});
+
+		expect(result.successCount).toBe(1);
+		expect(result.failureCount).toBe(0);
+		expect(deps.appOutboundBridge!.recordOutboundMessage).toHaveBeenCalledTimes(1);
+		expect(recorded).toEqual([
+			{
+				userId: 'u1',
+				appId: 'alerts',
+				kind: 'alert:expiry-warning:telegram',
+				body: 'Hi world',
+			},
+		]);
+	});
+
+	it('executeTelegramMessage does NOT bridge when telegram.send rejects', async () => {
+		const deps = makeDeps({
+			appOutboundBridge: {
+				recordOutboundMessage: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		// One user succeeds, one fails — bridge should only fire once.
+		(deps.telegram.send as any)
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(new Error('Network error'));
+
+		const actions: AlertAction[] = [
+			{ type: 'telegram_message', config: { message: 'Alert!' } },
+		];
+
+		await executeActions(actions, ['u1', 'u2'], deps, {
+			data: '',
+			alertName: 'Net Test',
+		});
+
+		expect(deps.appOutboundBridge!.recordOutboundMessage).toHaveBeenCalledTimes(1);
+		expect(deps.appOutboundBridge!.recordOutboundMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ userId: 'u1', appId: 'alerts' }),
+		);
+	});
 });

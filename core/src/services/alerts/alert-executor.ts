@@ -22,6 +22,7 @@ import type { AudioService } from '../../types/audio.js';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { atomicWrite, ensureDir } from '../../utils/file.js';
+import { type AppOutboundBridge, toAppMessageKind } from '../app-outbound-bridge/index.js';
 import { getCurrentHouseholdId, requestContext } from '../context/request-context.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
@@ -48,6 +49,8 @@ export interface ExecutorDeps {
 	timezone?: string;
 	/** Optional — when present, householdId is derived and injected into dispatch_message context. */
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
+	/** Optional — when present, telegram_message actions mirror the sent text into the user's chat transcript. */
+	appOutboundBridge?: AppOutboundBridge;
 }
 
 export interface ExecutionContext {
@@ -294,6 +297,7 @@ async function executeTelegramMessage(
 	let sentCount = 0;
 	let failCount = 0;
 
+	const kind = `alert:${toAppMessageKind(vars.alertName)}:telegram`;
 	for (const userId of delivery) {
 		try {
 			await deps.telegram.send(userId, text);
@@ -307,7 +311,14 @@ async function executeTelegramMessage(
 				},
 				'Failed to send alert Telegram message to user',
 			);
+			continue; // bridge call skipped: user never saw the message
 		}
+		await deps.appOutboundBridge?.recordOutboundMessage({
+			userId,
+			appId: 'alerts',
+			kind,
+			body: text,
+		});
 	}
 
 	if (failCount > 0 && sentCount === 0) {
@@ -470,6 +481,13 @@ async function executeAudio(
 
 /**
  * Dispatch a synthetic message through the router to trigger an app.
+ *
+ * NOTE: dispatch_message synthesizes an internal Router event; the dispatched
+ * app's user-visible reply flows through that app's normal send path. If that
+ * app participates in the AppOutboundBridge (declares the service requirement
+ * and calls the bridge after its telegram.send), the user-visible reply is
+ * captured there. We do NOT bridge from this site — that would double-record
+ * the same content. See REQ-CONV-APP-BRIDGE-009 and integration test I-DISP.
  */
 async function executeDispatchMessage(
 	config: DispatchMessageActionConfig,

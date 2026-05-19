@@ -150,6 +150,30 @@ describe('sendVotingMessages', () => {
 			expect(buttons.length).toBeGreaterThan(0);
 		}
 	});
+
+	it('bridges one weekly-menu record per per-member voting send', async () => {
+		const recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+		const bridgedServices = {
+			...services,
+			appOutboundBridge: { recordOutboundMessage },
+		} as unknown as CoreServices;
+		const household = makeHousehold({ members: ['user1', 'user2'] });
+
+		await sendVotingMessages(bridgedServices, sharedStore, household);
+
+		// 2 meals × 2 members = 4 calls
+		expect(recordOutboundMessage).toHaveBeenCalledTimes(4);
+		const recipients = recordOutboundMessage.mock.calls.map((c) => c[0].userId).sort();
+		expect(recipients).toEqual(['user1', 'user1', 'user2', 'user2']);
+		for (const call of recordOutboundMessage.mock.calls) {
+			expect(call[0]).toMatchObject({
+				appId: 'food',
+				kind: 'weekly-menu',
+				body: expect.any(String),
+			});
+			expect(Array.isArray(call[0].buttons)).toBe(true);
+		}
+	});
 });
 
 // ─── handleVoteCallback ───────────────────────────────────────────────────────

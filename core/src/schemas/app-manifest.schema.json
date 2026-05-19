@@ -178,7 +178,8 @@
 							"system-info",
 							"data-query",
 							"interaction-context",
-							"edit-service"
+							"edit-service",
+							"app-outbound-bridge"
 						]
 					},
 					"description": "Infrastructure services this app uses."

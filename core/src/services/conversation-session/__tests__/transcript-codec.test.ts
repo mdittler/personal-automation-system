@@ -169,6 +169,88 @@ describe('transcript-codec', () => {
 		});
 	});
 
+	describe('SessionTurn source field — codec round-trip', () => {
+		it('encodes and decodes source=photo', () => {
+			const original: SessionTurn = {
+				role: 'user',
+				content: '[Photo: receipt]',
+				timestamp: '2026-05-18T00:00:00Z',
+				source: 'photo',
+			};
+			let raw = encodeNew(meta);
+			raw = encodeAppend(raw, original);
+			expect(raw).toContain('source: photo');
+			const { turns } = decode(raw);
+			expect(turns).toHaveLength(1);
+			const [t0] = turns;
+			expect(t0?.source).toBe('photo');
+			expect(t0?.content).toBe('[Photo: receipt]');
+		});
+
+		it('encodes and decodes source=app', () => {
+			const original: SessionTurn = {
+				role: 'assistant',
+				content: 'Your weekly nutrition report is ready.',
+				timestamp: '2026-05-18T00:00:00Z',
+				source: 'app',
+			};
+			let raw = encodeNew(meta);
+			raw = encodeAppend(raw, original);
+			expect(raw).toContain('source: app');
+			const { turns } = decode(raw);
+			expect(turns).toHaveLength(1);
+			expect(turns[0]?.source).toBe('app');
+		});
+
+		it('encodes and decodes source=user and source=assistant', () => {
+			let raw = encodeNew(meta);
+			raw = encodeAppend(raw, { ...userTurn, source: 'user' });
+			raw = encodeAppend(raw, { ...assistantTurn, source: 'assistant' });
+			const { turns } = decode(raw);
+			expect(turns).toHaveLength(2);
+			expect(turns[0]?.source).toBe('user');
+			expect(turns[1]?.source).toBe('assistant');
+		});
+
+		it('omits the source line when undefined', () => {
+			const turn: SessionTurn = {
+				role: 'user',
+				content: 'hi',
+				timestamp: '2026-05-18T00:00:00Z',
+			};
+			const encoded = encodeAppend(encodeNew(meta), turn);
+			// `source: telegram` is part of frontmatter; assert no per-turn `source:` line.
+			// The turn body lives after the closing frontmatter `---` delimiter.
+			const turnBody = encoded.split(/\n---\n/)[1] ?? '';
+			expect(turnBody).not.toContain('source:');
+		});
+
+		it('decodes legacy transcripts (no source line) as source=undefined', () => {
+			let raw = encodeNew(meta);
+			raw = encodeAppend(raw, userTurn);
+			raw = encodeAppend(raw, assistantTurn);
+			// Sanity: legacy-style output has no per-turn source line (frontmatter
+			// `source: telegram` is meta, not turn metadata).
+			const turnBody = raw.split(/\n---\n/)[1] ?? '';
+			expect(turnBody).not.toContain('source:');
+			const { turns } = decode(raw);
+			expect(turns).toHaveLength(2);
+			for (const t of turns) expect(t.source).toBeUndefined();
+		});
+
+		it('treats invalid source values as undefined (forward compat)', () => {
+			// Manually build a transcript with an unknown source value (e.g., a
+			// future provenance label we don't recognize). Decode must not throw,
+			// and the field should be undefined.
+			const corrupt = `${encodeNew(meta)}\n### user — 2026-05-18T00:00:00Z\nsource: bogus\n\`\`\`\`\nhello\n\`\`\`\`\n`;
+			const { turns } = decode(corrupt);
+			expect(turns).toHaveLength(1);
+			const [t0] = turns;
+			expect(t0?.source).toBeUndefined();
+			expect(t0?.content).toBe('hello');
+		});
+	});
+
 	describe('endActive re-encode preserves token_counts', () => {
 		it('re-encoding with updated ended_at does not zero out token_counts', () => {
 			const metaWithTokens: ChatSessionFrontmatter = {

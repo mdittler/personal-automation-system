@@ -4,6 +4,7 @@
  * identical to pre-P0 chatbot behavior (apps/chatbot/src/index.ts:533).
  */
 import { formatRelativeTime } from '../../utils/cron-describe.js';
+import { APP_HEADER_RE } from '../app-outbound-bridge/index.js';
 import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import { sanitizeInput } from './sanitization.js';
 
@@ -20,6 +21,13 @@ const PHOTO_TURN_HEADERS = new Set([
 	'[Photo: grocery list]',
 ]);
 
+function isLegacyPhotoHeader(content: string): boolean {
+	return PHOTO_TURN_HEADERS.has(content);
+}
+function isLegacyAppHeader(content: string): boolean {
+	return APP_HEADER_RE.test(content);
+}
+
 const HISTORY_TURN_CAP = 500;
 const PHOTO_TURN_CAP = 2000;
 
@@ -34,16 +42,29 @@ export function formatConversationHistory(
 		const timePart = turn.timestamp
 			? ` (${formatRelativeTime(new Date(turn.timestamp), now)})`
 			: '';
-		// Photo-summary pair detection (exact-string whitelist, anti-spoof):
-		// - user turn: content is exactly one of the whitelisted headers
-		// - assistant turn: the preceding user turn was a whitelisted header
-		const isPhotoUser = turn.role === 'user' && PHOTO_TURN_HEADERS.has(turn.content);
 		const prev = turns[i - 1];
-		const isPhotoAssistant =
+
+		// Metadata-authoritative path (writes since 5a).
+		const sourceLiftsUser =
+			turn.role === 'user' && (turn.source === 'photo' || turn.source === 'app');
+		const sourceLiftsAssistant =
+			turn.role === 'assistant' && (prev?.source === 'photo' || prev?.source === 'app');
+
+		// Legacy fallback: only when source is undefined on the relevant turn.
+		const legacyLiftsUser =
+			turn.role === 'user' &&
+			turn.source === undefined &&
+			(isLegacyPhotoHeader(turn.content) || isLegacyAppHeader(turn.content));
+		const legacyLiftsAssistant =
 			turn.role === 'assistant' &&
 			prev?.role === 'user' &&
-			PHOTO_TURN_HEADERS.has(prev.content);
-		const cap = isPhotoUser || isPhotoAssistant ? PHOTO_TURN_CAP : HISTORY_TURN_CAP;
+			prev?.source === undefined &&
+			(isLegacyPhotoHeader(prev.content) || isLegacyAppHeader(prev.content));
+
+		const cap =
+			sourceLiftsUser || sourceLiftsAssistant || legacyLiftsUser || legacyLiftsAssistant
+				? PHOTO_TURN_CAP
+				: HISTORY_TURN_CAP;
 		return `- ${recencyTag}${timePart} ${role}: ${sanitizeInput(turn.content, cap)}`;
 	});
 }

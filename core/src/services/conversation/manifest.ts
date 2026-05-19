@@ -98,6 +98,17 @@ export const CONVERSATION_USER_CONFIG: ConversationUserConfigEntry[] = [
 		nlSafe: true,
 		nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
 	},
+	{
+		key: 'app_message_bridge_enabled',
+		type: 'boolean',
+		default: true,
+		description:
+			'When enabled, messages that PAS apps send to you proactively (weekly menus, scheduled reports, alerts) are recorded in your chat session so the chatbot can discuss them. Disable to keep them out of the transcript.',
+		label: 'Show app-sent messages in chat memory',
+		help: 'Record proactive app notifications in your chat session so the chatbot can reference them.',
+		category: 'memory-sessions',
+		nlSafe: false,
+	},
 ];
 
 /**

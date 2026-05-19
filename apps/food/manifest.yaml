@@ -175,6 +175,7 @@ requirements:
     - context-store
     - interaction-context
     - data-query
+    - app-outbound-bridge
   data:
     shared_scopes:
       - path: "recipes/"
