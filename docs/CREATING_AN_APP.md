@@ -265,6 +265,13 @@ turns can reference what the photo contained. Both strings are plain text —
 chatbot might need. Returning `undefined` means the photo was handled but
 nothing is recorded in the transcript.
 
+> **Sending non-photo proactive messages?** The same chatbot-visibility pattern
+> applies to weekly summaries, scheduled reports, alerts, voting prompts, and
+> batch-prep notifications. See [Proactive Messages and the Chatbot
+> Bridge](#proactive-messages-and-the-chatbot-bridge) below for the
+> `AppOutboundBridge` contract — call it alongside `services.telegram.send`
+> the same way you return a `PhotoSummary` here.
+
 ### CallbackContext
 
 Apps using inline keyboard buttons receive a `CallbackContext` in `handleCallbackQuery`:
@@ -359,6 +366,78 @@ for (const part of parts) {
 ```
 
 See `core/src/services/conversation/telegram-format.ts` for the production `splitTelegramMessage()` implementation that the built-in chatbot uses.
+
+### Proactive Messages and the Chatbot Bridge
+
+When your app sends a message to a user outside of a direct user-to-bot turn —
+weekly summaries, scheduled reports, alerts, voting prompts — call the
+**AppOutboundBridge** in addition to `services.telegram.send` so the chatbot
+can see what you sent. Users naturally follow up about messages they receive
+("what was on the menu?"); the bridge gives the chatbot the context it needs.
+
+This is the non-photo counterpart to the [`PhotoSummary` return value](#photocontext)
+your `handlePhoto` handler uses. The mechanics are the same — a synthetic
+user/assistant exchange is appended to the user's chat session transcript with
+a header that lifts the per-turn truncation cap. The difference is that photo
+summaries are returned synchronously from a photo handler, whereas the bridge
+is called wherever your app initiates an outbound send.
+
+**Required manifest declaration.** To receive `services.appOutboundBridge`,
+declare the service in your manifest:
+
+```yaml
+requirements:
+  services:
+    - telegram
+    - app-outbound-bridge
+```
+
+**Contract:**
+
+```typescript
+await services.telegram.send(userId, body);
+await services.appOutboundBridge?.recordOutboundMessage({
+  userId,
+  appId: 'your-app-id',        // your app's manifest id; [a-z0-9_-]{1,32}
+  kind: 'weekly-summary',      // short stable identifier; [a-z0-9_:-]{1,64}
+  body,                         // exact text sent over Telegram
+  buttons: inlineButtonRows,    // optional InlineButton[][] from sendWithButtons
+});
+```
+
+The bridge is fail-open: a failure to record never throws into the caller, but
+**only call it after `services.telegram.send` resolves**. If the send rejected,
+the user did not see the message and it should not be recorded.
+
+The user controls visibility via the `chat.app_message_bridge_enabled` setting
+(default ON). Do not gate your own delivery on the bridge; just call it.
+
+**When NOT to call it:**
+
+- Direct replies to user input (handler return values) — those are already in
+  the transcript via the normal user-bot turn path.
+- Photo-handler results — return a `PhotoSummary` instead; see [PhotoContext](#photocontext).
+- Internal `dispatch_message` plumbing — the synthesized message routes
+  through another app's handler whose visible output, if any, is captured by
+  that app's own bridge calls.
+- Admin-only / operator notifications that aren't user-visible.
+
+**Naming `kind`:**
+
+- Use a short, stable identifier the chatbot can pattern-match on.
+- Examples: `weekly-menu`, `weekly-nutrition`, `report:weekly-spend`,
+  `alert:expiry-warning:telegram`, `batch-prep`.
+- If you have a user-supplied name (e.g., an alert title), run it through
+  `toAppMessageKind(name)` from `@pas/core/services/app-outbound-bridge` so
+  invalid characters get slugged instead of silently rejected.
+- Avoid timestamps or run IDs in `kind` — those go in `body`.
+
+**Header format (visible to the chatbot):**
+
+The bridge writes a synthetic user turn with the literal content
+`[App: <appId>] <kind>`. The chatbot's system prompt explains this convention
+to the LLM (`APP_MESSAGE_GUIDANCE`). Keep `appId` and `kind` stable across
+releases — the chatbot may pattern-match on either field.
 
 ### Storing Data
 
