@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
-import { ConversationService } from '../services/conversation/conversation-service.js';
 import type { ChatSessionStore } from '../services/conversation-session/chat-session-store.js';
+import { ConversationService } from '../services/conversation/conversation-service.js';
 import type { EditService } from '../services/edit/index.js';
 import type { CoreServices } from '../types/app-module.js';
 
@@ -11,10 +11,14 @@ function makeNullChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: false, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'test-session', isNew: false, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
-		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 }
 

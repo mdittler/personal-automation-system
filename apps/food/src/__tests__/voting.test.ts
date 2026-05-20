@@ -272,7 +272,8 @@ describe('formatVotingMealMessage', () => {
 		// but should not have the New marker; check it doesn't have the bracketed/capitalised form
 		expect(msg).not.toContain('🆕');
 		// at minimum it shouldn't label it new when it isn't
-		const hasNewMarker = /\[new\]/i.test(msg) || msg.includes('(New)') || msg.includes('⭐') || msg.includes('🆕');
+		const hasNewMarker =
+			/\[new\]/i.test(msg) || msg.includes('(New)') || msg.includes('⭐') || msg.includes('🆕');
 		expect(hasNewMarker).toBe(false);
 	});
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
@@ -92,7 +92,10 @@ async function buildApp(options?: {
 	usageContent?: string;
 	tempDir?: string;
 	// Chunk D extensions
-	monthlyCostTracker?: Pick<import('../../services/llm/cost-tracker.js').CostTracker, 'getMonthlyHouseholdCost'>;
+	monthlyCostTracker?: Pick<
+		import('../../services/llm/cost-tracker.js').CostTracker,
+		'getMonthlyHouseholdCost'
+	>;
 	householdServiceFull?: Pick<HouseholdService, 'listHouseholds' | 'getMembers'>;
 	messageRateTracker?: MessageRateTracker;
 	llmSafeguards?: LLMSafeguardsConfig;
@@ -989,7 +992,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 
 	// B2
 	it('handles 9-col with cells[8] containing whitespace-only value', () => {
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice |   |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice |   |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -999,7 +1003,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 
 	// B3
 	it('handles row with pipe-split yielding more than 9 cells (trailing pipe)', () => {
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 | extra |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 | extra |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1029,7 +1034,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 		// A blank User cell in an otherwise 9-col row. After pipe split + filter(Boolean),
 		// the blank cell is dropped, shifting Household left into the User slot.
 		// This test verifies the parser does NOT shift columns.
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo |  | hh-real |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo |  | hh-real |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1052,7 +1058,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 
 	// B7 — blank App cell, populated User/Household → columns align positionally
 	it('9-col row with blank App cell still places User and Household in their correct slots', () => {
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  | alice | hh-1 |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  | alice | hh-1 |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1064,7 +1071,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 
 	// B8 — row without a trailing bounding pipe still parses (hand-edited-log tolerance)
 	it('row without a trailing bounding pipe still parses positionally', () => {
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1076,7 +1084,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 	// B9 — consecutive blank interior cells do not collapse
 	it('9-col row with consecutive blank interior cells does not collapse columns', () => {
 		// Blank App AND blank User, household populated
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  |  | hh-consec |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 |  |  | hh-consec |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1090,7 +1099,8 @@ describe('parseUsageMarkdown — Chunk D edge cases', () => {
 	// drops the .trim() step.
 	it('9-col row with truly-empty User cell (||) parses Household from cells[8]', () => {
 		// No spaces between pipes around the blank User column.
-		const content = '| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo || hh-empty |';
+		const content =
+			'| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo || hh-empty |';
 
 		const result = parseUsageMarkdown(content);
 
@@ -1135,15 +1145,17 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C1
 	it('returns one row per household with correct cost/cap/pct', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-1', name: 'Alpha' }],
-			{ 'hh-1': ['user1', 'user2'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-1', name: 'Alpha' }], {
+			'hh-1': ['user1', 'user2'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 5.0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1157,15 +1169,17 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C2
 	it('household with zero calls renders row with cost=0, pct=0, overCap=false', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-zero', name: 'Zero Household' }],
-			{ 'hh-zero': ['user1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-zero', name: 'Zero Household' }], {
+			'hh-zero': ['user1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1178,10 +1192,9 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C3
 	it('household override cap takes precedence over default cap', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-custom', name: 'Custom Cap' }],
-			{ 'hh-custom': ['user1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-custom', name: 'Custom Cap' }], {
+			'hh-custom': ['user1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 9.0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
@@ -1201,10 +1214,9 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C4
 	it('cap=0 does not divide by zero (pctOfCap=0)', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-nocap', name: 'No Cap' }],
-			{ 'hh-nocap': ['user1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-nocap', name: 'No Cap' }], {
+			'hh-nocap': ['user1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 5.0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
@@ -1225,16 +1237,18 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C5
 	it('overCap is true only when monthlyCost > cap (NOT when pctOfCap rounds to 100)', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-boundary', name: 'Boundary' }],
-			{ 'hh-boundary': ['user1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-boundary', name: 'Boundary' }], {
+			'hh-boundary': ['user1'],
+		});
 		// monthlyCost=0.995, cap=1.0 → pctOfCap=Math.round(99.5)=100 but cost ≤ cap
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 0.995 };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 1.0, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 1.0,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1246,17 +1260,19 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// C6
 	it('monthlyCost reflects live reservations via costTracker.getMonthlyHouseholdCost', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-reserve', name: 'Reserve Household' }],
-			{ 'hh-reserve': ['user1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-reserve', name: 'Reserve Household' }], {
+			'hh-reserve': ['user1'],
+		});
 		// This mock simulates a costTracker that includes outstanding reservations
 		const getMonthlyHouseholdCost = vi.fn().mockReturnValue(7.5);
 		const ct = { getMonthlyHouseholdCost };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1276,7 +1292,10 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1312,7 +1331,10 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 20, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1342,15 +1364,15 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 
 	// Hardening for BUG-1 polarity — see docs/d5c-chunk-d-review-findings.md
 	it('cost exactly equal to cap → overCap=false (strict >, not >=)', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-eq', name: 'Equal' }],
-			{ 'hh-eq': ['u1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-eq', name: 'Equal' }], { 'hh-eq': ['u1'] });
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 10.0,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1360,15 +1382,17 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 	});
 
 	it('cost slightly above cap → overCap=true', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-over', name: 'Slightly Over' }],
-			{ 'hh-over': ['u1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-over', name: 'Slightly Over' }], {
+			'hh-over': ['u1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 10.01 };
 		const built = await buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: 10.0, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 10.0,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 		});
 		app = built.app;
 
@@ -1399,13 +1423,15 @@ describe('Per-Household Breakdown rendering — Chunk D', () => {
 			Object.fromEntries(households.map(({ id }) => [id, ['user1']])),
 		);
 		const ct = {
-			getMonthlyHouseholdCost: (id: string) =>
-				households.find((h) => h.id === id)?.cost ?? 0,
+			getMonthlyHouseholdCost: (id: string) => households.find((h) => h.id === id)?.cost ?? 0,
 		};
 		return buildApp({
 			householdServiceFull: hs,
 			monthlyCostTracker: ct,
-			llmSafeguards: { defaultHouseholdMonthlyCostCap: cap, householdOverrides: {} } as LLMSafeguardsConfig,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: cap,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
 			usageContent,
 		});
 	}
@@ -1476,7 +1502,9 @@ describe('Per-Household Breakdown rendering — Chunk D', () => {
 		// Progress bar must carry a different style than the warning state
 		const progressMatch = res.body.match(/<progress[^>]*>/g) ?? [];
 		const dangerMarker = progressMatch.some(
-			(p) => p.includes('pico-del-color') || (p.includes('accent-color') && res.body.includes('OVER CAP')),
+			(p) =>
+				p.includes('pico-del-color') ||
+				(p.includes('accent-color') && res.body.includes('OVER CAP')),
 		);
 		expect(dangerMarker).toBe(true);
 	});
@@ -1507,10 +1535,9 @@ describe('Per-Household Breakdown rendering — Chunk D', () => {
 
 	// D8
 	it('household name containing <script>alert(1)</script> is HTML-escaped in rendered table', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh-xss', name: '<script>alert(1)</script>' }],
-			{ 'hh-xss': ['u1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh-xss', name: '<script>alert(1)</script>' }], {
+			'hh-xss': ['u1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
@@ -1526,10 +1553,9 @@ describe('Per-Household Breakdown rendering — Chunk D', () => {
 
 	// D9
 	it('household id containing HTML entities is escaped', async () => {
-		const hs = makeLlmHouseholdService(
-			[{ id: 'hh&evil', name: 'Evil Household' }],
-			{ 'hh&evil': ['u1'] },
-		);
+		const hs = makeLlmHouseholdService([{ id: 'hh&evil', name: 'Evil Household' }], {
+			'hh&evil': ['u1'],
+		});
 		const ct = { getMonthlyHouseholdCost: (_id: string) => 0 };
 		const built = await buildApp({
 			householdServiceFull: hs,
@@ -1618,7 +1644,12 @@ describe('GET /gui/llm/metrics — Chunk D', () => {
 		const built = await buildApp();
 		app = built.app;
 
-		const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm/metrics');
+		const res = await authenticatedGetAs(
+			app,
+			NON_ADMIN_USER_ID,
+			NON_ADMIN_PASSWORD,
+			'/gui/llm/metrics',
+		);
 
 		expect(res.statusCode).toBe(403);
 	});

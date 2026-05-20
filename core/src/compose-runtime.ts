@@ -34,24 +34,35 @@ import { HealthChecker } from './server/health-checks.js';
 import { createServer, registerHealthRoute, registerWebhookRoute } from './server/index.js';
 import { AlertService } from './services/alerts/index.js';
 import { AppKnowledgeBase } from './services/app-knowledge/index.js';
-import {
-	createAppOutboundBridge,
-	LateBoundAppOutboundBridge,
-} from './services/app-outbound-bridge/index.js';
 import { AppMetadataServiceImpl } from './services/app-metadata/index.js';
+import {
+	LateBoundAppOutboundBridge,
+	createAppOutboundBridge,
+} from './services/app-outbound-bridge/index.js';
 import { AppRegistry, type ServiceFactory } from './services/app-registry/index.js';
 import { AppToggleStore } from './services/app-toggle/index.js';
 import { AudioServiceImpl } from './services/audio/index.js';
+import { createChatTranscriptIndex } from './services/chat-transcript-index/index.js';
+import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js';
 import { ConditionEvaluatorServiceImpl } from './services/condition-evaluator/index.js';
 import { AppConfigServiceImpl } from './services/config/app-config-service.js';
 import { DEFAULT_LLM_SAFEGUARDS } from './services/config/defaults.js';
 import { loadSystemConfig } from './services/config/index.js';
-import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from './services/context-store/index.js';
+import {
+	SYSTEM_KEY_RUNTIME_PATH,
+	SYSTEM_SETTING_DEFS,
+} from './services/config/settings-metadata.js';
+import { SystemConfigWriter } from './services/config/system-config-writer.js';
+import {
+	CONTEXT_INTERNAL_BYPASS,
+	ContextStoreServiceImpl,
+} from './services/context-store/index.js';
 import { requestContext } from './services/context/request-context.js';
 import { ConversationRetrievalServiceImpl } from './services/conversation-retrieval/index.js';
+import type { SessionTurn } from './services/conversation-session/chat-session-store.js';
 import { composeChatSessionStore } from './services/conversation-session/compose.js';
-import { createChatTranscriptIndex } from './services/chat-transcript-index/index.js';
-import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js';
+import { TitleService } from './services/conversation-titling/index.js';
+import { handleSessionControlCallback } from './services/conversation/handle-session-control-callback.js';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,
@@ -59,14 +70,19 @@ import {
 	ConversationService,
 } from './services/conversation/index.js';
 import {
-	disableFlushAndCleanup as disableFlushHelper,
 	type MemoryFlushRemove,
 	type MemoryFlushSave,
+	disableFlushAndCleanup as disableFlushHelper,
 } from './services/conversation/memory-flush.js';
+import {
+	SC_NO,
+	SC_YES,
+	createPendingSessionControlStore,
+} from './services/conversation/pending-session-control-store.js';
+import { detectSessionControl } from './services/conversation/session-control-classifier.js';
+import { SessionControlLogger } from './services/conversation/session-control-logger.js';
 import { summarizeSession } from './services/conversation/session-summarizer.js';
-import type { SessionTurn } from './services/conversation-session/chat-session-store.js';
 import { resolveUserBool } from './services/conversation/settings-resolver.js';
-import { TitleService } from './services/conversation-titling/index.js';
 import { CredentialService } from './services/credentials/index.js';
 import { DailyDiffService } from './services/daily-diff/index.js';
 import { DataQueryServiceImpl } from './services/data-query/index.js';
@@ -99,28 +115,27 @@ import { ModelJournalServiceImpl } from './services/model-journal/index.js';
 import { N8nDispatcherImpl } from './services/n8n/index.js';
 import { handleFirstRunWizardCallback } from './services/onboarding/first-run-wizard.js';
 import { ReportService } from './services/reports/index.js';
-import { FallbackHandler } from './services/router/fallback.js';
 import { getEffectiveCommandCatalog } from './services/router/command-catalog.js';
+import { FallbackHandler } from './services/router/fallback.js';
+import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
+import { PendingVerificationStore } from './services/router/pending-verification-store.js';
+import { RouteVerifier } from './services/router/route-verifier.js';
 import {
 	logDocCoverageWarnings,
 	validateCommandDocumentation,
 } from './services/router/validate-command-documentation.js';
-import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
-import {
-	createPendingSessionControlStore,
-	SC_NO,
-	SC_YES,
-} from './services/conversation/pending-session-control-store.js';
-import { handleSessionControlCallback } from './services/conversation/handle-session-control-callback.js';
-import { SessionControlLogger } from './services/conversation/session-control-logger.js';
-import { detectSessionControl } from './services/conversation/session-control-classifier.js';
-import { PendingVerificationStore } from './services/router/pending-verification-store.js';
-import { RouteVerifier } from './services/router/route-verifier.js';
 import { VerificationLogger } from './services/router/verification-logger.js';
 import { SchedulerServiceImpl } from './services/scheduler/index.js';
 import { JobFailureNotifier } from './services/scheduler/job-failure-notifier.js';
 import { buildScheduledJobHandler } from './services/scheduler/per-user-dispatch.js';
 import { SecretsServiceImpl } from './services/secrets/index.js';
+import {
+	SettingsReader,
+	type SettingsRegistry,
+	SettingsWriter,
+	buildSettingsRegistry,
+} from './services/settings/index.js';
+import { createPendingSettingsConfirmStore } from './services/settings/pending-settings-confirm-store.js';
 import { SpaceService } from './services/spaces/index.js';
 import { SystemInfoServiceImpl } from './services/system-info/index.js';
 import { createBot, createWebhookCallback } from './services/telegram/bot.js';
@@ -135,18 +150,6 @@ import { scanForDuplicateNames } from './services/user-manager/scan-duplicate-na
 import { UserGuard } from './services/user-manager/user-guard.js';
 import { UserMutationService } from './services/user-manager/user-mutation-service.js';
 import { VaultService } from './services/vault/index.js';
-import {
-	buildSettingsRegistry,
-	SettingsReader,
-	SettingsWriter,
-	type SettingsRegistry,
-} from './services/settings/index.js';
-import { createPendingSettingsConfirmStore } from './services/settings/pending-settings-confirm-store.js';
-import { SystemConfigWriter } from './services/config/system-config-writer.js';
-import {
-	SYSTEM_KEY_RUNTIME_PATH,
-	SYSTEM_SETTING_DEFS,
-} from './services/config/settings-metadata.js';
 import { WebhookService } from './services/webhooks/index.js';
 import type { CoreServices } from './types/app-module.js';
 import type { LLMSafeguardsConfig, SystemConfig } from './types/config.js';
@@ -1188,7 +1191,10 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	// Save the generated session summary as 'environment-fact' (a durable kind) so it
 	// survives strict_durable_kinds=true filtering in buildMemorySnapshot.
 	const flushSave: MemoryFlushSave = (uid, key, content) =>
-		contextStore.save(uid, key, content, { kind: 'environment-fact', bypass: CONTEXT_INTERNAL_BYPASS });
+		contextStore.save(uid, key, content, {
+			kind: 'environment-fact',
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 	const flushRemove: MemoryFlushRemove = (uid, key) =>
 		contextStore.remove(uid, key, CONTEXT_INTERNAL_BYPASS);
 	const flushLogger = createChildLogger(logger, { service: 'memory-flush' });
@@ -1198,7 +1204,13 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	const sessionSummarizer = (turns: SessionTurn[], signal?: AbortSignal) =>
 		summarizeSession(turns, { llm: systemLlm, logger: summarizerLogger }, signal);
 	const getFlushEnabled = (userId: string) =>
-		resolveUserBool(conversationAppConfig, userId, 'flush_memory_on_idle_reset', false, flushLogger);
+		resolveUserBool(
+			conversationAppConfig,
+			userId,
+			'flush_memory_on_idle_reset',
+			false,
+			flushLogger,
+		);
 
 	const pendingSettingsConfirmStore = createPendingSettingsConfirmStore();
 
@@ -1477,13 +1489,15 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 					// Peek first to check the nonce without consuming
 					const peeked = pendingSessionControl.peek(userId);
 					if (!peeked || peeked.id !== entryId) {
-						sessionControlLogger?.logConfirmation({
-							timestamp: new Date(),
-							userId,
-							entryId: entryId ?? '',
-							outcome: 'expired-or-stale',
-							elapsedMs: 0,
-						}).catch(() => undefined);
+						sessionControlLogger
+							?.logConfirmation({
+								timestamp: new Date(),
+								userId,
+								entryId: entryId ?? '',
+								outcome: 'expired-or-stale',
+								elapsedMs: 0,
+							})
+							.catch(() => undefined);
 						await ctx.reply('That confirmation has expired. Please try again.');
 						return;
 					}
@@ -1499,17 +1513,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 					};
 
 					await requestContext.run({ userId, householdId: scHouseholdId }, async () => {
-						await handleSessionControlCallback(
-							isYes ? SC_YES : SC_NO,
-							entryId,
-							scCtx,
-							{
-								pendingStore: pendingSessionControl,
-								handleNewChat: (msgCtx) => conversationService.handleNewChat([], msgCtx),
-								sessionControlLogger,
-								logger,
-							},
-						);
+						await handleSessionControlCallback(isYes ? SC_YES : SC_NO, entryId, scCtx, {
+							pendingStore: pendingSessionControl,
+							handleNewChat: (msgCtx) => conversationService.handleNewChat([], msgCtx),
+							sessionControlLogger,
+							logger,
+						});
 					});
 
 					if (!isYes) {

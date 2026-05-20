@@ -124,21 +124,18 @@ describe('Scenario 2: recipe photo → ask about it', () => {
 		'is it saved',
 	];
 
-	it.each(messages)(
-		'after recipe upload, "%s" prompt contains recipe info',
-		async (msg) => {
-			const env = await createPersonaEnv();
-			try {
-				await env.uploadRecipe({ title: 'Lemon Pasta', ingredientCount: 6, stepCount: 4 });
-				const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
-				expect(prompt).toContain('Lemon Pasta');
-				expect(prompt).toContain('[Photo: recipe]');
-				expect(prompt).toContain('captured photo summary');
-			} finally {
-				await env.teardown();
-			}
-		},
-	);
+	it.each(messages)('after recipe upload, "%s" prompt contains recipe info', async (msg) => {
+		const env = await createPersonaEnv();
+		try {
+			await env.uploadRecipe({ title: 'Lemon Pasta', ingredientCount: 6, stepCount: 4 });
+			const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
+			expect(prompt).toContain('Lemon Pasta');
+			expect(prompt).toContain('[Photo: recipe]');
+			expect(prompt).toContain('captured photo summary');
+		} finally {
+			await env.teardown();
+		}
+	});
 });
 
 // ─── Scenario 3: Pantry photo → ask about it ────────────────────────────────
@@ -152,24 +149,21 @@ describe('Scenario 3: pantry photo → ask about it', () => {
 		'did you capture my pantry items',
 	];
 
-	it.each(messages)(
-		'after pantry upload, "%s" prompt contains pantry info',
-		async (msg) => {
-			const env = await createPersonaEnv();
-			try {
-				await env.uploadPantry([
-					{ name: 'Milk', quantity: '1 gal' },
-					{ name: 'Eggs', quantity: '12' },
-				]);
-				const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
-				expect(prompt).toContain('[Photo: pantry]');
-				expect(prompt).toContain('Milk');
-				expect(prompt).toContain('captured photo summary');
-			} finally {
-				await env.teardown();
-			}
-		},
-	);
+	it.each(messages)('after pantry upload, "%s" prompt contains pantry info', async (msg) => {
+		const env = await createPersonaEnv();
+		try {
+			await env.uploadPantry([
+				{ name: 'Milk', quantity: '1 gal' },
+				{ name: 'Eggs', quantity: '12' },
+			]);
+			const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
+			expect(prompt).toContain('[Photo: pantry]');
+			expect(prompt).toContain('Milk');
+			expect(prompt).toContain('captured photo summary');
+		} finally {
+			await env.teardown();
+		}
+	});
 });
 
 // ─── Scenario 4: /newchat clears active session (multi-step) ─────────────────
@@ -274,19 +268,16 @@ describe('Scenario 5: /ask without prior photo — receipt content NOT in prompt
 		'tell me about the weather in Vancouver',
 	];
 
-	it.each(messages)(
-		'without receipt upload, "%s" prompt has no receipt content',
-		async (msg) => {
-			const env = await createPersonaEnv();
-			try {
-				const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
-				expect(prompt).not.toContain('🧾 Receipt captured');
-				expect(prompt).not.toContain('Costco');
-			} finally {
-				await env.teardown();
-			}
-		},
-	);
+	it.each(messages)('without receipt upload, "%s" prompt has no receipt content', async (msg) => {
+		const env = await createPersonaEnv();
+		try {
+			const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
+			expect(prompt).not.toContain('🧾 Receipt captured');
+			expect(prompt).not.toContain('Costco');
+		} finally {
+			await env.teardown();
+		}
+	});
 });
 
 // ─── Scenario 6: Grocery list photo → ask about it ──────────────────────────
@@ -300,24 +291,21 @@ describe('Scenario 6: grocery list photo → ask about it', () => {
 		'what did the photo show',
 	];
 
-	it.each(messages)(
-		'after grocery upload, "%s" prompt contains grocery info',
-		async (msg) => {
-			const env = await createPersonaEnv();
-			try {
-				await env.uploadGrocery([
-					{ name: 'Milk', quantity: 2, unit: 'gal' },
-					{ name: 'Bread', quantity: 1, unit: 'loaf' },
-				]);
-				const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
-				expect(prompt).toContain('[Photo: grocery list]');
-				expect(prompt).toContain('Milk');
-				expect(prompt).toContain('captured photo summary');
-			} finally {
-				await env.teardown();
-			}
-		},
-	);
+	it.each(messages)('after grocery upload, "%s" prompt contains grocery info', async (msg) => {
+		const env = await createPersonaEnv();
+		try {
+			await env.uploadGrocery([
+				{ name: 'Milk', quantity: 2, unit: 'gal' },
+				{ name: 'Bread', quantity: 1, unit: 'loaf' },
+			]);
+			const prompt = await env.sendAskAndCaptureLLMPrompt(msg);
+			expect(prompt).toContain('[Photo: grocery list]');
+			expect(prompt).toContain('Milk');
+			expect(prompt).toContain('captured photo summary');
+		} finally {
+			await env.teardown();
+		}
+	});
 });
 
 // ─── Scenario 7: PHOTO_SUMMARY_GUIDANCE regression guard ─────────────────────

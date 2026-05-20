@@ -39,7 +39,7 @@ const HEALTH_BIOMETRIC_EXCLUSIONS =
  */
 export function isHealthCorrelationIntent(text: string): boolean {
 	if (HEALTH_BIOMETRIC_EXCLUSIONS.test(text)) return false;
-	return HEALTH_CORRELATION_PATTERNS.some(re => re.test(text));
+	return HEALTH_CORRELATION_PATTERNS.some((re) => re.test(text));
 }
 
 // ─── Period extraction ────────────────────────────────────────────────────

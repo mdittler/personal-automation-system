@@ -45,8 +45,8 @@ import { AppConfigServiceImpl } from '../../../../core/src/services/config/app-c
 import { requestContext } from '../../../../core/src/services/context/request-context.js';
 import type { ManifestUserConfig } from '../../../../core/src/types/manifest.js';
 import { handleCommand, handleMessage, init } from '../index.js';
-import type { Household, MonthlyMacroLog, Recipe } from '../types.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household, MonthlyMacroLog, Recipe } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -357,11 +357,13 @@ describe('H11.x Natural Language — Nutrition polish + Hosting flag forms', () 
 			// defaulting to 30 days. Assert the period picker was shown.
 			const sendWithButtons = vi.mocked(services.telegram.sendWithButtons);
 			expect(sendWithButtons).toHaveBeenCalledOnce();
-			const buttons = sendWithButtons.mock.calls[0]![2] as Array<Array<{ text: string; callbackData: string }>>;
+			const buttons = sendWithButtons.mock.calls[0]![2] as Array<
+				Array<{ text: string; callbackData: string }>
+			>;
 			const flat = buttons.flat();
-			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
-			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
-			expect(flat.some(b => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
+			expect(flat.some((b) => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
+			expect(flat.some((b) => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
+			expect(flat.some((b) => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
 		});
 	});
 

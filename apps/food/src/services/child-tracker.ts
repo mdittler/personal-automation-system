@@ -8,40 +8,95 @@ import type { ChildFoodLog, FoodIntroduction } from '../types.js';
 import { addDays } from '../utils/date.js';
 
 export const ALLERGEN_CATEGORIES = [
-	'milk', 'eggs', 'peanuts', 'tree_nuts', 'wheat',
-	'soy', 'fish', 'shellfish', 'sesame',
+	'milk',
+	'eggs',
+	'peanuts',
+	'tree_nuts',
+	'wheat',
+	'soy',
+	'fish',
+	'shellfish',
+	'sesame',
 ] as const;
 
-export type AllergenCategory = typeof ALLERGEN_CATEGORIES[number];
+export type AllergenCategory = (typeof ALLERGEN_CATEGORIES)[number];
 
 /** Maps common food names to their allergen category. */
 const FOOD_TO_ALLERGEN: Record<string, AllergenCategory> = {
 	// milk / dairy
-	milk: 'milk', cheese: 'milk', yogurt: 'milk', butter: 'milk', cream: 'milk',
-	dairy: 'milk', 'ice cream': 'milk', whey: 'milk', casein: 'milk',
+	milk: 'milk',
+	cheese: 'milk',
+	yogurt: 'milk',
+	butter: 'milk',
+	cream: 'milk',
+	dairy: 'milk',
+	'ice cream': 'milk',
+	whey: 'milk',
+	casein: 'milk',
 	// eggs
-	egg: 'eggs', eggs: 'eggs', omelette: 'eggs', omelet: 'eggs', meringue: 'eggs',
+	egg: 'eggs',
+	eggs: 'eggs',
+	omelette: 'eggs',
+	omelet: 'eggs',
+	meringue: 'eggs',
 	// peanuts
-	peanut: 'peanuts', peanuts: 'peanuts', 'peanut butter': 'peanuts',
+	peanut: 'peanuts',
+	peanuts: 'peanuts',
+	'peanut butter': 'peanuts',
 	// tree nuts
-	almond: 'tree_nuts', cashew: 'tree_nuts', walnut: 'tree_nuts', pecan: 'tree_nuts',
-	pistachio: 'tree_nuts', hazelnut: 'tree_nuts', macadamia: 'tree_nuts',
-	'brazil nut': 'tree_nuts', 'tree nut': 'tree_nuts', 'tree nuts': 'tree_nuts',
+	almond: 'tree_nuts',
+	cashew: 'tree_nuts',
+	walnut: 'tree_nuts',
+	pecan: 'tree_nuts',
+	pistachio: 'tree_nuts',
+	hazelnut: 'tree_nuts',
+	macadamia: 'tree_nuts',
+	'brazil nut': 'tree_nuts',
+	'tree nut': 'tree_nuts',
+	'tree nuts': 'tree_nuts',
 	// wheat
-	wheat: 'wheat', bread: 'wheat', pasta: 'wheat', flour: 'wheat',
-	cracker: 'wheat', cereal: 'wheat', couscous: 'wheat', noodle: 'wheat',
+	wheat: 'wheat',
+	bread: 'wheat',
+	pasta: 'wheat',
+	flour: 'wheat',
+	cracker: 'wheat',
+	cereal: 'wheat',
+	couscous: 'wheat',
+	noodle: 'wheat',
 	// soy
-	soy: 'soy', tofu: 'soy', edamame: 'soy', tempeh: 'soy', miso: 'soy',
-	'soy sauce': 'soy', soybean: 'soy',
+	soy: 'soy',
+	tofu: 'soy',
+	edamame: 'soy',
+	tempeh: 'soy',
+	miso: 'soy',
+	'soy sauce': 'soy',
+	soybean: 'soy',
 	// fish
-	fish: 'fish', salmon: 'fish', tuna: 'fish', cod: 'fish', tilapia: 'fish',
-	trout: 'fish', halibut: 'fish', sardine: 'fish', anchovy: 'fish', bass: 'fish',
+	fish: 'fish',
+	salmon: 'fish',
+	tuna: 'fish',
+	cod: 'fish',
+	tilapia: 'fish',
+	trout: 'fish',
+	halibut: 'fish',
+	sardine: 'fish',
+	anchovy: 'fish',
+	bass: 'fish',
 	// shellfish
-	shellfish: 'shellfish', shrimp: 'shellfish', crab: 'shellfish', lobster: 'shellfish',
-	clam: 'shellfish', mussel: 'shellfish', oyster: 'shellfish', scallop: 'shellfish',
-	prawn: 'shellfish', crawfish: 'shellfish',
+	shellfish: 'shellfish',
+	shrimp: 'shellfish',
+	crab: 'shellfish',
+	lobster: 'shellfish',
+	clam: 'shellfish',
+	mussel: 'shellfish',
+	oyster: 'shellfish',
+	scallop: 'shellfish',
+	prawn: 'shellfish',
+	crawfish: 'shellfish',
 	// sesame
-	sesame: 'sesame', tahini: 'sesame', hummus: 'sesame',
+	sesame: 'sesame',
+	tahini: 'sesame',
+	hummus: 'sesame',
 };
 
 /**
@@ -53,17 +108,13 @@ export function matchAllergenCategory(food: string): AllergenCategory | null {
 	const lower = food.toLowerCase().trim();
 
 	// Sort by key length descending so "peanut butter" matches before "butter"
-	const sorted = Object.entries(FOOD_TO_ALLERGEN).sort(
-		(a, b) => b[0].length - a[0].length,
-	);
+	const sorted = Object.entries(FOOD_TO_ALLERGEN).sort((a, b) => b[0].length - a[0].length);
 	for (const [key, category] of sorted) {
 		if (lower.includes(key)) return category;
 	}
 
 	// Direct category name check
-	return ALLERGEN_CATEGORIES.find((cat) =>
-		lower.includes(cat.replace('_', ' ')),
-	) ?? null;
+	return ALLERGEN_CATEGORIES.find((cat) => lower.includes(cat.replace('_', ' '))) ?? null;
 }
 
 export interface WaitWindowResult {
@@ -93,8 +144,9 @@ export function checkAllergenWaitWindow(
 	waitDays: number,
 ): WaitWindowResult {
 	// Find the most recent introduction of a *different* allergen category
-	const differentAllergenIntros = log.introductions
-		.filter((i) => i.allergenCategory != null && i.allergenCategory !== allergenCategory);
+	const differentAllergenIntros = log.introductions.filter(
+		(i) => i.allergenCategory != null && i.allergenCategory !== allergenCategory,
+	);
 
 	if (differentAllergenIntros.length === 0) {
 		return { safe: true };

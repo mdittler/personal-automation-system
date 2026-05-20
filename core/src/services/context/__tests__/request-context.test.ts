@@ -80,13 +80,7 @@ describe('requestContext', () => {
 		// userIds. Consumers (AppConfigService, LLM cost tracker, etc.) are
 		// responsible for format validation before using the value as e.g.
 		// a filesystem path component.
-		const suspicious = [
-			'',
-			'../../etc/passwd',
-			'user with space',
-			'unicode-Ω',
-			'"; rm -rf /',
-		];
+		const suspicious = ['', '../../etc/passwd', 'user with space', 'unicode-Ω', '"; rm -rf /'];
 		for (const uid of suspicious) {
 			const seen = requestContext.run({ userId: uid }, () => getCurrentUserId());
 			expect(seen).toBe(uid);
@@ -96,7 +90,10 @@ describe('requestContext', () => {
 
 describe('sessionId (via run)', () => {
 	it('returns undefined when store is present but sessionId is omitted', () => {
-		const seen = requestContext.run({ userId: 'alice' }, () => requestContext.getStore()?.sessionId);
+		const seen = requestContext.run(
+			{ userId: 'alice' },
+			() => requestContext.getStore()?.sessionId,
+		);
 		expect(seen).toBeUndefined();
 	});
 
@@ -129,25 +126,21 @@ describe('sessionId (via run)', () => {
 	});
 
 	it('inner run() overrides sessionId', () => {
-		const seen = requestContext.run(
-			{ userId: 'u', sessionId: 'sess-outer' },
-			() =>
-				requestContext.run(
-					{ userId: 'u', sessionId: 'sess-inner' },
-					() => requestContext.getStore()?.sessionId,
-				),
+		const seen = requestContext.run({ userId: 'u', sessionId: 'sess-outer' }, () =>
+			requestContext.run(
+				{ userId: 'u', sessionId: 'sess-inner' },
+				() => requestContext.getStore()?.sessionId,
+			),
 		);
 		expect(seen).toBe('sess-inner');
 	});
 
 	it('inner run() with sessionId: undefined shadows the outer sessionId', () => {
-		const seen = requestContext.run(
-			{ userId: 'u', sessionId: 'sess-outer' },
-			() =>
-				requestContext.run(
-					{ userId: 'u', sessionId: undefined },
-					() => requestContext.getStore()?.sessionId,
-				),
+		const seen = requestContext.run({ userId: 'u', sessionId: 'sess-outer' }, () =>
+			requestContext.run(
+				{ userId: 'u', sessionId: undefined },
+				() => requestContext.getStore()?.sessionId,
+			),
 		);
 		expect(seen).toBeUndefined();
 	});
@@ -158,10 +151,7 @@ describe('sessionId (via run)', () => {
 			await new Promise((r) => setTimeout(r, 1));
 			return requestContext.getStore()?.sessionId;
 		}
-		const seen = await requestContext.run(
-			{ userId: 'u', sessionId: 'sess-async' },
-			() => deep(),
-		);
+		const seen = await requestContext.run({ userId: 'u', sessionId: 'sess-async' }, () => deep());
 		expect(seen).toBe('sess-async');
 	});
 
@@ -238,9 +228,8 @@ describe('getCurrentHouseholdId', () => {
 	});
 
 	it('exposes householdId set by run()', () => {
-		const seen = requestContext.run(
-			{ userId: 'alice', householdId: 'hh-smith' },
-			() => getCurrentHouseholdId(),
+		const seen = requestContext.run({ userId: 'alice', householdId: 'hh-smith' }, () =>
+			getCurrentHouseholdId(),
 		);
 		expect(seen).toBe('hh-smith');
 	});

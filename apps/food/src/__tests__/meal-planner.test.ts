@@ -69,8 +69,19 @@ describe('generatePlan', () => {
 
 	it('generates a MealPlan from LLM response', async () => {
 		const meals = [
-			{ recipeId: 'chicken-stir-fry-abc', recipeTitle: 'Chicken Stir Fry', date: '2026-03-31', isNew: false },
-			{ recipeId: 'new-1', recipeTitle: 'Lemon Herb Salmon', date: '2026-04-01', isNew: true, description: 'Pan-seared salmon with lemon and dill' },
+			{
+				recipeId: 'chicken-stir-fry-abc',
+				recipeTitle: 'Chicken Stir Fry',
+				date: '2026-03-31',
+				isNew: false,
+			},
+			{
+				recipeId: 'new-1',
+				recipeTitle: 'Lemon Herb Salmon',
+				date: '2026-04-01',
+				isNew: true,
+				description: 'Pan-seared salmon with lemon and dill',
+			},
 		];
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(meals));
 
@@ -146,9 +157,7 @@ describe('generatePlan', () => {
 	});
 
 	it('sets mealType to dinner on generated meals', async () => {
-		const meals = [
-			{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false },
-		];
+		const meals = [{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false }];
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(meals));
 
 		const result = await generatePlan(services, [], [], '2026-03-31', 'America/New_York');
@@ -157,9 +166,7 @@ describe('generatePlan', () => {
 	});
 
 	it('initialises votes/cooked/rated on generated meals', async () => {
-		const meals = [
-			{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false },
-		];
+		const meals = [{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false }];
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(meals));
 
 		const result = await generatePlan(services, [], [], '2026-03-31', 'America/New_York');
@@ -183,19 +190,29 @@ describe('generatePlan', () => {
 	it('throws on LLM failure', async () => {
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM error'));
 
-		await expect(generatePlan(services, [], [], '2026-03-31', 'America/New_York')).rejects.toThrow('LLM error');
+		await expect(generatePlan(services, [], [], '2026-03-31', 'America/New_York')).rejects.toThrow(
+			'LLM error',
+		);
 	});
 
 	it('throws on invalid JSON from LLM', async () => {
 		vi.mocked(services.llm.complete).mockResolvedValue('not json');
 
-		await expect(generatePlan(services, [], [], '2026-03-31', 'America/New_York')).rejects.toThrow();
+		await expect(
+			generatePlan(services, [], [], '2026-03-31', 'America/New_York'),
+		).rejects.toThrow();
 	});
 
 	it('handles LLM returning an object with a meals key wrapping the array', async () => {
 		const meals = [
 			{ recipeId: 'r1', recipeTitle: 'Pasta', date: '2026-03-31', isNew: false },
-			{ recipeId: 'r2', recipeTitle: 'Salmon', date: '2026-04-01', isNew: true, description: 'Fresh salmon' },
+			{
+				recipeId: 'r2',
+				recipeTitle: 'Salmon',
+				date: '2026-04-01',
+				isNew: true,
+				description: 'Fresh salmon',
+			},
 		];
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify({ meals }));
 
@@ -314,7 +331,11 @@ describe('generateNewRecipeDetails', () => {
 		};
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(recipe));
 
-		const result = await generateNewRecipeDetails(services, 'Lemon Herb Salmon', 'Pan-seared salmon with lemon and dill');
+		const result = await generateNewRecipeDetails(
+			services,
+			'Lemon Herb Salmon',
+			'Pan-seared salmon with lemon and dill',
+		);
 
 		expect(result.title).toBe('Lemon Herb Salmon');
 		expect(result.ingredients).toHaveLength(1);
@@ -389,7 +410,9 @@ describe('generateNewRecipeDetails', () => {
 			}),
 		);
 
-		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow('Could not generate');
+		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow(
+			'Could not generate',
+		);
 	});
 
 	it('throws on incomplete recipe (missing ingredients)', async () => {
@@ -401,7 +424,9 @@ describe('generateNewRecipeDetails', () => {
 			}),
 		);
 
-		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow('Could not generate');
+		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow(
+			'Could not generate',
+		);
 	});
 
 	it('throws on incomplete recipe (missing instructions)', async () => {
@@ -413,7 +438,9 @@ describe('generateNewRecipeDetails', () => {
 			}),
 		);
 
-		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow('Could not generate');
+		await expect(generateNewRecipeDetails(services, 'Test', 'desc')).rejects.toThrow(
+			'Could not generate',
+		);
 	});
 
 	it('throws on LLM failure', async () => {

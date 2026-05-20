@@ -9,17 +9,13 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
+import type { PhotoContext } from '@pas/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import {
-	handleMessage,
-	handleCommand,
-	init,
-} from '../index.js';
 import { handlePhoto } from '../handlers/photo.js';
-import type { PhotoContext } from '@pas/core/types';
-import type { Household } from '../types.js';
+import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -91,7 +87,9 @@ describe('interaction recording — receipt_captured', () => {
 		const services = {
 			llm: {
 				complete: vi.fn().mockResolvedValue(validReceiptJson),
-				completeWithMeta: vi.fn().mockResolvedValue({ text: validReceiptJson, finishReason: 'stop' }),
+				completeWithMeta: vi
+					.fn()
+					.mockResolvedValue({ text: validReceiptJson, finishReason: 'stop' }),
 				classify: vi.fn(),
 				extractStructured: vi.fn(),
 			},
@@ -107,7 +105,15 @@ describe('interaction recording — receipt_captured', () => {
 				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
-			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
+			logger: {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				debug: vi.fn(),
+				trace: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
 			interactionContext,
 		} as unknown as CoreServices;
 		return { services, sharedStore, spaceStore };
@@ -383,7 +389,15 @@ describe('interaction recording — recipe_saved via photo', () => {
 				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
-			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
+			logger: {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				debug: vi.fn(),
+				trace: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
 			interactionContext,
 		} as unknown as CoreServices;
 		return { services, sharedStore, spaceStore };
@@ -486,7 +500,15 @@ describe('interaction recording — grocery_updated via photo', () => {
 				forSpace: vi.fn().mockReturnValue(spaceStore),
 				forUser: vi.fn().mockReturnValue(createMockScopedStore()),
 			},
-			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() },
+			logger: {
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				debug: vi.fn(),
+				trace: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
 			interactionContext,
 		} as unknown as CoreServices;
 		return { services, sharedStore, spaceStore };
@@ -560,7 +582,7 @@ describe('interaction recording — price_updated', () => {
 
 	const priceParseJson = JSON.stringify({
 		item: 'eggs',
-		price: 3.50,
+		price: 3.5,
 		unit: 'dozen',
 		store: 'Costco',
 		department: 'dairy',

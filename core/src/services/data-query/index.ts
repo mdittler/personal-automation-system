@@ -17,15 +17,15 @@
 
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import type { AppLogger } from '../../types/app-module.js';
+import type { DataQueryOptions, DataQueryResult } from '../../types/data-query.js';
+import type { LLMService } from '../../types/llm.js';
+import { stripFrontmatter } from '../../utils/frontmatter.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
 import type { FileIndexService } from '../file-index/index.js';
 import type { FileIndexEntry } from '../file-index/types.js';
-import type { SpaceService } from '../spaces/index.js';
-import type { LLMService } from '../../types/llm.js';
-import type { AppLogger } from '../../types/app-module.js';
-import type { DataQueryResult, DataQueryOptions } from '../../types/data-query.js';
-import { stripFrontmatter } from '../../utils/frontmatter.js';
 import { sanitizeInput } from '../llm/prompt-templates.js';
-import { getCurrentHouseholdId } from '../context/request-context.js';
+import type { SpaceService } from '../spaces/index.js';
 
 /** Maximum entries to send to the LLM for file selection. */
 const MAX_CANDIDATES = 100;
@@ -73,7 +73,11 @@ export class DataQueryServiceImpl {
 		return this.realDataDir;
 	}
 
-	async query(question: string, userId: string, options?: DataQueryOptions): Promise<DataQueryResult> {
+	async query(
+		question: string,
+		userId: string,
+		options?: DataQueryOptions,
+	): Promise<DataQueryResult> {
 		// Stage A: Scope filtering
 		const authorized = this.getAuthorizedEntries(userId);
 		if (authorized.length === 0) {
@@ -83,9 +87,7 @@ export class DataQueryServiceImpl {
 		// Resolve priority candidates from recentFilePaths (intersected with authorized set)
 		const priorityPaths = new Set(options?.recentFilePaths ?? []);
 		const priorityCandidates =
-			priorityPaths.size > 0
-				? authorized.filter((e) => priorityPaths.has(e.path))
-				: [];
+			priorityPaths.size > 0 ? authorized.filter((e) => priorityPaths.has(e.path)) : [];
 
 		// Stage B: Pre-filter to candidates (priority candidates bypass pre-filter)
 		const candidates = this.buildCandidates(authorized, question, priorityCandidates);
@@ -180,11 +182,7 @@ export class DataQueryServiceImpl {
 		);
 
 		const scored = nonPriority.map((entry) => {
-			const fields = [
-				entry.title ?? '',
-				...(entry.entityKeys ?? []),
-				...(entry.tags ?? []),
-			]
+			const fields = [entry.title ?? '', ...(entry.entityKeys ?? []), ...(entry.tags ?? [])]
 				.join(' ')
 				.toLowerCase();
 			const score = [...questionWords].filter((w) => fields.includes(w)).length;
@@ -227,9 +225,7 @@ export class DataQueryServiceImpl {
 				.slice(0, 5)
 				.map((k) => sanitizeInput(k, MAX_META_TAG))
 				.join(', ');
-			const dates = [entry.dates?.earliest, entry.dates?.latest]
-				.filter(Boolean)
-				.join('–');
+			const dates = [entry.dates?.earliest, entry.dates?.latest].filter(Boolean).join('–');
 			const summary = entry.summary ? sanitizeInput(entry.summary, MAX_META_TITLE) : '';
 
 			const prefix = priorityPathSet.has(entry.path) ? '[recent interaction] ' : '';

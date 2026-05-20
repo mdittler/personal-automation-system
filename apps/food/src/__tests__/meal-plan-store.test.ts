@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import {
 	archivePlan,
@@ -124,10 +124,7 @@ describe('savePlan', () => {
 		const store = createMockScopedStore();
 		const plan = makePlan();
 		await savePlan(store as any, plan);
-		expect(store.write).toHaveBeenCalledWith(
-			'meal-plans/current.yaml',
-			expect.any(String),
-		);
+		expect(store.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 	});
 
 	it('writes with YAML frontmatter header', async () => {
@@ -334,7 +331,7 @@ describe('formatPlanMessage', () => {
 
 		const text = formatPlanMessage(plan, [], 'Raleigh, NC');
 
-		expect(text).toContain("\\*Best\\*");
+		expect(text).toContain('\\*Best\\*');
 		expect(text).toContain('\\_wonderful\\_');
 	});
 });
@@ -427,7 +424,7 @@ describe('formatTonightMessage', () => {
 
 		const text = formatTonightMessage(meal, recipe);
 
-		expect(text).toContain("\\*Special\\*");
+		expect(text).toContain('\\*Special\\*');
 		expect(text).toContain('\\[Deluxe\\]');
 		expect(text).toContain('Use \\`high heat\\`');
 		expect(text).toContain('\\_best\\_');

@@ -70,10 +70,7 @@ export function buildManifest(input: BuildManifestInput): RunManifest {
  * responsible for validating `runId` (the CLI does this via the UUID regex
  * in `args.ts`).
  */
-export async function writeManifest(
-	rootDir: string,
-	manifest: RunManifest,
-): Promise<string> {
+export async function writeManifest(rootDir: string, manifest: RunManifest): Promise<string> {
 	const path = join(rootDir, `${manifest.runId}.json`);
 	await atomicWriteJson(path, manifest);
 	return path;

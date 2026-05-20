@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InteractionContextServiceImpl } from '../index.js';
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes

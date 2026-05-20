@@ -1,15 +1,15 @@
 import type { Logger } from 'pino';
+import type { IdleResetState, IdleResetStatus } from '../../types/conversation-session.js';
 import type {
-	ChatSessionStore,
 	ChatSessionFrontmatter,
+	ChatSessionStore,
 	SessionTurn,
 } from '../conversation-session/chat-session-store.js';
-import type { PendingSessionControlStore } from './pending-session-control-store.js';
-import { isIdle, getLastActivityIso } from '../conversation-session/idle-detector.js';
+import { getLastActivityIso, isIdle } from '../conversation-session/idle-detector.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
+import { type MemoryFlushSave, flushMemoryToContextStore } from './memory-flush.js';
 import { pendingEdits } from './pending-edits.js';
-import type { IdleResetState, IdleResetStatus } from '../../types/conversation-session.js';
-import { flushMemoryToContextStore, type MemoryFlushSave } from './memory-flush.js';
+import type { PendingSessionControlStore } from './pending-session-control-store.js';
 
 export type { IdleResetStatus, IdleResetState };
 

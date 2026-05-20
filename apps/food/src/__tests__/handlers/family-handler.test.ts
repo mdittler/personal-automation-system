@@ -208,12 +208,7 @@ describe('family handler', () => {
 
 		it('views a specific child profile with edit buttons', async () => {
 			store.read.mockResolvedValue(MARGOT_YAML);
-			const result = await handleFamilyCommand(
-				services,
-				['margot'],
-				'user1',
-				store as any,
-			);
+			const result = await handleFamilyCommand(services, ['margot'], 'user1', store as any);
 			expect(result.text).toContain('Margot');
 			expect(result.text).toContain('early-introduction');
 			expect(result.buttons).toBeDefined();
@@ -221,24 +216,14 @@ describe('family handler', () => {
 
 		it('shows not found for unknown child', async () => {
 			store.read.mockResolvedValue('');
-			const result = await handleFamilyCommand(
-				services,
-				['unknown'],
-				'user1',
-				store as any,
-			);
+			const result = await handleFamilyCommand(services, ['unknown'], 'user1', store as any);
 			expect(result.text).toContain('not found');
 		});
 
 		// /family edit
 		it('shows edit usage when no field given', async () => {
 			store.read.mockResolvedValue(MARGOT_YAML);
-			const result = await handleFamilyCommand(
-				services,
-				['edit', 'margot'],
-				'user1',
-				store as any,
-			);
+			const result = await handleFamilyCommand(services, ['edit', 'margot'], 'user1', store as any);
 			expect(result.text).toContain('What would you like to update');
 		});
 
@@ -414,7 +399,7 @@ describe('family handler', () => {
 			expect(isChildApprovalIntent('margot ate the pasta', ['margot'])).toBe(true);
 		});
 
-		it("matches \"Margot wouldn't eat the fish\"", () => {
+		it('matches "Margot wouldn\'t eat the fish"', () => {
 			expect(isChildApprovalIntent("margot wouldn't eat the fish", ['margot'])).toBe(true);
 		});
 
@@ -703,14 +688,7 @@ describe('family handler', () => {
 				.mockResolvedValueOnce(MARGOT_YAML) // child profile load
 				.mockResolvedValueOnce(RECIPE_YAML); // recipe load
 
-			await handleApprovalCallback(
-				services,
-				'y:margot:rec-123',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'y:margot:rec-123', 'user1', 123, 456, store as any);
 
 			expect(store.write).toHaveBeenCalledWith(
 				'recipes/rec-123.yaml',
@@ -720,18 +698,9 @@ describe('family handler', () => {
 		});
 
 		it('sets rejection on recipe for child', async () => {
-			store.read
-				.mockResolvedValueOnce(MARGOT_YAML)
-				.mockResolvedValueOnce(RECIPE_YAML);
+			store.read.mockResolvedValueOnce(MARGOT_YAML).mockResolvedValueOnce(RECIPE_YAML);
 
-			await handleApprovalCallback(
-				services,
-				'n:margot:rec-123',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'n:margot:rec-123', 'user1', 123, 456, store as any);
 
 			expect(store.write).toHaveBeenCalledWith(
 				'recipes/rec-123.yaml',
@@ -742,18 +711,9 @@ describe('family handler', () => {
 		it('clears approval on recipe for child', async () => {
 			store.read
 				.mockResolvedValueOnce(MARGOT_YAML)
-				.mockResolvedValueOnce(
-					RECIPE_YAML + '\nchildApprovals:\n  margot: approved',
-				);
+				.mockResolvedValueOnce(RECIPE_YAML + '\nchildApprovals:\n  margot: approved');
 
-			await handleApprovalCallback(
-				services,
-				'c:margot:rec-123',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'c:margot:rec-123', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -763,18 +723,9 @@ describe('family handler', () => {
 		});
 
 		it('handles stale recipe gracefully', async () => {
-			store.read
-				.mockResolvedValueOnce(MARGOT_YAML)
-				.mockResolvedValueOnce(''); // recipe not found
+			store.read.mockResolvedValueOnce(MARGOT_YAML).mockResolvedValueOnce(''); // recipe not found
 
-			await handleApprovalCallback(
-				services,
-				'y:margot:rec-123',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'y:margot:rec-123', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -786,14 +737,7 @@ describe('family handler', () => {
 		it('handles missing child gracefully', async () => {
 			store.read.mockResolvedValue(''); // child not found
 
-			await handleApprovalCallback(
-				services,
-				'y:ghost:rec-123',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'y:ghost:rec-123', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -809,14 +753,7 @@ describe('family handler', () => {
 			// First trigger the remove command to set pending state
 			await handleFamilyCommand(services, ['remove', 'Margot'], 'user1', store as any);
 
-			await handleApprovalCallback(
-				services,
-				'rm:margot',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'rm:margot', 'user1', 123, 456, store as any);
 
 			expect(store.archive).toHaveBeenCalledWith('children/margot.yaml');
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
@@ -827,14 +764,7 @@ describe('family handler', () => {
 		});
 
 		it('rejects remove callback without pending state', async () => {
-			await handleApprovalCallback(
-				services,
-				'rm:margot',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'rm:margot', 'user1', 123, 456, store as any);
 
 			expect(store.archive).not.toHaveBeenCalled();
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
@@ -845,31 +775,13 @@ describe('family handler', () => {
 		});
 
 		it('handles remove cancel callback', async () => {
-			await handleApprovalCallback(
-				services,
-				'rm-cancel',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'rm-cancel', 'user1', 123, 456, store as any);
 
-			expect(services.telegram.editMessage).toHaveBeenCalledWith(
-				123,
-				456,
-				'Cancelled.',
-			);
+			expect(services.telegram.editMessage).toHaveBeenCalledWith(123, 456, 'Cancelled.');
 		});
 
 		it('handles edit stage prompt callback', async () => {
-			await handleApprovalCallback(
-				services,
-				'es:margot',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleApprovalCallback(services, 'es:margot', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -903,14 +815,7 @@ describe('family handler', () => {
 		it('records reaction severity on most recent intro', async () => {
 			store.read.mockResolvedValue(MARGOT_WITH_INTRO_YAML);
 
-			await handleFoodIntroCallback(
-				services,
-				'r:margot:mild',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleFoodIntroCallback(services, 'r:margot:mild', 'user1', 123, 456, store as any);
 
 			expect(store.write).toHaveBeenCalledWith(
 				'children/margot.yaml',
@@ -926,14 +831,7 @@ describe('family handler', () => {
 		it('records no reaction', async () => {
 			store.read.mockResolvedValue(MARGOT_WITH_INTRO_YAML);
 
-			await handleFoodIntroCallback(
-				services,
-				'r:margot:none',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleFoodIntroCallback(services, 'r:margot:none', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -945,14 +843,7 @@ describe('family handler', () => {
 		it('records food rejection', async () => {
 			store.read.mockResolvedValue(MARGOT_WITH_INTRO_YAML);
 
-			await handleFoodIntroCallback(
-				services,
-				'rej:margot',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleFoodIntroCallback(services, 'rej:margot', 'user1', 123, 456, store as any);
 
 			expect(store.write).toHaveBeenCalledWith(
 				'children/margot.yaml',
@@ -968,14 +859,7 @@ describe('family handler', () => {
 		it('handles missing child gracefully', async () => {
 			store.read.mockResolvedValue('');
 
-			await handleFoodIntroCallback(
-				services,
-				'r:ghost:mild',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleFoodIntroCallback(services, 'r:ghost:mild', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -987,14 +871,7 @@ describe('family handler', () => {
 		it('handles empty introduction list', async () => {
 			store.read.mockResolvedValue(MARGOT_YAML); // no introductions
 
-			await handleFoodIntroCallback(
-				services,
-				'r:margot:mild',
-				'user1',
-				123,
-				456,
-				store as any,
-			);
+			await handleFoodIntroCallback(services, 'r:margot:mild', 'user1', 123, 456, store as any);
 
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -1033,22 +910,14 @@ describe('family handler', () => {
 		});
 
 		it('shows current approval status', () => {
-			const buttons = buildRecipeApprovalButtons(
-				'rec-123',
-				[margotLog],
-				{ margot: 'approved' },
-			);
+			const buttons = buildRecipeApprovalButtons('rec-123', [margotLog], { margot: 'approved' });
 			expect(buttons[0][0].text).toContain('👍');
 			// Toggling: approved -> next action is reject (n)
 			expect(buttons[0][0].callbackData).toContain('fa:n:margot:rec-123');
 		});
 
 		it('shows rejection status', () => {
-			const buttons = buildRecipeApprovalButtons(
-				'rec-123',
-				[margotLog],
-				{ margot: 'rejected' },
-			);
+			const buttons = buildRecipeApprovalButtons('rec-123', [margotLog], { margot: 'rejected' });
 			expect(buttons[0][0].text).toContain('👎');
 		});
 
@@ -1065,12 +934,7 @@ describe('family handler', () => {
 	// ─── Security ───────────────────────────────────────────────
 	describe('security', () => {
 		it('rejects path traversal in child name', async () => {
-			const result = await handleFamilyCommand(
-				services,
-				['../etc/passwd'],
-				'user1',
-				store as any,
-			);
+			const result = await handleFamilyCommand(services, ['../etc/passwd'], 'user1', store as any);
 			expect(result.text).toContain('not found');
 		});
 

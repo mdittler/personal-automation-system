@@ -55,9 +55,7 @@ describe('AsyncLock', () => {
 			await new Promise((r) => setTimeout(r, 5));
 			counter = v + 1;
 		}
-		await Promise.all(
-			Array.from({ length: 20 }, () => lock.run('counter', rmw)),
-		);
+		await Promise.all(Array.from({ length: 20 }, () => lock.run('counter', rmw)));
 		// Without the lock the interleaved RMW would lose updates and the
 		// final counter would be < 20. With the lock it's exactly 20.
 		expect(counter).toBe(20);

@@ -1,13 +1,13 @@
 /**
  * Tests for the guided targets-set flow (H11.y Task 1).
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	hasPendingTargetsFlow,
-	beginTargetsFlow,
-	handleTargetsFlowReply,
-	handleTargetsFlowCallback,
 	__resetTargetsFlowForTests,
+	beginTargetsFlow,
+	handleTargetsFlowCallback,
+	handleTargetsFlowReply,
+	hasPendingTargetsFlow,
 } from '../../handlers/targets-flow.js';
 
 // Mock saveTargets from nutrition.ts so we can assert it was called.
@@ -195,7 +195,8 @@ describe('targets-flow', () => {
 			);
 			expect(consumed).toBe(true);
 			expect(saveTargets).toHaveBeenCalledOnce();
-			const [, , calledUserId, calledTargets] = (saveTargets as ReturnType<typeof vi.fn>).mock.calls[0]!;
+			const [, , calledUserId, calledTargets] = (saveTargets as ReturnType<typeof vi.fn>).mock
+				.calls[0]!;
 			expect(calledUserId).toBe(USER_ID);
 			expect(calledTargets).toEqual({
 				calories: 2000,
@@ -364,10 +365,30 @@ describe('targets-flow', () => {
 			await beginTargetsFlow(services as never, USER_ID);
 
 			// Walk through cal → pro → carb → fat
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:cal:2000');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:pro:150');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:carb:250');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:fat:80');
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:cal:2000',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:pro:150',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:carb:250',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:fat:80',
+			);
 			vi.clearAllMocks();
 
 			// Skip fiber
@@ -413,11 +434,36 @@ describe('targets-flow', () => {
 
 			await beginTargetsFlow(services as never, USER_ID);
 			// Walk to confirm
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:cal:2000');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:pro:150');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:carb:250');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:fat:80');
-			await handleTargetsFlowCallback(services as never, userStore as never, USER_ID, 'app:food:nut:tgt:fib:30');
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:cal:2000',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:pro:150',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:carb:250',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:fat:80',
+			);
+			await handleTargetsFlowCallback(
+				services as never,
+				userStore as never,
+				USER_ID,
+				'app:food:nut:tgt:fib:30',
+			);
 			vi.clearAllMocks();
 
 			const consumed = await handleTargetsFlowCallback(

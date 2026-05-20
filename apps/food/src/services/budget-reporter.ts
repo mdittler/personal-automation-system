@@ -58,7 +58,8 @@ export function generateWeeklyReport(
 	const totalCost = meals.reduce((sum, m) => sum + m.cost, 0);
 	const mealCount = meals.length;
 	const avgPerMeal = mealCount > 0 ? totalCost / mealCount : 0;
-	const avgPerServing = mealCount > 0 ? meals.reduce((sum, m) => sum + m.perServing, 0) / mealCount : 0;
+	const avgPerServing =
+		mealCount > 0 ? meals.reduce((sum, m) => sum + m.perServing, 0) / mealCount : 0;
 
 	return {
 		weekId: getIsoWeekId(plan.startDate),
@@ -81,9 +82,10 @@ export function generateMonthlyReport(monthId: string, weeks: CostHistoryWeek[])
 	const totalCost = weeks.reduce((sum, w) => sum + w.totalCost, 0);
 	const mealCount = weeks.reduce((sum, w) => sum + w.mealCount, 0);
 	const avgPerMeal = mealCount > 0 ? totalCost / mealCount : 0;
-	const avgPerServing = mealCount > 0
-		? weeks.reduce((sum, w) => sum + w.avgPerServing * w.mealCount, 0) / mealCount
-		: 0;
+	const avgPerServing =
+		mealCount > 0
+			? weeks.reduce((sum, w) => sum + w.avgPerServing * w.mealCount, 0) / mealCount
+			: 0;
 
 	return {
 		monthId,
@@ -127,14 +129,18 @@ export function formatWeeklyReportMessage(
 	// Meal breakdown
 	if (week.meals.length > 0) {
 		for (const meal of week.meals) {
-			lines.push(`${formatDayAbbrev(meal.date)}: ${meal.recipeTitle} — **$${meal.cost.toFixed(2)}**`);
+			lines.push(
+				`${formatDayAbbrev(meal.date)}: ${meal.recipeTitle} — **$${meal.cost.toFixed(2)}**`,
+			);
 		}
 		lines.push('');
 	}
 
 	// Totals
 	lines.push(`**Weekly Total: $${week.totalCost.toFixed(2)}**`);
-	lines.push(`Avg per meal: $${week.avgPerMeal.toFixed(2)} · Per person: $${week.avgPerServing.toFixed(2)}`);
+	lines.push(
+		`Avg per meal: $${week.avgPerMeal.toFixed(2)} · Per person: $${week.avgPerServing.toFixed(2)}`,
+	);
 
 	// Comparison to previous week
 	if (prevWeek && prevWeek.totalCost > 0) {
@@ -288,7 +294,5 @@ export async function loadWeeklyHistory(
  */
 export async function listWeeklyHistories(store: ScopedDataStore): Promise<string[]> {
 	const files = await store.list(COST_HISTORY_DIR);
-	return files
-		.filter((f) => f.endsWith('.md'))
-		.map((f) => f.replace(/\.md$/, ''));
+	return files.filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
 }

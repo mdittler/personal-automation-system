@@ -25,22 +25,19 @@
  * Companion to natural-language-h11x.test.ts.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { stringify } from 'yaml';
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { stringify } from 'yaml';
 import {
+	extractLogMealText,
 	handleNutritionCommand,
 	handleRecipeLogCallback,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
-	extractLogMealText,
 } from '../handlers/nutrition.js';
+import { findSimilarAdHoc, recordAdHocLog } from '../services/ad-hoc-history.js';
 import { estimateMacros } from '../services/macro-estimator.js';
-import {
-	findSimilarAdHoc,
-	recordAdHocLog,
-} from '../services/ad-hoc-history.js';
 import type { Recipe } from '../types.js';
 
 // ─── Classification: what the user types vs. what the bot dispatches ────────
@@ -78,7 +75,7 @@ describe('H11.w persona — intent classification', () => {
 			// Nutrition queries must still route to the view intent
 			'how are my macros',
 			'show my nutrition summary',
-			"what did i eat yesterday",
+			'what did i eat yesterday',
 			'am I on track with calories',
 			'progress this week',
 		];
@@ -160,7 +157,12 @@ describe('H11.w persona — LLM macro-estimator', () => {
 	it('prompt contains anti-instruction framing for untrusted user input', async () => {
 		const llm = makeLlm(
 			JSON.stringify({
-				calories: 500, protein: 30, carbs: 50, fat: 15, fiber: 5, confidence: 0.8,
+				calories: 500,
+				protein: 30,
+				carbs: 50,
+				fat: 15,
+				fiber: 5,
+				confidence: 0.8,
 			}),
 		);
 
@@ -214,7 +216,11 @@ describe('H11.w persona — LLM macro-estimator', () => {
 		const llm = makeLlm(
 			JSON.stringify({
 				calories: 999999, // out of range
-				protein: 30, carbs: 40, fat: 20, fiber: 5, confidence: 0.5,
+				protein: 30,
+				carbs: 40,
+				fat: 20,
+				fiber: 5,
+				confidence: 0.5,
 			}),
 		);
 		const result = await estimateMacros(
@@ -227,7 +233,12 @@ describe('H11.w persona — LLM macro-estimator', () => {
 	it('backticks in user input are neutralized before hitting the prompt', async () => {
 		const llm = makeLlm(
 			JSON.stringify({
-				calories: 500, protein: 30, carbs: 50, fat: 15, fiber: 5, confidence: 0.8,
+				calories: 500,
+				protein: 30,
+				carbs: 50,
+				fat: 15,
+				fiber: 5,
+				confidence: 0.8,
 			}),
 		);
 		await estimateMacros(
@@ -266,11 +277,7 @@ describe('H11.w persona — ad-hoc history 30-day window', () => {
 		const store = makeStore();
 		// Record 10 days ago (relative to fixed "today").
 		await recordAdHocLog(store as never, 'family bbq chicken', '2026-04-01');
-		const match = await findSimilarAdHoc(
-			store as never,
-			'family bbq chicken',
-			'2026-04-11',
-		);
+		const match = await findSimilarAdHoc(store as never, 'family bbq chicken', '2026-04-11');
 		expect(match).not.toBeNull();
 		expect(match?.text).toBe('family bbq chicken');
 	});
@@ -279,11 +286,7 @@ describe('H11.w persona — ad-hoc history 30-day window', () => {
 		const store = makeStore();
 		await recordAdHocLog(store as never, 'summer cookout plate', '2026-02-01');
 		// Today is 60+ days later.
-		const match = await findSimilarAdHoc(
-			store as never,
-			'summer cookout plate',
-			'2026-04-09',
-		);
+		const match = await findSimilarAdHoc(store as never, 'summer cookout plate', '2026-04-09');
 		expect(match).toBeNull();
 	});
 });
@@ -344,7 +347,7 @@ describe('H11.w persona — /nutrition log handler routing', () => {
 
 	function seedRecipes(recipes: Recipe[]) {
 		store.list.mockImplementation(async (dir: string) => {
-			if (dir === 'recipes') return recipes.map(r => `${r.id}.yaml`);
+			if (dir === 'recipes') return recipes.map((r) => `${r.id}.yaml`);
 			return [];
 		});
 		store.read.mockImplementation(async (path: string) => {
@@ -357,12 +360,7 @@ describe('H11.w persona — /nutrition log handler routing', () => {
 
 	it('unique recipe match: "log chicken curry" logs the recipe with portion 1', async () => {
 		seedRecipes([recipeChickenCurry]);
-		await handleNutritionCommand(
-			services,
-			['log', 'chicken', 'curry'],
-			'matt',
-			store as never,
-		);
+		await handleNutritionCommand(services, ['log', 'chicken', 'curry'], 'matt', store as never);
 		const sent = vi.mocked(services.telegram.send).mock.calls[0]![1] as string;
 		expect(sent).toMatch(/Chicken Curry/);
 		expect(sent).toMatch(/500 cal/);
@@ -372,12 +370,7 @@ describe('H11.w persona — /nutrition log handler routing', () => {
 
 	it('ambiguous: two "curry" recipes → inline buttons, no log yet', async () => {
 		seedRecipes([recipeChickenCurry, recipeThaiCurry]);
-		await handleNutritionCommand(
-			services,
-			['log', 'curry'],
-			'matt',
-			store as never,
-		);
+		await handleNutritionCommand(services, ['log', 'curry'], 'matt', store as never);
 		expect(services.telegram.sendWithButtons).toHaveBeenCalled();
 		const [, , buttons] = vi.mocked(services.telegram.sendWithButtons).mock.calls[0]!;
 		// Rows: two recipe candidates + "None of these"
@@ -440,7 +433,12 @@ describe('H11.w persona — /nutrition log handler routing', () => {
 		// no quick-meals → ad-hoc LLM estimator).
 		vi.mocked(services.llm.complete).mockResolvedValue(
 			JSON.stringify({
-				calories: 700, protein: 30, carbs: 80, fat: 25, fiber: 6, confidence: 0.55,
+				calories: 700,
+				protein: 30,
+				carbs: 80,
+				fat: 25,
+				fiber: 6,
+				confidence: 0.55,
 			}),
 		);
 		seedRecipes([]);

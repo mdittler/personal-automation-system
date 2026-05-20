@@ -1,19 +1,19 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { composeChatSessionStore } from '../compose.js';
 import type {
-	ChatSessionStore,
 	ChatSessionFrontmatter,
+	ChatSessionStore,
 	SessionTurn,
 } from '../chat-session-store.js';
+import { composeChatSessionStore } from '../compose.js';
 import { mintSessionId } from '../session-id.js';
-import { encodeNew, decode } from '../transcript-codec.js';
+import { decode, encodeNew } from '../transcript-codec.js';
 
 const USER = 'matt';
 const SESSION_KEY = 'agent:main:telegram:dm:matt';
@@ -1060,7 +1060,9 @@ describe('P8c — parent_session_id on mint', () => {
 		const warnSpy = vi.fn();
 		const store = composeChatSessionStore({
 			data: makeDataStore(),
-			logger: { warn: warnSpy } as unknown as Parameters<typeof composeChatSessionStore>[0]['logger'],
+			logger: { warn: warnSpy } as unknown as Parameters<
+				typeof composeChatSessionStore
+			>[0]['logger'],
 			clock,
 		});
 		const { sessionId } = await store.ensureActiveSession({
@@ -1086,7 +1088,9 @@ describe('P8c — parent_session_id on mint', () => {
 		const warnSpy = vi.fn();
 		const store = composeChatSessionStore({
 			data: makeDataStore(),
-			logger: { warn: warnSpy } as unknown as Parameters<typeof composeChatSessionStore>[0]['logger'],
+			logger: { warn: warnSpy } as unknown as Parameters<
+				typeof composeChatSessionStore
+			>[0]['logger'],
 			clock,
 		});
 		const { sessionId } = await store.ensureActiveSession({

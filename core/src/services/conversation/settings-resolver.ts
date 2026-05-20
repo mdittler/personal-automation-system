@@ -35,7 +35,10 @@ export async function resolveUserBool(
 		logger?.warn({ userId, key, raw }, 'resolveUserBool: unrecognised value, using systemDefault');
 		return systemDefault;
 	} catch (err) {
-		logger?.warn({ userId, key, err }, 'resolveUserBool: error reading overrides, using systemDefault');
+		logger?.warn(
+			{ userId, key, err },
+			'resolveUserBool: error reading overrides, using systemDefault',
+		);
 		return systemDefault;
 	}
 }

@@ -33,9 +33,10 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 		const actor = request.user;
 		// D5b-5: non-admin sees only spaces they are a member of.
 		const allSpaces = spaceService.listSpaces();
-		const spaces = actor && !actor.isPlatformAdmin
-			? allSpaces.filter((s) => s.members.includes(actor.userId))
-			: allSpaces;
+		const spaces =
+			actor && !actor.isPlatformAdmin
+				? allSpaces.filter((s) => s.members.includes(actor.userId))
+				: allSpaces;
 
 		const spacesWithNames = spaces.map((s) => ({
 			...s,

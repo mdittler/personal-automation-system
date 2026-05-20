@@ -9,10 +9,7 @@ import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import {
-	handleLeftoverCallback,
-	handleLeftoverCheckJob,
-} from '../../handlers/leftover-handler.js';
+import { handleLeftoverCallback, handleLeftoverCheckJob } from '../../handlers/leftover-handler.js';
 import type { Household, Leftover, Recipe } from '../../types.js';
 
 // ─── Mock store factory ───────────────────────────────────────────
@@ -99,9 +96,9 @@ describe('handleLeftoverCallback — use', () => {
 
 		const { stripFrontmatter } = await import('@pas/core/utils/frontmatter');
 		const { parse } = await import('yaml');
-		const writeCall = vi.mocked(store.write).mock.calls.find((c) =>
-			String(c[0]).includes('leftovers'),
-		);
+		const writeCall = vi
+			.mocked(store.write)
+			.mock.calls.find((c) => String(c[0]).includes('leftovers'));
 		const saved = parse(stripFrontmatter(String(writeCall?.[1])));
 		expect(saved.items[0].status).toBe('used');
 
@@ -383,7 +380,11 @@ describe('handleLeftoverCheckJob', () => {
 	it('auto-wastes expired items and writes updated leftovers', async () => {
 		const household = makeHousehold({ members: ['user1'] });
 		// Expired yesterday
-		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		const expired = makeLeftover({
+			name: 'Old Soup',
+			expiryEstimate: '2026-04-01',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expired] }),
@@ -404,7 +405,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('appends waste log entry with reason expired for auto-wasted items', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		const expired = makeLeftover({
+			name: 'Old Soup',
+			expiryEstimate: '2026-04-01',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expired] }),
@@ -426,7 +431,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('sends alert message mentioning expired items to all household members', async () => {
 		const household = makeHousehold({ members: ['user1', 'user2'] });
-		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		const expired = makeLeftover({
+			name: 'Old Soup',
+			expiryEstimate: '2026-04-01',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expired] }),
@@ -453,7 +462,11 @@ describe('handleLeftoverCheckJob', () => {
 	it('sends alert with buttons for items expiring today', async () => {
 		const household = makeHousehold({ members: ['user1'] });
 		// Expires today
-		const expiringToday = makeLeftover({ name: 'Chicken', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'Chicken',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
@@ -471,7 +484,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('includes freeze/eat/toss buttons for items expiring today', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expiringToday = makeLeftover({ name: 'Chicken', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'Chicken',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
@@ -490,7 +507,11 @@ describe('handleLeftoverCheckJob', () => {
 	it('sends alert with buttons for items expiring tomorrow', async () => {
 		const household = makeHousehold({ members: ['user1'] });
 		// Expires tomorrow
-		const expiringTomorrow = makeLeftover({ name: 'Rice', expiryEstimate: '2026-04-03', status: 'active' });
+		const expiringTomorrow = makeLeftover({
+			name: 'Rice',
+			expiryEstimate: '2026-04-03',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringTomorrow] }),
@@ -515,7 +536,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('handles mix of expired, expiring today, and expiring tomorrow', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		const expired = makeLeftover({
+			name: 'Old Soup',
+			expiryEstimate: '2026-04-01',
+			status: 'active',
+		});
 		const today = makeLeftover({ name: 'Chicken', expiryEstimate: '2026-04-02', status: 'active' });
 		const tomorrow = makeLeftover({ name: 'Rice', expiryEstimate: '2026-04-03', status: 'active' });
 		sharedStore = mockStore({
@@ -545,7 +570,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('sends to all household members', async () => {
 		const household = makeHousehold({ members: ['user1', 'user2', 'user3'] });
-		const expiringToday = makeLeftover({ name: 'Chicken', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'Chicken',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
@@ -566,13 +595,19 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('appends leftover recipe ideas when expiring items have shared recipe matches', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expiringToday = makeLeftover({ name: 'leftover chili', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'leftover chili',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
 			'recipes/chili-bake.yaml': stringify(makeRecipe({ id: 'chili-bake', title: 'Chili Bake' })),
 		});
-		sharedStore.list.mockImplementation(async (path: string) => path === 'recipes' ? ['chili-bake.yaml'] : []);
+		sharedStore.list.mockImplementation(async (path: string) =>
+			path === 'recipes' ? ['chili-bake.yaml'] : [],
+		);
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 
 		await handleLeftoverCheckJob(services, '2026-04-02');
@@ -591,17 +626,25 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('omits the suggestion block when expiring leftovers have no recipe matches', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expiringToday = makeLeftover({ name: 'leftover curry', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'leftover curry',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
-			'recipes/pancakes.yaml': stringify(makeRecipe({
-				id: 'pancakes',
-				title: 'Weekend Pancakes',
-				ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
-			})),
+			'recipes/pancakes.yaml': stringify(
+				makeRecipe({
+					id: 'pancakes',
+					title: 'Weekend Pancakes',
+					ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
+				}),
+			),
 		});
-		sharedStore.list.mockImplementation(async (path: string) => path === 'recipes' ? ['pancakes.yaml'] : []);
+		sharedStore.list.mockImplementation(async (path: string) =>
+			path === 'recipes' ? ['pancakes.yaml'] : [],
+		);
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
 
 		await handleLeftoverCheckJob(services, '2026-04-02');
@@ -613,7 +656,11 @@ describe('handleLeftoverCheckJob', () => {
 
 	it('still sends the normal alert when recipe suggestion generation fails', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expiringToday = makeLeftover({ name: 'leftover chili', expiryEstimate: '2026-04-02', status: 'active' });
+		const expiringToday = makeLeftover({
+			name: 'leftover chili',
+			expiryEstimate: '2026-04-02',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expiringToday] }),
@@ -654,7 +701,9 @@ describe('security: callback guards', () => {
 		await handleLeftoverCallback(services, 'use:0:Soup', 'user1', 1, 1, sharedStore as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This leftover was already handled.',
+			1,
+			1,
+			'This leftover was already handled.',
 		);
 		// Data should NOT have been modified
 		expect(sharedStore.write).not.toHaveBeenCalled();
@@ -667,7 +716,9 @@ describe('security: callback guards', () => {
 		await handleLeftoverCallback(services, 'toss:0:Chili', 'user1', 1, 1, sharedStore as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This leftover was already handled.',
+			1,
+			1,
+			'This leftover was already handled.',
 		);
 		expect(sharedStore.write).not.toHaveBeenCalled();
 	});
@@ -679,7 +730,9 @@ describe('security: callback guards', () => {
 		await handleLeftoverCallback(services, 'freeze:0:Rice', 'user1', 1, 1, sharedStore as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This leftover was already handled.',
+			1,
+			1,
+			'This leftover was already handled.',
 		);
 	});
 
@@ -690,7 +743,9 @@ describe('security: callback guards', () => {
 		await handleLeftoverCallback(services, 'toss:0:Soup', 'user1', 1, 1, sharedStore as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This leftover was already handled.',
+			1,
+			1,
+			'This leftover was already handled.',
 		);
 	});
 });
@@ -706,7 +761,14 @@ describe('state transitions', () => {
 	});
 
 	it('freeze lifecycle: leftover marked frozen AND freezer item created', async () => {
-		const items = [makeLeftover({ name: 'Chili', quantity: '3 servings', fromRecipe: 'Beef Chili', status: 'active' })];
+		const items = [
+			makeLeftover({
+				name: 'Chili',
+				quantity: '3 servings',
+				fromRecipe: 'Beef Chili',
+				status: 'active',
+			}),
+		];
 		sharedStore = mockStore({
 			'leftovers.yaml': stringify({ items }),
 			'freezer.yaml': stringify({ items: [] }),
@@ -715,18 +777,26 @@ describe('state transitions', () => {
 		await handleLeftoverCallback(services, 'freeze:0:Chili', 'user1', 1, 1, sharedStore as any);
 
 		// Leftover should be marked frozen
-		const leftoverData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'leftovers.yaml')?.[1] as string;
+		const leftoverData = sharedStore.write.mock.calls.find(
+			(c: string[]) => c[0] === 'leftovers.yaml',
+		)?.[1] as string;
 		expect(leftoverData).toContain('frozen');
 
 		// Freezer should have the item
-		const freezerData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'freezer.yaml')?.[1] as string;
+		const freezerData = sharedStore.write.mock.calls.find(
+			(c: string[]) => c[0] === 'freezer.yaml',
+		)?.[1] as string;
 		expect(freezerData).toContain('Chili');
 		expect(freezerData).toContain('Beef Chili'); // source = fromRecipe
 	});
 
 	it('auto-expire lifecycle: expired leftover wasted AND waste log entry created', async () => {
 		const household = makeHousehold({ members: ['user1'] });
-		const expired = makeLeftover({ name: 'Old Soup', expiryEstimate: '2026-04-01', status: 'active' });
+		const expired = makeLeftover({
+			name: 'Old Soup',
+			expiryEstimate: '2026-04-01',
+			status: 'active',
+		});
 		sharedStore = mockStore({
 			'household.yaml': stringify(household),
 			'leftovers.yaml': stringify({ items: [expired] }),
@@ -737,11 +807,15 @@ describe('state transitions', () => {
 		await handleLeftoverCheckJob(services, '2026-04-02');
 
 		// Leftover should be marked wasted
-		const leftoverData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'leftovers.yaml')?.[1] as string;
+		const leftoverData = sharedStore.write.mock.calls.find(
+			(c: string[]) => c[0] === 'leftovers.yaml',
+		)?.[1] as string;
 		expect(leftoverData).toContain('wasted');
 
 		// Waste log should have entry
-		const wasteData = sharedStore.write.mock.calls.find((c: string[]) => c[0] === 'waste-log.yaml')?.[1] as string;
+		const wasteData = sharedStore.write.mock.calls.find(
+			(c: string[]) => c[0] === 'waste-log.yaml',
+		)?.[1] as string;
 		expect(wasteData).toContain('Old Soup');
 		expect(wasteData).toContain('expired');
 	});

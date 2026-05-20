@@ -17,9 +17,9 @@ import type { Logger } from 'pino';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, PhotoContext, SentMessage } from '../../types/telegram.js';
 import type { TelegramService } from '../../types/telegram.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry } from '../app-registry/index.js';
 import { buildVerificationPrompt } from '../llm/prompt-templates.js';
-import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { PendingEntry, PendingVerificationStore } from './pending-verification-store.js';
 import type { VerificationLogger } from './verification-logger.js';
 
@@ -98,7 +98,9 @@ function parseVerifierResponse(raw: string): VerifierResponse | undefined {
 type ClassifierResultFields = { appId: string; intent: string; confidence: number };
 
 /** Route action where the verifier confirmed the classifier's pick (or degraded gracefully). */
-function agreedRoute(classifierResult: ClassifierResultFields): Extract<VerifyAction, { action: 'route' }> {
+function agreedRoute(
+	classifierResult: ClassifierResultFields,
+): Extract<VerifyAction, { action: 'route' }> {
 	return {
 		action: 'route',
 		appId: classifierResult.appId,
@@ -113,7 +115,9 @@ function agreedRoute(classifierResult: ClassifierResultFields): Extract<VerifyAc
  * unparseable output, hallucinated an appId, or failed to send inline buttons.
  * Non-strict mode falls back to the classifier's pick.
  */
-function degradedRoute(classifierResult: ClassifierResultFields): Extract<VerifyAction, { action: 'route' }> {
+function degradedRoute(
+	classifierResult: ClassifierResultFields,
+): Extract<VerifyAction, { action: 'route' }> {
 	return {
 		action: 'route',
 		appId: classifierResult.appId,
@@ -191,14 +195,10 @@ export class RouteVerifier {
 
 		// Skip verification when there's 0–1 candidate apps (no alternatives to verify against)
 		if (accessibleApps.length <= 1) {
-			this.logger.debug(
-				'RouteVerifier: skipping verification — 1 or fewer accessible apps',
-			);
+			this.logger.debug('RouteVerifier: skipping verification — 1 or fewer accessible apps');
 			// Return the single accessible app's ID, not the classifier's pick (which may not be accessible)
 			const fallbackId =
-				accessibleApps.length === 1
-					? accessibleApps[0]!.manifest.app.id
-					: classifierResult.appId;
+				accessibleApps.length === 1 ? accessibleApps[0]!.manifest.app.id : classifierResult.appId;
 			return { ...agreedRoute(classifierResult), appId: fallbackId };
 		}
 

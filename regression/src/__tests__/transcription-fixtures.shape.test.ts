@@ -8,7 +8,12 @@ import type { ReceiptTranscription } from '../types/transcription.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(here, '../../fixtures/receipts');
-const FIXTURES = ['costco-long', 'trader-joes-correction', 'trader-joes-long', 'trader-joes-short'] as const;
+const FIXTURES = [
+	'costco-long',
+	'trader-joes-correction',
+	'trader-joes-long',
+	'trader-joes-short',
+] as const;
 
 describe.each(FIXTURES)('%s.transcription.yaml', (name) => {
 	const yamlPath = resolve(FIXTURES_DIR, `${name}.transcription.yaml`);
@@ -70,11 +75,15 @@ describe('per-fixture invariants', () => {
 	});
 
 	it('trader-joes-long: omits date (cropped photo)', () => {
-		expect(loadTranscription(resolve(FIXTURES_DIR, 'trader-joes-long.transcription.yaml')).date).toBeUndefined();
+		expect(
+			loadTranscription(resolve(FIXTURES_DIR, 'trader-joes-long.transcription.yaml')).date,
+		).toBeUndefined();
 	});
 
 	it('trader-joes-short: omits date (cropped photo)', () => {
-		expect(loadTranscription(resolve(FIXTURES_DIR, 'trader-joes-short.transcription.yaml')).date).toBeUndefined();
+		expect(
+			loadTranscription(resolve(FIXTURES_DIR, 'trader-joes-short.transcription.yaml')).date,
+		).toBeUndefined();
 	});
 
 	it('trader-joes-short: exactly 10 line items, includes duplicates of CROISSANTS 4 CHOCOLATE', () => {
@@ -86,18 +95,21 @@ describe('per-fixture invariants', () => {
 });
 
 describe('cross-reference with .expected.json (Codex #12)', () => {
-	it.each(FIXTURES)('%s: every high-confidence transcription name appears in .expected.json (byte-exact)', (name) => {
-		const trx = loadTranscription(resolve(FIXTURES_DIR, `${name}.transcription.yaml`));
-		const expectedRaw = readFileSync(resolve(FIXTURES_DIR, `${name}.expected.json`), 'utf8');
-		const expected = JSON.parse(expectedRaw) as { lineItems: Array<{ name: string }> };
-		const expectedNames = new Set(expected.lineItems.map((li) => li.name));
-		for (const li of trx.lineItems) {
-			if (li.confidence === 'high') {
-				expect(
-					expectedNames.has(li.name),
-					`'${li.name}' from ${name}.transcription.yaml not in ${name}.expected.json`,
-				).toBe(true);
+	it.each(FIXTURES)(
+		'%s: every high-confidence transcription name appears in .expected.json (byte-exact)',
+		(name) => {
+			const trx = loadTranscription(resolve(FIXTURES_DIR, `${name}.transcription.yaml`));
+			const expectedRaw = readFileSync(resolve(FIXTURES_DIR, `${name}.expected.json`), 'utf8');
+			const expected = JSON.parse(expectedRaw) as { lineItems: Array<{ name: string }> };
+			const expectedNames = new Set(expected.lineItems.map((li) => li.name));
+			for (const li of trx.lineItems) {
+				if (li.confidence === 'high') {
+					expect(
+						expectedNames.has(li.name),
+						`'${li.name}' from ${name}.transcription.yaml not in ${name}.expected.json`,
+					).toBe(true);
+				}
 			}
-		}
-	});
+		},
+	);
 });

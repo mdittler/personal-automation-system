@@ -10,9 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { ManifestCaseResult, RunManifest } from '../../../../types/regression.js';
 import { aggregateLeaderboard } from '../leaderboard-aggregator.js';
 
-function cr(
-	overrides: Partial<ManifestCaseResult> & { caseId: string },
-): ManifestCaseResult {
+function cr(overrides: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseResult {
 	return {
 		bucket: 'routing',
 		cacheKey: 'a'.repeat(64),
@@ -161,9 +159,7 @@ describe('aggregateLeaderboard — single tier', () => {
 		const rows = aggregateLeaderboard({
 			manifests: [m],
 			tier: 'fast',
-			pinOverrides: [
-				{ tier: 'standard', modelId: 'wrong', runId: 'does-not-exist' },
-			],
+			pinOverrides: [{ tier: 'standard', modelId: 'wrong', runId: 'does-not-exist' }],
 		});
 		expect(rows[0]!.runId).toBe('r1');
 	});

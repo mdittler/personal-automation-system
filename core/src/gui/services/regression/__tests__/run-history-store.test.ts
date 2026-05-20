@@ -12,10 +12,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunManifest } from '../../../../types/regression.js';
-import {
-	createRunHistoryStore,
-	tierModelKeys,
-} from '../run-history-store.js';
+import { createRunHistoryStore, tierModelKeys } from '../run-history-store.js';
 
 const silentLogger = pino({ level: 'silent' });
 let tempDir: string;
@@ -171,10 +168,7 @@ describe('createRunHistoryStore — robustness', () => {
 
 	it('skips a manifest with malformed JSON', async () => {
 		await mkdir(tempDir, { recursive: true });
-		await writeFile(
-			join(tempDir, '11111111-0000-4000-8000-000000000001.json'),
-			'{ not valid json',
-		);
+		await writeFile(join(tempDir, '11111111-0000-4000-8000-000000000001.json'), '{ not valid json');
 		const store = createRunHistoryStore({ rootDir: tempDir, logger: silentLogger });
 		expect(await store.list()).toEqual([]);
 	});

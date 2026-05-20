@@ -48,9 +48,9 @@ describe('createInvite name validation', () => {
 
 	it("rejects names equal to an existing user's Telegram id", async () => {
 		const svc = makeService({ knownUserIds: new Set(['8187111554']) });
-		await expect(
-			svc.createInvite('8187111554', 'admin1', { householdId: 'h1' }),
-		).rejects.toThrow(/matches an existing user id/i);
+		await expect(svc.createInvite('8187111554', 'admin1', { householdId: 'h1' })).rejects.toThrow(
+			/matches an existing user id/i,
+		);
 	});
 
 	it('accepts ordinary names', async () => {
@@ -91,9 +91,9 @@ describe('createInvite name validation', () => {
 
 	it("rejects names equal to an existing user's Telegram id even with padding", async () => {
 		const svc = makeService({ knownUserIds: new Set(['8187111554']) });
-		await expect(
-			svc.createInvite(' 8187111554 ', 'admin1', { householdId: 'h1' }),
-		).rejects.toThrow(/numeric-only|matches an existing user id/i);
+		await expect(svc.createInvite(' 8187111554 ', 'admin1', { householdId: 'h1' })).rejects.toThrow(
+			/numeric-only|matches an existing user id/i,
+		);
 	});
 
 	it('still applies blank/numeric-only guards with an empty knownUsers list', async () => {

@@ -10,23 +10,23 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { vi } from 'vitest';
 import type { Logger } from 'pino';
-import { DataStoreServiceImpl } from '../../../../../core/src/services/data-store/index.js';
-import { ChangeLog } from '../../../../../core/src/services/data-store/change-log.js';
-import { composeChatSessionStore } from '../../../../../core/src/services/conversation-session/compose.js';
+import { vi } from 'vitest';
 import type { ChatSessionStore } from '../../../../../core/src/services/conversation-session/chat-session-store.js';
+import { composeChatSessionStore } from '../../../../../core/src/services/conversation-session/compose.js';
 import { CONVERSATION_DATA_SCOPES } from '../../../../../core/src/services/conversation/manifest.js';
 import { buildSystemPrompt } from '../../../../../core/src/services/conversation/prompt-builder.js';
 import type { PromptBuilderDeps } from '../../../../../core/src/services/conversation/prompt-builder.js';
-import type { ReceiptLineItem } from '../../types.js';
+import { ChangeLog } from '../../../../../core/src/services/data-store/change-log.js';
+import { DataStoreServiceImpl } from '../../../../../core/src/services/data-store/index.js';
 import {
+	buildGrocerySummary,
+	buildPantrySummary,
 	buildReceiptSummary,
 	buildRecipeSummary,
-	buildPantrySummary,
-	buildGrocerySummary,
 } from '../../handlers/photo-summary.js';
 import type { ParsedReceipt } from '../../services/receipt-parser.js';
+import type { ReceiptLineItem } from '../../types.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,9 +45,7 @@ export interface PersonaEnv {
 		stepCount: number;
 	}): Promise<void>;
 	uploadPantry(items: Array<{ name: string; quantity: string }>): Promise<void>;
-	uploadGrocery(
-		items: Array<{ name: string; quantity?: number; unit?: string }>,
-	): Promise<void>;
+	uploadGrocery(items: Array<{ name: string; quantity?: number; unit?: string }>): Promise<void>;
 	startNewSession(): Promise<void>;
 	sendAskAndCaptureLLMPrompt(message: string): Promise<string>;
 	teardown(): Promise<void>;
@@ -139,9 +137,7 @@ export async function createPersonaEnv(): Promise<PersonaEnv> {
 		);
 	}
 
-	async function uploadPantry(
-		items: Array<{ name: string; quantity: string }>,
-	): Promise<void> {
+	async function uploadPantry(items: Array<{ name: string; quantity: string }>): Promise<void> {
 		const summary = buildPantrySummary(items);
 		const now = new Date().toISOString();
 		await chatSessions.appendExchange(
@@ -180,16 +176,8 @@ export async function createPersonaEnv(): Promise<PersonaEnv> {
 	// not LLM output. In production /ask would call buildAppAwareSystemPrompt with the live message;
 	// here we use buildSystemPrompt to deterministically assert transcript content.
 	async function sendAskAndCaptureLLMPrompt(_message: string): Promise<string> {
-		const turns = await chatSessions.loadRecentTurns(
-			{ userId, sessionKey },
-			{ maxTurns: 20 },
-		);
-		return buildSystemPrompt(
-			/* contextEntries */ [],
-			turns,
-			promptDeps,
-			/* options */ {},
-		);
+		const turns = await chatSessions.loadRecentTurns({ userId, sessionKey }, { maxTurns: 20 });
+		return buildSystemPrompt(/* contextEntries */ [], turns, promptDeps, /* options */ {});
 	}
 
 	// ── Teardown ─────────────────────────────────────────────────────────────

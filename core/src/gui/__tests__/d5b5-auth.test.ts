@@ -105,8 +105,12 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 
 	async function makeSpaceServiceForData() {
 		return {
-			getSpace: vi.fn().mockReturnValue({ id: 'sp-1', kind: 'household', householdId: HOUSEHOLD_ID }),
-			isMember: vi.fn().mockImplementation((_spaceId: string, userId: string) => userId === MEMBER_ID),
+			getSpace: vi
+				.fn()
+				.mockReturnValue({ id: 'sp-1', kind: 'household', householdId: HOUSEHOLD_ID }),
+			isMember: vi
+				.fn()
+				.mockImplementation((_spaceId: string, userId: string) => userId === MEMBER_ID),
 		};
 	}
 
@@ -142,7 +146,12 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		app = Fastify({ logger: false });
 		await app.register(fastifyCookie, { secret: AUTH_TOKEN });
 		const eta = new Eta();
-		await app.register(fastifyView, { engine: { eta }, root: viewsDir, viewExt: 'eta', layout: 'layout' });
+		await app.register(fastifyView, {
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
+		});
 
 		await app.register(
 			async (gui) => {
@@ -352,14 +361,21 @@ describe('D5b-5: data/browse space not-joined → 403', () => {
 
 		// This spaceService: MEMBER_ID is NOT a member of any space
 		const spaceService = {
-			getSpace: vi.fn().mockReturnValue({ id: 'sp-x', kind: 'household', householdId: HOUSEHOLD_ID }),
+			getSpace: vi
+				.fn()
+				.mockReturnValue({ id: 'sp-x', kind: 'household', householdId: HOUSEHOLD_ID }),
 			isMember: vi.fn().mockReturnValue(false),
 		};
 
 		app = Fastify({ logger: false });
 		await app.register(fastifyCookie, { secret: AUTH_TOKEN });
 		const eta = new Eta();
-		await app.register(fastifyView, { engine: { eta }, root: viewsDir, viewExt: 'eta', layout: 'layout' });
+		await app.register(fastifyView, {
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
+		});
 
 		await app.register(
 			async (gui) => {
@@ -505,7 +521,10 @@ describe('D5b-5: reports actor-based authorization', () => {
 			url: '/gui/reports',
 			cookies,
 		});
-		const allCookies = collectCookies({ cookies: Object.entries(cookies).map(([name, value]) => ({ name, value })) }, getRes);
+		const allCookies = collectCookies(
+			{ cookies: Object.entries(cookies).map(([name, value]) => ({ name, value })) },
+			getRes,
+		);
 		const metaMatch = getRes.body.match(/name="csrf-token" content="([^"]+)"/);
 		const csrfToken = metaMatch?.[1] ?? '';
 		return app.inject({
@@ -745,7 +764,10 @@ describe('D5b-5: spaces actor-based authorization', () => {
 
 		// Get CSRF token
 		const getRes = await app.inject({ method: 'GET', url: '/gui/spaces', cookies });
-		const allCookies = collectCookies({ cookies: Object.entries(cookies).map(([name, value]) => ({ name, value })) }, getRes);
+		const allCookies = collectCookies(
+			{ cookies: Object.entries(cookies).map(([name, value]) => ({ name, value })) },
+			getRes,
+		);
 		const metaMatch = getRes.body.match(/name="csrf-token" content="([^"]+)"/);
 		const csrfToken = metaMatch?.[1] ?? '';
 

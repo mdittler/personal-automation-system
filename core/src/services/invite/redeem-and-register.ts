@@ -6,11 +6,11 @@
  */
 
 import type { Logger } from 'pino';
-import type { InviteService } from './index.js';
-import type { UserMutationService } from '../user-manager/user-mutation-service.js';
-import type { SpaceService } from '../spaces/index.js';
 import type { TelegramService } from '../../types/telegram.js';
 import { beginFirstRunWizard } from '../onboarding/first-run-wizard.js';
+import type { SpaceService } from '../spaces/index.js';
+import type { UserMutationService } from '../user-manager/user-mutation-service.js';
+import type { InviteService } from './index.js';
 
 export interface RedeemAndRegisterDeps {
 	inviteService: InviteService;
@@ -51,7 +51,10 @@ export async function redeemInviteAndRegister(
 	// I-4: Reject invites with empty householdId — the redeemer must land in a known household.
 	// An invite created before D5a (or with householdId omitted) will have householdId: ''.
 	if (!invite.householdId) {
-		logger.error({ code, userId }, 'redeemInviteAndRegister: invite has empty householdId — refusing registration');
+		logger.error(
+			{ code, userId },
+			'redeemInviteAndRegister: invite has empty householdId — refusing registration',
+		);
 		try {
 			await telegram.send(
 				userId,

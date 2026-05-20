@@ -71,10 +71,7 @@ export const ROUTING_TARGET_TIER: Readonly<Record<RoutingTarget, EvaluatedTier>>
 	pas: 'fast',
 };
 
-export async function runRoutingCase(
-	c: PersonaCase,
-	deps: RoutingRunnerDeps,
-): Promise<RunResult> {
+export async function runRoutingCase(c: PersonaCase, deps: RoutingRunnerDeps): Promise<RunResult> {
 	if (c.bucket !== 'routing') {
 		throw new Error(`routing-runner called with bucket="${c.bucket}" (case: ${c.id})`);
 	}

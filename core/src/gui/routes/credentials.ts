@@ -8,10 +8,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
-import { issueSessionCookie } from '../auth.js';
-import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
 import type { CredentialService } from '../../services/credentials/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import { issueSessionCookie } from '../auth.js';
+import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
 
 const USER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MIN_PASSWORD_LENGTH = 8;

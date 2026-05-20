@@ -11,8 +11,8 @@
  *  - Normal write preserves all other frontmatter and turns (decoded comparison)
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
 import { rm } from 'node:fs/promises';
+import { afterEach, describe, expect, it } from 'vitest';
 import { makeStoreFixture } from './fixtures.js';
 
 describe('ChatSessionStore.setTitle', () => {

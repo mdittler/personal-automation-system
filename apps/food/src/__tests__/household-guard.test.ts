@@ -71,10 +71,7 @@ describe('Household Guard', () => {
 				joinCode: 'ABCDEF',
 				createdAt: '2026-01-01T00:00:00.000Z',
 			});
-			expect(store.write).toHaveBeenCalledWith(
-				'household.yaml',
-				expect.stringContaining('---'),
-			);
+			expect(store.write).toHaveBeenCalledWith('household.yaml', expect.stringContaining('---'));
 			const written = store.write.mock.calls[0][1] as string;
 			expect(written).toContain('Test Family');
 		});

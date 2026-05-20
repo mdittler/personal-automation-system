@@ -7,9 +7,7 @@
 
 import type { ManifestUserConfig } from '../../types/manifest.js';
 
-export type CoerceResult =
-	| { ok: true; coerced: unknown }
-	| { ok: false; reason: string };
+export type CoerceResult = { ok: true; coerced: unknown } | { ok: false; reason: string };
 
 export const BOOLEAN_TRUTHY = new Set(['true', '1', 'on']);
 export const BOOLEAN_FALSY = new Set(['false', '0', 'off']);

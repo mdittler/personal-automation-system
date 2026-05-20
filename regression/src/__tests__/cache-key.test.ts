@@ -258,26 +258,16 @@ describe('computeCacheKey', () => {
 			// SHA-256 fallback).
 			const yaml = 'total: 5\nlineItems:\n  - name: A\n    totalPrice: 5\n';
 			await writeFile(join(tempRepo, 'receipt.transcription.yaml'), yaml);
-			await writeFile(
-				join(tempRepo, 'receipt.transcription.sha256'),
-				'a'.repeat(64),
-			);
+			await writeFile(join(tempRepo, 'receipt.transcription.sha256'), 'a'.repeat(64));
 			const base = {
 				casePath: 'a.ts',
-				coveragePaths: [
-					'a.ts',
-					'receipt.transcription.yaml',
-					'receipt.transcription.sha256',
-				],
+				coveragePaths: ['a.ts', 'receipt.transcription.yaml', 'receipt.transcription.sha256'],
 				modelIds: { fast: 'f', standard: 's', reasoning: 'r' },
 				repoRoot: tempRepo,
 			};
 			const before = await computeCacheKey(base);
 			// Edit ONLY the SHA sidecar; YAML content untouched.
-			await writeFile(
-				join(tempRepo, 'receipt.transcription.sha256'),
-				'b'.repeat(64),
-			);
+			await writeFile(join(tempRepo, 'receipt.transcription.sha256'), 'b'.repeat(64));
 			const after = await computeCacheKey(base);
 			expect(after).not.toBe(before);
 		});

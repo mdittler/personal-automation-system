@@ -151,7 +151,10 @@ export class UserMutationService {
 			// householdService is updated only after config sync succeeds, so a
 			// rollback here only needs to restore the in-memory UserManager state.
 			this.restoreUsers(previousUsers);
-			this.logger.error({ userId: telegramId, err }, 'Config sync failed — user removal rolled back');
+			this.logger.error(
+				{ userId: telegramId, err },
+				'Config sync failed — user removal rolled back',
+			);
 			throw err;
 		}
 

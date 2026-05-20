@@ -8,11 +8,11 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
-import type { Holiday, HolidayDateRule, CulturalCalendar } from '../types.js';
-import { sanitizeForPrompt } from '../utils/sanitize.js';
+import type { CulturalCalendar, Holiday, HolidayDateRule } from '../types.js';
 import type { Recipe } from '../types.js';
+import { sanitizeForPrompt } from '../utils/sanitize.js';
 
 const CALENDAR_PATH = 'cultural-calendar.yaml';
 
@@ -24,7 +24,13 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: "New Year's Day",
 		dateRule: { type: 'fixed', month: 1, day: 1 },
 		cuisine: 'Global',
-		traditionalFoods: ['black-eyed peas', 'collard greens', 'pork', 'champagne cake', 'lentil soup'],
+		traditionalFoods: [
+			'black-eyed peas',
+			'collard greens',
+			'pork',
+			'champagne cake',
+			'lentil soup',
+		],
 		region: 'Global',
 		enabled: true,
 	},
@@ -67,7 +73,13 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: "St. Patrick's Day",
 		dateRule: { type: 'fixed', month: 3, day: 17 },
 		cuisine: 'Irish',
-		traditionalFoods: ['corned beef and cabbage', 'Irish stew', 'colcannon', 'soda bread', 'shepherd\'s pie'],
+		traditionalFoods: [
+			'corned beef and cabbage',
+			'Irish stew',
+			'colcannon',
+			'soda bread',
+			"shepherd's pie",
+		],
 		region: 'Irish-American',
 		enabled: true,
 	},
@@ -76,7 +88,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Easter',
 		dateRule: { type: 'easter' },
 		cuisine: 'American',
-		traditionalFoods: ['glazed ham', 'deviled eggs', 'hot cross buns', 'lamb', 'carrot cake', 'spring salad'],
+		traditionalFoods: [
+			'glazed ham',
+			'deviled eggs',
+			'hot cross buns',
+			'lamb',
+			'carrot cake',
+			'spring salad',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -94,7 +113,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Juneteenth',
 		dateRule: { type: 'fixed', month: 6, day: 19 },
 		cuisine: 'African-American Southern',
-		traditionalFoods: ['red foods', 'BBQ', 'collard greens', 'strawberry soda', 'red velvet cake', 'peach cobbler'],
+		traditionalFoods: [
+			'red foods',
+			'BBQ',
+			'collard greens',
+			'strawberry soda',
+			'red velvet cake',
+			'peach cobbler',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -103,7 +129,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Independence Day',
 		dateRule: { type: 'fixed', month: 7, day: 4 },
 		cuisine: 'American BBQ',
-		traditionalFoods: ['hot dogs', 'hamburgers', 'corn on the cob', 'coleslaw', 'baked beans', 'apple pie'],
+		traditionalFoods: [
+			'hot dogs',
+			'hamburgers',
+			'corn on the cob',
+			'coleslaw',
+			'baked beans',
+			'apple pie',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -128,7 +161,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 			},
 		},
 		cuisine: 'Ashkenazi Jewish',
-		traditionalFoods: ['honey cake', 'apple with honey', 'challah', 'brisket', 'tzimmes', 'matzo ball soup'],
+		traditionalFoods: [
+			'honey cake',
+			'apple with honey',
+			'challah',
+			'brisket',
+			'tzimmes',
+			'matzo ball soup',
+		],
 		region: 'Jewish',
 		enabled: true,
 	},
@@ -162,7 +202,13 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Halloween',
 		dateRule: { type: 'fixed', month: 10, day: 31 },
 		cuisine: 'American',
-		traditionalFoods: ['pumpkin soup', 'caramel apples', 'candy corn cookies', 'ghost pizza', 'pumpkin pie'],
+		traditionalFoods: [
+			'pumpkin soup',
+			'caramel apples',
+			'candy corn cookies',
+			'ghost pizza',
+			'pumpkin pie',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -171,7 +217,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Thanksgiving',
 		dateRule: { type: 'nthWeekday', month: 11, weekday: 4, n: 4 },
 		cuisine: 'American Southern',
-		traditionalFoods: ['turkey', 'cranberry sauce', 'sweet potato casserole', 'stuffing', 'pumpkin pie', 'green bean casserole'],
+		traditionalFoods: [
+			'turkey',
+			'cranberry sauce',
+			'sweet potato casserole',
+			'stuffing',
+			'pumpkin pie',
+			'green bean casserole',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -205,7 +258,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Christmas Eve',
 		dateRule: { type: 'fixed', month: 12, day: 24 },
 		cuisine: 'American',
-		traditionalFoods: ['seafood', 'prime rib', 'glazed ham', 'eggnog', 'gingerbread', 'holiday cookies'],
+		traditionalFoods: [
+			'seafood',
+			'prime rib',
+			'glazed ham',
+			'eggnog',
+			'gingerbread',
+			'holiday cookies',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -214,7 +274,14 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
 		name: 'Christmas',
 		dateRule: { type: 'fixed', month: 12, day: 25 },
 		cuisine: 'American',
-		traditionalFoods: ['roast turkey', 'glazed ham', 'mashed potatoes', 'cranberry sauce', 'Christmas pudding', 'gingerbread'],
+		traditionalFoods: [
+			'roast turkey',
+			'glazed ham',
+			'mashed potatoes',
+			'cranberry sauce',
+			'Christmas pudding',
+			'gingerbread',
+		],
 		region: 'US',
 		enabled: true,
 	},
@@ -381,19 +448,22 @@ export function buildSuggestionPrompt(
 	recipes: Recipe[],
 	location?: string,
 ): string {
-	const holidayLines = upcoming.map(({ holiday, date }) => {
-		const daysAway = Math.ceil(
-			(new Date(`${date}T00:00:00Z`).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
-		);
-		const when = daysAway <= 1 ? 'tomorrow' : daysAway <= 7 ? 'this week' : 'in the next two weeks';
-		return `- ${sanitizeForPrompt(holiday.name, [], 80)} (${when}, ${date}): traditional foods include ${holiday.traditionalFoods.map(f => sanitizeForPrompt(f, [], 50)).join(', ')}`;
-	}).join('\n');
+	const holidayLines = upcoming
+		.map(({ holiday, date }) => {
+			const daysAway = Math.ceil(
+				(new Date(`${date}T00:00:00Z`).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+			);
+			const when =
+				daysAway <= 1 ? 'tomorrow' : daysAway <= 7 ? 'this week' : 'in the next two weeks';
+			return `- ${sanitizeForPrompt(holiday.name, [], 80)} (${when}, ${date}): traditional foods include ${holiday.traditionalFoods.map((f) => sanitizeForPrompt(f, [], 50)).join(', ')}`;
+		})
+		.join('\n');
 
 	// Find household recipes that might match any upcoming holiday by cuisine, tags, or title
 	const relevantRecipes: string[] = [];
 	for (const { holiday } of upcoming) {
 		const keywordSet = new Set([
-			...holiday.traditionalFoods.map(f => f.toLowerCase()),
+			...holiday.traditionalFoods.map((f) => f.toLowerCase()),
 			holiday.cuisine.toLowerCase(),
 		]);
 		for (const recipe of recipes) {
@@ -402,17 +472,18 @@ export function buildSuggestionPrompt(
 			const tags = (recipe.tags ?? []).map((t: string) => t.toLowerCase());
 			const matches =
 				keywordSet.has(cuisineLower) ||
-				tags.some(t => keywordSet.has(t)) ||
-				holiday.traditionalFoods.some(f => titleLower.includes(f.toLowerCase()));
+				tags.some((t) => keywordSet.has(t)) ||
+				holiday.traditionalFoods.some((f) => titleLower.includes(f.toLowerCase()));
 			if (matches) {
 				relevantRecipes.push(sanitizeForPrompt(recipe.title, [], 100));
 			}
 		}
 	}
 
-	const recipeSection = relevantRecipes.length > 0
-		? `\nHousehold recipes that might be relevant:\n${relevantRecipes.map(r => `- ${r}`).join('\n')}\n`
-		: '';
+	const recipeSection =
+		relevantRecipes.length > 0
+			? `\nHousehold recipes that might be relevant:\n${relevantRecipes.map((r) => `- ${r}`).join('\n')}\n`
+			: '';
 
 	const locationLine = location ? ` in ${sanitizeForPrompt(location, [], 100)}` : '';
 

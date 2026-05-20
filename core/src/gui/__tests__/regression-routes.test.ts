@@ -31,12 +31,12 @@ import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
 import type { ListedCase } from '../services/regression/case-discovery.js';
+import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 import {
 	type RegressionEvent,
 	type RunRegistry,
 	createRunRegistry,
 } from '../services/regression/run-registry.js';
-import type { RunHistoryStore } from '../services/regression/run-history-store.js';
 
 const AUTH_TOKEN = 'test-token';
 const ADMIN_USER_ID = 'admin-1';
@@ -1095,9 +1095,7 @@ describe('Overview leaderboard — per-input routing accuracy', () => {
 		// no "% / inputs" figure.
 		const manifest = overviewManifest({
 			runId: 'run-standard',
-			caseResults: [
-				manifestCase({ caseId: 's1', bucket: 'chatbot', evaluatedTier: 'standard' }),
-			],
+			caseResults: [manifestCase({ caseId: 's1', bucket: 'chatbot', evaluatedTier: 'standard' })],
 			routingAccuracy: 0.906,
 			routingInputsEvaluated: 53,
 		});
@@ -1137,8 +1135,6 @@ describe('pas.css — terminal banner state styling', () => {
 		const failed = css.slice(css.indexOf('.terminal-failed'));
 		expect(failed).toMatch(/\.terminal-failed\s*{[^}]*--pas-danger/);
 		// gate-failed must NOT borrow the danger token — it is not a crash.
-		expect(
-			/\.terminal-gate-failed\s*{[^}]*--pas-danger/.test(css),
-		).toBe(false);
+		expect(/\.terminal-gate-failed\s*{[^}]*--pas-danger/.test(css)).toBe(false);
 	});
 });

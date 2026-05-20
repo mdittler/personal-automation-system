@@ -21,15 +21,15 @@ import type {
 import type { AudioService } from '../../types/audio.js';
 import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../types/telegram.js';
+import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import { atomicWrite, ensureDir } from '../../utils/file.js';
 import { type AppOutboundBridge, toAppMessageKind } from '../app-outbound-bridge/index.js';
 import { getCurrentHouseholdId, requestContext } from '../context/request-context.js';
-import { sanitizeInput } from '../llm/prompt-templates.js';
-import { escapeMarkdown } from '../../utils/escape-markdown.js';
+import { extractHouseholdIdFromPath } from '../data-store/paths.js';
 import type { HouseholdService } from '../household/index.js';
+import { sanitizeInput } from '../llm/prompt-templates.js';
 import type { ReportService } from '../reports/index.js';
 import { resolveDateTokens } from '../reports/section-collector.js';
-import { extractHouseholdIdFromPath } from '../data-store/paths.js';
 import type { Router } from '../router/index.js';
 
 /** Maximum length for template-expanded data to prevent memory issues. */
@@ -509,7 +509,9 @@ async function executeDispatchMessage(
 
 	// Wrap in request context for per-user cost attribution + household boundary
 	const householdId = deps.householdService?.getHouseholdForUser(config.user_id) ?? undefined;
-	await requestContext.run({ userId: config.user_id, householdId }, () => deps.router!.routeMessage(ctx));
+	await requestContext.run({ userId: config.user_id, householdId }, () =>
+		deps.router!.routeMessage(ctx),
+	);
 
 	deps.logger.info(
 		{ userId: config.user_id, textLength: text.length },

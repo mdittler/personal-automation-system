@@ -11,17 +11,17 @@
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { composeRuntime } from '../../../compose-runtime.js';
+import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../../../testing/fixtures/seed-users.js';
 import {
 	StubProvider,
 	createStubProviderRegistry,
 } from '../../../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CONVERSATION_USER_CONFIG } from '../manifest.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { conversationManifestToSettingDefs } from '../manifest-settings.js';
+import { CONVERSATION_USER_CONFIG } from '../manifest.js';
 
 describe('CONVERSATION_USER_CONFIG settings registration', () => {
 	it('three nlSafe keys have nlSafe=true and nlIntentRegex', () => {
@@ -28,7 +28,8 @@ describe('CONVERSATION_USER_CONFIG settings registration', () => {
 
 	it('auto_detect_pas registers under category="personal"', () => {
 		const reg = new SettingsRegistry();
-		for (const def of conversationManifestToSettingDefs(CONVERSATION_USER_CONFIG)) reg.register(def);
+		for (const def of conversationManifestToSettingDefs(CONVERSATION_USER_CONFIG))
+			reg.register(def);
 		expect(reg.getByAppKey('chatbot', 'auto_detect_pas')?.category).toBe('personal');
 	});
 });

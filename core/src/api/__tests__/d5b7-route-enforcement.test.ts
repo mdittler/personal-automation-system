@@ -9,30 +9,30 @@
  * - LLM scope enforcement (test 17)
  */
 
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApiAuthHook } from '../auth.js';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
-import { ApiKeyService } from '../../services/api-keys/index.js';
-import type { HouseholdService } from '../../services/household/index.js';
-import type { UserManager } from '../../services/user-manager/index.js';
-import type { ReportService } from '../../services/reports/index.js';
 import type { AlertService } from '../../services/alerts/index.js';
-import type { CronManager } from '../../services/scheduler/cron-manager.js';
+import { ApiKeyService } from '../../services/api-keys/index.js';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
-import type { LLMService } from '../../types/llm.js';
+import type { HouseholdService } from '../../services/household/index.js';
+import type { ReportService } from '../../services/reports/index.js';
+import type { CronManager } from '../../services/scheduler/cron-manager.js';
 import type { SpaceService } from '../../services/spaces/index.js';
-import { registerDataRoute } from '../routes/data.js';
-import { registerDataReadRoute } from '../routes/data-read.js';
-import { registerReportsApiRoute } from '../routes/reports-api.js';
+import type { UserManager } from '../../services/user-manager/index.js';
+import type { LLMService } from '../../types/llm.js';
+import { createApiAuthHook } from '../auth.js';
 import { registerAlertsApiRoute } from '../routes/alerts-api.js';
-import { registerSchedulesRoute } from '../routes/schedules.js';
 import { registerChangesRoute } from '../routes/changes.js';
+import { registerDataReadRoute } from '../routes/data-read.js';
+import { registerDataRoute } from '../routes/data.js';
 import { registerLlmRoute } from '../routes/llm.js';
+import { registerReportsApiRoute } from '../routes/reports-api.js';
+import { registerSchedulesRoute } from '../routes/schedules.js';
 
 const logger = pino({ level: 'silent' });
 const LEGACY_TOKEN = 'legacy-api-token-for-d5b7-tests';
@@ -67,8 +67,7 @@ function makeHouseholdService(userToHousehold: Record<string, string>): Househol
 
 function makeSpaceService(memberMap: Record<string, string[]>): SpaceService {
 	return {
-		isMember: (spaceId: string, userId: string) =>
-			memberMap[spaceId]?.includes(userId) ?? false,
+		isMember: (spaceId: string, userId: string) => memberMap[spaceId]?.includes(userId) ?? false,
 		getSpace: (_id: string) => null,
 	} as unknown as SpaceService;
 }
@@ -227,7 +226,13 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['data:write'],
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		const res = await server.inject({
 			method: 'POST',
@@ -251,7 +256,13 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['data:write'],
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		const res = await server.inject({
 			method: 'POST',
@@ -274,7 +285,13 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['data:read'],
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		const res = await server.inject({
 			method: 'GET',
@@ -294,7 +311,13 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['data:read'],
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		const res = await server.inject({
 			method: 'GET',
@@ -364,7 +387,13 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['data:read'], // no data:write
 		});
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		// POST with read-only key → 403
 		const writeRes = await server.inject({
@@ -393,7 +422,13 @@ describe('D5b-7: API route enforcement', () => {
 
 	it('test 8: legacy API_TOKEN → 200 on any data path (platform-system bypass)', async () => {
 		const changeLog = makeFakeChangeLog(tempDir);
-		const server = await buildServer({ apiKeyService, userManager: um, householdService: hs, dataDir: tempDir, changeLog });
+		const server = await buildServer({
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
+			dataDir: tempDir,
+			changeLog,
+		});
 
 		// POST with legacy token for OTHER user (different userId from what's in scope)
 		const writeRes = await server.inject({
@@ -416,12 +451,16 @@ describe('D5b-7: API route enforcement', () => {
 
 	function makeReportService(reports: Array<{ id: string; delivery: string[] }>): ReportService {
 		return {
-			listReports: vi.fn().mockResolvedValue(
-				reports.map((r) => ({ ...r, name: r.id, sections: [], schedule: '0 9 * * *' })),
-			),
+			listReports: vi
+				.fn()
+				.mockResolvedValue(
+					reports.map((r) => ({ ...r, name: r.id, sections: [], schedule: '0 9 * * *' })),
+				),
 			getReport: vi.fn().mockImplementation(async (id: string) => {
 				const r = reports.find((rep) => rep.id === id);
-				return r ? { ...r, name: r.id, sections: [], schedule: '0 9 * * *', delivery: r.delivery } : null;
+				return r
+					? { ...r, name: r.id, sections: [], schedule: '0 9 * * *', delivery: r.delivery }
+					: null;
 			}),
 			run: vi.fn().mockResolvedValue({ content: 'ok', reportId: 'r1' }),
 			deliver: vi.fn().mockResolvedValue(undefined),
@@ -438,7 +477,9 @@ describe('D5b-7: API route enforcement', () => {
 			{ id: 'r3', delivery: [] }, // not visible to actor
 		]);
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			reportService,
 		});
 
@@ -464,7 +505,9 @@ describe('D5b-7: API route enforcement', () => {
 			{ id: 'r1', delivery: [OTHER_USER_ID] }, // actor NOT in delivery
 		]);
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			reportService,
 		});
 
@@ -486,7 +529,9 @@ describe('D5b-7: API route enforcement', () => {
 			{ id: 'r1', delivery: [ACTOR_USER_ID] }, // actor IS in delivery
 		]);
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			reportService,
 		});
 
@@ -503,11 +548,11 @@ describe('D5b-7: API route enforcement', () => {
 	});
 
 	it('test 12: legacy API_TOKEN POST /api/reports/:id/run → 200', async () => {
-		const reportService = makeReportService([
-			{ id: 'r1', delivery: [ACTOR_USER_ID] },
-		]);
+		const reportService = makeReportService([{ id: 'r1', delivery: [ACTOR_USER_ID] }]);
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			reportService,
 		});
 
@@ -537,7 +582,9 @@ describe('D5b-7: API route enforcement', () => {
 			scopes: ['schedules:read'],
 		});
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			cronManager: makeCronManager(),
 		});
 
@@ -553,7 +600,9 @@ describe('D5b-7: API route enforcement', () => {
 
 	it('test 14: legacy API_TOKEN GET /api/schedules → 200', async () => {
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			cronManager: makeCronManager(),
 		});
 
@@ -607,10 +656,10 @@ describe('D5b-7: API route enforcement', () => {
 
 		expect(res.statusCode).toBe(200);
 		expect(JSON.parse(res.body)).toEqual({ ok: true, reEnabled: true });
-		expect((cronManager.hasJob as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+		expect(cronManager.hasJob as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
 			'system:daily-diff',
 		);
-		expect((cronManager.reEnable as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+		expect(cronManager.reEnable as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
 			'system',
 			'daily-diff',
 		);
@@ -638,10 +687,10 @@ describe('D5b-7: API route enforcement', () => {
 
 		expect(res.statusCode).toBe(200);
 		expect(JSON.parse(res.body)).toEqual({ ok: true, reEnabled: true });
-		expect((cronManager.hasJob as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+		expect(cronManager.hasJob as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
 			'system:daily-diff',
 		);
-		expect((cronManager.reEnable as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+		expect(cronManager.reEnable as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
 			'system',
 			'daily-diff',
 		);
@@ -654,7 +703,9 @@ describe('D5b-7: API route enforcement', () => {
 		const changeLog = makeFakeChangeLog(tempDir);
 		// Server WITHOUT auth hook — so request.actor is never set
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			changeLog,
 			skipAuthHook: true,
 		});
@@ -700,7 +751,9 @@ describe('D5b-7: API route enforcement', () => {
 			},
 		]);
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			changeLog,
 		});
 
@@ -742,7 +795,9 @@ describe('D5b-7: API route enforcement', () => {
 		} as unknown as LLMService;
 
 		const server = await buildServer({
-			apiKeyService, userManager: um, householdService: hs,
+			apiKeyService,
+			userManager: um,
+			householdService: hs,
 			llm: mockLlm,
 		});
 

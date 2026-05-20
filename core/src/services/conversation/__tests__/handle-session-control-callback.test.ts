@@ -7,11 +7,11 @@
  * REQ-CONV-NEWCHAT-010.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { handleSessionControlCallback } from '../handle-session-control-callback.js';
-import { createPendingSessionControlStore } from '../pending-session-control-store.js';
-import type { HandleSessionControlCallbackDeps } from '../handle-session-control-callback.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { MessageContext } from '../../../types/telegram.js';
+import { handleSessionControlCallback } from '../handle-session-control-callback.js';
+import type { HandleSessionControlCallbackDeps } from '../handle-session-control-callback.js';
+import { createPendingSessionControlStore } from '../pending-session-control-store.js';
 
 const SC_YES = 'sc:yes' as const;
 const SC_NO = 'sc:no' as const;
@@ -43,7 +43,10 @@ function makeDeps(
 		pendingStore: createPendingSessionControlStore({ clock: () => 2000 }),
 		handleNewChat: vi.fn().mockResolvedValue(undefined),
 		sessionControlLogger: undefined,
-		logger: { warn: vi.fn(), info: vi.fn() } as unknown as HandleSessionControlCallbackDeps['logger'],
+		logger: {
+			warn: vi.fn(),
+			info: vi.fn(),
+		} as unknown as HandleSessionControlCallbackDeps['logger'],
 		clock: () => 6000,
 		...overrides,
 	};
@@ -55,7 +58,9 @@ describe('handleSessionControlCallback — confirmed (sc:yes)', () => {
 		store.attach('u1', makeEntry('u1', 'abc123', 2000));
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps = makeDeps({
 			pendingStore: store,
@@ -82,8 +87,13 @@ describe('handleSessionControlCallback — confirmed (sc:yes)', () => {
 		store.attach('u1', makeEntry('u1', 'abc123', 2000));
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
-		const logger = { warn: vi.fn(), info: vi.fn() } as unknown as HandleSessionControlCallbackDeps['logger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const logger = {
+			warn: vi.fn(),
+			info: vi.fn(),
+		} as unknown as HandleSessionControlCallbackDeps['logger'];
 
 		const deps = makeDeps({
 			pendingStore: store,
@@ -93,11 +103,11 @@ describe('handleSessionControlCallback — confirmed (sc:yes)', () => {
 			clock: () => 6000,
 		});
 
-		await expect(handleSessionControlCallback(SC_YES, 'abc123', makeCtx(), deps)).resolves.toBeUndefined();
+		await expect(
+			handleSessionControlCallback(SC_YES, 'abc123', makeCtx(), deps),
+		).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('session store failure'));
-		expect(logConfirmation).toHaveBeenCalledWith(
-			expect.objectContaining({ outcome: 'failed' }),
-		);
+		expect(logConfirmation).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
 	});
 });
 
@@ -107,7 +117,9 @@ describe('handleSessionControlCallback — declined (sc:no)', () => {
 		store.attach('u1', makeEntry('u1', 'abc123', 2000));
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps = makeDeps({
 			pendingStore: store,
@@ -132,7 +144,12 @@ describe('handleSessionControlCallback — declined (sc:no)', () => {
 		const store = createPendingSessionControlStore({ clock: () => 2000 });
 		store.attach('u1', makeEntry('u1', 'abc123', 2000));
 
-		await handleSessionControlCallback(SC_NO, 'abc123', makeCtx(), makeDeps({ pendingStore: store }));
+		await handleSessionControlCallback(
+			SC_NO,
+			'abc123',
+			makeCtx(),
+			makeDeps({ pendingStore: store }),
+		);
 
 		// Entry should be consumed (get returns undefined)
 		expect(store.get('u1')).toBeUndefined();
@@ -143,7 +160,9 @@ describe('handleSessionControlCallback — expired-or-stale', () => {
 	it('logs expired-or-stale when store is empty (race: expired between peek and get)', async () => {
 		const store = createPendingSessionControlStore({ clock: () => 2000 }); // no entry attached
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps = makeDeps({ pendingStore: store, sessionControlLogger });
 		await handleSessionControlCallback(SC_YES, 'abc123', makeCtx(), deps);
@@ -159,7 +178,9 @@ describe('handleSessionControlCallback — expired-or-stale', () => {
 		store.attach('u1', makeEntry('u1', 'correct-nonce', 2000));
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps = makeDeps({ pendingStore: store, sessionControlLogger });
 		await handleSessionControlCallback(SC_YES, 'wrong-nonce', makeCtx(), deps);
@@ -185,7 +206,9 @@ describe('handleSessionControlCallback — elapsedMs computation', () => {
 		store.attach('u1', makeEntry('u1', 'n1', 1000));
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps = makeDeps({
 			pendingStore: store,
@@ -206,13 +229,18 @@ describe('handleSessionControlCallback — elapsedMs computation', () => {
 		store.attach('u1', entry);
 
 		const logConfirmation = vi.fn().mockResolvedValue(undefined);
-		const sessionControlLogger = { logConfirmation } as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
+		const sessionControlLogger = {
+			logConfirmation,
+		} as unknown as HandleSessionControlCallbackDeps['sessionControlLogger'];
 
 		const deps: HandleSessionControlCallbackDeps = {
 			pendingStore: store,
 			handleNewChat: vi.fn().mockResolvedValue(undefined),
 			sessionControlLogger,
-			logger: { warn: vi.fn(), info: vi.fn() } as unknown as HandleSessionControlCallbackDeps['logger'],
+			logger: {
+				warn: vi.fn(),
+				info: vi.fn(),
+			} as unknown as HandleSessionControlCallbackDeps['logger'],
 			// clock omitted → uses Date.now()
 		};
 

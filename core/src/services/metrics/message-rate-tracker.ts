@@ -36,7 +36,10 @@ export class MessageRateTracker {
 	 */
 	recordMessage(householdId?: string): void {
 		if (this.disposed) return;
-		const hhId = householdId && householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID ? householdId : PLATFORM_SYSTEM_HOUSEHOLD_ID;
+		const hhId =
+			householdId && householdId !== PLATFORM_SYSTEM_HOUSEHOLD_ID
+				? householdId
+				: PLATFORM_SYSTEM_HOUSEHOLD_ID;
 		this.entries.push({ ts: Date.now(), householdId: hhId });
 	}
 

@@ -189,10 +189,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt:
 			'Can you break out the price of each of the 21 items from my Costco receipt and indicate what is new?',
@@ -216,10 +213,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'When was my last trip to Costco? How much did it cost?',
 		oracle(reply) {
@@ -238,10 +232,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/index.ts',
-				'apps/food/src/services/receipt-query.ts',
-			],
+			coversFiles: ['apps/food/src/index.ts', 'apps/food/src/services/receipt-query.ts'],
 		},
 		prompt: 'Meal plan? I want to know about the receipt I just sent you.',
 		oracle(reply) {
@@ -266,10 +257,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'Can you send me those items? How much was the total?',
 		oracle(reply) {
@@ -289,10 +277,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-price-lookup',
 			seedPointer: 'scripts/iterate-prompts.ts:TJ_PRICES_MD',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'Can you tell me the cheapest spot to buy blueberries?',
 		oracle(reply) {
@@ -311,10 +296,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-store-spending',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'How much do I typically spend at each grocery store?',
 		oracle(reply) {
@@ -338,9 +320,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-grocery-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/index.ts'],
 		},
 		prompt: 'Is there anything on the grocery list?',
 		oracle(reply) {
@@ -358,10 +338,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-price-lookup',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_PRICES_MD',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'How much are blueberries at Costco?',
 		oracle(reply) {
@@ -380,10 +357,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'What did I buy at Costco last time?',
 		oracle(reply) {
@@ -402,10 +376,7 @@ const TEST_CASES: TestCase[] = [
 			oracleKind: 'structural',
 			expectedRoute: 'free-text-receipt-query',
 			seedPointer: 'scripts/iterate-prompts.ts:COSTCO_RECEIPT_YAML',
-			coversFiles: [
-				'apps/food/src/services/receipt-query.ts',
-				'apps/food/src/index.ts',
-			],
+			coversFiles: ['apps/food/src/services/receipt-query.ts', 'apps/food/src/index.ts'],
 		},
 		prompt: 'What is new from my last receipt?',
 		oracle(reply) {

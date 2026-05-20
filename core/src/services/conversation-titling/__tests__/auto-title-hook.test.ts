@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import type { LLMService } from '../../llm/index.js';
 import { runTitleAfterFirstExchange } from '../auto-title-hook.js';
 import type { TitleService } from '../title-service.js';
-import type { LLMService } from '../../llm/index.js';
 
 vi.mock('../title-generator.js', () => ({
 	generateTitle: vi.fn(),
@@ -39,7 +39,9 @@ describe('runTitleAfterFirstExchange', () => {
 			{ userId: 'u1', sessionId: 'sess-1', userContent: 'q', assistantContent: 'a' },
 			deps,
 		);
-		expect(deps.applyTitle).toHaveBeenCalledWith('u1', 'sess-1', 'Planning groceries', { skipIfTitled: true });
+		expect(deps.applyTitle).toHaveBeenCalledWith('u1', 'sess-1', 'Planning groceries', {
+			skipIfTitled: true,
+		});
 	});
 
 	it('does nothing when generateTitle returns null', async () => {

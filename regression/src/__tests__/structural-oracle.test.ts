@@ -172,7 +172,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 						],
 						expected: [
 							{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 },
-							{ name: 'BANANA EACH', quantity: 5, unitPrice: 0.30, totalPrice: 1.50 },
+							{ name: 'BANANA EACH', quantity: 5, unitPrice: 0.3, totalPrice: 1.5 },
 						],
 					},
 				],
@@ -214,20 +214,17 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 	});
 
 	it('fails when actual numeric field is NaN-equivalent (null)', () => {
-		const v = runStructuralOracle(
-			'{"lineItems":[{"name":"X","totalPrice":null,"quantity":1}]}',
-			{
-				schema: { type: 'object' },
-				multisetRows: [
-					{
-						path: 'lineItems',
-						keyField: 'name',
-						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
-						expected: [{ name: 'X', totalPrice: 1.0 }],
-					},
-				],
-			},
-		);
+		const v = runStructuralOracle('{"lineItems":[{"name":"X","totalPrice":null,"quantity":1}]}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+					expected: [{ name: 'X', totalPrice: 1.0 }],
+				},
+			],
+		});
 		expect(v.verdict).toBe('fail');
 		expect(v.details).toMatch(/not finite|totalPrice/i);
 	});
@@ -305,23 +302,20 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 	});
 
 	it('fail on missing duplicate (expected 2 PE GRANOLA, actual 1)', () => {
-		const v = runStructuralOracle(
-			'{"lineItems":[{"name":"PE GRANOLA","totalPrice":10.99}]}',
-			{
-				schema: { type: 'object' },
-				multisetRows: [
-					{
-						path: 'lineItems',
-						keyField: 'name',
-						valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
-						expected: [
-							{ name: 'PE GRANOLA', totalPrice: 10.99 },
-							{ name: 'PE GRANOLA', totalPrice: 10.99 },
-						],
-					},
-				],
-			},
-		);
+		const v = runStructuralOracle('{"lineItems":[{"name":"PE GRANOLA","totalPrice":10.99}]}', {
+			schema: { type: 'object' },
+			multisetRows: [
+				{
+					path: 'lineItems',
+					keyField: 'name',
+					valueFields: [{ field: 'totalPrice', tolerance: 0.01 }],
+					expected: [
+						{ name: 'PE GRANOLA', totalPrice: 10.99 },
+						{ name: 'PE GRANOLA', totalPrice: 10.99 },
+					],
+				},
+			],
+		});
 		expect(v.verdict).toBe('fail');
 		expect(v.details).toMatch(/PE GRANOLA/);
 	});

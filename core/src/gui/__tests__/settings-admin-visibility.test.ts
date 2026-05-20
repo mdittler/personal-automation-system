@@ -15,22 +15,22 @@ import fastifyCookie from '@fastify/cookie';
 import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
+import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CredentialService } from '../../services/credentials/index.js';
-import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
 	SYSTEM_SETTING_DEFS,
 } from '../../services/config/settings-metadata.js';
+import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
+import { CredentialService } from '../../services/credentials/index.js';
 import { buildSettingsRegistry } from '../../services/settings/build-registry.js';
 import { SettingsReader } from '../../services/settings/settings-reader.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
-import pino from 'pino';
+import { registerViewLocals } from '../view-locals.js';
 
 const AUTH_TOKEN = 'tok';
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
@@ -42,7 +42,10 @@ const viewsDir = join(moduleDir, 'views');
 
 function makeConfig(): SystemConfig {
 	return {
-		port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
+		port: 3000,
+		dataDir: '/tmp',
+		logLevel: 'info',
+		timezone: 'UTC',
 		telegram: { botToken: 'tok' },
 		claude: { apiKey: '', model: 'm' },
 		cloudflare: {},
@@ -53,9 +56,12 @@ function makeConfig(): SystemConfig {
 				standard: { provider: 'claude', model: 'm' },
 			},
 		},
-		gui: { authToken: 'tok' }, api: { token: '' }, n8n: { dispatchUrl: '' },
+		gui: { authToken: 'tok' },
+		api: { token: '' },
+		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [], webhooks: [],
+		users: [],
+		webhooks: [],
 		backup: { enabled: false, path: '/tmp/backups', schedule: '0 3 * * *', retentionCount: 7 },
 		chat: {
 			logToNotes: false,
@@ -125,8 +131,7 @@ async function buildVisibilityFixture(): Promise<VisibilityFixture> {
 		};
 		const householdService = {
 			getHouseholdForUser: () => 'hh',
-			getHousehold: (id: string) =>
-				id === 'hh' ? { id: 'hh', adminUserIds: [userId] } : null,
+			getHousehold: (id: string) => (id === 'hh' ? { id: 'hh', adminUserIds: [userId] } : null),
 		};
 		return { userManager, householdService };
 	}
@@ -137,24 +142,34 @@ async function buildVisibilityFixture(): Promise<VisibilityFixture> {
 		await app.register(fastifyCookie, { secret: AUTH_TOKEN });
 		const eta = new Eta();
 		await app.register(fastifyView, {
-			engine: { eta }, root: viewsDir, viewExt: 'eta', layout: 'layout',
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
 		});
-		await app.register(async (gui) => {
-			await registerAuth(gui, {
-				authToken: AUTH_TOKEN, credentialService: credService,
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
-			});
-			await registerCsrfProtection(gui);
-			await registerViewLocals(gui, {
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-			});
-			registerSettingsRoutes(gui, {
-				settingsRegistry: registry, settingsWriter,
-				appConfigResolver: () => undefined, logger: pino({ level: 'silent' }),
-				systemConfigWriter, systemConfig: config,
-			});
-		}, { prefix: '/gui' });
+		await app.register(
+			async (gui) => {
+				await registerAuth(gui, {
+					authToken: AUTH_TOKEN,
+					credentialService: credService,
+					userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+					householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				});
+				await registerCsrfProtection(gui);
+				await registerViewLocals(gui, {
+					userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				});
+				registerSettingsRoutes(gui, {
+					settingsRegistry: registry,
+					settingsWriter,
+					appConfigResolver: () => undefined,
+					logger: pino({ level: 'silent' }),
+					systemConfigWriter,
+					systemConfig: config,
+				});
+			},
+			{ prefix: '/gui' },
+		);
 		return app;
 	}
 
@@ -178,10 +193,14 @@ function collectCookies(
 
 async function loginAndGet(app: ReturnType<typeof Fastify>, userId: string) {
 	const loginRes = await app.inject({
-		method: 'POST', url: '/gui/login', payload: { userId, password: 'pass' },
+		method: 'POST',
+		url: '/gui/login',
+		payload: { userId, password: 'pass' },
 	});
 	const getRes = await app.inject({
-		method: 'GET', url: '/gui/settings', cookies: collectCookies(loginRes),
+		method: 'GET',
+		url: '/gui/settings',
+		cookies: collectCookies(loginRes),
 	});
 	return { body: getRes.body, cookies: collectCookies(loginRes, getRes) };
 }
@@ -204,48 +223,161 @@ interface MatrixRow {
 
 const MATRIX: MatrixRow[] = [
 	// Memory & Sessions — non-admin visible
-	{ qid: 'system.chat.sessions.retention_days', label: 'Keep ended sessions for', isAdmin: false, surface: 'gui', expected: 'visible' },
-	{ qid: 'system.chat.sessions.retention_days', label: 'Keep ended sessions for', isAdmin: true, surface: 'gui', expected: 'visible' },
-	{ qid: 'system.chat.sessions.auto_reset_idle_minutes', label: 'Auto-reset idle sessions', isAdmin: false, surface: 'gui', expected: 'visible' },
-	{ qid: 'system.chat.sessions.auto_reset_idle_minutes', label: 'Auto-reset idle sessions', isAdmin: true, surface: 'gui', expected: 'visible' },
+	{
+		qid: 'system.chat.sessions.retention_days',
+		label: 'Keep ended sessions for',
+		isAdmin: false,
+		surface: 'gui',
+		expected: 'visible',
+	},
+	{
+		qid: 'system.chat.sessions.retention_days',
+		label: 'Keep ended sessions for',
+		isAdmin: true,
+		surface: 'gui',
+		expected: 'visible',
+	},
+	{
+		qid: 'system.chat.sessions.auto_reset_idle_minutes',
+		label: 'Auto-reset idle sessions',
+		isAdmin: false,
+		surface: 'gui',
+		expected: 'visible',
+	},
+	{
+		qid: 'system.chat.sessions.auto_reset_idle_minutes',
+		label: 'Auto-reset idle sessions',
+		isAdmin: true,
+		surface: 'gui',
+		expected: 'visible',
+	},
 
 	// System — admin-only
-	{ qid: 'system.routing.verification.enabled', label: 'Route verification', isAdmin: false, surface: 'gui', expected: 'hidden' },
-	{ qid: 'system.routing.verification.enabled', label: 'Route verification', isAdmin: true, surface: 'gui', expected: 'visible' },
-	{ qid: 'system.routing.verification.upper_bound', label: 'upper_bound', isAdmin: false, surface: 'gui', expected: 'hidden' },
-	{ qid: 'system.routing.verification.upper_bound', label: 'upper_bound', isAdmin: true, surface: 'gui', expected: 'visible' },
+	{
+		qid: 'system.routing.verification.enabled',
+		label: 'Route verification',
+		isAdmin: false,
+		surface: 'gui',
+		expected: 'hidden',
+	},
+	{
+		qid: 'system.routing.verification.enabled',
+		label: 'Route verification',
+		isAdmin: true,
+		surface: 'gui',
+		expected: 'visible',
+	},
+	{
+		qid: 'system.routing.verification.upper_bound',
+		label: 'upper_bound',
+		isAdmin: false,
+		surface: 'gui',
+		expected: 'hidden',
+	},
+	{
+		qid: 'system.routing.verification.upper_bound',
+		label: 'upper_bound',
+		isAdmin: true,
+		surface: 'gui',
+		expected: 'visible',
+	},
 
 	// Dangerous — admin-only
-	{ qid: 'system.chat.sessions.auto_prune', label: 'Auto-prune', isAdmin: false, surface: 'gui', expected: 'hidden' },
-	{ qid: 'system.chat.sessions.auto_prune', label: 'Auto-prune', isAdmin: true, surface: 'gui', expected: 'visible' },
+	{
+		qid: 'system.chat.sessions.auto_prune',
+		label: 'Auto-prune',
+		isAdmin: false,
+		surface: 'gui',
+		expected: 'hidden',
+	},
+	{
+		qid: 'system.chat.sessions.auto_prune',
+		label: 'Auto-prune',
+		isAdmin: true,
+		surface: 'gui',
+		expected: 'visible',
+	},
 
 	// Catalog — Memory & Sessions visible to all
-	{ qid: 'system.chat.sessions.retention_days', label: 'Keep ended sessions for', isAdmin: false, surface: 'catalog', expected: 'visible' },
-	{ qid: 'system.chat.sessions.retention_days', label: 'Keep ended sessions for', isAdmin: true, surface: 'catalog', expected: 'visible' },
+	{
+		qid: 'system.chat.sessions.retention_days',
+		label: 'Keep ended sessions for',
+		isAdmin: false,
+		surface: 'catalog',
+		expected: 'visible',
+	},
+	{
+		qid: 'system.chat.sessions.retention_days',
+		label: 'Keep ended sessions for',
+		isAdmin: true,
+		surface: 'catalog',
+		expected: 'visible',
+	},
 
 	// Catalog — System admin-only
-	{ qid: 'system.routing.verification.enabled', label: 'Route verification', isAdmin: false, surface: 'catalog', expected: 'hidden' },
-	{ qid: 'system.routing.verification.enabled', label: 'Route verification', isAdmin: true, surface: 'catalog', expected: 'visible' },
+	{
+		qid: 'system.routing.verification.enabled',
+		label: 'Route verification',
+		isAdmin: false,
+		surface: 'catalog',
+		expected: 'hidden',
+	},
+	{
+		qid: 'system.routing.verification.enabled',
+		label: 'Route verification',
+		isAdmin: true,
+		surface: 'catalog',
+		expected: 'visible',
+	},
 
 	// Catalog — Dangerous admin-only
-	{ qid: 'system.chat.sessions.auto_prune', label: 'Auto-prune', isAdmin: false, surface: 'catalog', expected: 'hidden' },
-	{ qid: 'system.chat.sessions.auto_prune', label: 'Auto-prune', isAdmin: true, surface: 'catalog', expected: 'visible' },
+	{
+		qid: 'system.chat.sessions.auto_prune',
+		label: 'Auto-prune',
+		isAdmin: false,
+		surface: 'catalog',
+		expected: 'hidden',
+	},
+	{
+		qid: 'system.chat.sessions.auto_prune',
+		label: 'Auto-prune',
+		isAdmin: true,
+		surface: 'catalog',
+		expected: 'visible',
+	},
 
 	// NL allowlist — none of the system keys are nl-safe
-	{ qid: 'system.chat.sessions.retention_days', label: 'retention_days', isAdmin: false, surface: 'nl-allowlist', expected: 'blocked' },
-	{ qid: 'system.routing.verification.enabled', label: 'routing.verification.enabled', isAdmin: true, surface: 'nl-allowlist', expected: 'blocked' },
-	{ qid: 'system.chat.sessions.auto_prune', label: 'auto_prune', isAdmin: true, surface: 'nl-allowlist', expected: 'blocked' },
+	{
+		qid: 'system.chat.sessions.retention_days',
+		label: 'retention_days',
+		isAdmin: false,
+		surface: 'nl-allowlist',
+		expected: 'blocked',
+	},
+	{
+		qid: 'system.routing.verification.enabled',
+		label: 'routing.verification.enabled',
+		isAdmin: true,
+		surface: 'nl-allowlist',
+		expected: 'blocked',
+	},
+	{
+		qid: 'system.chat.sessions.auto_prune',
+		label: 'auto_prune',
+		isAdmin: true,
+		surface: 'nl-allowlist',
+		expected: 'blocked',
+	},
 ];
 
 describe('Visibility matrix (REQ-SETTINGS-025, 028, 033)', () => {
 	let fixture: VisibilityFixture;
 
-	beforeEach(async () => { fixture = await buildVisibilityFixture(); });
+	beforeEach(async () => {
+		fixture = await buildVisibilityFixture();
+	});
 	afterEach(async () => {
-		await Promise.all([
-			fixture.adminApp.close(),
-			fixture.nonAdminApp.close(),
-		]);
+		await Promise.all([fixture.adminApp.close(), fixture.nonAdminApp.close()]);
 		await rm(fixture.tempDir, { recursive: true, force: true });
 	});
 
@@ -302,7 +434,9 @@ describe('Visibility matrix (REQ-SETTINGS-025, 028, 033)', () => {
 describe('Catalog value matches direct read (REQ-SETTINGS-033)', () => {
 	let fixture: VisibilityFixture;
 
-	beforeEach(async () => { fixture = await buildVisibilityFixture(); });
+	beforeEach(async () => {
+		fixture = await buildVisibilityFixture();
+	});
 	afterEach(async () => {
 		await Promise.all([fixture.adminApp.close(), fixture.nonAdminApp.close()]);
 		await rm(fixture.tempDir, { recursive: true, force: true });

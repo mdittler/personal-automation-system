@@ -8,14 +8,13 @@
 
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
-import type { CoreServices } from '@pas/core/types';
 import type { DataQueryResult } from '@pas/core/types';
 import type { InteractionEntry } from '@pas/core/types';
-import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
-import type { Household } from '../types.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -75,12 +74,14 @@ function makeFoodInteractionEntry(): InteractionEntry {
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-function setupServices(opts: {
-	dataQueryResult?: DataQueryResult;
-	recentEntries?: InteractionEntry[];
-	dataQueryService?: boolean;
-	llmAnswer?: string;
-} = {}) {
+function setupServices(
+	opts: {
+		dataQueryResult?: DataQueryResult;
+		recentEntries?: InteractionEntry[];
+		dataQueryService?: boolean;
+		llmAnswer?: string;
+	} = {},
+) {
 	const sharedStore = createMockScopedStore({
 		'household.yaml': stringify(sampleHousehold),
 	});
@@ -134,11 +135,9 @@ describe('food app data query fallback', () => {
 
 		await handleMessage?.(ctx);
 
-		expect(mockDataQuery.query).toHaveBeenCalledWith(
-			'something unmatched xyzzy',
-			'user1',
-			{ recentFilePaths: ['users/shared/food/recipes/tacos.yaml'] },
-		);
+		expect(mockDataQuery.query).toHaveBeenCalledWith('something unmatched xyzzy', 'user1', {
+			recentFilePaths: ['users/shared/food/recipes/tacos.yaml'],
+		});
 	});
 
 	it('calls DataQueryService when text contains a data-question keyword', async () => {

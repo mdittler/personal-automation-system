@@ -209,7 +209,8 @@ export const SOURCE_POLICY: ReadonlyMap<AllowedSourceCategory, SourcePolicyEntry
 			underlyingService: 'SettingsReader',
 			underlyingMethod: 'buildCatalog',
 			authModel: 'user-scoped',
-			notes: 'produces per-user settings catalog (inside memory-context) + trusted instruction block (plain)',
+			notes:
+				'produces per-user settings catalog (inside memory-context) + trusted instruction block (plain)',
 		},
 	],
 ]);

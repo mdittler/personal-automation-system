@@ -313,7 +313,11 @@ describe('P8b: summaryStatus branches', () => {
 		const result = await runIdleResetHook(baseCtx, deps);
 		expect(result.status).toBe('reset');
 		expect(result.summaryStatus).toBe('written');
-		expect(deps.flushSave).toHaveBeenCalledWith('u1', RECENT_SESSION_SUMMARY_KEY, expect.any(String));
+		expect(deps.flushSave).toHaveBeenCalledWith(
+			'u1',
+			RECENT_SESSION_SUMMARY_KEY,
+			expect.any(String),
+		);
 	});
 
 	it('summaryStatus="disabled" when getFlushEnabled returns false', async () => {
@@ -395,10 +399,7 @@ describe('P8b: endActive CAS ordering', () => {
 		// Second hook's endActive loses the CAS race (returns null)
 		vi.mocked(deps2.chatSessions.endActive).mockResolvedValueOnce({ endedSessionId: null });
 
-		await Promise.all([
-			runIdleResetHook(baseCtx, deps1),
-			runIdleResetHook(baseCtx, deps2),
-		]);
+		await Promise.all([runIdleResetHook(baseCtx, deps1), runIdleResetHook(baseCtx, deps2)]);
 
 		// Only the CAS winner (deps1) summarizes; deps2 returned status='none'
 		expect(deps1.summarizer).toHaveBeenCalledTimes(1);

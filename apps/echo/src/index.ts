@@ -38,7 +38,11 @@ export const handleCommand: AppModule['handleCommand'] = async (
 	await services.telegram.send(ctx.userId, joined ? escapeMarkdown(joined) : '(empty)');
 
 	const store = services.data.forUser(ctx.userId);
-	await store.append('log.md', `- [${ctx.timestamp.toISOString()}] /echo ${joined || '(empty)'}\n`, {
-		frontmatter: buildLogFrontmatter(ctx.userId),
-	});
+	await store.append(
+		'log.md',
+		`- [${ctx.timestamp.toISOString()}] /echo ${joined || '(empty)'}\n`,
+		{
+			frontmatter: buildLogFrontmatter(ctx.userId),
+		},
+	);
 };

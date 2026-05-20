@@ -34,7 +34,13 @@ export async function handleNotes(
 
 	if (subcommand === '' || subcommand === 'status') {
 		// Show current effective state
-		const enabled = await resolveUserBool(config, ctx.userId, 'log_to_notes', systemDefault, logger);
+		const enabled = await resolveUserBool(
+			config,
+			ctx.userId,
+			'log_to_notes',
+			systemDefault,
+			logger,
+		);
 		const state = enabled ? 'ON' : 'OFF';
 		await telegram.send(
 			ctx.userId,

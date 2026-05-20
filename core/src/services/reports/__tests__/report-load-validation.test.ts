@@ -50,8 +50,16 @@ function makeService(overrides: Partial<ReportServiceOptions> = {}): ReportServi
 		dataDir: tempDir,
 		changeLog: new ChangeLog(tempDir),
 		contextStore: { get: vi.fn(), search: vi.fn() } as unknown as ContextStoreService,
-		llm: { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as unknown as LLMService,
-		telegram: { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as unknown as TelegramService,
+		llm: {
+			complete: vi.fn(),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		} as unknown as LLMService,
+		telegram: {
+			send: vi.fn(),
+			sendPhoto: vi.fn(),
+			sendOptions: vi.fn(),
+		} as unknown as TelegramService,
 		userManager,
 		cronManager: new CronManager(logger, 'UTC', tempDir),
 		timezone: 'UTC',

@@ -21,20 +21,20 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestContext } from '../../../../../core/src/services/context/request-context.js';
-import { saveQuickMeal, loadQuickMeals } from '../../services/quick-meals-store.js';
 import {
+	__resetQuickMealFlowForTests,
 	beginQuickMealAdd,
 	beginQuickMealEdit,
-	handleQuickMealAddReply,
 	handleQuickMealAddCallback,
-	handleQuickMealEditReply,
+	handleQuickMealAddReply,
 	handleQuickMealEditCallback,
+	handleQuickMealEditReply,
 	hasPendingQuickMealAdd,
 	hasPendingQuickMealEdit,
-	__resetQuickMealFlowForTests,
 } from '../../handlers/quick-meal-flow.js';
 import { handleQuickMealLogCallback } from '../../handlers/quick-meal-log.js';
-import type { Recipe, MonthlyMacroLog, QuickMealTemplate } from '../../types.js';
+import { loadQuickMeals, saveQuickMeal } from '../../services/quick-meals-store.js';
+import type { MonthlyMacroLog, QuickMealTemplate, Recipe } from '../../types.js';
 
 // Mock loadAllRecipes so each test can control the recipe library without
 // needing to write real YAML files through recipe-store's formatter.
@@ -206,13 +206,21 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		const sharedStore = buildUserStore();
 
 		await dispatchAs('u1', () =>
-			handleNutritionCommand(services as never, ['log', 'lasagna', 'half'], 'u1', sharedStore as never),
+			handleNutritionCommand(
+				services as never,
+				['log', 'lasagna', 'half'],
+				'u1',
+				sharedStore as never,
+			),
 		);
 
 		// Find the log file across any month written.
 		const month = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
 		expect(month).toBeDefined();
-		const log = await readLoggedEntries(userStore, month!.replace('nutrition/', '').replace('.yaml', ''));
+		const log = await readLoggedEntries(
+			userStore,
+			month!.replace('nutrition/', '').replace('.yaml', ''),
+		);
 		expect(log).not.toBeNull();
 		expect(log!.days).toHaveLength(1);
 		expect(log!.days[0]!.meals).toHaveLength(1);
@@ -240,11 +248,19 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		const sharedStore = buildUserStore();
 
 		await dispatchAs('u1', () =>
-			handleNutritionCommand(services as never, ['log', 'lasagna', '1.5'], 'u1', sharedStore as never),
+			handleNutritionCommand(
+				services as never,
+				['log', 'lasagna', '1.5'],
+				'u1',
+				sharedStore as never,
+			),
 		);
 
 		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
-		const log = await readLoggedEntries(userStore, key!.replace('nutrition/', '').replace('.yaml', ''));
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
 		const entry = log!.days[0]!.meals[0]!;
 		expect(entry.servingsEaten).toBe(1.5);
 		expect(entry.macros.calories).toBe(1200);
@@ -269,7 +285,10 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 		);
 
 		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
-		const log = await readLoggedEntries(userStore, key!.replace('nutrition/', '').replace('.yaml', ''));
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
 		const entry = log!.days[0]!.meals[0]!;
 		expect(entry.servingsEaten).toBe(1);
 		expect(entry.macros.calories).toBe(800);
@@ -359,7 +378,10 @@ describe('H11.w — /nutrition log <recipe-name> <portion>', () => {
 
 		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/'));
 		expect(key).toBeDefined();
-		const log = await readLoggedEntries(userStore, key!.replace('nutrition/', '').replace('.yaml', ''));
+		const log = await readLoggedEntries(
+			userStore,
+			key!.replace('nutrition/', '').replace('.yaml', ''),
+		);
 		const entry = log!.days[0]!.meals[0]!;
 		expect(entry.recipeId).toBe('manual');
 		expect(entry.recipeTitle).toBe('lunch');
@@ -392,9 +414,18 @@ describe('H11.w — /nutrition meals list + remove', () => {
 		const services = buildServices(userStore, telegram);
 		const sharedStore = buildUserStore();
 
-		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'a', label: 'A', kind: 'home', usageCount: 1 }));
-		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'b', label: 'B', kind: 'restaurant', usageCount: 5 }));
-		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'c', label: 'C', kind: 'home', usageCount: 3 }));
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({ id: 'a', label: 'A', kind: 'home', usageCount: 1 }),
+		);
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({ id: 'b', label: 'B', kind: 'restaurant', usageCount: 5 }),
+		);
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({ id: 'c', label: 'C', kind: 'home', usageCount: 3 }),
+		);
 
 		await dispatchAs('u1', () =>
 			handleNutritionCommand(services as never, ['meals', 'list'], 'u1', sharedStore as never),
@@ -429,9 +460,17 @@ describe('H11.w — /nutrition meals list + remove', () => {
 		const services = buildServices(userStore, telegram);
 		const sharedStore = buildUserStore();
 
-		await saveQuickMeal(userStore as never, quickMealFixture({ id: 'chipotle-bowl', label: 'Chipotle Bowl' }));
+		await saveQuickMeal(
+			userStore as never,
+			quickMealFixture({ id: 'chipotle-bowl', label: 'Chipotle Bowl' }),
+		);
 		await dispatchAs('u1', () =>
-			handleNutritionCommand(services as never, ['meals', 'remove', 'chipotle', 'bowl'], 'u1', sharedStore as never),
+			handleNutritionCommand(
+				services as never,
+				['meals', 'remove', 'chipotle', 'bowl'],
+				'u1',
+				sharedStore as never,
+			),
 		);
 		const list = await loadQuickMeals(userStore as never);
 		expect(list).toHaveLength(0);
@@ -459,10 +498,17 @@ describe('H11.w — /nutrition meals add guided flow', () => {
 		const telegram = buildTelegramSpy();
 		const services = buildServices(userStore, telegram, {
 			llm: {
-				complete: vi.fn().mockResolvedValue(JSON.stringify({
-					calories: 850, protein: 50, carbs: 80, fat: 35, fiber: 12,
-					confidence: 0.75, reasoning: 'standard Chipotle bowl',
-				})),
+				complete: vi.fn().mockResolvedValue(
+					JSON.stringify({
+						calories: 850,
+						protein: 50,
+						carbs: 80,
+						fat: 35,
+						fiber: 12,
+						confidence: 0.75,
+						reasoning: 'standard Chipotle bowl',
+					}),
+				),
 				getModelForTier: vi.fn().mockReturnValue('anthropic/claude-haiku-4-5'),
 				classify: vi.fn(),
 				extractStructured: vi.fn(),
@@ -508,7 +554,9 @@ describe('H11.w — /nutrition meals add guided flow', () => {
 			handleQuickMealAddReply(services as never, userStore as never, 'u1', 'skip'),
 		);
 		expect(telegram.lastMessage).toMatch(/850 cal/);
-		const confirmButtons = telegram.lastButtons as Array<Array<{ text: string; callbackData: string }>>;
+		const confirmButtons = telegram.lastButtons as Array<
+			Array<{ text: string; callbackData: string }>
+		>;
 		expect(confirmButtons.flat().map((b) => b.text)).toContain('Save');
 
 		// Step 5: save callback
@@ -895,7 +943,9 @@ describe('H11.w — /nutrition log quick-pick grid and quick-meal path', () => {
 		expect(telegram.sendWithButtons).toHaveBeenCalled();
 		const buttons = telegram.lastButtons as Array<Array<{ text: string; callbackData: string }>>;
 		const flat = buttons.flat();
-		const quickMealButtons = flat.filter((b) => b.callbackData.startsWith('app:food:nut:log:quickmeal:'));
+		const quickMealButtons = flat.filter((b) =>
+			b.callbackData.startsWith('app:food:nut:log:quickmeal:'),
+		);
 		expect(quickMealButtons.length).toBeGreaterThanOrEqual(5);
 		// Highest usage = Meal 6 — should be in the first quick-meal button.
 		expect(quickMealButtons[0]!.text).toContain('Meal 6');
@@ -1032,7 +1082,9 @@ describe('H11.w — /nutrition log quick-pick grid and quick-meal path', () => {
 			),
 		);
 
-		const key = Array.from(userStore.files.keys()).find((k) => k.startsWith('nutrition/') && k.endsWith('.yaml'));
+		const key = Array.from(userStore.files.keys()).find(
+			(k) => k.startsWith('nutrition/') && k.endsWith('.yaml'),
+		);
 		expect(key).toBeDefined();
 		const log = await readLoggedEntries(
 			userStore,
@@ -1202,10 +1254,7 @@ describe('H11.w — ad-hoc /nutrition log free-text', () => {
 		);
 
 		const { findSimilarAdHoc } = await import('../../services/ad-hoc-history.js');
-		const match = await findSimilarAdHoc(
-			userStore as never,
-			'mystery burger plate',
-		);
+		const match = await findSimilarAdHoc(userStore as never, 'mystery burger plate');
 		expect(match).not.toBeNull();
 		expect(match!.occurrences).toBe(1);
 	});
@@ -1319,12 +1368,8 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 		const flat = (call[2] as Array<Array<{ text: string; callbackData: string }>>).flat();
 		expect(flat.some((b) => /yes/i.test(b.text))).toBe(true);
 		expect(flat.some((b) => /no/i.test(b.text))).toBe(true);
-		expect(
-			flat.some((b) => b.callbackData === 'app:food:nut:log:promote:yes'),
-		).toBe(true);
-		expect(
-			flat.some((b) => b.callbackData === 'app:food:nut:log:promote:no'),
-		).toBe(true);
+		expect(flat.some((b) => b.callbackData === 'app:food:nut:log:promote:yes')).toBe(true);
+		expect(flat.some((b) => b.callbackData === 'app:food:nut:log:promote:no')).toBe(true);
 	});
 
 	it('does NOT prompt on dissimilar ad-hoc logs', async () => {
@@ -1353,12 +1398,7 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 			}),
 		);
 		await dispatchAs('u1', () =>
-			handleNutritionCommand(
-				services as never,
-				['log', 'apple'],
-				'u1',
-				sharedStore as never,
-			),
+			handleNutritionCommand(services as never, ['log', 'apple'], 'u1', sharedStore as never),
 		);
 
 		llmComplete.mockResolvedValueOnce(
@@ -1372,12 +1412,7 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 			}),
 		);
 		await dispatchAs('u1', () =>
-			handleNutritionCommand(
-				services as never,
-				['log', 'burger'],
-				'u1',
-				sharedStore as never,
-			),
+			handleNutritionCommand(services as never, ['log', 'burger'], 'u1', sharedStore as never),
 		);
 
 		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
@@ -1430,21 +1465,15 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 		expect(telegram.sendWithButtons).toHaveBeenCalled();
 
 		// Click "Yes" — should seed quick-meal flow at the kind-picker step.
-		await handleAdHocPromotionCallback(
-			services as never,
-			'u1',
-			'app:food:nut:log:promote:yes',
-		);
+		await handleAdHocPromotionCallback(services as never, 'u1', 'app:food:nut:log:promote:yes');
 		expect(hasPendingQuickMealAdd('u1')).toBe(true);
 		// The kind picker is sent via sendWithButtons with the kind callbacks.
 		const last = telegram.sendWithButtons.mock.calls.at(-1)!;
 		const flat = (last[2] as Array<Array<{ text: string; callbackData: string }>>).flat();
-		expect(
-			flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:home'),
-		).toBe(true);
-		expect(
-			flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:restaurant'),
-		).toBe(true);
+		expect(flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:home')).toBe(true);
+		expect(flat.some((b) => b.callbackData === 'app:food:nut:meals:add:kind:restaurant')).toBe(
+			true,
+		);
 		expect(last[1]).toMatch(/kind of meal/i);
 	});
 
@@ -1493,11 +1522,7 @@ describe('H11.w Task 14 — ad-hoc dedup auto-prompt', () => {
 			);
 		}
 
-		await handleAdHocPromotionCallback(
-			services as never,
-			'u1',
-			'app:food:nut:log:promote:no',
-		);
+		await handleAdHocPromotionCallback(services as never, 'u1', 'app:food:nut:log:promote:no');
 		expect(hasPendingQuickMealAdd('u1')).toBe(false);
 		expect(telegram.lastMessage).toMatch(/change your mind|nutrition meals add/i);
 	});
@@ -1562,8 +1587,7 @@ describe('H11.w — per-user isolation', () => {
 			handleNutritionCommand(services as never, ['log'], 'u2', sharedStore as never),
 		);
 
-		const allText =
-			telegram.messages.map((m) => m.text).join('\n') + (telegram.lastMessage ?? '');
+		const allText = telegram.messages.map((m) => m.text).join('\n') + (telegram.lastMessage ?? '');
 		expect(allText).not.toContain('Chipotle bowl');
 	});
 });
@@ -1632,7 +1656,11 @@ describe('L2 — handleQuickMealEditCallback returns false for unrecognised sub-
 			quickMealFixture({ id: 'test-meal', label: 'Test meal', kind: 'home' }),
 		);
 		await dispatchAs('u1', () =>
-			beginQuickMealEdit(services as never, 'u1', quickMealFixture({ id: 'test-meal', label: 'Test meal', kind: 'home' })),
+			beginQuickMealEdit(
+				services as never,
+				'u1',
+				quickMealFixture({ id: 'test-meal', label: 'Test meal', kind: 'home' }),
+			),
 		);
 		expect(hasPendingQuickMealEdit('u1')).toBe(true);
 

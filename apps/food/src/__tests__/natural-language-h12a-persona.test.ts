@@ -17,15 +17,15 @@
  *   F. Disjointness from nutrition/adherence/hosting intents
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isHealthCorrelationIntent } from '../handlers/health.js';
 import {
 	isAdherenceIntent,
-	isNutritionViewIntent,
 	isLogMealNLIntent,
+	isNutritionViewIntent,
 } from '../handlers/nutrition.js';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';

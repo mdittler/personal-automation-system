@@ -13,11 +13,11 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { RateLimiter } from '../middleware/rate-limiter.js';
 import type { ApiKeyService } from '../services/api-keys/index.js';
 import { enterMutableRequestContext } from '../services/context/request-context.js';
 import type { HouseholdService } from '../services/household/index.js';
 import type { UserManager } from '../services/user-manager/index.js';
-import type { RateLimiter } from '../middleware/rate-limiter.js';
 import type { AuthenticatedActor } from '../types/auth-actor.js';
 
 export interface ApiAuthOptions {
@@ -104,9 +104,7 @@ export function createApiAuthHook(options: ApiAuthOptions) {
 			// Rehydrate user + household from current service state (never from the stored record)
 			const user = userManager?.getUser(record.userId) ?? null;
 			if (!user) {
-				return reply
-					.status(401)
-					.send({ ok: false, error: 'API key owner no longer exists.' });
+				return reply.status(401).send({ ok: false, error: 'API key owner no longer exists.' });
 			}
 
 			const resolvedHouseholdId =

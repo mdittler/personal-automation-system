@@ -8,5 +8,12 @@
 		}
 	},
 	"include": ["src/**/*.ts", "src/**/*.json"],
-	"exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**", "src/cli/templates/**", "src/typecheck/**"]
+	"exclude": [
+		"node_modules",
+		"dist",
+		"**/*.test.ts",
+		"**/__tests__/**",
+		"src/cli/templates/**",
+		"src/typecheck/**"
+	]
 }

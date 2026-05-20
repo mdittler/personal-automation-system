@@ -10,10 +10,10 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import {
-	planInstallApp,
 	type InstallError,
 	type PermissionSummary,
 	type PlanInstallResult,
+	planInstallApp,
 } from '../services/app-installer/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

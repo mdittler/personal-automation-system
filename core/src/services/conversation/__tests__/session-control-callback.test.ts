@@ -11,13 +11,13 @@
  * mirroring exactly what the compose-runtime callback handler does.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import {
-	createPendingSessionControlStore,
-	createPendingEntry,
-	type PendingSessionControlEntry,
-} from '../pending-session-control-store.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { MessageContext } from '../../../types/telegram.js';
+import {
+	type PendingSessionControlEntry,
+	createPendingEntry,
+	createPendingSessionControlStore,
+} from '../pending-session-control-store.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ function makeCtx(userId: string): MessageContext {
 describe('session-control callback: sc:yes', () => {
 	it('consumes the entry and calls handleNewChat when entry is valid', async () => {
 		const userId = 'user-1';
-		let now = 1000;
+		const now = 1000;
 		const clock = () => now;
 		const store = createPendingSessionControlStore({ clock });
 

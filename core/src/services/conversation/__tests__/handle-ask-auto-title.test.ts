@@ -6,19 +6,19 @@
  *  - userContent is the question string (without /ask prefix)
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../conversation-titling/auto-title-hook.js', () => ({
 	scheduleTitleAfterFirstExchange: vi.fn(),
 	runTitleAfterFirstExchange: vi.fn(),
 }));
 
-import { handleAsk } from '../handle-ask.js';
-import { scheduleTitleAfterFirstExchange } from '../../conversation-titling/auto-title-hook.js';
-import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import { scheduleTitleAfterFirstExchange } from '../../conversation-titling/auto-title-hook.js';
 import type { TitleService } from '../../conversation-titling/title-service.js';
+import { handleAsk } from '../handle-ask.js';
 
 function makeChatSessions(overrides?: Partial<ChatSessionStore>): ChatSessionStore {
 	return {
@@ -27,7 +27,9 @@ function makeChatSessions(overrides?: Partial<ChatSessionStore>): ChatSessionSto
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		rebuildMemorySnapshot: vi
@@ -58,7 +60,9 @@ describe('handleAsk — auto-title hook wiring', () => {
 			.mockResolvedValueOnce('The ask response');
 
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'ask-sess-1', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'ask-sess-1', isNew: true, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 		});
 		const titleService = makeTitleService();

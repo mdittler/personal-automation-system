@@ -23,11 +23,11 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractAuthCookie, getCookieUserId } from './auth-test-helpers.js';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
 import { CredentialService } from '../../services/credentials/index.js';
 import { normalizeDisplayName } from '../../services/invite/normalize.js';
 import { registerAuth } from '../auth.js';
+import { extractAuthCookie, getCookieUserId } from './auth-test-helpers.js';
 
 const AUTH_TOKEN = 'test-secret-token';
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
@@ -323,5 +323,4 @@ describe('POST /login accepts username or numeric id', () => {
 
 		await app.close();
 	});
-
 });

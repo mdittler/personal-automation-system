@@ -16,10 +16,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { ManifestUserConfig } from '../../../types/manifest.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
-import type { ManifestUserConfig } from '../../../types/manifest.js';
 import { handleMessage } from '../handle-message.js';
 
 // ---------------------------------------------------------------------------
@@ -238,10 +238,9 @@ describe('handleMessage — settings-catalog in system prompt (P3 handler-level)
 		});
 
 		// 1. food.updateOverrides was called with seasonal_nudges=false
-		expect(foodCfg.updateOverrides).toHaveBeenCalledWith(
-			expect.any(String),
-			{ seasonal_nudges: false },
-		);
+		expect(foodCfg.updateOverrides).toHaveBeenCalledWith(expect.any(String), {
+			seasonal_nudges: false,
+		});
 
 		// 2. The response delivered to Telegram does NOT contain the raw <config-set tag
 		expect(services.telegram.send).toHaveBeenCalledWith(

@@ -19,14 +19,14 @@ import type {
 	SystemConfig,
 	TierAssignment,
 } from '../../types/config.js';
-import { DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
 import type { ModelRef } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
 import { isLocalProvider } from '../llm/model-pricing.js';
-import { parsePasYamlConfig } from './pas-yaml-schema.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
+import { DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
+import { parsePasYamlConfig } from './pas-yaml-schema.js';
 
 /** Shape of an LLM provider entry in pas.yaml. */
 interface YamlProviderConfig {
@@ -147,7 +147,10 @@ export async function loadSystemConfig(options?: {
 	// Validate required env vars
 	const env = cleanEnv(process.env, {
 		TELEGRAM_BOT_TOKEN: str({ desc: 'Telegram Bot API token from @BotFather' }),
-		ANTHROPIC_API_KEY: str({ default: '', desc: 'Anthropic Claude API key (optional when other providers configured)' }),
+		ANTHROPIC_API_KEY: str({
+			default: '',
+			desc: 'Anthropic Claude API key (optional when other providers configured)',
+		}),
 		GUI_AUTH_TOKEN: str({ desc: 'Management GUI authentication token' }),
 		OLLAMA_URL: str({
 			default: '',
@@ -194,9 +197,7 @@ export async function loadSystemConfig(options?: {
 	const rawUsers: RegisteredUser[] = (yamlConfig?.users ?? []).map((u) => {
 		const ru = u as Record<string, unknown>;
 		const householdId =
-			typeof ru['household_id'] === 'string' && ru['household_id']
-				? ru['household_id']
-				: undefined;
+			typeof ru['household_id'] === 'string' && ru['household_id'] ? ru['household_id'] : undefined;
 		return {
 			id: u.id,
 			name: u.name,
@@ -429,8 +430,7 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 					yamlLLM.safeguards.default_monthly_cost_cap ??
 					DEFAULT_LLM_SAFEGUARDS.defaultMonthlyCostCap,
 				globalMonthlyCostCap:
-					yamlLLM.safeguards.global_monthly_cost_cap ??
-					DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
+					yamlLLM.safeguards.global_monthly_cost_cap ?? DEFAULT_LLM_SAFEGUARDS.globalMonthlyCostCap,
 				defaultHouseholdRateLimit: yamlLLM.safeguards.default_household_rate_limit
 					? {
 							maxRequests: yamlLLM.safeguards.default_household_rate_limit.max_requests,

@@ -68,8 +68,7 @@ describe('runReceiptCase — production parser integration', () => {
 				total: 47.82,
 			}),
 		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete),
-		);
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath), deps);
 		expect(result.verdict).toBe('pass');
 		expect(result.actuals).toHaveLength(1);
@@ -99,7 +98,8 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Walmart',
 					date: '2026-04-15',
@@ -126,8 +126,7 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
-		const deps = makeReceiptDeps(llmShim('not json{'),
-		);
+		const deps = makeReceiptDeps(llmShim('not json{'));
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'bad-json'), deps);
 		expect(result.verdict).toBe('error');
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/parser threw/i);
@@ -146,7 +145,8 @@ describe('runReceiptCase — production parser integration', () => {
 		// isValidReceiptDate rejects it (MAX_RECEIPT_AGE_DAYS = 90, future
 		// dates rejected).
 		const futureDate = '2099-12-31';
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Walmart',
 					date: futureDate,
@@ -262,8 +262,7 @@ describe('runReceiptCase — production parser integration', () => {
 				total: 4.99,
 			}),
 		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete),
-		);
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
 		await runReceiptCase(makeCase(photoPath, sidecarPath, 'mime'), deps);
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		const callArgs = llmComplete.mock.calls[0];
@@ -287,7 +286,8 @@ describe('runReceiptCase — production parser integration', () => {
 			store: 'Wegmans Food Markets',
 			rejectedDate: '2025-08-01',
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Wegmans Food Markets',
 					date: '2025-08-01', // >90 days ago → rejected, becomes rawExtractedDate
@@ -314,7 +314,8 @@ describe('runReceiptCase — production parser integration', () => {
 			store: 'Wegmans Food Markets',
 			rejectedDate: '2025-08-01',
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Wegmans Food Markets',
 					date: '2025-07-15', // different rejected date than sidecar expects
@@ -346,7 +347,8 @@ describe('runReceiptCase — production parser integration', () => {
 				{ name: 'PE GRANOLA', totalPrice: 10.99 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Costco',
 					date: '2026-04-27',
@@ -375,7 +377,8 @@ describe('runReceiptCase — production parser integration', () => {
 				{ name: 'PE GRANOLA', totalPrice: 10.99 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Costco',
 					date: '2026-04-27',
@@ -403,7 +406,8 @@ describe('runReceiptCase — production parser integration', () => {
 				{ name: 'Grocery non-taxable', totalPrice: 9.35 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: "Trader Joe's",
 					date: '2026-05-12',
@@ -443,7 +447,8 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 1.84,
 			lineItems: [{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 }],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: "Trader Joe's",
 					date: '2026-05-10',
@@ -466,13 +471,14 @@ describe('runReceiptCase — production parser integration', () => {
 			date: '2026-04-15',
 			subtotal: 8.48,
 			tax: 0.42,
-			total: 8.90,
+			total: 8.9,
 			lineItems: [
 				{ name: 'Eggs', totalPrice: 4.99 },
 				{ name: 'Milk', totalPrice: 3.49 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Walmart',
 					date: '2026-04-15',
@@ -481,9 +487,9 @@ describe('runReceiptCase — production parser integration', () => {
 						{ name: 'Milk', quantity: 1, unitPrice: 3.49, totalPrice: 3.49 },
 					],
 					// Wrong subtotal — sidecar says 8.48, parser claims 7.00.
-					subtotal: 7.00,
+					subtotal: 7.0,
 					tax: 0.42,
-					total: 8.90,
+					total: 8.9,
 				}),
 			),
 		);
@@ -499,13 +505,14 @@ describe('runReceiptCase — production parser integration', () => {
 			date: '2026-04-15',
 			subtotal: 8.48,
 			tax: 0.42,
-			total: 8.90,
+			total: 8.9,
 			lineItems: [
 				{ name: 'Eggs', totalPrice: 4.99 },
 				{ name: 'Milk', totalPrice: 3.49 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Walmart',
 					date: '2026-04-15',
@@ -515,8 +522,8 @@ describe('runReceiptCase — production parser integration', () => {
 					],
 					subtotal: 8.48,
 					// Wrong tax — sidecar says 0.42, parser claims 1.50.
-					tax: 1.50,
-					total: 8.90,
+					tax: 1.5,
+					total: 8.9,
 				}),
 			),
 		);
@@ -532,13 +539,14 @@ describe('runReceiptCase — production parser integration', () => {
 			date: '2026-04-15',
 			subtotal: 8.48,
 			tax: 0.42,
-			total: 8.90,
+			total: 8.9,
 			lineItems: [
 				{ name: 'Eggs', totalPrice: 4.99 },
 				{ name: 'Milk', totalPrice: 3.49 },
 			],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: 'Walmart',
 					date: '2026-04-15',
@@ -548,7 +556,7 @@ describe('runReceiptCase — production parser integration', () => {
 					],
 					subtotal: 8.48,
 					tax: 0.42,
-					total: 8.90,
+					total: 8.9,
 				}),
 			),
 		);
@@ -564,7 +572,8 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 1.84,
 			lineItems: [{ name: 'BANANA EACH', quantity: 8, unitPrice: 0.23, totalPrice: 1.84 }],
 		});
-		const deps = makeReceiptDeps(llmShim(
+		const deps = makeReceiptDeps(
+			llmShim(
 				JSON.stringify({
 					store: "Trader Joe's",
 					date: '2026-05-10',

@@ -4,17 +4,17 @@
 
 import type { CoreServices, InlineButton, ScopedDataStore } from '@pas/core/types';
 import {
-	loadGuests,
 	addGuest,
+	formatGuestList,
+	loadGuests,
 	removeGuest,
 	slugifyGuestName,
-	formatGuestList,
 } from '../services/guest-profiles.js';
-import { planEvent, formatEventPlan } from '../services/hosting-planner.js';
-import { loadAllRecipes } from '../services/recipe-store.js';
+import { formatEventPlan, planEvent } from '../services/hosting-planner.js';
 import { loadPantry } from '../services/pantry-store.js';
-import { sanitizeInput } from '../utils/sanitize.js';
+import { loadAllRecipes } from '../services/recipe-store.js';
 import type { GuestProfile } from '../types.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 // ─── Intent Detection ─────────────────────────────────────────────────────────
 
@@ -60,15 +60,19 @@ export function parseGuestAddArgs(tail: string[]): GuestAddArgs {
 	// Normalize flag tokens to lowercase so `--DIET` or `--Notes`
 	// still route correctly. Non-flag tokens stay case-preserved so
 	// names like "Gluten-Free" survive untouched.
-	const hasFlags = tail.some(t => t.toLowerCase() in flagAliases);
+	const hasFlags = tail.some((t) => t.toLowerCase() in flagAliases);
 	if (!hasFlags) {
 		// Legacy form — everything is a dietary restriction.
-		result.dietaryRestrictions = tail.filter(t => t.length > 0);
+		result.dietaryRestrictions = tail.filter((t) => t.length > 0);
 		return result;
 	}
 
 	let currentFlag: 'diet' | 'allergy' | 'notes' | null = null;
-	const buckets: Record<'diet' | 'allergy' | 'notes', string[]> = { diet: [], allergy: [], notes: [] };
+	const buckets: Record<'diet' | 'allergy' | 'notes', string[]> = {
+		diet: [],
+		allergy: [],
+		notes: [],
+	};
 
 	for (const tok of tail) {
 		const lower = tok.toLowerCase();
@@ -81,7 +85,10 @@ export function parseGuestAddArgs(tail: string[]): GuestAddArgs {
 	}
 
 	const splitCsv = (parts: string[]): string[] =>
-		parts.flatMap(p => p.split(',')).map(s => s.trim()).filter(s => s.length > 0);
+		parts
+			.flatMap((p) => p.split(','))
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
 
 	result.dietaryRestrictions = splitCsv(buckets.diet);
 	result.allergies = splitCsv(buckets.allergy);
@@ -112,10 +119,12 @@ export async function handleHostingCommand(
 				[{ text: '👥 Guest Profiles', callbackData: 'app:food:host:guests' }],
 				[{ text: '➕ Add Guest', callbackData: 'app:food:host:gadd' }],
 			];
-			await services.telegram.sendWithButtons(userId,
+			await services.telegram.sendWithButtons(
+				userId,
 				'**Hosting**\nPlan an event with `/hosting plan <description>`\n' +
-				'Example: "dinner for 6 Saturday at 7pm, Sarah is vegetarian"',
-				menuButtons);
+					'Example: "dinner for 6 Saturday at 7pm, Sarah is vegetarian"',
+				menuButtons,
+			);
 			return;
 		}
 
@@ -125,8 +134,10 @@ export async function handleHostingCommand(
 			if (action === 'add') {
 				const name = args[2];
 				if (!name) {
-					await services.telegram.send(userId,
-						'Usage: `/hosting guests add <name> [--diet a,b] [--allergy x,y] [--notes text]`');
+					await services.telegram.send(
+						userId,
+						'Usage: `/hosting guests add <name> [--diet a,b] [--allergy x,y] [--notes text]`',
+					);
 					return;
 				}
 				const parsed = parseGuestAddArgs(args.slice(3));
@@ -143,11 +154,14 @@ export async function handleHostingCommand(
 				await addGuest(sharedStore, guest);
 
 				const parts: string[] = [];
-				if (parsed.dietaryRestrictions.length > 0) parts.push(`diet: ${parsed.dietaryRestrictions.join(', ')}`);
+				if (parsed.dietaryRestrictions.length > 0)
+					parts.push(`diet: ${parsed.dietaryRestrictions.join(', ')}`);
 				if (parsed.allergies.length > 0) parts.push(`allergies: ${parsed.allergies.join(', ')}`);
 				if (parsed.notes) parts.push(`notes: ${parsed.notes}`);
-				await services.telegram.send(userId,
-					`Added guest profile: **${name}**${parts.length > 0 ? ` (${parts.join(' • ')})` : ''}`);
+				await services.telegram.send(
+					userId,
+					`Added guest profile: **${name}**${parts.length > 0 ? ` (${parts.join(' • ')})` : ''}`,
+				);
 				return;
 			}
 
@@ -160,9 +174,9 @@ export async function handleHostingCommand(
 						await services.telegram.send(userId, 'No guest profiles to remove.');
 						return;
 					}
-					const buttons: InlineButton[][] = guests.map(g => ([
+					const buttons: InlineButton[][] = guests.map((g) => [
 						{ text: `❌ ${g.name}`, callbackData: `app:food:host:grem:${g.slug}` },
-					]));
+					]);
 					await services.telegram.sendWithButtons(userId, 'Select a guest to remove:', buttons);
 					return;
 				}
@@ -184,7 +198,10 @@ export async function handleHostingCommand(
 		if (subCommand === 'plan') {
 			const description = args.slice(1).join(' ');
 			if (!description) {
-				await services.telegram.send(userId, 'Usage: `/hosting plan <event description>`\nExample: "6 adults and 2 kids over Saturday at 6pm"');
+				await services.telegram.send(
+					userId,
+					'Usage: `/hosting plan <event description>`\nExample: "6 adults and 2 kids over Saturday at 6pm"',
+				);
 				return;
 			}
 

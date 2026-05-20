@@ -17,8 +17,8 @@ import type { SpaceKind } from '../../types/spaces.js';
 import { toArchiveTimestamp } from '../../utils/date.js';
 import { appendWithFrontmatter, atomicWrite, ensureDir } from '../../utils/file.js';
 import type { ChangeLog } from './change-log.js';
-import { SYSTEM_BYPASS_TOKEN } from './system-bypass-token.js';
 import { ScopeViolationError, findMatchingScope, resolveScopedPath } from './paths.js';
+import { SYSTEM_BYPASS_TOKEN } from './system-bypass-token.js';
 
 /** Metadata propagated to DataChangedPayload events. */
 export interface ScopedStoreEventMeta {
@@ -77,7 +77,10 @@ export class ScopedStore implements ScopedDataStore {
 
 	constructor(options: ScopedStoreOptions) {
 		// Validate system bypass token — forged symbols are rejected
-		if (options._systemBypassToken !== undefined && options._systemBypassToken !== SYSTEM_BYPASS_TOKEN) {
+		if (
+			options._systemBypassToken !== undefined &&
+			options._systemBypassToken !== SYSTEM_BYPASS_TOKEN
+		) {
 			throw new Error('Invalid system bypass token: forged symbol rejected');
 		}
 
@@ -110,11 +113,7 @@ export class ScopedStore implements ScopedDataStore {
 		}
 
 		if (!this.scopes || this.scopes.length === 0) {
-			throw new ScopeViolationError(
-				path,
-				operation,
-				this.appId,
-			);
+			throw new ScopeViolationError(path, operation, this.appId);
 		}
 
 		const scope = findMatchingScope(path, this.scopes);
@@ -164,7 +163,14 @@ export class ScopedStore implements ScopedDataStore {
 		if (!fileExists) return '';
 
 		const content = await readFile(fullPath, 'utf-8');
-		await this.changeLog.record('read', path, this.appId, this.userId, this.spaceId, this.eventMeta);
+		await this.changeLog.record(
+			'read',
+			path,
+			this.appId,
+			this.userId,
+			this.spaceId,
+			this.eventMeta,
+		);
 		return content;
 	}
 
@@ -172,7 +178,14 @@ export class ScopedStore implements ScopedDataStore {
 		this.checkScope(path, 'write');
 		const fullPath = resolveScopedPath(this.baseDir, path);
 		await atomicWrite(fullPath, content);
-		await this.changeLog.record('write', path, this.appId, this.userId, this.spaceId, this.eventMeta);
+		await this.changeLog.record(
+			'write',
+			path,
+			this.appId,
+			this.userId,
+			this.spaceId,
+			this.eventMeta,
+		);
 		this.emitDataChanged('write', path);
 	}
 
@@ -190,7 +203,14 @@ export class ScopedStore implements ScopedDataStore {
 			await fsAppend(fullPath, content, 'utf-8');
 		}
 
-		await this.changeLog.record('append', path, this.appId, this.userId, this.spaceId, this.eventMeta);
+		await this.changeLog.record(
+			'append',
+			path,
+			this.appId,
+			this.userId,
+			this.spaceId,
+			this.eventMeta,
+		);
 		this.emitDataChanged('append', path);
 	}
 
@@ -240,7 +260,14 @@ export class ScopedStore implements ScopedDataStore {
 		await ensureDir(join(archiveFullPath, '..'));
 		await rename(fullPath, archiveFullPath);
 
-		await this.changeLog.record('archive', path, this.appId, this.userId, this.spaceId, this.eventMeta);
+		await this.changeLog.record(
+			'archive',
+			path,
+			this.appId,
+			this.userId,
+			this.spaceId,
+			this.eventMeta,
+		);
 		this.emitDataChanged('archive', path);
 	}
 }

@@ -52,7 +52,8 @@ describe('chatbot bucket cases (migrated from v0)', () => {
 	});
 
 	it('every chatbot prompt is self-contained (no context-dependent pronouns; Codex C3)', () => {
-		const BANNED = /\b(those items|that receipt|I just sent|the receipt I just|the items I just)\b/i;
+		const BANNED =
+			/\b(those items|that receipt|I just sent|the receipt I just|the items I just)\b/i;
 		for (const c of cases) {
 			const payload = String(c.inputs[0]!.payload);
 			expect(payload).not.toMatch(BANNED);

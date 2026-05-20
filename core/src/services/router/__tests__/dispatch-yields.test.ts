@@ -11,7 +11,7 @@ import type { SystemConfig } from '../../../types/config.js';
 import type { ClassifyResult, LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 
@@ -38,9 +38,7 @@ function createMockTelegram(): TelegramService {
 function createMockLLM(classifyResult?: ClassifyResult): LLMService {
 	return {
 		complete: vi.fn(),
-		classify: vi
-			.fn()
-			.mockResolvedValue(classifyResult ?? { category: 'unknown', confidence: 0.1 }),
+		classify: vi.fn().mockResolvedValue(classifyResult ?? { category: 'unknown', confidence: 0.1 }),
 		extractStructured: vi.fn(),
 	};
 }
@@ -187,4 +185,4 @@ describe('dispatchMessage HandlerResult contract', () => {
 		);
 		expect(fallback.handleUnrecognized).not.toHaveBeenCalled();
 	});
-})
+});

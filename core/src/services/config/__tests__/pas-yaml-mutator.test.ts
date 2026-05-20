@@ -102,9 +102,9 @@ n8n:
 		});
 		const result = await readParsed();
 		expect(
-			(
-				(result['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>
-			)['retention_days'],
+			((result['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
+				'retention_days'
+			],
 		).toBe(90);
 	});
 
@@ -186,8 +186,6 @@ n8n:
 
 		const result = await readParsed();
 		expect((result['users'] as unknown[]).length).toBe(1);
-		expect(
-			((result['chat'] as Record<string, unknown>) ?? {})['log_to_notes'],
-		).toBe(true);
+		expect(((result['chat'] as Record<string, unknown>) ?? {})['log_to_notes']).toBe(true);
 	});
 });

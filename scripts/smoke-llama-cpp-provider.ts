@@ -64,7 +64,8 @@ async function main() {
 		pass(`providerType = ${provider.providerType}`);
 		if (provider.providerId !== 'llama-cpp') fail('providerId', provider.providerId);
 		pass(`providerId = ${provider.providerId}`);
-		if (provider.supportsVision !== false) fail('supportsVision should be false', provider.supportsVision);
+		if (provider.supportsVision !== false)
+			fail('supportsVision should be false', provider.supportsVision);
 		pass(`supportsVision = false (REQ-LLM-LLAMA-CPP-009)`);
 		if (!isLocalProvider(provider.providerType)) fail('isLocalProvider should be true');
 		pass(`isLocalProvider(providerType) = true (REQ-LLM-LLAMA-CPP-006)`);
@@ -86,10 +87,10 @@ async function main() {
 		// --- 3. completeWithUsage (real chat round-trip) ---
 		console.log('3. completeWithUsage() against /v1/chat/completions:');
 		const t0 = Date.now();
-		const result = await provider.completeWithUsage(
-			'Reply with exactly the single word: PONG',
-			{ maxTokens: 16, temperature: 0 },
-		);
+		const result = await provider.completeWithUsage('Reply with exactly the single word: PONG', {
+			maxTokens: 16,
+			temperature: 0,
+		});
 		const elapsed = Date.now() - t0;
 		pass(`call returned in ${elapsed}ms`);
 		if (typeof result.text !== 'string' || result.text.length === 0) {
@@ -103,7 +104,9 @@ async function main() {
 		if (!result.finishReason) fail('finishReason missing');
 		pass(`result.finishReason = ${result.finishReason}`);
 		if (!result.usage) fail('usage missing');
-		pass(`usage: { inputTokens: ${result.usage.inputTokens}, outputTokens: ${result.usage.outputTokens} }`);
+		pass(
+			`usage: { inputTokens: ${result.usage.inputTokens}, outputTokens: ${result.usage.outputTokens} }`,
+		);
 		console.log('');
 
 		// --- 4. Cost path returns $0 ---
@@ -115,7 +118,9 @@ async function main() {
 			'llama-cpp',
 		);
 		if (cost !== 0) fail(`estimateCallCost returned ${cost}, expected 0`);
-		pass(`estimateCallCost(model, ${result.usage.inputTokens}, ${result.usage.outputTokens}, 'llama-cpp') = 0`);
+		pass(
+			`estimateCallCost(model, ${result.usage.inputTokens}, ${result.usage.outputTokens}, 'llama-cpp') = 0`,
+		);
 
 		// Verify cost-tracker records $0 too
 		await costTracker.record({

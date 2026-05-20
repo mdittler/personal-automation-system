@@ -14,16 +14,16 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { parse as parseYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
 import { CredentialService } from '../../services/credentials/index.js';
 import { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerViewLocals } from '../view-locals.js';
 
 const TEST_USER_ID = 'user1';
 const TEST_PASSWORD = 'pass-concurrent-123';
@@ -209,8 +209,7 @@ function collectCookies(
 ): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const res of responses)
-		for (const c of res.cookies as Array<{ name: string; value: string }>)
-			out[c.name] = c.value;
+		for (const c of res.cookies as Array<{ name: string; value: string }>) out[c.name] = c.value;
 	return out;
 }
 
@@ -275,7 +274,13 @@ describe('Settings Concurrency — Slice 7', () => {
 
 		// Read the override file directly and parse to prove real YAML validity
 		// (getAll() swallows parse errors and returns defaults — insufficient)
-		const overridePath = join(srv.tempDir, 'system', 'app-config', 'chatbot', `${TEST_USER_ID}.yaml`);
+		const overridePath = join(
+			srv.tempDir,
+			'system',
+			'app-config',
+			'chatbot',
+			`${TEST_USER_ID}.yaml`,
+		);
 		const raw = await readFile(overridePath, 'utf-8');
 		const parsed = parseYaml(raw) as Record<string, unknown>;
 		expect(typeof parsed.log_to_notes).toBe('boolean');

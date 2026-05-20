@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AppConfigService } from '../../../types/config.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { AppConfigService } from '../../../types/config.js';
 import { appendDailyNote } from '../daily-notes.js';
 
 function makeConfig(overrides: Record<string, unknown> | null): AppConfigService {
@@ -24,7 +24,10 @@ describe('appendDailyNote — opt-in behavior', () => {
 		const store = createMockScopedStore();
 		vi.mocked(services.data.forUser).mockReturnValue(store);
 
-		const ctx = createTestMessageContext({ text: 'a note', timestamp: new Date('2026-03-11T14:30:00Z') });
+		const ctx = createTestMessageContext({
+			text: 'a note',
+			timestamp: new Date('2026-03-11T14:30:00Z'),
+		});
 		const result = await appendDailyNote(ctx, {
 			data: services.data,
 			logger: services.logger,

@@ -134,7 +134,10 @@ export class CredentialService {
 		// Read or parse error — create sidecar and start empty
 		if ('error' in result) {
 			await this.createCorruptSidecar();
-			this.logger?.warn({ path: this.credPath, error: result.error }, 'credentials: corrupt file; starting empty');
+			this.logger?.warn(
+				{ path: this.credPath, error: result.error },
+				'credentials: corrupt file; starting empty',
+			);
 			return {};
 		}
 
@@ -143,7 +146,10 @@ export class CredentialService {
 
 		if (typeof raw !== 'object' || Array.isArray(raw)) {
 			await this.createCorruptSidecar();
-			this.logger?.warn({ path: this.credPath }, 'credentials: unexpected top-level shape; starting empty');
+			this.logger?.warn(
+				{ path: this.credPath },
+				'credentials: unexpected top-level shape; starting empty',
+			);
 			return {};
 		}
 

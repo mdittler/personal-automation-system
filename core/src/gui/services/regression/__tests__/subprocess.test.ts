@@ -13,13 +13,13 @@
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
+import { isTerminalEventType } from '../run-registry.js';
 import {
 	type RegressionEvent,
 	type SpawnProcLike,
 	spawnRegression,
 	validateSpawnArgs,
 } from '../subprocess.js';
-import { isTerminalEventType } from '../run-registry.js';
 
 function terminalEvents(evts: readonly RegressionEvent[]): RegressionEvent[] {
 	return evts.filter((e) => isTerminalEventType(e.type));

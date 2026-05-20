@@ -45,9 +45,7 @@ describe('escapeMarkdown', () => {
 
 describe('escapeMarkdown — stored data regression (Gap 6)', () => {
 	it('escapes markdown table row with bold cell', () => {
-		expect(escapeMarkdown('| *Chicken* | 500g | $4.99 |')).toBe(
-			'| \\*Chicken\\* | 500g | $4.99 |',
-		);
+		expect(escapeMarkdown('| *Chicken* | 500g | $4.99 |')).toBe('| \\*Chicken\\* | 500g | $4.99 |');
 	});
 
 	it('escapes URL with parentheses', () => {
@@ -80,9 +78,7 @@ describe('escapeMarkdown — stored data regression (Gap 6)', () => {
 
 	it('handles multiline string with mixed special characters', () => {
 		const input = '*Bold heading*\n_italic note_\n`inline code`';
-		expect(escapeMarkdown(input)).toBe(
-			'\\*Bold heading\\*\n\\_italic note\\_\n\\`inline code\\`',
-		);
+		expect(escapeMarkdown(input)).toBe('\\*Bold heading\\*\n\\_italic note\\_\n\\`inline code\\`');
 	});
 
 	it('does not alter plain grocery list text', () => {

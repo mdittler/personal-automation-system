@@ -17,19 +17,31 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiKeyService } from '../../services/api-keys/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
-import type { UserManager } from '../../services/user-manager/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerCredentialRoutes } from '../routes/credentials.js';
 import { registerApiKeyRoutes } from '../routes/api-keys.js';
+import { registerCredentialRoutes } from '../routes/credentials.js';
 
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
 
-const ADMIN_USER = { id: 'admin-1', name: 'Admin', isAdmin: true, enabledApps: ['*'], sharedScopes: [] };
-const MEMBER_USER = { id: 'member-1', name: 'Member', isAdmin: false, enabledApps: ['*'], sharedScopes: [] };
+const ADMIN_USER = {
+	id: 'admin-1',
+	name: 'Admin',
+	isAdmin: true,
+	enabledApps: ['*'],
+	sharedScopes: [],
+};
+const MEMBER_USER = {
+	id: 'member-1',
+	name: 'Member',
+	isAdmin: false,
+	enabledApps: ['*'],
+	sharedScopes: [],
+};
 const ALL_USERS = [ADMIN_USER, MEMBER_USER];
 
 const ADMIN_PASS = 'admin-secret-123';
@@ -108,7 +120,10 @@ async function buildApp() {
 }
 
 /** Login with username + password, return the auth cookie. */
-async function loginWithPassword(userId: string, password: string): Promise<Record<string, string>> {
+async function loginWithPassword(
+	userId: string,
+	password: string,
+): Promise<Record<string, string>> {
 	const res = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
@@ -118,7 +133,9 @@ async function loginWithPassword(userId: string, password: string): Promise<Reco
 }
 
 /** GET a page and extract the CSRF token from the meta tag. */
-async function getCsrfToken(cookies: Record<string, string>): Promise<{ csrfToken: string; cookies: Record<string, string> }> {
+async function getCsrfToken(
+	cookies: Record<string, string>,
+): Promise<{ csrfToken: string; cookies: Record<string, string> }> {
 	const res = await app.inject({
 		method: 'GET',
 		url: '/gui/account',
@@ -206,10 +223,15 @@ describe('D5b-8: Account management', () => {
 
 	// ---- Test 3: non-admin cannot reset another user's password ----
 	it('non-admin POST /users/:userId/reset-password → 403', async () => {
-		const res = await authPost(MEMBER_USER.id, MEMBER_PASS, `/gui/users/${ADMIN_USER.id}/reset-password`, {
-			newPassword: 'hacked-password',
-			confirmPassword: 'hacked-password',
-		});
+		const res = await authPost(
+			MEMBER_USER.id,
+			MEMBER_PASS,
+			`/gui/users/${ADMIN_USER.id}/reset-password`,
+			{
+				newPassword: 'hacked-password',
+				confirmPassword: 'hacked-password',
+			},
+		);
 
 		// requirePlatformAdmin returns 403
 		expect(res.statusCode).toBe(403);
@@ -219,10 +241,15 @@ describe('D5b-8: Account management', () => {
 	it('admin POST /users/:userId/reset-password succeeds and bumps target sessionVersion', async () => {
 		const versionBefore = await credService.getSessionVersion(MEMBER_USER.id);
 
-		const res = await authPost(ADMIN_USER.id, ADMIN_PASS, `/gui/users/${MEMBER_USER.id}/reset-password`, {
-			newPassword: 'admin-reset-pass',
-			confirmPassword: 'admin-reset-pass',
-		});
+		const res = await authPost(
+			ADMIN_USER.id,
+			ADMIN_PASS,
+			`/gui/users/${MEMBER_USER.id}/reset-password`,
+			{
+				newPassword: 'admin-reset-pass',
+				confirmPassword: 'admin-reset-pass',
+			},
+		);
 
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('Password for');
@@ -272,7 +299,12 @@ describe('D5b-8: Account management', () => {
 			label: 'to-revoke',
 		});
 
-		const res = await authPost(ADMIN_USER.id, ADMIN_PASS, `/gui/account/api-keys/${keyId}/revoke`, {});
+		const res = await authPost(
+			ADMIN_USER.id,
+			ADMIN_PASS,
+			`/gui/account/api-keys/${keyId}/revoke`,
+			{},
+		);
 
 		// Should redirect after revoke
 		expect(res.statusCode).toBe(302);
@@ -290,7 +322,12 @@ describe('D5b-8: Account management', () => {
 		});
 
 		// Admin tries to revoke member's key via the self-service route
-		const res = await authPost(ADMIN_USER.id, ADMIN_PASS, `/gui/account/api-keys/${keyId}/revoke`, {});
+		const res = await authPost(
+			ADMIN_USER.id,
+			ADMIN_PASS,
+			`/gui/account/api-keys/${keyId}/revoke`,
+			{},
+		);
 
 		// Route checks listKeysForUser(admin) — doesn't contain member's key → 403
 		expect(res.statusCode).toBe(403);

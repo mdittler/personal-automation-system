@@ -165,9 +165,7 @@ describe('handleCookedCallback', () => {
 	it('does nothing when there is no plan', async () => {
 		const household = makeHousehold();
 
-		sharedStore.read
-			.mockResolvedValueOnce(stringify(household))
-			.mockResolvedValueOnce(null); // no plan
+		sharedStore.read.mockResolvedValueOnce(stringify(household)).mockResolvedValueOnce(null); // no plan
 
 		await handleCookedCallback(services, '2026-03-31', 'user1', 12345, 99);
 
@@ -327,10 +325,7 @@ describe('handleRateCallback', () => {
 		expect(recipeWrite).toBeUndefined();
 
 		// Plan was saved
-		expect(sharedStore.write).toHaveBeenCalledWith(
-			'meal-plans/current.yaml',
-			expect.any(String),
-		);
+		expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 
 		// Message was edited with skip text
 		expect(services.telegram.editMessage).toHaveBeenCalledWith(
@@ -355,10 +350,7 @@ describe('handleRateCallback', () => {
 		await handleRateCallback(services, 'up:2026-03-31', 'user1', 12345, 99);
 
 		// Plan still saved with rated=true
-		expect(sharedStore.write).toHaveBeenCalledWith(
-			'meal-plans/current.yaml',
-			expect.any(String),
-		);
+		expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 
 		// Message still edited
 		expect(services.telegram.editMessage).toHaveBeenCalledWith(
@@ -439,9 +431,7 @@ describe('handleNightlyRatingPromptJob', () => {
 	it('skips when there is no active plan', async () => {
 		const household = makeHousehold();
 
-		sharedStore.read
-			.mockResolvedValueOnce(stringify(household))
-			.mockResolvedValueOnce(null); // no plan
+		sharedStore.read.mockResolvedValueOnce(stringify(household)).mockResolvedValueOnce(null); // no plan
 
 		await handleNightlyRatingPromptJob(services, '2026-03-31');
 

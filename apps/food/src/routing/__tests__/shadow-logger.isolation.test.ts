@@ -12,20 +12,16 @@
  */
 
 import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { stringify } from 'yaml';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join, resolve } from 'node:path';
 import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
-import type { ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stringify } from 'yaml';
 
 import { handleMessage, init } from '../../index.js';
-import {
-	__clearShadowDepsForTests,
-	__flushShadowForTests,
-} from '../shadow-integration.js';
 import type { Household } from '../../types.js';
+import { __clearShadowDepsForTests, __flushShadowForTests } from '../shadow-integration.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 

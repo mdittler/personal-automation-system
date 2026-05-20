@@ -6,10 +6,9 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
-import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type {
 	DailyMacroEntry,
 	MacroAdherence,
@@ -21,9 +20,10 @@ import type {
 	MonthlyMacroLog,
 	Recipe,
 } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 /** A day "hits" a macro target if the day's total is within ±this fraction of the target. */
-export const ADHERENCE_TOLERANCE = 0.10;
+export const ADHERENCE_TOLERANCE = 0.1;
 
 const MACRO_FIELDS: Array<keyof MacroData & keyof MacroTargets> = [
 	'calories',
@@ -143,7 +143,12 @@ export async function loadMonthlyLog(
 		const data = parse(content) as MonthlyMacroLog;
 		// Schema-invalid but non-empty YAML: preserve before discarding (H3).
 		if (!data?.month) {
-			await preserveCorruptFile(store, raw, month, new Error('parsed YAML missing required "month" field'));
+			await preserveCorruptFile(
+				store,
+				raw,
+				month,
+				new Error('parsed YAML missing required "month" field'),
+			);
 			return null;
 		}
 		return {
@@ -157,10 +162,7 @@ export async function loadMonthlyLog(
 	}
 }
 
-export async function saveMonthlyLog(
-	store: ScopedDataStore,
-	log: MonthlyMacroLog,
-): Promise<void> {
+export async function saveMonthlyLog(store: ScopedDataStore, log: MonthlyMacroLog): Promise<void> {
 	const fm = generateFrontmatter({
 		title: `Nutrition ${log.month}`,
 		date: new Date().toISOString(),
@@ -177,7 +179,7 @@ export async function saveMonthlyLog(
 }
 
 export function getDailyMacros(log: MonthlyMacroLog, date: string): DailyMacroEntry | null {
-	return log.days.find(d => d.date === date) ?? null;
+	return log.days.find((d) => d.date === date) ?? null;
 }
 
 export async function logMealMacros(
@@ -190,7 +192,10 @@ export async function logMealMacros(
 	const parsed = MealMacroEntrySchema.safeParse(entry);
 	if (!parsed.success) {
 		// eslint-disable-next-line no-console
-		console.error('[macro-tracker] logMealMacros: invalid entry, skipping write:', parsed.error.flatten());
+		console.error(
+			'[macro-tracker] logMealMacros: invalid entry, skipping write:',
+			parsed.error.flatten(),
+		);
 		return;
 	}
 	const validEntry = parsed.data as MealMacroEntry;
@@ -201,14 +206,14 @@ export async function logMealMacros(
 		log = { month, userId, days: [] };
 	}
 
-	let day = log.days.find(d => d.date === date);
+	let day = log.days.find((d) => d.date === date);
 	if (!day) {
 		day = { date, meals: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 } };
 		log.days.push(day);
 	}
 
 	day.meals.push(validEntry);
-	day.totals = sumMacros(...day.meals.map(m => m.macros));
+	day.totals = sumMacros(...day.meals.map((m) => m.macros));
 
 	await saveMonthlyLog(store, log);
 }
@@ -250,14 +255,13 @@ export function computeProgress(
 	targets: MacroTargets,
 	period: string,
 ): MacroProgress {
-	const totals = entries.map(e => e.totals);
+	const totals = entries.map((e) => e.totals);
 	const current = sumMacros(...totals);
 	const dailyAverage = averageMacros(totals, entries.length);
 
-	const hasAnyTarget = MACRO_FIELDS.some(f => (targets[f] ?? 0) > 0);
-	const adherence = hasAnyTarget && entries.length > 0
-		? computeAdherence(entries, targets)
-		: undefined;
+	const hasAnyTarget = MACRO_FIELDS.some((f) => (targets[f] ?? 0) > 0);
+	const adherence =
+		hasAnyTarget && entries.length > 0 ? computeAdherence(entries, targets) : undefined;
 
 	return {
 		current,
@@ -348,13 +352,15 @@ export function formatMacroSummary(progress: MacroProgress, dailyEntry?: DailyMa
 		return `No macro data tracked for ${progress.period}.`;
 	}
 
-	const lines: string[] = [`**Nutrition — ${progress.period}** (${progress.daysTracked} day${progress.daysTracked === 1 ? '' : 's'})`];
+	const lines: string[] = [
+		`**Nutrition — ${progress.period}** (${progress.daysTracked} day${progress.daysTracked === 1 ? '' : 's'})`,
+	];
 	lines.push('');
 
 	// H11.w: If daily entry is provided and has meals, list them
 	if (dailyEntry && dailyEntry.meals.length > 0) {
 		const hasLowConfidence = dailyEntry.meals.some(
-			m => m.confidence !== undefined && m.confidence < 0.5,
+			(m) => m.confidence !== undefined && m.confidence < 0.5,
 		);
 
 		for (const meal of dailyEntry.meals) {
@@ -370,9 +376,13 @@ export function formatMacroSummary(progress: MacroProgress, dailyEntry?: DailyMa
 		lines.push('');
 	}
 
-	const hasTargets = Object.values(progress.targets).some(v => v !== undefined && v > 0);
+	const hasTargets = Object.values(progress.targets).some((v) => v !== undefined && v > 0);
 
-	const formatField = (label: string, value: number | undefined, target: number | undefined): string => {
+	const formatField = (
+		label: string,
+		value: number | undefined,
+		target: number | undefined,
+	): string => {
 		const val = value ?? 0;
 		if (hasTargets && target && target > 0) {
 			return `${label}: ${val} / ${target}`;

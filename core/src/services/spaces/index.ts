@@ -144,9 +144,7 @@ export class SpaceService {
 		return this.enqueue(async () => {
 			// Check max spaces limit (only on create)
 			const existing = this.spaces[def.id];
-			const existingSpace = existing
-				? { ...existing, members: [...existing.members] }
-				: null;
+			const existingSpace = existing ? { ...existing, members: [...existing.members] } : null;
 			const isNew = !existingSpace;
 			if (isNew && Object.keys(this.spaces).length >= MAX_SPACES) {
 				throw new SpaceLimitError(`Maximum ${MAX_SPACES} spaces allowed`);
@@ -470,7 +468,8 @@ export class SpaceService {
 			} else if (!SAFE_SEGMENT.test(def.householdId)) {
 				errors.push({
 					field: 'householdId',
-					message: 'householdId must be a valid SAFE_SEGMENT string (letters, digits, hyphens, underscores)',
+					message:
+						'householdId must be a valid SAFE_SEGMENT string (letters, digits, hyphens, underscores)',
 				});
 			}
 		} else if (def.kind === 'collaboration') {

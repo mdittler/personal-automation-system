@@ -19,30 +19,30 @@
  */
 
 import { mkdir, mkdtemp, readdir, readlink, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { HouseholdService, UserBoundaryError } from '../services/household/index.js';
-import { DataStoreServiceImpl, SpaceMembershipError } from '../services/data-store/index.js';
-import { ChangeLog } from '../services/data-store/change-log.js';
-import { SYSTEM_BYPASS_TOKEN } from '../services/data-store/system-bypass-token.js';
-import { InteractionContextServiceImpl } from '../services/interaction-context/index.js';
+import { AppToggleStore } from '../services/app-toggle/index.js';
 import { requestContext } from '../services/context/request-context.js';
-import { InviteService } from '../services/invite/index.js';
+import { ChangeLog } from '../services/data-store/change-log.js';
+import { DataStoreServiceImpl } from '../services/data-store/index.js';
+import { SYSTEM_BYPASS_TOKEN } from '../services/data-store/system-bypass-token.js';
 import { EventBusServiceImpl } from '../services/event-bus/index.js';
 import { FileIndexService } from '../services/file-index/index.js';
+import { HouseholdService, UserBoundaryError } from '../services/household/index.js';
+import { InteractionContextServiceImpl } from '../services/interaction-context/index.js';
+import { InviteService } from '../services/invite/index.js';
+import { collectSection } from '../services/reports/section-collector.js';
+import { FallbackHandler } from '../services/router/fallback.js';
+import type { SpaceService } from '../services/spaces/index.js';
+import { UserManager } from '../services/user-manager/index.js';
+import { VaultService } from '../services/vault/index.js';
+import type { ContextStoreService } from '../types/context-store.js';
 import type { DataChangedPayload } from '../types/data-events.js';
 import type { ManifestDataScope } from '../types/manifest.js';
 import type { SpaceDefinition } from '../types/spaces.js';
 import type { RegisteredUser } from '../types/users.js';
-import { collectSection } from '../services/reports/section-collector.js';
-import type { ContextStoreService } from '../types/context-store.js';
-import { FallbackHandler } from '../services/router/fallback.js';
-import { VaultService } from '../services/vault/index.js';
-import { UserManager } from '../services/user-manager/index.js';
-import { AppToggleStore } from '../services/app-toggle/index.js';
-import type { SpaceService } from '../services/spaces/index.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -183,38 +183,30 @@ afterAll(async () => {
 describe('DataStore boundary', () => {
 	it('1: alpha-parent-a cannot forUser(beta-parent-b) — cross-household', async () => {
 		const store = makeDataStore();
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				expect(() => store.forUser('beta-parent-b')).toThrow(UserBoundaryError);
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			expect(() => store.forUser('beta-parent-b')).toThrow(UserBoundaryError);
+		});
 	});
 
 	it('2: alpha-parent-a cannot forUser(alpha-child) — intra-household actor check', async () => {
 		const store = makeDataStore();
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				// Actor is alpha-parent-a, target is alpha-child — different user IDs => UserBoundaryError
-				expect(() => store.forUser('alpha-child')).toThrow(UserBoundaryError);
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			// Actor is alpha-parent-a, target is alpha-child — different user IDs => UserBoundaryError
+			expect(() => store.forUser('alpha-child')).toThrow(UserBoundaryError);
+		});
 	});
 
 	it('3: alpha-parent-a cannot forSpace(spaceId, alpha-child) — actor-vs-target mismatch', async () => {
 		const spaceService = {
-			isMember: (sid: string, uid: string) => ALPHA_SPACE.id === sid && ALPHA_SPACE.members.includes(uid),
+			isMember: (sid: string, uid: string) =>
+				ALPHA_SPACE.id === sid && ALPHA_SPACE.members.includes(uid),
 			getSpace: (sid: string) => (sid === ALPHA_SPACE.id ? ALPHA_SPACE : null),
 		};
 		const store = makeDataStore(spaceService);
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				// Actor is alpha-parent-a but target userId is alpha-child => UserBoundaryError
-				expect(() => store.forSpace(ALPHA_SPACE.id, 'alpha-child')).toThrow(UserBoundaryError);
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			// Actor is alpha-parent-a but target userId is alpha-child => UserBoundaryError
+			expect(() => store.forSpace(ALPHA_SPACE.id, 'alpha-child')).toThrow(UserBoundaryError);
+		});
 	});
 });
 
@@ -247,15 +239,24 @@ describe('FileIndex / DataQuery isolation', () => {
 		const betaSharedDir = join(dataDir, 'households', 'hh-beta', 'shared', 'food', 'shared');
 		await mkdir(alphaSharedDir, { recursive: true });
 		await mkdir(betaSharedDir, { recursive: true });
-		await writeFile(join(alphaSharedDir, 'grocery.md'), '---\ntitle: Alpha Grocery\ntype: grocery-list\n---\n');
-		await writeFile(join(betaSharedDir, 'grocery.md'), '---\ntitle: Beta Grocery\ntype: grocery-list\n---\n');
+		await writeFile(
+			join(alphaSharedDir, 'grocery.md'),
+			'---\ntitle: Alpha Grocery\ntype: grocery-list\n---\n',
+		);
+		await writeFile(
+			join(betaSharedDir, 'grocery.md'),
+			'---\ntitle: Beta Grocery\ntype: grocery-list\n---\n',
+		);
 
 		// Use directory-prefix scopes (how real manifests are written, e.g. 'recipes/')
 		const appScopes = new Map<string, { user: ManifestDataScope[]; shared: ManifestDataScope[] }>([
-			['food', {
-				user: [{ path: 'shared/', access: 'write' as const }],
-				shared: [{ path: 'shared/', access: 'write' as const }],
-			}],
+			[
+				'food',
+				{
+					user: [{ path: 'shared/', access: 'write' as const }],
+					shared: [{ path: 'shared/', access: 'write' as const }],
+				},
+			],
 		]);
 
 		const fileIndex = new FileIndexService(dataDir, appScopes);
@@ -289,23 +290,17 @@ describe('InteractionContext actor check', () => {
 	});
 
 	it('6: alpha-parent-a cannot getRecent(beta-parent-b) from hh-alpha context', async () => {
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				expect(() => interactionCtx.getRecent('beta-parent-b')).toThrow(UserBoundaryError);
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			expect(() => interactionCtx.getRecent('beta-parent-b')).toThrow(UserBoundaryError);
+		});
 	});
 
 	it('7: alpha-parent-a CAN getRecent(alpha-parent-a) from own context', async () => {
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				const entries = interactionCtx.getRecent('alpha-parent-a');
-				expect(Array.isArray(entries)).toBe(true);
-				// No error thrown
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			const entries = interactionCtx.getRecent('alpha-parent-a');
+			expect(Array.isArray(entries)).toBe(true);
+			// No error thrown
+		});
 	});
 });
 
@@ -327,14 +322,11 @@ describe('Space membership enforcement', () => {
 		const store = makeDataStore(spaceService);
 
 		// Run as beta-parent-b who does NOT belong to hh-alpha
-		await requestContext.run(
-			{ userId: 'beta-parent-b', householdId: 'hh-beta' },
-			async () => {
-				// beta-parent-b is not a member of alpha-family → SpaceMembershipError first
-				// (since isMember returns false for beta-parent-b on alpha-family)
-				expect(() => store.forSpace(ALPHA_SPACE.id, 'beta-parent-b')).toThrow();
-			},
-		);
+		await requestContext.run({ userId: 'beta-parent-b', householdId: 'hh-beta' }, async () => {
+			// beta-parent-b is not a member of alpha-family → SpaceMembershipError first
+			// (since isMember returns false for beta-parent-b on alpha-family)
+			expect(() => store.forSpace(ALPHA_SPACE.id, 'beta-parent-b')).toThrow();
+		});
 	});
 });
 
@@ -352,17 +344,14 @@ describe('Collaboration space isolation', () => {
 		const store = makeDataStore(spaceService);
 
 		// beta-parent-b IS a member of the collaboration space — should succeed
-		await requestContext.run(
-			{ userId: 'beta-parent-b', householdId: 'hh-beta' },
-			async () => {
-				// forSpace for a collaboration space stores under collaborations/<sId>/
-				// No household check, so should NOT throw
-				expect(() => store.forSpace(COLLAB_SPACE.id, 'beta-parent-b')).not.toThrow();
+		await requestContext.run({ userId: 'beta-parent-b', householdId: 'hh-beta' }, async () => {
+			// forSpace for a collaboration space stores under collaborations/<sId>/
+			// No household check, so should NOT throw
+			expect(() => store.forSpace(COLLAB_SPACE.id, 'beta-parent-b')).not.toThrow();
 
-				// But forUser(alpha-parent-a) from beta context must still fail
-				expect(() => store.forUser('alpha-parent-a')).toThrow(UserBoundaryError);
-			},
-		);
+			// But forUser(alpha-parent-a) from beta context must still fail
+			expect(() => store.forUser('alpha-parent-a')).toThrow(UserBoundaryError);
+		});
 	});
 });
 
@@ -413,13 +402,10 @@ describe('data:changed events', () => {
 
 		const store = makeDataStore();
 
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				const sharedStore = store.forShared('grocery');
-				await sharedStore.write('grocery.md', '# Shared Grocery\n');
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			const sharedStore = store.forShared('grocery');
+			await sharedStore.write('grocery.md', '# Shared Grocery\n');
+		});
 
 		// Allow async event propagation
 		await new Promise((r) => setTimeout(r, 10));
@@ -445,13 +431,10 @@ describe('data:changed events', () => {
 
 		const store = makeDataStore();
 
-		await requestContext.run(
-			{ userId: 'alpha-parent-a', householdId: 'hh-alpha' },
-			async () => {
-				const userStore = store.forUser('alpha-parent-a');
-				await userStore.write('notes.md', '# Test\n');
-			},
-		);
+		await requestContext.run({ userId: 'alpha-parent-a', householdId: 'hh-alpha' }, async () => {
+			const userStore = store.forUser('alpha-parent-a');
+			await userStore.write('notes.md', '# Test\n');
+		});
 
 		await new Promise((r) => setTimeout(r, 10));
 
@@ -488,16 +471,34 @@ describe('API change-log filter', () => {
 		// Test the filtering logic from changes.ts directly (without standing up Fastify).
 		// The filter is: if (requestHouseholdId) filter e => !e.householdId || e.householdId === requestHouseholdId
 		const entries = [
-			{ timestamp: new Date().toISOString(), operation: 'write', path: 'a.md', appId: 'food', userId: 'u1', householdId: 'hh-alpha' },
-			{ timestamp: new Date().toISOString(), operation: 'write', path: 'b.md', appId: 'food', userId: 'u2', householdId: 'hh-beta' },
-			{ timestamp: new Date().toISOString(), operation: 'write', path: 'c.md', appId: 'food', userId: 'system' }, // no householdId
+			{
+				timestamp: new Date().toISOString(),
+				operation: 'write',
+				path: 'a.md',
+				appId: 'food',
+				userId: 'u1',
+				householdId: 'hh-alpha',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				operation: 'write',
+				path: 'b.md',
+				appId: 'food',
+				userId: 'u2',
+				householdId: 'hh-beta',
+			},
+			{
+				timestamp: new Date().toISOString(),
+				operation: 'write',
+				path: 'c.md',
+				appId: 'food',
+				userId: 'system',
+			}, // no householdId
 		];
 
 		// Simulate hh-beta context filter
 		const betaHouseholdId = 'hh-beta';
-		const betaFiltered = entries.filter(
-			(e) => !e.householdId || e.householdId === betaHouseholdId,
-		);
+		const betaFiltered = entries.filter((e) => !e.householdId || e.householdId === betaHouseholdId);
 
 		// hh-alpha row should be excluded
 		expect(betaFiltered.some((e) => e.householdId === 'hh-alpha')).toBe(false);
@@ -660,7 +661,14 @@ describe('FallbackHandler — household daily-note routing', () => {
 
 		await handler.handleUnrecognized(fakeCtx, fakeTelegram);
 
-		const expectedDir = join(dataDir, 'households', 'hh-alpha', 'users', 'alpha-parent-a', 'daily-notes');
+		const expectedDir = join(
+			dataDir,
+			'households',
+			'hh-alpha',
+			'users',
+			'alpha-parent-a',
+			'daily-notes',
+		);
 		const files = await readdir(expectedDir);
 		expect(files).toHaveLength(1);
 		expect(files[0]).toMatch(/^2026-04-15\.md$/);
@@ -671,7 +679,9 @@ describe('FallbackHandler — household daily-note routing', () => {
 		try {
 			await readdir(legacyDir);
 			legacyExists = true;
-		} catch { /* not created */ }
+		} catch {
+			/* not created */
+		}
 		expect(legacyExists).toBe(false);
 	});
 });

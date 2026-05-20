@@ -10,30 +10,30 @@ import type { FoodShadowLabel } from './shadow-taxonomy.js';
  * never consulted in that case.
  */
 export function computeVerdict(
-    regexWinnerLabel: FoodShadowLabel,
-    shadow: ShadowResult,
-    rawRegexWinner?: string,
+	regexWinnerLabel: FoodShadowLabel,
+	shadow: ShadowResult,
+	rawRegexWinner?: string,
 ): ShadowVerdict {
-    if (rawRegexWinner === '(shadow-dispatched)') return 'shadow-dispatched';
-    switch (shadow.kind) {
-        case 'legacy-skipped':
-            return 'legacy-skipped';
-        case 'skipped-sample':
-        case 'skipped-no-caption':
-        case 'skipped-pending-flow':
-        case 'skipped-cook-mode':
-        case 'skipped-number-select':
-            return 'skipped';
-        case 'parse-failed':
-        case 'llm-error':
-            return 'error';
-        case 'ok': {
-            const shadowLabel = shadow.action as FoodShadowLabel;
-            const regexIsNone = regexWinnerLabel === 'none';
-            const shadowIsNone = shadowLabel === 'none';
-            if (regexIsNone && shadowIsNone) return 'both-none';
-            if (regexIsNone || shadowIsNone) return 'one-side-none';
-            return regexWinnerLabel === shadowLabel ? 'agree' : 'disagree';
-        }
-    }
+	if (rawRegexWinner === '(shadow-dispatched)') return 'shadow-dispatched';
+	switch (shadow.kind) {
+		case 'legacy-skipped':
+			return 'legacy-skipped';
+		case 'skipped-sample':
+		case 'skipped-no-caption':
+		case 'skipped-pending-flow':
+		case 'skipped-cook-mode':
+		case 'skipped-number-select':
+			return 'skipped';
+		case 'parse-failed':
+		case 'llm-error':
+			return 'error';
+		case 'ok': {
+			const shadowLabel = shadow.action as FoodShadowLabel;
+			const regexIsNone = regexWinnerLabel === 'none';
+			const shadowIsNone = shadowLabel === 'none';
+			if (regexIsNone && shadowIsNone) return 'both-none';
+			if (regexIsNone || shadowIsNone) return 'one-side-none';
+			return regexWinnerLabel === shadowLabel ? 'agree' : 'disagree';
+		}
+	}
 }

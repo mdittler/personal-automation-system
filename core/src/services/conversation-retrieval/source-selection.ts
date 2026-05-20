@@ -59,11 +59,7 @@ export function chooseSources(opts: ContextSnapshotOptions): Set<AllowedSourceCa
 	// Reports + alerts: scheduling questions or explicit keyword mention.
 	// Not added for ask mode broadly — /ask for general questions should not
 	// expose personal automation inventory unnecessarily.
-	if (
-		categories.has('scheduling') ||
-		lower.includes('report') ||
-		lower.includes('alert')
-	) {
+	if (categories.has('scheduling') || lower.includes('report') || lower.includes('alert')) {
 		selected.add('reports');
 		selected.add('alerts');
 	}

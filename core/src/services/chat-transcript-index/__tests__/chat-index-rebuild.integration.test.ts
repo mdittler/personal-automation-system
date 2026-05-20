@@ -691,8 +691,18 @@ describe('rebuildIndex P8c — parent_session_id propagation', () => {
 			parent_session_id: '20260504_110000_aaaaaaaa',
 		});
 		await writeTranscriptFile(
-			join(dataDir, 'users', 'user-alice', 'chatbot', 'conversation', 'sessions', '20260504_120000_cafef00d.md'),
-			buildTranscript(childMeta, [makeTurn('user', 'continuing the trip plan', '2026-05-04T12:01:00Z')]),
+			join(
+				dataDir,
+				'users',
+				'user-alice',
+				'chatbot',
+				'conversation',
+				'sessions',
+				'20260504_120000_cafef00d.md',
+			),
+			buildTranscript(childMeta, [
+				makeTurn('user', 'continuing the trip plan', '2026-05-04T12:01:00Z'),
+			]),
 		);
 
 		await rebuildIndex({ dbPath: rebuiltDb, dataDir });
@@ -718,8 +728,18 @@ describe('rebuildIndex P8c — parent_session_id propagation', () => {
 		});
 		// parent_session_id is null in makeSessionFrontmatter defaults
 		await writeTranscriptFile(
-			join(dataDir, 'users', 'user-alice', 'chatbot', 'conversation', 'sessions', '20260504_120001_dadbeef0.md'),
-			buildTranscript(legacyMeta, [makeTurn('user', 'new session no parent', '2026-05-04T12:01:01Z')]),
+			join(
+				dataDir,
+				'users',
+				'user-alice',
+				'chatbot',
+				'conversation',
+				'sessions',
+				'20260504_120001_dadbeef0.md',
+			),
+			buildTranscript(legacyMeta, [
+				makeTurn('user', 'new session no parent', '2026-05-04T12:01:01Z'),
+			]),
 		);
 
 		await rebuildIndex({ dbPath: rebuiltDb, dataDir });
@@ -747,7 +767,15 @@ describe('rebuildIndex P8c — parent_session_id propagation', () => {
 			parent_session_id: '<script>alert(1)</script>' as unknown as null,
 		};
 		await writeTranscriptFile(
-			join(dataDir, 'users', 'user-alice', 'chatbot', 'conversation', 'sessions', '20260504_120002_f00dface.md'),
+			join(
+				dataDir,
+				'users',
+				'user-alice',
+				'chatbot',
+				'conversation',
+				'sessions',
+				'20260504_120002_f00dface.md',
+			),
 			buildTranscript(malformedMeta, [makeTurn('user', 'xss attempt', '2026-05-04T12:01:02Z')]),
 		);
 

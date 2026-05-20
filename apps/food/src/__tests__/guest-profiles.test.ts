@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-	slugifyGuestName,
-	loadGuests,
-	saveGuests,
 	addGuest,
-	removeGuest,
 	findGuestByName,
-	formatGuestProfile,
 	formatGuestList,
+	formatGuestProfile,
 	getGuestsWithRestriction,
+	loadGuests,
+	removeGuest,
+	saveGuests,
+	slugifyGuestName,
 } from '../services/guest-profiles.js';
 import type { GuestProfile } from '../types.js';
 
@@ -250,7 +250,12 @@ describe('guest-profiles', () => {
 		it('formats multiple guests', () => {
 			const guests = [
 				makeGuest(),
-				makeGuest({ name: 'Mike Chen', slug: 'mike-chen', dietaryRestrictions: ['gluten-free'], allergies: [] }),
+				makeGuest({
+					name: 'Mike Chen',
+					slug: 'mike-chen',
+					dietaryRestrictions: ['gluten-free'],
+					allergies: [],
+				}),
 			];
 			const result = formatGuestList(guests);
 			expect(result).toContain('Sarah Johnson');
@@ -274,7 +279,7 @@ describe('guest-profiles', () => {
 		it('filters by restriction', () => {
 			const result = getGuestsWithRestriction(guests, 'vegetarian');
 			expect(result).toHaveLength(2);
-			expect(result.map(g => g.slug)).toEqual(['sarah', 'emma']);
+			expect(result.map((g) => g.slug)).toEqual(['sarah', 'emma']);
 		});
 
 		it('returns empty for unknown restriction', () => {

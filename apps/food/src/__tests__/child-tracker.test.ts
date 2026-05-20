@@ -165,9 +165,7 @@ describe('child-tracker', () => {
 		});
 
 		it('returns unsafe when too soon after a different allergen', () => {
-			const log = makeLog([
-				makeIntro({ allergenCategory: 'milk', date: '2026-04-05' }),
-			]);
+			const log = makeLog([makeIntro({ allergenCategory: 'milk', date: '2026-04-05' })]);
 			const result = checkAllergenWaitWindow(log, 'eggs', '2026-04-07', 3);
 			expect(result.safe).toBe(false);
 			expect(result.daysSince).toBe(2);
@@ -175,9 +173,7 @@ describe('child-tracker', () => {
 		});
 
 		it('ignores re-introductions of the same allergen category', () => {
-			const log = makeLog([
-				makeIntro({ allergenCategory: 'eggs', date: '2026-04-06' }),
-			]);
+			const log = makeLog([makeIntro({ allergenCategory: 'eggs', date: '2026-04-06' })]);
 			// Introducing eggs again — same category, should be safe
 			const result = checkAllergenWaitWindow(log, 'eggs', '2026-04-07', 3);
 			expect(result.safe).toBe(true);
@@ -192,9 +188,7 @@ describe('child-tracker', () => {
 		});
 
 		it('works with custom wait days', () => {
-			const log = makeLog([
-				makeIntro({ allergenCategory: 'milk', date: '2026-04-01' }),
-			]);
+			const log = makeLog([makeIntro({ allergenCategory: 'milk', date: '2026-04-01' })]);
 			// 6 days later with 7-day wait
 			const result = checkAllergenWaitWindow(log, 'eggs', '2026-04-07', 7);
 			expect(result.safe).toBe(false);
@@ -225,9 +219,7 @@ describe('child-tracker', () => {
 		});
 
 		it('returns empty array when no recent introductions', () => {
-			const log = makeLog([
-				makeIntro({ date: '2026-01-01' }),
-			]);
+			const log = makeLog([makeIntro({ date: '2026-01-01' })]);
 			const recent = getRecentIntroductions(log, 7, '2026-04-07');
 			expect(recent).toEqual([]);
 		});
@@ -243,8 +235,8 @@ describe('child-tracker', () => {
 				makeIntro({ food: 'day before cutoff', date: '2026-10-18' }), // must be excluded
 			]);
 			const recent = getRecentIntroductions(log, 14, '2026-11-02');
-			expect(recent.map(i => i.food)).toContain('boundary food');
-			expect(recent.map(i => i.food)).not.toContain('day before cutoff');
+			expect(recent.map((i) => i.food)).toContain('boundary food');
+			expect(recent.map((i) => i.food)).not.toContain('day before cutoff');
 		});
 	});
 
@@ -274,7 +266,12 @@ describe('child-tracker', () => {
 		it('formats introductions as readable text', () => {
 			const intros = [
 				makeIntro({ food: 'scrambled eggs', accepted: true, reaction: 'none' }),
-				makeIntro({ food: 'peanut butter', allergenCategory: 'peanuts', accepted: false, reaction: 'mild' }),
+				makeIntro({
+					food: 'peanut butter',
+					allergenCategory: 'peanuts',
+					accepted: false,
+					reaction: 'mild',
+				}),
 			];
 			const output = formatFoodLog(intros);
 			expect(output).toContain('scrambled eggs');
@@ -283,9 +280,7 @@ describe('child-tracker', () => {
 		});
 
 		it('respects limit parameter', () => {
-			const intros = Array.from({ length: 10 }, (_, i) =>
-				makeIntro({ food: `food-${i}` }),
-			);
+			const intros = Array.from({ length: 10 }, (_, i) => makeIntro({ food: `food-${i}` }));
 			const output = formatFoodLog(intros, 3);
 			expect(output).toContain('food-7');
 			expect(output).toContain('food-8');

@@ -1,8 +1,8 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PantryItem, Recipe } from '../types.js';
 import { findMatchingRecipes, formatMatchResults } from '../services/pantry-matcher.js';
+import type { PantryItem, Recipe } from '../types.js';
 
 // ─── Fixtures ─────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PersonaCase, TierModelSnapshot } from '../shared/types.js';
 import { runRoutingCase } from '../runner/case-runners/routing-runner.js';
+import type { PersonaCase, TierModelSnapshot } from '../shared/types.js';
 
 const MODEL_IDS: TierModelSnapshot = {
 	fast: 'claude-fast-1',
@@ -8,7 +8,9 @@ const MODEL_IDS: TierModelSnapshot = {
 	reasoning: null,
 };
 
-const meter = (overrides: Partial<{ model: string; tokenIn: number; tokenOut: number; costUsd: number }> = {}) => ({
+const meter = (
+	overrides: Partial<{ model: string; tokenIn: number; tokenOut: number; costUsd: number }> = {},
+) => ({
 	model: 'claude-fast-1',
 	tokenIn: 50,
 	tokenOut: 30,
@@ -110,7 +112,11 @@ describe('runRoutingCase — pas happy path', () => {
 	it('verdict=pass when pasRelated matches', async () => {
 		const deps = baseDeps();
 		deps.classifiers.pas.mockResolvedValueOnce({
-			raw: JSON.stringify({ pasRelated: true, dataQueryCandidate: false, settingsCandidate: false }),
+			raw: JSON.stringify({
+				pasRelated: true,
+				dataQueryCandidate: false,
+				settingsCandidate: false,
+			}),
 			meter: meter(),
 		});
 		const c = baseCase(

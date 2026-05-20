@@ -10,9 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	SessionControlLogger,
 	type SessionControlClassificationEntry,
 	type SessionControlConfirmationEntry,
+	SessionControlLogger,
 } from '../session-control-logger.js';
 
 let dir: string;
@@ -36,7 +36,12 @@ function makeClassification(
 		userId: 'u1',
 		messageText: 'can we start fresh',
 		preFilter: 'matched',
-		llm: { intent: 'new_session', confidence: 0.6, reason: 'explicit new session request', source: 'llm' },
+		llm: {
+			intent: 'new_session',
+			confidence: 0.6,
+			reason: 'explicit new session request',
+			source: 'llm',
+		},
 		zone: 'grey-zone',
 		entryId: 'abc123',
 		latencyMs: 42,
@@ -96,7 +101,9 @@ describe('SessionControlLogger.logClassification', () => {
 
 	it('omits Entry ID line when entryId is undefined', async () => {
 		const logger = new SessionControlLogger(dir, mockLogger);
-		await logger.logClassification(makeClassification({ entryId: undefined, zone: 'high-confidence' }));
+		await logger.logClassification(
+			makeClassification({ entryId: undefined, zone: 'high-confidence' }),
+		);
 		const content = await readLog(dir);
 		expect(content).not.toContain('Entry ID');
 	});
@@ -110,29 +117,33 @@ describe('SessionControlLogger.logClassification', () => {
 
 	it('appends to existing file without rewriting frontmatter on second call', async () => {
 		const logger = new SessionControlLogger(dir, mockLogger);
-		await logger.logClassification(makeClassification({ timestamp: new Date('2026-05-07T12:00:00Z') }));
-		await logger.logClassification(makeClassification({ timestamp: new Date('2026-05-07T12:00:01Z') }));
+		await logger.logClassification(
+			makeClassification({ timestamp: new Date('2026-05-07T12:00:00Z') }),
+		);
+		await logger.logClassification(
+			makeClassification({ timestamp: new Date('2026-05-07T12:00:01Z') }),
+		);
 		const content = await readLog(dir);
-		const frontmatterCount = (content.match(/^title: Session Control Classifier Log/m) ?? []).length;
+		const frontmatterCount = (content.match(/^title: Session Control Classifier Log/m) ?? [])
+			.length;
 		expect(frontmatterCount).toBe(1);
 		// Two ## headings
-		expect((content.match(/^## /gm) ?? [])).toHaveLength(2);
+		expect(content.match(/^## /gm) ?? []).toHaveLength(2);
 	});
 
 	it('serializes concurrent writes (10 simultaneous calls → 10 distinct entries)', async () => {
 		const logger = new SessionControlLogger(dir, mockLogger);
 		await Promise.all(
 			Array.from({ length: 10 }, (_, i) =>
-				logger.logClassification(
-					makeClassification({ entryId: `entry-${i}`, userId: `u${i}` }),
-				),
+				logger.logClassification(makeClassification({ entryId: `entry-${i}`, userId: `u${i}` })),
 			),
 		);
 		const content = await readLog(dir);
 		const headings = content.match(/^## /gm) ?? [];
 		expect(headings).toHaveLength(10);
 		// Verify no frontmatter duplication from concurrent writes
-		const frontmatterCount = (content.match(/^title: Session Control Classifier Log/m) ?? []).length;
+		const frontmatterCount = (content.match(/^title: Session Control Classifier Log/m) ?? [])
+			.length;
 		expect(frontmatterCount).toBe(1);
 	});
 
@@ -266,7 +277,9 @@ describe('SessionControlLogger — fail-open', () => {
 		// Remove the blocking directory, let the second write through a separate logger
 		// (the original logger's path is permanently broken due to the directory, so we verify
 		// the chain continues by confirming a second call also resolves without throwing)
-		await expect(logger.logClassification(makeClassification({ entryId: 'second' }))).resolves.toBeUndefined();
+		await expect(
+			logger.logClassification(makeClassification({ entryId: 'second' })),
+		).resolves.toBeUndefined();
 		// warn called again (second write also fails for same reason)
 		expect(mockLogger.warn).toHaveBeenCalledTimes(2);
 	});
@@ -311,7 +324,9 @@ describe('SessionControlLogger.logConfirmation', () => {
 
 	it('writes classification then confirmation — both present in file', async () => {
 		const logger = new SessionControlLogger(dir, mockLogger);
-		await logger.logClassification(makeClassification({ timestamp: new Date('2026-05-07T12:00:00Z') }));
+		await logger.logClassification(
+			makeClassification({ timestamp: new Date('2026-05-07T12:00:00Z') }),
+		);
 		await logger.logConfirmation(makeConfirmation({ timestamp: new Date('2026-05-07T12:00:05Z') }));
 		const content = await readLog(dir);
 		const headings = content.match(/^## /gm) ?? [];

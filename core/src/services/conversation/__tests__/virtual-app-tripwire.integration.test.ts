@@ -1,13 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { composeRuntime } from '../../../compose-runtime.js';
-import { seedUsers } from '../../../testing/fixtures/seed-users.js';
-import { createStubProviderRegistry, StubProvider } from '../../../testing/fixtures/stub-llm-provider.js';
 import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { chatbotMessage } from '../../../testing/fixtures/messages.js';
+import { seedUsers } from '../../../testing/fixtures/seed-users.js';
+import {
+	StubProvider,
+	createStubProviderRegistry,
+} from '../../../testing/fixtures/stub-llm-provider.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 import { CONVERSATION_USER_CONFIG_MANIFEST } from '../manifest.js';

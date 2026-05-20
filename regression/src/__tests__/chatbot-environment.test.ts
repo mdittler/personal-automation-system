@@ -102,9 +102,7 @@ describe('createChatbotEnvironment', () => {
 		await writeFile(badYaml, 'users:\n  - id: "8187\n', 'utf8');
 
 		try {
-			const before = (await readdir(tmpdir())).filter((n) =>
-				n.startsWith('regression-chatbot-'),
-			);
+			const before = (await readdir(tmpdir())).filter((n) => n.startsWith('regression-chatbot-'));
 
 			await expect(
 				createChatbotEnvironment({
@@ -115,9 +113,7 @@ describe('createChatbotEnvironment', () => {
 				}),
 			).rejects.toThrow(/parse|yaml|failed/i);
 
-			const after = (await readdir(tmpdir())).filter((n) =>
-				n.startsWith('regression-chatbot-'),
-			);
+			const after = (await readdir(tmpdir())).filter((n) => n.startsWith('regression-chatbot-'));
 			// Filter out the fixture dir we just created (it has a different prefix
 			// but shares the leading match) and dirs that existed before the run.
 			const leaked = after.filter(

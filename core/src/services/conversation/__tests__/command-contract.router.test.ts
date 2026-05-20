@@ -43,8 +43,20 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			getManifestCache: () => cache,
 			getLoadedAppIds: () => ['chatbot'],
 		};
-		const telegram = { send: vi.fn().mockResolvedValue(undefined), sendPhoto: vi.fn(), sendOptions: vi.fn() };
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() };
+		const telegram = {
+			send: vi.fn().mockResolvedValue(undefined),
+			sendPhoto: vi.fn(),
+			sendOptions: vi.fn(),
+		};
+		const logger = {
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			trace: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn().mockReturnThis(),
+		};
 
 		const router = new Router({
 			registry: registry as any,
@@ -52,9 +64,15 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			telegram: telegram as any,
 			fallback: { handleUnrecognized: vi.fn() } as any,
 			config: {
-				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
-				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
-				gui: { authToken: '' }, cloudflare: {},
+				port: 3000,
+				dataDir: '/tmp',
+				logLevel: 'info',
+				timezone: 'UTC',
+				telegram: { botToken: 'x' },
+				ollama: { url: '', model: '' },
+				claude: { apiKey: '', model: '' },
+				gui: { authToken: '' },
+				cloudflare: {},
 				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
 			} as any,
 			logger: logger as any,
@@ -62,7 +80,9 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 		});
 		router.buildRoutingTables();
 
-		await router.routeMessage(createTestMessageContext({ userId: 'user1', text: '/ask what is pas?' }));
+		await router.routeMessage(
+			createTestMessageContext({ userId: 'user1', text: '/ask what is pas?' }),
+		);
 
 		expect(conv.handleAsk).toHaveBeenCalledOnce();
 		const [args] = conv.handleAsk.mock.calls[0]!;
@@ -90,8 +110,20 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			getManifestCache: () => cache,
 			getLoadedAppIds: () => ['chatbot'],
 		};
-		const telegram = { send: vi.fn().mockResolvedValue(undefined), sendPhoto: vi.fn(), sendOptions: vi.fn() };
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis() };
+		const telegram = {
+			send: vi.fn().mockResolvedValue(undefined),
+			sendPhoto: vi.fn(),
+			sendOptions: vi.fn(),
+		};
+		const logger = {
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			trace: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn().mockReturnThis(),
+		};
 
 		const router = new Router({
 			registry: registry as any,
@@ -99,9 +131,15 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 			telegram: telegram as any,
 			fallback: { handleUnrecognized: vi.fn() } as any,
 			config: {
-				port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
-				telegram: { botToken: 'x' }, ollama: { url: '', model: '' }, claude: { apiKey: '', model: '' },
-				gui: { authToken: '' }, cloudflare: {},
+				port: 3000,
+				dataDir: '/tmp',
+				logLevel: 'info',
+				timezone: 'UTC',
+				telegram: { botToken: 'x' },
+				ollama: { url: '', model: '' },
+				claude: { apiKey: '', model: '' },
+				gui: { authToken: '' },
+				cloudflare: {},
 				users: [{ id: 'user1', name: 'Test', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
 			} as any,
 			logger: logger as any,
@@ -109,7 +147,9 @@ describe('Router command-name contract: built-ins reach ConversationService', ()
 		});
 		router.buildRoutingTables();
 
-		await router.routeMessage(createTestMessageContext({ userId: 'user1', text: '/edit fix something' }));
+		await router.routeMessage(
+			createTestMessageContext({ userId: 'user1', text: '/edit fix something' }),
+		);
 
 		expect(conv.handleEdit).toHaveBeenCalledOnce();
 		const [args] = conv.handleEdit.mock.calls[0]!;

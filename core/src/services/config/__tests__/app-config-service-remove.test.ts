@@ -65,7 +65,9 @@ describe('AppConfigServiceImpl.removeOverride() — REQ-SETTINGS-005', () => {
 
 	it('throws for an invalid userId', async () => {
 		const svc = makeSvc();
-		await expect(svc.removeOverride('../../evil', 'log_to_notes')).rejects.toThrow(/Invalid userId/);
+		await expect(svc.removeOverride('../../evil', 'log_to_notes')).rejects.toThrow(
+			/Invalid userId/,
+		);
 	});
 
 	it('is idempotent — calling twice on the same key does not error', async () => {

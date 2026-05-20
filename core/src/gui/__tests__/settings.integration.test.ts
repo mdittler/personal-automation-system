@@ -23,8 +23,8 @@ import { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerViewLocals } from '../view-locals.js';
 
 const TEST_USER_ID = 'user1';
 const TEST_PASSWORD = 'integration-pw-456';
@@ -212,8 +212,7 @@ function collectCookies(
 ): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const res of responses)
-		for (const c of res.cookies as Array<{ name: string; value: string }>)
-			out[c.name] = c.value;
+		for (const c of res.cookies as Array<{ name: string; value: string }>) out[c.name] = c.value;
 	return out;
 }
 

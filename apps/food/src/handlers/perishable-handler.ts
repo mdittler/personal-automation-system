@@ -8,7 +8,7 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { withMultiFileLock } from '@pas/core/utils/file-mutex';
-import { loadFreezer, addFreezerItem, saveFreezer } from '../services/freezer-store.js';
+import { addFreezerItem, loadFreezer, saveFreezer } from '../services/freezer-store.js';
 import { loadPantry, savePantry, withPantryLock } from '../services/pantry-store.js';
 import { appendWaste } from '../services/waste-store.js';
 import type { FreezerItem, WasteLogEntry } from '../types.js';
@@ -58,7 +58,7 @@ export async function handlePerishableCallback(
 ): Promise<void> {
 	const parts = action.split(':');
 	const verb = parts[0];
-	const idx = parseInt(parts[1] ?? '', 10);
+	const idx = Number.parseInt(parts[1] ?? '', 10);
 	const expectedName = parts.slice(2).join(':');
 	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
@@ -164,7 +164,7 @@ export async function handlePerishableCheckJob(
 	const today = todayOverride ?? todayDate(services.timezone);
 
 	// Find items with expiryEstimate set that are within 2 days (inclusive)
-	const expiringItems: Array<{ item: typeof pantry[number]; idx: number; daysLeft: number }> = [];
+	const expiringItems: Array<{ item: (typeof pantry)[number]; idx: number; daysLeft: number }> = [];
 	for (let i = 0; i < pantry.length; i++) {
 		const item = pantry[i]!;
 		if (!item.expiryEstimate) continue;

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { requestContext, getCurrentSessionId } from '../request-context.js';
+import { describe, expect, it } from 'vitest';
+import { getCurrentSessionId, requestContext } from '../request-context.js';
 
 describe('getCurrentSessionId', () => {
 	it('returns undefined outside any context', () => {

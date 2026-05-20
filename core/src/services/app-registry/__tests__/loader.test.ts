@@ -230,7 +230,10 @@ describe('AppLoader', () => {
 		it('ignores absolute package.json main paths and falls back safely', async () => {
 			const appDir = join(tempDir, 'absolute-app');
 			await mkdir(join(appDir, 'dist'), { recursive: true });
-			await writeFile(join(appDir, 'package.json'), JSON.stringify({ main: 'C:/absolute/path.js' }));
+			await writeFile(
+				join(appDir, 'package.json'),
+				JSON.stringify({ main: 'C:/absolute/path.js' }),
+			);
 			await writeRuntimeModule(join(appDir, 'dist', 'index.js'), 'dist-fallback');
 
 			const loader = new AppLoader({ appsDir: tempDir, logger });
@@ -257,7 +260,10 @@ describe('AppLoader', () => {
 			const appDir = join(tempDir, 'malformed-dist-app');
 			await mkdir(join(appDir, 'dist'), { recursive: true });
 			await mkdir(join(appDir, 'src'), { recursive: true });
-			await writeFile(join(appDir, 'dist', 'index.js'), 'export default { runtimeMarker: "broken-dist" };');
+			await writeFile(
+				join(appDir, 'dist', 'index.js'),
+				'export default { runtimeMarker: "broken-dist" };',
+			);
 			await writeRuntimeModule(join(appDir, 'src', 'index.ts'), 'dev-fallback');
 
 			const loader = new AppLoader({ appsDir: tempDir, logger });

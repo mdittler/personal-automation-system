@@ -102,9 +102,11 @@ describe('ChatTranscriptIndex schema', () => {
 	it('P8c — fresh DB has a parent_session_id TEXT NULL column', () => {
 		const db = makeDb(makeTmpPath());
 		applyMigrations(db);
-		const cols = db
-			.prepare("PRAGMA table_info('sessions')")
-			.all() as Array<{ name: string; type: string; notnull: number }>;
+		const cols = db.prepare("PRAGMA table_info('sessions')").all() as Array<{
+			name: string;
+			type: string;
+			notnull: number;
+		}>;
 		const col = cols.find((c) => c.name === 'parent_session_id');
 		expect(col).toBeDefined();
 		expect(col!.type).toBe('TEXT');
@@ -121,18 +123,19 @@ describe('ChatTranscriptIndex schema', () => {
       household_id TEXT, source TEXT NOT NULL, started_at TEXT NOT NULL,
       ended_at TEXT, model TEXT, title TEXT)`,
 		);
-		v1.prepare(
-			'INSERT INTO sessions (id, user_id, source, started_at) VALUES (?, ?, ?, ?)',
-		).run('20260101_010101_deadbeef', 'u1', 'telegram', '2026-01-01T01:01:01.000Z');
+		v1.prepare('INSERT INTO sessions (id, user_id, source, started_at) VALUES (?, ?, ?, ?)').run(
+			'20260101_010101_deadbeef',
+			'u1',
+			'telegram',
+			'2026-01-01T01:01:01.000Z',
+		);
 		v1.pragma('user_version = 1');
 		v1.close();
 
 		// Open via applyMigrations — should upgrade to v2
 		const db = makeDb(dbPath);
 		applyMigrations(db);
-		const cols = db
-			.prepare("PRAGMA table_info('sessions')")
-			.all() as Array<{ name: string }>;
+		const cols = db.prepare("PRAGMA table_info('sessions')").all() as Array<{ name: string }>;
 		expect(cols.find((c) => c.name === 'parent_session_id')).toBeDefined();
 		expect(db.pragma('user_version', { simple: true })).toBe(2);
 

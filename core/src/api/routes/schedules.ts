@@ -7,9 +7,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { requireScope } from '../guards/require-scope.js';
 import type { CronManager } from '../../services/scheduler/cron-manager.js';
 import { describeCron, getNextRun } from '../../utils/cron-describe.js';
+import { requireScope } from '../guards/require-scope.js';
 
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
@@ -31,42 +31,48 @@ export function registerSchedulesRoute(
 	): import('fastify').FastifyReply | undefined {
 		const actor = request.actor;
 		if (actor && !actor.isPlatformAdmin && actor.authMethod !== 'legacy-api-token') {
-			return reply.status(403).send({ ok: false, error: 'Insufficient privileges to manage schedules.' });
+			return reply
+				.status(403)
+				.send({ ok: false, error: 'Insufficient privileges to manage schedules.' });
 		}
 		return undefined;
 	}
 
-	server.get('/schedules', { preHandler: [requireScope('schedules:read')] }, async (request, reply) => {
-		// D5b-7: schedules list is platform-admin / platform-system only in D5b
-		// (no ownership metadata on jobs, so non-admin has nothing to see)
-		const denied = isAdminActor(request, reply);
-		if (denied) {
-			return denied;
-		}
+	server.get(
+		'/schedules',
+		{ preHandler: [requireScope('schedules:read')] },
+		async (request, reply) => {
+			// D5b-7: schedules list is platform-admin / platform-system only in D5b
+			// (no ownership metadata on jobs, so non-admin has nothing to see)
+			const denied = isAdminActor(request, reply);
+			if (denied) {
+				return denied;
+			}
 
-		const jobDetails = cronManager.getJobDetails();
+			const jobDetails = cronManager.getJobDetails();
 
-		const jobs = jobDetails.map((detail) => {
-			const nextRun = getNextRun(detail.job.cron, timezone);
+			const jobs = jobDetails.map((detail) => {
+				const nextRun = getNextRun(detail.job.cron, timezone);
 
-			return {
-				key: detail.key,
-				appId: detail.job.appId,
-				jobId: detail.job.id,
-				description: detail.job.description ?? null,
-				cron: detail.job.cron,
-				humanSchedule: describeCron(detail.job.cron),
-				nextRun: nextRun ? nextRun.toISOString() : null,
-				lastRunAt: detail.lastRunAt ? detail.lastRunAt.toISOString() : null,
-				disabled: detail.disabled,
-				failureCount: detail.failureCount,
-			};
-		});
+				return {
+					key: detail.key,
+					appId: detail.job.appId,
+					jobId: detail.job.id,
+					description: detail.job.description ?? null,
+					cron: detail.job.cron,
+					humanSchedule: describeCron(detail.job.cron),
+					nextRun: nextRun ? nextRun.toISOString() : null,
+					lastRunAt: detail.lastRunAt ? detail.lastRunAt.toISOString() : null,
+					disabled: detail.disabled,
+					failureCount: detail.failureCount,
+				};
+			});
 
-		logger.info({ count: jobs.length }, 'API schedules listed');
+			logger.info({ count: jobs.length }, 'API schedules listed');
 
-		return reply.send({ ok: true, jobs });
-	});
+			return reply.send({ ok: true, jobs });
+		},
+	);
 
 	server.post(
 		'/schedules/:appId/:jobId/re-enable',

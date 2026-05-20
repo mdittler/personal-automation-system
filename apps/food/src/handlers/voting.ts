@@ -8,7 +8,7 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import type { Household, MealPlan } from '../types.js';
+import { emitMealPlanFinalized, emitRecipeScheduled } from '../events/emitters.js';
 import {
 	buildPlanButtons,
 	formatPlanMessage,
@@ -25,12 +25,9 @@ import {
 	isVotingExpired,
 	recordVote,
 } from '../services/voting.js';
+import type { Household } from '../types.js';
 import { isoNow } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
-import {
-	emitMealPlanFinalized,
-	emitRecipeScheduled,
-} from '../events/emitters.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

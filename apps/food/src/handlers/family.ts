@@ -8,6 +8,12 @@
 import type { CoreServices, InlineButton, ScopedDataStore } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import {
+	addFoodIntroduction,
+	checkAllergenWaitWindow,
+	formatAllergenWarning,
+	matchAllergenCategory,
+} from '../services/child-tracker.js';
+import {
 	computeAgeMonths,
 	deleteChildProfile,
 	formatChildProfile,
@@ -17,16 +23,10 @@ import {
 	saveChildProfile,
 	slugifyChildName,
 } from '../services/family-profiles.js';
-import {
-	addFoodIntroduction,
-	checkAllergenWaitWindow,
-	formatAllergenWarning,
-	matchAllergenCategory,
-} from '../services/child-tracker.js';
-import { generateKidAdaptation, formatKidAdaptation } from '../services/kid-adapter.js';
+import { formatKidAdaptation, generateKidAdaptation } from '../services/kid-adapter.js';
 import { findRecipeByTitle, loadRecipe, updateRecipe } from '../services/recipe-store.js';
-import { isoNow, todayDate } from '../utils/date.js';
 import type { ChildFoodLog, ChildProfile, FoodIntroduction, Recipe } from '../types.js';
+import { isoNow, todayDate } from '../utils/date.js';
 
 // ─── Pending confirmation state (5-min TTL) ─────────────────────
 
@@ -161,7 +161,8 @@ async function handleFamilyEdit(
 
 	if (!nameOrSlug) {
 		return {
-			text: 'Usage: `/family edit <name> <field> <value>`\n\n' +
+			text:
+				'Usage: `/family edit <name> <field> <value>`\n\n' +
 				'Fields:\n' +
 				'• `stage` — pre-solids, early-introduction, expanding, established\n' +
 				'• `safe` — add a safe allergen (e.g., `safe milk`)\n' +
@@ -180,11 +181,20 @@ async function handleFamilyEdit(
 
 	if (!field || !value) {
 		return {
-			text: 'What would you like to update?\n\n' +
-				'• `/family edit ' + slug + ' stage early-introduction`\n' +
-				'• `/family edit ' + slug + ' safe milk`\n' +
-				'• `/family edit ' + slug + ' avoid peanuts`\n' +
-				'• `/family edit ' + slug + ' notes Prefers soft textures`',
+			text:
+				'What would you like to update?\n\n' +
+				'• `/family edit ' +
+				slug +
+				' stage early-introduction`\n' +
+				'• `/family edit ' +
+				slug +
+				' safe milk`\n' +
+				'• `/family edit ' +
+				slug +
+				' avoid peanuts`\n' +
+				'• `/family edit ' +
+				slug +
+				' notes Prefers soft textures`',
 		};
 	}
 
@@ -196,7 +206,7 @@ async function handleFamilyEdit(
 			if (!VALID_STAGES.includes(value as any)) {
 				return { text: `Invalid stage. Choose: ${VALID_STAGES.join(', ')}` };
 			}
-			profile.allergenStage = value as typeof VALID_STAGES[number];
+			profile.allergenStage = value as (typeof VALID_STAGES)[number];
 			break;
 		}
 		case 'safe': {
@@ -262,7 +272,10 @@ export function isKidAdaptIntent(text: string, childNames: string[]): boolean {
 	// Patterns with a child name
 	if (childNames.length > 0) {
 		const namePattern = childNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-		const nameRe = new RegExp(`\\b(make|adapt|prepare|cook)\\b.*\\bfor\\s+(${namePattern})\\b`, 'i');
+		const nameRe = new RegExp(
+			`\\b(make|adapt|prepare|cook)\\b.*\\bfor\\s+(${namePattern})\\b`,
+			'i',
+		);
 		if (nameRe.test(lower)) return true;
 
 		const forNameRe = new RegExp(`\\bfor\\s+(${namePattern})\\b`, 'i');
@@ -274,14 +287,16 @@ export function isKidAdaptIntent(text: string, childNames: string[]): boolean {
 
 export function isFoodIntroIntent(text: string): boolean {
 	const lower = text.toLowerCase();
-	if (/\b(introduc(e|ed|ing)|tried|gave|fed)\b.*\b(food|solid|first|baby|toddler)\b/.test(lower)) return true;
+	if (/\b(introduc(e|ed|ing)|tried|gave|fed)\b.*\b(food|solid|first|baby|toddler)\b/.test(lower))
+		return true;
 	if (/\bnew\s+food\b/.test(lower)) return true;
 	if (/\bfirst\s+time\b.*\b(eat|try|tast)/.test(lower)) return true;
 	if (/\blog\b.*\b(food|allergen|introduction)\b/.test(lower)) return true;
 	// "Margot tried X today" — tried + today/yesterday is a food intro pattern
 	if (/\btried\b/.test(lower) && /\b(today|yesterday|for the first)\b/.test(lower)) return true;
 	// "introduced X to baby/child-name" — introduced + food context
-	if (/\bintroduc(e|ed|ing)\b/.test(lower) && /\b(to|for|the|baby|toddler|child)\b/.test(lower)) return true;
+	if (/\bintroduc(e|ed|ing)\b/.test(lower) && /\b(to|for|the|baby|toddler|child)\b/.test(lower))
+		return true;
 	return false;
 }
 
@@ -332,8 +347,8 @@ export async function handleKidAdaptIntent(
 
 	// Try to find the child name in the text
 	const lower = text.toLowerCase();
-	let child = children.find((c) =>
-		lower.includes(c.profile.slug) || lower.includes(c.profile.name.toLowerCase()),
+	let child = children.find(
+		(c) => lower.includes(c.profile.slug) || lower.includes(c.profile.name.toLowerCase()),
 	);
 
 	// Default to first child if only one exists
@@ -369,13 +384,15 @@ export async function handleFoodIntroduction(
 ): Promise<{ text: string; buttons?: InlineButton[][] }> {
 	const children = await loadAllChildren(store);
 	if (children.length === 0) {
-		return { text: 'No children registered. Add a child with `/family add <name> <birthdate>` first.' };
+		return {
+			text: 'No children registered. Add a child with `/family add <name> <birthdate>` first.',
+		};
 	}
 
 	// Find child in text, default to first if one child
 	const lower = text.toLowerCase();
-	let child = children.find((c) =>
-		lower.includes(c.profile.slug) || lower.includes(c.profile.name.toLowerCase()),
+	let child = children.find(
+		(c) => lower.includes(c.profile.slug) || lower.includes(c.profile.name.toLowerCase()),
 	);
 	if (!child && children.length === 1) {
 		child = children[0];
@@ -390,8 +407,8 @@ export async function handleFoodIntroduction(
 	try {
 		const extractResult = await services.llm.complete(
 			`Extract the food name from this message about introducing food to a baby/child. ` +
-			`Return ONLY the food name, nothing else. No quotes, no punctuation.\n\n` +
-			`Message: "${text}"`,
+				`Return ONLY the food name, nothing else. No quotes, no punctuation.\n\n` +
+				`Message: "${text}"`,
 			{ tier: 'fast' },
 		);
 		food = extractResult.trim().replace(/^["']|["']$/g, '');
@@ -404,7 +421,9 @@ export async function handleFoodIntroduction(
 	}
 
 	if (!food || food.length < 2) {
-		return { text: 'What food was introduced? Try something like:\n• "Margot tried peanut butter today"\n• "introduced eggs to the baby"\n• "gave her yogurt for the first time"' };
+		return {
+			text: 'What food was introduced? Try something like:\n• "Margot tried peanut butter today"\n• "introduced eggs to the baby"\n• "gave her yogurt for the first time"',
+		};
 	}
 
 	// Match allergen category using the expanded food-to-allergen map
@@ -417,11 +436,8 @@ export async function handleFoodIntroduction(
 	if (allergenCategory) {
 		const waitCheck = checkAllergenWaitWindow(child, allergenCategory, today, waitDays);
 		if (!waitCheck.safe) {
-			warning = '\n\n' + formatAllergenWarning(
-				waitCheck.lastIntroDate!,
-				waitCheck.daysSince!,
-				waitDays,
-			);
+			warning =
+				'\n\n' + formatAllergenWarning(waitCheck.lastIntroDate!, waitCheck.daysSince!, waitDays);
 		}
 	}
 
@@ -446,9 +462,7 @@ export async function handleFoodIntroduction(
 				{ text: '😟 Moderate', callbackData: `app:food:fi:r:${child.profile.slug}:moderate` },
 				{ text: '🚨 Severe', callbackData: `app:food:fi:r:${child.profile.slug}:severe` },
 			],
-			[
-				{ text: '👎 Rejected', callbackData: `app:food:fi:rej:${child.profile.slug}` },
-			],
+			[{ text: '👎 Rejected', callbackData: `app:food:fi:rej:${child.profile.slug}` }],
 		],
 	};
 }
@@ -528,7 +542,11 @@ export async function handleApprovalCallback(
 		const slug = action.slice(3);
 		const pending = consumePendingRemoval(userId);
 		if (!pending || pending !== slug) {
-			await services.telegram.editMessage(chatId, messageId, 'This removal request has expired. Use `/family remove` again.');
+			await services.telegram.editMessage(
+				chatId,
+				messageId,
+				'This removal request has expired. Use `/family remove` again.',
+			);
 			return;
 		}
 		const removed = await deleteChildProfile(store, slug);
@@ -543,16 +561,21 @@ export async function handleApprovalCallback(
 	// Edit stage prompt buttons
 	if (action.startsWith('es:')) {
 		const slug = action.slice(3);
-		await services.telegram.editMessage(chatId, messageId, `Select allergen stage for this child:`, [
+		await services.telegram.editMessage(
+			chatId,
+			messageId,
+			`Select allergen stage for this child:`,
 			[
-				{ text: 'Pre-solids', callbackData: `app:food:fa:ss:${slug}:pre-solids` },
-				{ text: 'Early intro', callbackData: `app:food:fa:ss:${slug}:early-introduction` },
+				[
+					{ text: 'Pre-solids', callbackData: `app:food:fa:ss:${slug}:pre-solids` },
+					{ text: 'Early intro', callbackData: `app:food:fa:ss:${slug}:early-introduction` },
+				],
+				[
+					{ text: 'Expanding', callbackData: `app:food:fa:ss:${slug}:expanding` },
+					{ text: 'Established', callbackData: `app:food:fa:ss:${slug}:established` },
+				],
 			],
-			[
-				{ text: 'Expanding', callbackData: `app:food:fa:ss:${slug}:expanding` },
-				{ text: 'Established', callbackData: `app:food:fa:ss:${slug}:established` },
-			],
-		]);
+		);
 		return;
 	}
 
@@ -570,7 +593,11 @@ export async function handleApprovalCallback(
 		log.profile.allergenStage = stage as ChildProfile['allergenStage'];
 		log.profile.updatedAt = isoNow();
 		await saveChildProfile(store, log);
-		await services.telegram.editMessage(chatId, messageId, `Updated ${log.profile.name}'s stage to **${stage}**.`);
+		await services.telegram.editMessage(
+			chatId,
+			messageId,
+			`Updated ${log.profile.name}'s stage to **${stage}**.`,
+		);
 		return;
 	}
 
@@ -612,11 +639,7 @@ export async function handleApprovalCallback(
 		}
 
 		await updateRecipe(store, recipe);
-		await services.telegram.editMessage(
-			chatId,
-			messageId,
-			`${statusText}: **${recipe.title}**`,
-		);
+		await services.telegram.editMessage(chatId, messageId, `${statusText}: **${recipe.title}**`);
 		return;
 	}
 }
@@ -649,7 +672,14 @@ export async function handleFoodIntroCallback(
 		lastIntro.reaction = reaction;
 		await saveChildProfile(store, log);
 
-		const emoji = reaction === 'none' ? '😊' : reaction === 'mild' ? '🤔' : reaction === 'moderate' ? '😟' : '🚨';
+		const emoji =
+			reaction === 'none'
+				? '😊'
+				: reaction === 'mild'
+					? '🤔'
+					: reaction === 'moderate'
+						? '😟'
+						: '🚨';
 		await services.telegram.editMessage(
 			chatId,
 			messageId,

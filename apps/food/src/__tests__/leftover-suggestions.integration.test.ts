@@ -4,8 +4,8 @@ import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import {
-	__clearRecipeSelectionStateForTests,
 	SHADOW_HANDLERS,
+	__clearRecipeSelectionStateForTests,
 	handleMessage,
 	init,
 } from '../index.js';
@@ -99,13 +99,23 @@ describe('leftover suggestions integration', () => {
 	it('returns numbered suggestions and reuses numeric recipe selection for details', async () => {
 		sharedStore.storage.set('leftovers.yaml', stringify({ items: [makeLeftover()] }));
 		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({ id: 'chili-mac' })));
-		sharedStore.storage.set('recipes/chili-rice.yaml', stringify(makeRecipe({
-			id: 'chili-rice',
-			title: 'Chili Rice Bowl',
-			ingredients: [{ name: 'chili', quantity: 1, unit: 'cup' }, { name: 'rice', quantity: 2, unit: 'cups' }],
-		})));
+		sharedStore.storage.set(
+			'recipes/chili-rice.yaml',
+			stringify(
+				makeRecipe({
+					id: 'chili-rice',
+					title: 'Chili Rice Bowl',
+					ingredients: [
+						{ name: 'chili', quantity: 1, unit: 'cup' },
+						{ name: 'rice', quantity: 2, unit: 'cups' },
+					],
+				}),
+			),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'what should I do with leftovers?' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'what should I do with leftovers?' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -119,21 +129,28 @@ describe('leftover suggestions integration', () => {
 		vi.mocked(services.telegram.send).mockClear();
 		await handleMessage(createTestMessageContext({ userId: 'user1', text: '1' }));
 
-		expect(services.telegram.send).toHaveBeenCalledWith(
-			'user1',
-			expect.stringContaining('Chili'),
-		);
+		expect(services.telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('Chili'));
 	});
 
 	it('returns the explicit no-match fallback for on-demand suggestions', async () => {
-		sharedStore.storage.set('leftovers.yaml', stringify({ items: [makeLeftover({ name: 'leftover curry' })] }));
-		sharedStore.storage.set('recipes/pancakes.yaml', stringify(makeRecipe({
-			id: 'pancakes',
-			title: 'Weekend Pancakes',
-			ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
-		})));
+		sharedStore.storage.set(
+			'leftovers.yaml',
+			stringify({ items: [makeLeftover({ name: 'leftover curry' })] }),
+		);
+		sharedStore.storage.set(
+			'recipes/pancakes.yaml',
+			stringify(
+				makeRecipe({
+					id: 'pancakes',
+					title: 'Weekend Pancakes',
+					ingredients: [{ name: 'flour', quantity: 2, unit: 'cups' }],
+				}),
+			),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'ideas for leftovers?' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'ideas for leftovers?' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -142,9 +159,14 @@ describe('leftover suggestions integration', () => {
 	});
 
 	it('keeps leftover view phrases on the leftover list path', async () => {
-		sharedStore.storage.set('leftovers.yaml', stringify({ items: [makeLeftover({ name: 'leftover rice' })] }));
+		sharedStore.storage.set(
+			'leftovers.yaml',
+			stringify({ items: [makeLeftover({ name: 'leftover rice' })] }),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'what leftovers are there?' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'what leftovers are there?' }),
+		);
 
 		expect(services.telegram.sendWithButtons).toHaveBeenCalledWith(
 			'user1',
@@ -158,7 +180,9 @@ describe('leftover suggestions integration', () => {
 	});
 
 	it('keeps leftover add phrases on the add path', async () => {
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'we have leftover chili' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'we have leftover chili' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',

@@ -8,12 +8,12 @@
  * REQ-CONV-NEWCHAT-009.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache } from '../../app-registry/index.js';
 import type { PendingSessionControlStore } from '../../conversation/pending-session-control-store.js';
 import type { SessionControlResult } from '../../conversation/session-control-classifier.js';
 import type { SessionControlLogger } from '../../conversation/session-control-logger.js';
@@ -294,7 +294,10 @@ describe('Router session-control telemetry — fail-open cases', () => {
 			reason: 'strong',
 			source: 'llm',
 		};
-		const { router, conv } = buildRouter({ classifierResult: result, sessionControlLogger: undefined });
+		const { router, conv } = buildRouter({
+			classifierResult: result,
+			sessionControlLogger: undefined,
+		});
 		await expect(router.routeMessage(msg())).resolves.toBeUndefined();
 		// High-confidence still dispatches handleNewChat even without logger
 		expect(conv.handleNewChat).toHaveBeenCalledOnce();
@@ -312,7 +315,10 @@ describe('Router session-control telemetry — fail-open cases', () => {
 			reason: 'strong',
 			source: 'llm',
 		};
-		const { router, conv } = buildRouter({ classifierResult: result, sessionControlLogger: failLogger });
+		const { router, conv } = buildRouter({
+			classifierResult: result,
+			sessionControlLogger: failLogger,
+		});
 		await expect(router.routeMessage(msg())).resolves.toBeUndefined();
 		expect(conv.handleNewChat).toHaveBeenCalledOnce();
 	});

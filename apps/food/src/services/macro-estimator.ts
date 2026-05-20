@@ -18,8 +18,8 @@
  * rather than silently truncating, so the user can fix their input.
  */
 
-import { z } from 'zod';
 import type { LLMService } from '@pas/core/types';
+import { z } from 'zod';
 import type { MacroData } from '../types.js';
 import { sanitizeForPrompt } from '../utils/sanitize.js';
 

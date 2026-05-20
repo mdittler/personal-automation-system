@@ -1,10 +1,10 @@
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
-import type { AppManifest } from '../../../types/manifest.js';
-import type { AppModule } from '../../../types/app-module.js';
 import { validateManifest } from '../../../schemas/validate-manifest.js';
+import type { AppModule } from '../../../types/app-module.js';
+import type { AppManifest } from '../../../types/manifest.js';
+import { VIRTUAL_CHATBOT_PATH, buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 import { AppRegistry } from '../index.js';
-import { buildVirtualChatbotApp, VIRTUAL_CHATBOT_PATH } from '../../conversation/virtual-app.js';
 
 const logger = pino({ level: 'silent' });
 

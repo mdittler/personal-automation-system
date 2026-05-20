@@ -9,9 +9,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	__resetFirstRunWizardForTests,
+	hasPendingFirstRunWizard,
+} from '../../onboarding/first-run-wizard.js';
 import type { RedeemAndRegisterDeps } from '../redeem-and-register.js';
 import { redeemInviteAndRegister } from '../redeem-and-register.js';
-import { __resetFirstRunWizardForTests, hasPendingFirstRunWizard } from '../../onboarding/first-run-wizard.js';
 
 let tempDir: string;
 
@@ -92,7 +95,13 @@ describe('redeemInviteAndRegister + first-run wizard', () => {
 			dataDir: tempDir,
 			inviteService: {
 				claimAndRedeem: vi.fn().mockResolvedValue({
-					invite: { name: 'Bob', role: 'member', householdId: '', enabledApps: ['*'], initialSpaces: [] },
+					invite: {
+						name: 'Bob',
+						role: 'member',
+						householdId: '',
+						enabledApps: ['*'],
+						initialSpaces: [],
+					},
 				}),
 			} as unknown as RedeemAndRegisterDeps['inviteService'],
 		});
@@ -128,7 +137,9 @@ describe('redeemInviteAndRegister + first-run wizard', () => {
 			} as unknown as RedeemAndRegisterDeps['userMutationService'],
 		});
 
-		await expect(redeemInviteAndRegister(deps, 'CODE', 'user-4')).rejects.toThrow('config write failed');
+		await expect(redeemInviteAndRegister(deps, 'CODE', 'user-4')).rejects.toThrow(
+			'config write failed',
+		);
 		expect(hasPendingFirstRunWizard('user-4')).toBe(false);
 	});
 });

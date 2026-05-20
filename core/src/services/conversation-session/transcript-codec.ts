@@ -1,6 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { CorruptTranscriptError } from './errors.js';
 import type { ChatSessionFrontmatter, SessionTurn } from './chat-session-store.js';
+import { CorruptTranscriptError } from './errors.js';
 
 // The em-dash (U+2014) is the mandatory delimiter; ASCII hyphen-minus is not recognized.
 const EM_DASH = '—';

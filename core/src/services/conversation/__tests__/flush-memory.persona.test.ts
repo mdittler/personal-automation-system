@@ -15,9 +15,12 @@
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
-import type { ChatSessionStore, SessionTurn } from '../../conversation-session/chat-session-store.js';
-import { RECENT_SESSION_SUMMARY_KEY, type MemoryFlushSave } from '../memory-flush.js';
+import type {
+	ChatSessionStore,
+	SessionTurn,
+} from '../../conversation-session/chat-session-store.js';
 import { handleFlushMemory } from '../handle-flush-memory.js';
+import { type MemoryFlushSave, RECENT_SESSION_SUMMARY_KEY } from '../memory-flush.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,7 +58,9 @@ function twoTurnSession() {
 	};
 }
 
-function makeSessionStore(opts: { turns?: SessionTurn[]; peekError?: Error; readError?: Error } = {}) {
+function makeSessionStore(
+	opts: { turns?: SessionTurn[]; peekError?: Error; readError?: Error } = {},
+) {
 	const turns = opts.turns ?? twoTurnSession().turns;
 	return {
 		peekActive: opts.peekError
@@ -71,14 +76,16 @@ function makeCtx(userId = 'u1'): MessageContext {
 	return { userId, text: '/flushmemory', timestamp: new Date(), chatId: 99_001, messageId: 1 };
 }
 
-function makeDeps(overrides: Partial<{
-	telegram: TelegramService;
-	chatSessions: ChatSessionStore;
-	summarizer: (turns: SessionTurn[], signal?: AbortSignal) => Promise<string | null>;
-	flushSave: MemoryFlushSave;
-	logger: Logger;
-	timeoutMs: number;
-}> = {}) {
+function makeDeps(
+	overrides: Partial<{
+		telegram: TelegramService;
+		chatSessions: ChatSessionStore;
+		summarizer: (turns: SessionTurn[], signal?: AbortSignal) => Promise<string | null>;
+		flushSave: MemoryFlushSave;
+		logger: Logger;
+		timeoutMs: number;
+	}> = {},
+) {
 	return {
 		telegram: makeTelegram(),
 		chatSessions: makeSessionStore(),
@@ -237,7 +244,10 @@ describe('PF8 — Timeout guard: deferred reply + flushSave NOT called (REQ-CONV
 		let resolve!: (v: string) => void;
 		const deps = makeDeps({
 			summarizer: vi.fn().mockImplementation(
-				() => new Promise<string>((r) => { resolve = r; }),
+				() =>
+					new Promise<string>((r) => {
+						resolve = r;
+					}),
 			),
 			timeoutMs: 8_000,
 		});

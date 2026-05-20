@@ -6,7 +6,7 @@
  * "can't parse entities" errors that drop the message entirely.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { escapeMarkdown } from '../escape-markdown.js';
 
 describe('escapeMarkdown', () => {

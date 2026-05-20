@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ScopedDataStore } from '@pas/core/types';
-import {
-	recordAdHocLog,
-	findSimilarAdHoc,
-	trimExpired,
-} from '../ad-hoc-history.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { findSimilarAdHoc, recordAdHocLog, trimExpired } from '../ad-hoc-history.js';
 
 function createMockStore() {
 	const storage = new Map<string, string>();

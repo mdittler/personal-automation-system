@@ -16,18 +16,18 @@
  *      and returns an appropriate response (correlation result or needs-more-data).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isHealthCorrelationIntent } from '../handlers/health.js';
+import { isHostingIntent } from '../handlers/hosting.js';
 import {
 	isAdherenceIntent,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
 	isTargetsSetIntent,
 } from '../handlers/nutrition.js';
-import { isHostingIntent } from '../handlers/hosting.js';
-import { isHealthCorrelationIntent } from '../handlers/health.js';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 
@@ -184,7 +184,10 @@ describe('H12a persona — end-to-end routing', () => {
 		// Simulate LLM failure so correlateHealth returns null → handler sends "ran into an issue"
 		// Note: "sleep" is biometric-excluded; use "health" which is matched by isHealthCorrelationIntent
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
-		const ctx = createTestMessageContext({ userId: 'user1', text: 'how does my diet affect my health' });
+		const ctx = createTestMessageContext({
+			userId: 'user1',
+			text: 'how does my diet affect my health',
+		});
 		await handleMessage(ctx);
 		// correlateHealth catches the LLM rejection → returns null → handler sends error message
 		const [_uid, msg] = vi.mocked(services.telegram.send).mock.calls[0]!;
@@ -200,7 +203,14 @@ describe('H12a persona — end-to-end routing', () => {
 		const { handleHealthCorrelation } = await import('../handlers/health.js');
 		const mockInsightServices = createMockCoreServices();
 		vi.mocked(mockInsightServices.llm.complete).mockResolvedValue(
-			JSON.stringify([{ metric: 'energy', pattern: 'Higher protein linked to better energy', confidence: 0.75, disclaimer: 'Observational only.' }])
+			JSON.stringify([
+				{
+					metric: 'energy',
+					pattern: 'Higher protein linked to better energy',
+					confidence: 0.75,
+					disclaimer: 'Observational only.',
+				},
+			]),
 		);
 		// Mock store returns enough data for the correlator — but handleHealthCorrelation calls correlateHealth
 		// which needs actual store reads. Skip the full stack and call the handler with a pre-mocked correlator result.
@@ -213,8 +223,12 @@ describe('H12a persona — end-to-end routing', () => {
 			list: vi.fn().mockResolvedValue([]),
 			archive: vi.fn().mockResolvedValue(undefined),
 		};
-		vi.mocked(mockInsightServices.data.forUser).mockReturnValue(mockStore as unknown as ScopedDataStore);
-		vi.mocked(mockInsightServices.data.forShared).mockReturnValue(mockStore as unknown as ScopedDataStore);
+		vi.mocked(mockInsightServices.data.forUser).mockReturnValue(
+			mockStore as unknown as ScopedDataStore,
+		);
+		vi.mocked(mockInsightServices.data.forShared).mockReturnValue(
+			mockStore as unknown as ScopedDataStore,
+		);
 		const ctx = createTestMessageContext({ userId: 'user1', text: 'diet health check' });
 		await handleHealthCorrelation(mockInsightServices, ctx);
 		// With empty store, gets needs-more-data. Period disclosure is verified through the handler source (health.ts)

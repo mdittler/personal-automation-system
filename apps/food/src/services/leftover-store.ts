@@ -112,7 +112,9 @@ export function formatLeftoverList(items: Leftover[], today?: string): string {
 			indicator = ' ⚠️';
 		}
 		const fromPart = item.fromRecipe ? ` _(${item.fromRecipe})_` : '';
-		lines.push(`• ${item.name} — ${item.quantity}${fromPart} · exp ${item.expiryEstimate}${indicator}`);
+		lines.push(
+			`• ${item.name} — ${item.quantity}${fromPart} · exp ${item.expiryEstimate}${indicator}`,
+		);
 	}
 	return lines.join('\n').trimEnd();
 }

@@ -7,9 +7,9 @@
 
 import type { InlineButton } from '@pas/core/types';
 import type { CookSession, Recipe, ScaledIngredient } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type { ParsedTimer } from './timer-parser.js';
 import { formatDuration } from './timer-parser.js';
-import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 // Node timer globals — not in ES2024 lib, so we declare them here.
 declare function clearTimeout(id: unknown): void;
@@ -116,7 +116,10 @@ export function formatStepMessage(session: CookSession): string {
 	return `Step ${stepNum} of ${session.totalSteps}\n\n${escapeMarkdown(instruction)}`;
 }
 
-export function buildStepButtons(session: CookSession, timer?: ParsedTimer | null): InlineButton[][] {
+export function buildStepButtons(
+	session: CookSession,
+	timer?: ParsedTimer | null,
+): InlineButton[][] {
 	const navRow: InlineButton[] = [
 		{ text: '< Back', callbackData: 'app:food:ck:b' },
 		{ text: 'Repeat', callbackData: 'app:food:ck:r' },
@@ -131,9 +134,7 @@ export function buildStepButtons(session: CookSession, timer?: ParsedTimer | nul
 			session.timerHandle !== undefined && session.timerStepIndex === session.currentStep;
 
 		if (hasActiveTimerOnThisStep) {
-			rows.push([
-				{ text: '⏱ Cancel Timer', callbackData: 'app:food:ck:tc' },
-			]);
+			rows.push([{ text: '⏱ Cancel Timer', callbackData: 'app:food:ck:tc' }]);
 		} else {
 			rows.push([
 				{

@@ -120,10 +120,7 @@ describe('freezer-handler', () => {
 
 				await handleFreezerCallback(services, 'thaw:0', 'user1', 100, 200, store);
 
-				expect(vi.mocked(store.write)).toHaveBeenCalledWith(
-					'freezer.yaml',
-					expect.any(String),
-				);
+				expect(vi.mocked(store.write)).toHaveBeenCalledWith('freezer.yaml', expect.any(String));
 			});
 
 			it('does not log waste for thaw', async () => {
@@ -215,10 +212,7 @@ describe('freezer-handler', () => {
 
 				await handleFreezerCallback(services, 'toss:0', 'user1', 100, 200, store);
 
-				expect(vi.mocked(store.write)).toHaveBeenCalledWith(
-					'freezer.yaml',
-					expect.any(String),
-				);
+				expect(vi.mocked(store.write)).toHaveBeenCalledWith('freezer.yaml', expect.any(String));
 			});
 
 			it('toss second item by index', async () => {

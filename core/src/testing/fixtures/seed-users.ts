@@ -9,9 +9,9 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import pino from 'pino';
+import { HouseholdService } from '../../services/household/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { RegisteredUser } from '../../types/users.js';
-import { HouseholdService } from '../../services/household/index.js';
 import { writeYamlFile } from '../../utils/yaml.js';
 
 export interface SeedOptions {

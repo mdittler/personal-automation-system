@@ -20,15 +20,18 @@ import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { PhotoContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import {
 	getCurrentHouseholdId,
 	getCurrentSessionId,
 	getCurrentUserId,
 } from '../../context/request-context.js';
+import {
+	type StoreFixture,
+	makeStoreFixture,
+} from '../../conversation-session/__tests__/fixtures.js';
+import type { IdleResetHookDeps } from '../../conversation/idle-reset-hook.js';
 import type { HouseholdService } from '../../household/index.js';
-import type { IdleResetHookDeps, IdleResetState } from '../../conversation/idle-reset-hook.js';
-import { makeStoreFixture, type StoreFixture } from '../../conversation-session/__tests__/fixtures.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 
@@ -74,15 +77,26 @@ function makeResetIdleResetDeps(endedSessionId: string): IdleResetHookDeps {
 		chatSessions: {
 			peekActive: vi.fn().mockResolvedValue(endedSessionId),
 			readSession: vi.fn().mockResolvedValue({
-				meta: { id: endedSessionId, last_activity_at: lastActivity, started_at: startedAt, title: null, ended_at: null },
+				meta: {
+					id: endedSessionId,
+					last_activity_at: lastActivity,
+					started_at: startedAt,
+					title: null,
+					ended_at: null,
+				},
 				turns: [],
 			}),
 			endActive: vi.fn().mockResolvedValue({ endedSessionId }),
 		},
 		telegram: { send: vi.fn().mockResolvedValue(undefined) },
 		logger: {
-			debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
-			trace: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			trace: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn().mockReturnThis(),
 		} as unknown as Pick<Logger, 'warn'>,
 		pendingSessionControl: undefined,
 		now: undefined,

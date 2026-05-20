@@ -98,7 +98,10 @@ export async function estimateRecipeCost(
 
 	try {
 		const result = await services.llm.complete(prompt, { tier: 'standard' });
-		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+		const cleaned = result
+			.replace(/^```(?:json)?\n?/, '')
+			.replace(/\n?```$/, '')
+			.trim();
 		const parsed: unknown = JSON.parse(cleaned);
 
 		if (!Array.isArray(parsed)) {
@@ -200,7 +203,10 @@ export async function estimateGroceryListCost(
 
 	try {
 		const result = await services.llm.complete(prompt, { tier: 'standard' });
-		const cleaned = result.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+		const cleaned = result
+			.replace(/^```(?:json)?\n?/, '')
+			.replace(/\n?```$/, '')
+			.trim();
 		const parsed: unknown = JSON.parse(cleaned);
 
 		if (!Array.isArray(parsed)) {

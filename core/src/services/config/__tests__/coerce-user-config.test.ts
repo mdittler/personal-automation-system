@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { ManifestUserConfig } from '../../../types/manifest.js';
 import { coerceUserConfigValue } from '../coerce-user-config.js';
 
-function entry(overrides: Partial<ManifestUserConfig> & Pick<ManifestUserConfig, 'type'>): ManifestUserConfig {
+function entry(
+	overrides: Partial<ManifestUserConfig> & Pick<ManifestUserConfig, 'type'>,
+): ManifestUserConfig {
 	return {
 		key: 'test_key',
 		description: 'test',
@@ -32,21 +34,13 @@ describe('coerceUserConfigValue — boolean', () => {
 		expect(result).toEqual({ ok: true, coerced: expected });
 	});
 
-	it.each([
-		['yes'],
-		['no'],
-		['enabled'],
-		['2'],
-		[''],
-		[0],
-		[1],
-		[{}],
-		[[]],
-		['banana'],
-	])('rejects %p', (raw) => {
-		const result = coerceUserConfigValue(e, raw);
-		expect(result.ok).toBe(false);
-	});
+	it.each([['yes'], ['no'], ['enabled'], ['2'], [''], [0], [1], [{}], [[]], ['banana']])(
+		'rejects %p',
+		(raw) => {
+			const result = coerceUserConfigValue(e, raw);
+			expect(result.ok).toBe(false);
+		},
+	);
 });
 
 describe('coerceUserConfigValue — number', () => {
@@ -67,9 +61,9 @@ describe('coerceUserConfigValue — number', () => {
 	});
 
 	it.each([
-		[NaN],
-		[Infinity],
-		[-Infinity],
+		[Number.NaN],
+		[Number.POSITIVE_INFINITY],
+		[Number.NEGATIVE_INFINITY],
 		['NaN'],
 		['Infinity'],
 		['abc'],
@@ -205,13 +199,19 @@ describe('coerceUserConfigValue — string clearable (Fix 4)', () => {
 });
 
 describe('coerceUserConfigValue — null/undefined guard (all types)', () => {
-	it.each(['boolean', 'number', 'string', 'select'] as const)('rejects null for type %s', (type) => {
-		expect(coerceUserConfigValue(entry({ type }), null).ok).toBe(false);
-	});
+	it.each(['boolean', 'number', 'string', 'select'] as const)(
+		'rejects null for type %s',
+		(type) => {
+			expect(coerceUserConfigValue(entry({ type }), null).ok).toBe(false);
+		},
+	);
 
-	it.each(['boolean', 'number', 'string', 'select'] as const)('rejects undefined for type %s', (type) => {
-		expect(coerceUserConfigValue(entry({ type }), undefined).ok).toBe(false);
-	});
+	it.each(['boolean', 'number', 'string', 'select'] as const)(
+		'rejects undefined for type %s',
+		(type) => {
+			expect(coerceUserConfigValue(entry({ type }), undefined).ok).toBe(false);
+		},
+	);
 });
 
 describe('coerceUserConfigValue — contract', () => {

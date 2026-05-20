@@ -22,7 +22,7 @@ vi.mock('openai', () => {
 	return { default: MockOpenAI };
 });
 
-import { composeRuntime, type RuntimeHandle } from '../compose-runtime.js';
+import { type RuntimeHandle, composeRuntime } from '../compose-runtime.js';
 import { fakeTelegramService } from '../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../testing/fixtures/seed-users.js';
 

@@ -9,7 +9,7 @@ import type { InlineButton, ScopedDataStore } from '@pas/core/types';
 import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { MealPlan, PlannedMeal, Recipe } from '../types.js';
-import { isoNow, getIsoWeekId } from '../utils/date.js';
+import { getIsoWeekId, isoNow } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const CURRENT_PATH = 'meal-plans/current.yaml';

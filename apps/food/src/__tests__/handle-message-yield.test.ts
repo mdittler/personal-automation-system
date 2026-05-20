@@ -8,7 +8,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 
-function buildServices(overrides?: Partial<Parameters<typeof createMockCoreServices>[0]>): CoreServices {
+function buildServices(
+	overrides?: Partial<Parameters<typeof createMockCoreServices>[0]>,
+): CoreServices {
 	return createMockCoreServices({
 		config: {
 			get: vi.fn(async (key: string) => {

@@ -281,9 +281,7 @@ export async function updatePricesFromReceipt(
 				? li.packageSize.trim()
 				: null;
 		const packageSizeFromLine =
-			rawPackageSize !== null && parseSizeString(rawPackageSize) !== null
-				? rawPackageSize
-				: null;
+			rawPackageSize !== null && parseSizeString(rawPackageSize) !== null ? rawPackageSize : null;
 		const resolvedUnit = packageSizeFromLine ?? norm.unit;
 
 		const entry: PriceEntry = {

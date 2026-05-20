@@ -145,7 +145,12 @@ describe('generateGroceryFromRecipes', () => {
 			],
 		});
 		const pantry: PantryItem[] = [
-			{ name: 'soy sauce', quantity: '1 bottle', addedDate: '2026-01-01', category: 'Pantry & Dry Goods' },
+			{
+				name: 'soy sauce',
+				quantity: '1 bottle',
+				addedDate: '2026-01-01',
+				category: 'Pantry & Dry Goods',
+			},
 		];
 		const store = createMockScopedStore({
 			read: buildReadMock({ pantry }),

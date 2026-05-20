@@ -20,14 +20,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import type { AppLogger } from '../../../types/app-module.js';
 import type { AppConfigService } from '../../../types/config.js';
 import type { ManifestUserConfig } from '../../../types/manifest.js';
-import type { AppLogger } from '../../../types/app-module.js';
-import { processConfigSetTags } from '../control-tags.js';
-import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsReader } from '../../settings/settings-reader.js';
+import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
-import { NOTES_INTENT_REGEX, MEMORY_FLUSH_INTENT_REGEX } from '../control-tags.js';
+import { processConfigSetTags } from '../control-tags.js';
+import { MEMORY_FLUSH_INTENT_REGEX, NOTES_INTENT_REGEX } from '../control-tags.js';
 import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
 
 // ---------------------------------------------------------------------------
@@ -46,9 +46,10 @@ function makeLogger(): AppLogger {
 	} as AppLogger;
 }
 
-function makeAppConfig(
-	overrides: Record<string, unknown> | null = null,
-): { cfg: AppConfigService; updateOverrides: ReturnType<typeof vi.fn> } {
+function makeAppConfig(overrides: Record<string, unknown> | null = null): {
+	cfg: AppConfigService;
+	updateOverrides: ReturnType<typeof vi.fn>;
+} {
 	const updateOverrides = vi.fn().mockResolvedValue(undefined);
 	const cfg: AppConfigService = {
 		get: vi.fn(),
@@ -450,7 +451,7 @@ describe('Category 1C: processConfigSetTags — food.default_store (string value
 
 		await processConfigSetTags('<config-set key="food.default_store" value="Trader Joes"/>', {
 			userId: 'u1',
-			userMessage: "update my default grocery store",
+			userMessage: 'update my default grocery store',
 			logger: makeLogger(),
 			settingsRegistry: registry,
 			settingsWriter: writer,
@@ -521,7 +522,10 @@ describe('Category 2: SettingsReader.buildCatalog', () => {
 
 	it('C2-05: catalog shows live override values, not just defaults', async () => {
 		const { cfg: chatbotCfg } = makeAppConfig({ log_to_notes: true });
-		const { cfg: foodCfg } = makeAppConfig({ default_store: 'Whole Foods', seasonal_nudges: false });
+		const { cfg: foodCfg } = makeAppConfig({
+			default_store: 'Whole Foods',
+			seasonal_nudges: false,
+		});
 		const registry = makeRegistry();
 		const reader = makeReader(registry, chatbotCfg, foodCfg);
 
@@ -632,16 +636,13 @@ describe('Category 3: Intent gate — should NOT write', () => {
 		const registry = makeRegistry();
 		const writer = makeWriter(registry, chatbotCfg, foodCfg);
 
-		const result = await processConfigSetTags(
-			'<config-set key="log_to_notes" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'what recipes should I cook this week?',
-				logger: makeLogger(),
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		const result = await processConfigSetTags('<config-set key="log_to_notes" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'what recipes should I cook this week?',
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		expect(chatbotUpdate).not.toHaveBeenCalled();
 		expect(result.cleanedResponse).not.toContain('<config-set');
@@ -755,16 +756,13 @@ describe('Category 3: Intent gate — should NOT write', () => {
 		const registry = makeRegistry();
 		const writer = makeWriter(registry, chatbotCfg, foodCfg);
 
-		await processConfigSetTags(
-			'<config-set key="flush_memory_on_idle_reset" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'remember this for me',
-				logger: makeLogger(),
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="flush_memory_on_idle_reset" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'remember this for me',
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		expect(updateOverrides).not.toHaveBeenCalled();
 	});
@@ -796,16 +794,13 @@ describe('Category 3: Intent gate — should NOT write', () => {
 		const writer = makeWriter(registry, chatbotCfg, foodCfg);
 		const logger = makeLogger();
 
-		const result = await processConfigSetTags(
-			'<config-set key="log_to_notes" value="banana"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on daily notes',
-				logger,
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		const result = await processConfigSetTags('<config-set key="log_to_notes" value="banana"/>', {
+			userId: 'u1',
+			userMessage: 'turn on daily notes',
+			logger,
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		expect(updateOverrides).not.toHaveBeenCalled();
 		expect(result.cleanedResponse).not.toContain('<config-set');
@@ -1018,16 +1013,13 @@ describe('Category 5: Security', () => {
 		const logger = makeLogger();
 		const writer = makeWriter(registry, failingConfig, foodCfg, logger);
 
-		const result = await processConfigSetTags(
-			'<config-set key="log_to_notes" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on daily notes',
-				logger,
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		const result = await processConfigSetTags('<config-set key="log_to_notes" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'turn on daily notes',
+			logger,
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		expect(result.cleanedResponse).not.toContain('<config-set');
 		expect(result.confirmations).toHaveLength(0);
@@ -1042,16 +1034,13 @@ describe('Category 5: Security', () => {
 		const writer = makeWriter(registry, chatbotCfg, foodCfg);
 
 		// Regex requires key then value; reordered form is not parsed → no write
-		const result = await processConfigSetTags(
-			'<config-set value="true" key="log_to_notes"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on daily notes',
-				logger: makeLogger(),
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		const result = await processConfigSetTags('<config-set value="true" key="log_to_notes"/>', {
+			userId: 'u1',
+			userMessage: 'turn on daily notes',
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		expect(updateOverrides).not.toHaveBeenCalled();
 		expect(result.cleanedResponse).not.toContain('<config-set');
@@ -1085,16 +1074,13 @@ describe('Category 5: Security', () => {
 			logger,
 		});
 
-		const result = await processConfigSetTags(
-			'<config-set key="auto_detect_pas" value="false"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on daily notes', // unrelated intent
-				logger,
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		const result = await processConfigSetTags('<config-set key="auto_detect_pas" value="false"/>', {
+			userId: 'u1',
+			userMessage: 'turn on daily notes', // unrelated intent
+			logger,
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 
 		expect(updateOverrides).not.toHaveBeenCalled();
 		expect(result.cleanedResponse).not.toContain('<config-set');

@@ -14,8 +14,8 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,11 +76,15 @@ export function parseSessionControlLogEntry(block: string): ParsedEntry | null {
 
 	if (kind === 'classification') {
 		const latencyRaw = kv.get('Latency');
-		const latencyMs = latencyRaw ? parseInt(latencyRaw, 10) : undefined;
+		const latencyMs = latencyRaw ? Number.parseInt(latencyRaw, 10) : undefined;
 		const rawMessage = kv.get('Message') ?? '';
 		let messageText = rawMessage;
 		if (rawMessage.startsWith('"') && rawMessage.endsWith('"') && rawMessage.length >= 2) {
-			try { messageText = JSON.parse(rawMessage) as string; } catch { /* keep raw */ }
+			try {
+				messageText = JSON.parse(rawMessage) as string;
+			} catch {
+				/* keep raw */
+			}
 		}
 		return {
 			kind: 'classification',
@@ -97,7 +101,7 @@ export function parseSessionControlLogEntry(block: string): ParsedEntry | null {
 
 	if (kind === 'confirmation') {
 		const elapsedRaw = kv.get('Elapsed');
-		const elapsedMs = elapsedRaw ? parseInt(elapsedRaw, 10) : undefined;
+		const elapsedMs = elapsedRaw ? Number.parseInt(elapsedRaw, 10) : undefined;
 		return {
 			kind: 'confirmation',
 			timestamp,
@@ -153,7 +157,7 @@ export function analyzeSessionControlLog(entries: ParsedEntry[]): SessionControl
 	).length;
 	const greyZoneDenominator = greyZoneConfirmed + greyZoneDeclined;
 	const greyZoneConfirmationRate =
-		greyZoneDenominator > 0 ? greyZoneConfirmed / greyZoneDenominator : NaN;
+		greyZoneDenominator > 0 ? greyZoneConfirmed / greyZoneDenominator : Number.NaN;
 
 	// Top declined messages — link confirmation entryId → classification messageText
 	const entryIdToMessage = new Map<string, string>();

@@ -11,7 +11,7 @@ import type { TelegramService } from '../../../types/telegram.js';
 import { AppToggleStore } from '../../app-toggle/index.js';
 import { CronManager } from '../../scheduler/cron-manager.js';
 import { UserManager } from '../../user-manager/index.js';
-import { AlertService, AlertScopeError, type AlertServiceOptions } from '../index.js';
+import { AlertService, type AlertServiceOptions } from '../index.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -545,7 +545,7 @@ describe('AlertService', () => {
 			expect(first.actionsExecuted).toBe(1);
 			expect(second.conditionMet).toBe(true);
 			expect(second.actionTriggered).toBe(false);
-			expect((telegram.send as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+			expect(telegram.send as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2);
 		});
 	});
 
@@ -993,10 +993,13 @@ describe('AlertService — household scope authorization', () => {
 		return { getHouseholdForUser: (uid: string) => map[uid] ?? null };
 	}
 
-	function makeSpaceService(spaces: Record<string, { kind: string; householdId?: string; members?: string[] }>) {
+	function makeSpaceService(
+		spaces: Record<string, { kind: string; householdId?: string; members?: string[] }>,
+	) {
 		return {
 			getSpace: (id: string) => spaces[id] ?? null,
-			isMember: (spaceId: string, userId: string) => (spaces[spaceId]?.members ?? []).includes(userId),
+			isMember: (spaceId: string, userId: string) =>
+				(spaces[spaceId]?.members ?? []).includes(userId),
 		};
 	}
 
@@ -1098,10 +1101,12 @@ describe('AlertService — household scope authorization', () => {
 		});
 		const alert = makeHhAlert({
 			delivery: [USER_A],
-			actions: [{
-				type: 'write_data',
-				config: { app_id: 'food', user_id: USER_B, path: 'note.md', content: 'hello' },
-			}],
+			actions: [
+				{
+					type: 'write_data',
+					config: { app_id: 'food', user_id: USER_B, path: 'note.md', content: 'hello' },
+				},
+			],
 		});
 		const errs = await service.saveAlert(alert);
 		expect(errs).toHaveLength(0);
@@ -1206,7 +1211,9 @@ describe('AlertService — listForUser', () => {
 			userManager: makeUserManager(['u1', 'u2']),
 			householdService,
 		});
-		await service.saveAlert(makeValidAlertDef({ id: 'hh-alert', name: 'HH Alert', delivery: ['u2'] }));
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'hh-alert', name: 'HH Alert', delivery: ['u2'] }),
+		);
 
 		// u1 is NOT in the delivery list → should NOT see the alert
 		const result = await service.listForUser('u1');
@@ -1238,13 +1245,15 @@ describe('AlertService — listForUser', () => {
 
 	it('cross-user: listForUser(u1) does not include u2 alert', async () => {
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u2']) });
-		await service.saveAlert(makeValidAlertDef({ id: 'u2-alert', name: 'U2 Alert', delivery: ['u2'] }));
+		await service.saveAlert(
+			makeValidAlertDef({ id: 'u2-alert', name: 'U2 Alert', delivery: ['u2'] }),
+		);
 
 		const result = await service.listForUser('u1');
 		expect(result).toHaveLength(0);
 	});
 
-	it('cross-user isolation: user does not see another user\'s alert when not in delivery list', async () => {
+	it("cross-user isolation: user does not see another user's alert when not in delivery list", async () => {
 		// u1 and u3 are different users; alert delivers only to u3
 		const { service } = makeService({ userManager: makeUserManager(['u1', 'u3']) });
 		await service.saveAlert(
@@ -1270,10 +1279,7 @@ describe('AlertService — listForUser', () => {
 		await service.saveAlert(makeValidAlertDef({ id: 'a1', name: 'A1', delivery: ['u1'] }));
 		await service.saveAlert(makeValidAlertDef({ id: 'a2', name: 'A2', delivery: ['u2'] }));
 
-		const [r1, r2] = await Promise.all([
-			service.listForUser('u1'),
-			service.listForUser('u2'),
-		]);
+		const [r1, r2] = await Promise.all([service.listForUser('u1'), service.listForUser('u2')]);
 
 		expect(r1.map((a) => a.id)).toEqual(['a1']);
 		expect(r2.map((a) => a.id)).toEqual(['a2']);

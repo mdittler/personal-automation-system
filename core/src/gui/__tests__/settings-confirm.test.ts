@@ -16,19 +16,19 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
-import { CredentialService } from '../../services/credentials/index.js';
-import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
 	SYSTEM_SETTING_DEFS,
 } from '../../services/config/settings-metadata.js';
+import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
+import { CredentialService } from '../../services/credentials/index.js';
 import { buildSettingsRegistry } from '../../services/settings/build-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import type { AppConfigService, SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerViewLocals } from '../view-locals.js';
 
 const AUTH_TOKEN = 'tok';
 const logger = pino({ level: 'silent' });
@@ -53,7 +53,10 @@ const MOCK_APP_ID = 'testapp';
 
 function makeConfig(): SystemConfig {
 	return {
-		port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
+		port: 3000,
+		dataDir: '/tmp',
+		logLevel: 'info',
+		timezone: 'UTC',
 		telegram: { botToken: 'tok' },
 		claude: { apiKey: '', model: 'm' },
 		cloudflare: {},
@@ -64,9 +67,12 @@ function makeConfig(): SystemConfig {
 				standard: { provider: 'claude', model: 'm' },
 			},
 		},
-		gui: { authToken: 'tok' }, api: { token: '' }, n8n: { dispatchUrl: '' },
+		gui: { authToken: 'tok' },
+		api: { token: '' },
+		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [], webhooks: [],
+		users: [],
+		webhooks: [],
 		backup: { enabled: false, path: '/tmp/backups', schedule: '0 3 * * *', retentionCount: 7 },
 		chat: {
 			logToNotes: false,
@@ -127,8 +133,13 @@ async function buildTestServer(opts: SetupOpts): Promise<TestSetup> {
 	});
 
 	const mockLogger = {
-		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
-		error: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
 	};
 
 	const settingsWriter = new SettingsWriter({
@@ -151,7 +162,9 @@ async function buildTestServer(opts: SetupOpts): Promise<TestSetup> {
 			id === TEST_USER_ID
 				? { id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 }
 				: null,
-		getAllUsers: () => [{ id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 }],
+		getAllUsers: () => [
+			{ id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 },
+		],
 	};
 
 	const householdService = {
@@ -246,7 +259,9 @@ describe('Auth requirements (REQ-SETTINGS-026)', () => {
 	afterEach(async () => {
 		await Promise.all([
 			adminSetup.app.close().then(() => rm(adminSetup.tempDir, { recursive: true, force: true })),
-			nonAdminSetup.app.close().then(() => rm(nonAdminSetup.tempDir, { recursive: true, force: true })),
+			nonAdminSetup.app
+				.close()
+				.then(() => rm(nonAdminSetup.tempDir, { recursive: true, force: true })),
 		]);
 	});
 
@@ -301,7 +316,9 @@ describe('Auth requirements (REQ-SETTINGS-026)', () => {
 describe('GET /confirm modal (REQ-SETTINGS-026)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -398,7 +415,9 @@ describe('GET /confirm modal (REQ-SETTINGS-026)', () => {
 describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -429,7 +448,10 @@ describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 		// YAML on disk updated
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<string, unknown>;
+		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+			string,
+			unknown
+		>;
 		expect(sessions['auto_prune']).toBe(true);
 	});
 
@@ -461,7 +483,10 @@ describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 		// Key should be absent from YAML (reset to schema default)
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<string, unknown>;
+		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+			string,
+			unknown
+		>;
 		expect('auto_prune' in sessions).toBe(false);
 	});
 });
@@ -473,7 +498,9 @@ describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -496,13 +523,20 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 
 		const yamlAfter = await readFile(setup.configPath, 'utf-8');
 
-		return { res, unchangedYaml: parse(yamlBefore) as Record<string, unknown>, parsedAfter: parse(yamlAfter) as Record<string, unknown> };
+		return {
+			res,
+			unchangedYaml: parse(yamlBefore) as Record<string, unknown>,
+			parsedAfter: parse(yamlAfter) as Record<string, unknown>,
+		};
 	}
 
 	it('whitespace prefix → 403, no write', async () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, ` ${AUTO_PRUNE_PROMPT}`,
+			setup.app,
+			allCookies,
+			csrfToken,
+			` ${AUTO_PRUNE_PROMPT}`,
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
@@ -511,7 +545,10 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 	it('whitespace suffix → 403, no write', async () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, `${AUTO_PRUNE_PROMPT} `,
+			setup.app,
+			allCookies,
+			csrfToken,
+			`${AUTO_PRUNE_PROMPT} `,
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
@@ -520,7 +557,10 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 	it('case mismatch (uppercased) → 403, no write', async () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, AUTO_PRUNE_PROMPT.toUpperCase(),
+			setup.app,
+			allCookies,
+			csrfToken,
+			AUTO_PRUNE_PROMPT.toUpperCase(),
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
@@ -530,17 +570,23 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		const truncated = AUTO_PRUNE_PROMPT.slice(0, Math.floor(AUTO_PRUNE_PROMPT.length / 2));
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, truncated,
+			setup.app,
+			allCookies,
+			csrfToken,
+			truncated,
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
 	});
 
-	it('cross-key mismatch (different key\'s prompt) → 403, no write', async () => {
+	it("cross-key mismatch (different key's prompt) → 403, no write", async () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		// Use auto_prune endpoint but submit a different key's prompt
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, MOCK_PER_USER_DANGEROUS_PROMPT,
+			setup.app,
+			allCookies,
+			csrfToken,
+			MOCK_PER_USER_DANGEROUS_PROMPT,
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
@@ -549,7 +595,10 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 	it('empty phrase → 403, no write', async () => {
 		const { allCookies, csrfToken } = await login(setup.app);
 		const { res, unchangedYaml, parsedAfter } = await postConfirmAndCheck(
-			setup.app, allCookies, csrfToken, '',
+			setup.app,
+			allCookies,
+			csrfToken,
+			'',
 		);
 		expect(res.statusCode).toBe(403);
 		expect(parsedAfter).toEqual(unchangedYaml);
@@ -576,7 +625,9 @@ describe('POST /confirm — phrase mismatch (REQ-SETTINGS-027)', () => {
 describe('Direct POST /reset for dangerous key → 403 (REQ-SETTINGS-034)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -672,7 +723,9 @@ describe('POST /confirm — per-user dangerous reset', () => {
 describe('Server-side re-validation at POST confirm time', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -701,7 +754,10 @@ describe('Server-side re-validation at POST confirm time', () => {
 		// YAML unchanged
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<string, unknown>;
+		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+			string,
+			unknown
+		>;
 		expect('auto_prune' in sessions).toBe(false);
 	});
 });

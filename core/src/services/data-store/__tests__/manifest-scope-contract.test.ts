@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { validateManifest } from '../../../schemas/validate-manifest.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import { readYamlFile } from '../../../utils/yaml.js';
+import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 import { ChangeLog } from '../change-log.js';
 import { DataStoreServiceImpl } from '../index.js';
-import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appsDir = join(__dirname, '..', '..', '..', '..', '..', 'apps');

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
 import {
 	appendContextEntriesSection,
 	appendConversationHistorySection,
 	appendUserContextSection,
 } from '../system-prompt.js';
-import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
 
 const NOW = new Date('2026-04-10T12:00:00Z');
 

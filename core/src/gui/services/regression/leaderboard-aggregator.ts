@@ -119,11 +119,7 @@ export function aggregateLeaderboard(opts: AggregateOptions): LeaderboardRow[] {
 	return rows;
 }
 
-function buildRow(
-	m: RunManifest,
-	tier: LeaderboardTier,
-	modelId: string,
-): LeaderboardRow {
+function buildRow(m: RunManifest, tier: LeaderboardTier, modelId: string): LeaderboardRow {
 	const tierResults = m.caseResults.filter((cr) => cr.evaluatedTier === tier);
 	const counts = countVerdicts(tierResults);
 	const buckets = groupByBucket(tierResults);

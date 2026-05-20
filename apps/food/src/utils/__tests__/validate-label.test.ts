@@ -7,7 +7,7 @@
  * bad labels at the boundary instead of crashing deep in a callback.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { validateLabel } from '../validate-label.js';
 
 describe('validateLabel', () => {

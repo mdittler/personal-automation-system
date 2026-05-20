@@ -5,26 +5,28 @@
  * upcoming holiday lookup, shared store load/ensure, and year-boundary handling.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { stringify } from 'yaml';
-import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import type { ScopedDataStore } from '@pas/core/types';
-import type { CulturalCalendar, Holiday } from '../types.js';
+import { generateFrontmatter } from '@pas/core/utils/frontmatter';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { stringify } from 'yaml';
 import {
-	resolveHolidayDate,
+	DEFAULT_HOLIDAYS,
 	computeEaster,
+	ensureCalendar,
 	getUpcomingHolidays,
 	loadCalendar,
-	ensureCalendar,
-	DEFAULT_HOLIDAYS,
+	resolveHolidayDate,
 } from '../services/cultural-calendar.js';
+import type { CulturalCalendar, Holiday } from '../types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 function createMockStore() {
 	return {
 		read: vi.fn<Parameters<ScopedDataStore['read']>, ReturnType<ScopedDataStore['read']>>(),
-		write: vi.fn<Parameters<ScopedDataStore['write']>, ReturnType<ScopedDataStore['write']>>().mockResolvedValue(undefined),
+		write: vi
+			.fn<Parameters<ScopedDataStore['write']>, ReturnType<ScopedDataStore['write']>>()
+			.mockResolvedValue(undefined),
 		append: vi.fn().mockResolvedValue(undefined),
 		exists: vi.fn().mockResolvedValue(false),
 		list: vi.fn().mockResolvedValue([]),
@@ -47,7 +49,11 @@ function makeCalendar(holidays: Partial<Holiday>[] = []): CulturalCalendar {
 }
 
 function serializeCalendar(calendar: CulturalCalendar): string {
-	const fm = generateFrontmatter({ title: 'Cultural Calendar', date: new Date().toISOString(), tags: ['food', 'cultural-calendar'] });
+	const fm = generateFrontmatter({
+		title: 'Cultural Calendar',
+		date: new Date().toISOString(),
+		tags: ['food', 'cultural-calendar'],
+	});
 	return fm + stringify({ holidays: calendar.holidays });
 }
 
@@ -115,7 +121,10 @@ describe('resolveHolidayDate', () => {
 
 	describe('table rule', () => {
 		it('returns date for year present in table', () => {
-			const result = resolveHolidayDate({ type: 'table', dates: { 2025: '01-29', 2026: '02-17' } }, 2025);
+			const result = resolveHolidayDate(
+				{ type: 'table', dates: { 2025: '01-29', 2026: '02-17' } },
+				2025,
+			);
 			expect(result).toBe('2025-01-29');
 		});
 
@@ -217,7 +226,11 @@ describe('loadCalendar', () => {
 
 	it('parses a valid cultural-calendar.yaml and returns calendar', async () => {
 		const calendar: CulturalCalendar = makeCalendar([
-			{ id: 'thanksgiving', name: 'Thanksgiving', dateRule: { type: 'nthWeekday', month: 11, weekday: 4, n: 4 } },
+			{
+				id: 'thanksgiving',
+				name: 'Thanksgiving',
+				dateRule: { type: 'nthWeekday', month: 11, weekday: 4, n: 4 },
+			},
 		]);
 		store.read.mockResolvedValue(serializeCalendar(calendar));
 
@@ -294,13 +307,13 @@ describe('DEFAULT_HOLIDAYS', () => {
 	});
 
 	it('includes Thanksgiving with nthWeekday rule', () => {
-		const thanksgiving = DEFAULT_HOLIDAYS.find(h => h.id === 'thanksgiving-us');
+		const thanksgiving = DEFAULT_HOLIDAYS.find((h) => h.id === 'thanksgiving-us');
 		expect(thanksgiving).toBeDefined();
 		expect(thanksgiving!.dateRule.type).toBe('nthWeekday');
 	});
 
 	it('includes Christmas with fixed rule', () => {
-		const christmas = DEFAULT_HOLIDAYS.find(h => h.id === 'christmas');
+		const christmas = DEFAULT_HOLIDAYS.find((h) => h.id === 'christmas');
 		expect(christmas).toBeDefined();
 		expect(christmas!.dateRule.type).toBe('fixed');
 	});
@@ -315,6 +328,6 @@ describe('DEFAULT_HOLIDAYS', () => {
 	});
 
 	it('all holidays are enabled by default', () => {
-		expect(DEFAULT_HOLIDAYS.every(h => h.enabled)).toBe(true);
+		expect(DEFAULT_HOLIDAYS.every((h) => h.enabled)).toBe(true);
 	});
 });

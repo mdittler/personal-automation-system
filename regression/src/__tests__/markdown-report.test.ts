@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { RoutingTarget, RunResult } from '../shared/types.js';
 import {
 	ACCURACY_GATE_THRESHOLD,
 	FOOD_SHADOW_INPUT_FLOOR,
@@ -7,6 +6,7 @@ import {
 	computeRoutingAccuracy,
 	formatSummaryMarkdown,
 } from '../runner/markdown-report.js';
+import type { RoutingTarget, RunResult } from '../shared/types.js';
 
 function mk(
 	caseId: string,
@@ -19,11 +19,7 @@ function mk(
 		source: 'fresh',
 		verdict:
 			caseVerdict ??
-			(verdicts.includes('error')
-				? 'error'
-				: verdicts.includes('fail')
-					? 'fail'
-					: 'pass'),
+			(verdicts.includes('error') ? 'error' : verdicts.includes('fail') ? 'fail' : 'pass'),
 		inputs: verdicts.map(() => ({ payload: 'x', expected: {} })),
 		actuals: verdicts.map(() => ''),
 		oracleVerdicts: verdicts.map((v) => ({ verdict: v, details: '' })),
@@ -42,9 +38,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 
 	it('returns 1.0 when all food-shadow inputs pass', () => {
 		const results = Array.from({ length: 25 }, (_, i) => mk(`c${i}`, ['pass']));
-		const targets = new Map(
-			results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]),
-		);
+		const targets = new Map(results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		expect(computeRoutingAccuracy(results, targets)).toBe(1.0);
 	});
 
@@ -71,9 +65,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 	it('counts budget-exceeded cases (whose synthesized verdicts are error) against the gate', () => {
 		const passes = Array.from({ length: 19 }, (_, i) => mk(`p${i}`, ['pass']));
 		const be = mk('b1', ['error'], 'budget-exceeded');
-		const targets = new Map(
-			[...passes, be].map((r) => [r.caseId, 'food-shadow' as RoutingTarget]),
-		);
+		const targets = new Map([...passes, be].map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		const acc = computeRoutingAccuracy([...passes, be], targets);
 		expect(acc).toBeCloseTo(19 / 20, 3);
 	});
@@ -81,9 +73,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 	it(`returns null below floor (${FOOD_SHADOW_INPUT_FLOOR})`, () => {
 		expect(FOOD_SHADOW_INPUT_FLOOR).toBe(20);
 		const results = Array.from({ length: 10 }, (_, i) => mk(`c${i}`, ['pass']));
-		const targets = new Map(
-			results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]),
-		);
+		const targets = new Map(results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		expect(computeRoutingAccuracy(results, targets)).toBeNull();
 	});
 
@@ -91,9 +81,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 		const results = Array.from({ length: FOOD_SHADOW_INPUT_FLOOR - 1 }, (_, i) =>
 			mk(`c${i}`, ['pass']),
 		);
-		const targets = new Map(
-			results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]),
-		);
+		const targets = new Map(results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		expect(computeRoutingAccuracy(results, targets)).toBeNull();
 	});
 
@@ -126,9 +114,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 describe('buildSummary', () => {
 	it('aggregates verdicts at the case level', () => {
 		const results = [mk('p', ['pass']), mk('f', ['fail']), mk('e', ['error'])];
-		const targets = new Map(
-			results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]),
-		);
+		const targets = new Map(results.map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		const s = buildSummary(results, targets);
 		expect(s.pass).toBe(1);
 		expect(s.fail).toBe(1);

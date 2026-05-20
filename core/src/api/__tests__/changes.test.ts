@@ -11,7 +11,8 @@ import { registerApiRoutes } from '../index.js';
 // Mock the request-context module so we can control getCurrentHouseholdId in tests.
 // Fastify inject() does not propagate AsyncLocalStorage, so we use vi.mock instead.
 vi.mock('../../services/context/request-context.js', async (importOriginal) => {
-	const original = await importOriginal<typeof import('../../services/context/request-context.js')>();
+	const original =
+		await importOriginal<typeof import('../../services/context/request-context.js')>();
 	return {
 		...original,
 		getCurrentHouseholdId: vi.fn(() => undefined as string | undefined),
@@ -280,8 +281,22 @@ describe('API Changes Route', () => {
 		it('returns all entries when no householdId in request context (fail-open)', async () => {
 			const now = new Date().toISOString();
 			await writeChangeLogEntries([
-				{ timestamp: now, operation: 'write', path: 'a.md', appId: 'notes', userId: 'u1', householdId: 'hh1' },
-				{ timestamp: now, operation: 'write', path: 'b.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+				{
+					timestamp: now,
+					operation: 'write',
+					path: 'a.md',
+					appId: 'notes',
+					userId: 'u1',
+					householdId: 'hh1',
+				},
+				{
+					timestamp: now,
+					operation: 'write',
+					path: 'b.md',
+					appId: 'notes',
+					userId: 'u2',
+					householdId: 'hh2',
+				},
 			]);
 
 			// getCurrentHouseholdId() returns undefined → filter skipped → all rows returned
@@ -295,8 +310,22 @@ describe('API Changes Route', () => {
 		it('filters to matching household when householdId in request context', async () => {
 			const now = new Date().toISOString();
 			await writeChangeLogEntries([
-				{ timestamp: now, operation: 'write', path: 'hh1.md', appId: 'notes', userId: 'u1', householdId: 'hh1' },
-				{ timestamp: now, operation: 'write', path: 'hh2.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+				{
+					timestamp: now,
+					operation: 'write',
+					path: 'hh1.md',
+					appId: 'notes',
+					userId: 'u1',
+					householdId: 'hh1',
+				},
+				{
+					timestamp: now,
+					operation: 'write',
+					path: 'hh2.md',
+					appId: 'notes',
+					userId: 'u2',
+					householdId: 'hh2',
+				},
 			]);
 
 			mockGetCurrentHouseholdId.mockReturnValue('hh1');
@@ -311,7 +340,14 @@ describe('API Changes Route', () => {
 			const now = new Date().toISOString();
 			await writeChangeLogEntries([
 				{ timestamp: now, operation: 'write', path: 'system.md', appId: 'notes', userId: 'system' },
-				{ timestamp: now, operation: 'write', path: 'hh2.md', appId: 'notes', userId: 'u2', householdId: 'hh2' },
+				{
+					timestamp: now,
+					operation: 'write',
+					path: 'hh2.md',
+					appId: 'notes',
+					userId: 'u2',
+					householdId: 'hh2',
+				},
 			]);
 
 			mockGetCurrentHouseholdId.mockReturnValue('hh1');

@@ -16,15 +16,15 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AlertDefinition } from '../../../types/alert.js';
+import type { ContextStoreService } from '../../../types/context-store.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { TelegramService } from '../../../types/telegram.js';
 import { AppToggleStore } from '../../app-toggle/index.js';
+import { ChangeLog } from '../../data-store/change-log.js';
+import { ReportService } from '../../reports/index.js';
 import { CronManager } from '../../scheduler/cron-manager.js';
 import { UserManager } from '../../user-manager/index.js';
 import { AlertService, type AlertServiceOptions } from '../index.js';
-import { ReportService } from '../../reports/index.js';
-import { ChangeLog } from '../../data-store/change-log.js';
-import type { ContextStoreService } from '../../../types/context-store.js';
 
 let tempDir: string;
 
@@ -46,8 +46,16 @@ function makeService(overrides: Partial<AlertServiceOptions> = {}): AlertService
 		logger,
 	});
 	const cronManager = new CronManager(logger, 'UTC', tempDir);
-	const telegram = { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as unknown as TelegramService;
-	const llm = { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as unknown as LLMService;
+	const telegram = {
+		send: vi.fn(),
+		sendPhoto: vi.fn(),
+		sendOptions: vi.fn(),
+	} as unknown as TelegramService;
+	const llm = {
+		complete: vi.fn(),
+		classify: vi.fn(),
+		extractStructured: vi.fn(),
+	} as unknown as LLMService;
 	const contextStore = { get: vi.fn(), search: vi.fn() } as unknown as ContextStoreService;
 	const reportService = new ReportService({
 		dataDir: tempDir,

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import cron from 'node-cron';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerDailyDiffCron } from '../../../bootstrap/register-daily-diff-cron.js';
 import type { AlertDefinition } from '../../../types/alert.js';
 import type { ContextStoreService } from '../../../types/context-store.js';
 import type { EventBusService, EventHandler } from '../../../types/events.js';
@@ -16,7 +17,6 @@ import { ChangeLog } from '../../data-store/change-log.js';
 import { ReportService } from '../../reports/index.js';
 import { CronManager } from '../../scheduler/cron-manager.js';
 import { UserManager } from '../../user-manager/index.js';
-import { registerDailyDiffCron } from '../../../bootstrap/register-daily-diff-cron.js';
 import { type N8nDispatcher, N8nDispatcherImpl } from '../index.js';
 
 const logger = pino({ level: 'silent' });

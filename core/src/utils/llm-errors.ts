@@ -31,8 +31,7 @@ const USER_MESSAGES: Record<LLMErrorCategory, string> = {
 	'cost-cap': 'Monthly AI usage limit reached. Service will resume next month.',
 	'household-cost-cap':
 		'Your household has reached its monthly AI budget. Service will resume next month or when your admin raises the limit.',
-	'reservation-exceeded':
-		'The AI service is briefly at capacity. Please try again in a moment.',
+	'reservation-exceeded': 'The AI service is briefly at capacity. Please try again in a moment.',
 	auth: 'AI service configuration error. Please contact your admin.',
 	overloaded: 'AI service is temporarily overloaded. Please try again shortly.',
 	unknown: 'Could not process your request right now. Please try again later.',

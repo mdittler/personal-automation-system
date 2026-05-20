@@ -16,9 +16,7 @@ function createPermissionSummary(): PermissionSummary {
 	};
 }
 
-function createPreparedInstall(
-	overrides?: Partial<PreparedInstall>,
-): PreparedInstall & {
+function createPreparedInstall(overrides?: Partial<PreparedInstall>): PreparedInstall & {
 	commitMock: ReturnType<typeof vi.fn>;
 	disposeMock: ReturnType<typeof vi.fn>;
 } {
@@ -159,10 +157,7 @@ describe('install-app CLI', () => {
 			prompt,
 		});
 
-		const exitCode = await runInstallAppCli(
-			['https://github.com/user/repo.git', '--yes'],
-			deps,
-		);
+		const exitCode = await runInstallAppCli(['https://github.com/user/repo.git', '--yes'], deps);
 
 		expect(exitCode).toBe(0);
 		expect(prompt).not.toHaveBeenCalled();

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { handleSeasonalNudgeJob } from '../../handlers/seasonal-nudge.js';
 
-function createMockServices(llmResponse = 'Strawberries are in season! Try our Strawberry Salad recipe.') {
+function createMockServices(
+	llmResponse = 'Strawberries are in season! Try our Strawberry Salad recipe.',
+) {
 	return {
 		telegram: {
 			send: vi.fn().mockResolvedValue(undefined),

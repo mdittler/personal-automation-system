@@ -1,5 +1,5 @@
-import type { AppManifest } from '../../types/manifest.js';
 import type { AppModule } from '../../types/app-module.js';
+import type { AppManifest } from '../../types/manifest.js';
 import {
 	CONVERSATION_DATA_SCOPES,
 	CONVERSATION_LLM_SAFEGUARDS,

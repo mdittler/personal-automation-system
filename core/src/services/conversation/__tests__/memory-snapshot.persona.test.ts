@@ -21,8 +21,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { MemorySnapshot } from '../../../types/conversation-session.js';
-import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { requestContext } from '../../context/request-context.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { ConversationService } from '../conversation-service.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 
@@ -37,9 +37,12 @@ function makeOkSnapshot(content: string): MemorySnapshot {
 	return { content, status: 'ok', builtAt: '2026-04-28T00:00:00Z', entryCount: 1 };
 }
 
-function makeChatSessionsWithSnapshot(snapshot: MemorySnapshot | undefined, opts: {
-	sessionId?: string;
-} = {}): ChatSessionStore {
+function makeChatSessionsWithSnapshot(
+	snapshot: MemorySnapshot | undefined,
+	opts: {
+		sessionId?: string;
+	} = {},
+): ChatSessionStore {
 	const sessionId = opts.sessionId ?? 'session-abc';
 	return {
 		peekActive: vi.fn().mockResolvedValue(undefined),
@@ -69,7 +72,7 @@ function makeServiceWithSessions(
 				buildContextSnapshot: vi.fn().mockResolvedValue(null),
 				buildMemorySnapshot: vi.fn().mockImplementation(buildMemorySnapshot),
 				searchSessions: vi.fn(),
-		  }
+			}
 		: undefined;
 
 	const deps: ConversationServiceDeps = {
@@ -86,9 +89,9 @@ function makeServiceWithSessions(
 }
 
 function getStandardPrompt(services: ReturnType<typeof createMockCoreServices>): string {
-	const standardCall = vi.mocked(services.llm.complete).mock.calls.find(
-		(c) => c[1]?.tier === 'standard',
-	);
+	const standardCall = vi
+		.mocked(services.llm.complete)
+		.mock.calls.find((c) => c[1]?.tier === 'standard');
 	return (standardCall?.[1]?.systemPrompt ?? '') as string;
 }
 
@@ -149,7 +152,12 @@ describe('memory-snapshot persona — freeze semantic', () => {
 	});
 
 	it('no <memory-context> block when snapshot has degraded status', async () => {
-		const snapshot: MemorySnapshot = { content: '', status: 'degraded', builtAt: '', entryCount: 0 };
+		const snapshot: MemorySnapshot = {
+			content: '',
+			status: 'degraded',
+			builtAt: '',
+			entryCount: 0,
+		};
 		const chatSessions = makeChatSessionsWithSnapshot(snapshot);
 		const { svc, services } = makeServiceWithSessions(chatSessions);
 		vi.mocked(services.llm.complete).mockResolvedValue('OK');
@@ -250,8 +258,16 @@ describe('memory-snapshot persona — new session after /newchat', () => {
 			readSession: vi.fn().mockResolvedValue(undefined),
 			ensureActiveSession: vi
 				.fn()
-				.mockResolvedValueOnce({ sessionId: 'session-1', isNew: true, snapshot: sessionOneSnapshot })
-				.mockResolvedValueOnce({ sessionId: 'session-2', isNew: true, snapshot: sessionTwoSnapshot }),
+				.mockResolvedValueOnce({
+					sessionId: 'session-1',
+					isNew: true,
+					snapshot: sessionOneSnapshot,
+				})
+				.mockResolvedValueOnce({
+					sessionId: 'session-2',
+					isNew: true,
+					snapshot: sessionTwoSnapshot,
+				}),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 			setTitle: vi.fn().mockResolvedValue({ updated: false }),
 			rebuildMemorySnapshot: vi

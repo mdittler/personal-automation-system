@@ -79,10 +79,7 @@ describe('Echo App', () => {
 			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on echo module
 			await echo.handleCommand!('echo', ['*bold*', '_italic_'], createTestMessageContext());
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'test-user',
-				'\\*bold\\* \\_italic\\_',
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('test-user', '\\*bold\\* \\_italic\\_');
 		});
 
 		it('should send "(empty)" when no args given', async () => {

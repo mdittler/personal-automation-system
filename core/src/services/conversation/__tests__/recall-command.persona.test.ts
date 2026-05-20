@@ -14,24 +14,22 @@
  * REQ-CONV-RECALL-001..009
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { AppLogger } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
+import type { SearchHit, SearchResult } from '../../chat-transcript-index/types.js';
+import { requestContext } from '../../context/request-context.js';
+import type { ConversationRetrievalService } from '../../conversation-retrieval/conversation-retrieval-service.js';
+import { ConversationRetrievalError } from '../../conversation-retrieval/conversation-retrieval-service.js';
 import type { FallbackHandler } from '../../router/fallback.js';
 import { Router } from '../../router/index.js';
-import { requestContext } from '../../context/request-context.js';
-import type {
-	ConversationRetrievalService,
-} from '../../conversation-retrieval/conversation-retrieval-service.js';
-import { ConversationRetrievalError } from '../../conversation-retrieval/conversation-retrieval-service.js';
-import type { SearchHit, SearchResult } from '../../chat-transcript-index/types.js';
-import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { handleRecall } from '../handle-recall.js';
 import type { HandleRecallDeps } from '../handle-recall.js';
-import type { AppLogger } from '../../../types/app-module.js';
 
 // ---------------------------------------------------------------------------
 // Router fixtures (mirrors router-recall.test.ts)
@@ -110,7 +108,7 @@ function buildRouter(conversationService: ReturnType<typeof makeConversationServ
 						manifest: chatbotManifest,
 						module: { init: vi.fn(), handleMessage: vi.fn() } as any,
 						appDir: '/apps/chatbot',
-				  } as RegisteredApp)
+					} as RegisteredApp)
 				: undefined,
 		getManifestCache: () => cache,
 		getLoadedAppIds: () => ['chatbot'],
@@ -214,7 +212,10 @@ describe('/recall persona — router dispatch', () => {
 		['/recall pasta', ['pasta']],
 		['/recall PASTA', ['PASTA']],
 		['/recall pasta carbonara', ['pasta', 'carbonara']],
-		['/recall what did i say about onions last week', ['what', 'did', 'i', 'say', 'about', 'onions', 'last', 'week']],
+		[
+			'/recall what did i say about onions last week',
+			['what', 'did', 'i', 'say', 'about', 'onions', 'last', 'week'],
+		],
 		['/recall pantry restock', ['pantry', 'restock']],
 		['/recall school lunches', ['school', 'lunches']],
 		['/recall grocery list', ['grocery', 'list']],
@@ -227,7 +228,10 @@ describe('/recall persona — router dispatch', () => {
 		['/recall budget planning', ['budget', 'planning']],
 		['/recall weekend trip', ['weekend', 'trip']],
 		['/recall chicken stew recipe', ['chicken', 'stew', 'recipe']],
-		['/recall when did we talk about the car', ['when', 'did', 'we', 'talk', 'about', 'the', 'car']],
+		[
+			'/recall when did we talk about the car',
+			['when', 'did', 'we', 'talk', 'about', 'the', 'car'],
+		],
 		['/recall meal prep ideas', ['meal', 'prep', 'ideas']],
 		['/recall allergies', ['allergies']],
 		['/recall the', ['the']],
@@ -330,15 +334,18 @@ describe('/recall persona — handler queryTerms', () => {
 		['school lunches', ['school', 'lunches']],
 		['the and a', ['the', 'and', 'a']],
 		['GROCERY LIST', ['GROCERY', 'LIST']],
-	] as [string, string[]][])('query "%s" → searchSessions called with queryTerms %j', async (query, expectedTerms) => {
-		const retrieval = makeRetrieval();
-		const deps = makeDeps(retrieval);
-		const ctx = makeCtx();
-		await runWithContext('user1', () => handleRecall(query.split(' '), ctx, deps));
-		expect(retrieval.searchSessions).toHaveBeenCalledWith(
-			expect.objectContaining({ queryTerms: expectedTerms }),
-		);
-	});
+	] as [string, string[]][])(
+		'query "%s" → searchSessions called with queryTerms %j',
+		async (query, expectedTerms) => {
+			const retrieval = makeRetrieval();
+			const deps = makeDeps(retrieval);
+			const ctx = makeCtx();
+			await runWithContext('user1', () => handleRecall(query.split(' '), ctx, deps));
+			expect(retrieval.searchSessions).toHaveBeenCalledWith(
+				expect.objectContaining({ queryTerms: expectedTerms }),
+			);
+		},
+	);
 
 	it('FTS operators stripped: "*" → zero terms → no search', async () => {
 		const retrieval = makeRetrieval();
@@ -413,10 +420,15 @@ describe('/recall persona — reply formatting', () => {
 
 	it('FTS5 highlight markers stripped: [pasta] → pasta in snippet', async () => {
 		const hit = makeSearchHit({
-			matches: [{
-				turn_index: 1, role: 'user', timestamp: '2026-04-28T14:00:00Z',
-				snippet: 'we should make [pasta] tonight', bm25: -1.0,
-			}],
+			matches: [
+				{
+					turn_index: 1,
+					role: 'user',
+					timestamp: '2026-04-28T14:00:00Z',
+					snippet: 'we should make [pasta] tonight',
+					bm25: -1.0,
+				},
+			],
 		});
 		const deps = makeDeps(makeRetrieval({ hits: [hit] }));
 		await runWithContext('user1', () => handleRecall(['pasta'], makeCtx(), deps));
@@ -427,10 +439,15 @@ describe('/recall persona — reply formatting', () => {
 
 	it('user [brackets] not a query term: survive in escaped form \\[not a highlight\\]', async () => {
 		const hit = makeSearchHit({
-			matches: [{
-				turn_index: 1, role: 'user', timestamp: '2026-04-28T14:00:00Z',
-				snippet: 'check [not a highlight] here', bm25: -1.0,
-			}],
+			matches: [
+				{
+					turn_index: 1,
+					role: 'user',
+					timestamp: '2026-04-28T14:00:00Z',
+					snippet: 'check [not a highlight] here',
+					bm25: -1.0,
+				},
+			],
 		});
 		const deps = makeDeps(makeRetrieval({ hits: [hit] }));
 		await runWithContext('user1', () => handleRecall(['pasta'], makeCtx(), deps));
@@ -440,10 +457,15 @@ describe('/recall persona — reply formatting', () => {
 
 	it('Markdown special chars in snippet are escaped', async () => {
 		const hit = makeSearchHit({
-			matches: [{
-				turn_index: 1, role: 'user', timestamp: '2026-04-28T14:00:00Z',
-				snippet: 'try *bold* and _italic_', bm25: -1.0,
-			}],
+			matches: [
+				{
+					turn_index: 1,
+					role: 'user',
+					timestamp: '2026-04-28T14:00:00Z',
+					snippet: 'try *bold* and _italic_',
+					bm25: -1.0,
+				},
+			],
 		});
 		const deps = makeDeps(makeRetrieval({ hits: [hit] }));
 		await runWithContext('user1', () => handleRecall(['bold'], makeCtx(), deps));
@@ -478,11 +500,15 @@ describe('/recall persona — multi-step', () => {
 	it('Hostile content scenario: prior session contains *bold* → Markdown is escaped', async () => {
 		const hit = makeSearchHit({
 			title: 'Normal title',
-			matches: [{
-				turn_index: 1, role: 'user', timestamp: '2026-04-28T14:00:00Z',
-				snippet: '*bold* and _italic_ content',
-				bm25: -1.0,
-			}],
+			matches: [
+				{
+					turn_index: 1,
+					role: 'user',
+					timestamp: '2026-04-28T14:00:00Z',
+					snippet: '*bold* and _italic_ content',
+					bm25: -1.0,
+				},
+			],
 		});
 		const deps = makeDeps(makeRetrieval({ hits: [hit] }));
 		await runWithContext('user1', () => handleRecall(['bold'], makeCtx(), deps));
@@ -530,10 +556,15 @@ describe('/recall persona — multi-step', () => {
 			makeSearchHit({
 				sessionId: `20260428_14000${i}_abcd000${i}`,
 				title: `Session ${i}`,
-				matches: [{
-					turn_index: 1, role: 'user', timestamp: '2026-04-28T14:00:00Z',
-					snippet: 'long '.repeat(60), bm25: -1.0,
-				}],
+				matches: [
+					{
+						turn_index: 1,
+						role: 'user',
+						timestamp: '2026-04-28T14:00:00Z',
+						snippet: 'long '.repeat(60),
+						bm25: -1.0,
+					},
+				],
 			}),
 		);
 		const deps = makeDeps(makeRetrieval({ hits }));

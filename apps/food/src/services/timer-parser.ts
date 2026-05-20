@@ -27,12 +27,10 @@ const UNIT_MAP: Record<string, number> = {
 };
 
 // Match compound: "1 hour 30 minutes", "1 hour and 15 minutes"
-const COMPOUND_RE =
-	/(\d+)\s*(hours?|hrs?)\s*(?:and\s*)?(\d+)\s*(minutes?|mins?|seconds?|secs?)/i;
+const COMPOUND_RE = /(\d+)\s*(hours?|hrs?)\s*(?:and\s*)?(\d+)\s*(minutes?|mins?|seconds?|secs?)/i;
 
 // Match range: "5-7 minutes", "10 to 15 min"
-const RANGE_RE =
-	/(\d+)\s*(?:-|to)\s*(\d+)\s*(minutes?|mins?|hours?|hrs?|seconds?|secs?)/i;
+const RANGE_RE = /(\d+)\s*(?:-|to)\s*(\d+)\s*(minutes?|mins?|hours?|hrs?|seconds?|secs?)/i;
 
 // Match simple: "25 minutes", "1 hour", "30 sec"
 const SIMPLE_RE = /(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?|seconds?|secs?)/i;

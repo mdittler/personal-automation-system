@@ -17,7 +17,7 @@ import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, RouteInfo, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import type { AppToggleStore } from '../../app-toggle/index.js';
 import { getCurrentSessionId } from '../../context/request-context.js';
 import type { FallbackHandler } from '../fallback.js';
@@ -110,7 +110,11 @@ function buildRouter(options: {
 	const registry = {
 		getApp: (id: string) => {
 			if (id !== 'chatbot') return undefined;
-			return { manifest, module: { init: vi.fn(), handleMessage: vi.fn() } as any, appDir: '/apps/chatbot' } as RegisteredApp;
+			return {
+				manifest,
+				module: { init: vi.fn(), handleMessage: vi.fn() } as any,
+				appDir: '/apps/chatbot',
+			} as RegisteredApp;
 		},
 		getManifestCache: () => cache,
 		getLoadedAppIds: () => ['chatbot'],
@@ -229,7 +233,11 @@ describe('Router built-in conversation commands', () => {
 		const registry = {
 			getApp: (id: string) =>
 				id === 'chatbot'
-					? ({ manifest: chatbotManifestWithCommands, module: chatbotModule, appDir: '/apps/chatbot' } as RegisteredApp)
+					? ({
+							manifest: chatbotManifestWithCommands,
+							module: chatbotModule,
+							appDir: '/apps/chatbot',
+						} as RegisteredApp)
 					: undefined,
 			getManifestCache: () => cache,
 			getLoadedAppIds: () => ['chatbot'],
@@ -261,8 +269,8 @@ describe('Router built-in conversation commands', () => {
 
 	it('/ask bypasses chatbot toggle — still dispatches to ConversationService when chatbot is toggled off', async () => {
 		const appToggle: AppToggleStore = {
-			isEnabled: vi.fn().mockImplementation((userId: string, appId: string) =>
-				appId !== 'chatbot', // chatbot is OFF
+			isEnabled: vi.fn().mockImplementation(
+				(userId: string, appId: string) => appId !== 'chatbot', // chatbot is OFF
 			),
 		} as unknown as AppToggleStore;
 
@@ -324,7 +332,10 @@ describe('Router /help with conversation built-ins', () => {
 
 	it('/help lists /ask, /edit, /notes exactly once when conversationService is wired', async () => {
 		// Use chatbot manifest WITH commands — the filter should still produce only one each
-		const { telegram, router } = buildRouter({ conversationService: conv, chatbotManifest: chatbotManifestWithCommands });
+		const { telegram, router } = buildRouter({
+			conversationService: conv,
+			chatbotManifest: chatbotManifestWithCommands,
+		});
 		await router.routeMessage(msg('/help'));
 
 		const helpText = (telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
@@ -339,7 +350,10 @@ describe('Router /help with conversation built-ins', () => {
 	});
 
 	it('/help lists conversation commands when chatbot manifest has no commands', async () => {
-		const { telegram, router } = buildRouter({ conversationService: conv, chatbotManifest: chatbotManifestNoCommands });
+		const { telegram, router } = buildRouter({
+			conversationService: conv,
+			chatbotManifest: chatbotManifestNoCommands,
+		});
 		await router.routeMessage(msg('/help'));
 
 		const helpText = (telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
@@ -355,7 +369,11 @@ describe('Router /help with conversation built-ins', () => {
 		const registry = {
 			getApp: (id: string) =>
 				id === 'chatbot'
-					? ({ manifest: chatbotManifestWithCommands, module: { init: vi.fn(), handleMessage: vi.fn() } as any, appDir: '/apps/chatbot' } as RegisteredApp)
+					? ({
+							manifest: chatbotManifestWithCommands,
+							module: { init: vi.fn(), handleMessage: vi.fn() } as any,
+							appDir: '/apps/chatbot',
+						} as RegisteredApp)
 					: undefined,
 			getManifestCache: () => cache,
 			getLoadedAppIds: () => ['chatbot'],
@@ -381,9 +399,7 @@ describe('Router /help with conversation built-ins', () => {
 
 	it('/help lists conversation commands for user with chatbot toggled OFF', async () => {
 		const appToggle: AppToggleStore = {
-			isEnabled: vi.fn().mockImplementation((userId: string, appId: string) =>
-				appId !== 'chatbot',
-			),
+			isEnabled: vi.fn().mockImplementation((userId: string, appId: string) => appId !== 'chatbot'),
 		} as unknown as AppToggleStore;
 
 		const { telegram, router } = buildRouter({ conversationService: conv, appToggle });
@@ -398,7 +414,13 @@ describe('Router /help with conversation built-ins', () => {
 	it('/help contains /newchat exactly once even when chatbot manifest declares it', async () => {
 		// Manifest explicitly declares /newchat — BUILTIN_COMMAND_NAMES filter removes the duplicate
 		const manifestWithNewchat: AppManifest = {
-			app: { id: 'chatbot', name: 'Chatbot', version: '1.0.0', description: 'Chatbot', author: 'Test' },
+			app: {
+				id: 'chatbot',
+				name: 'Chatbot',
+				version: '1.0.0',
+				description: 'Chatbot',
+				author: 'Test',
+			},
 			capabilities: {
 				messages: {
 					commands: [
@@ -411,7 +433,10 @@ describe('Router /help with conversation built-ins', () => {
 				},
 			},
 		};
-		const { telegram, router } = buildRouter({ conversationService: conv, chatbotManifest: manifestWithNewchat });
+		const { telegram, router } = buildRouter({
+			conversationService: conv,
+			chatbotManifest: manifestWithNewchat,
+		});
 		await router.routeMessage(msg('/help'));
 
 		const helpText = (telegram.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;

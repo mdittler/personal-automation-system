@@ -51,7 +51,9 @@ function makeNullChatSessions() {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		rebuildMemorySnapshot: vi
@@ -442,12 +444,9 @@ describe('P5 — cross-user denial: user B cannot see user A data in prompt', ()
 		);
 
 		// Seed Bob's context entry
-		await contextStore.save(
-			'bob',
-			'food-prefs',
-			"Bob's preference: budget shopping",
-			{ bypass: CONTEXT_INTERNAL_BYPASS },
-		);
+		await contextStore.save('bob', 'food-prefs', "Bob's preference: budget shopping", {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 
 		retrieval = new ConversationRetrievalServiceImpl({
 			contextStore,
@@ -544,28 +543,20 @@ describe('P6 — parity: snapshot.dataQueryResult path is byte-identical to lega
 
 		// Legacy path: pass formatted string
 		const legacyDataContext = formatDataQueryContext(RESULT);
-		const legacyPrompt = await buildAppAwareSystemPrompt(
-			question,
-			userId,
-			[],
-			[],
-			deps,
-			{ modelSlug: 'test-slug', dataContextOrSnapshot: legacyDataContext },
-		);
+		const legacyPrompt = await buildAppAwareSystemPrompt(question, userId, [], [], deps, {
+			modelSlug: 'test-slug',
+			dataContextOrSnapshot: legacyDataContext,
+		});
 
 		// Snapshot path: pass snapshot object with dataQueryResult
 		const snapshot = {
 			dataQueryResult: RESULT,
 			failures: [] as AllowedSourceCategory[],
 		};
-		const snapshotPrompt = await buildAppAwareSystemPrompt(
-			question,
-			userId,
-			[],
-			[],
-			deps,
-			{ modelSlug: 'test-slug', dataContextOrSnapshot: snapshot },
-		);
+		const snapshotPrompt = await buildAppAwareSystemPrompt(question, userId, [], [], deps, {
+			modelSlug: 'test-slug',
+			dataContextOrSnapshot: snapshot,
+		});
 
 		// The recalled-data block must be byte-identical between both paths
 		expect(snapshotPrompt).toContain('Costco Prices');

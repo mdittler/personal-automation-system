@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+	type MemoryFlushRemove,
+	type MemoryFlushSave,
 	RECENT_SESSION_SUMMARY_KEY,
 	disableFlushAndCleanup,
 	flushMemoryToContextStore,
-	type MemoryFlushRemove,
-	type MemoryFlushSave,
 } from '../memory-flush.js';
 
 describe('flushMemoryToContextStore', () => {
@@ -22,7 +22,9 @@ describe('flushMemoryToContextStore', () => {
 	it('returns "failed" and does not throw when save throws', async () => {
 		const flushSave: MemoryFlushSave = vi.fn().mockRejectedValue(new Error('disk full'));
 		const logger = { warn: vi.fn() };
-		expect(await flushMemoryToContextStore('alice', 'x', { flushSave, logger })).toMatchObject({ status: 'failed' });
+		expect(await flushMemoryToContextStore('alice', 'x', { flushSave, logger })).toMatchObject({
+			status: 'failed',
+		});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 

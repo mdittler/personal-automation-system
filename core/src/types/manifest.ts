@@ -211,7 +211,14 @@ export interface ManifestUserConfig {
 	/** Extended tooltip / detail text shown on hover or expand. */
 	helpDetail?: string;
 	/** Setting category for grouping in the settings UI. */
-	category?: 'personal' | 'food' | 'notes' | 'memory-sessions' | 'notifications' | 'system' | 'dangerous';
+	category?:
+		| 'personal'
+		| 'food'
+		| 'notes'
+		| 'memory-sessions'
+		| 'notifications'
+		| 'system'
+		| 'dangerous';
 	/** If true, setting is only visible to platform admins. */
 	adminOnly?: boolean;
 	/** If true, a confirmation prompt is shown before applying. */

@@ -160,9 +160,7 @@ describe('createWeaknessSummarizer — happy path', () => {
 			logger: silentLogger,
 		});
 		await summarizer.summarize({ manifest: makeManifest(), tier: 'fast' });
-		const onDisk = JSON.parse(
-			await readFile(summarizer.pathFor(RUN_ID, 'fast'), 'utf8'),
-		);
+		const onDisk = JSON.parse(await readFile(summarizer.pathFor(RUN_ID, 'fast'), 'utf8'));
 		expect(onDisk.runId).toBe(RUN_ID);
 		expect(onDisk.tier).toBe('fast');
 		expect(onDisk.status).toBe('ready');
@@ -257,9 +255,7 @@ describe('createWeaknessSummarizer — LLM call discipline (Codex #12)', () => {
 			.mockResolvedValueOnce(
 				JSON.stringify({
 					summary: 'retry-recovered summary',
-					failureCategories: [
-						{ label: 'lbl', count: 1, exampleCaseIds: ['failing-case'] },
-					],
+					failureCategories: [{ label: 'lbl', count: 1, exampleCaseIds: ['failing-case'] }],
 				}),
 			);
 		const summarizer = createWeaknessSummarizer({
@@ -375,9 +371,7 @@ describe('createWeaknessSummarizer — robustness', () => {
 		h.llm.complete.mockResolvedValue(
 			JSON.stringify({
 				summary: 'truncation test',
-				failureCategories: [
-					{ label: 'lbl', count: 20, exampleCaseIds: ['failing-0'] },
-				],
+				failureCategories: [{ label: 'lbl', count: 20, exampleCaseIds: ['failing-0'] }],
 			}),
 		);
 		const summarizer = createWeaknessSummarizer({

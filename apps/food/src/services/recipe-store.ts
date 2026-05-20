@@ -6,7 +6,7 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { ParsedRecipe, Recipe, RecipeSearchQuery, RecipeSearchResult } from '../types.js';
 import { generateId, isoNow } from '../utils/date.js';
@@ -16,9 +16,21 @@ const RECIPES_DIR = 'recipes';
 
 /** Fields that can be updated via recipe edit. Excludes id, status, createdAt, updatedAt, ratings, history. */
 export const EDITABLE_RECIPE_FIELDS = [
-	'title', 'source', 'ingredients', 'instructions', 'servings',
-	'prepTime', 'cookTime', 'tags', 'cuisine', 'macros', 'allergens',
-	'householdNotes', 'kidAdaptation', 'scalingNotes', 'costEstimate',
+	'title',
+	'source',
+	'ingredients',
+	'instructions',
+	'servings',
+	'prepTime',
+	'cookTime',
+	'tags',
+	'cuisine',
+	'macros',
+	'allergens',
+	'householdNotes',
+	'kidAdaptation',
+	'scalingNotes',
+	'costEstimate',
 ] as const;
 
 /** Create a slug from a recipe title for the filename. */
@@ -75,7 +87,10 @@ export async function saveRecipe(
 		date: recipe.createdAt,
 		tags: buildAppTags('food', 'recipe', recipe.tags),
 		type: 'recipe',
-		entity_keys: [recipe.title.toLowerCase(), ...recipe.ingredients.slice(0, 5).map(i => i.name.toLowerCase())],
+		entity_keys: [
+			recipe.title.toLowerCase(),
+			...recipe.ingredients.slice(0, 5).map((i) => i.name.toLowerCase()),
+		],
 		app: 'food',
 	});
 	await store.write(recipePath(id), fm + stringify(recipe));
@@ -102,7 +117,10 @@ export async function updateRecipe(store: ScopedDataStore, recipe: Recipe): Prom
 		date: recipe.createdAt,
 		tags: buildAppTags('food', 'recipe', recipe.tags),
 		type: 'recipe',
-		entity_keys: [recipe.title.toLowerCase(), ...recipe.ingredients.slice(0, 5).map(i => i.name.toLowerCase())],
+		entity_keys: [
+			recipe.title.toLowerCase(),
+			...recipe.ingredients.slice(0, 5).map((i) => i.name.toLowerCase()),
+		],
 		app: 'food',
 	});
 	await store.write(recipePath(recipe.id), fm + stringify(recipe));
@@ -286,7 +304,9 @@ export function formatSearchResults(results: RecipeSearchResult[]): string {
 		const rating = recipe.ratings.length
 			? ` ★${(recipe.ratings.reduce((s: number, r: { score: number }) => s + r.score, 0) / recipe.ratings.length).toFixed(1)}`
 			: '';
-		lines.push(`${i + 1}. **${escapeMarkdown(recipe.title)}**${status}${rating} — ${escapeMarkdown(relevance)}`);
+		lines.push(
+			`${i + 1}. **${escapeMarkdown(recipe.title)}**${status}${rating} — ${escapeMarkdown(relevance)}`,
+		);
 	}
 	lines.push('\nReply with a number to see the full recipe.');
 	return lines.join('\n');

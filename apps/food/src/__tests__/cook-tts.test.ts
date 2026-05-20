@@ -143,9 +143,7 @@ describe('hands-free prompt', () => {
 		expect(promptCall).toBeUndefined();
 
 		// Should have sent the first step
-		const stepCall = calls.find(
-			([, msg]) => typeof msg === 'string' && msg.includes('Step 1'),
-		);
+		const stepCall = calls.find(([, msg]) => typeof msg === 'string' && msg.includes('Step 1'));
 		expect(stepCall).toBeDefined();
 
 		// Session TTS should be enabled
@@ -168,9 +166,7 @@ describe('hands-free prompt', () => {
 		expect(promptCall).toBeUndefined();
 
 		// Should have sent the first step directly
-		const stepCall = calls.find(
-			([, msg]) => typeof msg === 'string' && msg.includes('Step 1'),
-		);
+		const stepCall = calls.find(([, msg]) => typeof msg === 'string' && msg.includes('Step 1'));
 		expect(stepCall).toBeDefined();
 	});
 });
@@ -295,10 +291,7 @@ describe('device config', () => {
 		await handleCookCommand(services, ['pasta', 'carbonara'], ctx);
 		await handleServingsReply(services, '4', ctx);
 
-		expect(services.audio.speak).toHaveBeenCalledWith(
-			expect.any(String),
-			'Kitchen Speaker',
-		);
+		expect(services.audio.speak).toHaveBeenCalledWith(expect.any(String), 'Kitchen Speaker');
 	});
 });
 
@@ -323,9 +316,9 @@ describe('TTS failure resilience', () => {
 		await handleServingsReply(services, '4', ctx);
 
 		// Step should still have been sent despite TTS failure
-		const stepCall = vi.mocked(services.telegram.sendWithButtons).mock.calls.find(
-			([, msg]) => typeof msg === 'string' && msg.includes('Step 1'),
-		);
+		const stepCall = vi
+			.mocked(services.telegram.sendWithButtons)
+			.mock.calls.find(([, msg]) => typeof msg === 'string' && msg.includes('Step 1'));
 		expect(stepCall).toBeDefined();
 	});
 });

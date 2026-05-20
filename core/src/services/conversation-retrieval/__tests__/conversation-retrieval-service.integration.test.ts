@@ -51,9 +51,13 @@ describe('ConversationRetrievalServiceImpl integration — two-user isolation', 
 		});
 
 		// Seed alice's context entry (bypass actor check — seeding outside a user request)
-		await contextStore.save('alice', 'food-prefs', 'alice likes sushi', { bypass: CONTEXT_INTERNAL_BYPASS });
+		await contextStore.save('alice', 'food-prefs', 'alice likes sushi', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 		// Seed bob's context entry
-		await contextStore.save('bob', 'food-prefs', 'bob likes tacos', { bypass: CONTEXT_INTERNAL_BYPASS });
+		await contextStore.save('bob', 'food-prefs', 'bob likes tacos', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 	});
 
 	afterEach(async () => {
@@ -255,7 +259,9 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 		contextStore = new ContextStoreServiceImpl({ dataDir: tempDir, logger: makeLogger() });
 
 		// Seed a context entry for alice
-		await contextStore.save('alice', 'diet-pref', 'vegetarian', { bypass: CONTEXT_INTERNAL_BYPASS });
+		await contextStore.save('alice', 'diet-pref', 'vegetarian', {
+			bypass: CONTEXT_INTERNAL_BYPASS,
+		});
 	});
 
 	afterEach(async () => {
@@ -287,5 +293,4 @@ describe('ConversationRetrievalServiceImpl integration — buildContextSnapshot 
 		);
 		expect(dataQueryFailures.length).toBeGreaterThan(0);
 	});
-
 });

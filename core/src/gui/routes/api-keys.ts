@@ -34,10 +34,7 @@ export interface ApiKeyRoutesOptions {
 	logger: Logger;
 }
 
-export function registerApiKeyRoutes(
-	server: FastifyInstance,
-	options: ApiKeyRoutesOptions,
-): void {
+export function registerApiKeyRoutes(server: FastifyInstance, options: ApiKeyRoutesOptions): void {
 	const { apiKeyService, logger } = options;
 
 	// -------------------------------------------------------------------------

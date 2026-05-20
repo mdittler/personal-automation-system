@@ -341,8 +341,8 @@ describe('composeRuntime guard tests', { timeout: SMOKE_TEST_TIMEOUT_MS }, () =>
 	it('C2 — throws when config is provided without configPath', async () => {
 		const logger = pino({ level: 'silent' });
 		const seed = await seedUsers({ dataDir: tempDir2, users: 1, households: 1 });
-		await expect(
-			composeRuntime({ config: seed.config } as any),
-		).rejects.toThrow('composeRuntime: configPath is required when config is provided');
+		await expect(composeRuntime({ config: seed.config } as any)).rejects.toThrow(
+			'composeRuntime: configPath is required when config is provided',
+		);
 	});
 });

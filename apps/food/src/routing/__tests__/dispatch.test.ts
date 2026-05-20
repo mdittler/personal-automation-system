@@ -5,8 +5,8 @@
  * All imports will fail, confirming RED state.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RouteInfo } from '@core/types/telegram.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatchByRoute } from '../dispatch.js';
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,15 @@ describe('dispatchByRoute — happy path', () => {
 	it('intent source, agreed verifier, above threshold → returns true, handler called once', async () => {
 		const h1 = vi.fn(() => Promise.resolve());
 		const h2 = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ appId: 'food', intent: 'K1', confidence: 0.92, source: 'intent', verifierStatus: 'agreed' }));
+		const ctx = makeCtx(
+			makeRoute({
+				appId: 'food',
+				intent: 'K1',
+				confidence: 0.92,
+				source: 'intent',
+				verifierStatus: 'agreed',
+			}),
+		);
 		const handlers = { K1: h1, K2: h2 };
 
 		const result = await dispatchByRoute(ctx, handlers);
@@ -55,7 +63,9 @@ describe('dispatchByRoute — happy path', () => {
 
 	it('intent source, skipped verifier, high confidence → returns true', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'intent', verifierStatus: 'skipped', confidence: 0.88 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'intent', verifierStatus: 'skipped', confidence: 0.88 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -67,7 +77,9 @@ describe('dispatchByRoute — happy path', () => {
 		// verifierStatus:'degraded' means verifier LLM failed; treated same as 'skipped'.
 		// Confidence alone decides. 0.88 > MIN_INTENT_CONFIDENCE (0.75) → should dispatch.
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'intent', verifierStatus: 'degraded', confidence: 0.88 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'intent', verifierStatus: 'degraded', confidence: 0.88 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -77,7 +89,9 @@ describe('dispatchByRoute — happy path', () => {
 
 	it('command source — confidence threshold skipped, not-run verifier → returns true', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'command', verifierStatus: 'not-run', confidence: 1.0 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'command', verifierStatus: 'not-run', confidence: 1.0 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -87,7 +101,9 @@ describe('dispatchByRoute — happy path', () => {
 
 	it('user-override source — returns true', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'user-override', verifierStatus: 'user-override', confidence: 1.0 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'user-override', verifierStatus: 'user-override', confidence: 1.0 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -97,7 +113,9 @@ describe('dispatchByRoute — happy path', () => {
 
 	it('context-promotion source, agreed verifier → returns true', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'context-promotion', verifierStatus: 'agreed', confidence: 0.8 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'context-promotion', verifierStatus: 'agreed', confidence: 0.8 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -107,7 +125,9 @@ describe('dispatchByRoute — happy path', () => {
 
 	it('handler throws — error propagates (message is CLAIMED; no false return / regex cascade)', async () => {
 		const throwingHandler = vi.fn(() => Promise.reject(new Error('handler error')));
-		const ctx = makeCtx(makeRoute({ source: 'intent', verifierStatus: 'agreed', confidence: 0.92 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'intent', verifierStatus: 'agreed', confidence: 0.92 }),
+		);
 
 		// If claimed, the promise should reject — not silently return false.
 		await expect(dispatchByRoute(ctx, { K1: throwingHandler })).rejects.toThrow('handler error');
@@ -141,7 +161,9 @@ describe('dispatchByRoute — edge cases returning false', () => {
 
 	it('low confidence, intent source, below threshold → false', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'intent', confidence: 0.45, verifierStatus: 'agreed' }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'intent', confidence: 0.45, verifierStatus: 'agreed' }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -152,7 +174,9 @@ describe('dispatchByRoute — edge cases returning false', () => {
 	it('IMPORTANT: degraded verifier BELOW threshold → false (threshold alone decides, not verifierStatus)', async () => {
 		// Confirms: degraded does NOT unlock routing. Confidence 0.50 < 0.75 → false.
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ source: 'intent', verifierStatus: 'degraded', confidence: 0.50 }));
+		const ctx = makeCtx(
+			makeRoute({ source: 'intent', verifierStatus: 'degraded', confidence: 0.5 }),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler });
 
@@ -236,7 +260,15 @@ describe('dispatchByRoute — security', () => {
 describe('dispatchByRoute — custom appId argument', () => {
 	it('custom appId matches route.appId → returns true', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ appId: 'shopping', intent: 'K1', source: 'intent', confidence: 0.92, verifierStatus: 'agreed' }));
+		const ctx = makeCtx(
+			makeRoute({
+				appId: 'shopping',
+				intent: 'K1',
+				source: 'intent',
+				confidence: 0.92,
+				verifierStatus: 'agreed',
+			}),
+		);
 
 		const result = await dispatchByRoute(ctx, { K1: handler }, { appId: 'shopping' });
 
@@ -246,7 +278,15 @@ describe('dispatchByRoute — custom appId argument', () => {
 
 	it('custom appId does NOT match route.appId → false', async () => {
 		const handler = vi.fn(() => Promise.resolve());
-		const ctx = makeCtx(makeRoute({ appId: 'food', intent: 'K1', source: 'intent', confidence: 0.92, verifierStatus: 'agreed' }));
+		const ctx = makeCtx(
+			makeRoute({
+				appId: 'food',
+				intent: 'K1',
+				source: 'intent',
+				confidence: 0.92,
+				verifierStatus: 'agreed',
+			}),
+		);
 
 		// Passing 'shopping' as appId, but route says 'food' → mismatch
 		const result = await dispatchByRoute(ctx, { K1: handler }, { appId: 'shopping' });

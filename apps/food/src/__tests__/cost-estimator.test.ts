@@ -1,12 +1,12 @@
+import type { CoreServices } from '@pas/core/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
-	estimateRecipeCost,
-	estimatePlanCost,
 	estimateGroceryListCost,
+	estimatePlanCost,
+	estimateRecipeCost,
 	formatMealCostLine,
 } from '../services/cost-estimator.js';
-import type { Recipe, MealPlan, PlannedMeal, PriceEntry, GroceryItem } from '../types.js';
-import type { CoreServices } from '@pas/core/types';
+import type { GroceryItem, MealPlan, PlannedMeal, PriceEntry, Recipe } from '../types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -147,7 +147,8 @@ describe('estimateRecipeCost', () => {
 
 	it('drops entry with non-finite portionCost (Infinity via 1e309)', async () => {
 		// 1e309 exceeds IEEE 754 max and parses to Infinity
-		const bad = '[{"ingredientName":"flour","matchedItem":null,"portionCost":1e309,"isEstimate":true}]';
+		const bad =
+			'[{"ingredientName":"flour","matchedItem":null,"portionCost":1e309,"isEstimate":true}]';
 		const services = createMockServices(bad);
 		const result = await estimateRecipeCost(services, mockRecipe, priceItems, 'Costco');
 		expect(result.ingredientCosts).toHaveLength(0);

@@ -1,8 +1,8 @@
 import type { Logger } from 'pino';
 import type { DataStoreService } from '../../types/data-store.js';
+import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 import { DefaultChatSessionStore } from './chat-session-store.js';
 import type { ChatSessionStore } from './chat-session-store.js';
-import type { ChatTranscriptIndex } from '../chat-transcript-index/index.js';
 
 export interface ChatSessionStoreOptions {
 	data: DataStoreService;

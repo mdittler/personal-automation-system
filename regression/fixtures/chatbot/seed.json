@@ -1,12 +1,8 @@
 {
 	"version": 1,
 	"description": "Persona Regression Suite — chatbot bucket seed (REQ-REG-006/012). Mirrors scripts/iterate-prompts.ts.",
-	"users": [
-		{ "id": "regression-user-0", "name": "Regression User 0", "isAdmin": true }
-	],
-	"households": [
-		{ "id": "regression-hh-0", "members": ["regression-user-0"] }
-	],
+	"users": [{ "id": "regression-user-0", "name": "Regression User 0", "isAdmin": true }],
+	"households": [{ "id": "regression-hh-0", "members": ["regression-user-0"] }],
 	"foodSeed": {
 		"receipts": [
 			{

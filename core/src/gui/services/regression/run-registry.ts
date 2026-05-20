@@ -33,12 +33,7 @@ export type RunStatus =
 	| 'failed'
 	| 'cancelled';
 
-export const TERMINAL_EVENT_TYPES = [
-	'complete',
-	'gate-failed',
-	'failed',
-	'cancelled',
-] as const;
+export const TERMINAL_EVENT_TYPES = ['complete', 'gate-failed', 'failed', 'cancelled'] as const;
 
 export type TerminalEventType = (typeof TERMINAL_EVENT_TYPES)[number];
 

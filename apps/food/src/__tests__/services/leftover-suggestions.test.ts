@@ -62,10 +62,7 @@ describe('leftover suggestions', () => {
 
 	it('sorts by score descending then title ascending and ignores archived recipes', () => {
 		const suggestions = findLeftoverRecipeSuggestions(
-			[
-				makeLeftover({ name: 'leftover chili rice' }),
-				makeLeftover({ name: 'leftover chicken' }),
-			],
+			[makeLeftover({ name: 'leftover chili rice' }), makeLeftover({ name: 'leftover chicken' })],
 			[
 				makeRecipe({
 					id: 'triple-match',
@@ -85,7 +82,9 @@ describe('leftover suggestions', () => {
 				makeRecipe({
 					id: 'canonical-match',
 					title: 'Roasted Chickpea Salad',
-					ingredients: [{ name: 'garbanzo beans', canonicalName: 'chickpeas', quantity: 1, unit: 'can' }],
+					ingredients: [
+						{ name: 'garbanzo beans', canonicalName: 'chickpeas', quantity: 1, unit: 'can' },
+					],
 				}),
 				makeRecipe({
 					id: 'archived',
@@ -110,7 +109,9 @@ describe('leftover suggestions', () => {
 				makeRecipe({
 					id: 'chickpea-curry',
 					title: 'Golden Curry',
-					ingredients: [{ name: 'garbanzo beans', canonicalName: 'chickpeas', quantity: 1, unit: 'can' }],
+					ingredients: [
+						{ name: 'garbanzo beans', canonicalName: 'chickpeas', quantity: 1, unit: 'can' },
+					],
 				}),
 			],
 		);

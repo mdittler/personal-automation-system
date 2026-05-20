@@ -7,18 +7,18 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
-import { requireScope } from '../guards/require-scope.js';
+import { requestContext } from '../../services/context/request-context.js';
 import type { ChangeLog } from '../../services/data-store/change-log.js';
 import { DataStoreServiceImpl, SpaceMembershipError } from '../../services/data-store/index.js';
 import { PathTraversalError, ScopeViolationError } from '../../services/data-store/index.js';
 import { SYSTEM_BYPASS_TOKEN } from '../../services/data-store/system-bypass-token.js';
-import { requestContext } from '../../services/context/request-context.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { EventBusService } from '../../types/events.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
+import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
+import { requireScope } from '../guards/require-scope.js';
 
 const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const USER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;

@@ -10,10 +10,10 @@ import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	emitMealPlanFinalized,
 	emitGroceryListReady,
-	emitRecipeScheduled,
 	emitMealCooked,
+	emitMealPlanFinalized,
+	emitRecipeScheduled,
 	emitShoppingCompleted,
 } from '../events/emitters.js';
 import type {
@@ -79,16 +79,23 @@ describe('emitMealPlanFinalized', () => {
 
 	it('emits food:meal-plan-finalized with the provided payload', async () => {
 		await emitMealPlanFinalized(services, mealPlanPayload);
-		expect(services.eventBus!.emit).toHaveBeenCalledWith('food:meal-plan-finalized', mealPlanPayload);
+		expect(services.eventBus!.emit).toHaveBeenCalledWith(
+			'food:meal-plan-finalized',
+			mealPlanPayload,
+		);
 	});
 
 	it('does not throw when eventBus.emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await expect(emitMealPlanFinalized(services, mealPlanPayload)).resolves.toBeUndefined();
 	});
 
 	it('logs a warning when emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await emitMealPlanFinalized(services, mealPlanPayload);
 		expect(services.logger.warn).toHaveBeenCalled();
 	});
@@ -109,12 +116,16 @@ describe('emitGroceryListReady', () => {
 	});
 
 	it('does not throw when eventBus.emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await expect(emitGroceryListReady(services, groceryPayload)).resolves.toBeUndefined();
 	});
 
 	it('logs a warning when emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await emitGroceryListReady(services, groceryPayload);
 		expect(services.logger.warn).toHaveBeenCalled();
 	});
@@ -135,12 +146,16 @@ describe('emitRecipeScheduled', () => {
 	});
 
 	it('does not throw when eventBus.emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await expect(emitRecipeScheduled(services, recipePayload)).resolves.toBeUndefined();
 	});
 
 	it('logs a warning when emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await emitRecipeScheduled(services, recipePayload);
 		expect(services.logger.warn).toHaveBeenCalled();
 	});
@@ -161,12 +176,16 @@ describe('emitMealCooked', () => {
 	});
 
 	it('does not throw when eventBus.emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await expect(emitMealCooked(services, cookedPayload)).resolves.toBeUndefined();
 	});
 
 	it('logs a warning when emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await emitMealCooked(services, cookedPayload);
 		expect(services.logger.warn).toHaveBeenCalled();
 	});
@@ -183,16 +202,23 @@ describe('emitShoppingCompleted', () => {
 
 	it('emits food:shopping-completed with the provided payload', async () => {
 		await emitShoppingCompleted(services, shoppingPayload);
-		expect(services.eventBus!.emit).toHaveBeenCalledWith('food:shopping-completed', shoppingPayload);
+		expect(services.eventBus!.emit).toHaveBeenCalledWith(
+			'food:shopping-completed',
+			shoppingPayload,
+		);
 	});
 
 	it('does not throw when eventBus.emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await expect(emitShoppingCompleted(services, shoppingPayload)).resolves.toBeUndefined();
 	});
 
 	it('logs a warning when emit throws', async () => {
-		vi.mocked(services.eventBus!.emit).mockImplementation(() => { throw new Error('bus down'); });
+		vi.mocked(services.eventBus!.emit).mockImplementation(() => {
+			throw new Error('bus down');
+		});
 		await emitShoppingCompleted(services, shoppingPayload);
 		expect(services.logger.warn).toHaveBeenCalled();
 	});

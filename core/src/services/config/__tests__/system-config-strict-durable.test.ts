@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
-import { PasYamlConfigSchema } from '../pas-yaml-schema.js';
 import { loadSystemConfig } from '../index.js';
+import { PasYamlConfigSchema } from '../pas-yaml-schema.js';
 
 let tempDir: string;
 

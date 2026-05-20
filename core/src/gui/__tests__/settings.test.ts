@@ -18,11 +18,10 @@ import { AppConfigServiceImpl } from '../../services/config/app-config-service.j
 import { CredentialService } from '../../services/credentials/index.js';
 import { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
-import type { AppConfigService } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerViewLocals } from '../view-locals.js';
 
 const TEST_USER_ID = 'user1';
 const TEST_PASSWORD = 'test-pass-123';

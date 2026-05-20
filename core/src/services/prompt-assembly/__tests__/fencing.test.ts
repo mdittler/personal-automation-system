@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { formatConversationHistory } from '../fencing.js';
 import type { SessionTurn as ConversationTurn } from '../../conversation-session/chat-session-store.js';
+import { formatConversationHistory } from '../fencing.js';
 
-function turn(
-	role: 'user' | 'assistant',
-	content: string,
-	timestamp?: string,
-): ConversationTurn {
+function turn(role: 'user' | 'assistant', content: string, timestamp?: string): ConversationTurn {
 	return { role, content, timestamp: timestamp ?? '2026-04-10T10:00:00Z' };
 }
 
@@ -78,10 +74,7 @@ describe('formatConversationHistory', () => {
 	});
 
 	it('neutralizes triple backticks in turn content', () => {
-		const result = formatConversationHistory(
-			[turn('user', '```code block```')],
-			NOW,
-		);
+		const result = formatConversationHistory([turn('user', '```code block```')], NOW);
 		expect(result[0]).not.toContain('```');
 		expect(result[0]).toContain('`code block`');
 	});
@@ -91,7 +84,8 @@ describe('formatConversationHistory — photo-summary truncation exemption', () 
 	const ts = '2026-04-29T12:00:00Z';
 
 	it('exempts [Photo: receipt] pair from 500-char cap (renders assistant turn > 500 chars)', () => {
-		const longAssistant = '🧾 Costco — 2026-04-29, 21 items, total $306.77\n' +
+		const longAssistant =
+			'🧾 Costco — 2026-04-29, 21 items, total $306.77\n' +
 			Array.from({ length: 21 }, (_, i) => `- Distinctive Item Name ${i} that exists`).join('\n');
 		const out = formatConversationHistory([
 			{ role: 'user', content: '[Photo: receipt]', timestamp: ts },
@@ -101,18 +95,17 @@ describe('formatConversationHistory — photo-summary truncation exemption', () 
 		expect(out[1].length).toBeGreaterThan(600);
 	});
 
-	it.each([
-		['[Photo: recipe]'],
-		['[Photo: pantry]'],
-		['[Photo: grocery list]'],
-	])('exempts %s pair from 500-char cap', (header) => {
-		const longAssistant = 'a'.repeat(900);
-		const out = formatConversationHistory([
-			{ role: 'user', content: header, timestamp: ts },
-			{ role: 'assistant', content: longAssistant, timestamp: ts },
-		]);
-		expect(out[1].length).toBeGreaterThan(600);
-	});
+	it.each([['[Photo: recipe]'], ['[Photo: pantry]'], ['[Photo: grocery list]']])(
+		'exempts %s pair from 500-char cap',
+		(header) => {
+			const longAssistant = 'a'.repeat(900);
+			const out = formatConversationHistory([
+				{ role: 'user', content: header, timestamp: ts },
+				{ role: 'assistant', content: longAssistant, timestamp: ts },
+			]);
+			expect(out[1].length).toBeGreaterThan(600);
+		},
+	);
 
 	it('still applies 500-char cap to non-photo user turns', () => {
 		const longText = 'x'.repeat(800);

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import type { AppConfigService } from '../../../types/config.js';
 import type { RouteInfo } from '../../../types/router.js';
-import { createTestMessageContext } from '../../../testing/test-helpers.js';
 import { handleNotes } from '../handle-notes.js';
 
 function makeConfig(overrides: Record<string, unknown> | null = null): {
@@ -28,7 +28,13 @@ function makeDeps(configOverrides: Record<string, unknown> | null = null, system
 
 function makeCtx(userId = 'user1') {
 	// Include route metadata as required by feedback_precedence_tests_need_route
-	const route: RouteInfo = { source: 'command', appId: 'chatbot', intent: 'notes', confidence: 1.0, verifierStatus: 'not-run' };
+	const route: RouteInfo = {
+		source: 'command',
+		appId: 'chatbot',
+		intent: 'notes',
+		confidence: 1.0,
+		verifierStatus: 'not-run',
+	};
 	return createTestMessageContext({ userId, text: '/notes', route });
 }
 
@@ -131,7 +137,10 @@ describe('handleNotes — concurrency', () => {
 	it('concurrent on/off writes serialize, final state is one of the two written values', async () => {
 		const { deps, updateOverrides } = makeDeps();
 		// Mock to capture sequential calls
-		await Promise.all([handleNotes(['on'], makeCtx(), deps), handleNotes(['off'], makeCtx(), deps)]);
+		await Promise.all([
+			handleNotes(['on'], makeCtx(), deps),
+			handleNotes(['off'], makeCtx(), deps),
+		]);
 		// Both must have been called
 		expect(updateOverrides).toHaveBeenCalledTimes(2);
 		// Each call writes only { log_to_notes: boolean }

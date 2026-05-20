@@ -1,9 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '../../../testing/mock-services.js';
-import {
-	SWITCH_MODEL_TAG_REGEX,
-	processModelSwitchTags,
-} from '../control-tags.js';
+import { SWITCH_MODEL_TAG_REGEX, processModelSwitchTags } from '../control-tags.js';
 
 const TAG = '<switch-model tier="fast" provider="anthropic" model="claude-haiku-4-5-20251001"/>';
 const INTENT_MSG = 'please switch the fast model to claude-haiku';
@@ -135,8 +132,7 @@ describe('processModelSwitchTags security', () => {
 			error: 'Provider "evil" not found.',
 		});
 
-		const response =
-			'Sure! <switch-model tier="fast" provider="evil" model="malicious-model"/>';
+		const response = 'Sure! <switch-model tier="fast" provider="evil" model="malicious-model"/>';
 		const result = await processModelSwitchTags(response, {
 			userId: 'admin-user',
 			userMessage: 'switch to evil provider model',

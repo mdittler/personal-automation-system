@@ -28,14 +28,14 @@
  *   Group 4  — Household-missing path for household-gated intents
  */
 
-import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { RouteInfo, ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import { init, handleMessage } from '../index.js';
-import type { Household } from '../types.js';
+import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -91,8 +91,7 @@ function assertAnyHandlerFired(
 	sendMock: ReturnType<typeof vi.fn>,
 	sendWithButtonsMock: ReturnType<typeof vi.fn>,
 ): void {
-	const totalCalls =
-		sendMock.mock.calls.length + sendWithButtonsMock.mock.calls.length;
+	const totalCalls = sendMock.mock.calls.length + sendWithButtonsMock.mock.calls.length;
 	expect(totalCalls, 'Expected at least one Telegram reply').toBeGreaterThan(0);
 
 	const allSendCalls = sendMock.mock.calls as [string, string][];
@@ -123,7 +122,10 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
-		vi.mocked(services.llm.classify).mockResolvedValue({ category: 'save_recipe', confidence: 0.9 });
+		vi.mocked(services.llm.classify).mockResolvedValue({
+			category: 'save_recipe',
+			confidence: 0.9,
+		});
 		vi.mocked(services.llm.extractStructured).mockResolvedValue({});
 
 		await init(services);
@@ -135,7 +137,10 @@ describe('natural-language-route-dispatch persona tests', () => {
 			return '';
 		});
 		vi.mocked(services.llm.complete).mockResolvedValue('Mocked LLM response.');
-		vi.mocked(services.llm.classify).mockResolvedValue({ category: 'save_recipe', confidence: 0.9 });
+		vi.mocked(services.llm.classify).mockResolvedValue({
+			category: 'save_recipe',
+			confidence: 0.9,
+		});
 		vi.mocked(services.llm.extractStructured).mockResolvedValue({});
 	});
 
@@ -148,7 +153,6 @@ describe('natural-language-route-dispatch persona tests', () => {
 	// =========================================================================
 
 	describe('Group 1: allowlist intents fire the correct handler via ctx.route', () => {
-
 		// Note: "user wants to save a recipe" (former intent 1) and
 		// "user wants to search for a recipe" (former intent 2) were removed from
 		// ROUTE_HANDLERS because they overlap with handleEditRecipe and
@@ -165,7 +169,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe("what's for dinner (intent 1)", () => {
 			const INTENT = "user wants to know what's for dinner";
 			const messages = [
-				'what did you plan for tonight',    // original from route-dispatch.test.ts
+				'what did you plan for tonight', // original from route-dispatch.test.ts
 				'tonight plan',
 				'any idea what we eating',
 				'what are we having',
@@ -196,7 +200,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('start cooking a recipe (intent 2)', () => {
 			const INTENT = 'user wants to start cooking a recipe';
 			const messages = [
-				'kick off that recipe',             // original from route-dispatch.test.ts
+				'kick off that recipe', // original from route-dispatch.test.ts
 				"let's get cooking",
 				'fire up the stir fry',
 				'begin cooking mode',
@@ -223,7 +227,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('what can I make (intent 3)', () => {
 			const INTENT = 'user wants to know what they can make with what they have';
 			const messages = [
-				'list things i can cook',           // original from route-dispatch.test.ts
+				'list things i can cook', // original from route-dispatch.test.ts
 				'what can we make',
 				'what do we have to cook with',
 				'any recipes with what we got',
@@ -231,21 +235,24 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'improvise something from our ingredients',
 			];
 
-			it.each(messages)('"%s" + route → what-can-I-make handler fires (pantry-empty message)', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				// handleWhatCanIMake sends "Your pantry is empty!" when no pantry items exist.
-				// No other handler emits this specific message.
-				const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
-				expect(
-					calls.some(([, msg]) => msg.includes('pantry is empty') || msg.includes('pantry')),
-					'Expected pantry-empty message from handleWhatCanIMake',
-				).toBe(true);
-			});
+			it.each(messages)(
+				'"%s" + route → what-can-I-make handler fires (pantry-empty message)',
+				async (text) => {
+					const ctx = createTestMessageContext({
+						userId: 'matt',
+						text,
+						route: makeRoute(INTENT),
+					});
+					await handleMessage(ctx);
+					// handleWhatCanIMake sends "Your pantry is empty!" when no pantry items exist.
+					// No other handler emits this specific message.
+					const calls = vi.mocked(services.telegram.send).mock.calls as [string, string][];
+					expect(
+						calls.some(([, msg]) => msg.includes('pantry is empty') || msg.includes('pantry')),
+						'Expected pantry-empty message from handleWhatCanIMake',
+					).toBe(true);
+				},
+			);
 		});
 
 		// -----------------------------------------------------------------
@@ -254,7 +261,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('set or change nutrition targets (intent 4)', () => {
 			const INTENT = 'user wants to set or change their nutrition or macro targets';
 			const messages = [
-				'update my diet goals',             // original from route-dispatch.test.ts
+				'update my diet goals', // original from route-dispatch.test.ts
 				'i wanna change my calorie goal',
 				'new protein target',
 				'set nutrition goals',
@@ -262,16 +269,19 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'lower my carb target',
 			];
 
-			it.each(messages)('"%s" + route → targets flow begins (sendWithButtons called)', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				// beginTargetsFlow uses sendWithButtons for the first prompt
-				expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
-			});
+			it.each(messages)(
+				'"%s" + route → targets flow begins (sendWithButtons called)',
+				async (text) => {
+					const ctx = createTestMessageContext({
+						userId: 'matt',
+						text,
+						route: makeRoute(INTENT),
+					});
+					await handleMessage(ctx);
+					// beginTargetsFlow uses sendWithButtons for the first prompt
+					expect(vi.mocked(services.telegram.sendWithButtons)).toHaveBeenCalled();
+				},
+			);
 		});
 
 		// -----------------------------------------------------------------
@@ -280,7 +290,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('macro adherence (intent 5)', () => {
 			const INTENT = 'user wants to see how well they are hitting their macro targets over time';
 			const messages = [
-				'am i doing ok with nutrition',     // original from route-dispatch.test.ts
+				'am i doing ok with nutrition', // original from route-dispatch.test.ts
 				'how am i doing on protein',
 				'hitting my targets lately',
 				'macro check',
@@ -305,7 +315,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('diet-health correlation (intent 6)', () => {
 			const INTENT = 'user wants to understand how their diet is affecting their health or energy';
 			const messages = [
-				'connect my meals to my health',    // original from route-dispatch.test.ts
+				'connect my meals to my health', // original from route-dispatch.test.ts
 				'does what i eat affect how i feel',
 				'link diet to energy',
 				'how is my food doing for me',
@@ -313,15 +323,18 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'eating patterns vs health',
 			];
 
-			it.each(messages)('"%s" + route → health correlation handler fires, not help msg', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
-			});
+			it.each(messages)(
+				'"%s" + route → health correlation handler fires, not help msg',
+				async (text) => {
+					const ctx = createTestMessageContext({
+						userId: 'matt',
+						text,
+						route: makeRoute(INTENT),
+					});
+					await handleMessage(ctx);
+					assertHandlerFired(vi.mocked(services.telegram.send));
+				},
+			);
 		});
 
 		// -----------------------------------------------------------------
@@ -330,7 +343,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('holiday / cultural recipe suggestions (intent 7)', () => {
 			const INTENT = 'user wants holiday or cultural recipe suggestions';
 			const messages = [
-				'cultural cooking ideas',           // original from route-dispatch.test.ts
+				'cultural cooking ideas', // original from route-dispatch.test.ts
 				'any holiday meal ideas',
 				'whats traditional to eat',
 				'seasonal recipes please',
@@ -338,15 +351,18 @@ describe('natural-language-route-dispatch persona tests', () => {
 				'upcoming cultural holidays food',
 			];
 
-			it.each(messages)('"%s" + route → cultural calendar handler fires, not help msg', async (text) => {
-				const ctx = createTestMessageContext({
-					userId: 'matt',
-					text,
-					route: makeRoute(INTENT),
-				});
-				await handleMessage(ctx);
-				assertHandlerFired(vi.mocked(services.telegram.send));
-			});
+			it.each(messages)(
+				'"%s" + route → cultural calendar handler fires, not help msg',
+				async (text) => {
+					const ctx = createTestMessageContext({
+						userId: 'matt',
+						text,
+						route: makeRoute(INTENT),
+					});
+					await handleMessage(ctx);
+					assertHandlerFired(vi.mocked(services.telegram.send));
+				},
+			);
 		});
 
 		// -----------------------------------------------------------------
@@ -355,7 +371,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('hosting guests (intent 8)', () => {
 			const INTENT = 'user wants to plan for hosting guests';
 			const messages = [
-				"i'm having company",               // original from route-dispatch.test.ts
+				"i'm having company", // original from route-dispatch.test.ts
 				'friends are coming over saturday',
 				'help me plan for guests',
 				'menu ideas for visitors',
@@ -380,7 +396,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 		describe('food spending (intent 9)', () => {
 			const INTENT = 'user wants to see food spending';
 			const messages = [
-				"what's the grocery bill",          // original from route-dispatch.test.ts
+				"what's the grocery bill", // original from route-dispatch.test.ts
 				'how much did we spend on food',
 				'show food budget',
 				'cost summary',
@@ -409,7 +425,6 @@ describe('natural-language-route-dispatch persona tests', () => {
 	// =========================================================================
 
 	describe('Group 2: non-allowlist regressions — regex cascade fires despite ctx.route', () => {
-
 		it('freezer view — "show me the freezer" with pantry route → freezer handler fires', async () => {
 			const ctx = createTestMessageContext({
 				userId: 'matt',
@@ -531,7 +546,6 @@ describe('natural-language-route-dispatch persona tests', () => {
 	// =========================================================================
 
 	describe('Group 3: end-to-end multi-step scenarios via ctx.route', () => {
-
 		/**
 		 * Scenario A: "I want to cook something tonight"
 		 *
@@ -649,7 +663,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 			const ctx = createTestMessageContext({
 				userId: 'matt',
 				text: 'check the pantry',
-				route: makeRoute("user wants to know what's for dinner", { confidence: 0.60 }),
+				route: makeRoute("user wants to know what's for dinner", { confidence: 0.6 }),
 			});
 			await handleMessage(ctx);
 			// Pantry view handler fires via regex (telegram.send called with pantry content)
@@ -666,7 +680,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 				userId: 'matt',
 				text: 'show me the grocery list',
 				route: {
-					appId: 'chatbot',   // wrong app
+					appId: 'chatbot', // wrong app
 					intent: "user wants to know what's for dinner",
 					confidence: 0.99,
 					source: 'intent',
@@ -677,7 +691,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 			// isGroceryViewIntent matches — grocery list handler fires
 			expect(
 				vi.mocked(services.telegram.send).mock.calls.length +
-				vi.mocked(services.telegram.sendWithButtons).mock.calls.length,
+					vi.mocked(services.telegram.sendWithButtons).mock.calls.length,
 			).toBeGreaterThan(0);
 		});
 
@@ -689,7 +703,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 			const ctx1 = createTestMessageContext({
 				userId: 'matt',
 				text: 'link my food to how i feel',
-				route: makeRoute('user wants to understand how their diet is affecting their health or energy'),
+				route: makeRoute(
+					'user wants to understand how their diet is affecting their health or energy',
+				),
 			});
 			await handleMessage(ctx1);
 			assertHandlerFired(vi.mocked(services.telegram.send));
@@ -705,7 +721,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 			const ctx2 = createTestMessageContext({
 				userId: 'matt',
 				text: 'am i actually hitting my goals',
-				route: makeRoute('user wants to see how well they are hitting their macro targets over time'),
+				route: makeRoute(
+					'user wants to see how well they are hitting their macro targets over time',
+				),
 			});
 			await handleMessage(ctx2);
 			assertHandlerFired(vi.mocked(services.telegram.send));
@@ -722,7 +740,6 @@ describe('natural-language-route-dispatch persona tests', () => {
 	// =========================================================================
 
 	describe('Group 4: household-missing path for household-gated allowlist intents', () => {
-
 		it('food spending with no household → household error sent, cascade skipped', async () => {
 			// Override store to return no household
 			vi.mocked(store.read).mockImplementation(async (_path: string) => '');
@@ -743,7 +760,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 
 			// Regex cascade must NOT have fired — no "I'm not sure" help message
 			const helpCalls = calls.filter(([, msg]) => msg.includes("I'm not sure"));
-			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(0);
+			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(
+				0,
+			);
 		});
 
 		it('hosting with no household → household error sent, cascade skipped', async () => {
@@ -752,7 +771,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 
 			const ctx = createTestMessageContext({
 				userId: 'nina',
-				text: "friends are coming over saturday for dinner",
+				text: 'friends are coming over saturday for dinner',
 				route: makeRoute('user wants to plan for hosting guests', { confidence: 0.91 }),
 			});
 			await handleMessage(ctx);
@@ -766,7 +785,9 @@ describe('natural-language-route-dispatch persona tests', () => {
 
 			// No help fallback
 			const helpCalls = calls.filter(([, msg]) => msg.includes("I'm not sure"));
-			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(0);
+			expect(helpCalls, 'Regex cascade must not run after route claimed the message').toHaveLength(
+				0,
+			);
 		});
 	});
 });

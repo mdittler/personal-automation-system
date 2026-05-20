@@ -6,7 +6,7 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { HealthDailyMetricsPayload } from '../events/types.js';
 
@@ -91,7 +91,7 @@ export async function upsertDailyHealth(
 		log = { month, userId, days: [] };
 	}
 
-	const idx = log.days.findIndex(d => d.date === entry.date);
+	const idx = log.days.findIndex((d) => d.date === entry.date);
 	if (idx >= 0) {
 		log.days[idx] = entry;
 	} else {

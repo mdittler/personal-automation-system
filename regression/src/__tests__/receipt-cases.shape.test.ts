@@ -116,9 +116,7 @@ describe('receipt fixtures — global', () => {
 
 	it('all receipt case IDs are unique', async () => {
 		const loaded = await loadCases(CASES_DIR);
-		const ids = loaded
-			.filter((lc) => lc.case.bucket === 'receipt')
-			.map((lc) => lc.case.id);
+		const ids = loaded.filter((lc) => lc.case.bucket === 'receipt').map((lc) => lc.case.id);
 		expect(new Set(ids).size).toBe(ids.length);
 		// Spot-check the expected IDs match what the fixture map declares.
 		for (const { name } of FIXTURES) {

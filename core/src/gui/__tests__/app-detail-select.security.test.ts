@@ -49,11 +49,7 @@ function makeHouseholdService(
 	};
 }
 
-async function buildHostileSelectApp(
-	tempDir: string,
-	options: string[],
-	defaultOption: string,
-) {
+async function buildHostileSelectApp(tempDir: string, options: string[], defaultOption: string) {
 	const appDef: RegisteredApp = {
 		manifest: {
 			app: { id: 'hostile', name: 'Hostile', version: '1.0.0', description: 'XSS test' },
@@ -89,7 +85,9 @@ async function buildHostileSelectApp(
 		claude: { apiKey: 'test', model: 'claude-sonnet-4-20250514' },
 		gui: { authToken: AUTH_TOKEN },
 		cloudflare: {},
-		users: [{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true, enabledApps: ['*'], sharedScopes: [] }],
+		users: [
+			{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+		],
 	};
 	const toggle = new AppToggleStore({ dataDir: tempDir });
 	const server = Fastify({ logger: false });
@@ -206,10 +204,7 @@ describe('GET /gui/apps/:appId — type=select XSS hardening', () => {
 			// Pre-write hostile override directly to the canonical override path
 			const overrideDir = join(tempDir, 'system', 'app-config', 'hostile');
 			await mkdir(overrideDir, { recursive: true });
-			await writeFile(
-				join(overrideDir, `${TEST_USER_ID}.yaml`),
-				`routing_primary: "${HOSTILE}"\n`,
-			);
+			await writeFile(join(overrideDir, `${TEST_USER_ID}.yaml`), `routing_primary: "${HOSTILE}"\n`);
 
 			const loginRes = await server.inject({
 				method: 'POST',

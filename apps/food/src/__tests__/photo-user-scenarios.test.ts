@@ -10,10 +10,10 @@
  * These tests use the full handlePhoto pipeline with mocked LLM/Telegram.
  */
 
+import type { CoreServices, PhotoContext } from '@pas/core/types';
 import { describe, expect, it, vi } from 'vitest';
 import { handlePhoto } from '../handlers/photo.js';
 import { isRecipePhotoIntent } from '../index.js';
-import type { CoreServices, PhotoContext } from '@pas/core/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,12 +41,14 @@ function createMockStore(initialData: Record<string, string> = {}) {
 
 function mockServices(llmResponse: string | ((...args: unknown[]) => string)) {
 	const sharedStore = createMockStore({ 'household.yaml': makeHouseholdYaml(['user-1']) });
-	const completeFn = typeof llmResponse === 'function'
-		? vi.fn(llmResponse)
-		: vi.fn().mockResolvedValue(llmResponse);
+	const completeFn =
+		typeof llmResponse === 'function' ? vi.fn(llmResponse) : vi.fn().mockResolvedValue(llmResponse);
 	const completeWithMetaFn =
 		typeof llmResponse === 'function'
-			? vi.fn(async (...args: unknown[]) => ({ text: llmResponse(...args), finishReason: 'stop' as const }))
+			? vi.fn(async (...args: unknown[]) => ({
+					text: llmResponse(...args),
+					finishReason: 'stop' as const,
+				}))
 			: vi.fn().mockResolvedValue({ text: llmResponse, finishReason: 'stop' });
 	return {
 		services: {
@@ -101,7 +103,7 @@ function messageSentToUser(services: CoreServices): string {
 // ---------------------------------------------------------------------------
 
 const recipeResponse = JSON.stringify({
-	title: 'Grandma\'s Banana Bread',
+	title: "Grandma's Banana Bread",
 	source: 'photo',
 	ingredients: [
 		{ name: 'ripe bananas', quantity: 3, unit: null },
@@ -166,11 +168,11 @@ describe('Photo caption classification — real user phrases', () => {
 	describe('recipe captions', () => {
 		it.each([
 			'save this recipe',
-			'here\'s a recipe from my mom',
+			"here's a recipe from my mom",
 			'recipe I found online',
-			'save this please',                      // "save" alone triggers recipe
-			'found this in an old cookbook',           // "cookbook" triggers recipe
-			'this is a recipe card from the 1960s',   // "card" triggers recipe
+			'save this please', // "save" alone triggers recipe
+			'found this in an old cookbook', // "cookbook" triggers recipe
+			'this is a recipe card from the 1960s', // "card" triggers recipe
 		])('routes to recipe handler: "%s"', async (caption) => {
 			const { services } = mockServices(recipeResponse);
 			await handlePhoto(services, photo(caption));
@@ -185,11 +187,11 @@ describe('Photo caption classification — real user phrases', () => {
 		it.each([
 			'receipt',
 			'grocery receipt',
-			'here\'s my receipt from costco',
-			'I just spent too much at target',        // "spent" triggers receipt
-			'total was like $80',                      // "total" triggers receipt
-			'checkout slip',                           // "checkout" triggers receipt
-			'the bill from trader joes',               // "bill" triggers receipt
+			"here's my receipt from costco",
+			'I just spent too much at target', // "spent" triggers receipt
+			'total was like $80', // "total" triggers receipt
+			'checkout slip', // "checkout" triggers receipt
+			'the bill from trader joes', // "bill" triggers receipt
 		])('routes to receipt handler: "%s"', async (caption) => {
 			const { services } = mockServices(receiptResponse);
 			await handlePhoto(services, photo(caption));
@@ -202,12 +204,12 @@ describe('Photo caption classification — real user phrases', () => {
 
 	describe('pantry captions', () => {
 		it.each([
-			'what\'s in my fridge',
-			'here\'s my pantry',
-			'this is what\'s in the freezer',
-			'fridge contents',                        // "fridge" or "contents"
-			'stuff on the shelf',                     // "shelf" triggers pantry
-			'whats in here',                          // "what.?s in" triggers pantry
+			"what's in my fridge",
+			"here's my pantry",
+			"this is what's in the freezer",
+			'fridge contents', // "fridge" or "contents"
+			'stuff on the shelf', // "shelf" triggers pantry
+			'whats in here', // "what.?s in" triggers pantry
 		])('routes to pantry handler: "%s"', async (caption) => {
 			const { services } = mockServices(pantryResponse);
 			await handlePhoto(services, photo(caption));
@@ -223,9 +225,9 @@ describe('Photo caption classification — real user phrases', () => {
 		it.each([
 			'add these to grocery list',
 			'shopping list',
-			'we need to buy this stuff',              // "buy" triggers grocery
-			'grocery list for the week',              // "grocery" triggers grocery
-			'add this to the list',                   // "add...to...list" triggers grocery
+			'we need to buy this stuff', // "buy" triggers grocery
+			'grocery list for the week', // "grocery" triggers grocery
+			'add this to the list', // "add...to...list" triggers grocery
 		])('routes to grocery handler: "%s"', async (caption) => {
 			const { services } = mockServices(groceryResponse);
 			await handlePhoto(services, photo(caption));
@@ -245,7 +247,8 @@ describe('Photo caption classification — real user phrases', () => {
 			'what do you think?',
 		])('falls back to LLM vision for ambiguous caption: "%s"', async (caption) => {
 			// First call: classification → "recipe". Second call: parse.
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('recipe')
 				.mockResolvedValueOnce(recipeResponse);
 			const { services } = mockServices('');
@@ -294,7 +297,8 @@ describe('Photo caption classification — real user phrases', () => {
 		it('does not treat "birthday card" as a recipe', async () => {
 			// "card" in recipe keywords is for "recipe card", not greeting cards
 			// Should fall through to vision classification
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('I see a birthday card, not food related')
 				.mockResolvedValue('{}');
 			const { services } = mockServices('');
@@ -308,7 +312,8 @@ describe('Photo caption classification — real user phrases', () => {
 		});
 
 		it('does not treat "business card" as a recipe', async () => {
-			const completeFn = vi.fn()
+			const completeFn = vi
+				.fn()
 				.mockResolvedValueOnce('This appears to be a business card')
 				.mockResolvedValue('{}');
 			const { services } = mockServices('');
@@ -340,7 +345,7 @@ describe('LLM prompt construction — what the model actually sees', () => {
 
 	it('recipe prompt includes user caption as context', async () => {
 		const { services, completeFn } = mockServices(recipeResponse);
-		await handlePhoto(services, photo('my mom\'s banana bread recipe'));
+		await handlePhoto(services, photo("my mom's banana bread recipe"));
 
 		const prompt = promptSentToLLM(completeFn);
 		expect(prompt).toContain('banana bread');
@@ -366,7 +371,7 @@ describe('LLM prompt construction — what the model actually sees', () => {
 
 	it('pantry prompt asks for item names, quantities, and categories', async () => {
 		const { services, completeFn } = mockServices(pantryResponse);
-		await handlePhoto(services, photo('what\'s in my fridge'));
+		await handlePhoto(services, photo("what's in my fridge"));
 
 		const prompt = promptSentToLLM(completeFn);
 		expect(prompt).toContain('name');
@@ -410,7 +415,8 @@ describe('LLM prompt construction — what the model actually sees', () => {
 	});
 
 	it('classification prompt asks for a single-word response', async () => {
-		const completeFn = vi.fn()
+		const completeFn = vi
+			.fn()
 			.mockResolvedValueOnce('recipe')
 			.mockResolvedValueOnce(recipeResponse);
 		const { services } = mockServices('');
@@ -434,7 +440,7 @@ describe('Telegram responses — what the user actually sees', () => {
 			await handlePhoto(services, photo('save this recipe'));
 
 			const msg = messageSentToUser(services);
-			expect(msg).toContain('Grandma\'s Banana Bread');
+			expect(msg).toContain("Grandma's Banana Bread");
 			expect(msg).toContain('5 ingredients');
 			expect(msg).toContain('5 steps');
 			expect(msg).toContain('Servings: 8');
@@ -477,7 +483,7 @@ describe('Telegram responses — what the user actually sees', () => {
 	describe('pantry photo response', () => {
 		it('lists each identified item with quantity', async () => {
 			const { services } = mockServices(pantryResponse);
-			await handlePhoto(services, photo('what\'s in my fridge'));
+			await handlePhoto(services, photo("what's in my fridge"));
 
 			const msg = messageSentToUser(services);
 			expect(msg).toContain('eggs');
@@ -544,10 +550,10 @@ describe('Telegram responses — what the user actually sees', () => {
 	describe('empty results', () => {
 		it('tells user no items found in pantry photo and suggests alternatives', async () => {
 			const { services } = mockServices('[]');
-			await handlePhoto(services, photo('what\'s in the fridge'));
+			await handlePhoto(services, photo("what's in the fridge"));
 
 			const msg = messageSentToUser(services);
-			expect(msg).toContain('couldn\'t identify');
+			expect(msg).toContain("couldn't identify");
 			expect(msg).toContain('clearer photo');
 		});
 
@@ -557,7 +563,7 @@ describe('Telegram responses — what the user actually sees', () => {
 			await handlePhoto(services, photo('grocery list'));
 
 			const msg = messageSentToUser(services);
-			expect(msg).toContain('couldn\'t extract');
+			expect(msg).toContain("couldn't extract");
 		});
 	});
 
@@ -575,8 +581,9 @@ describe('Telegram responses — what the user actually sees', () => {
 		});
 
 		it('suggests adding a caption when uncertain photo is sent', async () => {
-			const completeFn = vi.fn()
-				.mockResolvedValueOnce('I can see a photo but it\'s unclear what type it is');
+			const completeFn = vi
+				.fn()
+				.mockResolvedValueOnce("I can see a photo but it's unclear what type it is");
 			const { services } = mockServices('');
 			services.llm.complete = completeFn;
 
@@ -622,13 +629,13 @@ describe('Recipe photo retrieval — user phrases', () => {
 		it.each([
 			// Recipe operations (not photo retrieval)
 			'show me the lasagna recipe',
-			'what\'s in the pasta recipe',
+			"what's in the pasta recipe",
 			'search for chicken recipes',
 			'find me a good chili recipe',
 
 			// Saving photos (uploading, not retrieving)
 			'save this recipe',
-			'here\'s a recipe to save',
+			"here's a recipe to save",
 
 			// General photo mentions
 			'take a photo',
@@ -636,11 +643,11 @@ describe('Recipe photo retrieval — user phrases', () => {
 
 			// Food questions
 			'how do I make banana bread',
-			'what\'s for dinner tonight',
+			"what's for dinner tonight",
 
 			// Grocery / pantry
 			'add chicken to the list',
-			'what\'s in the fridge',
+			"what's in the fridge",
 		])('does NOT match: "%s"', (text) => {
 			expect(isRecipePhotoIntent(text.toLowerCase())).toBe(false);
 		});

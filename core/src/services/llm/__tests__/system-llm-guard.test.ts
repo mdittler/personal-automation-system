@@ -19,7 +19,6 @@ function createMockInner(): LLMService {
 	};
 }
 
-
 describe('SystemLLMGuard', () => {
 	let inner: LLMService;
 	let costTracker: CostTracker;
@@ -317,7 +316,9 @@ describe('SystemLLMGuard', () => {
 describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 	const logger = pino({ level: 'silent' });
 
-	function makeGuardWithHH(overrides: { hhLimiter?: ReturnType<typeof createMockHouseholdLimiter> } = {}) {
+	function makeGuardWithHH(
+		overrides: { hhLimiter?: ReturnType<typeof createMockHouseholdLimiter> } = {},
+	) {
 		const hhLimiter = overrides.hhLimiter ?? createMockHouseholdLimiter();
 		const ct = createMockCostTracker();
 		const inner: LLMService = {
@@ -337,7 +338,13 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate denied → LLMRateLimitError{scope:household}; inner NOT called', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi.fn().mockReturnValue({ allowed: false, commit: vi.fn(), limit: { maxRequests: 200, windowSeconds: 3600 } }),
+			check: vi
+				.fn()
+				.mockReturnValue({
+					allowed: false,
+					commit: vi.fn(),
+					limit: { maxRequests: 200, windowSeconds: 3600 },
+				}),
 		});
 		const { guard, inner } = makeGuardWithHH({ hhLimiter });
 		await expect(
@@ -349,7 +356,12 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 	it('household cost denied → LLMCostCapError{scope:household}; inner NOT called', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
 			checkCost: vi.fn().mockImplementation(() => {
-				throw new LLMCostCapError({ scope: 'household', householdId: 'h1', currentCost: 20, cap: 20 });
+				throw new LLMCostCapError({
+					scope: 'household',
+					householdId: 'h1',
+					currentCost: 20,
+					cap: 20,
+				});
 			}),
 		});
 		const { guard, inner } = makeGuardWithHH({ hhLimiter });
@@ -362,8 +374,18 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 	it('global cap exceeded → LLMCostCapError{scope:global}; household checks still happen first', async () => {
 		const hhLimiter = createMockHouseholdLimiter();
 		const ct = createMockCostTracker(0, 50.0);
-		const inner: LLMService = { complete: vi.fn().mockResolvedValue('ok'), classify: vi.fn(), extractStructured: vi.fn() };
-		const g = new SystemLLMGuard({ inner, costTracker: ct, globalMonthlyCostCap: 50, logger, householdLimiter: hhLimiter });
+		const inner: LLMService = {
+			complete: vi.fn().mockResolvedValue('ok'),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		};
+		const g = new SystemLLMGuard({
+			inner,
+			costTracker: ct,
+			globalMonthlyCostCap: 50,
+			logger,
+			householdLimiter: hhLimiter,
+		});
 		await expect(
 			requestContext.run({ userId: 'u1', householdId: 'h1' }, () => g.complete('hi')),
 		).rejects.toMatchObject({ scope: 'global' });
@@ -389,7 +411,9 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('requestContext householdId=PLATFORM_SYSTEM_HOUSEHOLD_ID: household checks skipped', async () => {
 		const { guard, costTracker: ct } = makeGuardWithHH();
-		await requestContext.run({ userId: 'u1', householdId: PLATFORM_SYSTEM_HOUSEHOLD_ID }, () => guard.complete('hi'));
+		await requestContext.run({ userId: 'u1', householdId: PLATFORM_SYSTEM_HOUSEHOLD_ID }, () =>
+			guard.complete('hi'),
+		);
 		expect(ct.getMonthlyHouseholdCost).not.toHaveBeenCalled();
 	});
 
@@ -397,8 +421,18 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 		const hhLimiter = createMockHouseholdLimiter();
 		(hhLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mockReturnValue('res-err');
 		const ct = createMockCostTracker();
-		const inner: LLMService = { complete: vi.fn().mockRejectedValue(new Error('provider down')), classify: vi.fn(), extractStructured: vi.fn() };
-		const g = new SystemLLMGuard({ inner, costTracker: ct, globalMonthlyCostCap: 50, logger, householdLimiter: hhLimiter });
+		const inner: LLMService = {
+			complete: vi.fn().mockRejectedValue(new Error('provider down')),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		};
+		const g = new SystemLLMGuard({
+			inner,
+			costTracker: ct,
+			globalMonthlyCostCap: 50,
+			logger,
+			householdLimiter: hhLimiter,
+		});
 		await expect(
 			requestContext.run({ userId: 'u1', householdId: 'h1' }, () => g.complete('hi')),
 		).rejects.toThrow('provider down');

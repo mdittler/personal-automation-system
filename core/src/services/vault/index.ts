@@ -154,7 +154,10 @@ export class VaultService {
 			userDir = join(this.dataDir, 'households', householdId, 'users', userId);
 		} else if (householdId === null) {
 			// Wired but no household — skip personal symlinks (fail-soft)
-			this.logger.warn({ userId }, 'VaultService: user has no household — skipping personal app symlinks');
+			this.logger.warn(
+				{ userId },
+				'VaultService: user has no household — skipping personal app symlinks',
+			);
 			userDir = '';
 		} else {
 			userDir = join(this.dataDir, 'users', userId);

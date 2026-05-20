@@ -1,14 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-	computeFoodVariety,
 	computeAllergenHistory,
-	computeReactionSummary,
 	computeApprovalSummary,
+	computeFoodVariety,
 	computeMacroBalance,
+	computeReactionSummary,
 	formatPediatricianReport,
 	generatePediatricianReport,
 } from '../services/pediatrician-report.js';
-import type { ChildFoodLog, ChildProfile, DailyMacroEntry, FoodIntroduction, Recipe } from '../types.js';
+import type {
+	ChildFoodLog,
+	ChildProfile,
+	DailyMacroEntry,
+	FoodIntroduction,
+	Recipe,
+} from '../types.js';
 
 function createMockScopedStore(overrides: Record<string, unknown> = {}) {
 	return {
@@ -119,7 +125,7 @@ describe('pediatrician-report', () => {
 			const result = computeAllergenHistory(intros);
 			expect(result).toHaveLength(2);
 
-			const eggs = result.find(a => a.category === 'eggs');
+			const eggs = result.find((a) => a.category === 'eggs');
 			expect(eggs).toBeDefined();
 			expect(eggs!.firstIntroduced).toBe('2026-03-01');
 			expect(eggs!.foods).toContain('scrambled eggs');
@@ -127,9 +133,7 @@ describe('pediatrician-report', () => {
 		});
 
 		it('skips non-allergen foods', () => {
-			const intros = [
-				makeIntroduction({ food: 'banana', allergenCategory: null }),
-			];
+			const intros = [makeIntroduction({ food: 'banana', allergenCategory: null })];
 			const result = computeAllergenHistory(intros);
 			expect(result).toHaveLength(0);
 		});
@@ -150,8 +154,18 @@ describe('pediatrician-report', () => {
 		it('lists reactions excluding none', () => {
 			const intros = [
 				makeIntroduction({ food: 'eggs', reaction: 'none' }),
-				makeIntroduction({ food: 'peanuts', reaction: 'mild', allergenCategory: 'peanuts', notes: 'slight rash' }),
-				makeIntroduction({ food: 'shrimp', reaction: 'moderate', allergenCategory: 'shellfish', notes: 'hives' }),
+				makeIntroduction({
+					food: 'peanuts',
+					reaction: 'mild',
+					allergenCategory: 'peanuts',
+					notes: 'slight rash',
+				}),
+				makeIntroduction({
+					food: 'shrimp',
+					reaction: 'moderate',
+					allergenCategory: 'shellfish',
+					notes: 'hives',
+				}),
 			];
 			const result = computeReactionSummary(intros);
 			expect(result).toHaveLength(2);
@@ -161,9 +175,7 @@ describe('pediatrician-report', () => {
 		});
 
 		it('returns empty when no reactions', () => {
-			const intros = [
-				makeIntroduction({ reaction: 'none' }),
-			];
+			const intros = [makeIntroduction({ reaction: 'none' })];
 			expect(computeReactionSummary(intros)).toEqual([]);
 		});
 	});
@@ -216,7 +228,12 @@ describe('pediatrician-report', () => {
 				periodDays: 30,
 				foodVariety: { count: 15, foods: ['eggs', 'banana', 'yogurt'] },
 				allergenHistory: [
-					{ category: 'eggs', firstIntroduced: '2026-03-01', foods: ['scrambled eggs', 'omelette'], reactions: [] },
+					{
+						category: 'eggs',
+						firstIntroduced: '2026-03-01',
+						foods: ['scrambled eggs', 'omelette'],
+						reactions: [],
+					},
 					{ category: 'milk', firstIntroduced: '2026-03-10', foods: ['yogurt'], reactions: [] },
 				],
 				reactions: [
@@ -259,8 +276,18 @@ describe('pediatrician-report', () => {
 	describe('generatePediatricianReport', () => {
 		it('orchestrates full report generation', async () => {
 			const childLog = makeChildLog({}, [
-				makeIntroduction({ food: 'eggs', allergenCategory: 'eggs', date: '2026-03-20', accepted: true }),
-				makeIntroduction({ food: 'banana', allergenCategory: null, date: '2026-03-22', accepted: true }),
+				makeIntroduction({
+					food: 'eggs',
+					allergenCategory: 'eggs',
+					date: '2026-03-20',
+					accepted: true,
+				}),
+				makeIntroduction({
+					food: 'banana',
+					allergenCategory: null,
+					date: '2026-03-22',
+					accepted: true,
+				}),
 			]);
 
 			const sharedStore = createMockScopedStore({

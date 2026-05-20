@@ -80,9 +80,7 @@ const happyPathSidecar = JSON.stringify({
 function makeReceiptLlm(text: string) {
 	return {
 		complete: vi.fn().mockResolvedValue(text),
-		completeWithMeta: vi
-			.fn()
-			.mockResolvedValue({ text, finishReason: 'stop' as const }),
+		completeWithMeta: vi.fn().mockResolvedValue({ text, finishReason: 'stop' as const }),
 	};
 }
 

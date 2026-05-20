@@ -14,8 +14,8 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { saveTargets } from './nutrition.js';
 import { parseStrictInt } from '../utils/parse-int-strict.js';
+import { saveTargets } from './nutrition.js';
 
 type TargetsStep =
 	| 'awaiting_calories'
@@ -84,74 +84,58 @@ async function sendCaloriesStep(services: CoreServices, userId: string): Promise
 }
 
 async function sendProteinStep(services: CoreServices, userId: string): Promise<void> {
-	await services.telegram.sendWithButtons(
-		userId,
-		'Step 2/5 — Daily protein target (g):',
+	await services.telegram.sendWithButtons(userId, 'Step 2/5 — Daily protein target (g):', [
 		[
-			[
-				{ text: '80', callbackData: 'app:food:nut:tgt:pro:80' },
-				{ text: '120', callbackData: 'app:food:nut:tgt:pro:120' },
-				{ text: '150', callbackData: 'app:food:nut:tgt:pro:150' },
-				{ text: '180', callbackData: 'app:food:nut:tgt:pro:180' },
-				{ text: '220', callbackData: 'app:food:nut:tgt:pro:220' },
-				{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
-			],
-			[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+			{ text: '80', callbackData: 'app:food:nut:tgt:pro:80' },
+			{ text: '120', callbackData: 'app:food:nut:tgt:pro:120' },
+			{ text: '150', callbackData: 'app:food:nut:tgt:pro:150' },
+			{ text: '180', callbackData: 'app:food:nut:tgt:pro:180' },
+			{ text: '220', callbackData: 'app:food:nut:tgt:pro:220' },
+			{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
 		],
-	);
+		[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+	]);
 }
 
 async function sendCarbsStep(services: CoreServices, userId: string): Promise<void> {
-	await services.telegram.sendWithButtons(
-		userId,
-		'Step 3/5 — Daily carbs target (g):',
+	await services.telegram.sendWithButtons(userId, 'Step 3/5 — Daily carbs target (g):', [
 		[
-			[
-				{ text: '150', callbackData: 'app:food:nut:tgt:carb:150' },
-				{ text: '200', callbackData: 'app:food:nut:tgt:carb:200' },
-				{ text: '250', callbackData: 'app:food:nut:tgt:carb:250' },
-				{ text: '300', callbackData: 'app:food:nut:tgt:carb:300' },
-				{ text: '350', callbackData: 'app:food:nut:tgt:carb:350' },
-				{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
-			],
-			[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+			{ text: '150', callbackData: 'app:food:nut:tgt:carb:150' },
+			{ text: '200', callbackData: 'app:food:nut:tgt:carb:200' },
+			{ text: '250', callbackData: 'app:food:nut:tgt:carb:250' },
+			{ text: '300', callbackData: 'app:food:nut:tgt:carb:300' },
+			{ text: '350', callbackData: 'app:food:nut:tgt:carb:350' },
+			{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
 		],
-	);
+		[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+	]);
 }
 
 async function sendFatStep(services: CoreServices, userId: string): Promise<void> {
-	await services.telegram.sendWithButtons(
-		userId,
-		'Step 4/5 — Daily fat target (g):',
+	await services.telegram.sendWithButtons(userId, 'Step 4/5 — Daily fat target (g):', [
 		[
-			[
-				{ text: '50', callbackData: 'app:food:nut:tgt:fat:50' },
-				{ text: '65', callbackData: 'app:food:nut:tgt:fat:65' },
-				{ text: '80', callbackData: 'app:food:nut:tgt:fat:80' },
-				{ text: '100', callbackData: 'app:food:nut:tgt:fat:100' },
-				{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
-			],
-			[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+			{ text: '50', callbackData: 'app:food:nut:tgt:fat:50' },
+			{ text: '65', callbackData: 'app:food:nut:tgt:fat:65' },
+			{ text: '80', callbackData: 'app:food:nut:tgt:fat:80' },
+			{ text: '100', callbackData: 'app:food:nut:tgt:fat:100' },
+			{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
 		],
-	);
+		[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+	]);
 }
 
 async function sendFiberStep(services: CoreServices, userId: string): Promise<void> {
-	await services.telegram.sendWithButtons(
-		userId,
-		'Step 5/5 — Daily fiber target (g):',
+	await services.telegram.sendWithButtons(userId, 'Step 5/5 — Daily fiber target (g):', [
 		[
-			[
-				{ text: '20', callbackData: 'app:food:nut:tgt:fib:20' },
-				{ text: '25', callbackData: 'app:food:nut:tgt:fib:25' },
-				{ text: '30', callbackData: 'app:food:nut:tgt:fib:30' },
-				{ text: '40', callbackData: 'app:food:nut:tgt:fib:40' },
-				{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
-				{ text: 'Skip', callbackData: 'app:food:nut:tgt:fib:skip' },
-			],
-			[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+			{ text: '20', callbackData: 'app:food:nut:tgt:fib:20' },
+			{ text: '25', callbackData: 'app:food:nut:tgt:fib:25' },
+			{ text: '30', callbackData: 'app:food:nut:tgt:fib:30' },
+			{ text: '40', callbackData: 'app:food:nut:tgt:fib:40' },
+			{ text: 'Custom', callbackData: 'app:food:nut:tgt:custom' },
+			{ text: 'Skip', callbackData: 'app:food:nut:tgt:fib:skip' },
 		],
-	);
+		[{ text: 'Cancel', callbackData: 'app:food:nut:tgt:cancel' }],
+	]);
 }
 
 async function sendConfirmStep(
@@ -177,20 +161,23 @@ async function sendConfirmStep(
 
 function fieldNameForStep(step: TargetsStep): string {
 	switch (step) {
-		case 'awaiting_calories': return 'calories';
-		case 'awaiting_protein': return 'protein (g)';
-		case 'awaiting_carbs': return 'carbs (g)';
-		case 'awaiting_fat': return 'fat (g)';
-		case 'awaiting_fiber': return 'fiber (g)';
-		default: return 'value';
+		case 'awaiting_calories':
+			return 'calories';
+		case 'awaiting_protein':
+			return 'protein (g)';
+		case 'awaiting_carbs':
+			return 'carbs (g)';
+		case 'awaiting_fat':
+			return 'fat (g)';
+		case 'awaiting_fiber':
+			return 'fiber (g)';
+		default:
+			return 'value';
 	}
 }
 
 /** Entry point from `nutrition.ts` when user types `/nutrition targets set` with no args. */
-export async function beginTargetsFlow(
-	services: CoreServices,
-	userId: string,
-): Promise<void> {
+export async function beginTargetsFlow(services: CoreServices, userId: string): Promise<void> {
 	touch(userId, { step: 'awaiting_calories', expiresAt: 0 });
 	await sendCaloriesStep(services, userId);
 }
@@ -254,7 +241,7 @@ export async function handleTargetsFlowCallback(
 	if (!state) {
 		await services.telegram.send(
 			userId,
-			"Your targets flow has expired. Use `/nutrition targets set` to start again.",
+			'Your targets flow has expired. Use `/nutrition targets set` to start again.',
 		);
 		return true;
 	}
@@ -284,10 +271,7 @@ export async function handleTargetsFlowCallback(
 		state.awaitingCustomInput = true;
 		touch(userId, state);
 		const fieldName = fieldNameForStep(state.step);
-		await services.telegram.send(
-			userId,
-			`Reply with your ${fieldName} target (or 'cancel'):`,
-		);
+		await services.telegram.send(userId, `Reply with your ${fieldName} target (or 'cancel'):`);
 		return true;
 	}
 
@@ -299,27 +283,57 @@ export async function handleTargetsFlowCallback(
 	// Quick-pick values for each step.
 	const calMatch = data.match(/^app:food:nut:tgt:cal:(\d+)$/);
 	if (calMatch && state.step === 'awaiting_calories') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(calMatch[1]!, 10));
+		return await applyValueAndAdvance(
+			services,
+			userStore,
+			userId,
+			state,
+			Number.parseInt(calMatch[1]!, 10),
+		);
 	}
 
 	const proMatch = data.match(/^app:food:nut:tgt:pro:(\d+)$/);
 	if (proMatch && state.step === 'awaiting_protein') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(proMatch[1]!, 10));
+		return await applyValueAndAdvance(
+			services,
+			userStore,
+			userId,
+			state,
+			Number.parseInt(proMatch[1]!, 10),
+		);
 	}
 
 	const carbMatch = data.match(/^app:food:nut:tgt:carb:(\d+)$/);
 	if (carbMatch && state.step === 'awaiting_carbs') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(carbMatch[1]!, 10));
+		return await applyValueAndAdvance(
+			services,
+			userStore,
+			userId,
+			state,
+			Number.parseInt(carbMatch[1]!, 10),
+		);
 	}
 
 	const fatMatch = data.match(/^app:food:nut:tgt:fat:(\d+)$/);
 	if (fatMatch && state.step === 'awaiting_fat') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(fatMatch[1]!, 10));
+		return await applyValueAndAdvance(
+			services,
+			userStore,
+			userId,
+			state,
+			Number.parseInt(fatMatch[1]!, 10),
+		);
 	}
 
 	const fibMatch = data.match(/^app:food:nut:tgt:fib:(\d+)$/);
 	if (fibMatch && state.step === 'awaiting_fiber') {
-		return await applyValueAndAdvance(services, userStore, userId, state, parseInt(fibMatch[1]!, 10));
+		return await applyValueAndAdvance(
+			services,
+			userStore,
+			userId,
+			state,
+			Number.parseInt(fibMatch[1]!, 10),
+		);
 	}
 
 	return false;

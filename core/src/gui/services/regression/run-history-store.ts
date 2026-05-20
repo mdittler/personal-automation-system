@@ -199,8 +199,7 @@ function isValidRunSummary(v: unknown): boolean {
 	if (!isPlainObject(v)) return false;
 	const nonNegInt = (x: unknown): boolean =>
 		typeof x === 'number' && Number.isFinite(x) && x >= 0 && Number.isInteger(x);
-	const nonNegNum = (x: unknown): boolean =>
-		typeof x === 'number' && Number.isFinite(x) && x >= 0;
+	const nonNegNum = (x: unknown): boolean => typeof x === 'number' && Number.isFinite(x) && x >= 0;
 	if (!nonNegInt(v.totalCases)) return false;
 	if (!nonNegInt(v.pass)) return false;
 	if (!nonNegInt(v.fail)) return false;

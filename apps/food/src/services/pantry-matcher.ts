@@ -120,10 +120,8 @@ ${recipeSummary}
 
 	const enrichMatch = (match: LlmRecipeMatch): RecipeMatch => {
 		const recipe = recipeMap.get(match.recipeId);
-		const totalTime =
-			recipe != null ? (recipe.prepTime ?? 0) + (recipe.cookTime ?? 0) : undefined;
-		const prepTime =
-			totalTime != null && totalTime > 0 ? totalTime : undefined;
+		const totalTime = recipe != null ? (recipe.prepTime ?? 0) + (recipe.cookTime ?? 0) : undefined;
+		const prepTime = totalTime != null && totalTime > 0 ? totalTime : undefined;
 
 		return {
 			recipeId: match.recipeId,

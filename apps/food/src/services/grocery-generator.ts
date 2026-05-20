@@ -6,14 +6,20 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { emitGroceryListReady } from '../events/emitters.js';
 import type { GroceryItem, GroceryList, Recipe } from '../types.js';
+import { isoNow } from '../utils/date.js';
+import { loadHousehold } from '../utils/household-guard.js';
 import { deduplicateAndAssignDepartments } from './grocery-dedup.js';
-import { addItems, createEmptyList, loadGroceryList, saveGroceryList, withGroceryLock } from './grocery-store.js';
+import {
+	addItems,
+	createEmptyList,
+	loadGroceryList,
+	saveGroceryList,
+	withGroceryLock,
+} from './grocery-store.js';
 import { assignDepartment } from './item-parser.js';
 import { loadPantry, pantryContains } from './pantry-store.js';
-import { emitGroceryListReady } from '../events/emitters.js';
-import { loadHousehold } from '../utils/household-guard.js';
-import { isoNow } from '../utils/date.js';
 
 export interface GenerationResult {
 	list: GroceryList;

@@ -11,8 +11,8 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HealthDailyMetricsPayload } from '../events/types.js';
 import { registerHealthSubscribers } from '../events/subscribers.js';
+import type { HealthDailyMetricsPayload } from '../events/types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -27,7 +27,9 @@ function createMockStore() {
 	};
 }
 
-function makeHealthPayload(overrides: Partial<HealthDailyMetricsPayload> = {}): HealthDailyMetricsPayload {
+function makeHealthPayload(
+	overrides: Partial<HealthDailyMetricsPayload> = {},
+): HealthDailyMetricsPayload {
 	return {
 		userId: 'alice',
 		date: '2026-04-10',
@@ -41,7 +43,7 @@ function makeHealthPayload(overrides: Partial<HealthDailyMetricsPayload> = {}): 
  * Capture the handler registered via services.eventBus.on('health:daily-metrics', ...)
  * so tests can invoke it directly.
  */
-function captureSubscriberHandler(services: CoreServices): ((payload: unknown) => Promise<void>) {
+function captureSubscriberHandler(services: CoreServices): (payload: unknown) => Promise<void> {
 	let capturedHandler: ((payload: unknown) => Promise<void>) | undefined;
 	vi.mocked(services.eventBus!.on).mockImplementation((event, handler) => {
 		if (event === 'health:daily-metrics') {
@@ -49,7 +51,8 @@ function captureSubscriberHandler(services: CoreServices): ((payload: unknown) =
 		}
 	});
 	return async (payload: unknown) => {
-		if (!capturedHandler) throw new Error('Handler not captured — did registerHealthSubscribers run?');
+		if (!capturedHandler)
+			throw new Error('Handler not captured — did registerHealthSubscribers run?');
 		return capturedHandler(payload);
 	};
 }
@@ -68,7 +71,10 @@ describe('registerHealthSubscribers', () => {
 
 	it('subscribes to health:daily-metrics on the event bus', () => {
 		registerHealthSubscribers(services);
-		expect(services.eventBus!.on).toHaveBeenCalledWith('health:daily-metrics', expect.any(Function));
+		expect(services.eventBus!.on).toHaveBeenCalledWith(
+			'health:daily-metrics',
+			expect.any(Function),
+		);
 	});
 
 	it('persists a valid health payload to the user data store', async () => {

@@ -277,16 +277,19 @@ describe('RateLimiter', () => {
 	});
 
 	describe('constructor validation', () => {
-		it.each([NaN, Infinity, -Infinity, -1, 0, 1.5])(
+		it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0, 1.5])(
 			'rejects invalid maxAttempts = %s',
 			(v) => {
 				expect(() => new RateLimiter({ maxAttempts: v as number, windowMs: 1000 })).toThrow();
 			},
 		);
 
-		it.each([NaN, Infinity, -Infinity, -1, 0])('rejects invalid windowMs = %s', (v) => {
-			expect(() => new RateLimiter({ maxAttempts: 3, windowMs: v as number })).toThrow();
-		});
+		it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0])(
+			'rejects invalid windowMs = %s',
+			(v) => {
+				expect(() => new RateLimiter({ maxAttempts: 3, windowMs: v as number })).toThrow();
+			},
+		);
 	});
 
 	describe('revokeLastCommit()', () => {

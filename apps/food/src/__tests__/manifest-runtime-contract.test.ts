@@ -73,7 +73,9 @@ describe('food manifest/runtime contract', () => {
 
 		await expect(userStore.write('preferences.yaml', 'prefs')).resolves.toBeUndefined();
 		await expect(userStore.read('preferences.yaml')).resolves.toBe('prefs');
-		await expect(userStore.write('shopping-sessions/test.yaml', 'session')).resolves.toBeUndefined();
+		await expect(
+			userStore.write('shopping-sessions/test.yaml', 'session'),
+		).resolves.toBeUndefined();
 		await expect(userStore.read('shopping-sessions/test.yaml')).resolves.toBe('session');
 	});
 

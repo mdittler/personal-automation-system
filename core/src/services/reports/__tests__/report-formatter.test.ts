@@ -121,9 +121,7 @@ describe('formatReportForTelegram', () => {
 	});
 
 	it('does NOT escape LLM summary', () => {
-		const sections: CollectedSection[] = [
-			{ label: 'Data', content: 'some data', isEmpty: false },
-		];
+		const sections: CollectedSection[] = [{ label: 'Data', content: 'some data', isEmpty: false }];
 		const summary = '*Bold* summary from _LLM_';
 
 		const result = formatReportForTelegram(makeReport(), sections, summary);
@@ -152,7 +150,10 @@ describe('formatReportForTelegram', () => {
 			{ label: 'S', content: filler + ' *end*', isEmpty: false },
 		];
 
-		const result = formatReportForTelegram(makeReport({ name: 'R', description: undefined }), sections);
+		const result = formatReportForTelegram(
+			makeReport({ name: 'R', description: undefined }),
+			sections,
+		);
 
 		expect(result).toContain('...report truncated');
 		// The content just before the truncation notice must not end with a lone backslash

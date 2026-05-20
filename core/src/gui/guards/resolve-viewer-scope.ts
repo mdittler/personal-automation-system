@@ -35,10 +35,7 @@ export function resolveViewerScope(actor: AuthenticatedActor): ViewerScope {
  *   - the actor is a platform admin (sees all), OR
  *   - the actor's userId appears in the delivery list.
  */
-export function isDeliveryVisible(
-	delivery: string[],
-	actor: AuthenticatedActor,
-): boolean {
+export function isDeliveryVisible(delivery: string[], actor: AuthenticatedActor): boolean {
 	if (actor.isPlatformAdmin) return true;
 	return delivery.includes(actor.userId);
 }

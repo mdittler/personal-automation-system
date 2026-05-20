@@ -46,15 +46,15 @@ import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerRegressionRoutes } from './routes/regression.js';
-import { createRunHistoryStore } from './services/regression/run-history-store.js';
-import { createWeaknessSummarizer } from './services/regression/weakness-summarizer.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
 import { createCaseDiscovery } from './services/regression/case-discovery.js';
+import { createRunHistoryStore } from './services/regression/run-history-store.js';
 import { createRunRegistry } from './services/regression/run-registry.js';
+import { createWeaknessSummarizer } from './services/regression/weakness-summarizer.js';
 import { registerViewLocals } from './view-locals.js';
 
 export interface GuiOptions {

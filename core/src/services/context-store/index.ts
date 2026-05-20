@@ -313,7 +313,10 @@ export class ContextStoreServiceImpl implements ContextStoreService {
 		this.checkActor(userId, opts?.bypass);
 
 		// Runtime kind validation — callers may pass LLM-derived or dynamically typed values.
-		if (opts?.kind !== undefined && !(CONTEXT_ENTRY_KINDS as readonly string[]).includes(opts.kind)) {
+		if (
+			opts?.kind !== undefined &&
+			!(CONTEXT_ENTRY_KINDS as readonly string[]).includes(opts.kind)
+		) {
 			throw new Error(`Invalid kind: "${opts.kind}"`);
 		}
 

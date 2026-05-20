@@ -18,13 +18,14 @@ import type {
 	AlertDefinition,
 	AlertEvaluationResult,
 	AlertValidationError,
-	WriteDataActionConfig,
 	DispatchMessageActionConfig,
+	WriteDataActionConfig,
 } from '../../types/alert.js';
 import { ALERT_ID_PATTERN, MAX_ALERTS } from '../../types/alert.js';
+import type { AudioService } from '../../types/audio.js';
 import type { EventBusService, EventHandler } from '../../types/events.js';
 import type { LLMService } from '../../types/llm.js';
-import type { AudioService } from '../../types/audio.js';
+import type { SpaceDefinition } from '../../types/spaces.js';
 import type { TelegramService } from '../../types/telegram.js';
 import { ensureDir } from '../../utils/file.js';
 import { generateFrontmatter, stripFrontmatter } from '../../utils/frontmatter.js';
@@ -33,6 +34,7 @@ import type { AppOutboundBridge } from '../app-outbound-bridge/index.js';
 import { canFire, parseCooldown } from '../condition-evaluator/cooldown-tracker.js';
 import { evaluateDeterministic, evaluateFuzzy } from '../condition-evaluator/evaluator.js';
 import type { EvaluatorDeps } from '../condition-evaluator/evaluator.js';
+import { resolveScopedDataDir } from '../data-store/paths.js';
 import type { HouseholdService } from '../household/index.js';
 import type { N8nDispatcher } from '../n8n/index.js';
 import type { ReportService } from '../reports/index.js';
@@ -40,8 +42,6 @@ import { resolveDateTokens } from '../reports/section-collector.js';
 import type { Router } from '../router/index.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
 import type { UserManager } from '../user-manager/index.js';
-import { resolveScopedDataDir } from '../data-store/paths.js';
-import type { SpaceDefinition } from '../../types/spaces.js';
 import { executeActions } from './alert-executor.js';
 import { validateAlert } from './alert-validator.js';
 
@@ -75,7 +75,10 @@ export interface AlertServiceOptions {
 	/** Optional — when present, household boundary checks are enforced for delivery, data_sources, and actions. */
 	householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
 	/** Optional — when present, space_id data_sources are resolved to household/collaboration paths. */
-	spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
+	spaceService?: {
+		getSpace(id: string): SpaceDefinition | null;
+		isMember(spaceId: string, userId: string): boolean;
+	};
 	/** Optional — when present, successful telegram_message deliveries are mirrored into the user's chat transcript. */
 	appOutboundBridge?: AppOutboundBridge;
 }
@@ -96,7 +99,10 @@ export class AlertService {
 	private readonly audioService?: AudioService;
 	private router?: Router;
 	private readonly householdService?: Pick<HouseholdService, 'getHouseholdForUser'>;
-	private readonly spaceService?: { getSpace(id: string): SpaceDefinition | null; isMember(spaceId: string, userId: string): boolean };
+	private readonly spaceService?: {
+		getSpace(id: string): SpaceDefinition | null;
+		isMember(spaceId: string, userId: string): boolean;
+	};
 	private readonly appOutboundBridge?: AppOutboundBridge;
 	private readonly eventSubscriptions = new Map<
 		string,
@@ -320,7 +326,10 @@ export class AlertService {
 				alertHouseholdId = this.authorizeAlertScope(alert);
 			} catch (scopeErr) {
 				const msg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
-				this.logger.error({ alertId, error: msg }, 'Household scope authorization failed — refusing to evaluate');
+				this.logger.error(
+					{ alertId, error: msg },
+					'Household scope authorization failed — refusing to evaluate',
+				);
 				return {
 					alertId,
 					conditionMet: false,
@@ -449,7 +458,10 @@ export class AlertService {
 
 		// Derive household from delivery recipients
 		if (alert.delivery.length === 0) {
-			this.logger.warn({ alertId: alert.id }, 'Alert has no delivery recipients — skipping household authorization');
+			this.logger.warn(
+				{ alertId: alert.id },
+				'Alert has no delivery recipients — skipping household authorization',
+			);
 			return null;
 		}
 
@@ -483,7 +495,12 @@ export class AlertService {
 		return alertHouseholdId;
 	}
 
-	private authorizeDataSource(alertId: string, source: AlertDataSource, alertHouseholdId: string, deliveryUsers: string[]): void {
+	private authorizeDataSource(
+		alertId: string,
+		source: AlertDataSource,
+		alertHouseholdId: string,
+		deliveryUsers: string[],
+	): void {
 		if (source.space_id) {
 			const spaceDef = this.spaceService?.getSpace(source.space_id) ?? null;
 			if (!spaceDef) return; // Unknown space — let resolveScopedDataDir handle it
@@ -513,7 +530,6 @@ export class AlertService {
 		}
 	}
 
-
 	private authorizeAction(alertId: string, action: AlertAction, alertHouseholdId: string): void {
 		if (action.type === 'write_data') {
 			const cfg = action.config as WriteDataActionConfig;
@@ -534,7 +550,10 @@ export class AlertService {
 		}
 	}
 
-	private async readDataSources(alert: AlertDefinition, alertHouseholdId: string | null): Promise<string> {
+	private async readDataSources(
+		alert: AlertDefinition,
+		alertHouseholdId: string | null,
+	): Promise<string> {
 		const dataContents: string[] = [];
 
 		for (const source of alert.condition.data_sources) {

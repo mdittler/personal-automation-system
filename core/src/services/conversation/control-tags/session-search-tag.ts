@@ -98,7 +98,8 @@ export function extractSessionSearchTag(response: string): SessionSearchTagResul
 	for (const am of attrMatches) {
 		const idx = coverageRemainder.indexOf(am[0]);
 		if (idx !== -1) {
-			coverageRemainder = coverageRemainder.slice(0, idx) + coverageRemainder.slice(idx + am[0].length);
+			coverageRemainder =
+				coverageRemainder.slice(0, idx) + coverageRemainder.slice(idx + am[0].length);
 		}
 	}
 	if (coverageRemainder.trim().length > 0) return rejectAll(response);

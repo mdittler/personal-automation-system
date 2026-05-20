@@ -13,18 +13,22 @@
  * 4. Cross-write isolation: each YAML file holds only its own app's keys.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppConfigServiceImpl } from '../../config/app-config-service.js';
-import { SettingsRegistry } from '../../settings/settings-registry.js';
-import { SettingsReader } from '../../settings/settings-reader.js';
-import { SettingsWriter } from '../../settings/settings-writer.js';
-import { processConfigSetTags, NOTES_INTENT_REGEX, MEMORY_FLUSH_INTENT_REGEX } from '../control-tags.js';
-import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
-import type { ManifestUserConfig } from '../../../types/manifest.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppLogger } from '../../../types/app-module.js';
+import type { ManifestUserConfig } from '../../../types/manifest.js';
+import { AppConfigServiceImpl } from '../../config/app-config-service.js';
+import { SettingsReader } from '../../settings/settings-reader.js';
+import { SettingsRegistry } from '../../settings/settings-registry.js';
+import { SettingsWriter } from '../../settings/settings-writer.js';
+import {
+	MEMORY_FLUSH_INTENT_REGEX,
+	NOTES_INTENT_REGEX,
+	processConfigSetTags,
+} from '../control-tags.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
 
 // ---------------------------------------------------------------------------
 // Manifest entries (bare keys — as used by AppConfigServiceImpl defaults)
@@ -232,16 +236,13 @@ describe('settings integration — real AppConfigServiceImpl (Task 3.9)', () => 
 	// ── Test 1 ────────────────────────────────────────────────────────────────
 	it('food config-set writes to food YAML only; chatbot YAML untouched', async () => {
 		// Process a food.seasonal_nudges config-set tag with a seasonal intent message.
-		await processConfigSetTags(
-			'<config-set key="food.seasonal_nudges" value="false"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn off seasonal nudges',
-				logger: makeLogger(),
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="food.seasonal_nudges" value="false"/>', {
+			userId: 'u1',
+			userMessage: 'turn off seasonal nudges',
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		// Food YAML was written with seasonal_nudges: false.
 		const foodOverrides = await foodConfig.getOverrides('u1');
@@ -256,16 +257,13 @@ describe('settings integration — real AppConfigServiceImpl (Task 3.9)', () => 
 	// ── Test 2 ────────────────────────────────────────────────────────────────
 	it('chatbot bare-key config-set writes to chatbot YAML only; food YAML untouched', async () => {
 		// Process a bare log_to_notes config-set tag with a daily-notes intent message.
-		await processConfigSetTags(
-			'<config-set key="log_to_notes" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on daily notes',
-				logger: makeLogger(),
-				settingsRegistry: registry,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="log_to_notes" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'turn on daily notes',
+			logger: makeLogger(),
+			settingsRegistry: registry,
+			settingsWriter: writer,
+		});
 
 		// Chatbot YAML was written with log_to_notes: true.
 		const chatbotOverrides = await chatbotConfig.getOverrides('u1');

@@ -107,12 +107,14 @@ describe('EventBusService', () => {
 		// Validates that on() for two events sets up independent subscriptions
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
-		const handler = async (data: unknown) => { calls.push(data as string); };
+		const handler = async (data: unknown) => {
+			calls.push(data as string);
+		};
 		bus.on('event-a', handler);
 		bus.on('event-b', handler);
 		bus.emit('event-a', 'a-payload');
 		bus.emit('event-b', 'b-payload');
-		await new Promise(r => setTimeout(r, 10));
+		await new Promise((r) => setTimeout(r, 10));
 		// Both must fire AND arrive — the equality check ensures no duplicates from double-registration
 		expect(calls.sort()).toEqual(['a-payload', 'b-payload']);
 	});
@@ -120,35 +122,43 @@ describe('EventBusService', () => {
 	it('off(eventA) does not affect eventB subscription', async () => {
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
-		const handler = async (data: unknown) => { calls.push(data as string); };
+		const handler = async (data: unknown) => {
+			calls.push(data as string);
+		};
 		bus.on('event-a', handler);
 		bus.on('event-b', handler);
 		bus.off('event-a', handler);
 		bus.emit('event-a', 'a-payload');
 		bus.emit('event-b', 'b-payload');
-		await new Promise(r => setTimeout(r, 10));
+		await new Promise((r) => setTimeout(r, 10));
 		expect(calls).toEqual(['b-payload']);
 	});
 
 	it('off() both events removes handler from both', async () => {
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
-		const handler = async (data: unknown) => { calls.push(data as string); };
+		const handler = async (data: unknown) => {
+			calls.push(data as string);
+		};
 		bus.on('event-a', handler);
 		bus.on('event-b', handler);
 		bus.off('event-a', handler);
 		bus.off('event-b', handler);
 		bus.emit('event-a', 'a-payload');
 		bus.emit('event-b', 'b-payload');
-		await new Promise(r => setTimeout(r, 10));
+		await new Promise((r) => setTimeout(r, 10));
 		expect(calls).toEqual([]);
 	});
 
 	it('clearAll() removes handlers from all events', async () => {
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
-		const handlerA = async (data: unknown) => { calls.push(`a:${data as string}`); };
-		const handlerB = async (data: unknown) => { calls.push(`b:${data as string}`); };
+		const handlerA = async (data: unknown) => {
+			calls.push(`a:${data as string}`);
+		};
+		const handlerB = async (data: unknown) => {
+			calls.push(`b:${data as string}`);
+		};
 
 		bus.on('event-a', handlerA);
 		bus.on('event-b', handlerB);
@@ -158,7 +168,7 @@ describe('EventBusService', () => {
 
 		bus.emit('event-a', 'payload-a');
 		bus.emit('event-b', 'payload-b');
-		await new Promise(r => setTimeout(r, 10));
+		await new Promise((r) => setTimeout(r, 10));
 
 		expect(calls).toHaveLength(0);
 	});
@@ -166,11 +176,13 @@ describe('EventBusService', () => {
 	it('off() for unregistered event is a no-op', async () => {
 		const bus = new EventBusServiceImpl();
 		const calls: string[] = [];
-		const handler = async (data: unknown) => { calls.push(data as string); };
+		const handler = async (data: unknown) => {
+			calls.push(data as string);
+		};
 		bus.on('event-b', handler);
 		bus.off('event-a', handler); // not registered on event-a
 		bus.emit('event-b', 'b-payload');
-		await new Promise(r => setTimeout(r, 10));
+		await new Promise((r) => setTimeout(r, 10));
 		expect(calls).toEqual(['b-payload']);
 	});
 });

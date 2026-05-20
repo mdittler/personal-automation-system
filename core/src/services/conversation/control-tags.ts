@@ -111,9 +111,7 @@ const CONFIG_SET_TAG_REGEX = /<config-set\s+key="([^"]+)"\s+value="([^"]+)"\s*\/
 export function stripConfigSetTags(response: string): string {
 	if (!response.includes('<config-set')) return response;
 	return normalizeResponse(
-		response
-			.replace(CONFIG_SET_TAG_REGEX, '')
-			.replace(/<config-set\b[^>]*\/?>/g, ''),
+		response.replace(CONFIG_SET_TAG_REGEX, '').replace(/<config-set\b[^>]*\/?>/g, ''),
 	);
 }
 
@@ -266,10 +264,7 @@ export async function processConfigSetTags(
 	}
 	// Reconstruct the iteration list: rejected tags (for warn logging) + the
 	// single eligible survivor. Rejected tags will be warned and skipped in-loop.
-	const toProcess = [
-		...parsedTags.filter((t) => !passesPolicy(t)),
-		...eligible,
-	];
+	const toProcess = [...parsedTags.filter((t) => !passesPolicy(t)), ...eligible];
 
 	// Process surviving tags
 	for (const { appId, key, value } of toProcess) {

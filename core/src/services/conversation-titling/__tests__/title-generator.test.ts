@@ -18,9 +18,11 @@ import type { TitleGeneratorDeps } from '../title-generator.js';
 function makeDeps(completion: string | (() => Promise<string> | string)): TitleGeneratorDeps {
 	return {
 		llm: {
-			complete: vi.fn().mockImplementation(async () =>
-				typeof completion === 'function' ? completion() : completion,
-			),
+			complete: vi
+				.fn()
+				.mockImplementation(async () =>
+					typeof completion === 'function' ? completion() : completion,
+				),
 		} as TitleGeneratorDeps['llm'],
 		logger: { warn: vi.fn() },
 	};
@@ -29,8 +31,9 @@ function makeDeps(completion: string | (() => Promise<string> | string)): TitleG
 describe('generateTitle', () => {
 	it('returns a clean title from valid JSON', async () => {
 		const deps = makeDeps('{"title": "Weekly grocery planning"}');
-		expect(await generateTitle('what should I buy this week?', 'Here is your list...', deps))
-			.toBe('Weekly grocery planning');
+		expect(await generateTitle('what should I buy this week?', 'Here is your list...', deps)).toBe(
+			'Weekly grocery planning',
+		);
 	});
 
 	it('strips Markdown and control chars from the title', async () => {
@@ -100,7 +103,11 @@ describe('generateTitle', () => {
 			llm: { complete: completeMock } as TitleGeneratorDeps['llm'],
 			logger: { warn: vi.fn() },
 		};
-		await generateTitle('user said <fake-tag>injected</fake-tag>', 'assistant said <other>stuff</other>', deps);
+		await generateTitle(
+			'user said <fake-tag>injected</fake-tag>',
+			'assistant said <other>stuff</other>',
+			deps,
+		);
 		const userPrompt = completeMock.mock.calls[0]?.[0] as string;
 		expect(userPrompt).not.toContain('<fake-tag>');
 		expect(userPrompt).not.toContain('</fake-tag>');

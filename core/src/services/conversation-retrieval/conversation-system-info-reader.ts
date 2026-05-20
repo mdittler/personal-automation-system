@@ -44,13 +44,7 @@ export class ConversationSystemInfoReader {
 		const isAdmin = userId ? this.systemInfo.isUserAdmin(userId) : false;
 
 		try {
-			return await gatherSystemData(
-				this.systemInfo,
-				categories,
-				args.question,
-				userId,
-				isAdmin,
-			);
+			return await gatherSystemData(this.systemInfo, categories, args.question, userId, isAdmin);
 		} catch (err) {
 			this.logger?.warn('ConversationSystemInfoReader: gatherSystemData failed', err);
 			return '';

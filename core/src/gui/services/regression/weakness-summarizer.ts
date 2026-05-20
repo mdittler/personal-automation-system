@@ -78,8 +78,7 @@ export interface SummarizeRequest {
 
 const DEFAULT_MAX_FAILING_INPUTS = 20;
 
-const SYSTEM_PROMPT =
-	`You analyze regression test failures for a personal-automation-system. Given a model's failing inputs and the actuals it produced, identify the categories of inputs where this model struggles. Return JSON only.
+const SYSTEM_PROMPT = `You analyze regression test failures for a personal-automation-system. Given a model's failing inputs and the actuals it produced, identify the categories of inputs where this model struggles. Return JSON only.
 
 Schema:
 {
@@ -108,9 +107,7 @@ export interface WeaknessSummarizer {
 	read(runId: string, tier: SummaryTier): Promise<PersistedWeaknessSummary | null>;
 }
 
-export function createWeaknessSummarizer(
-	opts: WeaknessSummarizerOptions,
-): WeaknessSummarizer {
+export function createWeaknessSummarizer(opts: WeaknessSummarizerOptions): WeaknessSummarizer {
 	const { manifestDir, cacheDir, summaryDir, llm, logger } = opts;
 	const maxFailing = opts.maxFailingInputs ?? DEFAULT_MAX_FAILING_INPUTS;
 
@@ -118,20 +115,14 @@ export function createWeaknessSummarizer(
 		return join(summaryDir, runId, `${tier}.json`);
 	}
 
-	async function read(
-		runId: string,
-		tier: SummaryTier,
-	): Promise<PersistedWeaknessSummary | null> {
+	async function read(runId: string, tier: SummaryTier): Promise<PersistedWeaknessSummary | null> {
 		const path = pathFor(runId, tier);
 		let buf: string;
 		try {
 			buf = await readFile(path, 'utf8');
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-			logger.warn(
-				{ err: (err as Error).message, path },
-				'weakness-summarizer: read failed',
-			);
+			logger.warn({ err: (err as Error).message, path }, 'weakness-summarizer: read failed');
 			return null;
 		}
 		try {
@@ -211,7 +202,10 @@ export function createWeaknessSummarizer(
 			});
 		}
 
-		const parsed = tryParseSummaryJson(raw, failing.map((f) => f.caseId));
+		const parsed = tryParseSummaryJson(
+			raw,
+			failing.map((f) => f.caseId),
+		);
 		const result: PersistedWeaknessSummary = parsed.ok
 			? {
 					status: 'ready',
@@ -361,9 +355,7 @@ function tryParseSummaryJson(
 		if (typeof c.label !== 'string' || !c.label.length) continue;
 		if (typeof c.count !== 'number' || !Number.isFinite(c.count) || c.count < 0) continue;
 		const ids = Array.isArray(c.exampleCaseIds)
-			? c.exampleCaseIds.filter(
-					(id): id is string => typeof id === 'string' && validSet.has(id),
-				)
+			? c.exampleCaseIds.filter((id): id is string => typeof id === 'string' && validSet.has(id))
 			: [];
 		cats.push({ label: c.label, count: Math.floor(c.count), exampleCaseIds: ids });
 	}

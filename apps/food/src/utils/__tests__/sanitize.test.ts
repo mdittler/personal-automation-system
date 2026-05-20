@@ -4,8 +4,8 @@
  * structured prompts because it leaves newlines + fence sentinels intact.
  */
 
-import { describe, it, expect } from 'vitest';
-import { sanitizeInput, sanitizeForPrompt } from '../sanitize.js';
+import { describe, expect, it } from 'vitest';
+import { sanitizeForPrompt, sanitizeInput } from '../sanitize.js';
 
 describe('sanitizeInput (baseline)', () => {
 	it('truncates to maxLength', () => {

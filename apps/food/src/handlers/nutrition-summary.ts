@@ -6,9 +6,9 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse } from 'yaml';
 import { generateWeeklyDigest } from '../services/nutrition-reporter.js';
-import { loadHousehold } from '../utils/household-guard.js';
-import { todayDate } from '../utils/date.js';
 import type { MacroTargets } from '../types.js';
+import { todayDate } from '../utils/date.js';
+import { loadHousehold } from '../utils/household-guard.js';
 
 const TARGETS_FILE = 'nutrition/targets.yaml';
 

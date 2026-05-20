@@ -386,4 +386,3 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 		expect(systemPrompt).toMatch(/change my fast model|set my timezone|installed apps/i);
 	});
 });
-

@@ -10,10 +10,10 @@
  * imports keep working.
  */
 
-import type { ParsedReceipt } from '../services/receipt-parser.js';
-import type { ReceiptLineItem } from '../types.js';
 import type { PhotoSummary } from '@pas/core/types';
 import { sanitizeAppMessageField } from '../../../../core/src/services/app-outbound-bridge/sanitize.js';
+import type { ParsedReceipt } from '../services/receipt-parser.js';
+import type { ReceiptLineItem } from '../types.js';
 
 export {
 	sanitizeAppMessageField as sanitizePhotoField,
@@ -56,7 +56,11 @@ export function buildReceiptSummary(parsed: ParsedReceipt): PhotoSummary {
 	return { userTurn: '[Photo: receipt]', assistantTurn: parts.join('\n') };
 }
 
-export function buildRecipeSummary(title: string, ingredientCount: number, stepCount: number): PhotoSummary {
+export function buildRecipeSummary(
+	title: string,
+	ingredientCount: number,
+	stepCount: number,
+): PhotoSummary {
 	const safeTitle = sanitizeAppMessageField(title, 100) || 'Unknown recipe';
 	return {
 		userTurn: '[Photo: recipe]',
@@ -66,8 +70,12 @@ export function buildRecipeSummary(title: string, ingredientCount: number, stepC
 
 export function buildPantrySummary(items: Array<{ name: string; quantity: string }>): PhotoSummary {
 	const count = items.length;
-	const itemList = items.slice(0, 10)
-		.map((i) => `- ${sanitizeAppMessageField(i.name, PHOTO_FIELD_LEN)} (${sanitizeAppMessageField(i.quantity, 20)})`)
+	const itemList = items
+		.slice(0, 10)
+		.map(
+			(i) =>
+				`- ${sanitizeAppMessageField(i.name, PHOTO_FIELD_LEN)} (${sanitizeAppMessageField(i.quantity, 20)})`,
+		)
 		.join('\n');
 	return {
 		userTurn: '[Photo: pantry]',
@@ -81,7 +89,8 @@ export function buildGrocerySummary(
 	isRecipe: boolean,
 	recipeTitle?: string,
 ): PhotoSummary {
-	const itemList = items.slice(0, 10)
+	const itemList = items
+		.slice(0, 10)
 		.map((i) => `- ${sanitizeAppMessageField(i.name, PHOTO_FIELD_LEN)}`)
 		.join('\n');
 	let assistantTurn = `🛒 Grocery list updated: added ${itemCount} items${itemList ? '\n' + itemList : ''}`;

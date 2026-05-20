@@ -249,10 +249,7 @@ describe('Idle-reset persona scenarios', () => {
 
 			expect(result.status).toBe('reset');
 			expect(result.summaryStatus).toBe('failed');
-			expect(deps.telegram.send).toHaveBeenCalledWith(
-				'u1',
-				expect.stringContaining('inactivity'),
-			);
+			expect(deps.telegram.send).toHaveBeenCalledWith('u1', expect.stringContaining('inactivity'));
 			expect(deps.flushSave).not.toHaveBeenCalled();
 		});
 	});
@@ -356,8 +353,18 @@ describe('Idle-reset persona scenarios', () => {
 
 			// Both calls use the same key
 			expect(flushSave).toHaveBeenCalledTimes(2);
-			expect(flushSave).toHaveBeenNthCalledWith(1, 'u1', RECENT_SESSION_SUMMARY_KEY, 'First summary.');
-			expect(flushSave).toHaveBeenNthCalledWith(2, 'u1', RECENT_SESSION_SUMMARY_KEY, 'Second summary.');
+			expect(flushSave).toHaveBeenNthCalledWith(
+				1,
+				'u1',
+				RECENT_SESSION_SUMMARY_KEY,
+				'First summary.',
+			);
+			expect(flushSave).toHaveBeenNthCalledWith(
+				2,
+				'u1',
+				RECENT_SESSION_SUMMARY_KEY,
+				'Second summary.',
+			);
 		});
 	});
 

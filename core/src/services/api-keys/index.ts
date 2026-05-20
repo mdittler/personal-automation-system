@@ -13,9 +13,9 @@
  * NEVER log or return the rawSecret or hashedSecret from public methods.
  */
 
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { Logger } from 'pino';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { readYamlFile, writeYamlFile } from '../../utils/yaml.js';
@@ -69,7 +69,10 @@ export class ApiKeyService {
 	 * Create a new API key for a user.
 	 * Returns { keyId, fullToken } — fullToken is the ONLY time the secret is exposed.
 	 */
-	async createKey(userId: string, opts: CreateKeyOptions): Promise<{ keyId: string; fullToken: string }> {
+	async createKey(
+		userId: string,
+		opts: CreateKeyOptions,
+	): Promise<{ keyId: string; fullToken: string }> {
 		const keyId = randomBytes(16).toString('hex');
 		const rawSecret = randomBytes(32).toString('hex');
 		const salt = randomBytes(16).toString('hex');
@@ -154,9 +157,7 @@ export class ApiKeyService {
 	/**
 	 * List keys for a user, redacting secret fields.
 	 */
-	async listKeysForUser(
-		userId: string,
-	): Promise<Omit<ApiKeyRecord, 'hashedSecret' | 'salt'>[]> {
+	async listKeysForUser(userId: string): Promise<Omit<ApiKeyRecord, 'hashedSecret' | 'salt'>[]> {
 		const data = await this.loadUnsafe();
 		return data.keys
 			.filter((k) => k.userId === userId)
@@ -187,9 +188,7 @@ export class ApiKeyService {
 			const data = await this.loadUnsafe();
 			const now = new Date();
 			const before = data.keys.length;
-			data.keys = data.keys.filter(
-				(k) => !k.expiresAt || new Date(k.expiresAt) > now,
-			);
+			data.keys = data.keys.filter((k) => !k.expiresAt || new Date(k.expiresAt) > now);
 			count = before - data.keys.length;
 			if (count > 0) await this.saveUnsafe(data);
 		});

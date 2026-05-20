@@ -1,5 +1,5 @@
-import type { ChatSessionStore } from '../conversation-session/index.js';
 import type { ChatTranscriptIndex } from '../chat-transcript-index/chat-transcript-index.js';
+import type { ChatSessionStore } from '../conversation-session/index.js';
 
 export interface TitleServiceDeps {
 	chatSessions: ChatSessionStore;
@@ -44,7 +44,11 @@ export class TitleService {
 		const canonicalTitle = setResult.title ?? title;
 
 		try {
-			const idxResult = await this.deps.chatTranscriptIndex.updateTitle(userId, sessionId, canonicalTitle);
+			const idxResult = await this.deps.chatTranscriptIndex.updateTitle(
+				userId,
+				sessionId,
+				canonicalTitle,
+			);
 			if (!idxResult.updated) {
 				this.deps.logger.warn(
 					{ userId, sessionId },
@@ -52,7 +56,10 @@ export class TitleService {
 				);
 			}
 		} catch (err) {
-			this.deps.logger.warn({ err, userId, sessionId }, 'title-service: chat-transcript-index updateTitle failed');
+			this.deps.logger.warn(
+				{ err, userId, sessionId },
+				'title-service: chat-transcript-index updateTitle failed',
+			);
 		}
 
 		return { updated: true, title: canonicalTitle };

@@ -3,7 +3,6 @@ import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import {
 	handleCallbackQuery,
 	handleCommand,
@@ -22,6 +21,7 @@ import {
 	isWhatCanIMakeIntent,
 	isWhatsForDinnerIntent,
 } from '../index.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import type { GroceryList, Household, MealPlan, Recipe } from '../types.js';
 
 function createMockScopedStore(overrides: Record<string, unknown> = {}) {
@@ -2097,7 +2097,7 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // handleVoteCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(votingPlan));     // loadCurrentPlan
+				.mockResolvedValueOnce(stringify(votingPlan)); // loadCurrentPlan
 
 			await handleCallbackQuery?.('vote:up:2026-03-31', {
 				userId: 'user1',
@@ -2105,10 +2105,7 @@ describe('Food App', () => {
 				messageId: 456,
 			} as any);
 
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'meal-plans/current.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
 				456,
@@ -2120,7 +2117,7 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // handleVoteCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(votingPlan));     // loadCurrentPlan
+				.mockResolvedValueOnce(stringify(votingPlan)); // loadCurrentPlan
 
 			await handleCallbackQuery?.('vote:down:2026-03-31', {
 				userId: 'user1',
@@ -2128,10 +2125,7 @@ describe('Food App', () => {
 				messageId: 456,
 			} as any);
 
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'meal-plans/current.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
 				456,
@@ -2162,9 +2156,9 @@ describe('Food App', () => {
 
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(expiredPlan))     // loadCurrentPlan (status check)
-				.mockResolvedValueOnce(stringify(expiredPlan))     // finalizePlan: loadCurrentPlan
-				.mockResolvedValueOnce('');                        // loadAllRecipes (list is empty)
+				.mockResolvedValueOnce(stringify(expiredPlan)) // loadCurrentPlan (status check)
+				.mockResolvedValueOnce(stringify(expiredPlan)) // finalizePlan: loadCurrentPlan
+				.mockResolvedValueOnce(''); // loadAllRecipes (list is empty)
 			sharedStore.list.mockResolvedValue([]);
 			vi.mocked(services.config.get).mockResolvedValue(undefined); // voting_window_hours default
 
@@ -2214,9 +2208,9 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(singleMemberHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(singleMemberHousehold)) // handleVoteCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(singleMemberPlan))      // loadCurrentPlan (vote)
-				.mockResolvedValueOnce(stringify(singleMemberPlan))      // finalizePlan: loadCurrentPlan
-				.mockResolvedValueOnce('');                              // loadAllRecipes
+				.mockResolvedValueOnce(stringify(singleMemberPlan)) // loadCurrentPlan (vote)
+				.mockResolvedValueOnce(stringify(singleMemberPlan)) // finalizePlan: loadCurrentPlan
+				.mockResolvedValueOnce(''); // loadAllRecipes
 			sharedStore.list.mockResolvedValue([]);
 			vi.mocked(services.config.get).mockResolvedValue(undefined);
 
@@ -2267,7 +2261,7 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // handleCookedCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(activePlan));     // loadCurrentPlan
+				.mockResolvedValueOnce(stringify(activePlan)); // loadCurrentPlan
 
 			await handleCallbackQuery?.('cooked:2026-03-31', {
 				userId: 'user1',
@@ -2276,10 +2270,7 @@ describe('Food App', () => {
 			} as any);
 
 			// Plan saved with cooked=true
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'meal-plans/current.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 			// Message edited with "How was it?" and rate buttons
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -2295,8 +2286,8 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // handleRateCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(activePlan))      // loadCurrentPlan
-				.mockResolvedValueOnce(stringify(draftRecipe));    // loadRecipe
+				.mockResolvedValueOnce(stringify(activePlan)) // loadCurrentPlan
+				.mockResolvedValueOnce(stringify(draftRecipe)); // loadRecipe
 
 			await handleCallbackQuery?.('rate:up:2026-03-31', {
 				userId: 'user1',
@@ -2310,10 +2301,7 @@ describe('Food App', () => {
 				expect.stringContaining('confirmed'),
 			);
 			// Plan was saved with rated=true
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'meal-plans/current.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 			// User sees 👍 and promotion confirmation
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -2331,7 +2319,7 @@ describe('Food App', () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // handleRateCallback loadHouseholdSafe
-				.mockResolvedValueOnce(stringify(activePlan));     // loadCurrentPlan
+				.mockResolvedValueOnce(stringify(activePlan)); // loadCurrentPlan
 
 			await handleCallbackQuery?.('rate:skip:2026-03-31', {
 				userId: 'user1',
@@ -2345,10 +2333,7 @@ describe('Food App', () => {
 				expect.any(String),
 			);
 			// Plan saved with rated=true
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'meal-plans/current.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('meal-plans/current.yaml', expect.any(String));
 			// User sees ⏭ Skipped
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -2370,7 +2355,7 @@ describe('Food App', () => {
 			};
 
 			sharedStore.read
-				.mockResolvedValueOnce(stringify(sampleHousehold))  // loadHouseholdSafe
+				.mockResolvedValueOnce(stringify(sampleHousehold)) // loadHouseholdSafe
 				.mockResolvedValueOnce(stringify(planWithUncooked)); // loadCurrentPlan
 
 			// todayDate uses services.timezone which defaults to UTC in mock
@@ -2436,10 +2421,7 @@ describe('Food App', () => {
 			} as any);
 
 			// List saved as empty
-			expect(sharedStore.write).toHaveBeenCalledWith(
-				'grocery/active.yaml',
-				expect.any(String),
-			);
+			expect(sharedStore.write).toHaveBeenCalledWith('grocery/active.yaml', expect.any(String));
 			// User sees confirmation
 			expect(services.telegram.editMessage).toHaveBeenCalledWith(
 				123,
@@ -2449,8 +2431,7 @@ describe('Food App', () => {
 		});
 
 		it('shop-followup:keep dismisses the follow-up without modifying the list', async () => {
-			sharedStore.read
-				.mockResolvedValueOnce(stringify(sampleHousehold)); // requireHousehold
+			sharedStore.read.mockResolvedValueOnce(stringify(sampleHousehold)); // requireHousehold
 
 			await handleCallbackQuery?.('shop-followup:keep', {
 				userId: 'user1',
@@ -2471,7 +2452,7 @@ describe('Food App', () => {
 		it('shop-followup:clear with empty list confirms already empty', async () => {
 			sharedStore.read
 				.mockResolvedValueOnce(stringify(sampleHousehold)) // requireHousehold
-				.mockResolvedValueOnce('');                        // loadGroceryList returns null
+				.mockResolvedValueOnce(''); // loadGroceryList returns null
 
 			await handleCallbackQuery?.('shop-followup:clear', {
 				userId: 'user1',
@@ -2506,9 +2487,9 @@ describe('Food App', () => {
 			const ctx = createTestMessageContext({ text: 'I have leftover pasta', userId: 'user1' });
 			await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls.find(
-				(c) => String(c[1]).includes('use by'),
-			);
+			const msg = vi
+				.mocked(services.telegram.send)
+				.mock.calls.find((c) => String(c[1]).includes('use by'));
 			expect(msg).toBeDefined();
 			// Expiry should be stored at most 14 days from today
 			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
@@ -2527,9 +2508,9 @@ describe('Food App', () => {
 			const ctx = createTestMessageContext({ text: 'I have leftover chili', userId: 'user1' });
 			await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls.find(
-				(c) => String(c[1]).includes('use by'),
-			);
+			const msg = vi
+				.mocked(services.telegram.send)
+				.mock.calls.find((c) => String(c[1]).includes('use by'));
 			expect(msg).toBeDefined();
 			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
 			expect(expiryMatch).toBeTruthy();
@@ -2546,9 +2527,9 @@ describe('Food App', () => {
 			const ctx = createTestMessageContext({ text: 'I have leftover rice', userId: 'user1' });
 			await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls.find(
-				(c) => String(c[1]).includes('use by'),
-			);
+			const msg = vi
+				.mocked(services.telegram.send)
+				.mock.calls.find((c) => String(c[1]).includes('use by'));
 			expect(msg).toBeDefined();
 			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
 			expect(expiryMatch).toBeTruthy();
@@ -2565,9 +2546,9 @@ describe('Food App', () => {
 			const ctx = createTestMessageContext({ text: 'I have leftover soup', userId: 'user1' });
 			await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls.find(
-				(c) => String(c[1]).includes('use by'),
-			);
+			const msg = vi
+				.mocked(services.telegram.send)
+				.mock.calls.find((c) => String(c[1]).includes('use by'));
 			expect(msg).toBeDefined();
 			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
 			expect(expiryMatch).toBeTruthy();
@@ -2584,9 +2565,9 @@ describe('Food App', () => {
 			const ctx = createTestMessageContext({ text: 'I have leftover stew', userId: 'user1' });
 			await handleMessage(ctx);
 
-			const msg = vi.mocked(services.telegram.send).mock.calls.find(
-				(c) => String(c[1]).includes('use by'),
-			);
+			const msg = vi
+				.mocked(services.telegram.send)
+				.mock.calls.find((c) => String(c[1]).includes('use by'));
 			expect(msg).toBeDefined();
 			const expiryMatch = String(msg?.[1]).match(/use by (\d{4}-\d{2}-\d{2})/);
 			expect(expiryMatch).toBeTruthy();

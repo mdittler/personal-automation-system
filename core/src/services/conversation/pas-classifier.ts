@@ -19,7 +19,6 @@ import { sanitizeInput } from '../prompt-assembly/index.js';
 export const MODEL_SWITCH_INTENT_REGEX =
 	/\b(switch|change|set|use|update)\b.*\b(model|tier|fast|standard|reasoning)\b/i;
 
-
 /** Classification result from LLM-based PAS relevance check. */
 export interface PASClassification {
 	/** Whether the message is PAS-related (home automation, apps, data). */
@@ -125,8 +124,7 @@ export function parsePASClassifierOutput(raw: string): PASClassification {
 	const dataQueryCandidate = tokens.has('YES_DATA') && !tokens.has('NO_DATA');
 	// Bare YES implies pasRelated (backward-compat); YES_DATA also implies pasRelated.
 	const pasRelated =
-		(tokens.has('YES_PAS') || tokens.has('YES') || dataQueryCandidate) &&
-		!tokens.has('NO_PAS');
+		(tokens.has('YES_PAS') || tokens.has('YES') || dataQueryCandidate) && !tokens.has('NO_PAS');
 	// settingsCandidate is only meaningful when the message is PAS-related.
 	const settingsCandidate = pasRelated && tokens.has('YES_SETTINGS') && !tokens.has('NO_SETTINGS');
 
@@ -163,8 +161,7 @@ const SETTINGS_KEYWORDS_RE =
  * can return. Pure data-lookup queries belong here; PAS meta-questions
  * (e.g. "what apps are installed") belong in PAS_META_RE instead.
  */
-const SYSTEM_DATA_KEYWORDS_RE =
-	/\b(?:system\s+logs?|scheduled\s+alerts?|model\s+journal)\b/i;
+const SYSTEM_DATA_KEYWORDS_RE = /\b(?:system\s+logs?|scheduled\s+alerts?|model\s+journal)\b/i;
 
 /**
  * PAS meta-questions — these are PAS-related but NOT data queries (DataQueryService

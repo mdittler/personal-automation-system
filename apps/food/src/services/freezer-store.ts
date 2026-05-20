@@ -103,7 +103,9 @@ export function formatFreezerList(items: FreezerItem[], today?: string): string 
 		const ageWarning = today ? isOlderThan(item.frozenDate, AGE_WARNING_MONTHS, today) : false;
 		const warning = ageWarning ? ' ⚠️' : '';
 		const sourceStr = item.source ? ` — ${item.source}` : '';
-		lines.push(`${i + 1}. ${item.name} (${item.quantity})${sourceStr} — frozen ${item.frozenDate}${warning}`);
+		lines.push(
+			`${i + 1}. ${item.name} (${item.quantity})${sourceStr} — frozen ${item.frozenDate}${warning}`,
+		);
 	}
 
 	return lines.join('\n').trimEnd();

@@ -10,8 +10,8 @@
 import { stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
 import { FOOD_PERSONAS } from '@food/routing/__tests__/shadow-classifier.personas.js';
+import { describe, expect, it } from 'vitest';
 import { loadCases } from '../runner/case-loader.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -73,8 +73,9 @@ describe('routing cases contract', () => {
 		for (const lc of loaded) {
 			if (lc.case.routingTarget !== 'food-shadow') continue;
 			for (const i of lc.case.inputs) {
-				const exp = (i.expected as { strings?: Array<{ path: string; expectedCaseInsensitive: string }> })
-					.strings;
+				const exp = (
+					i.expected as { strings?: Array<{ path: string; expectedCaseInsensitive: string }> }
+				).strings;
 				const actionString = exp?.find((s) => s.path === 'action');
 				if (actionString) labelsCovered.add(actionString.expectedCaseInsensitive.toLowerCase());
 			}
@@ -101,7 +102,9 @@ describe('routing cases contract', () => {
 
 	it('pas classifier cases cover both positive AND negative for each output field', async () => {
 		const loaded = await loadCases(CASES_DIR);
-		const pasIds = new Set(loaded.filter((lc) => lc.case.routingTarget === 'pas').map((lc) => lc.case.id));
+		const pasIds = new Set(
+			loaded.filter((lc) => lc.case.routingTarget === 'pas').map((lc) => lc.case.id),
+		);
 		// Three positive + three negative cases per the plan.
 		for (const id of [
 			'pas-pas-related-positive',

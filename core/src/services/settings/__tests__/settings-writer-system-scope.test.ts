@@ -54,7 +54,10 @@ function makeConfig(): SystemConfig {
 		cloudflare: {},
 		llm: {
 			providers: {},
-			tiers: { fast: { provider: 'claude', model: 'm' }, standard: { provider: 'claude', model: 'm' } },
+			tiers: {
+				fast: { provider: 'claude', model: 'm' },
+				standard: { provider: 'claude', model: 'm' },
+			},
 		},
 		gui: { authToken: 'tok' },
 		api: { token: '' },
@@ -217,7 +220,11 @@ describe("WriteSource 'admin-confirmed' policy", () => {
 describe('validate() does not call SystemConfigWriter.write', () => {
 	it('returns ok without touching the writer', () => {
 		const registry = buildSettingsRegistry({ installedApps: [], systemDefs: SYSTEM_SETTING_DEFS });
-		const mockWriter = { write: vi.fn(), read: vi.fn(), resetToSchemaDefault: vi.fn() } as unknown as SystemConfigWriter;
+		const mockWriter = {
+			write: vi.fn(),
+			read: vi.fn(),
+			resetToSchemaDefault: vi.fn(),
+		} as unknown as SystemConfigWriter;
 		const config = makeConfig();
 		const writer = new SettingsWriter({
 			registry,
@@ -341,8 +348,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer, config } = makeWriter(p);
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: String(value), source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: String(value),
+			source: 'admin-confirmed',
 		});
 		expect(config.chat?.sessions?.retention_days).toBe(value);
 	});
@@ -354,8 +364,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer } = makeWriter(p);
 		const result = await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: String(value), source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: String(value),
+			source: 'admin-confirmed',
 		});
 		expect(result.ok).toBe(false);
 	});
@@ -367,8 +380,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer, config } = makeWriter(p);
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.auto_reset_idle_minutes',
-			rawValue: String(value), source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.auto_reset_idle_minutes',
+			rawValue: String(value),
+			source: 'admin-confirmed',
 		});
 		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBe(value);
 	});
@@ -377,8 +393,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer, config } = makeWriter(p);
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'routing.verification.upper_bound',
-			rawValue: String(value), source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'routing.verification.upper_bound',
+			rawValue: String(value),
+			source: 'admin-confirmed',
 		});
 		expect(config.routing?.verification?.upperBound).toBe(value);
 	});
@@ -390,8 +409,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer } = makeWriter(p);
 		const result = await writer.write({
-			userId: 'u1', appId: 'system', key: 'routing.verification.upper_bound',
-			rawValue: String(value), source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'routing.verification.upper_bound',
+			rawValue: String(value),
+			source: 'admin-confirmed',
 		});
 		expect(result.ok).toBe(false);
 	});
@@ -402,8 +424,11 @@ describe('system-scope coercion edge cases', () => {
 			const p = await makeSeedFile();
 			const { writer } = makeWriter(p);
 			const result = await writer.write({
-				userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-				rawValue, source: 'admin-confirmed',
+				userId: 'u1',
+				appId: 'system',
+				key: 'chat.sessions.retention_days',
+				rawValue,
+				source: 'admin-confirmed',
 			});
 			expect(result.ok).toBe(false);
 		},
@@ -413,8 +438,11 @@ describe('system-scope coercion edge cases', () => {
 		const p = await makeSeedFile();
 		const { writer } = makeWriter(p);
 		const result = await writer.write({
-			userId: 'u1', appId: 'system', key: 'unknown.key',
-			rawValue: 'value', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'unknown.key',
+			rawValue: 'value',
+			source: 'admin-confirmed',
 		});
 		expect(result.ok).toBe(false);
 	});
@@ -433,16 +461,21 @@ describe('post-write hooks on system keys', () => {
 		writer.registerPostWriteHook('system.chat.sessions.retention_days', hook);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: '120', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: '120',
+			source: 'admin-confirmed',
 		});
 
 		expect(hook).toHaveBeenCalledOnce();
-		expect(hook).toHaveBeenCalledWith(expect.objectContaining({
-			appId: 'system',
-			key: 'chat.sessions.retention_days',
-			newValue: 120,
-		}));
+		expect(hook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				appId: 'system',
+				key: 'chat.sessions.retention_days',
+				newValue: 120,
+			}),
+		);
 	});
 
 	it('does not fire hook when write fails', async () => {
@@ -463,8 +496,11 @@ describe('post-write hooks on system keys', () => {
 		writer.registerPostWriteHook('system.chat.sessions.retention_days', hook);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: '180', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: '180',
+			source: 'admin-confirmed',
 		});
 		expect(hook).not.toHaveBeenCalled();
 	});
@@ -480,8 +516,20 @@ describe('writeBatch — system items', () => {
 		const { writer, config } = makeWriter(p);
 
 		const result = await writer.writeBatch([
-			{ userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days', rawValue: '120', source: 'admin-confirmed' },
-			{ userId: 'u1', appId: 'system', key: 'routing.verification.enabled', rawValue: 'false', source: 'admin-confirmed' },
+			{
+				userId: 'u1',
+				appId: 'system',
+				key: 'chat.sessions.retention_days',
+				rawValue: '120',
+				source: 'admin-confirmed',
+			},
+			{
+				userId: 'u1',
+				appId: 'system',
+				key: 'routing.verification.enabled',
+				rawValue: 'false',
+				source: 'admin-confirmed',
+			},
 		]);
 
 		expect(result.perField.get('system.chat.sessions.retention_days')?.ok).toBe(true);
@@ -496,9 +544,21 @@ describe('writeBatch — system items', () => {
 		const original = config.chat?.sessions?.retention_days;
 
 		const result = await writer.writeBatch([
-			{ userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days', rawValue: '180', source: 'gui' },
+			{
+				userId: 'u1',
+				appId: 'system',
+				key: 'chat.sessions.retention_days',
+				rawValue: '180',
+				source: 'gui',
+			},
 			// auto_prune is dangerous — gui source should reject it
-			{ userId: 'u1', appId: 'system', key: 'chat.sessions.auto_prune', rawValue: 'true', source: 'gui' },
+			{
+				userId: 'u1',
+				appId: 'system',
+				key: 'chat.sessions.auto_prune',
+				rawValue: 'true',
+				source: 'gui',
+			},
 		]);
 
 		// auto_prune rejected by 'gui' source policy
@@ -516,9 +576,17 @@ describe('writeBatch — system items', () => {
 		const registry = new Reg();
 		for (const def of SYSTEM_SETTING_DEFS) registry.register({ ...def, appId: 'system' });
 		registry.register({
-			key: 'note_pref', appId: 'notes', category: 'notes',
-			label: 'Note pref', help: 'h', type: 'boolean', default: false,
-			adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
+			key: 'note_pref',
+			appId: 'notes',
+			category: 'notes',
+			label: 'Note pref',
+			help: 'h',
+			type: 'boolean',
+			default: false,
+			adminOnly: false,
+			dangerous: false,
+			hidden: false,
+			scope: 'per-user',
 			nlSafe: false,
 		});
 		const notesCfg = {
@@ -527,9 +595,11 @@ describe('writeBatch — system items', () => {
 		};
 		const writer = new SettingsWriter({
 			registry,
-			appConfigResolver: (id) => (id === 'notes' ? notesCfg as never : undefined),
+			appConfigResolver: (id) => (id === 'notes' ? (notesCfg as never) : undefined),
 			manifestResolver: (id) =>
-				id === 'notes' ? [{ key: 'note_pref', type: 'boolean', default: false, description: 'd' }] : [],
+				id === 'notes'
+					? [{ key: 'note_pref', type: 'boolean', default: false, description: 'd' }]
+					: [],
 			logger: makeLogger(),
 			systemConfigWriter: makeSystemWriter(p),
 			systemConfig: config,
@@ -537,7 +607,13 @@ describe('writeBatch — system items', () => {
 
 		const result = await writer.writeBatch([
 			{ userId: 'u1', appId: 'notes', key: 'note_pref', rawValue: 'true', source: 'gui' },
-			{ userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days', rawValue: '120', source: 'admin-confirmed' },
+			{
+				userId: 'u1',
+				appId: 'system',
+				key: 'chat.sessions.retention_days',
+				rawValue: '120',
+				source: 'admin-confirmed',
+			},
 		]);
 
 		expect(result.perField.get('notes.note_pref')?.ok).toBe(true);

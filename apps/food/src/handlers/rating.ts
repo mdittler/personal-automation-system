@@ -6,7 +6,8 @@
  * and the nightly 8pm cron job that prompts household members to rate.
  */
 
-import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import type { CoreServices } from '@pas/core/types';
+import { emitMealCooked } from '../events/emitters.js';
 import { loadCurrentPlan, savePlan } from '../services/meal-plan-store.js';
 import {
 	buildRateButtons,
@@ -17,10 +18,8 @@ import {
 	hasRatingPromptBeenSentToday,
 } from '../services/rating.js';
 import { loadRecipe, updateRecipe } from '../services/recipe-store.js';
-import type { Household } from '../types.js';
 import { isoNow, todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
-import { emitMealCooked } from '../events/emitters.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -159,14 +158,15 @@ export async function handleRateCallback(
 
 	// H6: Ask about leftovers after rating
 	if (meal.recipeTitle) {
-		await services.telegram.sendWithButtons(
-			userId,
-			`Any leftovers from ${meal.recipeTitle}?`,
-			[[
-				{ text: 'Yes, log leftovers', callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(meal.recipeTitle)}` },
+		await services.telegram.sendWithButtons(userId, `Any leftovers from ${meal.recipeTitle}?`, [
+			[
+				{
+					text: 'Yes, log leftovers',
+					callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(meal.recipeTitle)}`,
+				},
 				{ text: 'No leftovers', callbackData: 'app:food:lo:post-meal:no' },
-			]],
-		);
+			],
+		]);
 	}
 }
 

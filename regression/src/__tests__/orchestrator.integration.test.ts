@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildClassifierAdapters, type CostMeterSource } from '../runner/dispatch.js';
+import { type CostMeterSource, buildClassifierAdapters } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
 import { StubLLMService } from './_stub-provider.js';
 
@@ -87,9 +87,7 @@ describe('orchestrator → adapters → FoodShadowClassifier integration', () =>
 
 		const stubLLM = new StubLLMService();
 		// FoodShadowClassifier.classify will call llm.complete and JSON-parse the result.
-		stubLLM.queue(
-			JSON.stringify({ action: 'user wants to save a recipe', confidence: 0.92 }),
-		);
+		stubLLM.queue(JSON.stringify({ action: 'user wants to save a recipe', confidence: 0.92 }));
 		const costTracker = queuedCostTracker([1.0, 1.0001]);
 
 		const classifiers = buildClassifierAdapters({
@@ -156,9 +154,7 @@ describe('orchestrator → adapters → FoodShadowClassifier integration', () =>
 		await writeFile(join(casesDir, 'a.case.ts'), foodShadowCase);
 
 		const stubLLM = new StubLLMService();
-		stubLLM.queue(
-			JSON.stringify({ action: 'user wants to save a recipe', confidence: 0.92 }),
-		);
+		stubLLM.queue(JSON.stringify({ action: 'user wants to save a recipe', confidence: 0.92 }));
 		const costTracker = queuedCostTracker([1.0, 1.0001]);
 
 		const classifiers = buildClassifierAdapters({

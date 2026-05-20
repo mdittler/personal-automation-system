@@ -127,7 +127,9 @@ export class SettingsReader {
 			for (const def of defs) {
 				const overrides = overridesByApp.get(def.appId) ?? {};
 				const rawValue = this.resolveValue(def, overrides);
-				lines.push(`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${formatDisplayValue(def, rawValue)}`);
+				lines.push(
+					`- ${def.label} (${qualifiedKey(def.appId, def.key)}): ${formatDisplayValue(def, rawValue)}`,
+				);
 			}
 		}
 

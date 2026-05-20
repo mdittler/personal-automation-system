@@ -1,3 +1,6 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * DataQueryService — context hints tests (Task 4a).
  *
@@ -9,22 +12,22 @@
  * set before use — unauthorized paths are silently dropped.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { DataQueryServiceImpl } from '../index.js';
-import { FileIndexService } from '../../file-index/index.js';
-import type { ManifestDataScope } from '../../../types/manifest.js';
 import type { AppLogger } from '../../../types/app-module.js';
-import type { LLMService } from '../../../types/llm.js';
 import type { DataQueryOptions } from '../../../types/data-query.js';
+import type { LLMService } from '../../../types/llm.js';
+import type { ManifestDataScope } from '../../../types/manifest.js';
+import { FileIndexService } from '../../file-index/index.js';
+import { DataQueryServiceImpl } from '../index.js';
 
 // ---------------------------------------------------------------------------
 // Test infrastructure (mirrors data-query.test.ts helpers)
 // ---------------------------------------------------------------------------
 
 function makeTempDir() {
-	return join(tmpdir(), `pas-context-hints-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	return join(
+		tmpdir(),
+		`pas-context-hints-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
 }
 
 async function writeDataFile(dataDir: string, relPath: string, content: string) {
@@ -39,9 +42,7 @@ function makeAppScopes(userPaths: string[], sharedPaths: string[]) {
 		access: 'read-write' as const,
 		description: '',
 	});
-	return new Map([
-		['food', { user: userPaths.map(toScope), shared: sharedPaths.map(toScope) }],
-	]);
+	return new Map([['food', { user: userPaths.map(toScope), shared: sharedPaths.map(toScope) }]]);
 }
 
 function makeMockLogger(): AppLogger {
@@ -80,8 +81,7 @@ function makeSpaceService(spaces: { id: string; members: string[] }[]): MockSpac
 			const space = spaces.find((s) => s.id === spaceId);
 			return space?.members.includes(userId) ?? false;
 		},
-		getSpacesForUser: (userId: string) =>
-			spaces.filter((s) => s.members.includes(userId)),
+		getSpacesForUser: (userId: string) => spaces.filter((s) => s.members.includes(userId)),
 	};
 }
 
@@ -211,10 +211,7 @@ describe('DataQueryService — context hints (recentFilePaths)', () => {
 	it('recentFilePaths matching authorized entries get [recent interaction] label in LLM prompt', async () => {
 		await writeDataFile(dataDir, 'users/matt/food/receipts/receipt.md', RECEIPT_FILE);
 		await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.md', RECIPE_FILE);
-		const fileIndex = new FileIndexService(
-			dataDir,
-			makeAppScopes(['receipts/', 'recipes/'], []),
-		);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes(['receipts/', 'recipes/'], []));
 		await fileIndex.rebuild();
 
 		const llm = makeMockLlm('[0]');
@@ -248,10 +245,7 @@ describe('DataQueryService — context hints (recentFilePaths)', () => {
 		// Nina's private file — not authorized for matt
 		await writeDataFile(dataDir, 'users/nina/food/receipts/receipt.md', RECEIPT_FILE);
 
-		const fileIndex = new FileIndexService(
-			dataDir,
-			makeAppScopes(['recipes/', 'receipts/'], []),
-		);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/', 'receipts/'], []));
 		await fileIndex.rebuild();
 
 		const llm = makeMockLlm('[0]');
@@ -312,10 +306,7 @@ entity_keys:
 - Chicken $12.99`;
 		await writeDataFile(dataDir, 'users/matt/food/receipts/priority-receipt.md', receiptContent);
 
-		const fileIndex = new FileIndexService(
-			dataDir,
-			makeAppScopes(['recipes/', 'receipts/'], []),
-		);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/', 'receipts/'], []));
 		await fileIndex.rebuild();
 
 		// LLM always selects ID 0 — we just need to verify the system prompt

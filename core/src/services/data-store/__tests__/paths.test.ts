@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestDataScope } from '../../../types/manifest.js';
-import { ScopeViolationError, findMatchingScope, warnScopePathPrefix, resolveScopedDataDir, PathTraversalError } from '../paths.js';
 import { HouseholdBoundaryError } from '../../household/index.js';
+import {
+	PathTraversalError,
+	ScopeViolationError,
+	findMatchingScope,
+	resolveScopedDataDir,
+	warnScopePathPrefix,
+} from '../paths.js';
 
 describe('findMatchingScope', () => {
 	it('matches an exact file path', () => {
@@ -212,74 +218,93 @@ describe('warnScopePathPrefix', () => {
 describe('resolveScopedDataDir', () => {
 	const dataDir = '/data';
 	const normalize = (p: string) => p.replace(/\\/g, '/');
-	const mockSpaceService = (spaces: Record<string, { kind: string; householdId?: string; members?: string[] }>) => ({
+	const mockSpaceService = (
+		spaces: Record<string, { kind: string; householdId?: string; members?: string[] }>,
+	) => ({
 		getSpace: (id: string) => spaces[id] ?? null,
-		isMember: (spaceId: string, userId: string) => (spaces[spaceId]?.members ?? []).includes(userId),
+		isMember: (spaceId: string, userId: string) =>
+			(spaces[spaceId]?.members ?? []).includes(userId),
 	});
 
 	it('user path with householdId → household layout', () => {
-		const result = normalize(resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: 'hh-a' }));
+		const result = normalize(
+			resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: 'hh-a' }),
+		);
 		expect(result).toContain('/households/hh-a/users/matt/food');
 	});
 
 	it('user path with householdId undefined → legacy layout (service not wired)', () => {
-		const result = normalize(resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: undefined }));
+		const result = normalize(
+			resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: undefined }),
+		);
 		expect(result).toContain('/users/matt/food');
 		expect(result).not.toContain('households');
 	});
 
 	it('user path with householdId null → throws HouseholdBoundaryError (wired, no household)', () => {
-		expect(() => resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: null }))
-			.toThrow(HouseholdBoundaryError);
+		expect(() =>
+			resolveScopedDataDir({ dataDir, appId: 'food', userId: 'matt', householdId: null }),
+		).toThrow(HouseholdBoundaryError);
 	});
 
 	it('space path kind=household → household/spaces layout', () => {
-		const result = normalize(resolveScopedDataDir({
-			dataDir,
-			appId: 'food',
-			spaceId: 'family',
-			spaceService: mockSpaceService({ family: { kind: 'household', householdId: 'hh-a' } }),
-		}));
+		const result = normalize(
+			resolveScopedDataDir({
+				dataDir,
+				appId: 'food',
+				spaceId: 'family',
+				spaceService: mockSpaceService({ family: { kind: 'household', householdId: 'hh-a' } }),
+			}),
+		);
 		expect(result).toContain('/households/hh-a/spaces/family/food');
 	});
 
 	it('space path kind=collaboration → collaborations layout', () => {
-		const result = normalize(resolveScopedDataDir({
-			dataDir,
-			appId: 'food',
-			spaceId: 'collab-space',
-			spaceService: mockSpaceService({ 'collab-space': { kind: 'collaboration' } }),
-		}));
+		const result = normalize(
+			resolveScopedDataDir({
+				dataDir,
+				appId: 'food',
+				spaceId: 'collab-space',
+				spaceService: mockSpaceService({ 'collab-space': { kind: 'collaboration' } }),
+			}),
+		);
 		expect(result).toContain('/collaborations/collab-space/food');
 	});
 
 	it('space path unknown/legacy kind → legacy spaces layout', () => {
-		const result = normalize(resolveScopedDataDir({
-			dataDir,
-			appId: 'food',
-			spaceId: 'old-space',
-			spaceService: mockSpaceService({ 'old-space': { kind: 'legacy' } }),
-		}));
+		const result = normalize(
+			resolveScopedDataDir({
+				dataDir,
+				appId: 'food',
+				spaceId: 'old-space',
+				spaceService: mockSpaceService({ 'old-space': { kind: 'legacy' } }),
+			}),
+		);
 		expect(result).toContain('/spaces/old-space/food');
 	});
 
 	it('space path with no spaceService → legacy spaces layout', () => {
-		const result = normalize(resolveScopedDataDir({ dataDir, appId: 'food', spaceId: 'some-space' }));
+		const result = normalize(
+			resolveScopedDataDir({ dataDir, appId: 'food', spaceId: 'some-space' }),
+		);
 		expect(result).toContain('/spaces/some-space/food');
 	});
 
 	it('invalid appId → throws PathTraversalError', () => {
-		expect(() => resolveScopedDataDir({ dataDir, appId: '../evil', userId: 'matt' }))
-			.toThrow(PathTraversalError);
+		expect(() => resolveScopedDataDir({ dataDir, appId: '../evil', userId: 'matt' })).toThrow(
+			PathTraversalError,
+		);
 	});
 
 	it('invalid userId → throws PathTraversalError', () => {
-		expect(() => resolveScopedDataDir({ dataDir, appId: 'food', userId: '../evil' }))
-			.toThrow(PathTraversalError);
+		expect(() => resolveScopedDataDir({ dataDir, appId: 'food', userId: '../evil' })).toThrow(
+			PathTraversalError,
+		);
 	});
 
 	it('invalid spaceId → throws PathTraversalError', () => {
-		expect(() => resolveScopedDataDir({ dataDir, appId: 'food', spaceId: '../evil' }))
-			.toThrow(PathTraversalError);
+		expect(() => resolveScopedDataDir({ dataDir, appId: 'food', spaceId: '../evil' })).toThrow(
+			PathTraversalError,
+		);
 	});
 });

@@ -127,9 +127,7 @@ export class AppRegistry {
 	 */
 	registerVirtual(manifest: AppManifest, module: AppModule, virtualPath: string): void {
 		if (this.apps.has(manifest.app.id)) {
-			throw new Error(
-				`Duplicate app id "${manifest.app.id}" — cannot register virtual app`,
-			);
+			throw new Error(`Duplicate app id "${manifest.app.id}" — cannot register virtual app`);
 		}
 		this.cache.add(manifest, virtualPath);
 		this.apps.set(manifest.app.id, { manifest, module, appDir: virtualPath });

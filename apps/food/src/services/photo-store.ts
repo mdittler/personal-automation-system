@@ -30,10 +30,7 @@ export async function savePhoto(
  * Load a photo from the shared data store.
  * Returns the photo as a Buffer, or null if not found.
  */
-export async function loadPhoto(
-	store: ScopedDataStore,
-	path: string,
-): Promise<Buffer | null> {
+export async function loadPhoto(store: ScopedDataStore, path: string): Promise<Buffer | null> {
 	const content = await store.read(path);
 	if (!content) return null;
 	return Buffer.from(content, 'base64');

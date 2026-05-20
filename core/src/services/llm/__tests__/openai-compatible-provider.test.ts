@@ -109,7 +109,10 @@ describe('OpenAICompatibleProvider — finishReason mapping (REQ-FOOD-RECEIPT-IN
 	});
 
 	it('maps missing choices array → other', async () => {
-		mockChatCreate.mockResolvedValue({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } });
+		mockChatCreate.mockResolvedValue({
+			choices: [],
+			usage: { prompt_tokens: 0, completion_tokens: 0 },
+		});
 		const provider = makeProvider();
 		const result = await provider.completeWithUsage('hi');
 		expect(result.finishReason).toBe('other');

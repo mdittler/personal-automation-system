@@ -55,7 +55,8 @@ export function getIsoWeekId(dateStr: string): string {
 	const jan4DayOfWeek = (jan4.getUTCDay() + 6) % 7;
 	const week1Monday = new Date(jan4);
 	week1Monday.setUTCDate(jan4.getUTCDate() - jan4DayOfWeek);
-	const weekNumber = Math.round((thursday.getTime() - week1Monday.getTime()) / (7 * 24 * 3600 * 1000)) + 1;
+	const weekNumber =
+		Math.round((thursday.getTime() - week1Monday.getTime()) / (7 * 24 * 3600 * 1000)) + 1;
 	const year = thursday.getUTCFullYear();
 	return `${year}-W${String(weekNumber).padStart(2, '0')}`;
 }

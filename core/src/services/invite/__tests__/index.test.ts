@@ -363,7 +363,10 @@ describe('InviteService', () => {
 
 		it('stores role: admin when provided', async () => {
 			const svc = makeService();
-			const code = await svc.createInvite('Alice', 'admin', { householdId: 'default', role: 'admin' });
+			const code = await svc.createInvite('Alice', 'admin', {
+				householdId: 'default',
+				role: 'admin',
+			});
 
 			const store = await svc.listInvites();
 			expect(store[code]?.role).toBe('admin');

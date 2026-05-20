@@ -14,9 +14,9 @@
 
 import type { CoreServices, ScopedDataStore, SentMessage } from '@pas/core/types';
 import { addGuest, slugifyGuestName } from '../services/guest-profiles.js';
-import { sanitizeInput } from '../utils/sanitize.js';
-import { escapeMarkdown } from '../utils/escape-markdown.js';
 import type { GuestProfile } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 type GuestAddStep =
 	| 'awaiting_name'
@@ -140,8 +140,7 @@ async function sendDietPicker(
 ): Promise<void> {
 	const buttons = buildDietButtons(state.dietaryRestrictions);
 	const selected = state.dietaryRestrictions;
-	const selText =
-		selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
+	const selText = selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
 	const sent = await services.telegram.sendWithButtons(
 		userId,
 		`**Add guest: ${escapeMarkdown(state.name ?? '')}**\n\nDietary restrictions:\n${selText}`,
@@ -179,8 +178,7 @@ async function sendConfirmStep(
 	userId: string,
 	state: PendingGuestAdd,
 ): Promise<void> {
-	const diet =
-		state.dietaryRestrictions.length > 0 ? state.dietaryRestrictions.join(', ') : 'none';
+	const diet = state.dietaryRestrictions.length > 0 ? state.dietaryRestrictions.join(', ') : 'none';
 	const allergies = state.allergies.length > 0 ? state.allergies.join(', ') : 'none';
 	const lines = [
 		`**New guest: ${escapeMarkdown(state.name ?? '')}**`,
@@ -199,17 +197,14 @@ async function sendConfirmStep(
 }
 
 /** Entry point — seeds state and prompts for guest name. */
-export async function beginGuestAddFlow(
-	services: CoreServices,
-	userId: string,
-): Promise<void> {
+export async function beginGuestAddFlow(services: CoreServices, userId: string): Promise<void> {
 	touch(userId, {
 		step: 'awaiting_name',
 		dietaryRestrictions: [],
 		allergies: [],
 		expiresAt: 0,
 	});
-	await services.telegram.send(userId, '**Add guest**\n\nWhat\'s their name?');
+	await services.telegram.send(userId, "**Add guest**\n\nWhat's their name?");
 }
 
 /**
@@ -236,7 +231,7 @@ export async function handleGuestAddReply(
 		if (!name) {
 			await services.telegram.send(
 				userId,
-				"Name cannot be empty. What's their name? (Or reply \"cancel\" to abort.)",
+				'Name cannot be empty. What\'s their name? (Or reply "cancel" to abort.)',
 			);
 			return true;
 		}
@@ -387,8 +382,7 @@ export async function handleGuestAddCallback(
 			// Edit the message in place with updated buttons
 			const updatedButtons = buildDietButtons(state.dietaryRestrictions);
 			const selected = state.dietaryRestrictions;
-			const selText =
-				selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
+			const selText = selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
 			const sm = state.sentMessage ?? { chatId, messageId };
 			await services.telegram.editMessage(
 				sm.chatId,
@@ -448,8 +442,7 @@ export async function handleGuestAddCallback(
 			// Edit the message in place with updated buttons
 			const updatedButtons = buildAllergyButtons(state.allergies);
 			const selected = state.allergies;
-			const selText =
-				selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
+			const selText = selected.length > 0 ? `Selected: ${selected.join(', ')}` : 'None selected';
 			const sm = state.sentMessage ?? { chatId, messageId };
 			await services.telegram.editMessage(
 				sm.chatId,
@@ -489,16 +482,10 @@ export async function handleGuestAddCallback(
 			};
 			await addGuest(sharedStore, guest);
 			pending.delete(userId);
-			await services.telegram.send(
-				userId,
-				`Added guest: **${escapeMarkdown(state.name!)}**`,
-			);
+			await services.telegram.send(userId, `Added guest: **${escapeMarkdown(state.name!)}**`);
 		} catch (err) {
 			pending.delete(userId);
-			await services.telegram.send(
-				userId,
-				`Could not save guest: ${(err as Error).message}`,
-			);
+			await services.telegram.send(userId, `Could not save guest: ${(err as Error).message}`);
 		}
 		return true;
 	}

@@ -6,16 +6,35 @@
  */
 
 // Core contract
-export type { AppModule, CoreServices, AppLogger, PhotoSummary, PhotoHandlerResult } from './app-module.js';
+export type {
+	AppModule,
+	CoreServices,
+	AppLogger,
+	PhotoSummary,
+	PhotoHandlerResult,
+} from './app-module.js';
 
 // Data query (D2b/D2c)
-export type { DataQueryResult, DataQueryFile, DataQueryService, DataQueryOptions } from './data-query.js';
+export type {
+	DataQueryResult,
+	DataQueryFile,
+	DataQueryService,
+	DataQueryOptions,
+} from './data-query.js';
 
 // Interaction context (D2c)
-export type { InteractionEntry, InteractionContextService } from '../services/interaction-context/index.js';
+export type {
+	InteractionEntry,
+	InteractionContextService,
+} from '../services/interaction-context/index.js';
 
 // Edit service (D2c)
-export type { EditProposal, EditError, ProposeEditResult, EditService } from '../services/edit/index.js';
+export type {
+	EditProposal,
+	EditError,
+	ProposeEditResult,
+	EditService,
+} from '../services/edit/index.js';
 
 // Manifest
 export type {
@@ -38,7 +57,17 @@ export type {
 } from './manifest.js';
 
 // Telegram
-export type { CallbackContext, InlineButton, MessageContext, PhotoContext, RouteInfo, RouteSource, RouteVerifierStatus, SentMessage, TelegramService } from './telegram.js';
+export type {
+	CallbackContext,
+	InlineButton,
+	MessageContext,
+	PhotoContext,
+	RouteInfo,
+	RouteSource,
+	RouteVerifierStatus,
+	SentMessage,
+	TelegramService,
+} from './telegram.js';
 
 // LLM
 export type {

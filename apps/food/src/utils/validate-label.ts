@@ -11,9 +11,7 @@ import { slugifyLabel } from '../services/quick-meals-store.js';
 
 export const LABEL_MAX_LENGTH = 100;
 
-export type LabelValidation =
-	| { ok: true; slug: string }
-	| { ok: false; error: string };
+export type LabelValidation = { ok: true; slug: string } | { ok: false; error: string };
 
 export function validateLabel(raw: string): LabelValidation {
 	const trimmed = raw.trim();

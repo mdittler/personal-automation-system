@@ -22,7 +22,10 @@ export class EventBusServiceImpl implements EventBusService {
 	 * Keyed by event name first so the same handler function can be registered
 	 * on multiple events without the entries colliding or overwriting each other.
 	 */
-	private readonly handlerMap = new Map<string, Map<EventHandler, (data: unknown) => Promise<void>>>();
+	private readonly handlerMap = new Map<
+		string,
+		Map<EventHandler, (data: unknown) => Promise<void>>
+	>();
 
 	constructor(logger?: Logger) {
 		this.emitter = new Emittery();

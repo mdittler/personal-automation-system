@@ -13,23 +13,23 @@
  * REQ-CONV-SEARCH-001, REQ-CONV-SEARCH-007, REQ-CONV-SEARCH-013
  */
 
-import { mkdtemp, readdir, readFile, rm, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, readdir, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { composeRuntime } from '../../../compose-runtime.js';
+import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../../../testing/fixtures/seed-users.js';
 import {
 	StubProvider,
 	createStubProviderRegistry,
 } from '../../../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
-import { requestContext } from '../../context/request-context.js';
-import { CostTracker } from '../../llm/cost-tracker.js';
 import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/index.js';
 import { rebuildIndex } from '../../chat-transcript-index/rebuild.js';
+import { requestContext } from '../../context/request-context.js';
+import { CostTracker } from '../../llm/cost-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Shared setup

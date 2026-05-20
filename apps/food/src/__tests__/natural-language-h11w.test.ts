@@ -17,13 +17,13 @@
 
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
-import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import type { CoreServices } from '@pas/core/types';
+import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
-import type { Household, MonthlyMacroLog, QuickMealTemplate, Recipe } from '../types.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household, MonthlyMacroLog, QuickMealTemplate, Recipe } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -90,10 +90,7 @@ function createStore(opts: TestOpts = {}) {
 
 	// Seed quick-meals.yaml in the expected { active, archive } shape.
 	if (opts.quickMeals && opts.quickMeals.length > 0) {
-		files.set(
-			'quick-meals.yaml',
-			stringify({ active: opts.quickMeals, archive: [] }),
-		);
+		files.set('quick-meals.yaml', stringify({ active: opts.quickMeals, archive: [] }));
 	}
 
 	files.set('household.yaml', stringify(household));

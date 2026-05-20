@@ -184,19 +184,33 @@ describe('parseMemorySnapshotFrontmatter', () => {
 
 	it('returns undefined when content is missing', () => {
 		expect(
-			parseMemorySnapshotFrontmatter({ status: 'ok', built_at: '2026-01-01T00:00:00Z', entry_count: 1 }),
+			parseMemorySnapshotFrontmatter({
+				status: 'ok',
+				built_at: '2026-01-01T00:00:00Z',
+				entry_count: 1,
+			}),
 		).toBeUndefined();
 	});
 
 	it('returns undefined when content is not a string', () => {
 		expect(
-			parseMemorySnapshotFrontmatter({ content: 42, status: 'ok', built_at: '2026-01-01T00:00:00Z', entry_count: 1 }),
+			parseMemorySnapshotFrontmatter({
+				content: 42,
+				status: 'ok',
+				built_at: '2026-01-01T00:00:00Z',
+				entry_count: 1,
+			}),
 		).toBeUndefined();
 	});
 
 	it('returns undefined when status is invalid', () => {
 		expect(
-			parseMemorySnapshotFrontmatter({ content: '', status: 'invalid', built_at: '2026-01-01T00:00:00Z', entry_count: 0 }),
+			parseMemorySnapshotFrontmatter({
+				content: '',
+				status: 'invalid',
+				built_at: '2026-01-01T00:00:00Z',
+				entry_count: 0,
+			}),
 		).toBeUndefined();
 	});
 
@@ -208,12 +222,22 @@ describe('parseMemorySnapshotFrontmatter', () => {
 
 	it('returns undefined when entry_count is not a number', () => {
 		expect(
-			parseMemorySnapshotFrontmatter({ content: '', status: 'ok', built_at: '2026-01-01T00:00:00Z', entry_count: 'x' }),
+			parseMemorySnapshotFrontmatter({
+				content: '',
+				status: 'ok',
+				built_at: '2026-01-01T00:00:00Z',
+				entry_count: 'x',
+			}),
 		).toBeUndefined();
 	});
 
 	it('parses a valid ok snapshot correctly', () => {
-		const raw = { content: '## key\nvalue', status: 'ok', built_at: '2026-01-01T00:00:00Z', entry_count: 1 };
+		const raw = {
+			content: '## key\nvalue',
+			status: 'ok',
+			built_at: '2026-01-01T00:00:00Z',
+			entry_count: 1,
+		};
 		const result = parseMemorySnapshotFrontmatter(raw);
 		expect(result).toEqual({
 			content: '## key\nvalue',
@@ -224,9 +248,19 @@ describe('parseMemorySnapshotFrontmatter', () => {
 	});
 
 	it('parses degraded and empty status', () => {
-		const degraded = { content: '', status: 'degraded', built_at: '2026-01-01T00:00:00Z', entry_count: 0 };
+		const degraded = {
+			content: '',
+			status: 'degraded',
+			built_at: '2026-01-01T00:00:00Z',
+			entry_count: 0,
+		};
 		expect(parseMemorySnapshotFrontmatter(degraded)?.status).toBe('degraded');
-		const empty = { content: '', status: 'empty', built_at: '2026-01-01T00:00:00Z', entry_count: 0 };
+		const empty = {
+			content: '',
+			status: 'empty',
+			built_at: '2026-01-01T00:00:00Z',
+			entry_count: 0,
+		};
 		expect(parseMemorySnapshotFrontmatter(empty)?.status).toBe('empty');
 	});
 });

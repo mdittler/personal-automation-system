@@ -132,7 +132,9 @@ describe('DataStoreServiceImpl.forSystem()', () => {
 			sharedScopes: [],
 			changeLog,
 		});
-		expect(() => service.forSystem(Symbol('something-else'))).toThrow('Invalid system bypass token');
+		expect(() => service.forSystem(Symbol('something-else'))).toThrow(
+			'Invalid system bypass token',
+		);
 	});
 
 	it('returns a working store with the real SYSTEM_BYPASS_TOKEN', async () => {
@@ -191,10 +193,7 @@ describe('SYSTEM_BYPASS_TOKEN import audit', () => {
 	]);
 
 	/** Barrel / index files that must NOT re-export the token */
-	const BARREL_FILES = [
-		'core/src/index.ts',
-		'core/src/types/index.ts',
-	];
+	const BARREL_FILES = ['core/src/index.ts', 'core/src/types/index.ts'];
 
 	it('no barrel file re-exports system-bypass-token', () => {
 		for (const barrelRelPath of BARREL_FILES) {

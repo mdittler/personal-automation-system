@@ -12,8 +12,8 @@
 
 import type { AppLogger } from '../../types/app-module.js';
 import type { MessageContext } from '../../types/telegram.js';
-import type { SessionControlLogger } from './session-control-logger.js';
 import type { PendingSessionControlStore } from './pending-session-control-store.js';
+import type { SessionControlLogger } from './session-control-logger.js';
 
 export interface HandleSessionControlCallbackDeps {
 	pendingStore: PendingSessionControlStore;

@@ -348,14 +348,10 @@ describe('CronManager', () => {
 			resolveHandler = resolve;
 		});
 
-		manager.register(
-			makeJob(),
-			() =>
-				async () => {
-					await handlerDone;
-					handlerFinished = true;
-				},
-		);
+		manager.register(makeJob(), () => async () => {
+			await handlerDone;
+			handlerFinished = true;
+		});
 
 		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
 		expect(cronCallback).toBeDefined();
@@ -430,13 +426,9 @@ describe('CronManager', () => {
 		const manager = new CronManager(logger, 'America/New_York', tempDir);
 
 		// Register a handler that blocks until released
-		manager.register(
-			makeJob(),
-			() =>
-				async () => {
-					await blockForever;
-				},
-		);
+		manager.register(makeJob(), () => async () => {
+			await blockForever;
+		});
 
 		const cronCallback = createTaskSpy.mock.calls[0]?.[1] as () => Promise<void>;
 		expect(cronCallback).toBeDefined();

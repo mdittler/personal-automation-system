@@ -1,34 +1,69 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppLogger } from '../../../types/app-module.js';
-import { processConfigSetTags } from '../control-tags.js';
+import type { AppConfigService } from '../../../types/config.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
-import type { AppConfigService } from '../../../types/config.js';
+import { processConfigSetTags } from '../control-tags.js';
 
 function makeRegistry(): SettingsRegistry {
 	const reg = new SettingsRegistry();
 	reg.register({
-		key: 'log_to_notes', appId: 'chatbot', category: 'personal',
-		label: 'Daily notes', help: 'Save every chat message to your daily notes file.', type: 'boolean', default: false,
-		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
-		nlSafe: true, nlIntentRegex: /\bdaily[-\s]?notes?\b/i,
+		key: 'log_to_notes',
+		appId: 'chatbot',
+		category: 'personal',
+		label: 'Daily notes',
+		help: 'Save every chat message to your daily notes file.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: /\bdaily[-\s]?notes?\b/i,
 	});
 	reg.register({
-		key: 'seasonal_nudges', appId: 'food', category: 'food',
-		label: 'Seasonal nudges', help: 'Show seasonal suggestions.', type: 'boolean', default: true,
-		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
-		nlSafe: true, nlIntentRegex: /\bseasonal\b/i,
+		key: 'seasonal_nudges',
+		appId: 'food',
+		category: 'food',
+		label: 'Seasonal nudges',
+		help: 'Show seasonal suggestions.',
+		type: 'boolean',
+		default: true,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: /\bseasonal\b/i,
 	});
 	reg.register({
-		key: 'rogue', appId: 'system', category: 'system',
-		label: 'rogue', help: 'Rogue mode.', type: 'boolean', default: false,
-		adminOnly: true, dangerous: false, hidden: false, scope: 'system',
-		nlSafe: true, nlIntentRegex: /\brogue\b/i,
+		key: 'rogue',
+		appId: 'system',
+		category: 'system',
+		label: 'rogue',
+		help: 'Rogue mode.',
+		type: 'boolean',
+		default: false,
+		adminOnly: true,
+		dangerous: false,
+		hidden: false,
+		scope: 'system',
+		nlSafe: true,
+		nlIntentRegex: /\brogue\b/i,
 	});
 	reg.register({
-		key: 'guest_profiles_info', appId: 'food', category: 'food',
-		label: 'Guests', help: 'Guest profiles.', type: 'string', default: '',
-		adminOnly: false, dangerous: false, hidden: true, scope: 'per-user',
+		key: 'guest_profiles_info',
+		appId: 'food',
+		category: 'food',
+		label: 'Guests',
+		help: 'Guest profiles.',
+		type: 'string',
+		default: '',
+		adminOnly: false,
+		dangerous: false,
+		hidden: true,
+		scope: 'per-user',
 		nlSafe: false,
 	});
 	return reg;
@@ -51,13 +86,16 @@ function makeWriter(
 ): SettingsWriter {
 	return new SettingsWriter({
 		registry: reg,
-		appConfigResolver: (id) => (id === 'chatbot' ? chatbotCfg : id === 'food' ? foodCfg : undefined),
+		appConfigResolver: (id) =>
+			id === 'chatbot' ? chatbotCfg : id === 'food' ? foodCfg : undefined,
 		manifestResolver: (id) => {
-			if (id === 'chatbot') return [{ key: 'log_to_notes', type: 'boolean', default: false, description: 'd' }];
-			if (id === 'food') return [
-				{ key: 'seasonal_nudges', type: 'boolean', default: true, description: 'd' },
-				{ key: 'guest_profiles_info', type: 'string', default: '', description: 'd' },
-			];
+			if (id === 'chatbot')
+				return [{ key: 'log_to_notes', type: 'boolean', default: false, description: 'd' }];
+			if (id === 'food')
+				return [
+					{ key: 'seasonal_nudges', type: 'boolean', default: true, description: 'd' },
+					{ key: 'guest_profiles_info', type: 'string', default: '', description: 'd' },
+				];
 			return [];
 		},
 		logger: makeLogger(),
@@ -103,16 +141,13 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		const chatbotCfg = makeAppConfig();
 		const foodCfg = makeAppConfig();
 		const writer = makeWriter(reg, chatbotCfg, foodCfg);
-		await processConfigSetTags(
-			'OK. <config-set key="food.seasonal_nudges" value="false"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn off seasonal nudges',
-				logger: makeLogger(),
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('OK. <config-set key="food.seasonal_nudges" value="false"/>', {
+			userId: 'u1',
+			userMessage: 'turn off seasonal nudges',
+			logger: makeLogger(),
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 		expect(foodCfg.updateOverrides).toHaveBeenCalledWith('u1', { seasonal_nudges: false });
 		expect(chatbotCfg.updateOverrides).not.toHaveBeenCalled();
 	});
@@ -122,16 +157,13 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		const chatbotCfg = makeAppConfig();
 		const foodCfg = makeAppConfig();
 		const writer = makeWriter(reg, chatbotCfg, foodCfg);
-		await processConfigSetTags(
-			'<config-set key="food.guest_profiles_info" value="x"/>',
-			{
-				userId: 'u1',
-				userMessage: 'set guest profiles',
-				logger: makeLogger(),
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="food.guest_profiles_info" value="x"/>', {
+			userId: 'u1',
+			userMessage: 'set guest profiles',
+			logger: makeLogger(),
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 		expect(foodCfg.updateOverrides).not.toHaveBeenCalled();
 	});
 
@@ -140,16 +172,13 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		const chatbotCfg = makeAppConfig();
 		const foodCfg = makeAppConfig();
 		const writer = makeWriter(reg, chatbotCfg, foodCfg);
-		await processConfigSetTags(
-			'<config-set key="food.seasonal_nudges" value="false"/>',
-			{
-				userId: 'u1',
-				userMessage: 'what is the weather',
-				logger: makeLogger(),
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="food.seasonal_nudges" value="false"/>', {
+			userId: 'u1',
+			userMessage: 'what is the weather',
+			logger: makeLogger(),
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 		expect(foodCfg.updateOverrides).not.toHaveBeenCalled();
 	});
 
@@ -158,16 +187,13 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		const chatbotCfg = makeAppConfig();
 		const foodCfg = makeAppConfig();
 		const writer = makeWriter(reg, chatbotCfg, foodCfg);
-		await processConfigSetTags(
-			'<config-set key="system.rogue" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'enable rogue mode',
-				logger: makeLogger(),
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="system.rogue" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'enable rogue mode',
+			logger: makeLogger(),
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 		expect(chatbotCfg.updateOverrides).not.toHaveBeenCalled();
 		expect(foodCfg.updateOverrides).not.toHaveBeenCalled();
 	});
@@ -240,16 +266,13 @@ describe('processConfigSetTags — registry-derived allowlist (REQ-SETTINGS-007)
 		const foodCfg = makeAppConfig();
 		const logger = makeLogger();
 		const writer = makeWriter(reg, chatbotCfg, foodCfg);
-		await processConfigSetTags(
-			'<config-set key="chatbot.nonexistent_key" value="true"/>',
-			{
-				userId: 'u1',
-				userMessage: 'turn on nonexistent',
-				logger,
-				settingsRegistry: reg,
-				settingsWriter: writer,
-			},
-		);
+		await processConfigSetTags('<config-set key="chatbot.nonexistent_key" value="true"/>', {
+			userId: 'u1',
+			userMessage: 'turn on nonexistent',
+			logger,
+			settingsRegistry: reg,
+			settingsWriter: writer,
+		});
 		expect(chatbotCfg.updateOverrides).not.toHaveBeenCalled();
 		expect(logger.warn).toHaveBeenCalled();
 	});

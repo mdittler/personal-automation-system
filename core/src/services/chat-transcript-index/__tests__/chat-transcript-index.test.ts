@@ -742,7 +742,7 @@ describe('P8c Codex P3 — upsertSession set-once + FTS orphan defence', () => {
 		} as Parameters<typeof index.upsertSession>[0]);
 		const meta = await index.getSessionMeta('20260504_120000_cafef00d');
 		expect(meta?.parent_session_id).toBe('20260504_110000_aaaaaaaa'); // set-once preserved
-		expect(meta?.title).toBe('Trip planning');                          // other fields updated
+		expect(meta?.title).toBe('Trip planning'); // other fields updated
 		expect(meta?.ended_at).toBe('2026-05-04T13:00:00.000Z');
 	});
 
@@ -786,10 +786,16 @@ describe('P8c Codex P3 — upsertSession set-once + FTS orphan defence', () => {
 			model: null,
 			title: null,
 		});
-		await index.appendMessage(makeMessage({ session_id: sessionId, turn_index: 0, content: 'unique-fts-canary-word' }));
+		await index.appendMessage(
+			makeMessage({ session_id: sessionId, turn_index: 0, content: 'unique-fts-canary-word' }),
+		);
 
 		// Confirm searchable before re-upsert
-		const before = await index.searchSessions({ userId: 'u1', householdId: null, queryTerms: ['unique-fts-canary-word'] });
+		const before = await index.searchSessions({
+			userId: 'u1',
+			householdId: null,
+			queryTerms: ['unique-fts-canary-word'],
+		});
 		expect(before.hits).toHaveLength(1);
 
 		// Re-upsert with a title change (simulates session-end title write)
@@ -805,7 +811,11 @@ describe('P8c Codex P3 — upsertSession set-once + FTS orphan defence', () => {
 		});
 
 		// FTS rows must still be present — not orphaned by the re-upsert
-		const after = await index.searchSessions({ userId: 'u1', householdId: null, queryTerms: ['unique-fts-canary-word'] });
+		const after = await index.searchSessions({
+			userId: 'u1',
+			householdId: null,
+			queryTerms: ['unique-fts-canary-word'],
+		});
 		expect(after.hits).toHaveLength(1);
 		expect(after.hits[0].sessionId).toBe(sessionId);
 	});

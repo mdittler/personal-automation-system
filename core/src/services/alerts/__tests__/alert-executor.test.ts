@@ -179,9 +179,7 @@ describe('executeActions', () => {
 				}),
 			},
 		});
-		const actions: AlertAction[] = [
-			{ type: 'telegram_message', config: { message: 'Hi {data}' } },
-		];
+		const actions: AlertAction[] = [{ type: 'telegram_message', config: { message: 'Hi {data}' } }];
 
 		const result = await executeActions(actions, ['u1'], deps, {
 			data: 'world',
@@ -212,9 +210,7 @@ describe('executeActions', () => {
 			.mockResolvedValueOnce(undefined)
 			.mockRejectedValueOnce(new Error('Network error'));
 
-		const actions: AlertAction[] = [
-			{ type: 'telegram_message', config: { message: 'Alert!' } },
-		];
+		const actions: AlertAction[] = [{ type: 'telegram_message', config: { message: 'Alert!' } }];
 
 		await executeActions(actions, ['u1', 'u2'], deps, {
 			data: '',

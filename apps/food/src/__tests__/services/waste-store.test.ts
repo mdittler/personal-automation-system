@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
+import { appendWaste, formatWasteSummary, loadWasteLog } from '../../services/waste-store.js';
 import type { WasteLogEntry } from '../../types.js';
-import {
-	appendWaste,
-	formatWasteSummary,
-	loadWasteLog,
-} from '../../services/waste-store.js';
 
 function makeWasteEntry(overrides: Partial<WasteLogEntry> = {}): WasteLogEntry {
 	return {

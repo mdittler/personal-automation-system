@@ -116,10 +116,7 @@ describe('writeJournalEntries', () => {
 		journal.append.mockRejectedValueOnce(err).mockResolvedValue(undefined);
 		await writeJournalEntries(journal, 'slug', ['fail-entry', 'ok-entry'], logger);
 		expect(journal.append).toHaveBeenCalledTimes(2);
-		expect(logger.warn).toHaveBeenCalledWith(
-			'Failed to write model journal entry: %s',
-			err,
-		);
+		expect(logger.warn).toHaveBeenCalledWith('Failed to write model journal entry: %s', err);
 	});
 });
 
@@ -143,7 +140,9 @@ describe('appendJournalPromptSection', () => {
 		const joined = parts.join('\n');
 		expect(joined).toContain('data/model-journal/test-slug.md');
 		expect(joined).toContain('<model-journal>your content here</model-journal>');
-		expect(joined).toContain('The tag and its content will be removed before the user sees your response.');
+		expect(joined).toContain(
+			'The tag and its content will be removed before the user sees your response.',
+		);
 		// No journal content section when empty
 		expect(joined).not.toContain('Your current journal');
 	});
@@ -174,10 +173,7 @@ describe('appendJournalPromptSection', () => {
 		const logger = makeLogger();
 		const parts: string[] = [];
 		await appendJournalPromptSection(parts, journal, 'slug', logger);
-		expect(logger.warn).toHaveBeenCalledWith(
-			'Failed to read model journal for prompt: %s',
-			err,
-		);
+		expect(logger.warn).toHaveBeenCalledWith('Failed to read model journal for prompt: %s', err);
 		// Instruction block is still present
 		expect(parts.join('\n')).toContain('<model-journal>your content here</model-journal>');
 	});

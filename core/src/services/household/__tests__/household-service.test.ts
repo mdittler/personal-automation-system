@@ -4,12 +4,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RegisteredUser } from '../../../types/users.js';
-import {
-	HouseholdBoundaryError,
-	HouseholdService,
-	UserBoundaryError,
-	slugify,
-} from '../index.js';
+import { HouseholdBoundaryError, HouseholdService, UserBoundaryError, slugify } from '../index.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -192,11 +187,7 @@ describe('HouseholdService', () => {
 
 	describe('getMembers', () => {
 		it('returns users belonging to a household', async () => {
-			const users = [
-				makeUser('u1', 'hh-a'),
-				makeUser('u2', 'hh-a'),
-				makeUser('u3', 'hh-b'),
-			];
+			const users = [makeUser('u1', 'hh-a'), makeUser('u2', 'hh-a'), makeUser('u3', 'hh-b')];
 			const svc = makeService(users);
 			await svc.init();
 

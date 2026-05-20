@@ -14,9 +14,9 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DailyMacroEntry } from '../types.js';
-import type { DailyHealthEntry } from '../services/health-store.js';
 import type { CorrelationInsight } from '../services/health-correlator.js';
+import type { DailyHealthEntry } from '../services/health-store.js';
+import type { DailyMacroEntry } from '../types.js';
 
 // vi.mock calls are hoisted to the top of the file by Vitest — declare at module level
 vi.mock('../services/macro-tracker.js', () => ({
@@ -64,7 +64,10 @@ function makeMacroEntry(date: string): DailyMacroEntry {
 	};
 }
 
-function makeHealthEntry(date: string, overrides: Partial<DailyHealthEntry> = {}): DailyHealthEntry {
+function makeHealthEntry(
+	date: string,
+	overrides: Partial<DailyHealthEntry> = {},
+): DailyHealthEntry {
 	return {
 		date,
 		metrics: { sleepHours: 7 },
@@ -103,7 +106,7 @@ function setupMacroData(days: number) {
 function setupMacroAndHealthData(days: number) {
 	const dates = makeDates('2026-04-01', days);
 	vi.mocked(loadMacrosForPeriod).mockResolvedValue(dates.map(makeMacroEntry));
-	vi.mocked(loadHealthForPeriod).mockResolvedValue(dates.map(d => makeHealthEntry(d)));
+	vi.mocked(loadHealthForPeriod).mockResolvedValue(dates.map((d) => makeHealthEntry(d)));
 }
 
 // ─── correlateHealth ──────────────────────────────────────────────────────
@@ -220,7 +223,7 @@ describe('correlateHealth', () => {
 		const macroDates = makeDates('2026-04-01', 10);
 		const healthDates = makeDates('2026-04-11', 10);
 		vi.mocked(loadMacrosForPeriod).mockResolvedValue(macroDates.map(makeMacroEntry));
-		vi.mocked(loadHealthForPeriod).mockResolvedValue(healthDates.map(d => makeHealthEntry(d)));
+		vi.mocked(loadHealthForPeriod).mockResolvedValue(healthDates.map((d) => makeHealthEntry(d)));
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(makeInsights(1)));
 
 		const result = await correlateHealth(
@@ -327,7 +330,9 @@ describe('correlateHealth', () => {
 		const dates = makeDates('2026-04-01', 7);
 		vi.mocked(loadMacrosForPeriod).mockResolvedValue(dates.map(makeMacroEntry));
 		vi.mocked(loadHealthForPeriod).mockResolvedValue(
-			dates.map(d => makeHealthEntry(d, { metrics: { notes: 'normal note with ```backticks```' } })),
+			dates.map((d) =>
+				makeHealthEntry(d, { metrics: { notes: 'normal note with ```backticks```' } }),
+			),
 		);
 		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(makeInsights(1)));
 

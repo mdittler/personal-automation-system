@@ -35,10 +35,7 @@ export function appendContextEntriesSection(
 	parts.push('```');
 }
 
-export function appendConversationHistorySection(
-	parts: string[],
-	turns: ConversationTurn[],
-): void {
+export function appendConversationHistorySection(parts: string[], turns: ConversationTurn[]): void {
 	if (turns.length === 0) return;
 	parts.push('');
 	parts.push(

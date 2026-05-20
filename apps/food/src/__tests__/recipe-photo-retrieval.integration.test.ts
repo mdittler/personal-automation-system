@@ -90,18 +90,30 @@ describe('recipe photo retrieval integration', () => {
 	it('returns the empty-state message when no recipes with photos exist', async () => {
 		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe()));
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith('user1', 'No recipes with photos found.');
 	});
 
 	it('sends the only available recipe photo directly', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({
-			sourcePhoto: 'photos/recipe-chili-mac.b64',
-		})));
-		sharedStore.storage.set('photos/recipe-chili-mac.b64', Buffer.from('photo-one').toString('base64'));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(
+				makeRecipe({
+					sourcePhoto: 'photos/recipe-chili-mac.b64',
+				}),
+			),
+		);
+		sharedStore.storage.set(
+			'photos/recipe-chili-mac.b64',
+			Buffer.from('photo-one').toString('base64'),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }),
+		);
 
 		expect(services.telegram.sendPhoto).toHaveBeenCalledWith(
 			'user1',
@@ -111,20 +123,32 @@ describe('recipe photo retrieval integration', () => {
 	});
 
 	it('uses pendingPhotoSelection for numeric replies in the multi-photo flow', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({
-			id: 'chili-mac',
-			title: 'Chili Mac',
-			sourcePhoto: 'photos/chili-mac.b64',
-		})));
-		sharedStore.storage.set('recipes/soup.yaml', stringify(makeRecipe({
-			id: 'soup',
-			title: 'Soup Night',
-			sourcePhoto: 'photos/soup.b64',
-		})));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(
+				makeRecipe({
+					id: 'chili-mac',
+					title: 'Chili Mac',
+					sourcePhoto: 'photos/chili-mac.b64',
+				}),
+			),
+		);
+		sharedStore.storage.set(
+			'recipes/soup.yaml',
+			stringify(
+				makeRecipe({
+					id: 'soup',
+					title: 'Soup Night',
+					sourcePhoto: 'photos/soup.b64',
+				}),
+			),
+		);
 		sharedStore.storage.set('photos/chili-mac.b64', Buffer.from('photo-one').toString('base64'));
 		sharedStore.storage.set('photos/soup.b64', Buffer.from('photo-two').toString('base64'));
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -146,26 +170,47 @@ describe('recipe photo retrieval integration', () => {
 	});
 
 	it('keeps pending photo selection ahead of generic recipe selection on out-of-range replies', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({
-			id: 'chili-mac',
-			title: 'Chili Mac',
-			sourcePhoto: 'photos/chili-mac.b64',
-		})));
-		sharedStore.storage.set('recipes/soup.yaml', stringify(makeRecipe({
-			id: 'soup',
-			title: 'Soup Night',
-			sourcePhoto: 'photos/soup.b64',
-		})));
-		sharedStore.storage.set('recipes/weekday-pasta.yaml', stringify(makeRecipe({
-			id: 'weekday-pasta',
-			title: 'Weekday Pasta',
-			ingredients: [{ name: 'pasta', quantity: 1, unit: 'box' }],
-		})));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(
+				makeRecipe({
+					id: 'chili-mac',
+					title: 'Chili Mac',
+					sourcePhoto: 'photos/chili-mac.b64',
+				}),
+			),
+		);
+		sharedStore.storage.set(
+			'recipes/soup.yaml',
+			stringify(
+				makeRecipe({
+					id: 'soup',
+					title: 'Soup Night',
+					sourcePhoto: 'photos/soup.b64',
+				}),
+			),
+		);
+		sharedStore.storage.set(
+			'recipes/weekday-pasta.yaml',
+			stringify(
+				makeRecipe({
+					id: 'weekday-pasta',
+					title: 'Weekday Pasta',
+					ingredients: [{ name: 'pasta', quantity: 1, unit: 'box' }],
+				}),
+			),
+		);
 		sharedStore.storage.set('photos/chili-mac.b64', Buffer.from('photo-one').toString('base64'));
 		sharedStore.storage.set('photos/soup.b64', Buffer.from('photo-two').toString('base64'));
 
-		await handleCommand?.('recipes', [], createTestMessageContext({ userId: 'user1', text: '/recipes' }));
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }));
+		await handleCommand?.(
+			'recipes',
+			[],
+			createTestMessageContext({ userId: 'user1', text: '/recipes' }),
+		);
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }),
+		);
 
 		vi.mocked(services.telegram.send).mockClear();
 		vi.mocked(services.telegram.sendPhoto).mockClear();
@@ -179,9 +224,14 @@ describe('recipe photo retrieval integration', () => {
 	});
 
 	it('returns the existing no-source-photo message for a queried recipe', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({ title: 'Chili Mac' })));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(makeRecipe({ title: 'Chili Mac' })),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for chili mac' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for chili mac' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -190,12 +240,19 @@ describe('recipe photo retrieval integration', () => {
 	});
 
 	it('returns the missing-photo message when the stored file is gone', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({
-			title: 'Chili Mac',
-			sourcePhoto: 'photos/missing.b64',
-		})));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(
+				makeRecipe({
+					title: 'Chili Mac',
+					sourcePhoto: 'photos/missing.b64',
+				}),
+			),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for chili mac' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for chili mac' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -204,9 +261,14 @@ describe('recipe photo retrieval integration', () => {
 	});
 
 	it('returns the existing not-found message for unmatched recipe photo queries', async () => {
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({ title: 'Chili Mac' })));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(makeRecipe({ title: 'Chili Mac' })),
+		);
 
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for tacos' }));
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me the recipe photo for tacos' }),
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledWith(
 			'user1',
@@ -216,9 +278,16 @@ describe('recipe photo retrieval integration', () => {
 
 	it('preserves generic numeric recipe selection through lastSearchResults', async () => {
 		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({ id: 'chili-mac' })));
-		sharedStore.storage.set('recipes/soup.yaml', stringify(makeRecipe({ id: 'soup', title: 'Soup Night' })));
+		sharedStore.storage.set(
+			'recipes/soup.yaml',
+			stringify(makeRecipe({ id: 'soup', title: 'Soup Night' })),
+		);
 
-		await handleCommand?.('recipes', ['chili'], createTestMessageContext({ userId: 'user1', text: '/recipes chili' }));
+		await handleCommand?.(
+			'recipes',
+			['chili'],
+			createTestMessageContext({ userId: 'user1', text: '/recipes chili' }),
+		);
 
 		vi.mocked(services.telegram.send).mockClear();
 		await handleMessage(createTestMessageContext({ userId: 'user1', text: '1' }));
@@ -233,21 +302,37 @@ describe('recipe photo retrieval integration', () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date('2026-04-25T12:00:00.000Z'));
 
-		sharedStore.storage.set('recipes/chili-mac.yaml', stringify(makeRecipe({
-			id: 'chili-mac',
-			title: 'Chili Mac',
-			sourcePhoto: 'photos/chili-mac.b64',
-		})));
-		sharedStore.storage.set('recipes/soup.yaml', stringify(makeRecipe({
-			id: 'soup',
-			title: 'Soup Night',
-			sourcePhoto: 'photos/soup.b64',
-		})));
+		sharedStore.storage.set(
+			'recipes/chili-mac.yaml',
+			stringify(
+				makeRecipe({
+					id: 'chili-mac',
+					title: 'Chili Mac',
+					sourcePhoto: 'photos/chili-mac.b64',
+				}),
+			),
+		);
+		sharedStore.storage.set(
+			'recipes/soup.yaml',
+			stringify(
+				makeRecipe({
+					id: 'soup',
+					title: 'Soup Night',
+					sourcePhoto: 'photos/soup.b64',
+				}),
+			),
+		);
 		sharedStore.storage.set('photos/chili-mac.b64', Buffer.from('photo-one').toString('base64'));
 		sharedStore.storage.set('photos/soup.b64', Buffer.from('photo-two').toString('base64'));
 
-		await handleCommand?.('recipes', ['chili'], createTestMessageContext({ userId: 'user1', text: '/recipes chili' }));
-		await handleMessage(createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }));
+		await handleCommand?.(
+			'recipes',
+			['chili'],
+			createTestMessageContext({ userId: 'user1', text: '/recipes chili' }),
+		);
+		await handleMessage(
+			createTestMessageContext({ userId: 'user1', text: 'show me recipe photo' }),
+		);
 
 		vi.setSystemTime(new Date('2026-04-25T12:06:00.000Z'));
 		vi.mocked(services.telegram.send).mockClear();

@@ -5,16 +5,16 @@
  * upsertDailyHealth, and loadHealthForPeriod cross-month iteration.
  */
 
+import type { ScopedDataStore } from '@pas/core/types';
+import { buildAppTags, generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import { generateFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
-import type { ScopedDataStore } from '@pas/core/types';
 import type { DailyHealthEntry, MonthlyHealthLog } from '../services/health-store.js';
 import {
+	loadHealthForPeriod,
 	loadMonthlyHealth,
 	saveMonthlyHealth,
 	upsertDailyHealth,
-	loadHealthForPeriod,
 } from '../services/health-store.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -22,7 +22,9 @@ import {
 function createMockStore() {
 	return {
 		read: vi.fn<Parameters<ScopedDataStore['read']>, ReturnType<ScopedDataStore['read']>>(),
-		write: vi.fn<Parameters<ScopedDataStore['write']>, ReturnType<ScopedDataStore['write']>>().mockResolvedValue(undefined),
+		write: vi
+			.fn<Parameters<ScopedDataStore['write']>, ReturnType<ScopedDataStore['write']>>()
+			.mockResolvedValue(undefined),
 		append: vi.fn().mockResolvedValue(undefined),
 		exists: vi.fn().mockResolvedValue(false),
 		list: vi.fn().mockResolvedValue([]),
@@ -105,15 +107,16 @@ describe('loadMonthlyHealth', () => {
 	});
 
 	it('rejects month format missing day separator', async () => {
-		await expect(
-			loadMonthlyHealth(store as unknown as ScopedDataStore, '202604'),
-		).rejects.toThrow('Invalid month format');
+		await expect(loadMonthlyHealth(store as unknown as ScopedDataStore, '202604')).rejects.toThrow(
+			'Invalid month format',
+		);
 	});
 
 	it('returns null for a file missing the userId field (corrupt log)', async () => {
 		// A log file without userId is treated as corrupt — userId is required for routing
-		const content = generateFrontmatter({ title: 'Health 2026-04', date: new Date().toISOString(), tags: [] })
-			+ stringify({ month: '2026-04', days: [] }); // no userId field
+		const content =
+			generateFrontmatter({ title: 'Health 2026-04', date: new Date().toISOString(), tags: [] }) +
+			stringify({ month: '2026-04', days: [] }); // no userId field
 		store.read.mockResolvedValue(content);
 		const result = await loadMonthlyHealth(store as unknown as ScopedDataStore, '2026-04');
 		expect(result).toBeNull();
@@ -159,10 +162,14 @@ describe('saveMonthlyHealth', () => {
 	});
 
 	it('round-trips day entries through save and load', async () => {
-		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-05', { metrics: { sleepHours: 8, weightKg: 72 } })]);
+		const log = makeLog('2026-04', 'alice', [
+			makeEntry('2026-04-05', { metrics: { sleepHours: 8, weightKg: 72 } }),
+		]);
 
 		let stored = '';
-		store.write.mockImplementation(async (_path, content) => { stored = content as string; });
+		store.write.mockImplementation(async (_path, content) => {
+			stored = content as string;
+		});
 		store.read.mockImplementation(async () => stored);
 
 		await saveMonthlyHealth(store as unknown as ScopedDataStore, log);
@@ -219,7 +226,9 @@ describe('upsertDailyHealth', () => {
 	});
 
 	it('replaces an existing day entry (upsert semantics)', async () => {
-		const existingLog = makeLog('2026-04', 'alice', [makeEntry('2026-04-10', { metrics: { sleepHours: 6 } })]);
+		const existingLog = makeLog('2026-04', 'alice', [
+			makeEntry('2026-04-10', { metrics: { sleepHours: 6 } }),
+		]);
 		store.read.mockResolvedValue(serialiseLog(existingLog));
 
 		const updated = makeEntry('2026-04-10', { metrics: { sleepHours: 9 } });
@@ -244,7 +253,11 @@ describe('loadHealthForPeriod', () => {
 
 	it('returns empty array when no health data exists', async () => {
 		store.read.mockResolvedValue(null);
-		const result = await loadHealthForPeriod(store as unknown as ScopedDataStore, '2026-04-01', '2026-04-14');
+		const result = await loadHealthForPeriod(
+			store as unknown as ScopedDataStore,
+			'2026-04-01',
+			'2026-04-14',
+		);
 		expect(result).toEqual([]);
 	});
 
@@ -256,7 +269,11 @@ describe('loadHealthForPeriod', () => {
 		]);
 		store.read.mockResolvedValue(serialiseLog(log));
 
-		const result = await loadHealthForPeriod(store as unknown as ScopedDataStore, '2026-04-05', '2026-04-15');
+		const result = await loadHealthForPeriod(
+			store as unknown as ScopedDataStore,
+			'2026-04-05',
+			'2026-04-15',
+		);
 
 		expect(result).toHaveLength(1);
 		expect(result[0]!.date).toBe('2026-04-10');
@@ -270,13 +287,20 @@ describe('loadHealthForPeriod', () => {
 		]);
 		store.read.mockResolvedValue(serialiseLog(log));
 
-		const result = await loadHealthForPeriod(store as unknown as ScopedDataStore, '2026-04-01', '2026-04-30');
+		const result = await loadHealthForPeriod(
+			store as unknown as ScopedDataStore,
+			'2026-04-01',
+			'2026-04-30',
+		);
 
-		expect(result.map(e => e.date)).toEqual(['2026-04-02', '2026-04-07', '2026-04-10']);
+		expect(result.map((e) => e.date)).toEqual(['2026-04-02', '2026-04-07', '2026-04-10']);
 	});
 
 	it('spans month boundaries correctly', async () => {
-		const aprilLog = makeLog('2026-04', 'alice', [makeEntry('2026-04-29'), makeEntry('2026-04-30')]);
+		const aprilLog = makeLog('2026-04', 'alice', [
+			makeEntry('2026-04-29'),
+			makeEntry('2026-04-30'),
+		]);
 		const mayLog = makeLog('2026-05', 'alice', [makeEntry('2026-05-01'), makeEntry('2026-05-05')]);
 
 		store.read.mockImplementation(async (path) => {
@@ -285,16 +309,24 @@ describe('loadHealthForPeriod', () => {
 			return null;
 		});
 
-		const result = await loadHealthForPeriod(store as unknown as ScopedDataStore, '2026-04-29', '2026-05-03');
+		const result = await loadHealthForPeriod(
+			store as unknown as ScopedDataStore,
+			'2026-04-29',
+			'2026-05-03',
+		);
 
-		expect(result.map(e => e.date)).toEqual(['2026-04-29', '2026-04-30', '2026-05-01']);
+		expect(result.map((e) => e.date)).toEqual(['2026-04-29', '2026-04-30', '2026-05-01']);
 	});
 
 	it('includes entries on the start and end dates (inclusive)', async () => {
 		const log = makeLog('2026-04', 'alice', [makeEntry('2026-04-01'), makeEntry('2026-04-14')]);
 		store.read.mockResolvedValue(serialiseLog(log));
 
-		const result = await loadHealthForPeriod(store as unknown as ScopedDataStore, '2026-04-01', '2026-04-14');
+		const result = await loadHealthForPeriod(
+			store as unknown as ScopedDataStore,
+			'2026-04-01',
+			'2026-04-14',
+		);
 
 		expect(result).toHaveLength(2);
 	});

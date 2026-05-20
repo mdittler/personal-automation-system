@@ -1,11 +1,11 @@
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { getActive, setActive, clearActive } from '../session-index.js';
+import { clearActive, getActive, setActive } from '../session-index.js';
 import type { ActiveSessionEntry } from '../session-index.js';
 
 const USER = 'matt';
@@ -26,7 +26,11 @@ function makeStore(userId: string) {
 }
 
 const entry1: ActiveSessionEntry = { id: 's1', started_at: '2026-04-27T15:45:00Z', model: null };
-const entry2: ActiveSessionEntry = { id: 's2', started_at: '2026-04-27T16:00:00Z', model: 'claude-sonnet-4-6' };
+const entry2: ActiveSessionEntry = {
+	id: 's2',
+	started_at: '2026-04-27T16:00:00Z',
+	model: 'claude-sonnet-4-6',
+};
 
 beforeEach(async () => {
 	tempDir = await mkdtemp(join(tmpdir(), 'pas-session-index-'));
@@ -72,7 +76,14 @@ describe('session-index', () => {
 	});
 
 	it('self-heals on corrupted YAML: getActive returns undefined', async () => {
-		const corruptPath = join(tempDir, 'users', 'matt', 'chatbot', 'conversation', 'active-sessions.yaml');
+		const corruptPath = join(
+			tempDir,
+			'users',
+			'matt',
+			'chatbot',
+			'conversation',
+			'active-sessions.yaml',
+		);
 		await mkdir(join(tempDir, 'users', 'matt', 'chatbot', 'conversation'), { recursive: true });
 		await writeFile(corruptPath, 'invalid: [[[corrupt yaml');
 		const store = makeStore(USER);
@@ -80,7 +91,14 @@ describe('session-index', () => {
 	});
 
 	it('self-heals: subsequent setActive after corrupt YAML writes a clean file', async () => {
-		const corruptPath = join(tempDir, 'users', 'matt', 'chatbot', 'conversation', 'active-sessions.yaml');
+		const corruptPath = join(
+			tempDir,
+			'users',
+			'matt',
+			'chatbot',
+			'conversation',
+			'active-sessions.yaml',
+		);
 		await mkdir(join(tempDir, 'users', 'matt', 'chatbot', 'conversation'), { recursive: true });
 		await writeFile(corruptPath, 'invalid: [[[corrupt yaml');
 		const store = makeStore(USER);
@@ -90,10 +108,7 @@ describe('session-index', () => {
 
 	it('two simultaneous setActive under different keys leave both entries (mutex)', async () => {
 		const store = makeStore(USER);
-		await Promise.all([
-			setActive(store, USER, KEY, entry1),
-			setActive(store, USER, KEY2, entry2),
-		]);
+		await Promise.all([setActive(store, USER, KEY, entry1), setActive(store, USER, KEY2, entry2)]);
 		const a = await getActive(store, USER, KEY);
 		const b = await getActive(store, USER, KEY2);
 		expect(a?.id).toBe('s1');
@@ -102,12 +117,17 @@ describe('session-index', () => {
 
 	it('two simultaneous setActive under the SAME key leaves a valid parseable value (no corruption)', async () => {
 		const store = makeStore(USER);
-		const entryA: ActiveSessionEntry = { id: 'session-a', started_at: '2026-04-27T15:00:00Z', model: null };
-		const entryB: ActiveSessionEntry = { id: 'session-b', started_at: '2026-04-27T15:01:00Z', model: null };
-		await Promise.all([
-			setActive(store, USER, KEY, entryA),
-			setActive(store, USER, KEY, entryB),
-		]);
+		const entryA: ActiveSessionEntry = {
+			id: 'session-a',
+			started_at: '2026-04-27T15:00:00Z',
+			model: null,
+		};
+		const entryB: ActiveSessionEntry = {
+			id: 'session-b',
+			started_at: '2026-04-27T15:01:00Z',
+			model: null,
+		};
+		await Promise.all([setActive(store, USER, KEY, entryA), setActive(store, USER, KEY, entryB)]);
 		const result = await getActive(store, USER, KEY);
 		expect(result).not.toBeUndefined();
 		expect(['session-a', 'session-b']).toContain(result?.id);

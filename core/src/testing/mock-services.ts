@@ -8,16 +8,15 @@
 
 import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
-import type { AppOutboundBridge } from '../services/app-outbound-bridge/index.js';
+import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { AppKnowledgeBaseService } from '../types/app-knowledge.js';
 import type { AppMetadataService } from '../types/app-metadata.js';
 import type { AppLogger, CoreServices } from '../types/app-module.js';
-import type { DataQueryService } from '../types/data-query.js';
-import type { InteractionContextService } from '../services/interaction-context/index.js';
 import type { AudioService } from '../types/audio.js';
 import type { ConditionEvaluatorService } from '../types/condition.js';
 import type { AppConfigService } from '../types/config.js';
 import type { ContextStoreService } from '../types/context-store.js';
+import type { DataQueryService } from '../types/data-query.js';
 import type { DataStoreService, ScopedDataStore } from '../types/data-store.js';
 import type { EventBusService } from '../types/events.js';
 import type { LLMService } from '../types/llm.js';
@@ -62,8 +61,8 @@ type MockOverrides = {
 	[K in keyof CoreServices]?: K extends 'dataQuery'
 		? Partial<DataQueryService>
 		: K extends 'interactionContext'
-		? Partial<InteractionContextService>
-		: Partial<Record<string, unknown>>;
+			? Partial<InteractionContextService>
+			: Partial<Record<string, unknown>>;
 };
 
 /**
@@ -228,10 +227,17 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 			...overrides?.secrets,
 		},
 		dataQuery: overrides?.dataQuery
-			? ({ query: vi.fn().mockResolvedValue({ files: [], empty: true }), ...overrides.dataQuery } as DataQueryService)
+			? ({
+					query: vi.fn().mockResolvedValue({ files: [], empty: true }),
+					...overrides.dataQuery,
+				} as DataQueryService)
 			: undefined,
 		interactionContext: overrides?.interactionContext
-			? ({ record: vi.fn(), getRecent: vi.fn().mockReturnValue([]), ...overrides.interactionContext } as InteractionContextService)
+			? ({
+					record: vi.fn(),
+					getRecent: vi.fn().mockReturnValue([]),
+					...overrides.interactionContext,
+				} as InteractionContextService)
 			: undefined,
 		dataDir: tmpdir(),
 		timezone: 'UTC',

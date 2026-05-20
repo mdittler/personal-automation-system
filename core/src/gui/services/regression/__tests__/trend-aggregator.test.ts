@@ -3,10 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-	ManifestCaseResult,
-	RunManifest,
-} from '../../../../types/regression.js';
+import type { ManifestCaseResult, RunManifest } from '../../../../types/regression.js';
 import { buildTrendData } from '../trend-aggregator.js';
 
 function cr(o: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseResult {

@@ -8,15 +8,15 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
+import type { ChatTranscriptIndex } from '../../chat-transcript-index/index.js';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { composeChatSessionStore } from '../compose.js';
 import type { ChatSessionStore, SessionTurn } from '../chat-session-store.js';
-import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
-import type { ChatTranscriptIndex } from '../../chat-transcript-index/index.js';
+import { composeChatSessionStore } from '../compose.js';
 
 const USER = 'matt';
 const SESSION_KEY = 'agent:main:telegram:dm:matt';
@@ -82,7 +82,11 @@ function makeStore(opts?: { index?: ChatTranscriptIndex }): ChatSessionStore {
 describe('Chunk D — live indexer hook: appendExchange', () => {
 	it('appendExchange → immediate searchSessions returns the hit', async () => {
 		const store = makeStore();
-		await store.appendExchange(ctx, turn('user', 'tell me about carbonara'), turn('assistant', 'carbonara is a pasta dish'));
+		await store.appendExchange(
+			ctx,
+			turn('user', 'tell me about carbonara'),
+			turn('assistant', 'carbonara is a pasta dish'),
+		);
 
 		const result = await index.searchSessions({
 			userId: USER,
@@ -105,7 +109,11 @@ describe('Chunk D — live indexer hook: appendExchange', () => {
 			turn('user', 'first question'),
 			turn('assistant', 'first answer'),
 		);
-		await store.appendExchange(ctx, turn('user', 'second question'), turn('assistant', 'second answer'));
+		await store.appendExchange(
+			ctx,
+			turn('user', 'second question'),
+			turn('assistant', 'second answer'),
+		);
 
 		// The session should have 4 messages in the DB: turn_indices 0,1,2,3
 		const result = await index.searchSessions({
@@ -170,7 +178,11 @@ describe('Chunk D — live indexer hook: fault isolation', () => {
 		};
 
 		const store = makeStore({ index: failingIndex });
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 		expect(sessionId).toMatch(/^\d{8}_\d{6}_[0-9a-f]{8}$/);
 	});
 });
@@ -182,7 +194,11 @@ describe('Chunk D — live indexer hook: fault isolation', () => {
 describe('Chunk D — live indexer hook: endActive', () => {
 	it('endActive → endSession called with correct timestamp, DB shows ended_at != null', async () => {
 		const store = makeStore();
-		const { sessionId } = await store.appendExchange(ctx, turn('user', 'q'), turn('assistant', 'a'));
+		const { sessionId } = await store.appendExchange(
+			ctx,
+			turn('user', 'q'),
+			turn('assistant', 'a'),
+		);
 
 		// Session should exist and be open
 		const beforeEnd = await index.getSessionMeta(sessionId);
@@ -216,9 +232,17 @@ describe('Chunk D — live indexer hook: endActive', () => {
 
 const LEGACY_TURNS = [
 	{ role: 'user', content: 'what is spaghetti carbonara', timestamp: '2026-04-26T10:00:00Z' },
-	{ role: 'assistant', content: 'spaghetti carbonara is a classic Italian pasta dish', timestamp: '2026-04-26T10:00:01Z' },
+	{
+		role: 'assistant',
+		content: 'spaghetti carbonara is a classic Italian pasta dish',
+		timestamp: '2026-04-26T10:00:01Z',
+	},
 	{ role: 'user', content: 'how many eggs do I need', timestamp: '2026-04-26T10:01:00Z' },
-	{ role: 'assistant', content: 'you need two eggs per serving', timestamp: '2026-04-26T10:01:01Z' },
+	{
+		role: 'assistant',
+		content: 'you need two eggs per serving',
+		timestamp: '2026-04-26T10:01:01Z',
+	},
 ];
 
 async function plantHistoryJson(dir: string, content: string) {

@@ -1,11 +1,8 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { formatKidAdaptation, generateKidAdaptation } from '../services/kid-adapter.js';
 import type { ChildProfile, KidAdaptation, Recipe } from '../types.js';
-import {
-	generateKidAdaptation,
-	formatKidAdaptation,
-} from '../services/kid-adapter.js';
 
 function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
 	return {
@@ -105,9 +102,9 @@ describe('kid-adapter', () => {
 		it('handles LLM error gracefully', async () => {
 			vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
 
-			await expect(
-				generateKidAdaptation(services, makeRecipe(), makeChild(), 21),
-			).rejects.toThrow('LLM unavailable');
+			await expect(generateKidAdaptation(services, makeRecipe(), makeChild(), 21)).rejects.toThrow(
+				'LLM unavailable',
+			);
 		});
 
 		it('flags recipe allergens against child avoid list', async () => {

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { isIdle, getLastActivityIso } from '../idle-detector.js';
+import { describe, expect, it } from 'vitest';
 import type { ChatSessionFrontmatter } from '../chat-session-store.js';
+import { getLastActivityIso, isIdle } from '../idle-detector.js';
 
 describe('idle-detector', () => {
 	const baseMeta: ChatSessionFrontmatter = {
@@ -46,7 +46,9 @@ describe('idle-detector', () => {
 			expect(isIdle('not-a-date', new Date(), 60)).toBe(false);
 		});
 		it('returns true for 1ms past threshold', () => {
-			expect(isIdle('2026-05-01T12:00:00.000Z', new Date('2026-05-01T14:00:00.001Z'), 120)).toBe(true);
+			expect(isIdle('2026-05-01T12:00:00.000Z', new Date('2026-05-01T14:00:00.001Z'), 120)).toBe(
+				true,
+			);
 		});
 	});
 });

@@ -36,12 +36,14 @@ declare function clearTimeout(id: unknown): void;
 /** Speak the current step text via TTS if hands-free mode is active. Fire-and-forget. */
 function speakCurrentStep(services: CoreServices, session: CookSession): void {
 	if (!session.ttsEnabled || !services.audio) return;
-	void services.config.get('cooking_speaker_device').then((device) => {
-		services.audio.speak(
-			session.instructions[session.currentStep] ?? '',
-			(device as string) || undefined,
-		).catch(() => {});
-	}).catch(() => {});
+	void services.config
+		.get('cooking_speaker_device')
+		.then((device) => {
+			services.audio
+				.speak(session.instructions[session.currentStep] ?? '', (device as string) || undefined)
+				.catch(() => {});
+		})
+		.catch(() => {});
 }
 
 // ─── Pending recipe state (TTL map) ─────────────────────────────────
@@ -237,11 +239,13 @@ export async function handleServingsReply(
 	} else if (audioAvailable) {
 		await services.telegram.sendWithButtons(
 			ctx.userId,
-			'🔊 Want hands-free mode? I\'ll read each step aloud on your speaker.',
-			[[
-				{ text: 'Yes, hands-free', callbackData: 'app:food:ck:hf:y' },
-				{ text: 'No thanks', callbackData: 'app:food:ck:hf:n' },
-			]],
+			"🔊 Want hands-free mode? I'll read each step aloud on your speaker.",
+			[
+				[
+					{ text: 'Yes, hands-free', callbackData: 'app:food:ck:hf:y' },
+					{ text: 'No thanks', callbackData: 'app:food:ck:hf:n' },
+				],
+			],
 		);
 	} else {
 		await sendFirstStep(services, session, ctx.userId);
@@ -250,10 +254,18 @@ export async function handleServingsReply(
 
 // ─── sendFirstStep helper ───────────────────────────────────────────
 
-async function sendFirstStep(services: CoreServices, session: CookSession, userId: string): Promise<void> {
+async function sendFirstStep(
+	services: CoreServices,
+	session: CookSession,
+	userId: string,
+): Promise<void> {
 	const timer = parseStepTimer(session.instructions[session.currentStep] ?? '');
 	const stepMsg = formatStepMessage(session);
-	const sent = await services.telegram.sendWithButtons(userId, stepMsg, buildStepButtons(session, timer));
+	const sent = await services.telegram.sendWithButtons(
+		userId,
+		stepMsg,
+		buildStepButtons(session, timer),
+	);
 	session.lastMessageId = sent.messageId;
 	session.lastChatId = sent.chatId;
 
@@ -385,14 +397,15 @@ export async function handleCookCallback(
 			);
 			endSession(userId);
 			// H6: Ask about leftovers
-			await services.telegram.sendWithButtons(
-				userId,
-				`Any leftovers from ${recipeTitle}?`,
-				[[
-					{ text: 'Yes, log leftovers', callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}` },
+			await services.telegram.sendWithButtons(userId, `Any leftovers from ${recipeTitle}?`, [
+				[
+					{
+						text: 'Yes, log leftovers',
+						callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}`,
+					},
 					{ text: 'No leftovers', callbackData: 'app:food:lo:post-meal:no' },
-				]],
-			);
+				],
+			]);
 			break;
 		}
 		case 't': {
@@ -416,9 +429,12 @@ export async function handleCookCallback(
 				]);
 				if (activeSession.ttsEnabled && services.audio) {
 					const speakText = `Timer done! Step ${stepNum}: ${brief}`;
-					void services.config.get('cooking_speaker_device').then((device) => {
-						services.audio.speak(speakText, (device as string) || undefined).catch(() => {});
-					}).catch(() => {});
+					void services.config
+						.get('cooking_speaker_device')
+						.then((device) => {
+							services.audio.speak(speakText, (device as string) || undefined).catch(() => {});
+						})
+						.catch(() => {});
 				}
 			}, durationMs) as ReturnType<typeof setTimeout>;
 			await services.telegram.editMessage(
@@ -527,20 +543,18 @@ export async function handleCookTextAction(
 		case 'done': {
 			cancelSessionTimer(session);
 			const recipeTitle = session.recipeTitle;
-			await services.telegram.send(
-				ctx.userId,
-				`Finished cooking ${recipeTitle}. All done!`,
-			);
+			await services.telegram.send(ctx.userId, `Finished cooking ${recipeTitle}. All done!`);
 			endSession(ctx.userId);
 			// H6: Ask about leftovers
-			await services.telegram.sendWithButtons(
-				ctx.userId,
-				`Any leftovers from ${recipeTitle}?`,
-				[[
-					{ text: 'Yes, log leftovers', callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}` },
+			await services.telegram.sendWithButtons(ctx.userId, `Any leftovers from ${recipeTitle}?`, [
+				[
+					{
+						text: 'Yes, log leftovers',
+						callbackData: `app:food:lo:post-meal:yes:${encodeURIComponent(recipeTitle)}`,
+					},
 					{ text: 'No leftovers', callbackData: 'app:food:lo:post-meal:no' },
-				]],
-			);
+				],
+			]);
 			break;
 		}
 	}

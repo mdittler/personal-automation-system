@@ -1,16 +1,16 @@
 {
-  "store": "Trader Joe's",
-  "date": "2026-05-12",
-  "subtotal": 35.07,
-  "tax": 0.70,
-  "total": 35.77,
-  "lineItems": [
-    { "name": "R-SALAD HERB ORG 5 OZ", "totalPrice": 2.49 },
-    { "name": "Grocery non-taxable", "totalPrice": 10.07 },
-    { "name": "Grocery non-taxable", "totalPrice": 9.35 },
-    { "name": "CUT GRATED PARMESAN (DOM", "totalPrice": 6.19 },
-    { "name": "ORG APPLE CARROT CRUSHER", "totalPrice": 2.99 },
-    { "name": "HERB PARSLEY BUNCH", "totalPrice": 1.99 },
-    { "name": "ORG WHOLE WHEAT SPAGHETT", "totalPrice": 1.99 }
-  ]
+	"store": "Trader Joe's",
+	"date": "2026-05-12",
+	"subtotal": 35.07,
+	"tax": 0.7,
+	"total": 35.77,
+	"lineItems": [
+		{ "name": "R-SALAD HERB ORG 5 OZ", "totalPrice": 2.49 },
+		{ "name": "Grocery non-taxable", "totalPrice": 10.07 },
+		{ "name": "Grocery non-taxable", "totalPrice": 9.35 },
+		{ "name": "CUT GRATED PARMESAN (DOM", "totalPrice": 6.19 },
+		{ "name": "ORG APPLE CARROT CRUSHER", "totalPrice": 2.99 },
+		{ "name": "HERB PARSLEY BUNCH", "totalPrice": 1.99 },
+		{ "name": "ORG WHOLE WHEAT SPAGHETT", "totalPrice": 1.99 }
+	]
 }

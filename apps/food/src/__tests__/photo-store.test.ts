@@ -23,10 +23,7 @@ describe('PhotoStore', () => {
 			const path = await savePhoto(store as never, photo, 'recipe');
 
 			expect(path).toMatch(/^photos\/recipe-\d{4}-\d{2}-\d{2}-[a-f0-9]+\.b64$/);
-			expect(store.write).toHaveBeenCalledWith(
-				path,
-				photo.toString('base64'),
-			);
+			expect(store.write).toHaveBeenCalledWith(path, photo.toString('base64'));
 		});
 
 		it('generates different filenames for different categories', async () => {

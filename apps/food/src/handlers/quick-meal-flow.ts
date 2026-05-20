@@ -13,11 +13,15 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { estimateMacros, MAX_INGREDIENTS, MAX_INGREDIENT_LEN } from '../services/macro-estimator.js';
+import {
+	MAX_INGREDIENTS,
+	MAX_INGREDIENT_LEN,
+	estimateMacros,
+} from '../services/macro-estimator.js';
 import { saveQuickMeal } from '../services/quick-meals-store.js';
 import type { QuickMealTemplate } from '../types.js';
-import { validateLabel } from '../utils/validate-label.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { validateLabel } from '../utils/validate-label.js';
 
 type Kind = 'home' | 'restaurant' | 'other';
 
@@ -78,10 +82,7 @@ export function hasPendingQuickMealAdd(userId: string): boolean {
 }
 
 /** Entry point from `nutrition.ts` when user types `/nutrition meals add`. */
-export async function beginQuickMealAdd(
-	services: CoreServices,
-	userId: string,
-): Promise<void> {
+export async function beginQuickMealAdd(services: CoreServices, userId: string): Promise<void> {
 	touch(userId, { step: 'awaiting_label', expiresAt: 0 });
 	await services.telegram.send(
 		userId,
@@ -106,10 +107,7 @@ export async function beginQuickMealAddPrefilled(
 	// label that fails slugifyLabel later in the confirm callback.
 	const validation = validateLabel(label);
 	if (!validation.ok) {
-		await services.telegram.send(
-			userId,
-			`Cannot save as quick-meal: ${validation.error}`,
-		);
+		await services.telegram.send(userId, `Cannot save as quick-meal: ${validation.error}`);
 		return;
 	}
 	// Bound ingredients here too — promotion may seed from a long ad-hoc text.
@@ -177,17 +175,13 @@ export async function handleQuickMealAddReply(
 		state.label = label;
 		state.step = 'awaiting_kind';
 		touch(userId, state);
-		await services.telegram.sendWithButtons(
-			userId,
-			'Step 2/4 — what kind of meal is this?',
+		await services.telegram.sendWithButtons(userId, 'Step 2/4 — what kind of meal is this?', [
 			[
-				[
-					{ text: 'Home cooking', callbackData: 'app:food:nut:meals:add:kind:home' },
-					{ text: 'Restaurant', callbackData: 'app:food:nut:meals:add:kind:restaurant' },
-					{ text: 'Other', callbackData: 'app:food:nut:meals:add:kind:other' },
-				],
+				{ text: 'Home cooking', callbackData: 'app:food:nut:meals:add:kind:home' },
+				{ text: 'Restaurant', callbackData: 'app:food:nut:meals:add:kind:restaurant' },
+				{ text: 'Other', callbackData: 'app:food:nut:meals:add:kind:other' },
 			],
-		);
+		]);
 		return true;
 	}
 
@@ -263,9 +257,7 @@ export async function handleQuickMealAddReply(
 			pending.delete(userId);
 			await services.telegram.send(
 				userId,
-				"Couldn't estimate macros: " +
-					result.error +
-					'. Try `/nutrition meals add` again.',
+				"Couldn't estimate macros: " + result.error + '. Try `/nutrition meals add` again.',
 			);
 			return true;
 		}
@@ -352,10 +344,7 @@ export async function handleQuickMealAddCallback(
 			const validation = validateLabel(state.label!);
 			if (!validation.ok) {
 				pending.delete(userId);
-				await services.telegram.send(
-					userId,
-					`Cannot save: ${validation.error}`,
-				);
+				await services.telegram.send(userId, `Cannot save: ${validation.error}`);
 				return true;
 			}
 			const now = new Date().toISOString();
@@ -387,10 +376,7 @@ export async function handleQuickMealAddCallback(
 			);
 		} catch (err) {
 			pending.delete(userId);
-			await services.telegram.send(
-				userId,
-				`Could not save quick-meal: ${(err as Error).message}`,
-			);
+			await services.telegram.send(userId, `Could not save quick-meal: ${(err as Error).message}`);
 		}
 		return true;
 	}
@@ -521,10 +507,7 @@ export async function handleQuickMealEditReply(
 	if (state.step === 'awaiting_label') {
 		const validation = validateLabel(raw);
 		if (!validation.ok) {
-			await services.telegram.send(
-				userId,
-				`${validation.error} Try again, or reply "cancel".`,
-			);
+			await services.telegram.send(userId, `${validation.error} Try again, or reply "cancel".`);
 			return true;
 		}
 		state.working.label = raw;
@@ -558,9 +541,7 @@ export async function handleQuickMealEditReply(
 			);
 		}
 		if (overCap > 0) {
-			dropNotes.push(
-				`Only the first ${MAX_INGREDIENTS} ingredients will be used.`,
-			);
+			dropNotes.push(`Only the first ${MAX_INGREDIENTS} ingredients will be used.`);
 		}
 		if (dropNotes.length > 0) {
 			await services.telegram.send(userId, dropNotes.join('\n'));

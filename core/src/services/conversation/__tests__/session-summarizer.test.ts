@@ -59,17 +59,23 @@ describe('summarizeSession', () => {
 
 		it('returns null when summary field is null', async () => {
 			deps = mkDeps('{"summary": null}');
-			expect(await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps)).toBeNull();
+			expect(
+				await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps),
+			).toBeNull();
 		});
 
 		it('returns null when summary field is missing', async () => {
 			deps = mkDeps('{}');
-			expect(await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps)).toBeNull();
+			expect(
+				await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps),
+			).toBeNull();
 		});
 
 		it('returns null when summary is empty string after sanitization', async () => {
 			deps = mkDeps('{"summary": "  "}');
-			expect(await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps)).toBeNull();
+			expect(
+				await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps),
+			).toBeNull();
 		});
 
 		it('uses tail of TURNS_TAIL=60 turns when conversation is long', async () => {
@@ -119,12 +125,16 @@ describe('summarizeSession', () => {
 
 		it('returns null when summary is non-string (number)', async () => {
 			deps = mkDeps('{"summary": 42}');
-			expect(await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps)).toBeNull();
+			expect(
+				await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps),
+			).toBeNull();
 		});
 
 		it('returns null when parsed JSON is an array', async () => {
 			deps = mkDeps('[1,2,3]');
-			expect(await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps)).toBeNull();
+			expect(
+				await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps),
+			).toBeNull();
 		});
 	});
 

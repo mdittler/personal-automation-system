@@ -9,6 +9,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 import type { FirstRunWizardDeps } from '../first-run-wizard.js';
 import {
 	__resetFirstRunWizardForTests,
@@ -17,7 +18,6 @@ import {
 	handleFirstRunWizardReply,
 	hasPendingFirstRunWizard,
 } from '../first-run-wizard.js';
-import { parse } from 'yaml';
 
 function makeDeps(overrides?: Partial<FirstRunWizardDeps>): FirstRunWizardDeps {
 	return {
@@ -91,7 +91,10 @@ describe('D5b-9a: First-run wizard', () => {
 		expect(data['user-2']?.digestPreference).toBe('yes');
 
 		// Completion message sent
-		expect(deps.telegram.send).toHaveBeenCalledWith('user-2', expect.stringContaining("You're all set"));
+		expect(deps.telegram.send).toHaveBeenCalledWith(
+			'user-2',
+			expect.stringContaining("You're all set"),
+		);
 	});
 
 	// ---- Test 3: onboard:digest-no callback stores preference and clears state ----
@@ -125,9 +128,7 @@ describe('D5b-9a: First-run wizard', () => {
 			'user-4',
 			expect.any(String),
 			expect.arrayContaining([
-				expect.arrayContaining([
-					expect.objectContaining({ callbackData: 'onboard:digest-yes' }),
-				]),
+				expect.arrayContaining([expect.objectContaining({ callbackData: 'onboard:digest-yes' })]),
 			]),
 		);
 		// No YAML written — text reply does not advance or complete the wizard
@@ -245,7 +246,9 @@ describe('D5b-9a: First-run wizard', () => {
 	// ---- Test 12 (gap): beginFirstRunWizard when Telegram send fails — state still set ----
 	it('beginFirstRunWizard state persists even if Telegram send fails', async () => {
 		const deps = makeDeps({ dataDir: tempDir });
-		(deps.telegram.send as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network error'));
+		(deps.telegram.send as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error('network error'),
+		);
 
 		await beginFirstRunWizard(deps, 'user-fail', 'FailUser');
 

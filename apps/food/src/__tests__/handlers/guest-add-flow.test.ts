@@ -1,13 +1,13 @@
 /**
  * Tests for the guided guest-add flow (H11.y Task 2).
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	hasPendingGuestAdd,
-	beginGuestAddFlow,
-	handleGuestAddReply,
-	handleGuestAddCallback,
 	__resetGuestAddFlowForTests,
+	beginGuestAddFlow,
+	handleGuestAddCallback,
+	handleGuestAddReply,
+	hasPendingGuestAdd,
 } from '../../handlers/guest-add-flow.js';
 
 // Mock addGuest so we can assert it was called without touching the filesystem.
@@ -185,7 +185,9 @@ describe('guest-add-flow', () => {
 			// editMessage called — button text should include ✓ Peanuts
 			expect(services.telegram.editMessage).toHaveBeenCalledOnce();
 			const allergyEditArgs = services.telegram.editMessage.mock.calls[0]!;
-			const allergyEditButtons = allergyEditArgs[3] as Array<Array<{ text: string; callbackData: string }>>;
+			const allergyEditButtons = allergyEditArgs[3] as Array<
+				Array<{ text: string; callbackData: string }>
+			>;
 			const peanutBtn = allergyEditButtons.flat().find((b) => b.callbackData.includes(':peanuts'));
 			expect(peanutBtn?.text).toContain('✓');
 
@@ -450,8 +452,22 @@ describe('guest-add-flow', () => {
 
 			await beginGuestAddFlow(services as never, USER_ID);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Pat');
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
 			vi.clearAllMocks();
 
 			const consumed = await handleGuestAddCallback(
@@ -503,9 +519,30 @@ describe('guest-add-flow', () => {
 
 			await beginGuestAddFlow(services as never, USER_ID);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Alex');
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:notes:skip',
+				CHAT_ID,
+				MSG_ID,
+			);
 			vi.clearAllMocks();
 
 			const consumed = await handleGuestAddCallback(
@@ -531,11 +568,32 @@ describe('guest-add-flow', () => {
 			await beginGuestAddFlow(services as never, USER_ID);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Casey');
 			// Diet: none
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
 			// Allergy: none
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
 			// Skip notes
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:notes:skip',
+				CHAT_ID,
+				MSG_ID,
+			);
 			vi.clearAllMocks();
 
 			await handleGuestAddCallback(
@@ -564,8 +622,22 @@ describe('guest-add-flow', () => {
 
 			await beginGuestAddFlow(services as never, USER_ID);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Remy');
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
 
 			// Reply with notes containing triple backticks
 			await handleGuestAddReply(
@@ -596,8 +668,22 @@ describe('guest-add-flow', () => {
 
 			await beginGuestAddFlow(services as never, USER_ID);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, 'Remy');
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
 
 			const longNotes = 'a'.repeat(1000);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, longNotes);
@@ -629,9 +715,30 @@ describe('guest-add-flow', () => {
 				USER_ID,
 				'```injection attempt```',
 			);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:notes:skip',
+				CHAT_ID,
+				MSG_ID,
+			);
 			await handleGuestAddCallback(
 				services as never,
 				sharedStore as never,
@@ -653,9 +760,30 @@ describe('guest-add-flow', () => {
 			await beginGuestAddFlow(services as never, USER_ID);
 			const longName = 'x'.repeat(200);
 			await handleGuestAddReply(services as never, sharedStore as never, USER_ID, longName);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:diet:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:allergy:none', CHAT_ID, MSG_ID);
-			await handleGuestAddCallback(services as never, sharedStore as never, USER_ID, 'app:food:host:gadd:notes:skip', CHAT_ID, MSG_ID);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:diet:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:allergy:none',
+				CHAT_ID,
+				MSG_ID,
+			);
+			await handleGuestAddCallback(
+				services as never,
+				sharedStore as never,
+				USER_ID,
+				'app:food:host:gadd:notes:skip',
+				CHAT_ID,
+				MSG_ID,
+			);
 			await handleGuestAddCallback(
 				services as never,
 				sharedStore as never,

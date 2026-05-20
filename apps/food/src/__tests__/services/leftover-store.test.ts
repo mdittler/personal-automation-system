@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import type { Leftover } from '../../types.js';
 import {
 	addLeftover,
 	buildLeftoverButtons,
@@ -12,6 +11,7 @@ import {
 	saveLeftovers,
 	updateLeftoverStatus,
 } from '../../services/leftover-store.js';
+import type { Leftover } from '../../types.js';
 
 function makeLeftover(overrides: Partial<Leftover> = {}): Leftover {
 	return {
@@ -100,10 +100,7 @@ describe('leftover-store', () => {
 			const items = [makeLeftover()];
 			await saveLeftovers(store as never, items);
 			expect(store.write).toHaveBeenCalledTimes(1);
-			expect(store.write).toHaveBeenCalledWith(
-				'leftovers.yaml',
-				expect.stringContaining('items:'),
-			);
+			expect(store.write).toHaveBeenCalledWith('leftovers.yaml', expect.stringContaining('items:'));
 		});
 
 		it('includes frontmatter in output', async () => {
@@ -147,10 +144,7 @@ describe('leftover-store', () => {
 		});
 
 		it('case-insensitive dedup preserves position', () => {
-			const existing = [
-				makeLeftover({ name: 'Chili' }),
-				makeLeftover({ name: 'Soup' }),
-			];
+			const existing = [makeLeftover({ name: 'Chili' }), makeLeftover({ name: 'Soup' })];
 			const result = addLeftover(existing, makeLeftover({ name: 'CHILI', quantity: '5 servings' }));
 			expect(result).toHaveLength(2);
 			expect(result[0].quantity).toBe('5 servings');
@@ -226,10 +220,7 @@ describe('leftover-store', () => {
 		});
 
 		it('returns empty array when no active items', () => {
-			const items = [
-				makeLeftover({ status: 'used' }),
-				makeLeftover({ status: 'frozen' }),
-			];
+			const items = [makeLeftover({ status: 'used' }), makeLeftover({ status: 'frozen' })];
 			const result = getActiveLeftovers(items);
 			expect(result).toEqual([]);
 		});
@@ -304,26 +295,39 @@ describe('leftover-store', () => {
 		});
 
 		it('shows active item names and quantities', () => {
-			const items = [makeLeftover({ name: 'Chili', quantity: '3 servings', status: 'active', expiryEstimate: '2026-04-10' })];
+			const items = [
+				makeLeftover({
+					name: 'Chili',
+					quantity: '3 servings',
+					status: 'active',
+					expiryEstimate: '2026-04-10',
+				}),
+			];
 			const result = formatLeftoverList(items, '2026-04-02');
 			expect(result).toContain('Chili');
 			expect(result).toContain('3 servings');
 		});
 
 		it('shows warning emoji for item expiring tomorrow', () => {
-			const items = [makeLeftover({ name: 'Soup', status: 'active', expiryEstimate: '2026-04-03' })];
+			const items = [
+				makeLeftover({ name: 'Soup', status: 'active', expiryEstimate: '2026-04-03' }),
+			];
 			const result = formatLeftoverList(items, '2026-04-02');
 			expect(result).toContain('⚠️');
 		});
 
 		it('shows expired emoji for item expiring today', () => {
-			const items = [makeLeftover({ name: 'Chili', status: 'active', expiryEstimate: '2026-04-02' })];
+			const items = [
+				makeLeftover({ name: 'Chili', status: 'active', expiryEstimate: '2026-04-02' }),
+			];
 			const result = formatLeftoverList(items, '2026-04-02');
 			expect(result).toContain('❌');
 		});
 
 		it('shows expired emoji for past-due item', () => {
-			const items = [makeLeftover({ name: 'OldStew', status: 'active', expiryEstimate: '2026-03-30' })];
+			const items = [
+				makeLeftover({ name: 'OldStew', status: 'active', expiryEstimate: '2026-03-30' }),
+			];
 			const result = formatLeftoverList(items, '2026-04-02');
 			expect(result).toContain('❌');
 		});
@@ -339,7 +343,9 @@ describe('leftover-store', () => {
 		});
 
 		it('works without today parameter', () => {
-			const items = [makeLeftover({ name: 'Chili', status: 'active', expiryEstimate: '2099-12-31' })];
+			const items = [
+				makeLeftover({ name: 'Chili', status: 'active', expiryEstimate: '2099-12-31' }),
+			];
 			const result = formatLeftoverList(items);
 			expect(result).toContain('Chili');
 		});

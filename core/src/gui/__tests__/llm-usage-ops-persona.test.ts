@@ -119,7 +119,10 @@ function makeModelSelector(): ModelSelector {
 }
 
 function makeModelCatalog(): ModelCatalog {
-	return { getModels: () => Promise.resolve([]), refresh: () => Promise.resolve([]) } as unknown as ModelCatalog;
+	return {
+		getModels: () => Promise.resolve([]),
+		refresh: () => Promise.resolve([]),
+	} as unknown as ModelCatalog;
 }
 
 function makeProviderRegistry(): ProviderRegistry {
@@ -241,7 +244,7 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 
 	// G1
 	it('Matt (admin) opens /gui/llm and sees both households with correct member counts and cost values', async () => {
-		const built = await buildPersonaApp({ costPerHousehold: { hA: 0.50, hB: 0.25 } });
+		const built = await buildPersonaApp({ costPerHousehold: { hA: 0.5, hB: 0.25 } });
 		app = built.app;
 		tempDir = built.tempDir;
 
@@ -305,27 +308,35 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 		const app2 = Fastify({ logger: false });
 		await app2.register(fastifyCookie, { secret: AUTH_TOKEN });
 		const eta = new Eta();
-		await app2.register(fastifyView, { engine: { eta }, root: viewsDir, viewExt: 'eta', layout: 'layout' });
+		await app2.register(fastifyView, {
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
+		});
 
 		const userToHousehold = { [MATT.userId]: MATT.householdId };
-		await app2.register(async (gui) => {
-			await registerAuth(gui, {
-				authToken: AUTH_TOKEN,
-				credentialService: credService,
-				userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
-				householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
-			});
-			await registerCsrfProtection(gui);
-			registerLlmUsageRoutes(gui, {
-				llm,
-				modelSelector: makeModelSelector(),
-				modelCatalog: makeModelCatalog(),
-				providerRegistry: makeProviderRegistry(),
-				logger,
-				costTracker: dynamicCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
-				householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
-			});
-		}, { prefix: '/gui' });
+		await app2.register(
+			async (gui) => {
+				await registerAuth(gui, {
+					authToken: AUTH_TOKEN,
+					credentialService: credService,
+					userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
+					householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
+				});
+				await registerCsrfProtection(gui);
+				registerLlmUsageRoutes(gui, {
+					llm,
+					modelSelector: makeModelSelector(),
+					modelCatalog: makeModelCatalog(),
+					providerRegistry: makeProviderRegistry(),
+					logger,
+					costTracker: dynamicCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
+					householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
+				});
+			},
+			{ prefix: '/gui' },
+		);
 
 		try {
 			const cookies = await loginAs(app2, MATT.userId, MATT.password);

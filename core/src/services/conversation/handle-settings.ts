@@ -377,7 +377,8 @@ async function confirmFlow(
 			? ''
 			: rawArgs.trim();
 	const firstSpaceInRest = afterConfirm.indexOf(' ');
-	const submittedNonce = firstSpaceInRest === -1 ? afterConfirm : afterConfirm.slice(0, firstSpaceInRest);
+	const submittedNonce =
+		firstSpaceInRest === -1 ? afterConfirm : afterConfirm.slice(0, firstSpaceInRest);
 	const phrase = firstSpaceInRest === -1 ? '' : afterConfirm.slice(firstSpaceInRest + 1).trim();
 
 	// Peek (non-consuming) first.

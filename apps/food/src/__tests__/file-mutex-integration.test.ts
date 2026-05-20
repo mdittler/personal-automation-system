@@ -5,10 +5,11 @@
  * (non-lost) results, and that multi-store locks don't deadlock.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import { parse, stringify } from 'yaml';
 import type { ScopedDataStore } from '@pas/core/types';
+import { withMultiFileLock } from '@pas/core/utils/file-mutex';
 import { stripFrontmatter } from '@pas/core/utils/frontmatter';
+import { describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 import {
 	addItems,
 	archivePurchased,
@@ -23,9 +24,7 @@ import {
 	savePantry,
 	withPantryLock,
 } from '../services/pantry-store.js';
-import { appendWaste, withWasteLock } from '../services/waste-store.js';
-import { withFreezerLock } from '../services/freezer-store.js';
-import { withMultiFileLock } from '@pas/core/utils/file-mutex';
+import { appendWaste } from '../services/waste-store.js';
 import type { GroceryItem, PantryItem, WasteLogEntry } from '../types.js';
 
 /**

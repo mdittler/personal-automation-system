@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseRecallVerdict, RECALL_SAFE_DEFAULT } from '../recall-classifier.js';
+import { RECALL_SAFE_DEFAULT, parseRecallVerdict } from '../recall-classifier.js';
 
 const TODAY = '2026-05-05';
 
@@ -51,7 +51,11 @@ describe('parseRecallVerdict — accepted cases', () => {
 			reason: 'ok',
 		});
 		expect(result.shouldRecall).toBe(true);
-		expect(result.timeAnchor).toEqual({ type: 'window', after: '2026-04-14', before: '2026-04-22' });
+		expect(result.timeAnchor).toEqual({
+			type: 'window',
+			after: '2026-04-14',
+			before: '2026-04-22',
+		});
 	});
 
 	it('accepts window anchor with only after', () => {
@@ -80,7 +84,12 @@ describe('parseRecallVerdict — accepted cases', () => {
 		// 2024-02-29 is ~796 days before today=2026-05-05, which exceeds the default 365-day window.
 		// Use maxWindowDays=1000 to isolate the calendar-strict check from the temporal-boundary check.
 		const result = parseRecallVerdict(
-			{ shouldRecall: true, query: 'food', timeAnchor: { type: 'absolute', on: '2024-02-29' }, reason: 'leap year' },
+			{
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2024-02-29' },
+				reason: 'leap year',
+			},
 			{ today: TODAY, maxWindowDays: 1000 },
 		);
 		expect(result.shouldRecall).toBe(true);
@@ -116,85 +125,103 @@ describe('parseRecallVerdict — accepted cases', () => {
 
 describe('parseRecallVerdict — absolute anchor rejections', () => {
 	it('rejects calendar-invalid date: 2026-13-40', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2026-13-40' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2026-13-40' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects calendar-invalid date: 2026-02-30 (Feb has no 30th)', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2026-02-30' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2026-02-30' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects non-leap-year Feb 29: 2025-02-29', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2025-02-29' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2025-02-29' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects Apr 31: 2026-04-31', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2026-04-31' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2026-04-31' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects natural-language "yesterday"', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: 'yesterday' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: 'yesterday' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects missing "on" field', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects future date: 2026-05-06 (today is 2026-05-05)', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2026-05-06' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2026-05-06' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects date >365d before today: 2025-04-28', () => {
 		// 2025-04-28 is 372 days before 2026-05-05
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2025-04-28' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2025-04-28' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects extra field in absolute anchor object', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'absolute', on: '2026-04-28', foo: 'bar' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'absolute', on: '2026-04-28', foo: 'bar' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 });
 
@@ -202,67 +229,81 @@ describe('parseRecallVerdict — absolute anchor rejections', () => {
 
 describe('parseRecallVerdict — window anchor rejections', () => {
 	it('rejects before-only window where before is in the future', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', before: '2027-01-01' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', before: '2027-01-01' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects after-only window where after is in the future', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', after: '2027-01-01' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', after: '2027-01-01' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects window span >365 days: after=2024-01-01, before=2026-01-01', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', after: '2024-01-01', before: '2026-01-01' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', after: '2024-01-01', before: '2026-01-01' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects after > before: after=2026-04-28, before=2026-04-21', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', after: '2026-04-28', before: '2026-04-21' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', after: '2026-04-28', before: '2026-04-21' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects extra field in window anchor object', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', after: '2026-04-14', before: '2026-04-22', extra: 1 },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', after: '2026-04-14', before: '2026-04-22', extra: 1 },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects before-only window where before is an ancient date (>365d ago)', () => {
 		// One-sided windows must be individually validated against today, not only by span.
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', before: '2020-01-01' },
-			reason: 'very old',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', before: '2020-01-01' },
+				reason: 'very old',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects after-only window where after is an ancient date (>365d ago)', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'window', after: '2020-01-01' },
-			reason: 'very old',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'window', after: '2020-01-01' },
+				reason: 'very old',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('accepts before-only window where before is within 365 days', () => {
@@ -281,30 +322,36 @@ describe('parseRecallVerdict — window anchor rejections', () => {
 
 describe('parseRecallVerdict — legacy timeWindow clean break', () => {
 	it('rejects legacy timeAnchor: "recent" string (P5 format)', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: 'recent',
-			reason: 'legacy',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: 'recent',
+				reason: 'legacy',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects legacy timeAnchor: "older" string', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: 'older',
-			reason: 'legacy',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: 'older',
+				reason: 'legacy',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects unknown type: { type: "unknown", on: "2026-04-30" }', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'food',
-			timeAnchor: { type: 'unknown', on: '2026-04-30' },
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'food',
+				timeAnchor: { type: 'unknown', on: '2026-04-30' },
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 });
 
@@ -312,21 +359,25 @@ describe('parseRecallVerdict — legacy timeWindow clean break', () => {
 
 describe('parseRecallVerdict — top-level field validation', () => {
 	it('rejects empty query string', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: '',
-			timeAnchor: null,
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: '',
+				timeAnchor: null,
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects 201-char query string', () => {
-		expect(parse({
-			shouldRecall: true,
-			query: 'a'.repeat(201),
-			timeAnchor: null,
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: true,
+				query: 'a'.repeat(201),
+				timeAnchor: null,
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects non-JSON raw value (string)', () => {
@@ -334,12 +385,14 @@ describe('parseRecallVerdict — top-level field validation', () => {
 	});
 
 	it('rejects shouldRecall as string "true"', () => {
-		expect(parse({
-			shouldRecall: 'true',
-			query: 'food',
-			timeAnchor: null,
-			reason: 'bad',
-		})).toEqual(RECALL_SAFE_DEFAULT);
+		expect(
+			parse({
+				shouldRecall: 'true',
+				query: 'food',
+				timeAnchor: null,
+				reason: 'bad',
+			}),
+		).toEqual(RECALL_SAFE_DEFAULT);
 	});
 
 	it('rejects null input', () => {
@@ -363,7 +416,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 	it('default cap 365 (when undefined): 365-day-old absolute accepts', () => {
 		// 2025-05-07 is exactly 365 days before 2026-05-07
 		const result = parseRecallVerdict(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-05-07' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'absolute', on: '2025-05-07' },
+				reason: 'r',
+			},
 			{ today: TODAY_7 },
 		);
 		expect(result).not.toEqual(RECALL_SAFE_DEFAULT);
@@ -373,7 +431,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 	it('default cap 365 (when undefined): 366-day-old absolute rejects', () => {
 		// 2025-05-06 is 366 days before 2026-05-07
 		const result = parseRecallVerdict(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-05-06' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'absolute', on: '2025-05-06' },
+				reason: 'r',
+			},
 			{ today: TODAY_7 },
 		);
 		expect(result).toEqual(RECALL_SAFE_DEFAULT);
@@ -382,7 +445,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 	it('lower cap 30 rejects a 60-day window', () => {
 		// 2026-03-01 is ~67 days before 2026-05-07
 		const result = parseWithCap(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'window', after: '2026-03-01', before: '2026-05-07' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'window', after: '2026-03-01', before: '2026-05-07' },
+				reason: 'r',
+			},
 			30,
 		);
 		expect(result).toEqual(RECALL_SAFE_DEFAULT);
@@ -391,7 +459,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 	it('higher cap 730 accepts a 500-day-old absolute', () => {
 		// 2024-12-15 is 509 days before 2026-05-07
 		const result = parseWithCap(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2024-12-15' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'absolute', on: '2024-12-15' },
+				reason: 'r',
+			},
 			730,
 		);
 		expect(result.shouldRecall).toBe(true);
@@ -399,7 +472,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 
 	it('cap 1: 1-day-old absolute accepts', () => {
 		const result = parseWithCap(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2026-05-06' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'absolute', on: '2026-05-06' },
+				reason: 'r',
+			},
 			1,
 		);
 		expect(result.shouldRecall).toBe(true);
@@ -407,7 +485,12 @@ describe('parseRecallVerdict — configurable maxWindowDays', () => {
 
 	it('cap 1: 2-day-old absolute rejects', () => {
 		const result = parseWithCap(
-			{ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2026-05-05' }, reason: 'r' },
+			{
+				shouldRecall: true,
+				query: 'x',
+				timeAnchor: { type: 'absolute', on: '2026-05-05' },
+				reason: 'r',
+			},
 			1,
 		);
 		expect(result).toEqual(RECALL_SAFE_DEFAULT);

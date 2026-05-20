@@ -170,7 +170,7 @@ export class DataStoreServiceImpl implements DataStoreService {
 				// R9: Neither source available — throw even with bypass token.
 				throw new Error(
 					`forShared("${scope}") cannot resolve a household: request context has neither ` +
-					'householdId nor userId. Use forSystem() for cross-household system writes.',
+						'householdId nor userId. Use forSystem() for cross-household system writes.',
 				);
 			}
 		}

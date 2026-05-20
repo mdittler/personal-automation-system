@@ -7,12 +7,12 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import type { CuisineClassification, PlannedMeal } from '../types.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { loadHousehold } from '../utils/household-guard.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 import { loadCurrentPlan } from './meal-plan-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
-import type { CuisineClassification, PlannedMeal } from '../types.js';
-import { sanitizeInput } from '../utils/sanitize.js';
-import { loadHousehold } from '../utils/household-guard.js';
-import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 export interface CuisineRepetition {
 	cuisine: string;

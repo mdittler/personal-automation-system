@@ -6,8 +6,8 @@
  */
 
 import type { CoreServices } from '@pas/core/types';
-import type { HealthDailyMetricsPayload } from './types.js';
 import { upsertDailyHealth } from '../services/health-store.js';
+import type { HealthDailyMetricsPayload } from './types.js';
 
 /**
  * Register all health-related EventBus subscribers.
@@ -44,9 +44,11 @@ export function registerHealthSubscribers(services: CoreServices): void {
 function isHealthDailyMetrics(value: unknown): value is HealthDailyMetricsPayload {
 	if (!value || typeof value !== 'object') return false;
 	const v = value as Record<string, unknown>;
-	return typeof v['userId'] === 'string'
-		&& typeof v['date'] === 'string'
-		&& typeof v['source'] === 'string'
-		&& typeof v['metrics'] === 'object'
-		&& v['metrics'] !== null;
+	return (
+		typeof v['userId'] === 'string' &&
+		typeof v['date'] === 'string' &&
+		typeof v['source'] === 'string' &&
+		typeof v['metrics'] === 'object' &&
+		v['metrics'] !== null
+	);
 }

@@ -112,9 +112,7 @@ describe('grocery-store', () => {
 
 		it('does not merge quantities when different units', () => {
 			const list = makeList({ items: [makeItem({ name: 'Butter', quantity: 1, unit: 'stick' })] });
-			const result = addItems(list, [
-				makeItem({ name: 'butter', quantity: 500, unit: 'g' }),
-			]);
+			const result = addItems(list, [makeItem({ name: 'butter', quantity: 500, unit: 'g' })]);
 			expect(result.items).toHaveLength(1);
 			// Quantity stays at original value when units differ
 			expect(result.items[0]!.quantity).toBe(1);
@@ -520,7 +518,14 @@ describe('grocery-store', () => {
 
 		it('escapes Markdown control characters in item names', () => {
 			const list = makeList({
-				items: [makeItem({ name: '*Organic* [Spinach]', department: 'Produce', quantity: 1, unit: 'bag' })],
+				items: [
+					makeItem({
+						name: '*Organic* [Spinach]',
+						department: 'Produce',
+						quantity: 1,
+						unit: 'bag',
+					}),
+				],
 			});
 
 			const msg = formatGroceryMessage(list);

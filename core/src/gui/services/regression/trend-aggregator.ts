@@ -12,8 +12,8 @@
  */
 
 import type { ManifestCaseResult, RunManifest } from '../../../types/regression.js';
-import type { LeaderboardTier } from './leaderboard-aggregator.js';
 import type { LineSeries, ScatterPoint } from './chart-svg.js';
+import type { LeaderboardTier } from './leaderboard-aggregator.js';
 
 export type TimeWindow = '7d' | '30d' | 'all';
 

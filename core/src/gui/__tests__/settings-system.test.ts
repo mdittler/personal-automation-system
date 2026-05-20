@@ -18,19 +18,19 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
-import { CredentialService } from '../../services/credentials/index.js';
-import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
 	SYSTEM_SETTING_DEFS,
 } from '../../services/config/settings-metadata.js';
+import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
+import { CredentialService } from '../../services/credentials/index.js';
 import { buildSettingsRegistry } from '../../services/settings/build-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
-import { registerViewLocals } from '../view-locals.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerViewLocals } from '../view-locals.js';
 
 const AUTH_TOKEN = 'tok';
 const logger = pino({ level: 'silent' });
@@ -43,7 +43,10 @@ const viewsDir = join(moduleDir, 'views');
 
 function makeConfig(): SystemConfig {
 	return {
-		port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
+		port: 3000,
+		dataDir: '/tmp',
+		logLevel: 'info',
+		timezone: 'UTC',
 		telegram: { botToken: 'tok' },
 		claude: { apiKey: '', model: 'm' },
 		cloudflare: {},
@@ -54,9 +57,12 @@ function makeConfig(): SystemConfig {
 				standard: { provider: 'claude', model: 'm' },
 			},
 		},
-		gui: { authToken: 'tok' }, api: { token: '' }, n8n: { dispatchUrl: '' },
+		gui: { authToken: 'tok' },
+		api: { token: '' },
+		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [], webhooks: [],
+		users: [],
+		webhooks: [],
 		backup: { enabled: false, path: '/tmp/backups', schedule: '0 3 * * *', retentionCount: 7 },
 		chat: {
 			logToNotes: false,
@@ -67,7 +73,10 @@ function makeConfig(): SystemConfig {
 	} as unknown as SystemConfig;
 }
 
-async function writeSeedYaml(tempDir: string, extra: Record<string, unknown> = {}): Promise<string> {
+async function writeSeedYaml(
+	tempDir: string,
+	extra: Record<string, unknown> = {},
+): Promise<string> {
 	const p = join(tempDir, 'pas.yaml');
 	await writeFile(p, JSON.stringify({ users: [], ...extra }), 'utf-8');
 	return p;
@@ -80,7 +89,10 @@ interface TestSetup {
 	configPath: string;
 }
 
-async function buildTestServer(opts: { isAdmin: boolean; configOverride?: Partial<SystemConfig> }): Promise<TestSetup> {
+async function buildTestServer(opts: {
+	isAdmin: boolean;
+	configOverride?: Partial<SystemConfig>;
+}): Promise<TestSetup> {
 	const tempDir = await mkdtemp(join(tmpdir(), 'pas-sys-gui-'));
 	const configPath = await writeSeedYaml(tempDir);
 
@@ -94,8 +106,13 @@ async function buildTestServer(opts: { isAdmin: boolean; configOverride?: Partia
 	});
 
 	const mockLogger = {
-		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
-		error: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
 	};
 
 	const settingsWriter = new SettingsWriter({
@@ -117,7 +134,9 @@ async function buildTestServer(opts: { isAdmin: boolean; configOverride?: Partia
 			id === TEST_USER_ID
 				? { id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 }
 				: null,
-		getAllUsers: () => [{ id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 }],
+		getAllUsers: () => [
+			{ id: TEST_USER_ID, name: 'AdminUser', isAdmin: opts.isAdmin, telegramId: 1 },
+		],
 	};
 
 	const householdService = {
@@ -209,7 +228,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 
 	afterEach(async () => {
 		await Promise.all([
-			nonAdminSetup.app.close().then(() => rm(nonAdminSetup.tempDir, { recursive: true, force: true })),
+			nonAdminSetup.app
+				.close()
+				.then(() => rm(nonAdminSetup.tempDir, { recursive: true, force: true })),
 			adminSetup.app.close().then(() => rm(adminSetup.tempDir, { recursive: true, force: true })),
 		]);
 	});
@@ -217,7 +238,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 	it('non-admin GET /gui/settings: no System or Dangerous accordion', async () => {
 		const { allCookies } = await login(nonAdminSetup.app);
 		const res = await nonAdminSetup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		expect(res.statusCode).toBe(200);
 		// No dangerous/system accordions
@@ -230,7 +253,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 	it('non-admin GET: Memory & Sessions accordion IS present', async () => {
 		const { allCookies } = await login(nonAdminSetup.app);
 		const res = await nonAdminSetup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('Memory &amp; Sessions');
@@ -240,7 +265,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 	it('admin GET /gui/settings: System and Dangerous accordions present', async () => {
 		const { allCookies } = await login(adminSetup.app);
 		const res = await adminSetup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('System-wide settings');
@@ -251,7 +278,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 	it('admin GET: auto_prune visible in Dangerous section', async () => {
 		const { allCookies } = await login(adminSetup.app);
 		const res = await adminSetup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		expect(res.body).toContain('auto_prune');
 		expect(res.body).toContain('Auto-prune');
@@ -265,7 +294,9 @@ describe('Admin/non-admin category visibility (REQ-SETTINGS-025)', () => {
 describe('Restart-required badge (REQ-SETTINGS-031)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -274,7 +305,9 @@ describe('Restart-required badge (REQ-SETTINGS-031)', () => {
 	it('restart badge present for routing.verification.enabled', async () => {
 		const { allCookies } = await login(setup.app);
 		const res = await setup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		expect(res.body).toContain('restart-badge');
 		// routing.verification.enabled has restartRequired: true
@@ -284,7 +317,9 @@ describe('Restart-required badge (REQ-SETTINGS-031)', () => {
 	it('restart badge absent for auto_reset_idle_minutes', async () => {
 		const { allCookies } = await login(setup.app);
 		const res = await setup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: allCookies,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: allCookies,
 		});
 		// The auto_reset_idle_minutes row should not have restart badge
 		// (restartRequired: false). We check that the badge text appears
@@ -303,7 +338,9 @@ describe('Restart-required badge (REQ-SETTINGS-031)', () => {
 describe('Admin system write via single-form POST', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -336,7 +373,9 @@ describe('Admin system write via single-form POST', () => {
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)['retention_days'],
+			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
+				'retention_days'
+			],
 		).toBe(180);
 	});
 
@@ -379,7 +418,9 @@ describe('Admin system write via single-form POST', () => {
 		// Re-login to get fresh cookies after redirect
 		const { allCookies: fresh } = await login(setup.app);
 		const getRes = await setup.app.inject({
-			method: 'GET', url: '/gui/settings', cookies: fresh,
+			method: 'GET',
+			url: '/gui/settings',
+			cookies: fresh,
 		});
 		expect(getRes.body).toContain('365');
 	});
@@ -392,7 +433,9 @@ describe('Admin system write via single-form POST', () => {
 describe('Dangerous tampering check (REQ-SETTINGS-035)', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -444,7 +487,9 @@ describe('Dangerous tampering check (REQ-SETTINGS-035)', () => {
 describe('Reset endpoint', () => {
 	let setup: TestSetup;
 
-	beforeEach(async () => { setup = await buildTestServer({ isAdmin: true }); });
+	beforeEach(async () => {
+		setup = await buildTestServer({ isAdmin: true });
+	});
 	afterEach(async () => {
 		await setup.app.close();
 		await rm(setup.tempDir, { recursive: true, force: true });
@@ -484,7 +529,10 @@ describe('Reset endpoint', () => {
 		// YAML key removed
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<string, unknown>;
+		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+			string,
+			unknown
+		>;
 		expect('retention_days' in sessions).toBe(false);
 	});
 

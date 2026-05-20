@@ -181,7 +181,9 @@ describe('handlePerishableCallback', () => {
 		});
 
 		it('withholds the freeze confirmation when the freezer write fails', async () => {
-			const pantryItems = [makePantryItem({ name: 'Broccoli', quantity: '1 head', expiryEstimate: '2026-04-03' })];
+			const pantryItems = [
+				makePantryItem({ name: 'Broccoli', quantity: '1 head', expiryEstimate: '2026-04-03' }),
+			];
 			const store = mockStore({
 				'pantry.yaml': pantryYaml(pantryItems),
 				'freezer.yaml': null,
@@ -598,8 +600,13 @@ describe('security: perishable callback guards', () => {
 		const storage = new Map(Object.entries(storeData));
 		const store = {
 			read: vi.fn(async (path: string) => storage.get(path) ?? null),
-			write: vi.fn(async (path: string, content: string) => { storage.set(path, content); }),
-			append: vi.fn(), list: vi.fn(), exists: vi.fn(), archive: vi.fn(),
+			write: vi.fn(async (path: string, content: string) => {
+				storage.set(path, content);
+			}),
+			append: vi.fn(),
+			list: vi.fn(),
+			exists: vi.fn(),
+			archive: vi.fn(),
 		};
 		return store;
 	}
@@ -614,7 +621,9 @@ describe('security: perishable callback guards', () => {
 		await handlePerishableCallback(services, 'freeze:0:Spinach', 'user1', 1, 1, store as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This item was already handled.',
+			1,
+			1,
+			'This item was already handled.',
 		);
 		// Pantry should NOT have been modified
 		expect(store.write).not.toHaveBeenCalled();
@@ -628,7 +637,9 @@ describe('security: perishable callback guards', () => {
 		await handlePerishableCallback(services, 'toss:0:Chicken', 'user1', 1, 1, store as any);
 
 		expect(vi.mocked(services.telegram.editMessage)).toHaveBeenCalledWith(
-			1, 1, 'This item was already handled.',
+			1,
+			1,
+			'This item was already handled.',
 		);
 		expect(store.write).not.toHaveBeenCalled();
 	});

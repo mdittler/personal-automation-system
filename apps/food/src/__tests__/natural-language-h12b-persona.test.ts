@@ -15,13 +15,13 @@
  *   D. End-to-end routing — message reaches handler and returns
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isCulturalCalendarIntent } from '../handlers/cultural-calendar-handler.js';
-import { isHostingIntent } from '../handlers/hosting.js';
 import { isHealthCorrelationIntent } from '../handlers/health.js';
+import { isHostingIntent } from '../handlers/hosting.js';
 import { isNutritionViewIntent } from '../handlers/nutrition.js';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
@@ -128,7 +128,9 @@ describe('Persona — end-to-end: cultural calendar phrases route to the handler
 		const mockStore = createMockStore();
 		vi.mocked(services.data.forShared).mockReturnValue(mockStore as unknown as ScopedDataStore);
 		vi.mocked(services.data.forUser).mockReturnValue(mockStore as unknown as ScopedDataStore);
-		vi.mocked(services.llm.complete).mockResolvedValue('Try making a cranberry glazed turkey for Thanksgiving!');
+		vi.mocked(services.llm.complete).mockResolvedValue(
+			'Try making a cranberry glazed turkey for Thanksgiving!',
+		);
 		await init(services);
 	});
 
@@ -139,7 +141,10 @@ describe('Persona — end-to-end: cultural calendar phrases route to the handler
 	});
 
 	it('"what should I cook for Christmas" reaches the handler and sends a Telegram message', async () => {
-		const ctx = createTestMessageContext({ text: 'what should I cook for Christmas', userId: 'user1' });
+		const ctx = createTestMessageContext({
+			text: 'what should I cook for Christmas',
+			userId: 'user1',
+		});
 		await handleMessage?.(ctx);
 		expect(services.telegram.send).toHaveBeenCalledWith('user1', expect.any(String));
 	});

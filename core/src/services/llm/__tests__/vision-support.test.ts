@@ -3,7 +3,7 @@
  */
 
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
 	LLMCompletionOptions,
 	LLMCompletionResult,
@@ -12,7 +12,7 @@ import type {
 	ProviderModel,
 } from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
-import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
+import { LLMGuard } from '../llm-guard.js';
 import { BaseProvider, type BaseProviderOptions } from '../providers/base-provider.js';
 
 const logger = pino({ level: 'silent' });
@@ -118,9 +118,9 @@ describe('LLM Vision Support', () => {
 		it('throws when images passed to a non-vision provider', async () => {
 			const provider = new TextOnlyProvider(baseOpts());
 
-			await expect(
-				provider.complete('describe this', { images: [testImage] }),
-			).rejects.toThrow(/does not support vision/i);
+			await expect(provider.complete('describe this', { images: [testImage] })).rejects.toThrow(
+				/does not support vision/i,
+			);
 		});
 
 		it('allows images on a vision-capable provider', async () => {
@@ -171,18 +171,18 @@ describe('LLM Vision Support', () => {
 			const provider = new VisionProvider(baseOpts());
 			const badImage = { data: Buffer.from('data'), mimeType: 'text/html' };
 
-			await expect(
-				provider.complete('describe this', { images: [badImage] }),
-			).rejects.toThrow(/unsupported image mime type/i);
+			await expect(provider.complete('describe this', { images: [badImage] })).rejects.toThrow(
+				/unsupported image mime type/i,
+			);
 		});
 
 		it('throws on empty MIME type', async () => {
 			const provider = new VisionProvider(baseOpts());
 			const badImage = { data: Buffer.from('data'), mimeType: '' };
 
-			await expect(
-				provider.complete('describe this', { images: [badImage] }),
-			).rejects.toThrow(/unsupported image mime type/i);
+			await expect(provider.complete('describe this', { images: [badImage] })).rejects.toThrow(
+				/unsupported image mime type/i,
+			);
 		});
 
 		it.each(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])(

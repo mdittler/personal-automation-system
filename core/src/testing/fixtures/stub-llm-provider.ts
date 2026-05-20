@@ -7,14 +7,10 @@
  */
 
 import type { Logger } from 'pino';
-import type {
-	LLMCompletionOptions,
-	LLMCompletionResult,
-	ProviderModel,
-} from '../../types/llm.js';
 import type { CostTracker } from '../../services/llm/cost-tracker.js';
 import { BaseProvider } from '../../services/llm/providers/base-provider.js';
 import { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
+import type { LLMCompletionOptions, LLMCompletionResult, ProviderModel } from '../../types/llm.js';
 
 export interface StubProviderOptions {
 	/** Fixed category to return for classification prompts. Defaults to 'chatbot'. */
@@ -63,11 +59,7 @@ export class StubProvider extends BaseProvider {
 	private readonly p95Ms: number;
 	private readonly capMs: number;
 
-	constructor(
-		costTracker: CostTracker,
-		logger: Logger,
-		opts: StubProviderOptions = {},
-	) {
+	constructor(costTracker: CostTracker, logger: Logger, opts: StubProviderOptions = {}) {
 		super({
 			providerId: 'stub',
 			providerType: 'openai-compatible',

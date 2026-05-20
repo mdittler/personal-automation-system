@@ -1,6 +1,6 @@
+import type { LLMService } from '../../types/llm.js';
 import { generateTitle } from './title-generator.js';
 import type { TitleService } from './title-service.js';
-import type { LLMService } from '../../types/llm.js';
 
 export interface AutoTitleHookParams {
 	userId: string;
@@ -27,15 +27,23 @@ export async function runTitleAfterFirstExchange(
 			logger: deps.logger,
 		});
 	} catch (err) {
-		deps.logger.warn({ err, userId: params.userId, sessionId: params.sessionId }, 'auto-title-hook: generateTitle threw');
+		deps.logger.warn(
+			{ err, userId: params.userId, sessionId: params.sessionId },
+			'auto-title-hook: generateTitle threw',
+		);
 		return;
 	}
 	if (title === null) return;
 
 	try {
-		await deps.titleService.applyTitle(params.userId, params.sessionId, title, { skipIfTitled: true });
+		await deps.titleService.applyTitle(params.userId, params.sessionId, title, {
+			skipIfTitled: true,
+		});
 	} catch (err) {
-		deps.logger.warn({ err, userId: params.userId, sessionId: params.sessionId }, 'auto-title-hook: applyTitle threw');
+		deps.logger.warn(
+			{ err, userId: params.userId, sessionId: params.sessionId },
+			'auto-title-hook: applyTitle threw',
+		);
 	}
 }
 

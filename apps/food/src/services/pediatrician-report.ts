@@ -6,7 +6,13 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import type { ChildFoodLog, DailyMacroEntry, FoodIntroduction, MacroData, Recipe } from '../types.js';
+import type {
+	ChildFoodLog,
+	DailyMacroEntry,
+	FoodIntroduction,
+	MacroData,
+	Recipe,
+} from '../types.js';
 import { addDays } from '../utils/date.js';
 import { computeAgeDisplay } from './family-profiles.js';
 import { averageMacros, loadMacrosForPeriod } from './macro-tracker.js';
@@ -53,9 +59,7 @@ export function computeFoodVariety(
 ): FoodVarietyResult {
 	const cutoffStr = addDays(today, -periodDays);
 
-	const recentFoods = introductions
-		.filter(i => i.date >= cutoffStr)
-		.map(i => i.food);
+	const recentFoods = introductions.filter((i) => i.date >= cutoffStr).map((i) => i.food);
 
 	const unique = [...new Set(recentFoods)];
 	return { count: unique.length, foods: unique };
@@ -97,8 +101,8 @@ export function computeAllergenHistory(introductions: FoodIntroduction[]): Aller
 
 export function computeReactionSummary(introductions: FoodIntroduction[]): ReactionEntry[] {
 	return introductions
-		.filter(i => i.reaction !== 'none')
-		.map(i => ({
+		.filter((i) => i.reaction !== 'none')
+		.map((i) => ({
 			food: i.food,
 			severity: i.reaction,
 			date: i.date,
@@ -124,7 +128,10 @@ export function computeMacroBalance(entries: DailyMacroEntry[]): MacroData {
 	if (entries.length === 0) {
 		return { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
 	}
-	return averageMacros(entries.map(e => e.totals), entries.length);
+	return averageMacros(
+		entries.map((e) => e.totals),
+		entries.length,
+	);
 }
 
 export function formatPediatricianReport(data: PediatricianReportData): string {
@@ -147,7 +154,9 @@ export function formatPediatricianReport(data: PediatricianReportData): string {
 		lines.push('No allergen introductions recorded.');
 	} else {
 		for (const entry of data.allergenHistory) {
-			lines.push(`- ${entry.category}: introduced ${entry.firstIntroduced} (${entry.foods.join(', ')})`);
+			lines.push(
+				`- ${entry.category}: introduced ${entry.firstIntroduced} (${entry.foods.join(', ')})`,
+			);
 		}
 	}
 	lines.push('');
@@ -167,7 +176,9 @@ export function formatPediatricianReport(data: PediatricianReportData): string {
 	lines.push('**Nutrition (daily avg):**');
 	const m = data.macroBalance;
 	if ((m.calories ?? 0) > 0) {
-		lines.push(`${m.calories} cal | ${m.protein ?? 0}g protein | ${m.carbs ?? 0}g carbs | ${m.fat ?? 0}g fat`);
+		lines.push(
+			`${m.calories} cal | ${m.protein ?? 0}g protein | ${m.carbs ?? 0}g carbs | ${m.fat ?? 0}g fat`,
+		);
 	} else {
 		lines.push('No macro data tracked.');
 	}

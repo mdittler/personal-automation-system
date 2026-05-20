@@ -19,9 +19,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../index.js';
 import { requestContext } from '../../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../../household/index.js';
+import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../index.js';
 
 function createMockLogger(): Logger {
 	return {
@@ -218,9 +218,7 @@ describe('ContextStoreServiceImpl.listDurableForUser', () => {
 		});
 
 		await expect(
-			requestContext.run({ userId: 'unassigned' }, () =>
-				store.listDurableForUser('unassigned'),
-			),
+			requestContext.run({ userId: 'unassigned' }, () => store.listDurableForUser('unassigned')),
 		).rejects.toThrow(HouseholdBoundaryError);
 	});
 

@@ -75,9 +75,7 @@ export async function stageTranscription(
 	const shaPath = join(tempDir, `${baseName}.transcription.sha256`);
 	await writeFile(yamlPath, yamlText, 'utf8');
 	const sha =
-		shaMode === 'matching'
-			? createHash('sha256').update(yamlText).digest('hex')
-			: 'b'.repeat(64);
+		shaMode === 'matching' ? createHash('sha256').update(yamlText).digest('hex') : 'b'.repeat(64);
 	await writeFile(shaPath, sha, 'utf8');
 	return yamlPath;
 }
@@ -96,9 +94,7 @@ export function llmShim(text: string): ReceiptRunnerDeps['llm'] {
 	};
 }
 
-export function llmShimFromMock(
-	completeMock: ReturnType<typeof vi.fn>,
-): ReceiptRunnerDeps['llm'] {
+export function llmShimFromMock(completeMock: ReturnType<typeof vi.fn>): ReceiptRunnerDeps['llm'] {
 	return {
 		complete: completeMock,
 		completeWithMeta: vi.fn(async (...args: unknown[]) => ({

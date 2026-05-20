@@ -14,11 +14,15 @@ function makeConfig(overrides: Record<string, unknown> | null): AppConfigService
 
 describe('resolveUserBool — happy path', () => {
 	it('returns true when override is boolean true', async () => {
-		expect(await resolveUserBool(makeConfig({ log_to_notes: true }), 'u1', 'log_to_notes', false)).toBe(true);
+		expect(
+			await resolveUserBool(makeConfig({ log_to_notes: true }), 'u1', 'log_to_notes', false),
+		).toBe(true);
 	});
 
 	it('returns false when override is boolean false', async () => {
-		expect(await resolveUserBool(makeConfig({ log_to_notes: false }), 'u1', 'log_to_notes', true)).toBe(false);
+		expect(
+			await resolveUserBool(makeConfig({ log_to_notes: false }), 'u1', 'log_to_notes', true),
+		).toBe(false);
 	});
 
 	it('returns systemDefault true when no override file', async () => {
@@ -30,7 +34,9 @@ describe('resolveUserBool — happy path', () => {
 	});
 
 	it('returns systemDefault when key is absent from override file', async () => {
-		expect(await resolveUserBool(makeConfig({ other_key: 'x' }), 'u1', 'log_to_notes', true)).toBe(true);
+		expect(await resolveUserBool(makeConfig({ other_key: 'x' }), 'u1', 'log_to_notes', true)).toBe(
+			true,
+		);
 	});
 });
 
@@ -58,14 +64,22 @@ describe('resolveUserBool — string coercion', () => {
 		['OFF', false],
 		['0', false],
 	])('coerces string %p → %p', async (raw, expected) => {
-		expect(await resolveUserBool(makeConfig({ log_to_notes: raw }), 'u1', 'log_to_notes', !expected)).toBe(expected);
+		expect(
+			await resolveUserBool(makeConfig({ log_to_notes: raw }), 'u1', 'log_to_notes', !expected),
+		).toBe(expected);
 	});
 });
 
 describe('resolveUserBool — edge cases', () => {
 	it('returns systemDefault for unrecognised string value, logs warn', async () => {
 		const logger = { warn: vi.fn() };
-		const result = await resolveUserBool(makeConfig({ log_to_notes: 'banana' }), 'u1', 'log_to_notes', true, logger);
+		const result = await resolveUserBool(
+			makeConfig({ log_to_notes: 'banana' }),
+			'u1',
+			'log_to_notes',
+			true,
+			logger,
+		);
 		expect(result).toBe(true);
 		expect(logger.warn).toHaveBeenCalledOnce();
 	});

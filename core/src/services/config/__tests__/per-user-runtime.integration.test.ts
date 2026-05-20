@@ -109,15 +109,11 @@ describe('per-user config runtime propagation', () => {
 		await service.setAll('alice', { macro_target_calories: 2400 });
 		// bob does not
 
-		const bobCalories = await dispatchAs('bob', () =>
-			service.get<number>('macro_target_calories'),
-		);
+		const bobCalories = await dispatchAs('bob', () => service.get<number>('macro_target_calories'));
 		expect(bobCalories).toBe(2000);
 
 		// alice's override must not leak to bob
-		const bobPrefs = await dispatchAs('bob', () =>
-			service.get<string[]>('dietary_preferences'),
-		);
+		const bobPrefs = await dispatchAs('bob', () => service.get<string[]>('dietary_preferences'));
 		expect(bobPrefs).toEqual(['omnivore']);
 	});
 
@@ -131,15 +127,9 @@ describe('per-user config runtime propagation', () => {
 		// alice only overrides one of three keys
 		await service.setAll('alice', { macro_target_calories: 2400 });
 
-		const calories = await dispatchAs('alice', () =>
-			service.get<number>('macro_target_calories'),
-		);
-		const protein = await dispatchAs('alice', () =>
-			service.get<number>('macro_target_protein'),
-		);
-		const prefs = await dispatchAs('alice', () =>
-			service.get<string[]>('dietary_preferences'),
-		);
+		const calories = await dispatchAs('alice', () => service.get<number>('macro_target_calories'));
+		const protein = await dispatchAs('alice', () => service.get<number>('macro_target_protein'));
+		const prefs = await dispatchAs('alice', () => service.get<string[]>('dietary_preferences'));
 
 		expect(calories).toBe(2400); // overridden
 		expect(protein).toBe(100); // default
@@ -259,9 +249,7 @@ describe('per-user config runtime propagation', () => {
 		// An empty string is a common "forgot to set the user" bug at a
 		// dispatch site. It must fall through to defaults, not silently
 		// resolve to some random file on disk.
-		const calories = await dispatchAs('', () =>
-			service.get<number>('macro_target_calories'),
-		);
+		const calories = await dispatchAs('', () => service.get<number>('macro_target_calories'));
 		expect(calories).toBe(2000);
 	});
 
@@ -278,9 +266,7 @@ describe('per-user config runtime propagation', () => {
 		// pass the ^[a-zA-Z0-9_-]+$ guardrail in loadOverrides.
 		const invalid = ['alice bob', 'alice"; rm -rf /', 'αlice', 'alice\n'];
 		for (const uid of invalid) {
-			const calories = await dispatchAs(uid, () =>
-				service.get<number>('macro_target_calories'),
-			);
+			const calories = await dispatchAs(uid, () => service.get<number>('macro_target_calories'));
 			expect(calories).toBe(2000);
 		}
 	});

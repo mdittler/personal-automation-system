@@ -6,9 +6,9 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
-import type { ChildFoodLog, ChildProfile } from '../types.js';
+import type { ChildFoodLog } from '../types.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 
 const SAFE_SLUG = /^[a-z0-9][a-z0-9-]*$/;
@@ -109,10 +109,7 @@ export async function loadChildProfile(
 	}
 }
 
-export async function saveChildProfile(
-	store: ScopedDataStore,
-	log: ChildFoodLog,
-): Promise<void> {
+export async function saveChildProfile(store: ScopedDataStore, log: ChildFoodLog): Promise<void> {
 	const fm = generateFrontmatter({
 		title: log.profile.name,
 		date: log.profile.createdAt,
@@ -125,9 +122,7 @@ export async function saveChildProfile(
 	await store.write(childPath(log.profile.slug), fm + body);
 }
 
-export async function loadAllChildren(
-	store: ScopedDataStore,
-): Promise<ChildFoodLog[]> {
+export async function loadAllChildren(store: ScopedDataStore): Promise<ChildFoodLog[]> {
 	const files = await store.list('children');
 	const results: ChildFoodLog[] = [];
 
@@ -141,10 +136,7 @@ export async function loadAllChildren(
 	return results;
 }
 
-export async function deleteChildProfile(
-	store: ScopedDataStore,
-	slug: string,
-): Promise<boolean> {
+export async function deleteChildProfile(store: ScopedDataStore, slug: string): Promise<boolean> {
 	if (!isValidSlug(slug)) return false;
 
 	const exists = await store.exists(childPath(slug));
@@ -158,10 +150,7 @@ export function formatChildProfile(log: ChildFoodLog, today: string): string {
 	const { profile, introductions } = log;
 	const age = computeAgeDisplay(profile.birthDate, today);
 
-	const lines = [
-		`**${escapeMarkdown(profile.name)}** (${age})`,
-		`Stage: ${profile.allergenStage}`,
-	];
+	const lines = [`**${escapeMarkdown(profile.name)}** (${age})`, `Stage: ${profile.allergenStage}`];
 
 	if (profile.knownAllergens.length > 0) {
 		lines.push(`Safe allergens: ${profile.knownAllergens.map(escapeMarkdown).join(', ')}`);

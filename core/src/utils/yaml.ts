@@ -71,13 +71,17 @@ export async function readYamlFileStrict(filePath: string): Promise<StrictYamlRe
 	try {
 		content = await readFile(filePath, 'utf-8');
 	} catch (err) {
-		return { error: `Failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+		return {
+			error: `Failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+		};
 	}
 
 	try {
 		const data = parse(content);
 		return { data };
 	} catch (err) {
-		return { error: `YAML parse error in ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+		return {
+			error: `YAML parse error in ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+		};
 	}
 }

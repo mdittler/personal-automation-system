@@ -12,12 +12,7 @@
 	"compilerOptions": {
 		"rootDir": ".."
 	},
-	"include": [
-		"src/**/*.ts",
-		"src/**/*.json",
-		"../core/src/**/*.ts",
-		"../apps/food/src/**/*.ts"
-	],
+	"include": ["src/**/*.ts", "src/**/*.json", "../core/src/**/*.ts", "../apps/food/src/**/*.ts"],
 	// Exclude only true test files. Dataset/helper modules that live under
 	// __tests__/ (e.g. FOOD_PERSONAS in shadow-classifier.personas.ts) are
 	// importable by the regression generator and must be typechecked.

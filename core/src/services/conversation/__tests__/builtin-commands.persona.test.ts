@@ -9,11 +9,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { requestContext } from '../../context/request-context.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { RouteInfo } from '../../../types/router.js';
+import { requestContext } from '../../context/request-context.js';
 import type { ConversationServiceDeps } from '../conversation-service.js';
 import { ConversationService } from '../conversation-service.js';
-import type { RouteInfo } from '../../../types/router.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,10 +30,12 @@ function makeUserStore() {
 	};
 }
 
-function makeDeps(opts: {
-	configOverrides?: Record<string, unknown> | null;
-	llmResponse?: string;
-} = {}): ConversationServiceDeps & {
+function makeDeps(
+	opts: {
+		configOverrides?: Record<string, unknown> | null;
+		llmResponse?: string;
+	} = {},
+): ConversationServiceDeps & {
 	_updateOverrides: ReturnType<typeof vi.fn>;
 	_telegram: { send: ReturnType<typeof vi.fn>; sendOptions: ReturnType<typeof vi.fn> };
 	_llm: { complete: ReturnType<typeof vi.fn> };
@@ -50,7 +52,9 @@ function makeDeps(opts: {
 	};
 	const complete = vi.fn().mockResolvedValue(opts.llmResponse ?? 'Here is your answer.');
 	const editService = {
-		proposeEdit: vi.fn().mockResolvedValue({ kind: 'error', action: 'no_match', message: 'No match' }),
+		proposeEdit: vi
+			.fn()
+			.mockResolvedValue({ kind: 'error', action: 'no_match', message: 'No match' }),
 		confirmEdit: vi.fn().mockResolvedValue({ ok: true }),
 	};
 	const deps: ConversationServiceDeps = {
@@ -86,7 +90,9 @@ function makeDeps(opts: {
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 			endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 			readSession: vi.fn().mockResolvedValue(undefined),
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
 			peekSnapshot: vi.fn().mockResolvedValue(undefined),
 			setTitle: vi.fn().mockResolvedValue({ updated: false }),
 			rebuildMemorySnapshot: vi
@@ -130,7 +136,10 @@ describe('/ask command', () => {
 		await run('alice', () => svc.handleAsk([], ctx));
 
 		expect(deps._llm.complete).not.toHaveBeenCalled();
-		expect(deps._telegram.send).toHaveBeenCalledWith('alice', expect.stringContaining("I'm your PAS assistant"));
+		expect(deps._telegram.send).toHaveBeenCalledWith(
+			'alice',
+			expect.stringContaining("I'm your PAS assistant"),
+		);
 	});
 
 	it('/ask with question calls LLM and sends response', async () => {
@@ -141,7 +150,10 @@ describe('/ask command', () => {
 		await run('alice', () => svc.handleAsk(['what', 'apps', 'do', 'I', 'have?'], ctx));
 
 		expect(deps._llm.complete).toHaveBeenCalled();
-		expect(deps._telegram.send).toHaveBeenCalledWith('alice', expect.stringContaining('apps installed'));
+		expect(deps._telegram.send).toHaveBeenCalledWith(
+			'alice',
+			expect.stringContaining('apps installed'),
+		);
 	});
 
 	it('/ask and subsequent handleMessage share the same ConversationHistory (history grows)', async () => {
@@ -149,7 +161,10 @@ describe('/ask command', () => {
 		const svc = new ConversationService(deps);
 
 		await run('alice', async () => {
-			await svc.handleAsk(['what are my apps?'], commandCtx('alice', '/ask what are my apps?', 'ask'));
+			await svc.handleAsk(
+				['what are my apps?'],
+				commandCtx('alice', '/ask what are my apps?', 'ask'),
+			);
 			await svc.handleMessage(createTestMessageContext({ userId: 'alice', text: 'thanks' }));
 		});
 

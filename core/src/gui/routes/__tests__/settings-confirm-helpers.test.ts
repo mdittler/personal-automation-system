@@ -20,7 +20,9 @@ describe('matchesDangerConfirmPhrase', () => {
 	});
 
 	it('returns false for different lengths (longer submitted)', () => {
-		expect(matchesDangerConfirmPhrase('confirm this action extra', 'confirm this action')).toBe(false);
+		expect(matchesDangerConfirmPhrase('confirm this action extra', 'confirm this action')).toBe(
+			false,
+		);
 	});
 
 	it('returns false for same-length strings with one-byte difference', () => {

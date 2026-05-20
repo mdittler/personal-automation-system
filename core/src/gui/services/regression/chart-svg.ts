@@ -227,9 +227,7 @@ export function renderLineChart(opts: LineChartOptions): string {
 		for (const s of opts.series) {
 			if (s.points.length === 0) continue;
 			const slot = paletteSlotFor(s.tier, s.modelId);
-			lines.push(
-				`<circle cx="${lx}" cy="${ly}" r="3" fill="${escapeSvg(slot.color)}" />`,
-			);
+			lines.push(`<circle cx="${lx}" cy="${ly}" r="3" fill="${escapeSvg(slot.color)}" />`);
 			const label = `${s.label}`;
 			lines.push(
 				`<text x="${lx + 8}" y="${ly + 3}" font-size="10" fill="#1e293b">${escapeSvg(label)}</text>`,
@@ -264,7 +262,9 @@ export function renderScatter(opts: ScatterChartOptions): string {
 	lines.push(
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${opts.width} ${opts.height}" role="img" aria-label="scatter plot">`,
 	);
-	lines.push(`<title>${escapeSvg(opts.yLabel || 'accuracy')} vs ${escapeSvg(opts.xLabel || 'cost')}</title>`);
+	lines.push(
+		`<title>${escapeSvg(opts.yLabel || 'accuracy')} vs ${escapeSvg(opts.xLabel || 'cost')}</title>`,
+	);
 
 	lines.push(
 		`<line x1="${MARGIN.left}" y1="${MARGIN.top + innerH}" x2="${MARGIN.left + innerW}" y2="${MARGIN.top + innerH}" stroke="#94a3b8" />`,

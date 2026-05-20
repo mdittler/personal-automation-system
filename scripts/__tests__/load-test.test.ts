@@ -142,7 +142,11 @@ describe('createCapCapturingTransport', () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
 		// LLMGuard:177 — logger.warn({ householdId }, 'Household LLM rate limit exceeded')
-		await writeRecord(stream, { level: 40, householdId: 'hh-1', msg: 'Household LLM rate limit exceeded' });
+		await writeRecord(stream, {
+			level: 40,
+			householdId: 'hh-1',
+			msg: 'Household LLM rate limit exceeded',
+		});
 		expect(m.getCapHits().household).toBe(1);
 	});
 
@@ -150,7 +154,14 @@ describe('createCapCapturingTransport', () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
 		// HouseholdLLMLimiter:142 — logger.warn({ householdId, current, estimatedCost, cap }, 'Household monthly LLM cost cap exceeded')
-		await writeRecord(stream, { level: 40, householdId: 'hh-2', current: 18, estimatedCost: 3, cap: 20, msg: 'Household monthly LLM cost cap exceeded' });
+		await writeRecord(stream, {
+			level: 40,
+			householdId: 'hh-2',
+			current: 18,
+			estimatedCost: 3,
+			cap: 20,
+			msg: 'Household monthly LLM cost cap exceeded',
+		});
 		expect(m.getCapHits().household).toBe(1);
 	});
 
@@ -158,7 +169,11 @@ describe('createCapCapturingTransport', () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
 		// LLMGuard:204 — logger.warn({ totalCost }, 'Global monthly LLM cost cap exceeded')
-		await writeRecord(stream, { level: 40, totalCost: 50.01, msg: 'Global monthly LLM cost cap exceeded' });
+		await writeRecord(stream, {
+			level: 40,
+			totalCost: 50.01,
+			msg: 'Global monthly LLM cost cap exceeded',
+		});
 		expect(m.getCapHits().global).toBe(1);
 		expect(m.getCapHits().app).toBe(0);
 		expect(m.getCapHits().household).toBe(0);
@@ -168,7 +183,11 @@ describe('createCapCapturingTransport', () => {
 		const m = new Metrics();
 		const stream = createCapCapturingTransport(m);
 		// SystemLLMGuard:121 — 'Household LLM rate limit exceeded (system)'
-		await writeRecord(stream, { level: 40, householdId: 'hh-3', msg: 'Household LLM rate limit exceeded (system)' });
+		await writeRecord(stream, {
+			level: 40,
+			householdId: 'hh-3',
+			msg: 'Household LLM rate limit exceeded (system)',
+		});
 		expect(m.getCapHits().household).toBe(1);
 	});
 

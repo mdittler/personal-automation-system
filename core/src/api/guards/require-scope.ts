@@ -22,9 +22,7 @@ export function requireScope(scope: string): PreHandlerFn {
 		}
 		const scopes = actor.scopes ?? [];
 		if (!scopes.includes('*') && !scopes.includes(scope)) {
-			return reply
-				.status(403)
-				.send({ ok: false, error: `Missing required scope: ${scope}` });
+			return reply.status(403).send({ ok: false, error: `Missing required scope: ${scope}` });
 		}
 	};
 }

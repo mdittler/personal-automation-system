@@ -135,10 +135,14 @@ export class InviteService {
 		// router/command level before createInvite is called, so it is not re-enforced here.
 		const householdId = opts?.householdId ?? '';
 		if (!householdId) {
-			throw new Error('householdId is required when creating an invite code. Pass opts.householdId.');
+			throw new Error(
+				'householdId is required when creating an invite code. Pass opts.householdId.',
+			);
 		}
 		if (!SAFE_SEGMENT.test(householdId)) {
-			throw new Error(`Invalid householdId: ${JSON.stringify(householdId)}. Must match SAFE_SEGMENT pattern.`);
+			throw new Error(
+				`Invalid householdId: ${JSON.stringify(householdId)}. Must match SAFE_SEGMENT pattern.`,
+			);
 		}
 
 		// locked uniqueness check + write.
@@ -192,10 +196,7 @@ export class InviteService {
 			};
 
 			await this.writeStore(store);
-			this.logger.info(
-				{ code, name: trimmedName, createdBy, householdId },
-				'Invite code created',
-			);
+			this.logger.info({ code, name: trimmedName, createdBy, householdId }, 'Invite code created');
 			return code;
 		});
 	}

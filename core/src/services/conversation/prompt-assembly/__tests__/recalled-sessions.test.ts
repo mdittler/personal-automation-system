@@ -123,9 +123,7 @@ describe('formatRecalledSessions', () => {
 	it('includes turn_index in output', () => {
 		const hits = [
 			makeHit({
-				matches: [
-					{ turn_index: 5, role: 'user', timestamp: '', snippet: 'Some message', bm25: 0 },
-				],
+				matches: [{ turn_index: 5, role: 'user', timestamp: '', snippet: 'Some message', bm25: 0 }],
 			}),
 		];
 		const result = formatRecalledSessions(hits);
@@ -136,7 +134,13 @@ describe('formatRecalledSessions', () => {
 		const hits = [
 			makeHit({
 				matches: [
-					{ turn_index: 1, role: 'user', timestamp: '', snippet: 'unique snippet content xyz', bm25: 0 },
+					{
+						turn_index: 1,
+						role: 'user',
+						timestamp: '',
+						snippet: 'unique snippet content xyz',
+						bm25: 0,
+					},
 				],
 			}),
 		];
@@ -202,9 +206,7 @@ describe('wrapInRecalledFence — budget truncation', () => {
 		const longSnippet = 'x'.repeat(4500);
 		const hits = [
 			makeHit({
-				matches: [
-					{ turn_index: 1, role: 'user', timestamp: '', snippet: longSnippet, bm25: 0 },
-				],
+				matches: [{ turn_index: 1, role: 'user', timestamp: '', snippet: longSnippet, bm25: 0 }],
 			}),
 		];
 		const result = wrapInRecalledFence(hits);
@@ -216,9 +218,7 @@ describe('wrapInRecalledFence — budget truncation', () => {
 		const shortSnippet = 'This is a short snippet.';
 		const hits = [
 			makeHit({
-				matches: [
-					{ turn_index: 1, role: 'user', timestamp: '', snippet: shortSnippet, bm25: 0 },
-				],
+				matches: [{ turn_index: 1, role: 'user', timestamp: '', snippet: shortSnippet, bm25: 0 }],
 			}),
 		];
 		const result = wrapInRecalledFence(hits);

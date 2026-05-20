@@ -5,5 +5,5 @@
 export function parseStrictInt(raw: string): number | null {
 	const trimmed = raw.trim();
 	if (!/^\d+$/.test(trimmed)) return null;
-	return parseInt(trimmed, 10);
+	return Number.parseInt(trimmed, 10);
 }

@@ -31,16 +31,14 @@
 import type { AppKnowledgeBaseService } from '../../types/app-knowledge.js';
 import type { AppInfo, AppMetadataService } from '../../types/app-metadata.js';
 import type { AppLogger } from '../../types/app-module.js';
+import type { MemorySnapshot } from '../../types/conversation-session.js';
 import type { DataStoreService } from '../../types/data-store.js';
 import type { LLMService } from '../../types/llm.js';
 import type { ModelJournalService } from '../../types/model-journal.js';
 import type { SystemInfoService } from '../../types/system-info.js';
-import type { MemorySnapshot } from '../../types/conversation-session.js';
-import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
-import type { ConversationContextSnapshot } from '../conversation-retrieval/index.js';
 import type { SearchHit } from '../chat-transcript-index/index.js';
-import type { CommandCatalogEntry } from '../router/command-catalog.js';
-import { formatAlertLines, formatReportLines } from './reports-alerts-format.js';
+import type { ConversationContextSnapshot } from '../conversation-retrieval/index.js';
+import type { SessionTurn as ConversationTurn } from '../conversation-session/chat-session-store.js';
 import {
 	type JournalLogger,
 	appendContextEntriesSection,
@@ -50,9 +48,11 @@ import {
 	buildMemoryContextBlock,
 	sanitizeInput,
 } from '../prompt-assembly/index.js';
-import { wrapInRecalledFence } from './prompt-assembly/recalled-sessions.js';
+import type { CommandCatalogEntry } from '../router/command-catalog.js';
 import { formatAppMetadata, getEnabledAppInfos, searchKnowledge } from './app-data.js';
 import { formatDataQueryContext } from './data-query-context.js';
+import { wrapInRecalledFence } from './prompt-assembly/recalled-sessions.js';
+import { formatAlertLines, formatReportLines } from './reports-alerts-format.js';
 import { categorizeQuestion, gatherSystemData } from './system-data.js';
 
 /**
@@ -273,7 +273,8 @@ export async function buildAppAwareSystemPrompt(
 	deps: PromptBuilderDeps,
 	options?: BuildAppAwareSystemPromptOptions,
 ): Promise<string> {
-	const { modelSlug, userCtx, dataContextOrSnapshot, memorySnapshot, recalledSessions } = options ?? {};
+	const { modelSlug, userCtx, dataContextOrSnapshot, memorySnapshot, recalledSessions } =
+		options ?? {};
 
 	// Normalise the overloaded dataContextOrSnapshot parameter
 	let dataContext: string | undefined;

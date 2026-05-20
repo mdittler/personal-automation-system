@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CONVERSATION_DATA_SCOPES } from '../manifest.js';
 
 describe('CONVERSATION_DATA_SCOPES', () => {

@@ -6,7 +6,7 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { GuestProfile } from '../types.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
@@ -56,7 +56,7 @@ export async function addGuest(store: ScopedDataStore, guest: GuestProfile): Pro
 		throw new Error('Guest name is too long (max 100 characters)');
 	}
 	const guests = await loadGuests(store);
-	if (guests.some(g => g.slug === guest.slug)) {
+	if (guests.some((g) => g.slug === guest.slug)) {
 		throw new Error(`Guest "${guest.name}" already exists`);
 	}
 	guests.push(guest);
@@ -65,7 +65,7 @@ export async function addGuest(store: ScopedDataStore, guest: GuestProfile): Pro
 
 export async function removeGuest(store: ScopedDataStore, slug: string): Promise<boolean> {
 	const guests = await loadGuests(store);
-	const idx = guests.findIndex(g => g.slug === slug);
+	const idx = guests.findIndex((g) => g.slug === slug);
 	if (idx === -1) return false;
 	guests.splice(idx, 1);
 	await saveGuests(store, guests);
@@ -76,12 +76,12 @@ export function findGuestByName(guests: GuestProfile[], name: string): GuestProf
 	const lower = name.toLowerCase().trim();
 
 	// Exact match (case-insensitive)
-	const exact = guests.find(g => g.name.toLowerCase() === lower);
+	const exact = guests.find((g) => g.name.toLowerCase() === lower);
 	if (exact) return exact;
 
 	// Partial match (first name or last name)
-	const partial = guests.find(g =>
-		g.name.toLowerCase().includes(lower) || lower.includes(g.name.toLowerCase()),
+	const partial = guests.find(
+		(g) => g.name.toLowerCase().includes(lower) || lower.includes(g.name.toLowerCase()),
 	);
 	return partial ?? null;
 }
@@ -110,12 +110,13 @@ export function formatGuestList(guests: GuestProfile[]): string {
 		return 'No guest profiles saved yet. Use `/hosting guests add` to add one.';
 	}
 
-	return guests.map(g => formatGuestProfile(g)).join('\n\n');
+	return guests.map((g) => formatGuestProfile(g)).join('\n\n');
 }
 
-export function getGuestsWithRestriction(guests: GuestProfile[], restriction: string): GuestProfile[] {
+export function getGuestsWithRestriction(
+	guests: GuestProfile[],
+	restriction: string,
+): GuestProfile[] {
 	const lower = restriction.toLowerCase();
-	return guests.filter(g =>
-		g.dietaryRestrictions.some(r => r.toLowerCase() === lower),
-	);
+	return guests.filter((g) => g.dietaryRestrictions.some((r) => r.toLowerCase() === lower));
 }

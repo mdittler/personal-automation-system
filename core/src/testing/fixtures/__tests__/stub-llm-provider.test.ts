@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import pino from 'pino';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import pino from 'pino';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CostTracker } from '../../../services/llm/cost-tracker.js';
 import { StubProvider, createStubProviderRegistry } from '../stub-llm-provider.js';
 
@@ -37,9 +37,7 @@ describe('StubProvider', () => {
 
 	it('returns { category, confidence } when prompt contains "category"', async () => {
 		const provider = new StubProvider(costTracker, logger);
-		const result = await provider.completeWithUsage(
-			'What category does this message belong to?',
-		);
+		const result = await provider.completeWithUsage('What category does this message belong to?');
 		const parsed = JSON.parse(result.text) as unknown;
 		expect(parsed).toMatchObject({ category: expect.any(String), confidence: 0.9 });
 	});

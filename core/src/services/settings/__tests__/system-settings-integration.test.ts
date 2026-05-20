@@ -17,10 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
-import {
-	SYSTEM_KEY_RUNTIME_PATH,
-	SYSTEM_SETTING_DEFS,
-} from '../../config/settings-metadata.js';
+import { SYSTEM_KEY_RUNTIME_PATH, SYSTEM_SETTING_DEFS } from '../../config/settings-metadata.js';
 import { SystemConfigWriter } from '../../config/system-config-writer.js';
 import { buildSettingsRegistry } from '../build-registry.js';
 import { SettingsReader } from '../settings-reader.js';
@@ -28,24 +25,38 @@ import { SettingsWriter } from '../settings-writer.js';
 
 function makeLogger(): AppLogger {
 	return {
-		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
-		error: vi.fn(), fatal: vi.fn(), child: vi.fn().mockReturnThis(),
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn().mockReturnThis(),
 	};
 }
 
 function makeConfig(): SystemConfig {
 	return {
-		port: 3000, dataDir: '/tmp', logLevel: 'info', timezone: 'UTC',
+		port: 3000,
+		dataDir: '/tmp',
+		logLevel: 'info',
+		timezone: 'UTC',
 		telegram: { botToken: 'tok' },
 		claude: { apiKey: '', model: 'm' },
 		cloudflare: {},
 		llm: {
 			providers: {},
-			tiers: { fast: { provider: 'claude', model: 'm' }, standard: { provider: 'claude', model: 'm' } },
+			tiers: {
+				fast: { provider: 'claude', model: 'm' },
+				standard: { provider: 'claude', model: 'm' },
+			},
 		},
-		gui: { authToken: 'tok' }, api: { token: '' }, n8n: { dispatchUrl: '' },
+		gui: { authToken: 'tok' },
+		api: { token: '' },
+		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [], webhooks: [],
+		users: [],
+		webhooks: [],
 		backup: { enabled: false, path: '/tmp/backups', schedule: '0 3 * * *', retentionCount: 7 },
 		chat: {
 			logToNotes: false,
@@ -145,7 +156,11 @@ describe('NL source blocked for system keys (REQ-SETTINGS-028)', () => {
 			const p = await writeSeedYaml();
 			const { writer } = makeAll(p);
 			const result = await writer.write({
-				userId: 'u1', appId: 'system', key, rawValue: 'true', source: 'nl',
+				userId: 'u1',
+				appId: 'system',
+				key,
+				rawValue: 'true',
+				source: 'nl',
 			});
 			expect(result.ok).toBe(false);
 		},
@@ -162,8 +177,11 @@ describe('admin-confirmed e2e write', () => {
 		const { writer, config, reader } = makeAll(p);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: '180', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: '180',
+			source: 'admin-confirmed',
 		});
 
 		// In-memory
@@ -173,7 +191,9 @@ describe('admin-confirmed e2e write', () => {
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)['retention_days'],
+			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
+				'retention_days'
+			],
 		).toBe(180);
 
 		// Reader catalog reflects new value
@@ -186,15 +206,20 @@ describe('admin-confirmed e2e write', () => {
 		const { writer, config } = makeAll(p);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'routing.verification.enabled',
-			rawValue: 'false', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'routing.verification.enabled',
+			rawValue: 'false',
+			source: 'admin-confirmed',
 		});
 
 		expect(config.routing?.verification?.enabled).toBe(false);
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['routing'] as Record<string, unknown>)['verification'] as Record<string, unknown>)['enabled'],
+			((parsed['routing'] as Record<string, unknown>)['verification'] as Record<string, unknown>)[
+				'enabled'
+			],
 		).toBe(false);
 	});
 });
@@ -209,11 +234,17 @@ describe('catalog reflects system config values', () => {
 		const { writer, reader } = makeAll(p);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.retention_days',
-			rawValue: '180', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.retention_days',
+			rawValue: '180',
+			source: 'admin-confirmed',
 		});
 
-		const { catalog: nonAdminCatalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: false });
+		const { catalog: nonAdminCatalog } = await reader.buildCatalog({
+			userId: 'u1',
+			isAdmin: false,
+		});
 		expect(nonAdminCatalog).toMatch(/Keep ended sessions for/);
 		expect(nonAdminCatalog).toMatch(/180/);
 	});
@@ -239,8 +270,11 @@ describe('catalog reflects system config values', () => {
 		const { writer, reader } = makeAll(p);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'routing.verification.upper_bound',
-			rawValue: '0.5', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'routing.verification.upper_bound',
+			rawValue: '0.5',
+			source: 'admin-confirmed',
 		});
 
 		const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin: true });
@@ -261,9 +295,17 @@ describe('effective-default resolver (REQ-SETTINGS-029)', () => {
 		for (const def of SYSTEM_SETTING_DEFS) registry.register({ ...def, appId: 'system' });
 		// Register a per-user def backed by a system config value
 		registry.register({
-			key: 'log_to_notes', appId: 'myapp', category: 'personal',
-			label: 'Daily notes logging', help: 'Toggle daily notes.', type: 'boolean', default: false,
-			adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
+			key: 'log_to_notes',
+			appId: 'myapp',
+			category: 'personal',
+			label: 'Daily notes logging',
+			help: 'Toggle daily notes.',
+			type: 'boolean',
+			default: false,
+			adminOnly: false,
+			dangerous: false,
+			hidden: false,
+			scope: 'per-user',
 			nlSafe: false,
 			systemConfigBackingKey,
 		});
@@ -313,7 +355,7 @@ describe('effective-default resolver (REQ-SETTINGS-029)', () => {
 		});
 		const reader = new SettingsReader({
 			registry,
-			appConfigResolver: (id) => (id === 'myapp' ? userCfg as never : undefined),
+			appConfigResolver: (id) => (id === 'myapp' ? (userCfg as never) : undefined),
 			logger: makeLogger(),
 			systemConfigWriter,
 			systemConfig: config,
@@ -338,15 +380,20 @@ describe('hot-update hook (REQ-SETTINGS-030)', () => {
 		writer.registerPostWriteHook('system.chat.sessions.auto_reset_idle_minutes', hookFn);
 
 		await writer.write({
-			userId: 'u1', appId: 'system', key: 'chat.sessions.auto_reset_idle_minutes',
-			rawValue: '30', source: 'admin-confirmed',
+			userId: 'u1',
+			appId: 'system',
+			key: 'chat.sessions.auto_reset_idle_minutes',
+			rawValue: '30',
+			source: 'admin-confirmed',
 		});
 
 		expect(hookFn).toHaveBeenCalledOnce();
-		expect(hookFn).toHaveBeenCalledWith(expect.objectContaining({
-			appId: 'system',
-			key: 'chat.sessions.auto_reset_idle_minutes',
-			newValue: 30,
-		}));
+		expect(hookFn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				appId: 'system',
+				key: 'chat.sessions.auto_reset_idle_minutes',
+				newValue: 30,
+			}),
+		);
 	});
 });

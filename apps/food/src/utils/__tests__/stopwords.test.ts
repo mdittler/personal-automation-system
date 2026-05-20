@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { STOP_WORDS } from '../stopwords.js';
 
 describe('STOP_WORDS', () => {

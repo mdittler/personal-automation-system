@@ -8,10 +8,7 @@
 
 import type { ManifestDataScope, ManifestUserConfig } from '../../types/manifest.js';
 import type { SettingsCategory } from '../settings/settings-registry.js';
-import {
-	MEMORY_FLUSH_INTENT_REGEX,
-	NOTES_INTENT_REGEX,
-} from './control-tags.js';
+import { MEMORY_FLUSH_INTENT_REGEX, NOTES_INTENT_REGEX } from './control-tags.js';
 import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from './control-tags/session-search-instruction.js';
 
 /**
@@ -141,7 +138,15 @@ export const CONVERSATION_LLM_SAFEGUARDS: ConversationLLMSafeguards = {
 export type { ManifestDataScope as ConversationDataScope };
 
 export const CONVERSATION_DATA_SCOPES: ManifestDataScope[] = [
-	{ path: 'history.json', access: 'read-write', description: 'Conversation history for context continuity' },
+	{
+		path: 'history.json',
+		access: 'read-write',
+		description: 'Conversation history for context continuity',
+	},
 	{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes fallback logging' },
-	{ path: 'conversation/', access: 'read-write', description: 'Per-session transcript files and active-session index' },
+	{
+		path: 'conversation/',
+		access: 'read-write',
+		description: 'Per-session transcript files and active-session index',
+	},
 ];

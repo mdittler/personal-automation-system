@@ -73,10 +73,25 @@ function createMockInviteService(overrides: Partial<InviteService> = {}): Invite
 	return {
 		createInvite: vi.fn().mockResolvedValue('abc12345'),
 		validateCode: vi.fn().mockResolvedValue({
-			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null },
+			invite: {
+				name: 'Sarah',
+				createdBy: 'admin1',
+				createdAt: '',
+				expiresAt: '',
+				usedBy: null,
+				usedAt: null,
+			},
 		}),
 		claimAndRedeem: vi.fn().mockResolvedValue({
-			invite: { name: 'Sarah', createdBy: 'admin1', createdAt: '', expiresAt: '', usedBy: null, usedAt: null, householdId: 'default' },
+			invite: {
+				name: 'Sarah',
+				createdBy: 'admin1',
+				createdAt: '',
+				expiresAt: '',
+				usedBy: null,
+				usedAt: null,
+				householdId: 'default',
+			},
 		}),
 		redeemCode: vi.fn().mockResolvedValue(undefined),
 		listInvites: vi.fn().mockResolvedValue({}),
@@ -172,11 +187,12 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/invite Sarah', 'admin1'));
 
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1', expect.objectContaining({ householdId: 'default' }));
-			expect(telegram.send).toHaveBeenCalledWith(
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'Sarah',
 				'admin1',
-				expect.stringContaining('abc12345'),
+				expect.objectContaining({ householdId: 'default' }),
 			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('abc12345'));
 		});
 
 		it('should reject non-admin users', async () => {
@@ -188,10 +204,7 @@ describe('Router — /invite command', () => {
 			await router.routeMessage(createTextCtx('/invite Sarah', 'user1'));
 
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
-			expect(telegram.send).toHaveBeenCalledWith(
-				'user1',
-				'Only admins can create invites.',
-			);
+			expect(telegram.send).toHaveBeenCalledWith('user1', 'Only admins can create invites.');
 		});
 
 		it('should show usage when no name is provided', async () => {
@@ -203,10 +216,7 @@ describe('Router — /invite command', () => {
 			await router.routeMessage(createTextCtx('/invite', 'admin1'));
 
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				'Usage: `/invite <name>`',
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', 'Usage: `/invite <name>`');
 		});
 
 		it('should report when invite system is not configured', async () => {
@@ -217,10 +227,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/invite Sarah', 'admin1'));
 
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				'Invite system is not configured.',
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', 'Invite system is not configured.');
 		});
 	});
 
@@ -301,10 +308,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/help', 'admin1'));
 
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				expect.stringContaining('/invite'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('/invite'));
 		});
 
 		it('should not show /invite in help for non-admin users', async () => {
@@ -315,10 +319,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/help', 'user1'));
 
-			expect(telegram.send).toHaveBeenCalledWith(
-				'user1',
-				expect.not.stringContaining('/invite'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('user1', expect.not.stringContaining('/invite'));
 		});
 	});
 
@@ -347,10 +348,7 @@ describe('Router — /invite command', () => {
 
 			await router.routeMessage(createTextCtx('/invite Test.User_1', 'admin1'));
 
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				expect.stringContaining('abc12345'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('abc12345'));
 		});
 	});
 });

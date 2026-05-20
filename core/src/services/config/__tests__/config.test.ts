@@ -404,7 +404,10 @@ describe('loadSystemConfig', () => {
 				},
 			},
 		});
-		expect(config.llm?.safeguards?.defaultHouseholdRateLimit).toEqual({ maxRequests: 200, windowSeconds: 3600 });
+		expect(config.llm?.safeguards?.defaultHouseholdRateLimit).toEqual({
+			maxRequests: 200,
+			windowSeconds: 3600,
+		});
 		expect(config.llm?.safeguards?.defaultHouseholdMonthlyCostCap).toBe(20.0);
 	});
 

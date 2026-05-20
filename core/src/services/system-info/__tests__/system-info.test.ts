@@ -358,9 +358,7 @@ describe('SystemInfoServiceImpl', () => {
 
 		it('returns false for unknown userId', () => {
 			const deps = createMockDeps();
-			(deps.userManager.getUser as ReturnType<typeof vi.fn>) = vi
-				.fn()
-				.mockReturnValue(undefined);
+			(deps.userManager.getUser as ReturnType<typeof vi.fn>) = vi.fn().mockReturnValue(undefined);
 			const svc = new SystemInfoServiceImpl(deps);
 			expect(svc.isUserAdmin('nonexistent')).toBe(false);
 		});

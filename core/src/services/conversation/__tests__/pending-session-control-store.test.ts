@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-	createPendingSessionControlStore,
-	createPendingEntry,
 	type PendingSessionControlEntry,
+	createPendingEntry,
+	createPendingSessionControlStore,
 } from '../pending-session-control-store.js';
 
 describe('PendingSessionControlStore', () => {

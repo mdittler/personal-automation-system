@@ -7,7 +7,13 @@
 import type { CoreServices } from '@pas/core/types';
 import type { Household } from '../types.js';
 import { generateId, isoNow } from '../utils/date.js';
-import { JOIN_CODE_PATTERN, generateJoinCode, loadHousehold, saveHousehold, withHouseholdLock } from '../utils/household-guard.js';
+import {
+	JOIN_CODE_PATTERN,
+	generateJoinCode,
+	loadHousehold,
+	saveHousehold,
+	withHouseholdLock,
+} from '../utils/household-guard.js';
 
 export interface HouseholdResult {
 	success: boolean;

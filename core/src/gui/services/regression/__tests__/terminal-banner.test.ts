@@ -45,10 +45,7 @@ describe('buildGateFailedBanner', () => {
 	});
 
 	it('omits the accuracy line when routingAccuracy is null', () => {
-		const b = buildGateFailedBanner(
-			{ ...validSummary, routingAccuracy: null },
-			validModelIds,
-		);
+		const b = buildGateFailedBanner({ ...validSummary, routingAccuracy: null }, validModelIds);
 		expect(b.lines.some((l) => l.includes('per-input routing accuracy'))).toBe(false);
 		// the case line and the action hint still render
 		expect(b.lines.some((l) => l.includes('30/71 cases'))).toBe(true);

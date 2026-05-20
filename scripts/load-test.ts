@@ -16,25 +16,25 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs } from 'node:util';
-import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import pino from 'pino';
 import { composeRuntime } from '../core/src/compose-runtime.js';
 import type { RuntimeHandle, RuntimeServices } from '../core/src/compose-runtime.js';
+import { requestContext } from '../core/src/services/context/request-context.js';
+import type { CostTracker } from '../core/src/services/llm/cost-tracker.js';
+import type { ProviderRegistry } from '../core/src/services/llm/providers/provider-registry.js';
+import { fakeTelegramService } from '../core/src/testing/fixtures/fake-telegram.js';
+import { askMessage, chatbotMessage, foodMessage } from '../core/src/testing/fixtures/messages.js';
+import { seedUsers } from '../core/src/testing/fixtures/seed-users.js';
+import type { SeededUser } from '../core/src/testing/fixtures/seed-users.js';
 import {
 	StubProvider,
 	createStubProviderRegistry,
 } from '../core/src/testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../core/src/testing/fixtures/fake-telegram.js';
-import { seedUsers } from '../core/src/testing/fixtures/seed-users.js';
-import type { SeededUser } from '../core/src/testing/fixtures/seed-users.js';
-import { chatbotMessage, askMessage, foodMessage } from '../core/src/testing/fixtures/messages.js';
-import { requestContext } from '../core/src/services/context/request-context.js';
 import type { MessageContext } from '../core/src/types/telegram.js';
-import type { ProviderRegistry } from '../core/src/services/llm/providers/provider-registry.js';
-import type { CostTracker } from '../core/src/services/llm/cost-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,10 +107,7 @@ export class Metrics {
 
 	/** Accumulate LLM cost attributed to a household. */
 	recordCost(householdId: string, costUsd: number): void {
-		this.householdCosts.set(
-			householdId,
-			(this.householdCosts.get(householdId) ?? 0) + costUsd,
-		);
+		this.householdCosts.set(householdId, (this.householdCosts.get(householdId) ?? 0) + costUsd);
 	}
 
 	/** Increment a cap-hit counter by scope. */
@@ -200,11 +197,7 @@ const CAP_MSG_RE = /rate limit exceeded|cost cap exceeded/i;
  */
 export function createCapCapturingTransport(metrics: Metrics): Writable {
 	return new Writable({
-		write(
-			chunk: Buffer,
-			_enc: BufferEncoding,
-			cb: (err?: Error | null) => void,
-		) {
+		write(chunk: Buffer, _enc: BufferEncoding, cb: (err?: Error | null) => void) {
 			try {
 				const line = chunk.toString().trim();
 				if (!line) {
@@ -215,8 +208,7 @@ export function createCapCapturingTransport(metrics: Metrics): Writable {
 				const msg = typeof record.msg === 'string' ? record.msg : '';
 				if (CAP_MSG_RE.test(msg)) {
 					const scope: 'household' | 'app' | 'global' =
-						'householdId' in record ? 'household' :
-						'totalCost' in record   ? 'global'    : 'app';
+						'householdId' in record ? 'household' : 'totalCost' in record ? 'global' : 'app';
 					const key =
 						(record.householdId as string | undefined) ??
 						(record.appId as string | undefined) ??
@@ -240,13 +232,12 @@ export function createCapCapturingTransport(metrics: Metrics): Writable {
  * constructed with a no-op cost tracker. Patch it to use the real CostTracker
  * so that all simulated LLM calls are attributed correctly.
  */
-function rewireStubCostTracker(
-	costTracker: CostTracker,
-	providerRegistry: ProviderRegistry,
-): void {
+function rewireStubCostTracker(costTracker: CostTracker, providerRegistry: ProviderRegistry): void {
 	const provider = providerRegistry.get('stub');
 	if (!provider) {
-		throw new Error('rewireStubCostTracker: stub provider not found in registry — check provider ID');
+		throw new Error(
+			'rewireStubCostTracker: stub provider not found in registry — check provider ID',
+		);
 	}
 	if (!(provider instanceof StubProvider)) {
 		throw new Error('rewireStubCostTracker: provider is not a StubProvider — cannot rewire');
@@ -260,8 +251,8 @@ function rewireStubCostTracker(
 
 function pickKind(): TrafficKind {
 	const r = Math.random();
-	if (r < 0.70) return 'chatbot';
-	if (r < 0.90) return 'ask';
+	if (r < 0.7) return 'chatbot';
+	if (r < 0.9) return 'ask';
 	return 'food';
 }
 
@@ -303,10 +294,7 @@ async function worker(
 // verifyAttribution
 // ---------------------------------------------------------------------------
 
-async function verifyAttribution(
-	services: RuntimeServices,
-	_metrics: Metrics,
-): Promise<boolean> {
+async function verifyAttribution(services: RuntimeServices, _metrics: Metrics): Promise<boolean> {
 	// Wait for any in-flight writes to complete
 	await services.costTracker.drainWrites();
 
@@ -314,7 +302,10 @@ async function verifyAttribution(
 	const rows = markdown.split('\n').filter((l: string) => l.startsWith('| 2'));
 	let allCorrect = true;
 	for (const row of rows) {
-		const cols = row.split('|').slice(1, -1).map((c: string) => c.trim());
+		const cols = row
+			.split('|')
+			.slice(1, -1)
+			.map((c: string) => c.trim());
 		if (cols.length < 9) continue;
 		const userId = cols[7];
 		const householdId = cols[8];
@@ -347,12 +338,10 @@ function renderReport(
 	const s = metrics.summary();
 	const today = new Date().toISOString().slice(0, 10);
 	const fms = (n: number) => (Number.isNaN(n) ? 'n/a' : `${Math.round(n)}ms`);
-	const latencyRows = ALL_KINDS
-		.map((k) => {
-			const ks = s.byKind[k];
-			return `| ${k} | ${ks.count} | ${ks.errorCount} | ${fms(ks.p50)} | ${fms(ks.p95)} | ${fms(ks.p99)} |`;
-		})
-		.join('\n');
+	const latencyRows = ALL_KINDS.map((k) => {
+		const ks = s.byKind[k];
+		return `| ${k} | ${ks.count} | ${ks.errorCount} | ${fms(ks.p50)} | ${fms(ks.p95)} | ${fms(ks.p99)} |`;
+	}).join('\n');
 	const totalRow = `| **overall** | ${s.overall.count} | ${s.overall.errorCount} | ${fms(s.overall.p50)} | ${fms(s.overall.p95)} | ${fms(s.overall.p99)} |`;
 
 	const costRows = opts.householdIds
@@ -399,16 +388,16 @@ ${capStr}
 async function main(): Promise<void> {
 	const { values: args } = parseArgs({
 		options: {
-			users:      { type: 'string', default: '40' },
+			users: { type: 'string', default: '40' },
 			households: { type: 'string', default: '8' },
-			duration:   { type: 'string', default: '120' },
-			report:     { type: 'string', default: '' },
+			duration: { type: 'string', default: '120' },
+			report: { type: 'string', default: '' },
 		},
 	});
 
-	const users      = parseInt(args.users ?? '40', 10);
-	const households = parseInt(args.households ?? '8', 10);
-	const duration   = parseInt(args.duration ?? '120', 10);
+	const users = Number.parseInt(args.users ?? '40', 10);
+	const households = Number.parseInt(args.households ?? '8', 10);
+	const duration = Number.parseInt(args.duration ?? '120', 10);
 
 	if (!Number.isInteger(users) || users <= 0) {
 		console.error(`Invalid --users value: "${args.users}". Must be a positive integer.`);
@@ -422,8 +411,8 @@ async function main(): Promise<void> {
 		console.error(`Invalid --duration value: "${args.duration}". Must be a positive integer.`);
 		process.exit(1);
 	}
-	const today      = new Date().toISOString().slice(0, 10);
-	const report     = args.report || `docs/load-test-report-${today}.md`;
+	const today = new Date().toISOString().slice(0, 10);
+	const report = args.report || `docs/load-test-report-${today}.md`;
 
 	console.log(`Starting load test: ${users} users × ${households} households × ${duration}s`);
 
@@ -437,7 +426,12 @@ async function main(): Promise<void> {
 		const seed = await seedUsers({ dataDir: tempDir, users, households });
 
 		const providerRegistry = createStubProviderRegistry(
-			{ record: async () => {}, estimateCost: () => 0, flush: async () => {}, readUsage: async () => '' } as any,
+			{
+				record: async () => {},
+				estimateCost: () => 0,
+				flush: async () => {},
+				readUsage: async () => '',
+			} as any,
 			logger,
 		);
 

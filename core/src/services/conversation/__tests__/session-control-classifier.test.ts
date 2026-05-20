@@ -93,14 +93,13 @@ describe('preFilterSessionControl', () => {
 		expect(result.matched).toBe(false);
 	});
 
-	it.each([
-		['clear chat'],
-		['forget everything'],
-		['reset conversation'],
-	])('returns not-matched for NL phrase "%s" (handled by LLM classifier)', (phrase) => {
-		const result = preFilterSessionControl(phrase);
-		expect(result.matched).toBe(false);
-	});
+	it.each([['clear chat'], ['forget everything'], ['reset conversation']])(
+		'returns not-matched for NL phrase "%s" (handled by LLM classifier)',
+		(phrase) => {
+			const result = preFilterSessionControl(phrase);
+			expect(result.matched).toBe(false);
+		},
+	);
 
 	// Safety: negations and meta-questions must NOT match
 	it('returns not-matched for "don\'t start over"', () => {
@@ -198,9 +197,7 @@ describe('classifySessionControl', () => {
 	});
 
 	it('returns safeDefault for confidence below 0', async () => {
-		const deps = makeDeps(
-			JSON.stringify({ intent: 'continue', confidence: -0.1, reason: 'bad' }),
-		);
+		const deps = makeDeps(JSON.stringify({ intent: 'continue', confidence: -0.1, reason: 'bad' }));
 		const result = await classifySessionControl('something', deps);
 		expect(result.intent).toBe('unclear');
 		expect(result.confidence).toBe(0);

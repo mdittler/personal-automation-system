@@ -6,7 +6,6 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { estimatePlanCost } from '../services/cost-estimator.js';
 import {
 	formatMonthlyReportMessage,
 	formatWeeklyReportMessage,
@@ -16,10 +15,11 @@ import {
 	loadWeeklyHistory,
 	saveWeeklyHistory,
 } from '../services/budget-reporter.js';
+import { estimatePlanCost } from '../services/cost-estimator.js';
 import { loadCurrentPlan } from '../services/meal-plan-store.js';
-import { loadStorePrices, listStores, getStoreSlug } from '../services/price-store.js';
+import { getStoreSlug, listStores, loadStorePrices } from '../services/price-store.js';
 import { loadAllRecipes } from '../services/recipe-store.js';
-import { todayDate, getIsoWeekId } from '../utils/date.js';
+import { getIsoWeekId, todayDate } from '../utils/date.js';
 
 // Re-export for unified intent surface
 export { isPriceUpdateIntent } from '../services/price-store.js';
@@ -48,8 +48,8 @@ export function isBudgetViewIntent(text: string): boolean {
  */
 function getPrevMonth(monthStr: string): string {
 	const [yearStr, monthNumStr] = monthStr.split('-');
-	const year = parseInt(yearStr ?? '2000', 10);
-	const month = parseInt(monthNumStr ?? '1', 10);
+	const year = Number.parseInt(yearStr ?? '2000', 10);
+	const month = Number.parseInt(monthNumStr ?? '1', 10);
 	if (month === 1) {
 		return `${year - 1}-12`;
 	}
@@ -79,24 +79,39 @@ async function handleWeeklyBudget(
 ): Promise<void> {
 	const plan = await loadCurrentPlan(store);
 	if (!plan) {
-		await services.telegram.send(userId, 'No active meal plan found. Generate a meal plan first to track food costs.');
+		await services.telegram.send(
+			userId,
+			'No active meal plan found. Generate a meal plan first to track food costs.',
+		);
 		return;
 	}
 
 	const storeSlug = await resolveStoreSlug(services, store);
 	if (!storeSlug) {
-		await services.telegram.send(userId, 'No price data available. Add a receipt photo or price update to start tracking costs.');
+		await services.telegram.send(
+			userId,
+			'No price data available. Add a receipt photo or price update to start tracking costs.',
+		);
 		return;
 	}
 
 	const priceData = await loadStorePrices(store, storeSlug);
 	if (!priceData.items.length) {
-		await services.telegram.send(userId, 'No price data available. Add a receipt photo or price update to start tracking costs.');
+		await services.telegram.send(
+			userId,
+			'No price data available. Add a receipt photo or price update to start tracking costs.',
+		);
 		return;
 	}
 
 	const recipes = await loadAllRecipes(store);
-	const estimates = await estimatePlanCost(services, plan, recipes, priceData.items, priceData.store);
+	const estimates = await estimatePlanCost(
+		services,
+		plan,
+		recipes,
+		priceData.items,
+		priceData.store,
+	);
 	const week = generateWeeklyReport(plan, estimates);
 
 	// Load previous week for comparison
@@ -117,8 +132,8 @@ async function handleWeeklyBudget(
 export function getPrevWeekId(weekId: string): string {
 	const match = weekId.match(/^(\d{4})-W(\d{2})$/);
 	if (!match) return weekId;
-	const year = parseInt(match[1]!, 10);
-	const week = parseInt(match[2]!, 10);
+	const year = Number.parseInt(match[1]!, 10);
+	const week = Number.parseInt(match[2]!, 10);
 	if (week > 1) {
 		return `${year}-W${String(week - 1).padStart(2, '0')}`;
 	}
@@ -144,13 +159,15 @@ async function handleMonthlyBudget(
 	const prevWeeks = await loadWeeksForMonth(store, allWeekIds, prevMonth);
 
 	if (currentWeeks.length === 0) {
-		await services.telegram.send(userId, `No food budget data for ${formatMonthLabel(currentMonth)} yet. Run /foodbudget to generate this week's report first.`);
+		await services.telegram.send(
+			userId,
+			`No food budget data for ${formatMonthLabel(currentMonth)} yet. Run /foodbudget to generate this week's report first.`,
+		);
 		return;
 	}
 
-	const prevMonthTotal = prevWeeks.length > 0
-		? prevWeeks.reduce((sum, w) => sum + w.totalCost, 0)
-		: null;
+	const prevMonthTotal =
+		prevWeeks.length > 0 ? prevWeeks.reduce((sum, w) => sum + w.totalCost, 0) : null;
 
 	const monthLabel = formatMonthLabel(currentMonth);
 	const message = formatMonthlyReportMessage(monthLabel, currentWeeks, prevMonthTotal);
@@ -192,14 +209,17 @@ async function handleYearlyBudget(
 	const allWeekIds = await listWeeklyHistories(store);
 
 	// Load all weeks and filter by startDate to avoid ISO year / calendar year boundary issues
-	const allWeeks = (await Promise.all(
-		allWeekIds.map((id) => loadWeeklyHistory(store, id)),
-	)).filter((w): w is import('../types.js').CostHistoryWeek => w !== null && w !== undefined);
+	const allWeeks = (await Promise.all(allWeekIds.map((id) => loadWeeklyHistory(store, id)))).filter(
+		(w): w is import('../types.js').CostHistoryWeek => w !== null && w !== undefined,
+	);
 
 	const yearWeeks = allWeeks.filter((w) => w.startDate.startsWith(currentYear));
 
 	if (yearWeeks.length === 0) {
-		await services.telegram.send(userId, `No food budget data for ${currentYear} yet. Run /foodbudget to generate weekly reports first.`);
+		await services.telegram.send(
+			userId,
+			`No food budget data for ${currentYear} yet. Run /foodbudget to generate weekly reports first.`,
+		);
 		return;
 	}
 

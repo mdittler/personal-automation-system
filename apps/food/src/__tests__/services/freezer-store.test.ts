@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import type { FreezerItem } from '../../types.js';
 import {
 	addFreezerItem,
 	buildFreezerButtons,
@@ -11,6 +10,7 @@ import {
 	removeFreezerItem,
 	saveFreezer,
 } from '../../services/freezer-store.js';
+import type { FreezerItem } from '../../types.js';
 
 function makeFreezerItem(overrides: Partial<FreezerItem> = {}): FreezerItem {
 	return {
@@ -97,10 +97,7 @@ describe('freezer-store', () => {
 			const items = [makeFreezerItem()];
 			await saveFreezer(store as never, items);
 			expect(store.write).toHaveBeenCalledTimes(1);
-			expect(store.write).toHaveBeenCalledWith(
-				'freezer.yaml',
-				expect.stringContaining('items:'),
-			);
+			expect(store.write).toHaveBeenCalledWith('freezer.yaml', expect.stringContaining('items:'));
 		});
 
 		it('includes frontmatter in output', async () => {
@@ -138,7 +135,10 @@ describe('freezer-store', () => {
 
 		it('deduplicates by name (case-insensitive) — updates existing', () => {
 			const existing = [makeFreezerItem({ name: 'Chicken', quantity: '1 lb' })];
-			const result = addFreezerItem(existing, makeFreezerItem({ name: 'chicken', quantity: '3 lbs' }));
+			const result = addFreezerItem(
+				existing,
+				makeFreezerItem({ name: 'chicken', quantity: '3 lbs' }),
+			);
 			expect(result).toHaveLength(1);
 			expect(result[0].quantity).toBe('3 lbs');
 		});
@@ -155,20 +155,14 @@ describe('freezer-store', () => {
 
 	describe('removeFreezerItem', () => {
 		it('removes item at given index', () => {
-			const items = [
-				makeFreezerItem({ name: 'Salmon' }),
-				makeFreezerItem({ name: 'Chicken' }),
-			];
+			const items = [makeFreezerItem({ name: 'Salmon' }), makeFreezerItem({ name: 'Chicken' })];
 			const result = removeFreezerItem(items, 0);
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('Chicken');
 		});
 
 		it('removes last item by index', () => {
-			const items = [
-				makeFreezerItem({ name: 'Salmon' }),
-				makeFreezerItem({ name: 'Chicken' }),
-			];
+			const items = [makeFreezerItem({ name: 'Salmon' }), makeFreezerItem({ name: 'Chicken' })];
 			const result = removeFreezerItem(items, 1);
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('Salmon');
@@ -243,10 +237,7 @@ describe('freezer-store', () => {
 		});
 
 		it('shows item count in header', () => {
-			const items = [
-				makeFreezerItem({ name: 'Chicken' }),
-				makeFreezerItem({ name: 'Salmon' }),
-			];
+			const items = [makeFreezerItem({ name: 'Chicken' }), makeFreezerItem({ name: 'Salmon' })];
 			const result = formatFreezerList(items);
 			expect(result).toContain('2 items');
 		});
@@ -265,9 +256,7 @@ describe('freezer-store', () => {
 		});
 
 		it('shows age warning for items frozen 3+ months ago', () => {
-			const items = [
-				makeFreezerItem({ name: 'Old Chicken', frozenDate: '2025-10-01' }),
-			];
+			const items = [makeFreezerItem({ name: 'Old Chicken', frozenDate: '2025-10-01' })];
 			// today ~6 months after frozen date
 			const result = formatFreezerList(items, '2026-04-02');
 			expect(result).toContain('⚠️');
@@ -296,10 +285,7 @@ describe('freezer-store', () => {
 		});
 
 		it('returns Add button plus per-item rows', () => {
-			const items = [
-				makeFreezerItem({ name: 'Chicken' }),
-				makeFreezerItem({ name: 'Salmon' }),
-			];
+			const items = [makeFreezerItem({ name: 'Chicken' }), makeFreezerItem({ name: 'Salmon' })];
 			const buttons = buildFreezerButtons(items);
 			// First row: Add button; then one row per item (Thaw + Toss)
 			expect(buttons).toHaveLength(3);
@@ -327,10 +313,7 @@ describe('freezer-store', () => {
 		});
 
 		it('uses correct indices for multiple items', () => {
-			const items = [
-				makeFreezerItem({ name: 'Chicken' }),
-				makeFreezerItem({ name: 'Salmon' }),
-			];
+			const items = [makeFreezerItem({ name: 'Chicken' }), makeFreezerItem({ name: 'Salmon' })];
 			const buttons = buildFreezerButtons(items);
 			expect(buttons[1]![0].callbackData).toBe('app:food:fz:thaw:0:Chicken');
 			expect(buttons[1]![1].callbackData).toBe('app:food:fz:toss:0:Chicken');

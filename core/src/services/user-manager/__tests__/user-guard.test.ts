@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TelegramService } from '../../../types/telegram.js';
 import type { InviteService } from '../../invite/index.js';
 import type { UserManager } from '../index.js';
-import type { UserMutationService } from '../user-mutation-service.js';
 import { UserGuard } from '../user-guard.js';
+import type { UserMutationService } from '../user-mutation-service.js';
 
 function createMockUserManager(registeredIds: string[]): UserManager {
 	const idSet = new Set(registeredIds);

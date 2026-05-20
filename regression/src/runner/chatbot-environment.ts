@@ -19,13 +19,13 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { composeRuntime, type RuntimeHandle } from '@core/compose-runtime.js';
+import { type RuntimeHandle, composeRuntime } from '@core/compose-runtime.js';
 import { loadSystemConfig } from '@core/services/config/index.js';
 import { HouseholdService } from '@core/services/household/index.js';
 import type { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import {
-	fakeTelegramService,
 	type FakeTelegramService,
+	fakeTelegramService,
 } from '@core/testing/fixtures/fake-telegram.js';
 import type { SystemConfig } from '@core/types/config.js';
 import type { ModelRef } from '@core/types/llm.js';

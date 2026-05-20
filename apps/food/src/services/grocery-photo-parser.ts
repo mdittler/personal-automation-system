@@ -5,9 +5,9 @@
 
 import type { CoreServices } from '@pas/core/types';
 import type { ParsedRecipe } from '../types.js';
-import { parseJsonResponse, attachCanonicalNames } from './recipe-parser.js';
-import { fenceCaption } from '../utils/sanitize.js';
 import { isValidGroceryPhotoItem } from '../utils/photo-validators.js';
+import { fenceCaption } from '../utils/sanitize.js';
+import { attachCanonicalNames, parseJsonResponse } from './recipe-parser.js';
 
 /** Result of parsing a grocery photo. */
 export interface GroceryPhotoResult {
@@ -73,18 +73,15 @@ export async function parseGroceryFromPhoto(
 	const parsed = parseJsonResponse(result, 'grocery photo parse') as Record<string, unknown>;
 
 	const rawItems = Array.isArray(parsed.items) ? (parsed.items as unknown[]) : [];
-	const items = rawItems
-		.filter(isValidGroceryPhotoItem)
-		.map((item) => ({
-			name: item.name,
-			quantity: (item.quantity !== undefined && item.quantity !== null) ? item.quantity : null,
-			unit: item.unit ?? null,
-		}));
+	const items = rawItems.filter(isValidGroceryPhotoItem).map((item) => ({
+		name: item.name,
+		quantity: item.quantity !== undefined && item.quantity !== null ? item.quantity : null,
+		unit: item.unit ?? null,
+	}));
 
 	const isRecipe = parsed.isRecipe === true;
-	let parsedRecipe = isRecipe && parsed.parsedRecipe
-		? (parsed.parsedRecipe as ParsedRecipe)
-		: undefined;
+	const parsedRecipe =
+		isRecipe && parsed.parsedRecipe ? (parsed.parsedRecipe as ParsedRecipe) : undefined;
 
 	// F18: attach canonical names to photo-derived recipe ingredients (guard for malformed parsedRecipe)
 	if (parsedRecipe && Array.isArray(parsedRecipe.ingredients)) {

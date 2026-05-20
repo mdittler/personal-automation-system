@@ -238,7 +238,8 @@ describe('family-profiles', () => {
 		it('loads all child profiles from children/ directory', async () => {
 			const store = createMockScopedStore({
 				list: vi.fn().mockResolvedValue(['children/margot.yaml', 'children/oliver.yaml']),
-				read: vi.fn()
+				read: vi
+					.fn()
 					.mockResolvedValueOnce(MARGOT_YAML)
 					.mockResolvedValueOnce(
 						`profile:\n  name: Oliver\n  slug: oliver\n  birthDate: "2025-01-10"\n  allergenStage: pre-solids\n  knownAllergens: []\n  avoidAllergens: []\n  dietaryNotes: ""\n  createdAt: "2026-01-01T00:00:00.000Z"\n  updatedAt: "2026-01-01T00:00:00.000Z"\nintroductions: []`,

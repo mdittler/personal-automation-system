@@ -9,18 +9,18 @@
  * All other Chunk C tests stay at the unit / persona slice.
  */
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { composeRuntime } from '../../../compose-runtime.js';
+import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../../../testing/fixtures/seed-users.js';
 import {
-	createStubProviderRegistry,
 	StubProvider,
+	createStubProviderRegistry,
 } from '../../../testing/fixtures/stub-llm-provider.js';
-import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 
@@ -142,14 +142,7 @@ describe('ConversationService built-in dispatch (integration)', () => {
 
 	it('override file on disk contains ONLY { log_to_notes: true } — no manifest defaults materialized', async () => {
 		// /notes on was already called in the previous test; check the resulting override file
-		const overridePath = join(
-			tempDir,
-			'data',
-			'system',
-			'app-config',
-			'chatbot',
-			`${userId}.yaml`,
-		);
+		const overridePath = join(tempDir, 'data', 'system', 'app-config', 'chatbot', `${userId}.yaml`);
 		const raw = await readFile(overridePath, 'utf-8');
 
 		// Parse YAML (simple: split on newlines and look for keys)

@@ -302,9 +302,7 @@ export async function parseReceiptFromPhoto(
 	const warnings: ReceiptVerificationWarning[] = [...integrityWarnings];
 	if (initialFinishReason === 'length') {
 		const stillSuspect =
-			!continuationParsedOk ||
-			continuationTruncated ||
-			integrityWarnings.includes('sum_mismatch');
+			!continuationParsedOk || continuationTruncated || integrityWarnings.includes('sum_mismatch');
 		if (stillSuspect) {
 			if (!warnings.includes('output_truncated')) warnings.push('output_truncated');
 			if (!warnings.includes('continuation_unresolved')) warnings.push('continuation_unresolved');

@@ -20,8 +20,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { type InteractionContextService, InteractionContextServiceImpl } from '../index.js';
 import { buildVirtualChatbotApp } from '../../conversation/virtual-app.js';
+import { type InteractionContextService, InteractionContextServiceImpl } from '../index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

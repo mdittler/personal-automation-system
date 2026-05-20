@@ -21,13 +21,9 @@
  */
 
 import type { ScopedDataStore } from '@pas/core/types';
-import { parse, stringify } from 'yaml';
-import {
-	generateFrontmatter,
-	stripFrontmatter,
-	buildAppTags,
-} from '@pas/core/utils/frontmatter';
 import { AsyncLock } from '@pas/core/utils/async-lock';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
+import { parse, stringify } from 'yaml';
 import { STOP_WORDS } from '../utils/stopwords.js';
 
 const FILE = 'ad-hoc-history.yaml';
@@ -152,9 +148,7 @@ export async function recordAdHocLog(
 		// Drop expired and future-dated entries on every write — cheap, keeps
 		// the file bounded without a separate cron.
 		f.entries = f.entries.filter((e) => isWithinWindow(e, date));
-		const match = f.entries.find(
-			(e) => jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD,
-		);
+		const match = f.entries.find((e) => jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD);
 		if (match) {
 			match.occurrences += 1;
 			match.lastSeenDate = date;
@@ -187,9 +181,7 @@ export async function findSimilarAdHoc(
 	const tokens = tokenize(text);
 	const f = await read(store);
 	const match = f.entries.find(
-		(e) =>
-			jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD &&
-			isWithinWindow(e, today),
+		(e) => jaccard(e.canonical, tokens) >= SIMILARITY_THRESHOLD && isWithinWindow(e, today),
 	);
 	return match ?? null;
 }
@@ -199,10 +191,7 @@ export async function findSimilarAdHoc(
  * opportunistic sweep in `recordAdHocLog`, but kept for explicit-cleanup tests
  * and any future cron path.
  */
-export async function trimExpired(
-	store: ScopedDataStore,
-	today: string,
-): Promise<void> {
+export async function trimExpired(store: ScopedDataStore, today: string): Promise<void> {
 	await lock.run(LOCK_KEY, async () => {
 		const f = await read(store);
 		f.entries = f.entries.filter((e) => isWithinWindow(e, today));

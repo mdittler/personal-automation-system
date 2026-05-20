@@ -4,15 +4,14 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
-import { PLATFORM_SYSTEM_HOUSEHOLD_ID } from '../../../types/auth-actor.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
 import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
 import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
 import {
-    createMockHouseholdLimiter,
-    PLATFORM_NOOP_RESERVATION,
+	PLATFORM_NOOP_RESERVATION,
+	createMockHouseholdLimiter,
 } from './helpers/mock-household-limiter.js';
 
 const logger = pino({ level: 'silent' });
@@ -371,7 +370,12 @@ describe('LLMGuard', () => {
 		});
 
 		it('LLMCostCapError includes correct details for app scope', () => {
-			const err = new LLMCostCapError({ scope: 'app', appId: 'my-app', currentCost: 11.5, cap: 10.0 });
+			const err = new LLMCostCapError({
+				scope: 'app',
+				appId: 'my-app',
+				currentCost: 11.5,
+				cap: 10.0,
+			});
 			expect(err.name).toBe('LLMCostCapError');
 			expect(err.scope).toBe('app');
 			expect(err.currentCost).toBe(11.5);
@@ -451,8 +455,9 @@ describe('LLMGuard + CostTracker — unknown-model cost cap integration (Gap 8)'
 // LLMGuard + HouseholdLLMLimiter integration tests
 // ==========================================================================
 describe('LLMGuard + HouseholdLLMLimiter integration', () => {
-
-	function makeGuardWithHH(overrides: { hhLimiter?: ReturnType<typeof createMockHouseholdLimiter> } = {}) {
+	function makeGuardWithHH(
+		overrides: { hhLimiter?: ReturnType<typeof createMockHouseholdLimiter> } = {},
+	) {
 		const hhLimiter = overrides.hhLimiter ?? createMockHouseholdLimiter();
 		const ct = createMockCostTracker();
 		const innerSvc = createMockInner();
@@ -480,7 +485,13 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate denied: no app rate slot committed on either', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi.fn().mockReturnValue({ allowed: false, commit: vi.fn(), limit: { maxRequests: 200, windowSeconds: 3600 } }),
+			check: vi
+				.fn()
+				.mockReturnValue({
+					allowed: false,
+					commit: vi.fn(),
+					limit: { maxRequests: 200, windowSeconds: 3600 },
+				}),
 		});
 		const { guard } = makeGuardWithHH({ hhLimiter });
 		await expect(guard.complete('hi')).rejects.toThrow(LLMRateLimitError);
@@ -490,7 +501,12 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 	it('household cost denied: no rate commits; no reserve; inner NOT called', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
 			checkCost: vi.fn().mockImplementation(() => {
-				throw new LLMCostCapError({ scope: 'household', householdId: 'h1', currentCost: 20, cap: 20 });
+				throw new LLMCostCapError({
+					scope: 'household',
+					householdId: 'h1',
+					currentCost: 20,
+					cap: 20,
+				});
 			}),
 		});
 		const { guard, inner } = makeGuardWithHH({ hhLimiter });
@@ -513,7 +529,14 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 		const innerSvc = createMockInner();
 		(innerSvc.complete as any).mockRejectedValue(new Error('provider down'));
 		const ct = createMockCostTracker();
-		const g = new LLMGuard({ inner: innerSvc, appId: 'chatbot', costTracker: ct, config: defaultConfig, logger, householdLimiter: hhLimiter });
+		const g = new LLMGuard({
+			inner: innerSvc,
+			appId: 'chatbot',
+			costTracker: ct,
+			config: defaultConfig,
+			logger,
+			householdLimiter: hhLimiter,
+		});
 
 		await expect(g.complete('hi')).rejects.toThrow('provider down');
 		expect(hhLimiter.releaseReservation).toHaveBeenCalledTimes(1);
@@ -522,7 +545,9 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('reserveEstimated throws unexpectedly → both rate slots rolled back; LLMCostCapError(reservation-exceeded)', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			reserveEstimated: vi.fn().mockImplementation(() => { throw new Error('cost tracker blew up'); }),
+			reserveEstimated: vi.fn().mockImplementation(() => {
+				throw new Error('cost tracker blew up');
+			}),
 			revokeLastCheckCommit: vi.fn(),
 		});
 		const { guard } = makeGuardWithHH({ hhLimiter });
@@ -542,10 +567,16 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate error carries override limit metadata from check().limit', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi.fn().mockReturnValue({ allowed: false, commit: vi.fn(), limit: { maxRequests: 400, windowSeconds: 1800 } }),
+			check: vi
+				.fn()
+				.mockReturnValue({
+					allowed: false,
+					commit: vi.fn(),
+					limit: { maxRequests: 400, windowSeconds: 1800 },
+				}),
 		});
 		const { guard } = makeGuardWithHH({ hhLimiter });
-		const err = await guard.complete('hi').catch((e: unknown) => e) as LLMRateLimitError;
+		const err = (await guard.complete('hi').catch((e: unknown) => e)) as LLMRateLimitError;
 		expect(err.scope).toBe('household');
 		expect(err.maxRequests).toBe(400);
 		expect(err.windowSeconds).toBe(1800);

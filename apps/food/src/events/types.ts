@@ -28,7 +28,7 @@ export interface RecipeScheduledPayload {
 	planId: string;
 	recipeId: string;
 	recipeTitle: string;
-	date: string;     // YYYY-MM-DD
+	date: string; // YYYY-MM-DD
 	mealType: string;
 	householdId: string;
 }
@@ -37,7 +37,7 @@ export interface MealCookedPayload {
 	planId: string;
 	recipeId: string;
 	recipeTitle: string;
-	date: string;     // YYYY-MM-DD
+	date: string; // YYYY-MM-DD
 	mealType: string;
 	householdId: string;
 	cookedAt: string; // ISO 8601

@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { TitleService } from '../title-service.js';
-import type { ChatSessionStore } from '../../conversation-session/index.js';
 import type { ChatTranscriptIndex } from '../../chat-transcript-index/chat-transcript-index.js';
+import type { ChatSessionStore } from '../../conversation-session/index.js';
+import { TitleService } from '../title-service.js';
 
 function makeDeps() {
 	// updateTitle on ChatTranscriptIndex is async (returns Promise); setTitle is also async.

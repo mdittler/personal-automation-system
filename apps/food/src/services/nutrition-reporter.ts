@@ -9,11 +9,10 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { DailyMacroEntry, MacroTargets } from '../types.js';
 import { addDays, todayDate } from '../utils/date.js';
 import {
-	loadMacrosForPeriod,
 	computeProgress,
-	formatMacroSummary,
 	formatAdherenceSummary,
-	sumMacros,
+	formatMacroSummary,
+	loadMacrosForPeriod,
 } from './macro-tracker.js';
 
 export interface MacroTrend {
@@ -30,11 +29,11 @@ export function detectTrends(entries: DailyMacroEntry[]): MacroTrend[] {
 	if (entries.length < 3) return [];
 
 	const fields: Array<{ field: string; getter: (e: DailyMacroEntry) => number }> = [
-		{ field: 'calories', getter: e => e.totals.calories ?? 0 },
-		{ field: 'protein', getter: e => e.totals.protein ?? 0 },
-		{ field: 'carbs', getter: e => e.totals.carbs ?? 0 },
-		{ field: 'fat', getter: e => e.totals.fat ?? 0 },
-		{ field: 'fiber', getter: e => e.totals.fiber ?? 0 },
+		{ field: 'calories', getter: (e) => e.totals.calories ?? 0 },
+		{ field: 'protein', getter: (e) => e.totals.protein ?? 0 },
+		{ field: 'carbs', getter: (e) => e.totals.carbs ?? 0 },
+		{ field: 'fat', getter: (e) => e.totals.fat ?? 0 },
+		{ field: 'fiber', getter: (e) => e.totals.fiber ?? 0 },
 	];
 
 	const trends: MacroTrend[] = [];
@@ -75,7 +74,7 @@ export function formatTrendSummary(trends: MacroTrend[]): string {
 	if (trends.length === 0) return '';
 
 	return trends
-		.map(t => {
+		.map((t) => {
 			const label = t.field.charAt(0).toUpperCase() + t.field.slice(1);
 			return `${label}: ${t.direction}`;
 		})

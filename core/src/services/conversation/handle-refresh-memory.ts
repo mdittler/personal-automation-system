@@ -54,7 +54,9 @@ export async function handleRefreshMemory(
 			await deps.telegram.send(userId, 'No active session to refresh.');
 			return;
 		}
-		deps.logger.warn(`refresh-memory failed userId=${userId} sessionId=${ctx.sessionId ?? 'none'}: ${String(err)}`);
+		deps.logger.warn(
+			`refresh-memory failed userId=${userId} sessionId=${ctx.sessionId ?? 'none'}: ${String(err)}`,
+		);
 		await deps.telegram.send(userId, 'Memory refresh deferred — try again later.');
 	}
 }

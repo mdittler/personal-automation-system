@@ -776,9 +776,13 @@ describe('CostTracker', () => {
 			// Blank User cell (not '-') while Household is populated.
 			// Under the buggy .filter(Boolean) parser, the blank User is dropped,
 			// cells shift left, and 'hh-real' lands in cells[7] (user) instead of cells[8].
-			await writeUsageLog(systemDir, [
-				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.500000 | echo |  | hh-real |`,
-			], 9);
+			await writeUsageLog(
+				systemDir,
+				[
+					`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.500000 | echo |  | hh-real |`,
+				],
+				9,
+			);
 
 			const t = new CostTracker(tempDir, logger);
 			await t.loadMonthlyCache();
@@ -792,9 +796,13 @@ describe('CostTracker', () => {
 
 		it('9-col row with blank App cell still attributes user + household correctly', async () => {
 			const systemDir = join(tempDir, 'system');
-			await writeUsageLog(systemDir, [
-				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.250000 |  | alice | hh-1 |`,
-			], 9);
+			await writeUsageLog(
+				systemDir,
+				[
+					`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.250000 |  | alice | hh-1 |`,
+				],
+				9,
+			);
 
 			const t = new CostTracker(tempDir, logger);
 			await t.loadMonthlyCache();
@@ -809,9 +817,13 @@ describe('CostTracker', () => {
 		it('9-col row without trailing bounding pipe still attributes user + household', async () => {
 			const systemDir = join(tempDir, 'system');
 			// Note: no trailing ' |' on the row below.
-			await writeUsageLog(systemDir, [
-				`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.333333 | echo | alice | hh-trail`,
-			], 9);
+			await writeUsageLog(
+				systemDir,
+				[
+					`| ${currentMonth}-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.333333 | echo | alice | hh-trail`,
+				],
+				9,
+			);
 
 			const t = new CostTracker(tempDir, logger);
 			await t.loadMonthlyCache();

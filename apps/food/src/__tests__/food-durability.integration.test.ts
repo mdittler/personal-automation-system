@@ -1,12 +1,12 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
+import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'yaml';
-import { stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { handleMessage, init } from '../index.js';
-import type { Household } from '../types.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
+import type { Household } from '../types.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -39,11 +39,19 @@ describe('food durability integration', () => {
 	beforeEach(async () => {
 		storage = new Map<string, string>([
 			['household.yaml', stringify(makeHousehold())],
-			['pantry.yaml', stringify({
-				items: [
-					{ name: 'milk', quantity: '1 gallon', addedDate: '2026-04-20', expiryEstimate: '2026-04-26' },
-				],
-			})],
+			[
+				'pantry.yaml',
+				stringify({
+					items: [
+						{
+							name: 'milk',
+							quantity: '1 gallon',
+							addedDate: '2026-04-20',
+							expiryEstimate: '2026-04-26',
+						},
+					],
+				}),
+			],
 			['waste-log.yaml', stringify({ entries: [] })],
 		]);
 		sharedStore = {

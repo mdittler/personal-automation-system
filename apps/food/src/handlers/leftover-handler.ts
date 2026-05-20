@@ -8,12 +8,12 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { withMultiFileLock } from '@pas/core/utils/file-mutex';
-import { loadFreezer, addFreezerItem, saveFreezer } from '../services/freezer-store.js';
+import { addFreezerItem, loadFreezer, saveFreezer } from '../services/freezer-store.js';
 import {
+	getActiveLeftovers,
 	loadLeftovers,
 	saveLeftovers,
 	updateLeftoverStatus,
-	getActiveLeftovers,
 	withLeftoverLock,
 } from '../services/leftover-store.js';
 import { findLeftoverRecipeSuggestions } from '../services/leftover-suggestions.js';
@@ -52,7 +52,7 @@ export async function handleLeftoverCallback(
 	// Parse "verb:idx:encodedName" format
 	const parts = action.split(':');
 	const verb = parts[0];
-	const idx = parseInt(parts[1] ?? '', 10);
+	const idx = Number.parseInt(parts[1] ?? '', 10);
 	const expectedName = parts.slice(2).join(':'); // rejoin in case name had colons
 	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
@@ -66,7 +66,8 @@ export async function handleLeftoverCallback(
 				const items = await loadLeftovers(store);
 				const item = items[idx];
 				if (!item) return null;
-				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase())
+					return 'mismatch' as const;
 				if (item.status !== 'active') return 'mismatch' as const;
 				const updated = updateLeftoverStatus(items, idx, 'used');
 				await saveLeftovers(store, updated);
@@ -74,7 +75,11 @@ export async function handleLeftoverCallback(
 			});
 			if (!result) return;
 			if (result === 'mismatch') {
-				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				await services.telegram.editMessage(
+					chatId,
+					messageId,
+					'This leftover was already handled.',
+				);
 				return;
 			}
 			await services.telegram.editMessage(chatId, messageId, `✅ Used: ${result}`);
@@ -87,7 +92,8 @@ export async function handleLeftoverCallback(
 				const items = await loadLeftovers(store);
 				const item = items[idx];
 				if (!item) return null;
-				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase())
+					return 'mismatch' as const;
 				if (item.status !== 'active') return 'mismatch' as const;
 				// Update leftover status
 				const updated = updateLeftoverStatus(items, idx, 'frozen');
@@ -106,7 +112,11 @@ export async function handleLeftoverCallback(
 			});
 			if (!result) return;
 			if (result === 'mismatch') {
-				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				await services.telegram.editMessage(
+					chatId,
+					messageId,
+					'This leftover was already handled.',
+				);
 				return;
 			}
 			await services.telegram.editMessage(chatId, messageId, `🧊 Frozen: ${result}`);
@@ -118,7 +128,8 @@ export async function handleLeftoverCallback(
 				const items = await loadLeftovers(store);
 				const item = items[idx];
 				if (!item) return null;
-				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase()) return 'mismatch' as const;
+				if (decodedName && item.name.toLowerCase() !== decodedName.toLowerCase())
+					return 'mismatch' as const;
 				if (item.status !== 'active') return 'mismatch' as const;
 				// Update leftover status
 				const updated = updateLeftoverStatus(items, idx, 'wasted');
@@ -127,7 +138,11 @@ export async function handleLeftoverCallback(
 			});
 			if (!result) return;
 			if (result === 'mismatch') {
-				await services.telegram.editMessage(chatId, messageId, 'This leftover was already handled.');
+				await services.telegram.editMessage(
+					chatId,
+					messageId,
+					'This leftover was already handled.',
+				);
 				return;
 			}
 			// Append waste log (self-locking)
@@ -148,11 +163,7 @@ export async function handleLeftoverCallback(
 			const items = await loadLeftovers(store);
 			const item = items[idx];
 			const name = item?.name ?? 'item';
-			await services.telegram.editMessage(
-				chatId,
-				messageId,
-				`✅ Got it — keeping ${name}`,
-			);
+			await services.telegram.editMessage(chatId, messageId, `✅ Got it — keeping ${name}`);
 			break;
 		}
 

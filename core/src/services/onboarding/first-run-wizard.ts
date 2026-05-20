@@ -87,7 +87,10 @@ async function savePreference(
 	await withFileLock(filePath, async () => {
 		const raw = await readYamlFile<unknown>(filePath);
 		if (raw !== null && !isValidOnboardingStore(raw)) {
-			deps.logger.error({ filePath }, 'savePreference: onboarding.yaml has unexpected shape — skipping write to avoid data loss');
+			deps.logger.error(
+				{ filePath },
+				'savePreference: onboarding.yaml has unexpected shape — skipping write to avoid data loss',
+			);
 			return;
 		}
 		const existing: OnboardingStore = raw ?? {};
@@ -101,10 +104,7 @@ async function savePreference(
 
 // ---- Wizard steps ----
 
-async function sendDigestQuestion(
-	deps: FirstRunWizardDeps,
-	userId: string,
-): Promise<void> {
+async function sendDigestQuestion(deps: FirstRunWizardDeps, userId: string): Promise<void> {
 	await deps.telegram.sendWithButtons(
 		userId,
 		'Would you like a daily digest message each morning summarizing your household activity? You can change this later.',
@@ -146,7 +146,10 @@ export async function beginFirstRunWizard(
 		);
 		await sendDigestQuestion(deps, userId);
 	} catch (err) {
-		deps.logger.error({ userId, err }, 'beginFirstRunWizard: failed to send welcome — user will be re-prompted on next message');
+		deps.logger.error(
+			{ userId, err },
+			'beginFirstRunWizard: failed to send welcome — user will be re-prompted on next message',
+		);
 	}
 }
 
@@ -183,7 +186,10 @@ export async function handleFirstRunWizardCallback(
 	if (!state) {
 		// Wizard expired — stale button press. Telegram's finally block will answer the
 		// callback query (clearing the spinner) via answerCallbackQuery().
-		deps.logger.debug({ userId, callbackData }, 'handleFirstRunWizardCallback: wizard expired or not started');
+		deps.logger.debug(
+			{ userId, callbackData },
+			'handleFirstRunWizardCallback: wizard expired or not started',
+		);
 		return true;
 	}
 
@@ -197,15 +203,15 @@ export async function handleFirstRunWizardCallback(
 			deps.logger.error({ userId, err }, 'handleFirstRunWizardCallback: failed to save preference');
 		}
 
-		await deps.telegram.send(
-			userId,
-			"You're all set. Type /help any time to see what I can do.",
-		);
+		await deps.telegram.send(userId, "You're all set. Type /help any time to see what I can do.");
 		return true;
 	}
 
 	// Unknown onboard: prefix — log for debuggability but don't crash.
-	deps.logger.warn({ userId, callbackData }, 'handleFirstRunWizardCallback: unknown onboard: callback prefix');
+	deps.logger.warn(
+		{ userId, callbackData },
+		'handleFirstRunWizardCallback: unknown onboard: callback prefix',
+	);
 	return true;
 }
 

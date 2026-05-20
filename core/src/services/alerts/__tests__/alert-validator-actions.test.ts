@@ -151,7 +151,13 @@ describe('validateAlert — write_data action', () => {
 	it('rejects path traversal', () => {
 		const def = makeValidAlert({
 			type: 'write_data',
-			config: { app_id: 'notes', user_id: 'user1', path: '../etc/passwd', content: 'x', mode: 'append' },
+			config: {
+				app_id: 'notes',
+				user_id: 'user1',
+				path: '../etc/passwd',
+				content: 'x',
+				mode: 'append',
+			},
 		});
 		const errors = validateAlert(def, mockUserManager);
 		expect(errors.some((e) => e.message.includes('..'))).toBe(true);
@@ -160,7 +166,13 @@ describe('validateAlert — write_data action', () => {
 	it('rejects absolute path', () => {
 		const def = makeValidAlert({
 			type: 'write_data',
-			config: { app_id: 'notes', user_id: 'user1', path: '/etc/passwd', content: 'x', mode: 'append' },
+			config: {
+				app_id: 'notes',
+				user_id: 'user1',
+				path: '/etc/passwd',
+				content: 'x',
+				mode: 'append',
+			},
 		});
 		const errors = validateAlert(def, mockUserManager);
 		expect(errors.some((e) => e.message.includes('relative'))).toBe(true);
@@ -178,7 +190,13 @@ describe('validateAlert — write_data action', () => {
 	it('rejects backslash in path', () => {
 		const def = makeValidAlert({
 			type: 'write_data',
-			config: { app_id: 'notes', user_id: 'user1', path: 'sub\\dir\\file.md', content: 'x', mode: 'append' },
+			config: {
+				app_id: 'notes',
+				user_id: 'user1',
+				path: 'sub\\dir\\file.md',
+				content: 'x',
+				mode: 'append',
+			},
 		});
 		const errors = validateAlert(def, mockUserManager);
 		expect(errors.some((e) => e.message.includes('forward slashes'))).toBe(true);
@@ -281,7 +299,14 @@ describe('validateAlert — dispatch_message action', () => {
 // --- All action types recognized ---
 
 describe('validateAlert — action type recognition', () => {
-	for (const type of ['telegram_message', 'run_report', 'webhook', 'write_data', 'audio', 'dispatch_message']) {
+	for (const type of [
+		'telegram_message',
+		'run_report',
+		'webhook',
+		'write_data',
+		'audio',
+		'dispatch_message',
+	]) {
 		it(`recognizes "${type}" as a valid action type`, () => {
 			// Use minimal config — we're testing type recognition, not config validation
 			const def = makeValidAlert({ type, config: {} });

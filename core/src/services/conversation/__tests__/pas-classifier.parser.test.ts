@@ -125,9 +125,7 @@ describe('parsePASClassifierOutput — robustness against prose/quoted tokens', 
 
 	it('unknown tokens on a line disqualify it as a structured token line', () => {
 		// First line has "MAYBE" which is not a known token → skip to second line
-		const r = parsePASClassifierOutput(
-			'MAYBE_PAS YES_SETTINGS\nYES_PAS NO_SETTINGS NO_DATA',
-		);
+		const r = parsePASClassifierOutput('MAYBE_PAS YES_SETTINGS\nYES_PAS NO_SETTINGS NO_DATA');
 		expect(r.pasRelated).toBe(true);
 		expect(r.settingsCandidate).toBe(false);
 	});

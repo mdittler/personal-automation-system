@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApiAuthHook } from '../../../api/auth.js';
 import { RateLimiter } from '../../../middleware/rate-limiter.js';
 import type { HouseholdService } from '../../household/index.js';
@@ -110,7 +110,9 @@ describe('ApiKeyService', () => {
 	});
 
 	it('test 7: unknown keyId → null', async () => {
-		const result = await service.verifyAndConsume('pas_nonexistentkeyid00000000000000_fakesecret00000000000000000000000000000000000000000000000000000000');
+		const result = await service.verifyAndConsume(
+			'pas_nonexistentkeyid00000000000000_fakesecret00000000000000000000000000000000000000000000000000000000',
+		);
 		expect(result).toBeNull();
 	});
 
@@ -264,13 +266,11 @@ describe('API auth hook', () => {
 	it('test 13: household rehydration — move user to different household, key uses new household', async () => {
 		let currentHousehold = 'hh-old';
 		const um = makeUserManager([{ id: 'user-1', name: 'User One', isAdmin: false }]);
-		const hsFactory = () => makeHouseholdService(
-			{ 'user-1': currentHousehold },
-			[
+		const hsFactory = () =>
+			makeHouseholdService({ 'user-1': currentHousehold }, [
 				{ id: 'hh-old', adminUserIds: [] },
 				{ id: 'hh-new', adminUserIds: [] },
-			],
-		);
+			]);
 
 		const { fullToken } = await apiKeyService.createKey('user-1', { scopes: ['data:read'] });
 

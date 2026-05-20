@@ -15,16 +15,20 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { requestContext } from '../../context/request-context.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import type { ConversationServiceDeps } from '../conversation-service.js';
-import { ConversationService } from '../conversation-service.js';
-import { CONFIG_SET_INSTRUCTION_BLOCK, NOTES_INTENT_REGEX, MEMORY_FLUSH_INTENT_REGEX } from '../control-tags.js';
-import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
+import type { AppConfigService } from '../../../types/config.js';
+import { requestContext } from '../../context/request-context.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
-import type { AppConfigService } from '../../../types/config.js';
+import {
+	CONFIG_SET_INSTRUCTION_BLOCK,
+	MEMORY_FLUSH_INTENT_REGEX,
+	NOTES_INTENT_REGEX,
+} from '../control-tags.js';
+import { SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX } from '../control-tags/session-search-instruction.js';
+import type { ConversationServiceDeps } from '../conversation-service.js';
+import { ConversationService } from '../conversation-service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,25 +41,49 @@ function makeChatbotSettingsServices(chatbotCfg: AppConfigService): {
 } {
 	const settingsRegistry = new SettingsRegistry();
 	settingsRegistry.register({
-		key: 'log_to_notes', appId: 'chatbot', category: 'personal',
-		label: 'Daily notes logging', help: 'Save every chat message to your daily notes file.',
-		type: 'boolean', default: false,
-		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
-		nlSafe: true, nlIntentRegex: NOTES_INTENT_REGEX,
+		key: 'log_to_notes',
+		appId: 'chatbot',
+		category: 'personal',
+		label: 'Daily notes logging',
+		help: 'Save every chat message to your daily notes file.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: NOTES_INTENT_REGEX,
 	});
 	settingsRegistry.register({
-		key: 'flush_memory_on_idle_reset', appId: 'chatbot', category: 'memory-sessions',
-		label: 'Memory flush on session reset', help: 'Summarize the session to memory when the chat auto-resets.',
-		type: 'boolean', default: false,
-		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
-		nlSafe: true, nlIntentRegex: MEMORY_FLUSH_INTENT_REGEX,
+		key: 'flush_memory_on_idle_reset',
+		appId: 'chatbot',
+		category: 'memory-sessions',
+		label: 'Memory flush on session reset',
+		help: 'Summarize the session to memory when the chat auto-resets.',
+		type: 'boolean',
+		default: false,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: MEMORY_FLUSH_INTENT_REGEX,
 	});
 	settingsRegistry.register({
-		key: 'session_search_tool_enabled', appId: 'chatbot', category: 'memory-sessions',
-		label: 'Session search tool', help: 'Allow the chatbot to search your past conversations mid-reply.',
-		type: 'boolean', default: true,
-		adminOnly: false, dangerous: false, hidden: false, scope: 'per-user',
-		nlSafe: true, nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
+		key: 'session_search_tool_enabled',
+		appId: 'chatbot',
+		category: 'memory-sessions',
+		label: 'Session search tool',
+		help: 'Allow the chatbot to search your past conversations mid-reply.',
+		type: 'boolean',
+		default: true,
+		adminOnly: false,
+		dangerous: false,
+		hidden: false,
+		scope: 'per-user',
+		nlSafe: true,
+		nlIntentRegex: SESSION_SEARCH_TOOL_TOGGLE_INTENT_REGEX,
 	});
 	const settingsWriter = new SettingsWriter({
 		registry: settingsRegistry,
@@ -123,10 +151,14 @@ function makeDeps(opts: MakeDepsOpts = {}): ConversationServiceDeps & {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'test-session', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
-		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ status: 'ok', entryCount: 0, content: '', builtAt: '' }),
 	};
 	const { settingsRegistry, settingsWriter } = makeChatbotSettingsServices(config as any);
 	const deps: ConversationServiceDeps = {
@@ -243,9 +275,7 @@ describe('conversational toggle — <config-set> tag processing', () => {
 		});
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'daily notes please turn on')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'daily notes please turn on')));
 
 		expect(deps._updateOverrides).toHaveBeenCalledWith('alice', { log_to_notes: true });
 	});
@@ -271,9 +301,7 @@ describe('conversational toggle — <config-set> tag processing', () => {
 		});
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'turn on daily notes')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'turn on daily notes')));
 
 		expect(deps._updateOverrides).toHaveBeenCalledTimes(1);
 		const [, arg] = deps._updateOverrides.mock.calls[0] as [string, Record<string, unknown>];
@@ -289,9 +317,7 @@ describe('conversational toggle — <config-set> tag processing', () => {
 		const svc = new ConversationService(deps);
 
 		// "what's the weather?" does not match NOTES_INTENT_REGEX
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', "what's the weather in Paris?")),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', "what's the weather in Paris?")));
 
 		expect(deps._updateOverrides).not.toHaveBeenCalled();
 		const [[, sentText]] = deps._telegram.send.mock.calls as [[string, string]];
@@ -305,9 +331,7 @@ describe('conversational toggle — <config-set> tag processing', () => {
 		});
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'turn on daily notes')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'turn on daily notes')));
 
 		expect(deps._updateOverrides).not.toHaveBeenCalled();
 		const calls = deps._telegram.send.mock.calls as [[string, string]][];
@@ -321,9 +345,7 @@ describe('conversational toggle — <config-set> tag processing', () => {
 		});
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'please turn on daily notes logging')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'please turn on daily notes logging')));
 
 		expect(deps._updateOverrides).not.toHaveBeenCalled();
 	});
@@ -339,9 +361,7 @@ describe('LLM error fidelity', () => {
 		deps._llm.complete.mockRejectedValue(new Error('LLM down'));
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', "what's for dinner?")),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', "what's for dinner?")));
 
 		const [[, sentText]] = deps._telegram.send.mock.calls as [[string, string]];
 		expect(sentText.toLowerCase()).not.toContain('daily notes');
@@ -370,9 +390,7 @@ describe('CONFIG_SET_INSTRUCTION_BLOCK injection', () => {
 		const deps = makeDeps();
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'turn on daily notes')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'turn on daily notes')));
 
 		const calls = deps._llm.complete.mock.calls as [[string, Record<string, unknown>]][];
 		const systemPrompt = (calls[0]?.[1]?.systemPrompt ?? '') as string;
@@ -383,9 +401,7 @@ describe('CONFIG_SET_INSTRUCTION_BLOCK injection', () => {
 		const deps = makeDeps();
 		const svc = new ConversationService(deps);
 
-		await run('alice', () =>
-			svc.handleMessage(ctx('alice', 'take notes on this recipe')),
-		);
+		await run('alice', () => svc.handleMessage(ctx('alice', 'take notes on this recipe')));
 
 		const calls = deps._llm.complete.mock.calls as [[string, Record<string, unknown>]][];
 		const systemPrompt = (calls[0]?.[1]?.systemPrompt ?? '') as string;

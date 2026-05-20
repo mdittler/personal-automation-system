@@ -181,9 +181,7 @@ describe('ck:t — set timer', () => {
 			'user1',
 			expect.stringContaining('Timer done'),
 			expect.arrayContaining([
-				expect.arrayContaining([
-					expect.objectContaining({ callbackData: 'app:food:ck:n' }),
-				]),
+				expect.arrayContaining([expect.objectContaining({ callbackData: 'app:food:ck:n' })]),
 			]),
 		);
 	});
@@ -285,9 +283,9 @@ describe('ck:tc — cancel timer', () => {
 		await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
 
 		// Timer was cancelled — should not fire "Timer done"
-		const timerCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls.filter(
-			([, msg]) => typeof msg === 'string' && msg.includes('Timer done'),
-		);
+		const timerCalls = vi
+			.mocked(services.telegram.sendWithButtons)
+			.mock.calls.filter(([, msg]) => typeof msg === 'string' && msg.includes('Timer done'));
 		expect(timerCalls).toHaveLength(0);
 	});
 
@@ -339,9 +337,9 @@ describe('auto-cancel on navigation', () => {
 		// Timer should not fire
 		vi.mocked(services.telegram.sendWithButtons).mockClear();
 		await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
-		const timerCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls.filter(
-			([, msg]) => typeof msg === 'string' && msg.includes('Timer done'),
-		);
+		const timerCalls = vi
+			.mocked(services.telegram.sendWithButtons)
+			.mock.calls.filter(([, msg]) => typeof msg === 'string' && msg.includes('Timer done'));
 		expect(timerCalls).toHaveLength(0);
 	});
 

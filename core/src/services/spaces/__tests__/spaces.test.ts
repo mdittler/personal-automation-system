@@ -52,9 +52,7 @@ function makeHouseholdService(
 	};
 }
 
-function makeServiceWithHousehold(
-	userHouseholds: Record<string, string | null>,
-): SpaceService {
+function makeServiceWithHousehold(userHouseholds: Record<string, string | null>): SpaceService {
 	return new SpaceService({
 		dataDir: tempDir,
 		userManager: makeUserManager(),
@@ -851,7 +849,11 @@ describe('SpaceService', () => {
 				].join('\n'),
 			);
 
-			const svc = new SpaceService({ dataDir: tempDir, userManager: makeUserManager(), logger: testLogger });
+			const svc = new SpaceService({
+				dataDir: tempDir,
+				userManager: makeUserManager(),
+				logger: testLogger,
+			});
 			await svc.init();
 
 			// Valid space is present
@@ -895,7 +897,11 @@ describe('SpaceService', () => {
 			await mkdir(join(tempDir, 'system'), { recursive: true });
 			await writeFile(join(tempDir, 'system', 'spaces.yaml'), '{{invalid: [[[corrupt yaml');
 
-			const svc = new SpaceService({ dataDir: tempDir, userManager: makeUserManager(), logger: testLogger });
+			const svc = new SpaceService({
+				dataDir: tempDir,
+				userManager: makeUserManager(),
+				logger: testLogger,
+			});
 			await svc.init();
 
 			expect(svc.listSpaces()).toHaveLength(0);
@@ -951,9 +957,7 @@ describe('SpaceService', () => {
 			const svc = makeService();
 			await svc.init();
 
-			const errors = await svc.saveSpace(
-				makeSpace({ kind: 'household', householdId: undefined }),
-			);
+			const errors = await svc.saveSpace(makeSpace({ kind: 'household', householdId: undefined }));
 			expect(errors.length).toBeGreaterThan(0);
 			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
 		});
@@ -962,9 +966,7 @@ describe('SpaceService', () => {
 			const svc = makeService();
 			await svc.init();
 
-			const errors = await svc.saveSpace(
-				makeSpace({ kind: 'household', householdId: '../evil' }),
-			);
+			const errors = await svc.saveSpace(makeSpace({ kind: 'household', householdId: '../evil' }));
 			expect(errors.length).toBeGreaterThan(0);
 			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
 		});
@@ -980,7 +982,7 @@ describe('SpaceService', () => {
 			expect(errors.some((e) => e.field === 'householdId')).toBe(true);
 		});
 
-		it("saveSpace accepts valid collaboration space (no householdId)", async () => {
+		it('saveSpace accepts valid collaboration space (no householdId)', async () => {
 			const svc = makeService();
 			await svc.init();
 
@@ -990,7 +992,7 @@ describe('SpaceService', () => {
 			expect(errors).toEqual([]);
 		});
 
-		it("saveSpace accepts valid household space with valid householdId", async () => {
+		it('saveSpace accepts valid household space with valid householdId', async () => {
 			const svc = makeService();
 			await svc.init();
 

@@ -57,7 +57,9 @@ function makeHousehold(overrides: Partial<Household> = {}): Household {
 	};
 }
 
-function createMockScopedStore(overrides: Partial<Record<keyof ScopedDataStore, unknown>> = {}): ScopedDataStore {
+function createMockScopedStore(
+	overrides: Partial<Record<keyof ScopedDataStore, unknown>> = {},
+): ScopedDataStore {
 	return {
 		read: vi.fn().mockResolvedValue(''),
 		write: vi.fn().mockResolvedValue(undefined),
@@ -206,7 +208,11 @@ describe('handleVoteCallback', () => {
 
 		await handleVoteCallback(services, 'up:2026-04-01', 'user1', 100, 200);
 
-		expect(services.telegram.editMessage).toHaveBeenCalledWith(100, 200, expect.stringContaining('👍'));
+		expect(services.telegram.editMessage).toHaveBeenCalledWith(
+			100,
+			200,
+			expect.stringContaining('👍'),
+		);
 	});
 
 	it('edits message with thumbs down for a down vote', async () => {
@@ -216,7 +222,11 @@ describe('handleVoteCallback', () => {
 
 		await handleVoteCallback(services, 'down:2026-04-01', 'user1', 100, 200);
 
-		expect(services.telegram.editMessage).toHaveBeenCalledWith(100, 200, expect.stringContaining('👎'));
+		expect(services.telegram.editMessage).toHaveBeenCalledWith(
+			100,
+			200,
+			expect.stringContaining('👎'),
+		);
 	});
 
 	it('edits message with neutral emoji for a neutral vote', async () => {
@@ -226,7 +236,11 @@ describe('handleVoteCallback', () => {
 
 		await handleVoteCallback(services, 'neutral:2026-04-01', 'user1', 100, 200);
 
-		expect(services.telegram.editMessage).toHaveBeenCalledWith(100, 200, expect.stringContaining('😐'));
+		expect(services.telegram.editMessage).toHaveBeenCalledWith(
+			100,
+			200,
+			expect.stringContaining('😐'),
+		);
 	});
 
 	it('confirmation message includes the recipe title', async () => {
@@ -260,11 +274,7 @@ describe('handleVoteCallback', () => {
 
 		await handleVoteCallback(services, 'up:2026-04-01', 'user1', 100, 200);
 
-		expect(services.telegram.editMessage).toHaveBeenCalledWith(
-			100,
-			200,
-			'Voting has ended',
-		);
+		expect(services.telegram.editMessage).toHaveBeenCalledWith(100, 200, 'Voting has ended');
 	});
 
 	it('rejects vote with "Voting has ended" when no plan exists', async () => {
@@ -310,7 +320,12 @@ describe('handleVoteCallback', () => {
 			votingStartedAt: new Date().toISOString(),
 			meals: [
 				makeMeal({ date: '2026-04-01', votes: {} }), // user1 votes here
-				makeMeal({ date: '2026-04-02', recipeTitle: 'Pasta', recipeId: 'pasta-abc', votes: { user1: 'up', user2: 'up' } }),
+				makeMeal({
+					date: '2026-04-02',
+					recipeTitle: 'Pasta',
+					recipeId: 'pasta-abc',
+					votes: { user1: 'up', user2: 'up' },
+				}),
 			],
 		});
 		// After user1 votes on 2026-04-01, allMembersVoted returns true (user2 also votes)
@@ -320,7 +335,12 @@ describe('handleVoteCallback', () => {
 			votingStartedAt: new Date().toISOString(),
 			meals: [
 				makeMeal({ date: '2026-04-01', votes: { user2: 'up' } }), // user1 is the last voter
-				makeMeal({ date: '2026-04-02', recipeTitle: 'Pasta', recipeId: 'pasta-abc', votes: { user1: 'up', user2: 'up' } }),
+				makeMeal({
+					date: '2026-04-02',
+					recipeTitle: 'Pasta',
+					recipeId: 'pasta-abc',
+					votes: { user1: 'up', user2: 'up' },
+				}),
 			],
 		});
 		sharedStore = setupStore(fullPlan);
@@ -354,7 +374,10 @@ describe('handleFinalizeVotesJob', () => {
 	let services: CoreServices;
 	let sharedStore: ScopedDataStore;
 
-	function setupStore(plan: MealPlan | null, household: Household | null = makeHousehold()): ScopedDataStore {
+	function setupStore(
+		plan: MealPlan | null,
+		household: Household | null = makeHousehold(),
+	): ScopedDataStore {
 		return createMockScopedStore({
 			read: vi.fn().mockImplementation(async (path: string) => {
 				if (path === 'meal-plans/current.yaml') return plan ? planYaml(plan) : null;
@@ -395,7 +418,10 @@ describe('handleFinalizeVotesJob', () => {
 	});
 
 	it('does nothing when no household exists', async () => {
-		const plan = makePlan({ status: 'voting', votingStartedAt: new Date(Date.now() - 25 * 3600_000).toISOString() });
+		const plan = makePlan({
+			status: 'voting',
+			votingStartedAt: new Date(Date.now() - 25 * 3600_000).toISOString(),
+		});
 		sharedStore = setupStore(plan, null);
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore);
 
@@ -458,20 +484,27 @@ describe('handleFinalizeVotesJob', () => {
 			votingStartedAt: new Date(Date.now() - 25 * 3600_000).toISOString(),
 			meals: [
 				makeMeal({ date: '2026-04-01', votes: { user1: 'down', user2: 'down' } }),
-				makeMeal({ date: '2026-04-02', recipeTitle: 'Pasta Carbonara', recipeId: 'pasta-abc', votes: { user1: 'up', user2: 'up' } }),
+				makeMeal({
+					date: '2026-04-02',
+					recipeTitle: 'Pasta Carbonara',
+					recipeId: 'pasta-abc',
+					votes: { user1: 'up', user2: 'up' },
+				}),
 			],
 		});
 		sharedStore = setupStore(plan);
 		vi.mocked(services.data.forShared).mockReturnValue(sharedStore);
 
 		// LLM should return a replacement meal
-		vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify({
-			recipeId: 'new-soup-abc',
-			recipeTitle: 'Tomato Soup',
-			date: '2026-04-01',
-			isNew: true,
-			description: 'A comforting tomato soup',
-		}));
+		vi.mocked(services.llm.complete).mockResolvedValue(
+			JSON.stringify({
+				recipeId: 'new-soup-abc',
+				recipeTitle: 'Tomato Soup',
+				date: '2026-04-01',
+				isNew: true,
+				description: 'A comforting tomato soup',
+			}),
+		);
 
 		await handleFinalizeVotesJob(services);
 

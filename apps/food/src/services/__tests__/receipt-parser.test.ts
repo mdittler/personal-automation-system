@@ -14,16 +14,22 @@
  * JSDoc.
  */
 
-import { describe, expect, it, vi } from 'vitest';
 import type { CoreServices } from '@pas/core/types';
+import { describe, expect, it, vi } from 'vitest';
 import { buildReceiptPrompt, parseReceiptFromPhoto } from '../receipt-parser.js';
 
 const testPhoto = Buffer.from('fake-jpeg-data');
 const testMimeType = 'image/jpeg';
 
-function makeServices(llmText: string | string[], finishReasons: ('stop' | 'length' | 'error' | 'other')[] = ['stop']) {
+function makeServices(
+	llmText: string | string[],
+	finishReasons: ('stop' | 'length' | 'error' | 'other')[] = ['stop'],
+) {
 	const texts = Array.isArray(llmText) ? llmText : [llmText];
-	const reasons = finishReasons.length === texts.length ? finishReasons : texts.map(() => finishReasons[0] ?? 'stop');
+	const reasons =
+		finishReasons.length === texts.length
+			? finishReasons
+			: texts.map(() => finishReasons[0] ?? 'stop');
 	const completeWithMeta = vi.fn();
 	for (let i = 0; i < texts.length; i++) {
 		completeWithMeta.mockResolvedValueOnce({ text: texts[i], finishReason: reasons[i] });
@@ -77,7 +83,7 @@ describe('parseReceiptFromPhoto — request shape (REQ-FOOD-RECEIPT-INTEGRITY-00
 		const { services, completeWithMeta } = makeServices(valid);
 		await parseReceiptFromPhoto(services, testPhoto, testMimeType);
 		expect(completeWithMeta).toHaveBeenCalledTimes(1);
-		expect((services.llm.complete as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+		expect(services.llm.complete as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
 	});
 
 	it('passes maxTokens: 8192 with the standard tier and the photo', async () => {

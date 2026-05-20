@@ -10,10 +10,10 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { BatchAnalysis, FreezerItem, MealPlan, PlannedMeal, Recipe } from '../types.js';
-import { sanitizeInput } from '../utils/sanitize.js';
-import { loadHousehold } from '../utils/household-guard.js';
-import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { addDays } from '../utils/date.js';
+import { escapeMarkdown } from '../utils/escape-markdown.js';
+import { loadHousehold } from '../utils/household-guard.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 import { loadFreezer } from './freezer-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
 
@@ -88,9 +88,7 @@ export function formatBatchPrepMessage(analysis: BatchAnalysis): string {
 	const lines: string[] = ['🔪 Batch Prep Plan', ''];
 
 	if (analysis.sharedTasks.length === 0) {
-		lines.push(
-			'No shared prep tasks this week — each recipe has unique ingredients.',
-		);
+		lines.push('No shared prep tasks this week — each recipe has unique ingredients.');
 	} else {
 		lines.push('Shared prep tasks:');
 		for (const task of analysis.sharedTasks) {
@@ -181,7 +179,9 @@ export function formatDefrostMessage(matches: DefrostMatch[]): string {
 	];
 
 	for (const match of matches) {
-		lines.push(`• ${escapeMarkdown(match.freezerItem.name)} → ${escapeMarkdown(match.meal.recipeTitle)}`);
+		lines.push(
+			`• ${escapeMarkdown(match.freezerItem.name)} → ${escapeMarkdown(match.meal.recipeTitle)}`,
+		);
 	}
 
 	return lines.join('\n');
@@ -202,10 +202,12 @@ export function formatDefrostMessage(matches: DefrostMatch[]): string {
 export function buildBatchFreezeButtons(
 	freezerFriendlyRecipes: string[],
 ): Array<Array<{ text: string; callbackData: string }>> {
-	return freezerFriendlyRecipes.map((recipe, index) => [{
-		text: `🧊 Double & freeze: ${recipe}`,
-		callbackData: `app:food:batch:freeze:${index}`,
-	}]);
+	return freezerFriendlyRecipes.map((recipe, index) => [
+		{
+			text: `🧊 Double & freeze: ${recipe}`,
+			callbackData: `app:food:batch:freeze:${index}`,
+		},
+	]);
 }
 
 export async function checkDefrostNeeded(

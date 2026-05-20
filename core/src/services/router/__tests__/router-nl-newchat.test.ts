@@ -13,17 +13,17 @@
  */
 
 import type { Logger } from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SystemConfig } from '../../../types/config.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import {
-	SC_NO,
-	SC_YES,
 	type PendingSessionControlEntry,
 	type PendingSessionControlStore,
+	SC_NO,
+	SC_YES,
 } from '../../conversation/pending-session-control-store.js';
 import type { SessionControlResult } from '../../conversation/session-control-classifier.js';
 import type { FallbackHandler } from '../fallback.js';
@@ -224,7 +224,8 @@ describe('Router NL /newchat hook', () => {
 			await router.routeMessage(msg('maybe reset things?'));
 
 			expect(pendingStore.attach).toHaveBeenCalledOnce();
-			const [attachedUserId, attachedEntry] = (pendingStore.attach as ReturnType<typeof vi.fn>).mock.calls[0]!;
+			const [attachedUserId, attachedEntry] = (pendingStore.attach as ReturnType<typeof vi.fn>).mock
+				.calls[0]!;
 			expect(attachedUserId).toBe('user1');
 			const entry = attachedEntry as PendingSessionControlEntry;
 			expect(entry.messageText).toBe('maybe reset things?');

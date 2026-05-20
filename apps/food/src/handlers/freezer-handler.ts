@@ -37,7 +37,7 @@ export async function handleFreezerCallback(
 ): Promise<void> {
 	const parts = action.split(':');
 	const verb = parts[0];
-	const index = parseInt(parts[1] ?? '', 10);
+	const index = Number.parseInt(parts[1] ?? '', 10);
 	const expectedName = parts.slice(2).join(':');
 	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
@@ -67,7 +67,8 @@ export async function handleFreezerCallback(
 	}
 
 	if (verb === 'toss') {
-		await appendWaste(store, { // self-locking
+		await appendWaste(store, {
+			// self-locking
 			name: item.name,
 			quantity: item.quantity,
 			reason: 'discarded',
@@ -108,7 +109,9 @@ export async function handleFreezerCheckJob(
 		const [fy, fm] = item.frozenDate.split('-').map(Number) as [number, number, number];
 		const [ty, tm] = today.split('-').map(Number) as [number, number, number];
 		const months = (ty - fy) * 12 + (tm - fm);
-		lines.push(`• ${item.name} — ${months} month${months === 1 ? '' : 's'} (frozen ${item.frozenDate})`);
+		lines.push(
+			`• ${item.name} — ${months} month${months === 1 ? '' : 's'} (frozen ${item.frozenDate})`,
+		);
 	}
 
 	lines.push('\nUse /freezer to manage your inventory.');

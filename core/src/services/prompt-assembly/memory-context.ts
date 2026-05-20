@@ -10,7 +10,10 @@
  * toMemorySnapshotFrontmatter / parseMemorySnapshotFrontmatter — camelCase ↔
  *   snake_case YAML conversion for the session frontmatter field.
  */
-import type { MemorySnapshot, MemorySnapshotFrontmatter } from '../../types/conversation-session.js';
+import type {
+	MemorySnapshot,
+	MemorySnapshotFrontmatter,
+} from '../../types/conversation-session.js';
 
 export type { MemorySnapshot } from '../../types/conversation-session.js';
 
@@ -25,8 +28,7 @@ export interface MemoryContextBlockOpts {
 
 /** Tags that, if present in recalled content, could interfere with the wrapper or the LLM's
  *  role-parsing heuristics. The opening `<` is replaced with `&lt;`. Case-insensitive. */
-const ROLE_TAG_RE =
-	/(<\/?(memory-context|system|user|assistant)(?=[\s>]))/gi;
+const ROLE_TAG_RE = /(<\/?(memory-context|system|user|assistant)(?=[\s>]))/gi;
 
 /** Zero-width chars and Unicode bidi controls that can hide or reverse injected text. */
 const ZERO_WIDTH_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
@@ -35,11 +37,7 @@ const ZERO_WIDTH_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
  * Strips zero-width/bidi chars, collapses nested backtick fences (≥3 ASCII backticks),
  * and neutralizes role-like XML tags inside recalled content, then truncates.
  */
-export function sanitizeContextContent(
-	content: string,
-	maxChars: number,
-	marker: string,
-): string {
+export function sanitizeContextContent(content: string, maxChars: number, marker: string): string {
 	// Strip invisible chars that can hide injected text or alter bidi rendering.
 	let sanitized = content.replace(ZERO_WIDTH_RE, '');
 

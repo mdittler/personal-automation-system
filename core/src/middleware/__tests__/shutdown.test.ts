@@ -464,8 +464,7 @@ describe('ShutdownManager', () => {
 
 			const infoCalls = (logger.info as ReturnType<typeof vi.fn>).mock.calls;
 			const shutdownCompleteCall = infoCalls.find(
-				(call: unknown[]) =>
-					typeof call[0] === 'string' && call[0].includes('Shutdown complete'),
+				(call: unknown[]) => typeof call[0] === 'string' && call[0].includes('Shutdown complete'),
 			);
 			expect(shutdownCompleteCall).toBeUndefined();
 		});

@@ -104,12 +104,9 @@ describe('validatePersonaCase — routingTarget (Chunk B)', () => {
 		expect(() => validatePersonaCase(c as PersonaCase)).toThrow(/routingTarget.*required/i);
 	});
 
-	it.each(['food-shadow', 'session-control', 'pas'] as const)(
-		'accepts routingTarget=%s',
-		(t) => {
-			expect(() => validatePersonaCase({ ...validRouting, routingTarget: t })).not.toThrow();
-		},
-	);
+	it.each(['food-shadow', 'session-control', 'pas'] as const)('accepts routingTarget=%s', (t) => {
+		expect(() => validatePersonaCase({ ...validRouting, routingTarget: t })).not.toThrow();
+	});
 
 	it('rejects unknown routingTarget value', () => {
 		expect(() =>
@@ -151,15 +148,15 @@ describe('Chunk C — rubric oracle rules', () => {
 	});
 
 	it('rejects oracle="rubric" without a rubric field', () => {
-		expect(() =>
-			validatePersonaCase({ ...baseChatbot, oracle: 'rubric' } as PersonaCase),
-		).toThrow(/rubric.*required/i);
+		expect(() => validatePersonaCase({ ...baseChatbot, oracle: 'rubric' } as PersonaCase)).toThrow(
+			/rubric.*required/i,
+		);
 	});
 
 	it('rejects oracle="rubric" with an empty rubric string', () => {
-		expect(() =>
-			validatePersonaCase({ ...baseChatbot, oracle: 'rubric', rubric: '   ' }),
-		).toThrow(/rubric.*non-empty/i);
+		expect(() => validatePersonaCase({ ...baseChatbot, oracle: 'rubric', rubric: '   ' })).toThrow(
+			/rubric.*non-empty/i,
+		);
 	});
 
 	it('rejects oracle="rubric" on a non-chatbot bucket (recall)', () => {

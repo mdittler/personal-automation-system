@@ -33,10 +33,6 @@ import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { composeRuntime } from '../../../compose-runtime.js';
-import { AppConfigServiceImpl } from '../../config/app-config-service.js';
-import { requestContext } from '../../context/request-context.js';
-import { buildSessionKey } from '../../conversation-session/session-key.js';
-import { CostTracker } from '../../llm/cost-tracker.js';
 import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { seedUsers } from '../../../testing/fixtures/seed-users.js';
 import {
@@ -45,6 +41,10 @@ import {
 } from '../../../testing/fixtures/stub-llm-provider.js';
 import type { AlertDefinition } from '../../../types/alert.js';
 import type { ReportDefinition } from '../../../types/report.js';
+import { AppConfigServiceImpl } from '../../config/app-config-service.js';
+import { requestContext } from '../../context/request-context.js';
+import { buildSessionKey } from '../../conversation-session/session-key.js';
+import { CostTracker } from '../../llm/cost-tracker.js';
 
 const INT_TEST_TIMEOUT_MS = 30_000;
 const STUB_OPTIONS = { p50Ms: 1, p95Ms: 2, capMs: 5 } as const;
@@ -96,14 +96,7 @@ describe.sequential(
 			// handleWeeklyNutritionSummaryJob's membership check passes.
 			// `services.data.forShared('shared')` resolves to
 			// data/households/<hhId>/shared/food/ when invoked under requestContext.
-			const householdDir = join(
-				tempDir,
-				'data',
-				'households',
-				householdAId,
-				'shared',
-				'food',
-			);
+			const householdDir = join(tempDir, 'data', 'households', householdAId, 'shared', 'food');
 			await mkdir(householdDir, { recursive: true });
 			const householdYaml =
 				`---\ntitle: Solo\napp: food\n---\n` +
@@ -373,10 +366,7 @@ describe.sequential(
 			const sessionEntry = indexMap[sessionKey];
 			expect(sessionEntry?.id).toBeDefined();
 
-			const transcript = await readFile(
-				join(sessionsDir, `${sessionEntry!.id}.md`),
-				'utf-8',
-			);
+			const transcript = await readFile(join(sessionsDir, `${sessionEntry!.id}.md`), 'utf-8');
 			const fmMatch = transcript.match(/^---\n([\s\S]*?)\n---\n/);
 			expect(fmMatch).not.toBeNull();
 			const frontmatter = parseYaml(fmMatch![1]!) as Record<string, unknown>;
@@ -446,8 +436,9 @@ describe.sequential(
 					});
 					expect(turns.some((t) => t.content === expectedHeader)).toBe(false);
 					// Count of report-bridged turns for USER_C is unchanged.
-					const userCAfterBridged = turns.filter((t) => t.content.startsWith('[App: reports]'))
-						.length;
+					const userCAfterBridged = turns.filter((t) =>
+						t.content.startsWith('[App: reports]'),
+					).length;
 					expect(userCAfterBridged).toBe(userCBeforeBridged);
 				});
 			} finally {

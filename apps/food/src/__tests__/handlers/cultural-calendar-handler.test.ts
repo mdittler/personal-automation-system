@@ -8,10 +8,10 @@
  * Frozen date: 2025-12-20 → Christmas Dec 25 is 5 days away (within 14-day window).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { stringify } from 'yaml';
-import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import type { CoreServices } from '@pas/core/types';
+import { generateFrontmatter } from '@pas/core/utils/frontmatter';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stringify } from 'yaml';
 import {
 	handleCulturalCalendarJob,
 	handleCulturalCalendarMessage,
@@ -23,12 +23,18 @@ import type { CulturalCalendar } from '../../types.js';
 
 const FROZEN_DATE = '2025-12-20'; // Christmas Dec 25 is within 14-day window
 
-function createMockServices(overrides: Partial<{
-	llmResponse: string;
-	configEnabled: boolean;
-	location: string;
-}> = {}) {
-	const { llmResponse = 'Try this holiday recipe!', configEnabled = true, location = 'Raleigh, NC' } = overrides;
+function createMockServices(
+	overrides: Partial<{
+		llmResponse: string;
+		configEnabled: boolean;
+		location: string;
+	}> = {},
+) {
+	const {
+		llmResponse = 'Try this holiday recipe!',
+		configEnabled = true,
+		location = 'Raleigh, NC',
+	} = overrides;
 	return {
 		telegram: { send: vi.fn().mockResolvedValue(undefined) },
 		llm: { complete: vi.fn().mockResolvedValue(llmResponse) },
@@ -62,26 +68,32 @@ function createMockServices(overrides: Partial<{
 }
 
 function makeHouseholdYaml(members = ['user1', 'user2']): string {
-	return `id: h1\nname: Test Household\ncreatedBy: user1\nmembers:\n${members.map(m => `  - ${m}`).join('\n')}\njoinCode: ABC123\ncreatedAt: "2025-01-01T00:00:00.000Z"`;
+	return `id: h1\nname: Test Household\ncreatedBy: user1\nmembers:\n${members.map((m) => `  - ${m}`).join('\n')}\njoinCode: ABC123\ncreatedAt: "2025-01-01T00:00:00.000Z"`;
 }
 
 function makeCalendarYaml(calendar: CulturalCalendar): string {
-	const fm = generateFrontmatter({ title: 'Cultural Calendar', date: new Date().toISOString(), tags: ['food'] });
+	const fm = generateFrontmatter({
+		title: 'Cultural Calendar',
+		date: new Date().toISOString(),
+		tags: ['food'],
+	});
 	return fm + stringify({ holidays: calendar.holidays });
 }
 
 /** A minimal calendar with just Christmas (Dec 25) for deterministic testing. */
 function makeChristmasCalendar(): CulturalCalendar {
 	return {
-		holidays: [{
-			id: 'christmas',
-			name: 'Christmas',
-			dateRule: { type: 'fixed', month: 12, day: 25 },
-			cuisine: 'American',
-			traditionalFoods: ['roast turkey', 'glazed ham', 'mashed potatoes'],
-			region: 'US',
-			enabled: true,
-		}],
+		holidays: [
+			{
+				id: 'christmas',
+				name: 'Christmas',
+				dateRule: { type: 'fixed', month: 12, day: 25 },
+				cuisine: 'American',
+				traditionalFoods: ['roast turkey', 'glazed ham', 'mashed potatoes'],
+				region: 'US',
+				enabled: true,
+			},
+		],
 	};
 }
 
@@ -100,7 +112,8 @@ describe('handleCulturalCalendarJob', () => {
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
 			if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			return Promise.resolve(null);
 		});
 
@@ -118,7 +131,8 @@ describe('handleCulturalCalendarJob', () => {
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
 			if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(emptyCalendar));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(emptyCalendar));
 			return Promise.resolve(null);
 		});
 
@@ -152,12 +166,15 @@ describe('handleCulturalCalendarJob', () => {
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
 			if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			return Promise.resolve(null);
 		});
 
 		// Should not throw
-		await expect(handleCulturalCalendarJob(services as unknown as CoreServices)).resolves.toBeUndefined();
+		await expect(
+			handleCulturalCalendarJob(services as unknown as CoreServices),
+		).resolves.toBeUndefined();
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
 
@@ -184,7 +201,8 @@ describe('handleCulturalCalendarJob', () => {
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
 			if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			return Promise.resolve(null);
 		});
 
@@ -223,7 +241,8 @@ describe('handleCulturalCalendarJob', () => {
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
 			if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(twoHolidayCalendar));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(twoHolidayCalendar));
 			return Promise.resolve(null);
 		});
 
@@ -249,7 +268,8 @@ describe('handleCulturalCalendarMessage', () => {
 		const services = createMockServices();
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			return Promise.resolve(null);
 		});
 
@@ -266,7 +286,8 @@ describe('handleCulturalCalendarMessage', () => {
 		const services = createMockServices();
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			return Promise.resolve(null);
 		});
 
@@ -282,7 +303,8 @@ describe('handleCulturalCalendarMessage', () => {
 		const emptyCalendar: CulturalCalendar = { holidays: [] };
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(emptyCalendar));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(emptyCalendar));
 			return Promise.resolve(null);
 		});
 
@@ -298,19 +320,22 @@ describe('handleCulturalCalendarMessage', () => {
 		const services = createMockServices();
 		// Calendar has a holiday with table entries only for 2024 — no entry for 2025 or 2026
 		const staleCalendar: CulturalCalendar = {
-			holidays: [{
-				id: 'lunar-new-year',
-				name: 'Lunar New Year',
-				dateRule: { type: 'table', dates: { 2024: '02-10' } },
-				cuisine: 'Chinese',
-				traditionalFoods: ['dumplings', 'noodles'],
-				region: 'East Asian',
-				enabled: true,
-			}],
+			holidays: [
+				{
+					id: 'lunar-new-year',
+					name: 'Lunar New Year',
+					dateRule: { type: 'table', dates: { 2024: '02-10' } },
+					cuisine: 'Chinese',
+					traditionalFoods: ['dumplings', 'noodles'],
+					region: 'East Asian',
+					enabled: true,
+				},
+			],
 		};
 		const sharedStore = services.data.forShared('shared');
 		sharedStore.read.mockImplementation((path: string) => {
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(staleCalendar));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(staleCalendar));
 			return Promise.resolve(null);
 		});
 
@@ -333,7 +358,9 @@ describe('handleCulturalCalendarMessage', () => {
 
 		const ctx = { userId: 'user1', text: 'Any holiday recipes?' };
 		// Should not throw — either sends a suggestion or "no upcoming"
-		await expect(handleCulturalCalendarMessage(services as unknown as CoreServices, ctx as never)).resolves.toBeUndefined();
+		await expect(
+			handleCulturalCalendarMessage(services as unknown as CoreServices, ctx as never),
+		).resolves.toBeUndefined();
 		expect(sharedStore.write).toHaveBeenCalledWith('cultural-calendar.yaml', expect.any(String));
 		expect(services.telegram.send).toHaveBeenCalledOnce();
 	});
@@ -343,24 +370,31 @@ describe('handleCulturalCalendarMessage', () => {
 		const sharedStore = services.data.forShared('shared');
 
 		// Christmas calendar + one matching recipe that contains a traditional food keyword ("ham")
-		const fm = generateFrontmatter({ title: 'Glazed Ham', date: '2025-01-01T00:00:00.000Z', tags: ['food', 'recipe'] });
-		const recipeYaml = fm + stringify({
-			id: 'glazed-ham-r1',
+		const fm = generateFrontmatter({
 			title: 'Glazed Ham',
-			tags: ['holiday', 'dinner'],
-			cuisine: 'American',
-			servings: 8,
-			ingredients: [],
-			instructions: [],
-			ratings: [],
-			history: [],
-			status: 'draft',
-			createdAt: '2025-01-01T00:00:00.000Z',
-			updatedAt: '2025-01-01T00:00:00.000Z',
+			date: '2025-01-01T00:00:00.000Z',
+			tags: ['food', 'recipe'],
 		});
+		const recipeYaml =
+			fm +
+			stringify({
+				id: 'glazed-ham-r1',
+				title: 'Glazed Ham',
+				tags: ['holiday', 'dinner'],
+				cuisine: 'American',
+				servings: 8,
+				ingredients: [],
+				instructions: [],
+				ratings: [],
+				history: [],
+				status: 'draft',
+				createdAt: '2025-01-01T00:00:00.000Z',
+				updatedAt: '2025-01-01T00:00:00.000Z',
+			});
 
 		sharedStore.read.mockImplementation((path: string) => {
-			if (path === 'cultural-calendar.yaml') return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+			if (path === 'cultural-calendar.yaml')
+				return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
 			if (path.startsWith('recipes/') && path.endsWith('.yaml')) return Promise.resolve(recipeYaml);
 			return Promise.resolve(null);
 		});

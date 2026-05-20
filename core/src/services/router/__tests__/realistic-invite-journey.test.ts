@@ -18,8 +18,8 @@ import type { MessageContext, TelegramService } from '../../../types/telegram.js
 import { type AppRegistry, ManifestCache } from '../../app-registry/index.js';
 import type { InviteService } from '../../invite/index.js';
 import type { UserManager } from '../../user-manager/index.js';
-import type { UserMutationService } from '../../user-manager/user-mutation-service.js';
 import { UserGuard } from '../../user-manager/user-guard.js';
+import type { UserMutationService } from '../../user-manager/user-mutation-service.js';
 import type { FallbackHandler } from '../fallback.js';
 import { Router } from '../index.js';
 
@@ -50,9 +50,7 @@ function createMockTelegram(): TelegramService {
 function createMockLLM(): LLMService {
 	return {
 		complete: vi.fn(),
-		classify: vi
-			.fn()
-			.mockResolvedValue({ category: 'unknown', confidence: 0.1 } as ClassifyResult),
+		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0.1 } as ClassifyResult),
 		extractStructured: vi.fn(),
 	};
 }
@@ -178,10 +176,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const result = await guard.checkUser('newuser', '/start a1b2c3d4');
 			expect(result).toBe(true);
 			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('a1b2c3d4', 'newuser');
-			expect(telegram.send).toHaveBeenCalledWith(
-				'newuser',
-				expect.stringContaining('Welcome'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('newuser', expect.stringContaining('Welcome'));
 		});
 
 		it('"  a1b2c3d4  " — they copy-pasted the code and got extra spaces', async () => {
@@ -248,10 +243,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 
 		it('"Here is my invite code: a1b2c3d4" — writes a full sentence', async () => {
 			const guard = buildGuard([], validInvite);
-			const result = await guard.checkUser(
-				'newuser',
-				'Here is my invite code: a1b2c3d4',
-			);
+			const result = await guard.checkUser('newuser', 'Here is my invite code: a1b2c3d4');
 			expect(result).toBe(false);
 			expect(inviteService.claimAndRedeem).not.toHaveBeenCalled();
 		});
@@ -309,10 +301,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const result = await guard.checkUser('newuser', 'deadbeef');
 			expect(result).toBe(false);
 			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('deadbeef', 'newuser');
-			expect(telegram.send).toHaveBeenCalledWith(
-				'newuser',
-				expect.stringContaining('expired'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('newuser', expect.stringContaining('expired'));
 		});
 
 		it('"/start deadbeef" — expired code via deep link', async () => {
@@ -320,10 +309,7 @@ describe('Realistic invite journeys — UserGuard (unregistered users)', () => {
 			const result = await guard.checkUser('newuser', '/start deadbeef');
 			expect(result).toBe(false);
 			expect(inviteService.claimAndRedeem).toHaveBeenCalledWith('deadbeef', 'newuser');
-			expect(telegram.send).toHaveBeenCalledWith(
-				'newuser',
-				expect.stringContaining('expired'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('newuser', expect.stringContaining('expired'));
 		});
 
 		it('"abcd1234" — someone already used this code', async () => {
@@ -407,9 +393,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 		},
 	};
 
-	function createMockConfig(
-		users: SystemConfig['users'] = [],
-	): SystemConfig {
+	function createMockConfig(users: SystemConfig['users'] = []): SystemConfig {
 		return {
 			port: 3000,
 			dataDir: '/tmp/data',
@@ -495,35 +479,52 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 		it('"/invite Sarah" — simple first name', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Sarah', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah', 'admin1', expect.objectContaining({ householdId: 'default' }));
-			expect(telegram.send).toHaveBeenCalledWith(
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'Sarah',
 				'admin1',
-				expect.stringContaining('d3f7a8c2'),
+				expect.objectContaining({ householdId: 'default' }),
 			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('d3f7a8c2'));
 		});
 
 		it('"/invite Mom" — family nickname', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Mom', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Mom', 'admin1', expect.objectContaining({ householdId: 'default' }));
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'Mom',
+				'admin1',
+				expect.objectContaining({ householdId: 'default' }),
+			);
 		});
 
 		it('"/invite Sarah Johnson" — full name with space', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Sarah Johnson', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Sarah Johnson', 'admin1', expect.objectContaining({ householdId: 'default' }));
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'Sarah Johnson',
+				'admin1',
+				expect.objectContaining({ householdId: 'default' }),
+			);
 		});
 
 		it('"/invite my wife" — descriptive name', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite my wife', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('my wife', 'admin1', expect.objectContaining({ householdId: 'default' }));
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'my wife',
+				'admin1',
+				expect.objectContaining({ householdId: 'default' }),
+			);
 		});
 
 		it('"/invite Grandma 👵" — name with emoji', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite Grandma 👵', 'admin1'));
-			expect(inviteService.createInvite).toHaveBeenCalledWith('Grandma 👵', 'admin1', expect.objectContaining({ householdId: 'default' }));
+			expect(inviteService.createInvite).toHaveBeenCalledWith(
+				'Grandma 👵',
+				'admin1',
+				expect.objectContaining({ householdId: 'default' }),
+			);
 		});
 	});
 
@@ -536,10 +537,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/invite', 'admin1'));
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				expect.stringContaining('Usage'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('Usage'));
 		});
 
 		it('"/invite " — just a trailing space, no name', async () => {
@@ -569,9 +567,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 
 		it('"I want to invite someone" — no name, conversational', async () => {
 			const router = buildRouter([adminUser]);
-			await router.routeMessage(
-				createTextCtx('I want to invite someone', 'admin1'),
-			);
+			await router.routeMessage(createTextCtx('I want to invite someone', 'admin1'));
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
 		});
 	});
@@ -585,10 +581,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 			const router = buildRouter([adminUser, regularUser]);
 			await router.routeMessage(createTextCtx('/invite Sarah', 'user1'));
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
-			expect(telegram.send).toHaveBeenCalledWith(
-				'user1',
-				expect.stringContaining('Only admins'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('user1', expect.stringContaining('Only admins'));
 		});
 
 		it('"/invite Mom" from regular user — also denied', async () => {
@@ -606,19 +599,13 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 		it('admin sees /invite in help', async () => {
 			const router = buildRouter([adminUser]);
 			await router.routeMessage(createTextCtx('/help', 'admin1'));
-			expect(telegram.send).toHaveBeenCalledWith(
-				'admin1',
-				expect.stringContaining('/invite'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('admin1', expect.stringContaining('/invite'));
 		});
 
 		it('regular user does NOT see /invite in help', async () => {
 			const router = buildRouter([adminUser, regularUser]);
 			await router.routeMessage(createTextCtx('/help', 'user1'));
-			expect(telegram.send).toHaveBeenCalledWith(
-				'user1',
-				expect.not.stringContaining('/invite'),
-			);
+			expect(telegram.send).toHaveBeenCalledWith('user1', expect.not.stringContaining('/invite'));
 		});
 	});
 
@@ -655,9 +642,7 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 	describe('invite-adjacent messages from registered users route normally', () => {
 		it('"invite my mom over for dinner Saturday" — food intent, not /invite', async () => {
 			const router = buildRouter([adminUser]);
-			await router.routeMessage(
-				createTextCtx('invite my mom over for dinner Saturday', 'admin1'),
-			);
+			await router.routeMessage(createTextCtx('invite my mom over for dinner Saturday', 'admin1'));
 			// Should go through LLM classification, not the /invite handler
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
 			expect(llm.classify).toHaveBeenCalled();
@@ -665,18 +650,14 @@ describe('Realistic invite journeys — Router (admin /invite command)', () => {
 
 		it('"I need to send an invite for the party" — daily note, not /invite', async () => {
 			const router = buildRouter([adminUser]);
-			await router.routeMessage(
-				createTextCtx('I need to send an invite for the party', 'admin1'),
-			);
+			await router.routeMessage(createTextCtx('I need to send an invite for the party', 'admin1'));
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
 			expect(llm.classify).toHaveBeenCalled();
 		});
 
 		it('"add the code ABC123 to my notes" — mentions code-like text in context', async () => {
 			const router = buildRouter([adminUser]);
-			await router.routeMessage(
-				createTextCtx('add the code ABC123 to my notes', 'admin1'),
-			);
+			await router.routeMessage(createTextCtx('add the code ABC123 to my notes', 'admin1'));
 			expect(inviteService.createInvite).not.toHaveBeenCalled();
 			expect(llm.classify).toHaveBeenCalled();
 		});

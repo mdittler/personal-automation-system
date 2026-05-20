@@ -1,10 +1,9 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataChangedPayload } from '../../../types/data-events.js';
 import type { EventBusService } from '../../../types/events.js';
-import type { ManifestDataScope } from '../../../types/manifest.js';
 import { ChangeLog } from '../change-log.js';
 import { PathTraversalError, ScopeViolationError } from '../paths.js';
 import { ScopedStore } from '../scoped-store.js';
@@ -402,9 +401,7 @@ describe('ScopedStore', () => {
 		});
 
 		it('rejects write outside declared scopes', async () => {
-			await expect(scopedStore.write('secret.md', 'bad')).rejects.toThrow(
-				ScopeViolationError,
-			);
+			await expect(scopedStore.write('secret.md', 'bad')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('rejects read outside declared scopes', async () => {
@@ -422,21 +419,15 @@ describe('ScopedStore', () => {
 		});
 
 		it('rejects write on read-only scope', async () => {
-			await expect(scopedStore.write('config.yaml', 'bad')).rejects.toThrow(
-				ScopeViolationError,
-			);
+			await expect(scopedStore.write('config.yaml', 'bad')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('rejects append on read-only scope', async () => {
-			await expect(scopedStore.append('config.yaml', 'bad')).rejects.toThrow(
-				ScopeViolationError,
-			);
+			await expect(scopedStore.append('config.yaml', 'bad')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('rejects archive on read-only scope', async () => {
-			await expect(scopedStore.archive('config.yaml')).rejects.toThrow(
-				ScopeViolationError,
-			);
+			await expect(scopedStore.archive('config.yaml')).rejects.toThrow(ScopeViolationError);
 		});
 
 		it('allows write on write-only scope', async () => {
@@ -516,9 +507,7 @@ describe('ScopedStore', () => {
 				appId: 'notes',
 				userId: 'user-1',
 				changeLog,
-				scopes: [
-					{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes' },
-				],
+				scopes: [{ path: 'daily-notes/', access: 'read-write', description: 'Daily notes' }],
 			});
 			await notesStore.append('daily-notes/test-entry.md', '- note\n');
 			const content = await notesStore.read('daily-notes/test-entry.md');
@@ -583,9 +572,7 @@ describe('ScopedStore', () => {
 					{ path: 'daily-notes/', access: 'read-write', description: 'Notes' },
 				],
 			});
-			await expect(chatbotStore.write('sneaky.md', 'bad')).rejects.toThrow(
-				ScopeViolationError,
-			);
+			await expect(chatbotStore.write('sneaky.md', 'bad')).rejects.toThrow(ScopeViolationError);
 		});
 	});
 

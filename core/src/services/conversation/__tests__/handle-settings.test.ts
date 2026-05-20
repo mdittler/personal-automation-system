@@ -21,7 +21,11 @@ import type { SystemConfigWriter } from '../../config/system-config-writer.js';
 import { createPendingSettingsConfirmStore } from '../../settings/pending-settings-confirm-store.js';
 import { SettingsRegistry } from '../../settings/settings-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
-import { handleSettings, type HandleSettingsDeps, type HandleSettingsArgs } from '../handle-settings.js';
+import {
+	type HandleSettingsArgs,
+	type HandleSettingsDeps,
+	handleSettings,
+} from '../handle-settings.js';
 
 // ---------------------------------------------------------------------------
 // Registry builder
@@ -193,7 +197,10 @@ function makeRegistry(): SettingsRegistry {
 
 function makeAppConfig(
 	overrides: Record<string, unknown> | null = null,
-): AppConfigService & { updateOverrides: ReturnType<typeof vi.fn>; removeOverride: ReturnType<typeof vi.fn> } {
+): AppConfigService & {
+	updateOverrides: ReturnType<typeof vi.fn>;
+	removeOverride: ReturnType<typeof vi.fn>;
+} {
 	return {
 		get: vi.fn(),
 		getAll: vi.fn(),
@@ -346,7 +353,17 @@ function makeContext(opts?: {
 		logger,
 	};
 
-	return { registry, writer, foodCfg, notesCfg, systemCfg, systemCfgWriter, logger, deps, pendingStore };
+	return {
+		registry,
+		writer,
+		foodCfg,
+		notesCfg,
+		systemCfg,
+		systemCfgWriter,
+		logger,
+		deps,
+		pendingStore,
+	};
 }
 
 function makeInput(overrides: Partial<HandleSettingsArgs> = {}): HandleSettingsArgs {
@@ -386,10 +403,7 @@ describe('handleSettings — happy path', () => {
 
 	it('lists keys with current values for /settings food', async () => {
 		const { deps } = makeContext({ foodOverrides: { default_store: 'Whole Foods' } });
-		const { reply } = await handleSettings(
-			makeInput({ args: ['food'], rawArgs: 'food' }),
-			deps,
-		);
+		const { reply } = await handleSettings(makeInput({ args: ['food'], rawArgs: 'food' }), deps);
 		expect(reply).toContain('Default store');
 		expect(reply).toContain('Whole Foods');
 	});
@@ -765,7 +779,7 @@ describe('handleSettings — edge cases', () => {
 								default: 'weekly',
 								description: 'Meal plan style',
 							},
-					  ]
+						]
 					: undefined,
 			logger: makeLogger(),
 		});
@@ -1513,7 +1527,11 @@ describe('handleSettings — state transitions', () => {
 		expect(goodReply).toContain('Confirmed and saved');
 		expect(pendingStore.has('u1')).toBe(false);
 		// Wrote false (the second value)
-		expect(systemCfgWriter.write).toHaveBeenCalledWith('chat.sessions.auto_prune', false, expect.anything());
+		expect(systemCfgWriter.write).toHaveBeenCalledWith(
+			'chat.sessions.auto_prune',
+			false,
+			expect.anything(),
+		);
 	});
 });
 

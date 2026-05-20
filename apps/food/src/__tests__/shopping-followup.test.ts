@@ -2,8 +2,8 @@ import { createMockCoreServices, createMockScopedStore } from '@pas/core/testing
 import type { CoreServices } from '@pas/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	cancelShoppingFollowup,
 	FOLLOWUP_DELAY_MS,
+	cancelShoppingFollowup,
 	handleShopFollowupClearCallback,
 	handleShopFollowupKeepCallback,
 	handleShoppingFollowupJob,
@@ -49,9 +49,7 @@ describe('shopping-followup handler', () => {
 	describe('scheduleShoppingFollowup', () => {
 		it('logs info when scheduling', () => {
 			scheduleShoppingFollowup(services, 'u1', 3);
-			expect(vi.mocked(services.logger.info)).toHaveBeenCalledWith(
-				expect.stringContaining('u1'),
-			);
+			expect(vi.mocked(services.logger.info)).toHaveBeenCalledWith(expect.stringContaining('u1'));
 		});
 
 		it('stores pending data for the follow-up job', async () => {

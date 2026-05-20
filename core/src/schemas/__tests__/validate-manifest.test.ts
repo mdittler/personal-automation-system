@@ -643,8 +643,7 @@ describe('validateManifest', () => {
 						dangerous: false,
 						hidden: false,
 						nlSafe: true,
-						nlIntentRegex:
-							'(turn|switch|enable|disable).*(seasonal|season).*(nudge|suggestion)',
+						nlIntentRegex: '(turn|switch|enable|disable).*(seasonal|season).*(nudge|suggestion)',
 					},
 				],
 			};
@@ -654,9 +653,7 @@ describe('validateManifest', () => {
 		it('accepts entries with only legacy fields (no new metadata)', () => {
 			const manifest = {
 				app: { id: 'food', name: 'Food', version: '1.0.0', description: 'x', author: 'y' },
-				user_config: [
-					{ key: 'meal_plan_dinners', type: 'number', default: 5, description: 'x' },
-				],
+				user_config: [{ key: 'meal_plan_dinners', type: 'number', default: 5, description: 'x' }],
 			};
 			expect(validateManifest(manifest).valid).toBe(true);
 		});

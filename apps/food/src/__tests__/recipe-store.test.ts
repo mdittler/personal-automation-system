@@ -392,7 +392,7 @@ describe('formatRecipe', () => {
 		const text = formatRecipe(recipe);
 
 		// Data fields should be escaped
-		expect(text).toContain("\\*Best\\*");
+		expect(text).toContain('\\*Best\\*');
 		expect(text).toContain('Thai\\_fusion');
 		expect(text).toContain('kid\\_friendly');
 		expect(text).toContain('quick\\*easy');
@@ -615,9 +615,7 @@ describe('formatSearchResults — numbered', () => {
 	});
 
 	it('includes footer prompt', () => {
-		const results: RecipeSearchResult[] = [
-			{ recipe: makeSampleRecipe(), relevance: 'match' },
-		];
+		const results: RecipeSearchResult[] = [{ recipe: makeSampleRecipe(), relevance: 'match' }];
 		const text = formatSearchResults(results);
 		expect(text).toContain('Reply with a number');
 	});
@@ -632,7 +630,7 @@ describe('formatSearchResults — numbered', () => {
 
 		const text = formatSearchResults(results);
 
-		expect(text).toContain("\\*Best\\*");
+		expect(text).toContain('\\*Best\\*');
 		// Do NOT assert '**' — double-asterisk bold is a pre-existing legacy Markdown
 		// mismatch deferred to Finding 21. Only assert data-field escaping here.
 	});

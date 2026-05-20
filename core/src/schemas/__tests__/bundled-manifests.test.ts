@@ -2,9 +2,9 @@ import { access, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { warnScopePathPrefix } from '../../services/data-store/paths.js';
 import type { ManifestDataScope } from '../../types/manifest.js';
 import { readYamlFile } from '../../utils/yaml.js';
-import { warnScopePathPrefix } from '../../services/data-store/paths.js';
 import { validateManifest } from '../validate-manifest.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

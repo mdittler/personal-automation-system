@@ -15,7 +15,11 @@ const DAY_ABBREVS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
  * Record a vote on a planned meal. Mutates meal in place.
  * Returns true if the vote was new or changed, false if unchanged.
  */
-export function recordVote(meal: PlannedMeal, userId: string, vote: 'up' | 'down' | 'neutral'): boolean {
+export function recordVote(
+	meal: PlannedMeal,
+	userId: string,
+	vote: 'up' | 'down' | 'neutral',
+): boolean {
 	if (meal.votes[userId] === vote) {
 		return false;
 	}

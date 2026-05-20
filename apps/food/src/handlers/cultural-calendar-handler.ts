@@ -11,15 +11,15 @@
  */
 
 import type { CoreServices, MessageContext } from '@pas/core/types';
-import { todayDate } from '../utils/date.js';
-import { loadHousehold } from '../utils/household-guard.js';
-import { loadAllRecipes } from '../services/recipe-store.js';
 import {
+	buildSuggestionPrompt,
 	ensureCalendar,
 	getUpcomingHolidays,
-	buildSuggestionPrompt,
 	resolveHolidayDate,
 } from '../services/cultural-calendar.js';
+import { loadAllRecipes } from '../services/recipe-store.js';
+import { todayDate } from '../utils/date.js';
+import { loadHousehold } from '../utils/household-guard.js';
 
 const WINDOW_DAYS = 14;
 
@@ -49,7 +49,7 @@ const CULTURAL_CALENDAR_EXCLUSIONS = /\b(?:host(?:ing)?|party|parties|guests|eve
  */
 export function isCulturalCalendarIntent(text: string): boolean {
 	if (CULTURAL_CALENDAR_EXCLUSIONS.test(text)) return false;
-	return CULTURAL_CALENDAR_PATTERNS.some(re => re.test(text));
+	return CULTURAL_CALENDAR_PATTERNS.some((re) => re.test(text));
 }
 
 // ─── Scheduled job ────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ export async function handleCulturalCalendarMessage(
 		// Try to find a specific holiday mentioned in the message
 		const lowerText = (ctx.text ?? '').toLowerCase();
 		const namedHolidays = calendar.holidays.filter(
-			h => h.enabled && lowerText.includes(h.name.toLowerCase()),
+			(h) => h.enabled && lowerText.includes(h.name.toLowerCase()),
 		);
 
 		let upcoming;
@@ -138,7 +138,7 @@ export async function handleCulturalCalendarMessage(
 		if (upcoming.length === 0) {
 			await services.telegram.send(
 				userId,
-				"No holidays are coming up in the next two weeks. Check back soon, or ask me about a specific holiday!",
+				'No holidays are coming up in the next two weeks. Check back soon, or ask me about a specific holiday!',
 			);
 			return;
 		}

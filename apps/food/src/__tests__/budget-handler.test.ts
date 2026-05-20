@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
-import { getPrevWeekId, handleBudgetCommand, isBudgetViewIntent, loadWeeksForMonth } from '../handlers/budget.js';
 import type { CoreServices } from '@pas/core/types';
+import { describe, expect, it, vi } from 'vitest';
+import {
+	getPrevWeekId,
+	handleBudgetCommand,
+	isBudgetViewIntent,
+	loadWeeksForMonth,
+} from '../handlers/budget.js';
 import type { CostHistoryWeek } from '../types.js';
 
 function createMockStore(overrides: Record<string, unknown> = {}) {
@@ -144,7 +149,11 @@ describe('budget-handler', () => {
 		it('includes W53 week in 2025 yearly because startDate is 2025-12-29', async () => {
 			const store = {
 				read: vi.fn().mockResolvedValue(w53Yaml),
-				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+				write: vi.fn(),
+				append: vi.fn(),
+				exists: vi.fn(),
+				list: vi.fn(),
+				archive: vi.fn(),
 			};
 			// Use a month prefix of '2025' to simulate yearly filtering (startDate.startsWith('2025'))
 			const results = await loadWeeksForMonth(store as never, ['2025-W53'], '2025');
@@ -155,7 +164,11 @@ describe('budget-handler', () => {
 		it('excludes W53 week from 2026 yearly because startDate is 2025-12-29, not 2026', async () => {
 			const store = {
 				read: vi.fn().mockResolvedValue(w53Yaml),
-				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+				write: vi.fn(),
+				append: vi.fn(),
+				exists: vi.fn(),
+				list: vi.fn(),
+				archive: vi.fn(),
 			};
 			const results = await loadWeeksForMonth(store as never, ['2025-W53'], '2026');
 			expect(results).toHaveLength(0);
@@ -164,7 +177,11 @@ describe('budget-handler', () => {
 		it('includes W01 week in 2026 yearly because startDate is 2026-01-02', async () => {
 			const store = {
 				read: vi.fn().mockResolvedValue(w01Yaml),
-				write: vi.fn(), append: vi.fn(), exists: vi.fn(), list: vi.fn(), archive: vi.fn(),
+				write: vi.fn(),
+				append: vi.fn(),
+				exists: vi.fn(),
+				list: vi.fn(),
+				archive: vi.fn(),
 			};
 			const results = await loadWeeksForMonth(store as never, ['2026-W01'], '2026');
 			expect(results).toHaveLength(1);

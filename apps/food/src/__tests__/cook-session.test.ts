@@ -351,7 +351,9 @@ describe('endSession with timer', () => {
 		const recipe = makeRecipe();
 		const session = createSession('user1', recipe, 4, [], null);
 		let fired = false;
-		session.timerHandle = setTimeout(() => { fired = true; }, 100000) as ReturnType<typeof setTimeout>;
+		session.timerHandle = setTimeout(() => {
+			fired = true;
+		}, 100000) as ReturnType<typeof setTimeout>;
 		session.timerStepIndex = 0;
 		endSession('user1');
 		expect(getSession('user1')).toBeNull();

@@ -1,12 +1,12 @@
+import { matchesDangerConfirmPhrase } from '../../gui/routes/settings-confirm-helpers.js';
 import type { AppConfigService, SystemConfig } from '../../types/config.js';
 import type { MessageContext } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
-import { getCurrentHouseholdId } from '../context/request-context.js';
-import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
-import type { SessionTurn } from '../conversation-session/chat-session-store.js';
 import type { SystemConfigWriter } from '../config/system-config-writer.js';
+import { getCurrentHouseholdId } from '../context/request-context.js';
+import type { SessionTurn } from '../conversation-session/chat-session-store.js';
+import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
 import type { EditService } from '../edit/index.js';
-import { matchesDangerConfirmPhrase } from '../../gui/routes/settings-confirm-helpers.js';
 import type { PendingSettingsConfirmStore } from '../settings/pending-settings-confirm-store.js';
 import { type HandleAskDeps, handleAsk as coreHandleAsk } from './handle-ask.js';
 import { handleEdit as coreHandleEdit } from './handle-edit.js';
@@ -17,8 +17,8 @@ import { handleRecall as coreHandleRecall } from './handle-recall.js';
 import { handleRefreshMemory as coreHandleRefreshMemory } from './handle-refresh-memory.js';
 import { handleSettings as handleSettingsFn } from './handle-settings.js';
 import type { MemoryFlushSave } from './memory-flush.js';
-import { sendSplitResponse } from './telegram-format.js';
 import { pendingEdits } from './pending-edits.js';
+import { sendSplitResponse } from './telegram-format.js';
 
 /**
  * DI bundle for ConversationService. Equivalent to HandleMessageDeps plus
@@ -260,7 +260,10 @@ export class ConversationService {
 				err instanceof Error ? err.message : String(err),
 			);
 			try {
-				await this.deps.telegram.send(ctx.userId, 'Something went wrong processing your settings command.');
+				await this.deps.telegram.send(
+					ctx.userId,
+					'Something went wrong processing your settings command.',
+				);
 			} catch {
 				// ignore send failure
 			}

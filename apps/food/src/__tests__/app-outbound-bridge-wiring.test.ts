@@ -34,16 +34,14 @@ vi.mock('../services/health-correlator.js', () => ({
 // Mock the meal-planner so the generate-weekly-plan dispatcher reaches the
 // telegram + bridge call without needing LLM-generated meals.
 vi.mock('../services/meal-planner.js', async (importOriginal) => {
-	const original =
-		await importOriginal<typeof import('../services/meal-planner.js')>();
+	const original = await importOriginal<typeof import('../services/meal-planner.js')>();
 	return { ...original, generatePlan: vi.fn() };
 });
 
 // Mock the batch-cooking analyzer so we control whether the batch-prep branch
 // is reached and what content it sends.
 vi.mock('../services/batch-cooking.js', async (importOriginal) => {
-	const original =
-		await importOriginal<typeof import('../services/batch-cooking.js')>();
+	const original = await importOriginal<typeof import('../services/batch-cooking.js')>();
 	return { ...original, analyzeBatchPrep: vi.fn() };
 });
 
@@ -262,9 +260,7 @@ describe('App-Outbound-Bridge wiring (food scheduled jobs)', () => {
 		});
 		vi.mocked(generatePlan).mockResolvedValue(plan);
 		vi.mocked(analyzeBatchPrep).mockResolvedValue({
-			sharedTasks: [
-				{ task: 'Dice onions', recipes: ['Test Recipe'], estimatedMinutes: 5 },
-			],
+			sharedTasks: [{ task: 'Dice onions', recipes: ['Test Recipe'], estimatedMinutes: 5 }],
 			totalPrepMinutes: 30,
 			estimatedSavingsMinutes: 10,
 			freezerFriendlyRecipes: ['Test Recipe'],

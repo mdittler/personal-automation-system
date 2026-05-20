@@ -33,7 +33,9 @@ export async function loadCases(rootDir: string): Promise<LoadedCase[]> {
 		if (name.endsWith('.case.ts')) {
 			const mod = (await import(pathToFileURL(filePath).href)) as { default?: unknown };
 			if (mod.default === undefined) {
-				throw new Error(`${filePath}: missing default export (expected export default <PersonaCase>)`);
+				throw new Error(
+					`${filePath}: missing default export (expected export default <PersonaCase>)`,
+				);
 			}
 			const c = mod.default as PersonaCase;
 			validatePersonaCase(c);

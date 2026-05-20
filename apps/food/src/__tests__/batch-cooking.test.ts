@@ -8,14 +8,6 @@
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-	BatchAnalysis,
-	FreezerItem,
-	Household,
-	MealPlan,
-	PlannedMeal,
-	Recipe,
-} from '../types.js';
 import {
 	analyzeBatchPrep,
 	buildBatchFreezeButtons,
@@ -25,6 +17,14 @@ import {
 	matchFreezerToRecipes,
 } from '../services/batch-cooking.js';
 import type { DefrostMatch } from '../services/batch-cooking.js';
+import type {
+	BatchAnalysis,
+	FreezerItem,
+	Household,
+	MealPlan,
+	PlannedMeal,
+	Recipe,
+} from '../types.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────
 
@@ -159,11 +159,7 @@ describe('analyzeBatchPrep', () => {
 	it('returns null when LLM fails', async () => {
 		vi.mocked(services.llm.complete).mockRejectedValue(new Error('LLM unavailable'));
 
-		const result = await analyzeBatchPrep(
-			services,
-			makePlan([makeMeal()]),
-			[makeRecipe()],
-		);
+		const result = await analyzeBatchPrep(services, makePlan([makeMeal()]), [makeRecipe()]);
 
 		expect(result).toBeNull();
 	});
@@ -171,11 +167,7 @@ describe('analyzeBatchPrep', () => {
 	it('returns null when LLM returns invalid JSON', async () => {
 		vi.mocked(services.llm.complete).mockResolvedValue('not valid json at all');
 
-		const result = await analyzeBatchPrep(
-			services,
-			makePlan([makeMeal()]),
-			[makeRecipe()],
-		);
+		const result = await analyzeBatchPrep(services, makePlan([makeMeal()]), [makeRecipe()]);
 
 		expect(result).toBeNull();
 	});
@@ -301,9 +293,7 @@ describe('matchFreezerToRecipes', () => {
 	});
 
 	it('matches substring (ingredient name contains freezer item name)', () => {
-		const freezer: FreezerItem[] = [
-			{ name: 'beef', quantity: '1 lb', frozenDate: '2026-03-20' },
-		];
+		const freezer: FreezerItem[] = [{ name: 'beef', quantity: '1 lb', frozenDate: '2026-03-20' }];
 		const meals = [makeMeal()];
 		const recipes = [makeRecipe()]; // has 'ground beef'
 
@@ -369,13 +359,13 @@ describe('matchFreezerToRecipes', () => {
 
 	it('does not match when term appears mid-word (no word boundary)', () => {
 		// "ice" should NOT match "rice" — "ice" is not at a word boundary in "rice"
-		const freezer: FreezerItem[] = [
-			{ name: 'ice', quantity: '1 bag', frozenDate: '2026-03-20' },
-		];
+		const freezer: FreezerItem[] = [{ name: 'ice', quantity: '1 bag', frozenDate: '2026-03-20' }];
 		const meals = [makeMeal()];
-		const recipes = [makeRecipe({
-			ingredients: [{ name: 'rice', quantity: 1, unit: 'cup' }],
-		})];
+		const recipes = [
+			makeRecipe({
+				ingredients: [{ name: 'rice', quantity: 1, unit: 'cup' }],
+			}),
+		];
 
 		const matches = matchFreezerToRecipes(freezer, meals, recipes);
 
@@ -384,13 +374,13 @@ describe('matchFreezerToRecipes', () => {
 
 	it('matches when term is at a word boundary', () => {
 		// "ham" should match "smoked ham" — "ham" is at a word boundary
-		const freezer: FreezerItem[] = [
-			{ name: 'ham', quantity: '1 lb', frozenDate: '2026-03-20' },
-		];
+		const freezer: FreezerItem[] = [{ name: 'ham', quantity: '1 lb', frozenDate: '2026-03-20' }];
 		const meals = [makeMeal()];
-		const recipes = [makeRecipe({
-			ingredients: [{ name: 'smoked ham', quantity: 1, unit: 'lb' }],
-		})];
+		const recipes = [
+			makeRecipe({
+				ingredients: [{ name: 'smoked ham', quantity: 1, unit: 'lb' }],
+			}),
+		];
 
 		const matches = matchFreezerToRecipes(freezer, meals, recipes);
 
@@ -450,10 +440,7 @@ describe('checkDefrostNeeded', () => {
 		store = createMockStore();
 	});
 
-	function setupHouseholdAndFreezer(
-		hh: Household | null,
-		freezerItems: FreezerItem[],
-	) {
+	function setupHouseholdAndFreezer(hh: Household | null, freezerItems: FreezerItem[]) {
 		store.read.mockImplementation(async (path: string) => {
 			if (path === 'household.yaml' && hh) {
 				return `---\ntitle: ${hh.name}\n---\n` + (await import('yaml')).stringify(hh);
@@ -465,7 +452,7 @@ describe('checkDefrostNeeded', () => {
 		});
 	}
 
-	it('sends reminder when tomorrow\'s meal uses frozen ingredient', async () => {
+	it("sends reminder when tomorrow's meal uses frozen ingredient", async () => {
 		setupHouseholdAndFreezer(household, [
 			{ name: 'ground beef', quantity: '1 lb', frozenDate: '2026-03-20' },
 		]);
@@ -479,7 +466,13 @@ describe('checkDefrostNeeded', () => {
 		]);
 		const recipes = [makeRecipe()];
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		expect(services.telegram.send).toHaveBeenCalledTimes(2); // matt and sarah
 		const msg = vi.mocked(services.telegram.send).mock.calls[0]![1] as string;
@@ -501,7 +494,13 @@ describe('checkDefrostNeeded', () => {
 		]);
 		const recipes = [makeRecipe()]; // no chicken ingredient
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
@@ -509,12 +508,16 @@ describe('checkDefrostNeeded', () => {
 	it('does not send when freezer is empty', async () => {
 		setupHouseholdAndFreezer(household, []);
 
-		const plan = makePlan([
-			makeMeal({ date: '2026-04-04' }),
-		]);
+		const plan = makePlan([makeMeal({ date: '2026-04-04' })]);
 		const recipes = [makeRecipe()];
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
@@ -529,7 +532,13 @@ describe('checkDefrostNeeded', () => {
 		]);
 		const recipes = [makeRecipe()];
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
@@ -549,7 +558,13 @@ describe('checkDefrostNeeded', () => {
 		]);
 		const recipes = [makeRecipe()]; // has ground beef and onion
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		// Should send ONE message per member (not one per item)
 		expect(services.telegram.send).toHaveBeenCalledTimes(2); // matt and sarah
@@ -559,14 +574,18 @@ describe('checkDefrostNeeded', () => {
 	});
 
 	it('does not send when household is null', async () => {
-		setupHouseholdAndFreezer(null, [
-			{ name: 'beef', quantity: '1 lb', frozenDate: '2026-03-20' },
-		]);
+		setupHouseholdAndFreezer(null, [{ name: 'beef', quantity: '1 lb', frozenDate: '2026-03-20' }]);
 
 		const plan = makePlan([makeMeal({ date: '2026-04-04' })]);
 		const recipes = [makeRecipe()];
 
-		await checkDefrostNeeded(services, store as unknown as ScopedDataStore, plan, recipes, '2026-04-03');
+		await checkDefrostNeeded(
+			services,
+			store as unknown as ScopedDataStore,
+			plan,
+			recipes,
+			'2026-04-03',
+		);
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
@@ -591,7 +610,8 @@ describe('buildBatchFreezeButtons', () => {
 	});
 
 	it('callback data stays within Telegram 64-byte limit even with long recipe names', () => {
-		const longName = 'Grandma\'s Famous Southern Fried Chicken with Buttermilk Biscuits and Honey Drizzle';
+		const longName =
+			"Grandma's Famous Southern Fried Chicken with Buttermilk Biscuits and Honey Drizzle";
 		const buttons = buildBatchFreezeButtons([longName]);
 		// Callback data uses index, not name — always fits in 64 bytes
 		expect(Buffer.byteLength(buttons[0]![0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);

@@ -1,9 +1,9 @@
 import type { ScopedDataStore } from '@pas/core/types';
+import { AsyncLock } from '@pas/core/utils/async-lock';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
 import type { QuickMealTemplate } from '../types.js';
-import { AsyncLock } from '@pas/core/utils/async-lock';
 
 const QUICK_MEALS_FILE = 'quick-meals.yaml';
 const SAFE_SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
@@ -25,15 +25,9 @@ const TemplateSchema = z.object({
 		.string()
 		.min(1, 'label cannot be empty')
 		.max(100, 'label too long')
-		.refine(
-			(s) => !/[*_`[\]()]/.test(s),
-			'label cannot contain markdown special characters',
-		),
+		.refine((s) => !/[*_`[\]()]/.test(s), 'label cannot contain markdown special characters'),
 	kind: z.enum(['home', 'restaurant', 'other']),
-	ingredients: z
-		.array(z.string().min(1).max(200))
-		.min(1)
-		.max(50, 'too many ingredients'),
+	ingredients: z.array(z.string().min(1).max(200)).min(1).max(50, 'too many ingredients'),
 	notes: z.string().max(500).optional(),
 	estimatedMacros: z.object({
 		calories: z.number().min(0).max(10000),
@@ -169,10 +163,7 @@ export async function saveQuickMeal(
  * Move a template from active → archive. No-op if not found.
  * Caps the archive at ARCHIVE_MAX with FIFO eviction.
  */
-export async function archiveQuickMeal(
-	store: ScopedDataStore,
-	id: string,
-): Promise<void> {
+export async function archiveQuickMeal(store: ScopedDataStore, id: string): Promise<void> {
 	await lock.run(LOCK_KEY, async () => {
 		const f = await readFile(store);
 		const idx = f.active.findIndex((t) => t.id === id);
@@ -188,10 +179,7 @@ export async function archiveQuickMeal(
 }
 
 /** Bump usageCount + lastUsedAt on an active quick-meal. No-op if not found. */
-export async function incrementUsage(
-	store: ScopedDataStore,
-	id: string,
-): Promise<void> {
+export async function incrementUsage(store: ScopedDataStore, id: string): Promise<void> {
 	await lock.run(LOCK_KEY, async () => {
 		const f = await readFile(store);
 		const t = f.active.find((x) => x.id === id);

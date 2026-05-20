@@ -38,9 +38,9 @@ import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerAlertRoutes } from '../routes/alerts.js';
 import { registerContextRoutes } from '../routes/context.js';
+import { registerCredentialRoutes } from '../routes/credentials.js';
 import { registerDashboardRoutes } from '../routes/dashboard.js';
 import { registerDataRoutes } from '../routes/data.js';
-import { registerCredentialRoutes } from '../routes/credentials.js';
 import { registerReportRoutes } from '../routes/reports.js';
 
 const AUTH_TOKEN = 'test-token-batch2b';
@@ -235,10 +235,7 @@ function collectCookies(
 	return result;
 }
 
-async function loginAsAdmin(
-	app: Awaited<ReturnType<typeof Fastify>>,
-	userIdentifier = ADMIN_ID,
-) {
+async function loginAsAdmin(app: Awaited<ReturnType<typeof Fastify>>, userIdentifier = ADMIN_ID) {
 	const loginRes = await app.inject({
 		method: 'POST',
 		url: '/gui/login',
@@ -252,9 +249,7 @@ async function loginAsAdmin(
 }
 
 /** Extract checkbox labels with class="delivery-cb" from rendered HTML. */
-function extractDeliveryCbLabels(
-	html: string,
-): Array<{ checkboxValue: string; text: string }> {
+function extractDeliveryCbLabels(html: string): Array<{ checkboxValue: string; text: string }> {
 	const results: Array<{ checkboxValue: string; text: string }> = [];
 	// Match each <label> whose contents include an <input class="delivery-cb" ... value="...">,
 	// capturing the value and the post-input label text.
@@ -266,7 +261,10 @@ function extractDeliveryCbLabels(
 		const valueMatch = inner.match(/<input[^>]*value="([^"]*)"/);
 		if (!valueMatch) continue;
 		// Strip the <input ... /> element; the remaining text is the visible label.
-		const text = inner.replace(/<input[^>]*\/?>/g, '').replace(/\s+/g, ' ').trim();
+		const text = inner
+			.replace(/<input[^>]*\/?>/g, '')
+			.replace(/\s+/g, ' ')
+			.trim();
 		results.push({ checkboxValue: valueMatch[1], text });
 	}
 	return results;
@@ -581,10 +579,7 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 		const introBlock = intro![0];
 		const introIdHits = [...introBlock.matchAll(new RegExp(ADMIN_ID, 'g'))];
 		for (const hit of introIdHits) {
-			const surrounding = introBlock.slice(
-				Math.max(0, hit.index! - 80),
-				hit.index! + 80,
-			);
+			const surrounding = introBlock.slice(Math.max(0, hit.index! - 80), hit.index! + 80);
 			expect(surrounding).toMatch(/<small[^>]*>[\s\S]*?111/);
 		}
 	});

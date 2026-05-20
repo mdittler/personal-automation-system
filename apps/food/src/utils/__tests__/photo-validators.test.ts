@@ -12,27 +12,54 @@ import {
 
 describe('isValidReceiptLineItem — negative totals allowed for discount/coupon/return lines', () => {
 	it('accepts negative totalPrice (coupon line)', () => {
-		expect(isValidReceiptLineItem({ name: 'Coupon BOGO', quantity: 1, unitPrice: -2.0, totalPrice: -2.0 })).toBe(true);
+		expect(
+			isValidReceiptLineItem({
+				name: 'Coupon BOGO',
+				quantity: 1,
+				unitPrice: -2.0,
+				totalPrice: -2.0,
+			}),
+		).toBe(true);
 	});
 
 	it('accepts negative totalPrice with positive unitPrice (deposit return)', () => {
-		expect(isValidReceiptLineItem({ name: 'Bottle Deposit Return', quantity: 1, unitPrice: 0.05, totalPrice: -0.50 })).toBe(true);
+		expect(
+			isValidReceiptLineItem({
+				name: 'Bottle Deposit Return',
+				quantity: 1,
+				unitPrice: 0.05,
+				totalPrice: -0.5,
+			}),
+		).toBe(true);
 	});
 
 	it('still rejects non-finite totalPrice (NaN)', () => {
-		expect(isValidReceiptLineItem({ name: 'X', quantity: 1, unitPrice: 1, totalPrice: Number.NaN })).toBe(false);
+		expect(
+			isValidReceiptLineItem({ name: 'X', quantity: 1, unitPrice: 1, totalPrice: Number.NaN }),
+		).toBe(false);
 	});
 
 	it('still rejects non-finite totalPrice (Infinity)', () => {
-		expect(isValidReceiptLineItem({ name: 'X', quantity: 1, unitPrice: 1, totalPrice: Number.POSITIVE_INFINITY })).toBe(false);
+		expect(
+			isValidReceiptLineItem({
+				name: 'X',
+				quantity: 1,
+				unitPrice: 1,
+				totalPrice: Number.POSITIVE_INFINITY,
+			}),
+		).toBe(false);
 	});
 
 	it('still rejects missing name', () => {
-		expect(isValidReceiptLineItem({ name: '', quantity: 1, unitPrice: 1, totalPrice: 1 })).toBe(false);
+		expect(isValidReceiptLineItem({ name: '', quantity: 1, unitPrice: 1, totalPrice: 1 })).toBe(
+			false,
+		);
 	});
 
 	it('still rejects whitespace-only name', () => {
-		expect(isValidReceiptLineItem({ name: '   ', quantity: 1, unitPrice: 1, totalPrice: 1 })).toBe(false);
+		expect(isValidReceiptLineItem({ name: '   ', quantity: 1, unitPrice: 1, totalPrice: 1 })).toBe(
+			false,
+		);
 	});
 
 	it('still rejects non-object input', () => {
@@ -43,7 +70,9 @@ describe('isValidReceiptLineItem — negative totals allowed for discount/coupon
 	});
 
 	it('accepts a zero totalPrice (e.g. free with purchase)', () => {
-		expect(isValidReceiptLineItem({ name: 'Free Sample', quantity: 1, unitPrice: 0, totalPrice: 0 })).toBe(true);
+		expect(
+			isValidReceiptLineItem({ name: 'Free Sample', quantity: 1, unitPrice: 0, totalPrice: 0 }),
+		).toBe(true);
 	});
 });
 
@@ -54,7 +83,11 @@ describe('normalizeReceiptLineItem — defaults for missing fields', () => {
 	});
 
 	it('normalizes non-finite quantity (NaN) to 1', () => {
-		const li = normalizeReceiptLineItem({ name: 'A', quantity: Number.NaN, totalPrice: 5.0 } as never);
+		const li = normalizeReceiptLineItem({
+			name: 'A',
+			quantity: Number.NaN,
+			totalPrice: 5.0,
+		} as never);
 		expect(li.quantity).toBe(1);
 	});
 
@@ -64,7 +97,12 @@ describe('normalizeReceiptLineItem — defaults for missing fields', () => {
 	});
 
 	it('preserves a valid positive quantity', () => {
-		const li = normalizeReceiptLineItem({ name: 'A', quantity: 2, unitPrice: 2.5, totalPrice: 5.0 });
+		const li = normalizeReceiptLineItem({
+			name: 'A',
+			quantity: 2,
+			unitPrice: 2.5,
+			totalPrice: 5.0,
+		});
 		expect(li.quantity).toBe(2);
 	});
 
@@ -84,12 +122,22 @@ describe('normalizeReceiptLineItem — defaults for missing fields', () => {
 	});
 
 	it('preserves a valid unitPrice', () => {
-		const li = normalizeReceiptLineItem({ name: 'A', quantity: 2, unitPrice: 2.5, totalPrice: 5.0 });
+		const li = normalizeReceiptLineItem({
+			name: 'A',
+			quantity: 2,
+			unitPrice: 2.5,
+			totalPrice: 5.0,
+		});
 		expect(li.unitPrice).toBe(2.5);
 	});
 
 	it('preserves a negative unitPrice (discount line)', () => {
-		const li = normalizeReceiptLineItem({ name: 'Coupon', quantity: 1, unitPrice: -2.0, totalPrice: -2.0 });
+		const li = normalizeReceiptLineItem({
+			name: 'Coupon',
+			quantity: 1,
+			unitPrice: -2.0,
+			totalPrice: -2.0,
+		});
 		expect(li.unitPrice).toBe(-2.0);
 	});
 
@@ -110,7 +158,13 @@ describe('normalizeReceiptLineItem — defaults for missing fields', () => {
 	});
 
 	it('coerces empty packageSize to null', () => {
-		const li = normalizeReceiptLineItem({ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5, packageSize: '' });
+		const li = normalizeReceiptLineItem({
+			name: 'A',
+			quantity: 1,
+			unitPrice: 5,
+			totalPrice: 5,
+			packageSize: '',
+		});
 		expect(li.packageSize).toBeNull();
 	});
 });
@@ -244,7 +298,7 @@ describe('validateReceiptIntegrity (REQ-FOOD-RECEIPT-INTEGRITY-004 .. -006)', ()
 			// than producing a false-positive warning.
 			const r = {
 				...clean,
-				lineItems: [{ name: 'Deposit Return', quantity: 1, unitPrice: 0.05, totalPrice: -0.50 }],
+				lineItems: [{ name: 'Deposit Return', quantity: 1, unitPrice: 0.05, totalPrice: -0.5 }],
 			};
 			expect(validateReceiptIntegrity(r, 'stop')).not.toContain('line_arithmetic_mismatch');
 		});

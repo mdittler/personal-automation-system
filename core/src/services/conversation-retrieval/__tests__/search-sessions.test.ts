@@ -10,13 +10,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { requestContext } from '../../context/request-context.js';
 import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/index.js';
+import type { ChatTranscriptIndex, SearchResult } from '../../chat-transcript-index/index.js';
+import { requestContext } from '../../context/request-context.js';
 import {
 	ConversationRetrievalError,
 	ConversationRetrievalServiceImpl,
 } from '../conversation-retrieval-service.js';
-import type { ChatTranscriptIndex, SearchResult } from '../../chat-transcript-index/index.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -120,9 +120,7 @@ describe('searchSessions — fail-closed without requestContext', () => {
 	it('error has category conversation-transcripts', async () => {
 		const service = new ConversationRetrievalServiceImpl({ index: makeMockIndex() });
 
-		const err = await service
-			.searchSessions({ queryTerms: ['test'] })
-			.catch((e: unknown) => e);
+		const err = await service.searchSessions({ queryTerms: ['test'] }).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(ConversationRetrievalError);
 		expect((err as ConversationRetrievalError).category).toBe('conversation-transcripts');
 	});

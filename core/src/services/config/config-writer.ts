@@ -7,11 +7,11 @@
  */
 
 import { writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { stringify } from 'yaml';
 import type { RegisteredUser } from '../../types/users.js';
 import { ensureDir } from '../../utils/file.js';
 import { mutatePasYaml } from './pas-yaml-mutator.js';
-import { dirname } from 'node:path';
 
 /**
  * Sync a list of RegisteredUsers to the `users` key in pas.yaml.

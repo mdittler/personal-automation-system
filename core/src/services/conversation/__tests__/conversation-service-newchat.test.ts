@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { requestContext } from '../../context/request-context.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
-import type { ConversationServiceDeps } from '../conversation-service.js';
-import { ConversationService } from '../conversation-service.js';
+import { requestContext } from '../../context/request-context.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { buildSessionKey } from '../../conversation-session/session-key.js';
+import type { ConversationServiceDeps } from '../conversation-service.js';
+import { ConversationService } from '../conversation-service.js';
 
 const SESSION_KEY = buildSessionKey({
 	agent: 'main',
@@ -13,11 +13,13 @@ const SESSION_KEY = buildSessionKey({
 	chatId: 'user-0',
 });
 
-function makeChatSessions(opts: {
-	endActiveResult?: { endedSessionId: string | null };
-	loadRecentTurnsResult?: { role: 'user' | 'assistant'; content: string; timestamp: string }[];
-	appendExchangeResult?: { sessionId: string };
-} = {}): ChatSessionStore {
+function makeChatSessions(
+	opts: {
+		endActiveResult?: { endedSessionId: string | null };
+		loadRecentTurnsResult?: { role: 'user' | 'assistant'; content: string; timestamp: string }[];
+		appendExchangeResult?: { sessionId: string };
+	} = {},
+): ChatSessionStore {
 	return {
 		peekActive: vi.fn().mockResolvedValue(undefined),
 		appendExchange: vi
@@ -26,10 +28,18 @@ function makeChatSessions(opts: {
 		loadRecentTurns: vi.fn().mockResolvedValue(opts.loadRecentTurnsResult ?? []),
 		endActive: vi.fn().mockResolvedValue(opts.endActiveResult ?? { endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({
+				sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id',
+				isNew: true,
+				snapshot: undefined,
+			}),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
-		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ content: '', status: 'empty', builtAt: '', entryCount: 0 }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ content: '', status: 'empty', builtAt: '', entryCount: 0 }),
 	};
 }
 
@@ -82,7 +92,10 @@ describe('ConversationService.handleNewChat', () => {
 		const chatSessions = makeChatSessions({ endActiveResult: { endedSessionId: 'old-session' } });
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
-		const ctx = { ...createTestMessageContext({ userId: 'user-0', text: '/newchat' }), sessionKey: SESSION_KEY };
+		const ctx = {
+			...createTestMessageContext({ userId: 'user-0', text: '/newchat' }),
+			sessionKey: SESSION_KEY,
+		};
 
 		await requestContext.run({ userId: 'user-0', householdId: null }, async () => {
 			await svc.handleNewChat([], ctx);
@@ -102,7 +115,10 @@ describe('ConversationService.handleNewChat', () => {
 		const chatSessions = makeChatSessions({ endActiveResult: { endedSessionId: null } });
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
-		const ctx = { ...createTestMessageContext({ userId: 'user-0', text: '/newchat' }), sessionKey: SESSION_KEY };
+		const ctx = {
+			...createTestMessageContext({ userId: 'user-0', text: '/newchat' }),
+			sessionKey: SESSION_KEY,
+		};
 
 		await requestContext.run({ userId: 'user-0', householdId: null }, async () => {
 			await svc.handleNewChat([], ctx);
@@ -142,7 +158,10 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		const chatSessions = makeChatSessions();
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
-		const ctx = { ...createTestMessageContext({ userId: 'user-0', text: 'hello' }), sessionKey: SESSION_KEY };
+		const ctx = {
+			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
+			sessionKey: SESSION_KEY,
+		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
@@ -155,7 +174,9 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 	});
 
 	it('calls appendExchange with both turns after a successful LLM response', async () => {
-		const chatSessions = makeChatSessions({ appendExchangeResult: { sessionId: 'ensure-session-id' } });
+		const chatSessions = makeChatSessions({
+			appendExchangeResult: { sessionId: 'ensure-session-id' },
+		});
 		const deps = mockDeps(chatSessions);
 		(deps.llm as any).complete = vi.fn().mockResolvedValue('hi there');
 		const svc = new ConversationService(deps);
@@ -184,7 +205,10 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		const deps = mockDeps(chatSessions);
 		(deps.llm as any).complete = vi.fn().mockRejectedValue(new Error('LLM failure'));
 		const svc = new ConversationService(deps);
-		const ctx = { ...createTestMessageContext({ userId: 'user-0', text: 'hello' }), sessionKey: SESSION_KEY };
+		const ctx = {
+			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
+			sessionKey: SESSION_KEY,
+		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
@@ -220,7 +244,7 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		const ctx = {
 			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
 			sessionKey: SESSION_KEY,
-			};
+		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);
@@ -240,7 +264,10 @@ describe('ConversationService.handleMessage — chatSessions wiring', () => {
 		);
 		const deps = mockDeps(chatSessions);
 		const svc = new ConversationService(deps);
-		const ctx = { ...createTestMessageContext({ userId: 'user-0', text: 'hello' }), sessionKey: SESSION_KEY };
+		const ctx = {
+			...createTestMessageContext({ userId: 'user-0', text: 'hello' }),
+			sessionKey: SESSION_KEY,
+		};
 
 		await requestContext.run({ userId: 'user-0' }, async () => {
 			await svc.handleMessage(ctx);

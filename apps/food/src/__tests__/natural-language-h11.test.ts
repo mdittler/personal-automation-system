@@ -30,8 +30,8 @@ import {
 	handleCommand,
 	handleMessage,
 	init,
-	isNutritionViewIntent,
 	isHostingIntent,
+	isNutritionViewIntent,
 } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import type { ChildFoodLog, GuestProfile, Household, Recipe } from '../types.js';
@@ -317,7 +317,9 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 
 		it('/nutrition month → monthly summary (30-day window)', async () => {
 			setupHousehold();
-			vi.mocked(services.llm.complete).mockResolvedValue('Month summary — steady protein, carbs up 8%');
+			vi.mocked(services.llm.complete).mockResolvedValue(
+				'Month summary — steady protein, carbs up 8%',
+			);
 
 			await handleCommand('nutrition', ['month'], msg('/nutrition month'));
 
@@ -545,9 +547,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 					}),
 				)
 				.mockResolvedValueOnce(
-					JSON.stringify([
-						{ recipeTitle: 'Roast Chicken', scaledServings: 6, dietaryNotes: [] },
-					]),
+					JSON.stringify([{ recipeTitle: 'Roast Chicken', scaledServings: 6, dietaryNotes: [] }]),
 				)
 				.mockResolvedValueOnce(
 					JSON.stringify([
@@ -651,10 +651,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 			);
 
 			expect(store.write).toHaveBeenCalled();
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'matt',
-				expect.stringContaining('Sarah'),
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Sarah'));
 			const sent = vi.mocked(services.telegram.send).mock.calls[0]![1] as string;
 			expect(sent).toContain('vegetarian');
 			expect(sent).toContain('gluten-free');
@@ -666,26 +663,16 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 			await handleCommand('hosting', ['guests', 'add'], msg('/hosting guests add'));
 
 			expect(store.write).not.toHaveBeenCalled();
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'matt',
-				expect.stringContaining('Usage'),
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Usage'));
 		});
 
 		it('/hosting guests add Mike (no restrictions) → still works', async () => {
 			setupHousehold();
 
-			await handleCommand(
-				'hosting',
-				['guests', 'add', 'Mike'],
-				msg('/hosting guests add Mike'),
-			);
+			await handleCommand('hosting', ['guests', 'add', 'Mike'], msg('/hosting guests add Mike'));
 
 			expect(store.write).toHaveBeenCalled();
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'matt',
-				expect.stringContaining('Mike'),
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Mike'));
 		});
 
 		it('/hosting guests remove Sarah → removes by name', async () => {
@@ -697,10 +684,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 				msg('/hosting guests remove Sarah'),
 			);
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'matt',
-				expect.stringContaining('Sarah'),
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Sarah'));
 		});
 
 		it('/hosting guests remove (no name, guests exist) → shows remove-buttons', async () => {
@@ -742,10 +726,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 
 			await handleCommand('hosting', ['plan'], msg('/hosting plan'));
 
-			expect(services.telegram.send).toHaveBeenCalledWith(
-				'matt',
-				expect.stringContaining('Usage'),
-			);
+			expect(services.telegram.send).toHaveBeenCalledWith('matt', expect.stringContaining('Usage'));
 		});
 
 		it('/hosting plan dinner for 6 saturday → runs full 3-LLM pipeline', async () => {
@@ -761,13 +742,9 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 					}),
 				)
 				.mockResolvedValueOnce(
-					JSON.stringify([
-						{ recipeTitle: 'Roast Chicken', scaledServings: 6, dietaryNotes: [] },
-					]),
+					JSON.stringify([{ recipeTitle: 'Roast Chicken', scaledServings: 6, dietaryNotes: [] }]),
 				)
-				.mockResolvedValueOnce(
-					JSON.stringify([{ time: 'T-2h', task: 'Prep' }]),
-				);
+				.mockResolvedValueOnce(JSON.stringify([{ time: 'T-2h', task: 'Prep' }]));
 
 			await handleCommand(
 				'hosting',
@@ -785,11 +762,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 		it('/hosting unknown-subcommand → friendly unknown-command message', async () => {
 			setupHousehold();
 
-			await handleCommand(
-				'hosting',
-				['destroyeverything'],
-				msg('/hosting destroyeverything'),
-			);
+			await handleCommand('hosting', ['destroyeverything'], msg('/hosting destroyeverything'));
 
 			expect(services.telegram.send).toHaveBeenCalledWith(
 				'matt',
@@ -863,9 +836,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 						{ recipeTitle: 'Veggie Pasta', scaledServings: 4, dietaryNotes: ['vegetarian'] },
 					]),
 				)
-				.mockResolvedValueOnce(
-					JSON.stringify([{ time: 'T-1h', task: 'Boil water, make sauce' }]),
-				);
+				.mockResolvedValueOnce(JSON.stringify([{ time: 'T-1h', task: 'Boil water, make sauce' }]));
 
 			await handleCommand(
 				'hosting',
@@ -916,9 +887,7 @@ describe('H11 Natural Language — Nutrition, Hosting, Seasonal', () => {
 				.mockResolvedValueOnce(
 					JSON.stringify([{ recipeTitle: 'Roast Chicken', scaledServings: 5, dietaryNotes: [] }]),
 				)
-				.mockResolvedValueOnce(
-					JSON.stringify([{ time: 'T-1h', task: 'Prep' }]),
-				);
+				.mockResolvedValueOnce(JSON.stringify([{ time: 'T-1h', task: 'Prep' }]));
 
 			// Casual, slightly messy phrasing
 			await handleMessage(msg('having some friends over for dinner tomorrow'));

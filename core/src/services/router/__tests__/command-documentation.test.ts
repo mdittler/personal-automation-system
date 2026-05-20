@@ -52,9 +52,7 @@ async function discoverApps(repoRoot: string): Promise<DiscoveredApp[]> {
 	const out: DiscoveredApp[] = [];
 	for (const entry of entries) {
 		const appDir = join(APPS_DIR, entry);
-		const manifest = await readYamlFile<DiscoveredApp['manifest']>(
-			join(appDir, 'manifest.yaml'),
-		);
+		const manifest = await readYamlFile<DiscoveredApp['manifest']>(join(appDir, 'manifest.yaml'));
 		const appId = manifest?.app?.id;
 		if (!manifest || typeof appId !== 'string' || appId.length === 0) continue;
 		out.push({ appId, appDir, manifest });
@@ -147,7 +145,15 @@ describe('command documentation coverage', () => {
 });
 
 describe('allowlist fixture validation', () => {
-	const FIXTURES_DIR = join(REPO_ROOT, 'core', 'src', 'services', 'router', '__tests__', 'fixtures');
+	const FIXTURES_DIR = join(
+		REPO_ROOT,
+		'core',
+		'src',
+		'services',
+		'router',
+		'__tests__',
+		'fixtures',
+	);
 	const fixtureDeps = (): CommandCatalogDeps => ({
 		registry: { getAll: () => [] },
 		isUserAdmin: () => true,
@@ -199,9 +205,7 @@ describe('allowlist fixture validation', () => {
 
 	it('treats malformed root (non-list entries:) as zero valid entries plus a malformed marker', async () => {
 		const result = await validateCommandDocumentation({
-			indexedEntries: [
-				{ appId: 'fixture', source: 'sparse.md', content: '/help /start' },
-			],
+			indexedEntries: [{ appId: 'fixture', source: 'sparse.md', content: '/help /start' }],
 			catalogDeps: fixtureDeps(),
 			allowlistPath: join(FIXTURES_DIR, 'allowlist-malformed-root.yaml'),
 		});

@@ -20,10 +20,10 @@
  * cannot break out of the fenced block. Codex I7 follow-up.
  */
 
-import type { CallMeter, OracleVerdict } from '../shared/types.js';
-import type { LLMService } from '@core/types/llm.js';
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
+import type { LLMService } from '@core/types/llm.js';
 import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '@core/utils/json-strip-fences.js';
+import type { CallMeter, OracleVerdict } from '../shared/types.js';
 
 const PASS_THRESHOLD = 4;
 const MIN_SCORE = 0;

@@ -17,9 +17,7 @@ export function formatRecalledSessions(hits: SearchHit[]): string {
 	if (hits.length === 0) return '';
 	const lines: string[] = [];
 	for (const hit of hits) {
-		lines.push(
-			`### Session ${hit.sessionStartedAt}${hit.title ? ` — ${hit.title}` : ''}`,
-		);
+		lines.push(`### Session ${hit.sessionStartedAt}${hit.title ? ` — ${hit.title}` : ''}`);
 		for (const match of hit.matches) {
 			const role = match.role === 'user' ? 'You' : 'Assistant';
 			lines.push(`**${role}** (turn ${match.turn_index}): ${match.snippet}`);

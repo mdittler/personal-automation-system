@@ -7,11 +7,7 @@
 import type { Logger } from 'pino';
 import type { KnowledgeEntry } from '../../types/app-knowledge.js';
 import { readYamlFile } from '../../utils/yaml.js';
-import {
-	type CommandCatalogDeps,
-	type CommandCatalogEntry,
-	getEffectiveCommandCatalog,
-} from './command-catalog.js';
+import { type CommandCatalogDeps, getEffectiveCommandCatalog } from './command-catalog.js';
 
 /** A single missing-doc record. `aliasOf` is set when the missing token is an alias. */
 export interface MissingCommandRecord {

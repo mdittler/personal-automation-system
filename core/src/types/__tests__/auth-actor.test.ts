@@ -11,9 +11,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+	type AuthenticatedActor,
 	PLATFORM_SYSTEM_HOUSEHOLD_ID,
 	PLATFORM_SYSTEM_USER_ID,
-	type AuthenticatedActor,
 } from '../auth-actor.js';
 
 describe('AuthenticatedActor type', () => {

@@ -21,10 +21,14 @@ function makeChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
-		rebuildMemorySnapshot: vi.fn().mockResolvedValue({ content: '', status: 'empty', builtAt: '', entryCount: 0 }),
+		rebuildMemorySnapshot: vi
+			.fn()
+			.mockResolvedValue({ content: '', status: 'empty', builtAt: '', entryCount: 0 }),
 	};
 }
 

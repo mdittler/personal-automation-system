@@ -6,13 +6,13 @@
  * REQ-REG-GUI-V2-001.
  */
 
-import { describe, expect, it } from 'vitest';
 import {
 	EVALUATED_TIER_VALUES,
 	type RunResult,
 	getEvaluatedTier,
 	looksLikeRunResult,
 } from '@core/types/regression.js';
+import { describe, expect, it } from 'vitest';
 import { ROUTING_TARGET_TIER } from '../runner/case-runners/routing-runner.js';
 
 const VALID_KEY = 'a'.repeat(64);

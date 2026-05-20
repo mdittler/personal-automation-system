@@ -9,7 +9,7 @@
  * - API/YAML-created space-scoped report retains space_id after GUI edit
  */
 
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,15 +21,15 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppToggleStore } from '../../../services/app-toggle/index.js';
 import { ChangeLog } from '../../../services/data-store/change-log.js';
+import { ReportService } from '../../../services/reports/index.js';
 import { CronManager } from '../../../services/scheduler/cron-manager.js';
 import { UserManager } from '../../../services/user-manager/index.js';
-import { ReportService } from '../../../services/reports/index.js';
+import type { ContextStoreService } from '../../../types/context-store.js';
+import type { LLMService } from '../../../types/llm.js';
+import type { TelegramService } from '../../../types/telegram.js';
 import { registerAuth } from '../../auth.js';
 import { registerCsrfProtection } from '../../csrf.js';
 import { registerReportRoutes } from '../reports.js';
-import type { LLMService } from '../../../types/llm.js';
-import type { TelegramService } from '../../../types/telegram.js';
-import type { ContextStoreService } from '../../../types/context-store.js';
 
 const AUTH_TOKEN = 'test-token-d39';
 const logger = pino({ level: 'silent' });
@@ -74,7 +74,11 @@ async function buildApp(spaceService?: { listSpaces(): Array<{ id: string; name:
 		dataDir: tempDir,
 		changeLog: new ChangeLog(tempDir),
 		contextStore: { get: vi.fn(), search: vi.fn() } as unknown as ContextStoreService,
-		llm: { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as unknown as LLMService,
+		llm: {
+			complete: vi.fn(),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		} as unknown as LLMService,
 		telegram: {
 			send: vi.fn(),
 			sendPhoto: vi.fn(),

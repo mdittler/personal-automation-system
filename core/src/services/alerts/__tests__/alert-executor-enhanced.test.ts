@@ -145,9 +145,7 @@ describe('executeActions — telegram_message with templates', () => {
 	it('truncates long telegram messages', async () => {
 		const deps = makeDeps();
 		const longData = 'x'.repeat(5000);
-		const actions: AlertAction[] = [
-			{ type: 'telegram_message', config: { message: '{data}' } },
-		];
+		const actions: AlertAction[] = [{ type: 'telegram_message', config: { message: '{data}' } }];
 		const ctx = makeContext({ data: longData });
 
 		await executeActions(actions, ['user1'], deps, ctx);
@@ -260,9 +258,9 @@ describe('executeActions — telegram_message with LLM summary', () => {
 
 describe('executeActions — webhook', () => {
 	it('sends POST to configured URL', async () => {
-		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('ok', { status: 200 }),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('ok', { status: 200 }));
 		const deps = makeDeps();
 		const actions: AlertAction[] = [
 			{ type: 'webhook', config: { url: 'https://example.com/hook' } },
@@ -286,9 +284,9 @@ describe('executeActions — webhook', () => {
 	});
 
 	it('includes data when include_data is true', async () => {
-		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('ok', { status: 200 }),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('ok', { status: 200 }));
 		const deps = makeDeps();
 		const actions: AlertAction[] = [
 			{
@@ -307,9 +305,11 @@ describe('executeActions — webhook', () => {
 	});
 
 	it('fails on non-200 response', async () => {
-		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('error', { status: 500, statusText: 'Internal Server Error' }),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(
+				new Response('error', { status: 500, statusText: 'Internal Server Error' }),
+			);
 		const deps = makeDeps();
 		const actions: AlertAction[] = [
 			{ type: 'webhook', config: { url: 'https://example.com/hook' } },
@@ -325,9 +325,7 @@ describe('executeActions — webhook', () => {
 	});
 
 	it('fails on network error', async () => {
-		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
-			new Error('Network error'),
-		);
+		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'));
 		const deps = makeDeps();
 		const actions: AlertAction[] = [
 			{ type: 'webhook', config: { url: 'https://example.com/hook' } },
@@ -552,7 +550,7 @@ describe('executeActions — write_data', () => {
 		expect(result.successCount).toBe(0);
 	});
 
-	it('expands {date} token in path to today\'s date (Gap 14)', async () => {
+	it("expands {date} token in path to today's date (Gap 14)", async () => {
 		// Both the executor (via timezone param) and todayStr below use UTC,
 		// so this test is safe across timezone boundaries.
 		const deps = makeDeps({ dataDir: tempDir, timezone: 'UTC' });
@@ -593,9 +591,7 @@ describe('executeActions — audio', () => {
 	it('calls audioService.speak with resolved text', async () => {
 		const audioService = { speak: vi.fn().mockResolvedValue(undefined) };
 		const deps = makeDeps({ audioService: audioService as any });
-		const actions: AlertAction[] = [
-			{ type: 'audio', config: { message: 'Alert: {alert_name}' } },
-		];
+		const actions: AlertAction[] = [{ type: 'audio', config: { message: 'Alert: {alert_name}' } }];
 		const ctx = makeContext({ alertName: 'Fire Alarm' });
 
 		const result = await executeActions(actions, ['user1'], deps, ctx);
@@ -621,9 +617,7 @@ describe('executeActions — audio', () => {
 
 	it('fails when audioService not available', async () => {
 		const deps = makeDeps({ audioService: undefined });
-		const actions: AlertAction[] = [
-			{ type: 'audio', config: { message: 'Hello' } },
-		];
+		const actions: AlertAction[] = [{ type: 'audio', config: { message: 'Hello' } }];
 
 		const result = await executeActions(actions, ['user1'], deps, makeContext());
 
@@ -714,9 +708,9 @@ describe('executeActions — dispatch_message', () => {
 
 describe('executeActions — mixed action types', () => {
 	it('executes multiple different action types', async () => {
-		const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('ok', { status: 200 }),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('ok', { status: 200 }));
 		const audioService = { speak: vi.fn().mockResolvedValue(undefined) };
 		const deps = makeDeps({ audioService: audioService as any });
 		const actions: AlertAction[] = [
@@ -806,9 +800,7 @@ describe('executeActions — edge cases', () => {
 	it('data truncation preserves exact MAX_DATA_LENGTH characters', async () => {
 		const deps = makeDeps();
 		const exactData = 'a'.repeat(4000);
-		const actions: AlertAction[] = [
-			{ type: 'telegram_message', config: { message: '{data}' } },
-		];
+		const actions: AlertAction[] = [{ type: 'telegram_message', config: { message: '{data}' } }];
 
 		// Exactly at limit — no truncation, no ellipsis
 		await executeActions(actions, ['user1'], deps, makeContext({ data: exactData }));

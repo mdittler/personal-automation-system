@@ -3,8 +3,8 @@
  */
 
 import type { CoreServices } from '@pas/core/types';
-import { sanitizeInput } from '../utils/sanitize.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sanitizeInput } from '../utils/sanitize.js';
 
 export async function handleSeasonalNudgeJob(services: CoreServices): Promise<void> {
 	// Check if seasonal nudges are enabled

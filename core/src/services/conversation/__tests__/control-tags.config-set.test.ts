@@ -89,8 +89,18 @@ function makeChatbotRegistryAndWriter(chatbotCfg: AppConfigService): {
 			if (id === 'chatbot') {
 				return [
 					{ key: 'log_to_notes', type: 'boolean', default: false, description: 'Log to notes' },
-					{ key: 'flush_memory_on_idle_reset', type: 'boolean', default: false, description: 'Flush memory' },
-					{ key: 'session_search_tool_enabled', type: 'boolean', default: true, description: 'Session search' },
+					{
+						key: 'flush_memory_on_idle_reset',
+						type: 'boolean',
+						default: false,
+						description: 'Flush memory',
+					},
+					{
+						key: 'session_search_tool_enabled',
+						type: 'boolean',
+						default: true,
+						description: 'Session search',
+					},
 				];
 			}
 			return [];
@@ -476,8 +486,7 @@ describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
 	it('persists true when MEMORY_FLUSH_INTENT_REGEX matches', async () => {
 		const { config, updateOverrides } = makeConfig();
 		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
-		const response =
-			'Sure! <config-set key="flush_memory_on_idle_reset" value="true"/> Done.';
+		const response = 'Sure! <config-set key="flush_memory_on_idle_reset" value="true"/> Done.';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'enable session memory',
@@ -495,8 +504,7 @@ describe('processConfigSetTags — flush_memory_on_idle_reset enable', () => {
 	it('strips tag and does not write when MEMORY_FLUSH_INTENT_REGEX does not match', async () => {
 		const { config, updateOverrides } = makeConfig();
 		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
-		const response =
-			'Here you go! <config-set key="flush_memory_on_idle_reset" value="true"/>';
+		const response = 'Here you go! <config-set key="flush_memory_on_idle_reset" value="true"/>';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: "what's the weather like today?",
@@ -516,8 +524,7 @@ describe('processConfigSetTags — flush_memory_on_idle_reset disable + cleanup'
 		const { config, updateOverrides } = makeConfig();
 		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
 		const cleanup = vi.fn().mockResolvedValue(undefined);
-		const response =
-			'OK! <config-set key="flush_memory_on_idle_reset" value="false"/> Disabled.';
+		const response = 'OK! <config-set key="flush_memory_on_idle_reset" value="false"/> Disabled.';
 		const result = await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn off session memory',
@@ -569,8 +576,7 @@ describe('processConfigSetTags — co-existence: notes intent does NOT toggle fl
 	it('notes-only message does not process flush_memory_on_idle_reset tag', async () => {
 		const { config, updateOverrides } = makeConfig();
 		const { settingsRegistry, settingsWriter } = makeChatbotRegistryAndWriter(config);
-		const response =
-			'<config-set key="flush_memory_on_idle_reset" value="true"/>';
+		const response = '<config-set key="flush_memory_on_idle_reset" value="true"/>';
 		await processConfigSetTags(response, {
 			userId: 'alice',
 			userMessage: 'turn on daily notes',

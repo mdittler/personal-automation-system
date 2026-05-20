@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { MemorySnapshot } from '../../../types/conversation-session.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { buildSettingsRegistry } from '../../settings/build-registry.js';
 import { SettingsWriter } from '../../settings/settings-writer.js';
 import { processConfigSetTags } from '../control-tags.js';
-import { CONVERSATION_USER_CONFIG_MANIFEST } from '../manifest.js';
 import { handleMessage } from '../handle-message.js';
+import { CONVERSATION_USER_CONFIG_MANIFEST } from '../manifest.js';
 
 function makeChatSessions(): ChatSessionStore {
 	return {
@@ -16,7 +16,9 @@ function makeChatSessions(): ChatSessionStore {
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		rebuildMemorySnapshot: vi
@@ -483,7 +485,8 @@ describe('handle-message <config-set> regression — existing 3 nlSafe keys (Tas
 
 		const writer = new SettingsWriter({
 			registry,
-			appConfigResolver: (appId) => (appId === 'chatbot' ? (mockChatbotConfig as never) : undefined),
+			appConfigResolver: (appId) =>
+				appId === 'chatbot' ? (mockChatbotConfig as never) : undefined,
 			manifestResolver: (appId) =>
 				appId === 'chatbot' ? CONVERSATION_USER_CONFIG_MANIFEST : undefined,
 			logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
@@ -501,7 +504,8 @@ describe('handle-message <config-set> regression — existing 3 nlSafe keys (Tas
 
 		// User message must match NOTES_INTENT_REGEX (action verb + notes concept)
 		const userMessage = 'enable daily notes logging';
-		const llmResponse = 'Sure, I have enabled daily notes. <config-set key="log_to_notes" value="true"/>';
+		const llmResponse =
+			'Sure, I have enabled daily notes. <config-set key="log_to_notes" value="true"/>';
 
 		const { cleanedResponse } = await processConfigSetTags(llmResponse, {
 			userId: 'userId',
@@ -512,7 +516,9 @@ describe('handle-message <config-set> regression — existing 3 nlSafe keys (Tas
 		});
 
 		// Bare key "log_to_notes" → parseConfigSetKey → appId='chatbot', key='log_to_notes'
-		expect(mockChatbotConfig.updateOverrides).toHaveBeenCalledWith('userId', { log_to_notes: true });
+		expect(mockChatbotConfig.updateOverrides).toHaveBeenCalledWith('userId', {
+			log_to_notes: true,
+		});
 		expect(cleanedResponse).not.toContain('<config-set');
 	});
 

@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { formatConversationHistory } from '@pas/core/services/prompt-assembly';
 import type { CoreServices, PhotoContext, PhotoHandlerResult } from '@pas/core/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import { buildReceiptSummary, sanitizePhotoField } from '../handlers/photo-summary.js';
 import { handlePhoto } from '../handlers/photo.js';
+import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 
 afterEach(() => {
 	__clearShadowDepsForTests();
@@ -73,7 +73,7 @@ function createMockServices(
 				forUser: vi.fn().mockReturnValue(createMockStore()),
 			},
 			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-		dataDir: tmpdir(),
+			dataDir: tmpdir(),
 		} as unknown as CoreServices,
 		sharedStore,
 		spaceStore,
@@ -681,7 +681,10 @@ describe('Photo Handler', () => {
 			const { services, sharedStore } = createMockServices(mismatchedReceiptJson);
 			await handlePhoto(services, createPhotoCtx('receipt'));
 
-			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+				string,
+				string,
+			][];
 			const receiptWrite = writeCalls.find(([path]) => path.includes('receipts/'));
 			expect(receiptWrite).toBeDefined();
 			expect(receiptWrite?.[1]).toContain('verification_warnings:');
@@ -692,7 +695,10 @@ describe('Photo Handler', () => {
 			const { services, sharedStore } = createMockServices(validReceiptJson);
 			await handlePhoto(services, createPhotoCtx('receipt'));
 
-			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [string, string][];
+			const writeCalls = (sharedStore.write as ReturnType<typeof vi.fn>).mock.calls as [
+				string,
+				string,
+			][];
 			const receiptWrite = writeCalls.find(([path]) => path.includes('receipts/'));
 			expect(receiptWrite).toBeDefined();
 			expect(receiptWrite?.[1]).not.toContain('verification_warnings');

@@ -6,12 +6,17 @@
  * items should be kept or archived.
  */
 
-import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { archivePurchased, loadGroceryList, saveGroceryList, withGroceryLock } from '../services/grocery-store.js';
-import type { GroceryItem, GroceryList, Household } from '../types.js';
-import { loadHousehold } from '../utils/household-guard.js';
+import type { CoreServices } from '@pas/core/types';
 import { emitShoppingCompleted } from '../events/emitters.js';
+import {
+	archivePurchased,
+	loadGroceryList,
+	saveGroceryList,
+	withGroceryLock,
+} from '../services/grocery-store.js';
+import type { GroceryItem, GroceryList } from '../types.js';
 import { isoNow } from '../utils/date.js';
+import { loadHousehold } from '../utils/household-guard.js';
 
 // Node timer globals — not in ES2024 lib, so we declare them here.
 declare function setTimeout(callback: () => void, ms: number): unknown;
@@ -96,7 +101,9 @@ export async function handleShoppingFollowupJob(services: CoreServices): Promise
 	const shown = remaining.slice(0, maxShow);
 	const extra = count - shown.length;
 
-	const lines: string[] = [`🛒 You still have ${count} item${count === 1 ? '' : 's'} on your grocery list:\n`];
+	const lines: string[] = [
+		`🛒 You still have ${count} item${count === 1 ? '' : 's'} on your grocery list:\n`,
+	];
 	for (const item of shown) {
 		lines.push(`• ${item.name}`);
 	}

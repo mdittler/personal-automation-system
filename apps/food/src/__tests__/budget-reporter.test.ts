@@ -1,19 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+import { checkBudgetAlert, formatBudgetAlert } from '../services/budget-alerts.js';
 import {
-	generateWeeklyReport,
-	generateMonthlyReport,
-	generateYearlyReport,
-	formatWeeklyReportMessage,
 	formatMonthlyReportMessage,
+	formatWeeklyReportMessage,
 	formatYearlyReportMessage,
-	saveWeeklyHistory,
-	loadWeeklyHistory,
+	generateMonthlyReport,
+	generateWeeklyReport,
+	generateYearlyReport,
 	listWeeklyHistories,
+	loadWeeklyHistory,
+	saveWeeklyHistory,
 } from '../services/budget-reporter.js';
-import {
-	checkBudgetAlert,
-	formatBudgetAlert,
-} from '../services/budget-alerts.js';
 import type { CostHistoryWeek, MealCostEstimate, MealPlan } from '../types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -36,7 +33,7 @@ function makeMealEstimate(overrides: Partial<MealCostEstimate> = {}): MealCostEs
 		recipeTitle: 'Pancakes',
 		store: 'Costco',
 		ingredientCosts: [],
-		totalCost: 4.50,
+		totalCost: 4.5,
 		perServingCost: 1.13,
 		servings: 4,
 		estimatedAt: '2026-04-07T10:00:00.000Z',
@@ -79,10 +76,46 @@ function makePlan(overrides: Partial<MealPlan> = {}): MealPlan {
 }
 
 const recentWeeks: CostHistoryWeek[] = [
-	{ weekId: '2026-W12', startDate: '2026-03-16', endDate: '2026-03-22', meals: [], totalCost: 36.00, avgPerMeal: 5.14, avgPerServing: 1.29, mealCount: 7 },
-	{ weekId: '2026-W13', startDate: '2026-03-23', endDate: '2026-03-29', meals: [], totalCost: 38.00, avgPerMeal: 5.43, avgPerServing: 1.36, mealCount: 7 },
-	{ weekId: '2026-W14', startDate: '2026-03-30', endDate: '2026-04-05', meals: [], totalCost: 34.00, avgPerMeal: 4.86, avgPerServing: 1.21, mealCount: 7 },
-	{ weekId: '2026-W15', startDate: '2026-04-06', endDate: '2026-04-12', meals: [], totalCost: 40.00, avgPerMeal: 5.71, avgPerServing: 1.43, mealCount: 7 },
+	{
+		weekId: '2026-W12',
+		startDate: '2026-03-16',
+		endDate: '2026-03-22',
+		meals: [],
+		totalCost: 36.0,
+		avgPerMeal: 5.14,
+		avgPerServing: 1.29,
+		mealCount: 7,
+	},
+	{
+		weekId: '2026-W13',
+		startDate: '2026-03-23',
+		endDate: '2026-03-29',
+		meals: [],
+		totalCost: 38.0,
+		avgPerMeal: 5.43,
+		avgPerServing: 1.36,
+		mealCount: 7,
+	},
+	{
+		weekId: '2026-W14',
+		startDate: '2026-03-30',
+		endDate: '2026-04-05',
+		meals: [],
+		totalCost: 34.0,
+		avgPerMeal: 4.86,
+		avgPerServing: 1.21,
+		mealCount: 7,
+	},
+	{
+		weekId: '2026-W15',
+		startDate: '2026-04-06',
+		endDate: '2026-04-12',
+		meals: [],
+		totalCost: 40.0,
+		avgPerMeal: 5.71,
+		avgPerServing: 1.43,
+		mealCount: 7,
+	},
 ];
 
 // ─── generateWeeklyReport ─────────────────────────────────────────────────────
@@ -91,14 +124,25 @@ describe('generateWeeklyReport', () => {
 	it('builds report from plan and estimates', () => {
 		const plan = makePlan();
 		const estimates = [
-			makeMealEstimate({ recipeId: 'recipe-1', recipeTitle: 'Pancakes', totalCost: 4.50, perServingCost: 1.13 }),
-			makeMealEstimate({ recipeId: 'recipe-2', recipeTitle: 'Pasta', totalCost: 8.00, perServingCost: 2.00, servings: 4 }),
+			makeMealEstimate({
+				recipeId: 'recipe-1',
+				recipeTitle: 'Pancakes',
+				totalCost: 4.5,
+				perServingCost: 1.13,
+			}),
+			makeMealEstimate({
+				recipeId: 'recipe-2',
+				recipeTitle: 'Pasta',
+				totalCost: 8.0,
+				perServingCost: 2.0,
+				servings: 4,
+			}),
 		];
 		const result = generateWeeklyReport(plan, estimates);
 
 		expect(result.weekId).toBe('2026-W15');
 		expect(result.meals).toHaveLength(2);
-		expect(result.totalCost).toBeCloseTo(12.50);
+		expect(result.totalCost).toBeCloseTo(12.5);
 		expect(result.mealCount).toBe(2);
 		expect(result.avgPerMeal).toBeCloseTo(6.25);
 	});
@@ -119,12 +163,18 @@ describe('generateWeeklyReport', () => {
 			],
 		});
 		const estimates = [
-			makeMealEstimate({ recipeId: 'r1', recipeTitle: 'Solo Meal', totalCost: 5.00, perServingCost: 1.25, servings: 4 }),
+			makeMealEstimate({
+				recipeId: 'r1',
+				recipeTitle: 'Solo Meal',
+				totalCost: 5.0,
+				perServingCost: 1.25,
+				servings: 4,
+			}),
 		];
 		const result = generateWeeklyReport(plan, estimates);
-		expect(result.totalCost).toBe(5.00);
+		expect(result.totalCost).toBe(5.0);
 		expect(result.mealCount).toBe(1);
-		expect(result.avgPerMeal).toBe(5.00);
+		expect(result.avgPerMeal).toBe(5.0);
 	});
 
 	it('handles empty estimates gracefully', () => {
@@ -142,13 +192,13 @@ describe('generateWeeklyReport', () => {
 	it('maps meals to correct dates from plan', () => {
 		const plan = makePlan();
 		const estimates = [
-			makeMealEstimate({ recipeId: 'recipe-1', recipeTitle: 'Pancakes', totalCost: 4.50 }),
+			makeMealEstimate({ recipeId: 'recipe-1', recipeTitle: 'Pancakes', totalCost: 4.5 }),
 		];
 		const result = generateWeeklyReport(plan, estimates);
 
 		expect(result.meals[0]?.recipeTitle).toBe('Pancakes');
 		expect(result.meals[0]?.date).toBe('2026-04-07');
-		expect(result.meals[0]?.cost).toBeCloseTo(4.50);
+		expect(result.meals[0]?.cost).toBeCloseTo(4.5);
 	});
 });
 
@@ -157,16 +207,34 @@ describe('generateWeeklyReport', () => {
 describe('generateMonthlyReport', () => {
 	it('aggregates weeks into monthly summary', () => {
 		const weeks: CostHistoryWeek[] = [
-			{ weekId: '2026-W14', startDate: '2026-03-30', endDate: '2026-04-05', meals: [], totalCost: 34.00, avgPerMeal: 4.86, avgPerServing: 1.21, mealCount: 7 },
-			{ weekId: '2026-W15', startDate: '2026-04-06', endDate: '2026-04-12', meals: [], totalCost: 40.00, avgPerMeal: 5.71, avgPerServing: 1.43, mealCount: 7 },
+			{
+				weekId: '2026-W14',
+				startDate: '2026-03-30',
+				endDate: '2026-04-05',
+				meals: [],
+				totalCost: 34.0,
+				avgPerMeal: 4.86,
+				avgPerServing: 1.21,
+				mealCount: 7,
+			},
+			{
+				weekId: '2026-W15',
+				startDate: '2026-04-06',
+				endDate: '2026-04-12',
+				meals: [],
+				totalCost: 40.0,
+				avgPerMeal: 5.71,
+				avgPerServing: 1.43,
+				mealCount: 7,
+			},
 		];
 		const result = generateMonthlyReport('2026-04', weeks);
 
 		expect(result.monthId).toBe('2026-04');
-		expect(result.totalCost).toBeCloseTo(74.00);
+		expect(result.totalCost).toBeCloseTo(74.0);
 		expect(result.mealCount).toBe(14);
 		expect(result.weeks).toHaveLength(2);
-		expect(result.avgPerMeal).toBeCloseTo(74.00 / 14);
+		expect(result.avgPerMeal).toBeCloseTo(74.0 / 14);
 	});
 });
 
@@ -175,14 +243,14 @@ describe('generateMonthlyReport', () => {
 describe('generateYearlyReport', () => {
 	it('aggregates months into yearly summary', () => {
 		const months = [
-			{ monthLabel: '2026-01', totalCost: 120.00, mealCount: 28 },
-			{ monthLabel: '2026-02', totalCost: 105.00, mealCount: 28 },
-			{ monthLabel: '2026-03', totalCost: 140.00, mealCount: 30 },
+			{ monthLabel: '2026-01', totalCost: 120.0, mealCount: 28 },
+			{ monthLabel: '2026-02', totalCost: 105.0, mealCount: 28 },
+			{ monthLabel: '2026-03', totalCost: 140.0, mealCount: 30 },
 		];
 		const result = generateYearlyReport('2026', months);
 
-		expect(result.totalCost).toBeCloseTo(365.00);
-		expect(result.avgPerMonth).toBeCloseTo(365.00 / 3);
+		expect(result.totalCost).toBeCloseTo(365.0);
+		expect(result.avgPerMonth).toBeCloseTo(365.0 / 3);
 		expect(result.months).toHaveLength(3);
 	});
 });
@@ -195,10 +263,10 @@ describe('formatWeeklyReportMessage', () => {
 		startDate: '2026-04-07',
 		endDate: '2026-04-13',
 		meals: [
-			{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.50, perServing: 1.13 },
-			{ date: '2026-04-08', recipeTitle: 'Pasta', cost: 8.00, perServing: 2.00 },
+			{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.5, perServing: 1.13 },
+			{ date: '2026-04-08', recipeTitle: 'Pasta', cost: 8.0, perServing: 2.0 },
 		],
-		totalCost: 12.50,
+		totalCost: 12.5,
 		avgPerMeal: 6.25,
 		avgPerServing: 1.57,
 		mealCount: 2,
@@ -230,8 +298,8 @@ describe('formatWeeklyReportMessage', () => {
 			startDate: '2026-03-30',
 			endDate: '2026-04-05',
 			meals: [],
-			totalCost: 15.00,
-			avgPerMeal: 7.50,
+			totalCost: 15.0,
+			avgPerMeal: 7.5,
 			avgPerServing: 1.88,
 			mealCount: 2,
 		};
@@ -251,10 +319,10 @@ describe('formatWeeklyReportMessage', () => {
 			weekId: '2026-W15',
 			startDate: '2026-04-07',
 			endDate: '2026-04-13',
-			meals: [{ date: '2026-04-07', recipeTitle: 'A'.repeat(100), cost: 10.00, perServing: 2.50 }],
-			totalCost: 10.00,
-			avgPerMeal: 10.00,
-			avgPerServing: 2.50,
+			meals: [{ date: '2026-04-07', recipeTitle: 'A'.repeat(100), cost: 10.0, perServing: 2.5 }],
+			totalCost: 10.0,
+			avgPerMeal: 10.0,
+			avgPerServing: 2.5,
 			mealCount: 1,
 		};
 		const msg = formatWeeklyReportMessage(longNameWeek, null);
@@ -275,8 +343,8 @@ describe('formatMonthlyReportMessage', () => {
 			weekId: '2026-W14',
 			startDate: '2026-03-30',
 			endDate: '2026-04-05',
-			meals: [{ date: '2026-03-30', recipeTitle: 'Tacos', cost: 10.00, perServing: 2.50 }],
-			totalCost: 34.00,
+			meals: [{ date: '2026-03-30', recipeTitle: 'Tacos', cost: 10.0, perServing: 2.5 }],
+			totalCost: 34.0,
 			avgPerMeal: 4.86,
 			avgPerServing: 1.21,
 			mealCount: 7,
@@ -285,8 +353,8 @@ describe('formatMonthlyReportMessage', () => {
 			weekId: '2026-W15',
 			startDate: '2026-04-06',
 			endDate: '2026-04-12',
-			meals: [{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.50, perServing: 1.13 }],
-			totalCost: 40.00,
+			meals: [{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.5, perServing: 1.13 }],
+			totalCost: 40.0,
 			avgPerMeal: 5.71,
 			avgPerServing: 1.43,
 			mealCount: 7,
@@ -304,7 +372,7 @@ describe('formatMonthlyReportMessage', () => {
 	});
 
 	it('includes comparison vs last month when provided', () => {
-		const result = formatMonthlyReportMessage('April 2026', weeks, 60.00);
+		const result = formatMonthlyReportMessage('April 2026', weeks, 60.0);
 		expect(result).toMatch(/↓|↑/);
 		expect(result).toContain('last month');
 	});
@@ -314,9 +382,9 @@ describe('formatMonthlyReportMessage', () => {
 
 describe('formatYearlyReportMessage', () => {
 	const months = [
-		{ monthLabel: 'Jan', totalCost: 120.00, mealCount: 28 },
-		{ monthLabel: 'Feb', totalCost: 105.00, mealCount: 28 },
-		{ monthLabel: 'Mar', totalCost: 140.00, mealCount: 30 },
+		{ monthLabel: 'Jan', totalCost: 120.0, mealCount: 28 },
+		{ monthLabel: 'Feb', totalCost: 105.0, mealCount: 28 },
+		{ monthLabel: 'Mar', totalCost: 140.0, mealCount: 30 },
 	];
 
 	it('contains year label', () => {
@@ -353,9 +421,9 @@ describe('saveWeeklyHistory', () => {
 			startDate: '2026-04-07',
 			endDate: '2026-04-13',
 			meals: [],
-			totalCost: 42.00,
-			avgPerMeal: 6.00,
-			avgPerServing: 1.50,
+			totalCost: 42.0,
+			avgPerMeal: 6.0,
+			avgPerServing: 1.5,
 			mealCount: 7,
 		};
 		await saveWeeklyHistory(store as never, week);
@@ -371,9 +439,9 @@ describe('saveWeeklyHistory', () => {
 			startDate: '2026-04-07',
 			endDate: '2026-04-13',
 			meals: [],
-			totalCost: 42.00,
-			avgPerMeal: 6.00,
-			avgPerServing: 1.50,
+			totalCost: 42.0,
+			avgPerMeal: 6.0,
+			avgPerServing: 1.5,
 			mealCount: 7,
 		};
 		await saveWeeklyHistory(store as never, week);
@@ -395,10 +463,10 @@ describe('loadWeeklyHistory', () => {
 			weekId: '2026-W15',
 			startDate: '2026-04-07',
 			endDate: '2026-04-13',
-			meals: [{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.50, perServing: 1.13 }],
-			totalCost: 42.00,
-			avgPerMeal: 6.00,
-			avgPerServing: 1.50,
+			meals: [{ date: '2026-04-07', recipeTitle: 'Pancakes', cost: 4.5, perServing: 1.13 }],
+			totalCost: 42.0,
+			avgPerMeal: 6.0,
+			avgPerServing: 1.5,
 			mealCount: 7,
 		};
 
@@ -419,7 +487,7 @@ describe('loadWeeklyHistory', () => {
 		const result = await loadWeeklyHistory(readStore as never, '2026-W15');
 		expect(result).not.toBeNull();
 		expect(result!.weekId).toBe('2026-W15');
-		expect(result!.totalCost).toBe(42.00);
+		expect(result!.totalCost).toBe(42.0);
 		expect(result!.meals).toHaveLength(1);
 	});
 });
@@ -444,7 +512,7 @@ describe('listWeeklyHistories', () => {
 
 describe('checkBudgetAlert', () => {
 	it('returns null when no historical data', () => {
-		const estimates = [makeMealEstimate({ totalCost: 10.00 })];
+		const estimates = [makeMealEstimate({ totalCost: 10.0 })];
 		const result = checkBudgetAlert(estimates, []);
 		expect(result).toBeNull();
 	});
@@ -469,7 +537,7 @@ describe('checkBudgetAlert', () => {
 		// 15% threshold → alert if > 37 * 1.15 = 42.55
 		// Provide estimates totaling ~35 (within budget)
 		const estimates = Array.from({ length: 7 }, (_, i) =>
-			makeMealEstimate({ recipeId: `r-${i}`, recipeTitle: `Meal ${i}`, totalCost: 5.00 }),
+			makeMealEstimate({ recipeId: `r-${i}`, recipeTitle: `Meal ${i}`, totalCost: 5.0 }),
 		);
 		const result = checkBudgetAlert(estimates, recentWeeks);
 		expect(result).toBeNull();
@@ -479,24 +547,24 @@ describe('checkBudgetAlert', () => {
 		// Average = 37.00, threshold = 42.55
 		// Provide estimates totaling ~55 (well above)
 		const estimates = Array.from({ length: 7 }, (_, i) =>
-			makeMealEstimate({ recipeId: `r-${i}`, recipeTitle: `Meal ${i}`, totalCost: 8.00 }),
+			makeMealEstimate({ recipeId: `r-${i}`, recipeTitle: `Meal ${i}`, totalCost: 8.0 }),
 		);
 		const result = checkBudgetAlert(estimates, recentWeeks);
 		expect(result).not.toBeNull();
-		expect(result!.projectedCost).toBeCloseTo(56.00);
+		expect(result!.projectedCost).toBeCloseTo(56.0);
 		expect(result!.percentAbove).toBeGreaterThan(15);
 	});
 
 	it('identifies the most expensive meal in the alert', () => {
 		const estimates = [
-			makeMealEstimate({ recipeId: 'r-1', recipeTitle: 'Cheap Meal', totalCost: 5.00 }),
-			makeMealEstimate({ recipeId: 'r-2', recipeTitle: 'Expensive Steak', totalCost: 30.00 }),
-			makeMealEstimate({ recipeId: 'r-3', recipeTitle: 'Medium Meal', totalCost: 8.00 }),
+			makeMealEstimate({ recipeId: 'r-1', recipeTitle: 'Cheap Meal', totalCost: 5.0 }),
+			makeMealEstimate({ recipeId: 'r-2', recipeTitle: 'Expensive Steak', totalCost: 30.0 }),
+			makeMealEstimate({ recipeId: 'r-3', recipeTitle: 'Medium Meal', totalCost: 8.0 }),
 		];
 		const result = checkBudgetAlert(estimates, recentWeeks);
 		expect(result).not.toBeNull();
 		expect(result!.mostExpensiveMeal.title).toBe('Expensive Steak');
-		expect(result!.mostExpensiveMeal.cost).toBe(30.00);
+		expect(result!.mostExpensiveMeal.cost).toBe(30.0);
 	});
 });
 
@@ -505,10 +573,10 @@ describe('checkBudgetAlert', () => {
 describe('formatBudgetAlert', () => {
 	it('contains warning emoji and percentage', () => {
 		const alert = {
-			projectedCost: 55.00,
-			averageCost: 37.00,
+			projectedCost: 55.0,
+			averageCost: 37.0,
 			percentAbove: 48.6,
-			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.00 },
+			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.0 },
 		};
 		const result = formatBudgetAlert(alert);
 		expect(result).toContain('⚠️');
@@ -517,10 +585,10 @@ describe('formatBudgetAlert', () => {
 
 	it('contains most expensive meal title and cost', () => {
 		const alert = {
-			projectedCost: 55.00,
-			averageCost: 37.00,
+			projectedCost: 55.0,
+			averageCost: 37.0,
 			percentAbove: 48.6,
-			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.00 },
+			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.0 },
 		};
 		const result = formatBudgetAlert(alert);
 		expect(result).toContain('Steak Dinner');
@@ -529,10 +597,10 @@ describe('formatBudgetAlert', () => {
 
 	it('includes suggestion to swap', () => {
 		const alert = {
-			projectedCost: 55.00,
-			averageCost: 37.00,
+			projectedCost: 55.0,
+			averageCost: 37.0,
 			percentAbove: 48.6,
-			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.00 },
+			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.0 },
 		};
 		const result = formatBudgetAlert(alert);
 		expect(result.toLowerCase()).toMatch(/swap|lower|consider/);
@@ -540,10 +608,10 @@ describe('formatBudgetAlert', () => {
 
 	it('includes the 4-week avg cost', () => {
 		const alert = {
-			projectedCost: 55.00,
-			averageCost: 37.00,
+			projectedCost: 55.0,
+			averageCost: 37.0,
 			percentAbove: 48.6,
-			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.00 },
+			mostExpensiveMeal: { title: 'Steak Dinner', cost: 25.0 },
 		};
 		const result = formatBudgetAlert(alert);
 		expect(result).toContain('$37.00');

@@ -6,7 +6,13 @@ import type { ManifestUserConfig } from '../../../types/manifest.js';
 import { AppConfigServiceImpl } from '../app-config-service.js';
 
 const defaults: ManifestUserConfig[] = [
-	{ key: 'theme', type: 'select', default: 'light', description: 'UI theme', options: ['light', 'dark'] },
+	{
+		key: 'theme',
+		type: 'select',
+		default: 'light',
+		description: 'UI theme',
+		options: ['light', 'dark'],
+	},
 	{ key: 'notify', type: 'boolean', default: true, description: 'Enable notifications' },
 	{ key: 'log_to_notes', type: 'boolean', default: false, description: 'Log to notes' },
 ];

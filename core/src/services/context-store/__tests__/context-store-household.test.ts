@@ -10,16 +10,13 @@
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { rm } from 'node:fs/promises';
-import {
-	ContextStoreServiceImpl,
-	CONTEXT_INTERNAL_BYPASS,
-} from '../index.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { requestContext } from '../../context/request-context.js';
 import { HouseholdBoundaryError, UserBoundaryError } from '../../household/index.js';
+import { CONTEXT_INTERNAL_BYPASS, ContextStoreServiceImpl } from '../index.js';
 
 function makeLogger() {
 	return {
@@ -87,9 +84,7 @@ describe('ContextStoreServiceImpl — household routing', () => {
 		await mkdir(ctxDir, { recursive: true });
 		await writeFile(join(ctxDir, 'diet.md'), 'Low-carb diet');
 
-		const entries = await requestContext.run({ userId: 'matt' }, () =>
-			service.listForUser('matt'),
-		);
+		const entries = await requestContext.run({ userId: 'matt' }, () => service.listForUser('matt'));
 		expect(entries).toHaveLength(1);
 		expect(entries[0]!.key).toBe('diet');
 		expect(entries[0]!.content).toBe('Low-carb diet');
@@ -103,9 +98,7 @@ describe('ContextStoreServiceImpl — household routing', () => {
 		});
 
 		await expect(
-			requestContext.run({ userId: 'unassigned' }, () =>
-				service.listForUser('unassigned'),
-			),
+			requestContext.run({ userId: 'unassigned' }, () => service.listForUser('unassigned')),
 		).rejects.toThrow(HouseholdBoundaryError);
 	});
 
@@ -172,9 +165,7 @@ describe('ContextStoreServiceImpl — actor-vs-target checks', () => {
 			logger: makeLogger(),
 		});
 		await expect(
-			requestContext.run({ userId: 'alice' }, () =>
-				service.save('bob', 'key', 'content'),
-			),
+			requestContext.run({ userId: 'alice' }, () => service.save('bob', 'key', 'content')),
 		).rejects.toThrow(UserBoundaryError);
 	});
 
@@ -184,9 +175,7 @@ describe('ContextStoreServiceImpl — actor-vs-target checks', () => {
 			logger: makeLogger(),
 		});
 		await expect(
-			requestContext.run({ userId: 'alice' }, () =>
-				service.remove('bob', 'key'),
-			),
+			requestContext.run({ userId: 'alice' }, () => service.remove('bob', 'key')),
 		).rejects.toThrow(UserBoundaryError);
 	});
 
@@ -196,9 +185,7 @@ describe('ContextStoreServiceImpl — actor-vs-target checks', () => {
 			logger: makeLogger(),
 		});
 		await expect(
-			requestContext.run({ userId: 'alice' }, () =>
-				service.getForUser('key', 'bob'),
-			),
+			requestContext.run({ userId: 'alice' }, () => service.getForUser('key', 'bob')),
 		).rejects.toThrow(UserBoundaryError);
 	});
 
@@ -208,9 +195,7 @@ describe('ContextStoreServiceImpl — actor-vs-target checks', () => {
 			logger: makeLogger(),
 		});
 		await expect(
-			requestContext.run({ userId: 'alice' }, () =>
-				service.searchForUser('pasta', 'bob'),
-			),
+			requestContext.run({ userId: 'alice' }, () => service.searchForUser('pasta', 'bob')),
 		).rejects.toThrow(UserBoundaryError);
 	});
 });

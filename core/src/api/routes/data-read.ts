@@ -6,16 +6,19 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
-import { requireScope } from '../guards/require-scope.js';
-import { PathTraversalError, resolveScopedPath, resolveScopedDataDir } from '../../services/data-store/paths.js';
+import {
+	PathTraversalError,
+	resolveScopedDataDir,
+	resolveScopedPath,
+} from '../../services/data-store/paths.js';
 import { HouseholdBoundaryError, type HouseholdService } from '../../services/household/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import { SPACE_ID_PATTERN } from '../../types/spaces.js';
+import { authorizeResourceAccess } from '../guards/authorize-resource-kind.js';
+import { requireScope } from '../guards/require-scope.js';
 
 const APP_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const USER_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -155,9 +158,7 @@ export function registerDataReadRoute(
 		try {
 			// Validate space membership before resolving path
 			if (spaceId && !spaceService.isMember(spaceId, userId)) {
-				return reply
-					.status(403)
-					.send({ ok: false, error: 'Not a member of the requested space.' });
+				return reply.status(403).send({ ok: false, error: 'Not a member of the requested space.' });
 			}
 
 			// Resolve the base directory — household-aware when householdService is wired

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OneOffManager } from '../oneoff-manager.js';
 import type { SchedulerJobNotifier } from '../notifier.js';
+import { OneOffManager } from '../oneoff-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -218,7 +218,11 @@ describe('OneOffManager', () => {
 		await manager.schedule('app1', 'job1', new Date(Date.now() - 60_000), 'handler.js');
 		await manager.checkAndExecute();
 
-		expect(notifier.onFailure).toHaveBeenCalledWith('app1', 'job1', expect.stringContaining('boom'));
+		expect(notifier.onFailure).toHaveBeenCalledWith(
+			'app1',
+			'job1',
+			expect.stringContaining('boom'),
+		);
 		expect(notifier.onSuccess).not.toHaveBeenCalled();
 
 		// Task should be removed (attempted)
@@ -344,7 +348,9 @@ describe('OneOffManager', () => {
 			onSuccess: vi.fn(),
 		};
 		manager.setNotifier(notifier);
-		manager.setHandlerResolver(() => async () => { throw new Error('handler crash'); });
+		manager.setHandlerResolver(() => async () => {
+			throw new Error('handler crash');
+		});
 
 		const pastDate = new Date(Date.now() - 60_000);
 		// Schedule TWO tasks — if the loop aborts on first notifier failure, second is lost
@@ -375,12 +381,9 @@ describe('OneOffManager', () => {
 			releaseHandler = resolve;
 		});
 
-		localManager.setHandlerResolver(
-			() =>
-				async () => {
-					await blockForever;
-				},
-		);
+		localManager.setHandlerResolver(() => async () => {
+			await blockForever;
+		});
 
 		const pastDate = new Date(Date.now() - 60_000);
 		// Schedule a past-due task — this persists the YAML so doCheckAndExecute

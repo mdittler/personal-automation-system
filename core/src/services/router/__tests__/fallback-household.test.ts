@@ -9,12 +9,12 @@
  */
 
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { rm, readdir } from 'node:fs/promises';
-import { FallbackHandler } from '../fallback.js';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageContext, TelegramService } from '../../../types/telegram.js';
+import { FallbackHandler } from '../fallback.js';
 
 function makeLogger() {
 	const warnFn = vi.fn();

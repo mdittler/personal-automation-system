@@ -1,3 +1,6 @@
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * DataQueryService tests.
  *
@@ -6,16 +9,13 @@
  * path hardening, and error handling.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { DataQueryServiceImpl } from '../index.js';
-import { FileIndexService } from '../../file-index/index.js';
-import type { FileIndexEntry } from '../../file-index/types.js';
-import type { ManifestDataScope } from '../../../types/manifest.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { LLMService } from '../../../types/llm.js';
+import type { ManifestDataScope } from '../../../types/manifest.js';
 import { requestContext } from '../../context/request-context.js';
+import { FileIndexService } from '../../file-index/index.js';
+import type { FileIndexEntry } from '../../file-index/types.js';
+import { DataQueryServiceImpl } from '../index.js';
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -79,8 +79,7 @@ function makeSpaceService(spaces: { id: string; members: string[] }[]): MockSpac
 			const space = spaces.find((s) => s.id === spaceId);
 			return space?.members.includes(userId) ?? false;
 		},
-		getSpacesForUser: (userId: string) =>
-			spaces.filter((s) => s.members.includes(userId)),
+		getSpacesForUser: (userId: string) => spaces.filter((s) => s.members.includes(userId)),
 	};
 }
 
@@ -797,28 +796,25 @@ describe('DataQueryService — LLM output untrusted (ID validation)', () => {
 		{ desc: 'out-of-range ID', response: '[999]' },
 		{ desc: 'object instead of array', response: '{"ids": [0]}' },
 		{ desc: 'nested arrays', response: '[[0, 1]]' },
-	])(
-		'silently rejects invalid/untrusted LLM output: $desc',
-		async ({ response }) => {
-			await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.md', RECIPE_FILE);
-			const fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/'], []));
-			await fileIndex.rebuild();
+	])('silently rejects invalid/untrusted LLM output: $desc', async ({ response }) => {
+		await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.md', RECIPE_FILE);
+		const fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/'], []));
+		await fileIndex.rebuild();
 
-			const svc = new DataQueryServiceImpl({
-				fileIndex,
-				spaceService: makeSpaceService([]),
-				llm: makeMockLlm(response),
-				dataDir,
-				logger,
-			});
+		const svc = new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([]),
+			llm: makeMockLlm(response),
+			dataDir,
+			logger,
+		});
 
-			const result = await svc.query('show me recipes', 'matt');
+		const result = await svc.query('show me recipes', 'matt');
 
-			// No valid IDs → empty result (no exception)
-			expect(result.empty).toBe(true);
-			expect(result.files).toHaveLength(0);
-		},
-	);
+		// No valid IDs → empty result (no exception)
+		expect(result.empty).toBe(true);
+		expect(result.files).toHaveLength(0);
+	});
 
 	it('accepts valid integer IDs and rejects invalid ones from mixed response', async () => {
 		await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.md', RECIPE_FILE);
@@ -845,9 +841,21 @@ describe('DataQueryService — LLM output untrusted (ID validation)', () => {
 	// numbers from negative/float prose, violating the ID validation contract.
 	it.each([
 		{ desc: 'prose negative "use file -1"', response: 'use file -1', expectEmpty: true },
-		{ desc: 'prose float "file 0.5 is relevant"', response: 'file 0.5 is relevant', expectEmpty: true },
-		{ desc: 'prose valid integer "I recommend file 0"', response: 'I recommend file 0', expectEmpty: false },
-		{ desc: 'mixed prose "files -1 and 0.5 and 2"', response: 'files -1 and 0.5 and 2', expectEmpty: false },
+		{
+			desc: 'prose float "file 0.5 is relevant"',
+			response: 'file 0.5 is relevant',
+			expectEmpty: true,
+		},
+		{
+			desc: 'prose valid integer "I recommend file 0"',
+			response: 'I recommend file 0',
+			expectEmpty: false,
+		},
+		{
+			desc: 'mixed prose "files -1 and 0.5 and 2"',
+			response: 'files -1 and 0.5 and 2',
+			expectEmpty: false,
+		},
 	])('prose fallback: $desc', async ({ response, expectEmpty }) => {
 		// Create 3 files so ID 2 is in range
 		for (let i = 0; i < 3; i++) {
@@ -1000,7 +1008,9 @@ function makeStubFileIndex(entries: FileIndexEntry[]): FileIndexService {
 	return {
 		getEntries: () => entries,
 		getRelated: () => [],
-		get size() { return entries.length; },
+		get size() {
+			return entries.length;
+		},
 	} as unknown as FileIndexService;
 }
 

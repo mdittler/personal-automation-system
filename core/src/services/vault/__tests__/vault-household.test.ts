@@ -10,15 +10,15 @@
  * - Legacy layout is unchanged when householdService is absent
  */
 
-import { mkdir, readlink, writeFile, lstat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { lstat, mkdir, readlink, writeFile } from 'node:fs/promises';
 import { rm } from 'node:fs/promises';
-import { VaultService } from '../index.js';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpaceDefinition } from '../../../types/spaces.js';
 import type { SpaceService } from '../../spaces/index.js';
 import type { UserManager } from '../../user-manager/index.js';
+import { VaultService } from '../index.js';
 
 function makeLogger() {
 	const warnFn = vi.fn();

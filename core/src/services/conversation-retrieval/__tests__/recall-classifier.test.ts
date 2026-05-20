@@ -149,17 +149,16 @@ describe('classifyRecallIntent — malformed output', () => {
 			'shouldRecall=true but query is an array',
 			JSON.stringify({ shouldRecall: true, query: ['pasta'], timeAnchor: null, reason: 'test' }),
 		],
-		[
-			'non-JSON response (plain text)',
-			'just plain text with no JSON',
-		],
-		[
-			'truncated/invalid JSON',
-			'{"shouldRecall": tr',
-		],
+		['non-JSON response (plain text)', 'just plain text with no JSON'],
+		['truncated/invalid JSON', '{"shouldRecall": tr'],
 		[
 			'query over 200 chars is rejected',
-			JSON.stringify({ shouldRecall: true, query: 'a'.repeat(201), timeAnchor: null, reason: 'too long' }),
+			JSON.stringify({
+				shouldRecall: true,
+				query: 'a'.repeat(201),
+				timeAnchor: null,
+				reason: 'too long',
+			}),
 		],
 	])('returns safe default for: %s', async (_label, rawResponse) => {
 		const deps = makeDeps(rawResponse);
@@ -214,7 +213,11 @@ describe('classifyRecallIntent — happy path', () => {
 		const deps = makeDeps(raw);
 		const result = await classifyRecallIntent('two weeks ago we discussed budgets', deps);
 		expect(result.shouldRecall).toBe(true);
-		expect(result.timeAnchor).toEqual({ type: 'window', after: '2026-04-14', before: '2026-04-22' });
+		expect(result.timeAnchor).toEqual({
+			type: 'window',
+			after: '2026-04-14',
+			before: '2026-04-22',
+		});
 	});
 
 	it('handles shouldRecall=false correctly (query is null, timeAnchor null)', async () => {
@@ -232,12 +235,15 @@ describe('classifyRecallIntent — happy path', () => {
 	});
 
 	it('strips markdown code fences before parsing', async () => {
-		const raw = '```json\n' + JSON.stringify({
-			shouldRecall: true,
-			query: 'exercise routine',
-			timeAnchor: null,
-			reason: 'past discussion reference',
-		}) + '\n```';
+		const raw =
+			'```json\n' +
+			JSON.stringify({
+				shouldRecall: true,
+				query: 'exercise routine',
+				timeAnchor: null,
+				reason: 'past discussion reference',
+			}) +
+			'\n```';
 		const deps = makeDeps(raw);
 		const result = await classifyRecallIntent('did we discuss exercise?', deps);
 		expect(result.shouldRecall).toBe(true);
@@ -302,7 +308,14 @@ describe('classifyRecallIntent — maxWindowDays threading', () => {
 	it('threads deps.maxWindowDays=30 into parseRecallVerdict — rejects 401-day-old anchor', async () => {
 		// 2025-04-01 is 401 days before 2026-05-07; cap=30 → rejected
 		const deps = {
-			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-04-01' }, reason: 'r' })),
+			...makeDeps(
+				JSON.stringify({
+					shouldRecall: true,
+					query: 'x',
+					timeAnchor: { type: 'absolute', on: '2025-04-01' },
+					reason: 'r',
+				}),
+			),
 			today: TODAY_7,
 			maxWindowDays: 30,
 		};
@@ -313,7 +326,14 @@ describe('classifyRecallIntent — maxWindowDays threading', () => {
 	it('uses default 365 when maxWindowDays is omitted (back-compat)', async () => {
 		// 2025-12-01 is 157 days before 2026-05-07; default 365 → accepted
 		const deps = {
-			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'absolute', on: '2025-12-01' }, reason: 'r' })),
+			...makeDeps(
+				JSON.stringify({
+					shouldRecall: true,
+					query: 'x',
+					timeAnchor: { type: 'absolute', on: '2025-12-01' },
+					reason: 'r',
+				}),
+			),
 			today: TODAY_7,
 		};
 		const result = await classifyRecallIntent('test', deps);
@@ -323,7 +343,14 @@ describe('classifyRecallIntent — maxWindowDays threading', () => {
 	it('accepts beyond-365 windows when cap is higher (maxWindowDays=730)', async () => {
 		// 2024-08-01 is 645 days before 2026-05-07; cap=730 → accepted
 		const deps = {
-			...makeDeps(JSON.stringify({ shouldRecall: true, query: 'x', timeAnchor: { type: 'window', after: '2024-08-01', before: '2026-04-01' }, reason: 'r' })),
+			...makeDeps(
+				JSON.stringify({
+					shouldRecall: true,
+					query: 'x',
+					timeAnchor: { type: 'window', after: '2024-08-01', before: '2026-04-01' },
+					reason: 'r',
+				}),
+			),
 			today: TODAY_7,
 			maxWindowDays: 730,
 		};
@@ -351,7 +378,9 @@ function makeQueuedDeps(responses: string[]) {
 
 describe('classifyRecallIntent — JSON mode + retry-on-empty (Batch 2)', () => {
 	it('passes responseFormat: "json" to llm.complete', async () => {
-		const deps = makeDeps(JSON.stringify({ shouldRecall: false, query: null, timeAnchor: null, reason: 'r' }));
+		const deps = makeDeps(
+			JSON.stringify({ shouldRecall: false, query: null, timeAnchor: null, reason: 'r' }),
+		);
 		await classifyRecallIntent('what did we talk about yesterday?', deps);
 		const callOptions = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
 		expect(callOptions).toMatchObject({ responseFormat: 'json' });

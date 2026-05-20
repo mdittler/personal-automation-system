@@ -9,11 +9,11 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { findQuickMealById, incrementUsage } from '../services/quick-meals-store.js';
 import { logMealMacros } from '../services/macro-tracker.js';
+import { findQuickMealById, incrementUsage } from '../services/quick-meals-store.js';
+import type { MacroData, MealMacroEntry, QuickMealTemplate } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
-import type { MacroData, MealMacroEntry, QuickMealTemplate } from '../types.js';
 
 /** Logs a quick-meal against the user's monthly macro log, scaling by portion. */
 export async function logQuickMeal(
@@ -71,7 +71,7 @@ export async function handleQuickMealLogCallback(
 	if (!match) return false;
 
 	const id = match[1]!;
-	const portion = parseFloat(match[2]!);
+	const portion = Number.parseFloat(match[2]!);
 	if (!Number.isFinite(portion) || portion <= 0) {
 		await services.telegram.send(userId, 'Invalid portion on that button.');
 		return true;

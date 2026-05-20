@@ -376,30 +376,49 @@ function validateWriteDataConfig(
 	userManager: UserManager,
 ): void {
 	if (!config.app_id) {
-		errors.push({ field: `${prefix}.config.app_id`, message: 'app_id is required for write_data actions' });
+		errors.push({
+			field: `${prefix}.config.app_id`,
+			message: 'app_id is required for write_data actions',
+		});
 	} else if (!APP_ID_PATTERN.test(config.app_id)) {
 		errors.push({
 			field: `${prefix}.config.app_id`,
-			message: 'app_id must start with a letter and contain only lowercase letters, digits, and hyphens',
+			message:
+				'app_id must start with a letter and contain only lowercase letters, digits, and hyphens',
 		});
 	}
 
 	if (!config.user_id) {
-		errors.push({ field: `${prefix}.config.user_id`, message: 'user_id is required for write_data actions' });
+		errors.push({
+			field: `${prefix}.config.user_id`,
+			message: 'user_id is required for write_data actions',
+		});
 	} else if (!USER_ID_PATTERN.test(config.user_id)) {
-		errors.push({ field: `${prefix}.config.user_id`, message: 'user_id contains invalid characters' });
+		errors.push({
+			field: `${prefix}.config.user_id`,
+			message: 'user_id contains invalid characters',
+		});
 	} else if (!userManager.isRegistered(config.user_id)) {
-		errors.push({ field: `${prefix}.config.user_id`, message: `User ID "${config.user_id}" is not a registered user` });
+		errors.push({
+			field: `${prefix}.config.user_id`,
+			message: `User ID "${config.user_id}" is not a registered user`,
+		});
 	}
 
 	if (!config.path) {
-		errors.push({ field: `${prefix}.config.path`, message: 'path is required for write_data actions' });
+		errors.push({
+			field: `${prefix}.config.path`,
+			message: 'path is required for write_data actions',
+		});
 	} else {
 		if (config.path.includes('..')) {
 			errors.push({ field: `${prefix}.config.path`, message: 'path must not contain ".."' });
 		}
 		if (config.path.startsWith('/') || config.path.startsWith('\\')) {
-			errors.push({ field: `${prefix}.config.path`, message: 'path must be relative (not start with / or \\)' });
+			errors.push({
+				field: `${prefix}.config.path`,
+				message: 'path must be relative (not start with / or \\)',
+			});
 		}
 		if (config.path.includes('\\')) {
 			errors.push({ field: `${prefix}.config.path`, message: 'path must use forward slashes' });
@@ -407,7 +426,10 @@ function validateWriteDataConfig(
 	}
 
 	if (!config.content && config.content !== '') {
-		errors.push({ field: `${prefix}.config.content`, message: 'content is required for write_data actions' });
+		errors.push({
+			field: `${prefix}.config.content`,
+			message: 'content is required for write_data actions',
+		});
 	}
 
 	if (config.mode && config.mode !== 'write' && config.mode !== 'append') {
@@ -447,7 +469,10 @@ function validateDispatchMessageConfig(
 			message: 'user_id is required for dispatch_message actions',
 		});
 	} else if (!USER_ID_PATTERN.test(config.user_id)) {
-		errors.push({ field: `${prefix}.config.user_id`, message: 'user_id contains invalid characters' });
+		errors.push({
+			field: `${prefix}.config.user_id`,
+			message: 'user_id contains invalid characters',
+		});
 	} else if (!userManager.isRegistered(config.user_id)) {
 		errors.push({
 			field: `${prefix}.config.user_id`,

@@ -32,9 +32,7 @@ function accuracy(v: unknown): number | null {
 }
 
 function nonNegInt(v: unknown): number | null {
-	return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= 0
-		? v
-		: null;
+	return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : null;
 }
 
 function fastModel(modelIdsRaw: unknown): string | null {
@@ -52,10 +50,7 @@ function pct(acc: number): string {
  * per-input routing accuracy was below the REQ-REG-011 bar. Framed explicitly
  * as a model result, not a crash.
  */
-export function buildGateFailedBanner(
-	summaryRaw: unknown,
-	modelIdsRaw: unknown,
-): TerminalBanner {
+export function buildGateFailedBanner(summaryRaw: unknown, modelIdsRaw: unknown): TerminalBanner {
 	const lines: string[] = [];
 	const summary = isPlainObject(summaryRaw) ? summaryRaw : null;
 

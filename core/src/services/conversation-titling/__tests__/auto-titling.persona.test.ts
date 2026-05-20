@@ -15,18 +15,18 @@
  * REQ-CONV-TITLE-001, REQ-CONV-TITLE-003
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
+import { composeChatSessionStore } from '../../conversation-session/compose.js';
+import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
 import { ChangeLog } from '../../data-store/change-log.js';
 import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
-import { composeChatSessionStore } from '../../conversation-session/compose.js';
-import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
-import { TitleService } from '../title-service.js';
 import { runTitleAfterFirstExchange } from '../auto-title-hook.js';
+import { TitleService } from '../title-service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -139,7 +139,11 @@ describe('auto-titling persona — first exchange', () => {
 
 		const { sessionId } = await chatSessions.appendExchange(
 			{ userId, sessionKey },
-			{ role: 'user', content: 'Budget groceries for the month', timestamp: new Date().toISOString() },
+			{
+				role: 'user',
+				content: 'Budget groceries for the month',
+				timestamp: new Date().toISOString(),
+			},
 			{ role: 'assistant', content: 'Here is a budget plan.', timestamp: new Date().toISOString() },
 		);
 
@@ -211,7 +215,11 @@ describe('auto-titling persona — skipIfTitled guard', () => {
 		const { sessionId } = await chatSessions.appendExchange(
 			{ userId, sessionKey },
 			{ role: 'user', content: 'Organize my recipes', timestamp: new Date().toISOString() },
-			{ role: 'assistant', content: 'Here is how to organize them.', timestamp: new Date().toISOString() },
+			{
+				role: 'assistant',
+				content: 'Here is how to organize them.',
+				timestamp: new Date().toISOString(),
+			},
 		);
 
 		await chatTranscriptIndex.upsertSession({

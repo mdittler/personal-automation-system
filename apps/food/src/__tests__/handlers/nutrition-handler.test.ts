@@ -1,8 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	handleAdherencePeriodCallback,
 	handleNutritionCommand,
 	isNutritionViewIntent,
-	handleAdherencePeriodCallback,
 } from '../../handlers/nutrition.js';
 
 // Mock targets-flow so beginTargetsFlow can be observed without actually
@@ -117,7 +117,12 @@ describe('nutrition handler', () => {
 		it('sets macro targets', async () => {
 			const services = createMockServices();
 			const store = createMockScopedStore();
-			await handleNutritionCommand(services as never, ['targets', 'set', '2000', '150', '200', '70'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', '2000', '150', '200', '70'],
+				'user1',
+				store as never,
+			);
 			const userStore = services.data.forUser('user1');
 			expect(userStore.write).toHaveBeenCalled();
 			expect(services.telegram.send).toHaveBeenCalledOnce();
@@ -128,9 +133,18 @@ describe('nutrition handler', () => {
 			const store = createMockScopedStore({
 				// loadAllChildren needs children files
 				list: vi.fn().mockResolvedValue(['children/margot.yaml']),
-				read: vi.fn().mockResolvedValue(`profile:\n  name: Margot\n  slug: margot\n  birthDate: "2024-06-15"\n  allergenStage: early-introduction\n  knownAllergens: []\n  avoidAllergens: []\n  dietaryNotes: ""\n  createdAt: "2026-01-01T00:00:00.000Z"\n  updatedAt: "2026-01-01T00:00:00.000Z"\nintroductions: []`),
+				read: vi
+					.fn()
+					.mockResolvedValue(
+						`profile:\n  name: Margot\n  slug: margot\n  birthDate: "2024-06-15"\n  allergenStage: early-introduction\n  knownAllergens: []\n  avoidAllergens: []\n  dietaryNotes: ""\n  createdAt: "2026-01-01T00:00:00.000Z"\n  updatedAt: "2026-01-01T00:00:00.000Z"\nintroductions: []`,
+					),
 			});
-			await handleNutritionCommand(services as never, ['pediatrician', 'margot'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['pediatrician', 'margot'],
+				'user1',
+				store as never,
+			);
 			expect(services.telegram.send).toHaveBeenCalledOnce();
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toContain('Margot');
@@ -141,7 +155,12 @@ describe('nutrition handler', () => {
 			const store = createMockScopedStore({
 				list: vi.fn().mockResolvedValue([]),
 			});
-			await handleNutritionCommand(services as never, ['pediatrician', 'unknown'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['pediatrician', 'unknown'],
+				'user1',
+				store as never,
+			);
 			expect(services.telegram.send).toHaveBeenCalledOnce();
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/not found|no child/i);
@@ -151,11 +170,17 @@ describe('nutrition handler', () => {
 			const services = createMockServices();
 			const store = createMockScopedStore({
 				list: vi.fn().mockResolvedValue(['children/margot.yaml']),
-				read: vi.fn().mockResolvedValue(`profile:\n  name: Margot\n  slug: margot\n  birthDate: "2024-06-15"\n  allergenStage: early-introduction\n  knownAllergens: []\n  avoidAllergens: []\n  dietaryNotes: ""\n  createdAt: "2026-01-01T00:00:00.000Z"\n  updatedAt: "2026-01-01T00:00:00.000Z"\nintroductions: []`),
+				read: vi
+					.fn()
+					.mockResolvedValue(
+						`profile:\n  name: Margot\n  slug: margot\n  birthDate: "2024-06-15"\n  allergenStage: early-introduction\n  knownAllergens: []\n  avoidAllergens: []\n  dietaryNotes: ""\n  createdAt: "2026-01-01T00:00:00.000Z"\n  updatedAt: "2026-01-01T00:00:00.000Z"\nintroductions: []`,
+					),
 			});
 			await handleNutritionCommand(services as never, ['pediatrician'], 'user1', store as never);
 			expect(services.telegram.sendWithButtons).toHaveBeenCalledOnce();
-			const buttons = services.telegram.sendWithButtons.mock.calls[0]![2] as Array<Array<{ text: string; callbackData: string }>>;
+			const buttons = services.telegram.sendWithButtons.mock.calls[0]![2] as Array<
+				Array<{ text: string; callbackData: string }>
+			>;
 			expect(buttons[0]![0]!.text).toBe('Margot');
 			expect(buttons[0]![0]!.callbackData).toBe('app:food:nut:ped:margot');
 		});
@@ -166,7 +191,12 @@ describe('nutrition handler', () => {
 		it('rejects invalid macro target values', async () => {
 			const services = createMockServices();
 			const store = createMockScopedStore();
-			await handleNutritionCommand(services as never, ['targets', 'set', 'abc', '150', '200', '70'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', 'abc', '150', '200', '70'],
+				'user1',
+				store as never,
+			);
 			expect(services.telegram.send).toHaveBeenCalledOnce();
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/invalid/i);
@@ -175,7 +205,12 @@ describe('nutrition handler', () => {
 		it('rejects negative macro target values', async () => {
 			const services = createMockServices();
 			const store = createMockScopedStore();
-			await handleNutritionCommand(services as never, ['targets', 'set', '2000', '-10', '200', '70'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', '2000', '-10', '200', '70'],
+				'user1',
+				store as never,
+			);
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/invalid/i);
 		});
@@ -183,7 +218,12 @@ describe('nutrition handler', () => {
 		it('rejects excessively large macro target values', async () => {
 			const services = createMockServices();
 			const store = createMockScopedStore();
-			await handleNutritionCommand(services as never, ['targets', 'set', '100000', '150', '200', '70'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', '100000', '150', '200', '70'],
+				'user1',
+				store as never,
+			);
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/invalid/i);
 		});
@@ -192,7 +232,12 @@ describe('nutrition handler', () => {
 		it('rejects targets shortcut with numeric-prefix string "2000cal" for calories', async () => {
 			const services = createMockServices();
 			const store = createMockScopedStore();
-			await handleNutritionCommand(services as never, ['targets', 'set', '2000cal', '150', '200', '70'], 'user1', store as never);
+			await handleNutritionCommand(
+				services as never,
+				['targets', 'set', '2000cal', '150', '200', '70'],
+				'user1',
+				store as never,
+			);
 			const msg = services.telegram.send.mock.calls[0]![1] as string;
 			expect(msg).toMatch(/invalid/i);
 			const userStore = services.data.forUser('user1');
@@ -572,11 +617,13 @@ describe('nutrition handler', () => {
 			const store = createMockScopedStore();
 			await handleNutritionCommand(services as never, ['adherence'], 'user1', store as never);
 			expect(services.telegram.sendWithButtons).toHaveBeenCalledOnce();
-			const buttons = services.telegram.sendWithButtons.mock.calls[0]![2] as Array<Array<{ text: string; callbackData: string }>>;
+			const buttons = services.telegram.sendWithButtons.mock.calls[0]![2] as Array<
+				Array<{ text: string; callbackData: string }>
+			>;
 			const flatButtons = buttons.flat();
-			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
-			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
-			expect(flatButtons.some(b => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
+			expect(flatButtons.some((b) => b.callbackData === 'app:food:nut:adh:7')).toBe(true);
+			expect(flatButtons.some((b) => b.callbackData === 'app:food:nut:adh:30')).toBe(true);
+			expect(flatButtons.some((b) => b.callbackData === 'app:food:nut:adh:90')).toBe(true);
 		});
 
 		it('handleAdherencePeriodCallback with app:food:nut:adh:7 runs adherence and sends result', async () => {

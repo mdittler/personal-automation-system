@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { PersonaCase, TierModelSnapshot } from '@core/types/regression.js';
+import { describe, expect, it, vi } from 'vitest';
 import { runChatbotCase } from '../runner/case-runners/chatbot-runner.js';
 import { StubLLMService } from './_stub-provider.js';
 
@@ -151,7 +151,7 @@ describe('runChatbotCase', () => {
 	it('aborts with budget-exceeded before invoking routeMessage when over budget', async () => {
 		const env = fakeEnv('reply');
 		const judge = new StubLLMService();
-		let cost = 0.18;
+		const cost = 0.18;
 		const tracker = { getMonthlyTotalCost: () => cost };
 		const r = await runChatbotCase(chatbotCase({ budgetUsd: 0.05 }), {
 			env,
@@ -192,9 +192,7 @@ describe('runChatbotCase', () => {
 			logger: noopLogger,
 		});
 		expect(r.verdict).toBe('fail');
-		expect(
-			r.oracleVerdicts.some((v) => v.details.includes('routing mismatch')),
-		).toBe(true);
+		expect(r.oracleVerdicts.some((v) => v.details.includes('routing mismatch'))).toBe(true);
 	});
 
 	it('calls endActiveSession before each input (Codex C3)', async () => {

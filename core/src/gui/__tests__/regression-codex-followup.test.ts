@@ -15,22 +15,19 @@ import { fileURLToPath } from 'node:url';
 import fastifyCookie from '@fastify/cookie';
 import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
-import type { CatalogModel, ModelCatalog } from '../../services/llm/model-catalog.js';
+import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { RunManifest, RunResult } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
-import {
-	type RegressionEvent,
-	createRunRegistry,
-} from '../services/regression/run-registry.js';
 import { createRunHistoryStore } from '../services/regression/run-history-store.js';
+import { type RegressionEvent, createRunRegistry } from '../services/regression/run-registry.js';
 import type { WeaknessSummarizer } from '../services/regression/weakness-summarizer.js';
 
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
@@ -41,8 +38,7 @@ const VALID_KEY = 'a'.repeat(64);
 
 function makeUserManager() {
 	return {
-		getUser: (id: string) =>
-			id === ADMIN.id ? { id, name: 'admin', isAdmin: true } : null,
+		getUser: (id: string) => (id === ADMIN.id ? { id, name: 'admin', isAdmin: true } : null),
 		getAllUsers: () => [{ id: ADMIN.id, name: 'admin', isAdmin: true }],
 	} as unknown as UserManager;
 }
@@ -135,11 +131,7 @@ describe('P0 — runFactory receives canonical runId argument (TDZ fix)', () => 
 		const originalCreateRun = runRegistry.createRun.bind(runRegistry);
 		let factoryRunId: string | undefined;
 		runRegistry.createRun = async ({ args, runFactory: _ignored }) => {
-			const factory = async (
-				_e: (e: RegressionEvent) => void,
-				_s: AbortSignal,
-				runId: string,
-			) => {
+			const factory = async (_e: (e: RegressionEvent) => void, _s: AbortSignal, runId: string) => {
 				factoryRunId = runId;
 				const whenComplete = new Promise<void>(() => {});
 				return { whenComplete };

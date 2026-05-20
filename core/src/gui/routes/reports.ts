@@ -71,7 +71,8 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			activePage: 'reports',
 			reports: reports.map((r) => {
 				const schedule = r.schedule ?? '';
-				const nextRun = r.enabled && !r._validationErrors?.length ? getNextRun(schedule, timezone) : null;
+				const nextRun =
+					r.enabled && !r._validationErrors?.length ? getNextRun(schedule, timezone) : null;
 				return {
 					id: r.id,
 					name: r.name ?? r.id,

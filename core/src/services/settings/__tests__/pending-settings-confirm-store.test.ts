@@ -63,15 +63,15 @@ describe('PendingSettingsConfirmStore — attach', () => {
 	it('attach overwrites prior pending for same user', () => {
 		const store = makeStore();
 		const first = store.attach('u1', BASE_ENTRY);
-		const second = store.attach('u1', { ...BASE_ENTRY, rawValue: 'Trader Joe\'s' });
+		const second = store.attach('u1', { ...BASE_ENTRY, rawValue: "Trader Joe's" });
 
 		expect(second.id).toBe('id2');
-		expect(second.rawValue).toBe('Trader Joe\'s');
+		expect(second.rawValue).toBe("Trader Joe's");
 
 		// Only the second entry should be retrievable.
 		const retrieved = store.get('u1');
 		expect(retrieved!.id).toBe('id2');
-		expect(retrieved!.rawValue).toBe('Trader Joe\'s');
+		expect(retrieved!.rawValue).toBe("Trader Joe's");
 	});
 
 	it('stores reset action without rawValue', () => {

@@ -10,14 +10,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SessionControlLogger } from '../../core/src/services/conversation/session-control-logger.js';
 import {
-	parseSessionControlLog,
-	parseSessionControlLogEntry,
-	analyzeSessionControlLog,
 	type ParsedClassificationEntry,
 	type ParsedConfirmationEntry,
+	analyzeSessionControlLog,
+	parseSessionControlLog,
+	parseSessionControlLogEntry,
 } from '../analyze-session-control-log.js';
-import { SessionControlLogger } from '../../core/src/services/conversation/session-control-logger.js';
 
 // ─── Synthetic log fixture ────────────────────────────────────────────────────
 

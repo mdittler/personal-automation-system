@@ -3,9 +3,9 @@ import { SHADOW_DECLINE_LABEL } from './shadow-taxonomy.js';
 import type { FoodShadowLabel } from './shadow-taxonomy.js';
 
 export interface DispatchShadowResult {
-    dispatched: boolean;
-    /** True when shadow returned ok but confidence was below threshold and we fell through. Telemetry only. */
-    suppressedByThreshold: boolean;
+	dispatched: boolean;
+	/** True when shadow returned ok but confidence was below threshold and we fell through. Telemetry only. */
+	suppressedByThreshold: boolean;
 }
 
 /**
@@ -20,28 +20,28 @@ export interface DispatchShadowResult {
  * - action has no entry in handlers
  */
 export async function dispatchShadow<Ctx>(
-    ctx: Ctx,
-    shadow: ShadowResult,
-    minConfidence: number,
-    handlers: Partial<Record<FoodShadowLabel, (ctx: Ctx) => Promise<void>>>,
-    blocklist: ReadonlySet<string>,
+	ctx: Ctx,
+	shadow: ShadowResult,
+	minConfidence: number,
+	handlers: Partial<Record<FoodShadowLabel, (ctx: Ctx) => Promise<void>>>,
+	blocklist: ReadonlySet<string>,
 ): Promise<DispatchShadowResult> {
-    if (shadow.kind !== 'ok') {
-        return { dispatched: false, suppressedByThreshold: false };
-    }
-    if (shadow.action === SHADOW_DECLINE_LABEL) {
-        return { dispatched: false, suppressedByThreshold: false };
-    }
-    if (shadow.confidence < minConfidence) {
-        return { dispatched: false, suppressedByThreshold: true };
-    }
-    if (blocklist.has(shadow.action)) {
-        return { dispatched: false, suppressedByThreshold: false };
-    }
-    const handler = handlers[shadow.action as FoodShadowLabel];
-    if (!handler) {
-        return { dispatched: false, suppressedByThreshold: false };
-    }
-    await handler(ctx);
-    return { dispatched: true, suppressedByThreshold: false };
+	if (shadow.kind !== 'ok') {
+		return { dispatched: false, suppressedByThreshold: false };
+	}
+	if (shadow.action === SHADOW_DECLINE_LABEL) {
+		return { dispatched: false, suppressedByThreshold: false };
+	}
+	if (shadow.confidence < minConfidence) {
+		return { dispatched: false, suppressedByThreshold: true };
+	}
+	if (blocklist.has(shadow.action)) {
+		return { dispatched: false, suppressedByThreshold: false };
+	}
+	const handler = handlers[shadow.action as FoodShadowLabel];
+	if (!handler) {
+		return { dispatched: false, suppressedByThreshold: false };
+	}
+	await handler(ctx);
+	return { dispatched: true, suppressedByThreshold: false };
 }

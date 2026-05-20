@@ -10,16 +10,19 @@
  *   J.3 — /ask <q> → adds a turn to the active session (single transcript, not a new one)
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { composeRuntime } from '../../../compose-runtime.js';
-import { seedUsers } from '../../../testing/fixtures/seed-users.js';
-import { createStubProviderRegistry, StubProvider } from '../../../testing/fixtures/stub-llm-provider.js';
 import { fakeTelegramService } from '../../../testing/fixtures/fake-telegram.js';
 import { askMessage, chatbotMessage } from '../../../testing/fixtures/messages.js';
+import { seedUsers } from '../../../testing/fixtures/seed-users.js';
+import {
+	StubProvider,
+	createStubProviderRegistry,
+} from '../../../testing/fixtures/stub-llm-provider.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 
@@ -65,8 +68,15 @@ describe('ChatSessionStore production wiring (J — composeRuntime)', () => {
 	function sessionsDir(): string {
 		if (householdId) {
 			return join(
-				tempDir, 'data', 'households', householdId, 'users', userId,
-				'chatbot', 'conversation', 'sessions',
+				tempDir,
+				'data',
+				'households',
+				householdId,
+				'users',
+				userId,
+				'chatbot',
+				'conversation',
+				'sessions',
 			);
 		}
 		return join(tempDir, 'data', 'users', userId, 'chatbot', 'conversation', 'sessions');

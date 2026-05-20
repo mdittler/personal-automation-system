@@ -88,10 +88,9 @@ async function buildApp(tempDir: string) {
 	const credService = new CredentialService({ dataDir: tempDir });
 	await credService.setPassword(TEST_USER_ID, TEST_PASSWORD);
 	const userManager = makeUserManager([{ id: TEST_USER_ID, name: 'TestUser', isAdmin: true }]);
-	const householdService = makeHouseholdService(
-		{ [TEST_USER_ID]: 'hh-1' },
-		[{ id: 'hh-1', adminUserIds: [TEST_USER_ID] }],
-	);
+	const householdService = makeHouseholdService({ [TEST_USER_ID]: 'hh-1' }, [
+		{ id: 'hh-1', adminUserIds: [TEST_USER_ID] },
+	]);
 
 	await app.register(
 		async (gui) => {
@@ -103,11 +102,11 @@ async function buildApp(tempDir: string) {
 			});
 			await registerCsrfProtection(gui);
 			registerContextRoutes(gui, {
-					contextStore,
-					config,
-					logger,
-					householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
-				});
+				contextStore,
+				config,
+				logger,
+				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+			});
 		},
 		{ prefix: '/gui' },
 	);

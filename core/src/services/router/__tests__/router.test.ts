@@ -55,9 +55,7 @@ function createMockLLM(classifyResult?: ClassifyResult): LLMService {
 	};
 }
 
-function createMockConfig(
-	users: SystemConfig['users'] = [],
-): SystemConfig {
+function createMockConfig(users: SystemConfig['users'] = []): SystemConfig {
 	return {
 		port: 3000,
 		dataDir: '/tmp/data',

@@ -33,9 +33,7 @@ import {
 	findTranscriptionVerdict,
 } from './_buildcase-helper.js';
 
-const COSTCO_TRX = loadTranscription(
-	resolve(REAL_FIXTURES_DIR, 'costco-long.transcription.yaml'),
-);
+const COSTCO_TRX = loadTranscription(resolve(REAL_FIXTURES_DIR, 'costco-long.transcription.yaml'));
 
 /**
  * Build a happy-path `ParsedReceipt` shape from the loaded transcription —

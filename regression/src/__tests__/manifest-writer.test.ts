@@ -7,13 +7,13 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
 	PersonaCase,
 	RunResult,
 	RunSummary,
 	TierModelSnapshot,
 } from '@core/types/regression.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildManifest, writeManifest } from '../runner/manifest-writer.js';
 
 let tempDir: string;

@@ -71,10 +71,7 @@ describe('SYSTEM_SETTING_DEFS shape', () => {
 					typeof def.dangerConfirmPrompt === 'string' && def.dangerConfirmPrompt.length > 0,
 					`${def.key} is dangerous but dangerConfirmPrompt is empty`,
 				).toBe(true);
-				expect(
-					def.adminOnly,
-					`${def.key} is dangerous but adminOnly is false`,
-				).toBe(true);
+				expect(def.adminOnly, `${def.key} is dangerous but adminOnly is false`).toBe(true);
 			}
 		}
 	});
@@ -82,14 +79,8 @@ describe('SYSTEM_SETTING_DEFS shape', () => {
 	it('all numeric defs have defined min and max', () => {
 		for (const def of SYSTEM_SETTING_DEFS) {
 			if (def.type === 'number') {
-				expect(
-					typeof def.min === 'number',
-					`${def.key} is numeric but has no min`,
-				).toBe(true);
-				expect(
-					typeof def.max === 'number',
-					`${def.key} is numeric but has no max`,
-				).toBe(true);
+				expect(typeof def.min === 'number', `${def.key} is numeric but has no min`).toBe(true);
+				expect(typeof def.max === 'number', `${def.key} is numeric but has no max`).toBe(true);
 			}
 		}
 	});
@@ -118,17 +109,13 @@ describe('bound constants', () => {
 	});
 
 	it('IDLE_MINUTES bounds match SettingDef.min/max', () => {
-		const def = SYSTEM_SETTING_DEFS.find(
-			(d) => d.key === 'chat.sessions.auto_reset_idle_minutes',
-		)!;
+		const def = SYSTEM_SETTING_DEFS.find((d) => d.key === 'chat.sessions.auto_reset_idle_minutes')!;
 		expect(def.min).toBe(IDLE_MINUTES_MIN);
 		expect(def.max).toBe(IDLE_MINUTES_MAX);
 	});
 
 	it('UPPER_BOUND constants match SettingDef.min/max', () => {
-		const def = SYSTEM_SETTING_DEFS.find(
-			(d) => d.key === 'routing.verification.upper_bound',
-		)!;
+		const def = SYSTEM_SETTING_DEFS.find((d) => d.key === 'routing.verification.upper_bound')!;
 		expect(def.min).toBe(UPPER_BOUND_MIN);
 		expect(def.max).toBe(UPPER_BOUND_MAX);
 	});

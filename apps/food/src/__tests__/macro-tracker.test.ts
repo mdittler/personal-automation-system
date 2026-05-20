@@ -1,19 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-	sumMacros,
+	autoLogFromCookedMeal,
 	averageMacros,
-	macrosFromRecipe,
-	logMealMacros,
-	loadMonthlyLog,
-	saveMonthlyLog,
+	computeAdherence,
+	computeProgress,
+	formatMacroSummary,
 	getDailyMacros,
 	loadMacrosForPeriod,
-	computeProgress,
-	computeAdherence,
-	formatMacroSummary,
-	autoLogFromCookedMeal,
+	loadMonthlyLog,
+	logMealMacros,
+	macrosFromRecipe,
+	saveMonthlyLog,
+	sumMacros,
 } from '../services/macro-tracker.js';
-import type { DailyMacroEntry, MacroData, MacroTargets, MealMacroEntry, MonthlyMacroLog, Recipe } from '../types.js';
+import type {
+	DailyMacroEntry,
+	MacroData,
+	MacroTargets,
+	MealMacroEntry,
+	MonthlyMacroLog,
+	Recipe,
+} from '../types.js';
 
 function createMockScopedStore(overrides: Record<string, unknown> = {}) {
 	return {
@@ -300,9 +307,7 @@ describe('macro-tracker', () => {
 		it('loads entries spanning two months', async () => {
 			const marchLog = `month: "2026-03"\nuserId: user1\ndays:\n  - date: "2026-03-31"\n    meals: []\n    totals: { calories: 500 }`;
 			const store = createMockScopedStore({
-				read: vi.fn()
-					.mockResolvedValueOnce(marchLog)
-					.mockResolvedValueOnce(MONTHLY_LOG_YAML),
+				read: vi.fn().mockResolvedValueOnce(marchLog).mockResolvedValueOnce(MONTHLY_LOG_YAML),
 			});
 			const result = await loadMacrosForPeriod(store as never, '2026-03-31', '2026-04-01');
 			expect(result).toHaveLength(2);
@@ -326,7 +331,9 @@ describe('macro-tracker', () => {
 				},
 				{
 					date: '2026-04-02',
-					meals: [makeMealEntry({ macros: { calories: 600, protein: 45, carbs: 50, fat: 20, fiber: 8 } })],
+					meals: [
+						makeMealEntry({ macros: { calories: 600, protein: 45, carbs: 50, fat: 20, fiber: 8 } }),
+					],
 					totals: { calories: 600, protein: 45, carbs: 50, fat: 20, fiber: 8 },
 				},
 			];
@@ -412,7 +419,7 @@ describe('macro-tracker', () => {
 				makeDay('2026-04-01', 2000), // hit
 				makeDay('2026-04-02', 2000), // hit
 				makeDay('2026-04-03', 2000), // hit
-				makeDay('2026-04-04', 500),  // miss — resets running
+				makeDay('2026-04-04', 500), // miss — resets running
 				makeDay('2026-04-05', 2000), // hit
 				makeDay('2026-04-06', 2000), // hit
 			];
@@ -522,8 +529,8 @@ describe('macro-tracker', () => {
 			// The looser `\s*\*` regex would falsely match the closing `**` of the bold title.
 			expect(result).toMatch(/\*\*BBQ mystery\*\* \*/); // flagged
 			expect(result).not.toMatch(/\*\*Oatmeal\*\* \*/); // not flagged
-			expect(result).toMatch(/low-confidence/i);        // legend present
-			expect(result).toContain('1100');                 // totals still include flagged
+			expect(result).toMatch(/low-confidence/i); // legend present
+			expect(result).toContain('1100'); // totals still include flagged
 		});
 
 		it('omits legend line when no meals are low-confidence', () => {
@@ -565,7 +572,7 @@ describe('macro-tracker', () => {
 			const progress = computeProgress([day], {}, 'today');
 			const result = formatMacroSummary(progress, day);
 			expect(result).not.toMatch(/\*\*Legacy Meal\*\* \*/); // no flag for undefined confidence
-			expect(result).not.toMatch(/low-confidence/i);   // no legend
+			expect(result).not.toMatch(/low-confidence/i); // no legend
 		});
 
 		it('correctly positions * after bold markdown markers', () => {
@@ -616,14 +623,20 @@ describe('macro-tracker', () => {
 	// ─── Edge Cases ─────────────────────────────────────────
 	describe('edge cases', () => {
 		it('handles zero servings in recipe without NaN', () => {
-			const recipe = makeRecipe({ servings: 0, macros: { calories: 800, protein: 40, carbs: 60, fat: 30, fiber: 5 } });
+			const recipe = makeRecipe({
+				servings: 0,
+				macros: { calories: 800, protein: 40, carbs: 60, fat: 30, fiber: 5 },
+			});
 			const result = macrosFromRecipe(recipe, 1);
 			// Division by zero produces Infinity, which rounds to Infinity — just verify no crash
 			expect(typeof result.calories).toBe('number');
 		});
 
 		it('handles negative servings eaten', () => {
-			const recipe = makeRecipe({ servings: 4, macros: { calories: 800, protein: 40, carbs: 60, fat: 30, fiber: 5 } });
+			const recipe = makeRecipe({
+				servings: 4,
+				macros: { calories: 800, protein: 40, carbs: 60, fat: 30, fiber: 5 },
+			});
 			const result = macrosFromRecipe(recipe, -1);
 			expect(result.calories).toBe(-200);
 		});
@@ -632,10 +645,14 @@ describe('macro-tracker', () => {
 			const store = createMockScopedStore({
 				read: vi.fn().mockImplementation((path: string) => {
 					if (path.includes('2026-03')) {
-						return Promise.resolve(`month: "2026-03"\nuserId: user1\ndays:\n  - date: "2026-03-30"\n    meals: []\n    totals:\n      calories: 100\n      protein: 10\n      carbs: 15\n      fat: 5\n      fiber: 2\n  - date: "2026-03-31"\n    meals: []\n    totals:\n      calories: 200\n      protein: 20\n      carbs: 25\n      fat: 10\n      fiber: 4`);
+						return Promise.resolve(
+							`month: "2026-03"\nuserId: user1\ndays:\n  - date: "2026-03-30"\n    meals: []\n    totals:\n      calories: 100\n      protein: 10\n      carbs: 15\n      fat: 5\n      fiber: 2\n  - date: "2026-03-31"\n    meals: []\n    totals:\n      calories: 200\n      protein: 20\n      carbs: 25\n      fat: 10\n      fiber: 4`,
+						);
 					}
 					if (path.includes('2026-04')) {
-						return Promise.resolve(`month: "2026-04"\nuserId: user1\ndays:\n  - date: "2026-04-01"\n    meals: []\n    totals:\n      calories: 300\n      protein: 30\n      carbs: 35\n      fat: 15\n      fiber: 6`);
+						return Promise.resolve(
+							`month: "2026-04"\nuserId: user1\ndays:\n  - date: "2026-04-01"\n    meals: []\n    totals:\n      calories: 300\n      protein: 30\n      carbs: 35\n      fat: 15\n      fiber: 6`,
+						);
 					}
 					return Promise.resolve(null);
 				}),
@@ -659,7 +676,10 @@ describe('macro-tracker', () => {
 		});
 
 		it('averageMacros with zero count returns zeroes', () => {
-			const result = averageMacros([{ calories: 100, protein: 10, carbs: 15, fat: 5, fiber: 2 }], 0);
+			const result = averageMacros(
+				[{ calories: 100, protein: 10, carbs: 15, fat: 5, fiber: 2 }],
+				0,
+			);
 			expect(result.calories).toBe(0);
 		});
 	});
@@ -670,7 +690,9 @@ describe('macro-tracker', () => {
 			const storage = new Map<string, string>();
 			return {
 				read: vi.fn(async (path: string) => storage.get(path) ?? null),
-				write: vi.fn(async (path: string, content: string) => { storage.set(path, content); }),
+				write: vi.fn(async (path: string, content: string) => {
+					storage.set(path, content);
+				}),
 				append: vi.fn(async () => {}),
 				exists: vi.fn(async (path: string) => storage.has(path)),
 				list: vi.fn(async () => []),
@@ -724,13 +746,19 @@ describe('macro-tracker', () => {
 	describe('security', () => {
 		it('rejects path traversal in month parameter', async () => {
 			const store = createMockScopedStore();
-			await expect(loadMonthlyLog(store as never, '../../../etc/passwd')).rejects.toThrow(/Invalid month format/);
+			await expect(loadMonthlyLog(store as never, '../../../etc/passwd')).rejects.toThrow(
+				/Invalid month format/,
+			);
 		});
 
 		it('rejects invalid month format', async () => {
 			const store = createMockScopedStore();
-			await expect(loadMonthlyLog(store as never, '2026-13-01')).rejects.toThrow(/Invalid month format/);
-			await expect(loadMonthlyLog(store as never, 'not-a-month')).rejects.toThrow(/Invalid month format/);
+			await expect(loadMonthlyLog(store as never, '2026-13-01')).rejects.toThrow(
+				/Invalid month format/,
+			);
+			await expect(loadMonthlyLog(store as never, 'not-a-month')).rejects.toThrow(
+				/Invalid month format/,
+			);
 		});
 
 		it('accepts valid YYYY-MM format', async () => {
@@ -805,13 +833,23 @@ describe('macro-tracker', () => {
 
 		it('rejects entry with recipeTitle exceeding 200 chars', async () => {
 			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
-			await logMealMacros(store as never, 'u1', makeMealEntry({ recipeTitle: 'a'.repeat(201) }), '2026-04-01');
+			await logMealMacros(
+				store as never,
+				'u1',
+				makeMealEntry({ recipeTitle: 'a'.repeat(201) }),
+				'2026-04-01',
+			);
 			expect(store.write).not.toHaveBeenCalled();
 		});
 
 		it('rejects entry with negative calories', async () => {
 			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
-			await logMealMacros(store as never, 'u1', makeMealEntry({ macros: { calories: -1 } }), '2026-04-01');
+			await logMealMacros(
+				store as never,
+				'u1',
+				makeMealEntry({ macros: { calories: -1 } }),
+				'2026-04-01',
+			);
 			expect(store.write).not.toHaveBeenCalled();
 		});
 
@@ -823,7 +861,12 @@ describe('macro-tracker', () => {
 
 		it('rejects entry with servingsEaten exceeding 100', async () => {
 			const store = createMockScopedStore({ read: vi.fn().mockResolvedValue(null) });
-			await logMealMacros(store as never, 'u1', makeMealEntry({ servingsEaten: 101 }), '2026-04-01');
+			await logMealMacros(
+				store as never,
+				'u1',
+				makeMealEntry({ servingsEaten: 101 }),
+				'2026-04-01',
+			);
 			expect(store.write).not.toHaveBeenCalled();
 		});
 

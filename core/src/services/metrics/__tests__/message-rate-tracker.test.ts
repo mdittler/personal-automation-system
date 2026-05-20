@@ -203,7 +203,9 @@ describe('MessageRateTracker', () => {
 			tracker.recordMessage('hB');
 			vi.advanceTimersByTime(10_001);
 			const entries = (tracker as unknown as { entries: Array<{ householdId: string }> }).entries;
-			expect(entries.every((e) => e.householdId !== '__platform__' || e.householdId === '__platform__')).toBe(true);
+			expect(
+				entries.every((e) => e.householdId !== '__platform__' || e.householdId === '__platform__'),
+			).toBe(true);
 			expect(entries.some((e) => e.householdId === 'hA')).toBe(false);
 		});
 

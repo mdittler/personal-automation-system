@@ -10,11 +10,11 @@
  */
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
-import { loadMacrosForPeriod } from './macro-tracker.js';
-import { loadHealthForPeriod } from './health-store.js';
-import { parseJsonResponse } from './recipe-parser.js';
-import { sanitizeInput } from '../utils/sanitize.js';
 import { addDays, todayDate } from '../utils/date.js';
+import { sanitizeInput } from '../utils/sanitize.js';
+import { loadHealthForPeriod } from './health-store.js';
+import { loadMacrosForPeriod } from './macro-tracker.js';
+import { parseJsonResponse } from './recipe-parser.js';
 
 const MIN_NUTRITION_DAYS = 5;
 const MAX_INSIGHTS = 3;
@@ -60,8 +60,8 @@ export async function correlateHealth(
 	// to this table, they MUST be sanitized before inclusion to prevent prompt injection.
 	const hasHealthData = healthEntries.length > 0;
 
-	const rows = macroEntries.map(macro => {
-		const health = healthEntries.find(h => h.date === macro.date);
+	const rows = macroEntries.map((macro) => {
+		const health = healthEntries.find((h) => h.date === macro.date);
 		const row: Record<string, unknown> = {
 			date: macro.date,
 			calories: macro.totals.calories ?? 0,
@@ -116,9 +116,7 @@ Rules:
 		if (!Array.isArray(parsed)) return null;
 		// Validate and cap each element — malformed LLM output (nulls, missing fields,
 		// excessively long strings) must not crash the handler or produce bad Telegram messages.
-		return parsed
-			.filter(isCorrelationInsight)
-			.slice(0, MAX_INSIGHTS);
+		return parsed.filter(isCorrelationInsight).slice(0, MAX_INSIGHTS);
 	} catch {
 		return null;
 	}
@@ -128,9 +126,16 @@ Rules:
 function isCorrelationInsight(x: unknown): x is CorrelationInsight {
 	if (!x || typeof x !== 'object') return false;
 	const v = x as Record<string, unknown>;
-	return typeof v['metric'] === 'string' && v['metric'].length > 0 && v['metric'].length <= 30
-		&& typeof v['pattern'] === 'string' && v['pattern'].length > 0 && v['pattern'].length <= 400
-		&& typeof v['confidence'] === 'number'
-		&& typeof v['disclaimer'] === 'string' && v['disclaimer'].length > 0 && v['disclaimer'].length <= 250;
+	return (
+		typeof v['metric'] === 'string' &&
+		v['metric'].length > 0 &&
+		v['metric'].length <= 30 &&
+		typeof v['pattern'] === 'string' &&
+		v['pattern'].length > 0 &&
+		v['pattern'].length <= 400 &&
+		typeof v['confidence'] === 'number' &&
+		typeof v['disclaimer'] === 'string' &&
+		v['disclaimer'].length > 0 &&
+		v['disclaimer'].length <= 250
+	);
 }
-

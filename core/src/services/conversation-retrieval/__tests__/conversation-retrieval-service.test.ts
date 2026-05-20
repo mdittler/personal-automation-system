@@ -15,13 +15,13 @@ import type { AppInfo } from '../../../types/app-metadata.js';
 import type { ContextEntry } from '../../../types/context-store.js';
 import type { DataQueryResult } from '../../../types/data-query.js';
 import type { ReportDefinition } from '../../../types/report.js';
-import { formatDataQueryContext } from '../../conversation/data-query-context.js';
 import { requestContext } from '../../context/request-context.js';
+import { formatDataQueryContext } from '../../conversation/data-query-context.js';
 import type { InteractionEntry } from '../../interaction-context/index.js';
 import {
+	type ConversationRetrievalService,
 	ConversationRetrievalServiceImpl,
 	MissingRequestContextError,
-	type ConversationRetrievalService,
 } from '../conversation-retrieval-service.js';
 import { METHOD_SOURCE_CATEGORIES } from '../source-policy.js';
 
@@ -141,9 +141,7 @@ describe('ConversationRetrievalServiceImpl — every method returns a Promise', 
 	});
 
 	it('buildSystemDataBlock returns a Promise', () => {
-		const result = withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: 'test' }),
-		);
+		const result = withUserId('user1', () => service.buildSystemDataBlock({ question: 'test' }));
 		expect(result).toBeInstanceOf(Promise);
 		return result.catch(() => {});
 	});
@@ -305,7 +303,9 @@ describe('ConversationRetrievalServiceImpl — searchData', () => {
 
 	it('delegates to dataQuery.query with userId from requestContext', async () => {
 		const service = new ConversationRetrievalServiceImpl({ dataQuery: mockDataQuery });
-		await withUserAndHousehold('user1', 'hh1', () => service.searchData({ question: 'test question' }));
+		await withUserAndHousehold('user1', 'hh1', () =>
+			service.searchData({ question: 'test question' }),
+		);
 		expect(mockDataQuery.query).toHaveBeenCalledWith('test question', 'user1', undefined);
 	});
 
@@ -503,9 +503,7 @@ describe('ConversationRetrievalServiceImpl — buildSystemDataBlock', () => {
 	it('empty question returns empty string', async () => {
 		const systemInfo = makeSystemInfo(false);
 		const service = new ConversationRetrievalServiceImpl({ systemInfo: systemInfo as never });
-		const result = await withUserId('user1', () =>
-			service.buildSystemDataBlock({ question: '' }),
-		);
+		const result = await withUserId('user1', () => service.buildSystemDataBlock({ question: '' }));
 		expect(result).toBe('');
 	});
 
@@ -789,14 +787,25 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 
 	it('does not call interactionContext.getRecent during buildContextSnapshot', async () => {
 		const getRecentSpy = vi.fn().mockReturnValue([]);
-		const service = new ConversationRetrievalServiceImpl({ interactionContext: { getRecent: getRecentSpy } } as never);
-		await withUserId('user1', () => service.buildContextSnapshot({ question: 'hi', mode: 'free-text', dataQueryCandidate: false, recentFilePaths: [] }));
+		const service = new ConversationRetrievalServiceImpl({
+			interactionContext: { getRecent: getRecentSpy },
+		} as never);
+		await withUserId('user1', () =>
+			service.buildContextSnapshot({
+				question: 'hi',
+				mode: 'free-text',
+				dataQueryCandidate: false,
+				recentFilePaths: [],
+			}),
+		);
 		expect(getRecentSpy).not.toHaveBeenCalled();
 	});
 
 	it('ignores forced interaction-context inclusion in buildContextSnapshot', async () => {
 		const getRecentSpy = vi.fn().mockReturnValue([]);
-		const service = new ConversationRetrievalServiceImpl({ interactionContext: { getRecent: getRecentSpy } } as never);
+		const service = new ConversationRetrievalServiceImpl({
+			interactionContext: { getRecent: getRecentSpy },
+		} as never);
 		const snapshot = await withUserId('user1', () =>
 			service.buildContextSnapshot({
 				question: 'hi',
@@ -804,7 +813,7 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 				dataQueryCandidate: false,
 				recentFilePaths: [],
 				include: { 'interaction-context': true },
-			})
+			}),
 		);
 		expect(getRecentSpy).not.toHaveBeenCalled();
 		expect('interactionContext' in snapshot).toBe(false);
@@ -859,7 +868,12 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot', () => {
 // ─── I-1: DataQuery failure filter (rejected + budget-exhausted) ──────────────
 
 describe('ConversationRetrievalServiceImpl — I-1 phantom DataQuery failures', () => {
-	const DATA_QUERY_CATS = ['user-app-data', 'household-shared-data', 'space-data', 'collaboration-data'];
+	const DATA_QUERY_CATS = [
+		'user-app-data',
+		'household-shared-data',
+		'space-data',
+		'collaboration-data',
+	];
 
 	/** Minimal deps: dataQuery rejects, all baseline readers force-offed. */
 	function makeRejectingDeps() {
@@ -1161,7 +1175,9 @@ describe('ConversationRetrievalServiceImpl — I-2 DataQuery formatted-size acco
 
 		const mockDataQuery = {
 			query: vi.fn().mockResolvedValue({
-				files: [{ appId, type: null, title: null, path: 'users/u1/food/r.md', content: fileContent }],
+				files: [
+					{ appId, type: null, title: null, path: 'users/u1/food/r.md', content: fileContent },
+				],
 				empty: false,
 			}),
 		};
@@ -1293,9 +1309,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('produces byte-identical output on consecutive calls with identical input', async () => {
-		const contextStore = makeContextStore([
-			makeEntry('pref', 'Celsius'),
-		]) as never;
+		const contextStore = makeContextStore([makeEntry('pref', 'Celsius')]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const a = await withUserId('u1', () => service.buildMemorySnapshot());
 		const b = await withUserId('u1', () => service.buildMemorySnapshot());
@@ -1318,9 +1332,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 
 	it('includes partial content when the first entry alone exceeds the budget', async () => {
 		const hugeContent = 'x'.repeat(5000);
-		const contextStore = makeContextStore([
-			makeEntry('huge', hugeContent),
-		]) as never;
+		const contextStore = makeContextStore([makeEntry('huge', hugeContent)]) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
 		expect(result.status).toBe('ok');
@@ -1392,10 +1404,7 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('pinnedKeys: falls back to alphabetical-only when no pinned key is present in user data', async () => {
-		const entries = [
-			makeEntry('bbb', 'bbb content'),
-			makeEntry('aaa', 'aaa content'),
-		];
+		const entries = [makeEntry('bbb', 'bbb content'), makeEntry('aaa', 'aaa content')];
 		const contextStore = makeContextStore(entries) as never;
 		const service = new ConversationRetrievalServiceImpl({ contextStore });
 		const result = await withUserId('u1', () => service.buildMemorySnapshot());
@@ -1406,9 +1415,13 @@ describe('ConversationRetrievalServiceImpl.buildMemorySnapshot', () => {
 	});
 
 	it('interface accepts opts (compile-time: ConversationRetrievalService.buildMemorySnapshot)', async () => {
-		const contextStore = makeContextStore([makeEntry('recent-session-summary', 'prev session')]) as never;
+		const contextStore = makeContextStore([
+			makeEntry('recent-session-summary', 'prev session'),
+		]) as never;
 		// Use interface-typed reference to confirm opts are exposed on the interface.
-		const svc: ConversationRetrievalService = new ConversationRetrievalServiceImpl({ contextStore });
+		const svc: ConversationRetrievalService = new ConversationRetrievalServiceImpl({
+			contextStore,
+		});
 		const withPinning = await withUserId('u1', () => svc.buildMemorySnapshot({}));
 		const noPinning = await withUserId('u1', () => svc.buildMemorySnapshot({ pinnedKeys: [] }));
 		expect(withPinning.content).toContain('## recent-session-summary');
@@ -1459,7 +1472,12 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot settings fai
 
 	it('does NOT push "settings" to failures when reader succeeds', async () => {
 		const successReader = {
-			buildCatalog: vi.fn().mockResolvedValue({ catalog: '## Your settings\n- Foo (a.b): ON', trustedInstructions: '' }),
+			buildCatalog: vi
+				.fn()
+				.mockResolvedValue({
+					catalog: '## Your settings\n- Foo (a.b): ON',
+					trustedInstructions: '',
+				}),
 		} as never;
 		const systemInfo = {
 			isUserAdmin: vi.fn().mockReturnValue(false),

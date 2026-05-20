@@ -9,18 +9,12 @@ import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import type {
-	CuisineClassification,
-	Household,
-	MealPlan,
-	PlannedMeal,
-} from '../types.js';
 import {
-	classifyCuisines,
 	checkCuisineDiversity,
+	classifyCuisines,
 	findRepetition,
 } from '../services/cuisine-tracker.js';
-import type { CuisineRepetition } from '../services/cuisine-tracker.js';
+import type { CuisineClassification, Household, MealPlan, PlannedMeal } from '../types.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────
 
@@ -199,10 +193,7 @@ describe('checkCuisineDiversity', () => {
 		store = createMockStore();
 	});
 
-	function setupHouseholdAndPlan(
-		hh: Household | null,
-		plan: MealPlan | null,
-	) {
+	function setupHouseholdAndPlan(hh: Household | null, plan: MealPlan | null) {
 		store.read.mockImplementation(async (path: string) => {
 			if (path === 'household.yaml' && hh) {
 				return `---\ntitle: ${hh.name}\n---\n` + stringify(hh);
@@ -290,9 +281,7 @@ describe('checkCuisineDiversity', () => {
 	});
 
 	it('handles single-meal plan without error', async () => {
-		const plan = makePlan([
-			makeMeal({ recipeTitle: 'Pasta Bolognese' }),
-		]);
+		const plan = makePlan([makeMeal({ recipeTitle: 'Pasta Bolognese' })]);
 		setupHouseholdAndPlan(household, plan);
 
 		const classifications: CuisineClassification[] = [

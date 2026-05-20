@@ -13,7 +13,7 @@ import type { MessageContext, TelegramService } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { ChatSessionStore, SessionTurn } from '../conversation-session/chat-session-store.js';
 import { resolveOrDefaultSessionKey } from '../conversation-session/session-key.js';
-import { flushMemoryToContextStore, type MemoryFlushSave } from './memory-flush.js';
+import { type MemoryFlushSave, flushMemoryToContextStore } from './memory-flush.js';
 
 export interface HandleFlushMemoryDeps {
 	telegram: TelegramService;

@@ -8,7 +8,7 @@
  * - space dropdown renders when spaceService is provided
  */
 
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,18 +18,18 @@ import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AlertService } from '../../../services/alerts/index.js';
 import { AppToggleStore } from '../../../services/app-toggle/index.js';
 import { ChangeLog } from '../../../services/data-store/change-log.js';
+import { ReportService } from '../../../services/reports/index.js';
 import { CronManager } from '../../../services/scheduler/cron-manager.js';
 import { UserManager } from '../../../services/user-manager/index.js';
-import { AlertService } from '../../../services/alerts/index.js';
-import { ReportService } from '../../../services/reports/index.js';
+import type { ContextStoreService } from '../../../types/context-store.js';
+import type { LLMService } from '../../../types/llm.js';
+import type { TelegramService } from '../../../types/telegram.js';
 import { registerAuth } from '../../auth.js';
 import { registerCsrfProtection } from '../../csrf.js';
 import { registerAlertRoutes } from '../alerts.js';
-import type { LLMService } from '../../../types/llm.js';
-import type { TelegramService } from '../../../types/telegram.js';
-import type { ContextStoreService } from '../../../types/context-store.js';
 
 const AUTH_TOKEN = 'test-token-d39-alert';
 const logger = pino({ level: 'silent' });
@@ -70,8 +70,16 @@ async function buildApp(spaceService?: { listSpaces(): Array<{ id: string; name:
 		logger,
 	});
 	const cronManager = new CronManager(logger, 'UTC', tempDir);
-	const llm = { complete: vi.fn(), classify: vi.fn(), extractStructured: vi.fn() } as unknown as LLMService;
-	const telegram = { send: vi.fn(), sendPhoto: vi.fn(), sendOptions: vi.fn() } as unknown as TelegramService;
+	const llm = {
+		complete: vi.fn(),
+		classify: vi.fn(),
+		extractStructured: vi.fn(),
+	} as unknown as LLMService;
+	const telegram = {
+		send: vi.fn(),
+		sendPhoto: vi.fn(),
+		sendOptions: vi.fn(),
+	} as unknown as TelegramService;
 	const contextStore = { get: vi.fn(), search: vi.fn() } as unknown as ContextStoreService;
 	const reportService = new ReportService({
 		dataDir: tempDir,
@@ -150,7 +158,7 @@ function makeValidAlertPayload(overrides: Record<string, string> = {}): Record<s
 		ds_user_id_0: '123',
 		ds_path_0: 'notes.md',
 		action_type_0: 'telegram_message',
-		'action_message_0': 'Alert!',
+		action_message_0: 'Alert!',
 		cooldown: '1 hour',
 		...overrides,
 	};
@@ -178,7 +186,11 @@ describe('D39: Alert form space_id round-trip', () => {
 				enabled: true,
 				schedule: '0 9 * * 1',
 				delivery: ['123'],
-				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }] },
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }],
+				},
 				actions: [{ type: 'telegram_message', config: { message: 'Alert!' } }],
 				cooldown: '1 hour',
 			});
@@ -218,7 +230,11 @@ describe('D39: Alert form space_id round-trip', () => {
 				enabled: true,
 				schedule: '0 9 * * 1',
 				delivery: ['123'],
-				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }] },
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }],
+				},
 				actions: [{ type: 'telegram_message', config: { message: 'Alert!' } }],
 				cooldown: '1 hour',
 			});
@@ -251,7 +267,11 @@ describe('D39: Alert form space_id round-trip', () => {
 				enabled: true,
 				schedule: '0 9 * * 1',
 				delivery: ['123'],
-				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }] },
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }],
+				},
 				actions: [{ type: 'telegram_message', config: { message: 'Alert!' } }],
 				cooldown: '1 hour',
 			});
@@ -294,7 +314,11 @@ describe('D39: Alert form space_id round-trip', () => {
 				enabled: true,
 				schedule: '0 9 * * 1',
 				delivery: ['123'],
-				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }] },
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }],
+				},
 				actions: [{ type: 'telegram_message', config: { message: 'Alert!' } }],
 				cooldown: '1 hour',
 			});
@@ -441,7 +465,11 @@ describe('D39: Alert form space_id round-trip', () => {
 				enabled: true,
 				schedule: '0 9 * * 1',
 				delivery: ['123'],
-				condition: { type: 'deterministic', expression: 'line count > 0', data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }] },
+				condition: {
+					type: 'deterministic',
+					expression: 'line count > 0',
+					data_sources: [{ app_id: 'notes', user_id: '123', path: 'notes.md' }],
+				},
 				actions: [{ type: 'telegram_message', config: { message: 'Alert!' } }],
 				cooldown: '1 hour',
 			});

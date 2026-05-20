@@ -4,7 +4,7 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { withFileLock } from '@pas/core/utils/file-mutex';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
 import type { Household } from '../types.js';
 

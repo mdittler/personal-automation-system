@@ -12,9 +12,9 @@
  * - Message includes the metric and disclaimer for each insight
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleScheduledJob, init } from '../../index.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -82,7 +82,9 @@ describe('handleScheduledJob weekly-health-correlation', () => {
 
 		// Regression: job must not throw even if LLM is called
 		vi.mocked(services.llm.complete).mockResolvedValue(
-			JSON.stringify([{ metric: 'energy', pattern: 'Test pattern', confidence: 0.8, disclaimer: 'Obs only.' }])
+			JSON.stringify([
+				{ metric: 'energy', pattern: 'Test pattern', confidence: 0.8, disclaimer: 'Obs only.' },
+			]),
 		);
 		await expect(
 			handleScheduledJob?.('weekly-health-correlation', 'user1'),

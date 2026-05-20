@@ -23,17 +23,17 @@
  * Companion to natural-language-h11w-persona.test.ts and natural-language-h11.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockCoreServices } from '@pas/core/testing';
 import { createTestMessageContext } from '@pas/core/testing/helpers';
 import type { CoreServices } from '@pas/core/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isHostingIntent } from '../handlers/hosting.js';
 import {
 	isAdherenceIntent,
 	isLogMealNLIntent,
 	isNutritionViewIntent,
 	isTargetsSetIntent,
 } from '../handlers/nutrition.js';
-import { isHostingIntent } from '../handlers/hosting.js';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 
@@ -67,12 +67,12 @@ describe('H11.y persona — isTargetsSetIntent', () => {
 
 	describe('rejects false positives', () => {
 		const shouldNotMatch = [
-			'I hit my calorie targets today',   // hit, not set
-			'my targets look good',             // no mutation verb
-			'how are my macro targets',         // query, not mutation
+			'I hit my calorie targets today', // hit, not set
+			'my targets look good', // no mutation verb
+			'how are my macro targets', // query, not mutation
 			'I had a good workout and hit my protein target', // hit, not set
-			'show me my current targets',       // view, not set
-			'what are my nutrition targets',    // query only
+			'show me my current targets', // view, not set
+			'what are my nutrition targets', // query only
 		];
 		for (const phrase of shouldNotMatch) {
 			it(`"${phrase}" → NOT targets-set intent`, () => {
@@ -106,10 +106,10 @@ describe('H11.y persona — isAdherenceIntent', () => {
 
 	describe('rejects false positives', () => {
 		const shouldNotMatch = [
-			'show me my macros',     // view, not adherence check
-			'log my macros',         // log intent, not adherence
+			'show me my macros', // view, not adherence check
+			'log my macros', // log intent, not adherence
 			'I had a good macro day', // past statement, not a query
-			'what are my targets',   // targets view, not adherence
+			'what are my targets', // targets view, not adherence
 			'tell me my macro totals', // pure view query, not an adherence check
 		];
 		for (const phrase of shouldNotMatch) {
@@ -230,7 +230,7 @@ describe('H11.y persona — end-to-end NL routing (handleMessage)', () => {
 		expect(services.telegram.send).toHaveBeenCalled();
 		const sendCalls = vi.mocked(services.telegram.send).mock.calls;
 		const texts = sendCalls.map(([, t]) => t as string);
-		expect(texts.some(t => t.toLowerCase().includes('household'))).toBe(true);
+		expect(texts.some((t) => t.toLowerCase().includes('household'))).toBe(true);
 	});
 });
 

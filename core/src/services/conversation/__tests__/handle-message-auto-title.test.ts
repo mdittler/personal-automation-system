@@ -9,19 +9,19 @@
  *  - Hook is scheduled AFTER appendExchange resolves
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../conversation-titling/auto-title-hook.js', () => ({
 	scheduleTitleAfterFirstExchange: vi.fn(),
 	runTitleAfterFirstExchange: vi.fn(),
 }));
 
-import { handleMessage } from '../handle-message.js';
-import { scheduleTitleAfterFirstExchange } from '../../conversation-titling/auto-title-hook.js';
-import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
 import { createMockCoreServices, createMockScopedStore } from '../../../testing/mock-services.js';
 import { createTestMessageContext } from '../../../testing/test-helpers.js';
+import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import { scheduleTitleAfterFirstExchange } from '../../conversation-titling/auto-title-hook.js';
 import type { TitleService } from '../../conversation-titling/title-service.js';
+import { handleMessage } from '../handle-message.js';
 
 function makeChatSessions(overrides?: Partial<ChatSessionStore>): ChatSessionStore {
 	return {
@@ -30,7 +30,9 @@ function makeChatSessions(overrides?: Partial<ChatSessionStore>): ChatSessionSto
 		loadRecentTurns: vi.fn().mockResolvedValue([]),
 		endActive: vi.fn().mockResolvedValue({ endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
+		ensureActiveSession: vi
+			.fn()
+			.mockResolvedValue({ sessionId: 'session-1', isNew: true, snapshot: undefined }),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		rebuildMemorySnapshot: vi
@@ -68,7 +70,9 @@ describe('handleMessage — auto-title hook wiring', () => {
 
 	it('schedules auto-title when session is new and there are no prior turns', async () => {
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 		});
 		const titleService = makeTitleService();
@@ -94,7 +98,9 @@ describe('handleMessage — auto-title hook wiring', () => {
 
 	it('does NOT schedule auto-title when session is not new', async () => {
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'existing-sess', isNew: false, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'existing-sess', isNew: false, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 		});
 		const titleService = makeTitleService();
@@ -112,10 +118,16 @@ describe('handleMessage — auto-title hook wiring', () => {
 	it('does NOT schedule auto-title when there are prior turns (not first exchange)', async () => {
 		const priorTurns = [
 			{ role: 'user' as const, content: 'previous message', timestamp: '2026-01-01T00:00:00Z' },
-			{ role: 'assistant' as const, content: 'previous response', timestamp: '2026-01-01T00:00:01Z' },
+			{
+				role: 'assistant' as const,
+				content: 'previous response',
+				timestamp: '2026-01-01T00:00:01Z',
+			},
 		];
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue(priorTurns),
 		});
 		const titleService = makeTitleService();
@@ -132,7 +144,9 @@ describe('handleMessage — auto-title hook wiring', () => {
 
 	it('does NOT schedule auto-title when titleService is undefined', async () => {
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 		});
 		const ctx = createTestMessageContext({ text: 'Hello bot' });
@@ -153,7 +167,9 @@ describe('handleMessage — auto-title hook wiring', () => {
 		const callOrder: string[] = [];
 
 		const chatSessions = makeChatSessions({
-			ensureActiveSession: vi.fn().mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
+			ensureActiveSession: vi
+				.fn()
+				.mockResolvedValue({ sessionId: 'sess-1', isNew: true, snapshot: undefined }),
 			loadRecentTurns: vi.fn().mockResolvedValue([]),
 			appendExchange: vi.fn().mockImplementation(async () => {
 				callOrder.push('appendExchange');

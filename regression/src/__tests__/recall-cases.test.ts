@@ -24,9 +24,7 @@ describe('recall bucket cases', () => {
 
 	it('every case covers recall-classifier + transcript-search', () => {
 		for (const c of cases) {
-			expect(c.coverage).toContain(
-				'core/src/services/conversation-retrieval/recall-classifier.ts',
-			);
+			expect(c.coverage).toContain('core/src/services/conversation-retrieval/recall-classifier.ts');
 		}
 	});
 
@@ -47,7 +45,9 @@ describe('recall bucket cases', () => {
 	it('at least 12 cases label shouldRecall=true', () => {
 		const trueCases = cases.filter((c) =>
 			c.inputs.some((inp) => {
-				const exp = inp.expected as { schema?: { properties?: { shouldRecall?: { const?: boolean } } } };
+				const exp = inp.expected as {
+					schema?: { properties?: { shouldRecall?: { const?: boolean } } };
+				};
 				return exp.schema?.properties?.shouldRecall?.const === true;
 			}),
 		);
@@ -57,7 +57,9 @@ describe('recall bucket cases', () => {
 	it('at least 10 cases label shouldRecall=false', () => {
 		const falseCases = cases.filter((c) =>
 			c.inputs.some((inp) => {
-				const exp = inp.expected as { schema?: { properties?: { shouldRecall?: { const?: boolean } } } };
+				const exp = inp.expected as {
+					schema?: { properties?: { shouldRecall?: { const?: boolean } } };
+				};
 				return exp.schema?.properties?.shouldRecall?.const === false;
 			}),
 		);
@@ -79,7 +81,11 @@ describe('recall bucket cases', () => {
 				schema?: {
 					properties?: {
 						timeAnchor?: {
-							properties?: { on?: { const?: string }; after?: { const?: string }; before?: { const?: string } };
+							properties?: {
+								on?: { const?: string };
+								after?: { const?: string };
+								before?: { const?: string };
+							};
 						};
 					};
 				};
@@ -95,11 +101,15 @@ describe('recall bucket cases', () => {
 
 	it('every case that asserts shouldRecall=true requires a non-empty query (Codex C5)', () => {
 		const trueCases = cases.filter((c) => {
-			const exp = c.inputs[0]!.expected as { schema?: { properties?: { shouldRecall?: { const?: boolean } } } };
+			const exp = c.inputs[0]!.expected as {
+				schema?: { properties?: { shouldRecall?: { const?: boolean } } };
+			};
 			return exp.schema?.properties?.shouldRecall?.const === true;
 		});
 		for (const c of trueCases) {
-			const exp = c.inputs[0]!.expected as { schema?: { properties?: { query?: { type?: string; minLength?: number } } } };
+			const exp = c.inputs[0]!.expected as {
+				schema?: { properties?: { query?: { type?: string; minLength?: number } } };
+			};
 			expect(exp.schema?.properties?.query?.type).toBe('string');
 			expect(exp.schema?.properties?.query?.minLength).toBeGreaterThanOrEqual(1);
 		}

@@ -3,31 +3,26 @@
  */
 
 import type { CoreServices, InlineButton, ScopedDataStore } from '@pas/core/types';
-import { generateFrontmatter, stripFrontmatter, buildAppTags } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, stripFrontmatter } from '@pas/core/utils/frontmatter';
 import { parse, stringify } from 'yaml';
-import { generateWeeklyDigest, generatePersonalSummary } from '../services/nutrition-reporter.js';
-import { generatePediatricianReport } from '../services/pediatrician-report.js';
-import { loadChildProfile, loadAllChildren } from '../services/family-profiles.js';
-import { loadAllRecipes } from '../services/recipe-store.js';
-import { matchRecipes } from '../services/recipe-matcher.js';
-import { parsePortion } from '../services/portion-parser.js';
-import {
-	loadQuickMeals,
-	archiveQuickMeal,
-	findQuickMealById,
-	slugifyLabel,
-} from '../services/quick-meals-store.js';
-import {
-	beginQuickMealAdd,
-	beginQuickMealEdit,
-	beginQuickMealAddPrefilled,
-} from './quick-meal-flow.js';
-import { beginTargetsFlow } from './targets-flow.js';
-import { logQuickMeal } from './quick-meal-log.js';
+import { findSimilarAdHoc, recordAdHocLog } from '../services/ad-hoc-history.js';
+import { loadAllChildren, loadChildProfile } from '../services/family-profiles.js';
 import { estimateMacros } from '../services/macro-estimator.js';
-import { recordAdHocLog, findSimilarAdHoc } from '../services/ad-hoc-history.js';
+import { generatePersonalSummary, generateWeeklyDigest } from '../services/nutrition-reporter.js';
+import { generatePediatricianReport } from '../services/pediatrician-report.js';
+import { parsePortion } from '../services/portion-parser.js';
+import { archiveQuickMeal, loadQuickMeals, slugifyLabel } from '../services/quick-meals-store.js';
+import { matchRecipes } from '../services/recipe-matcher.js';
+import { loadAllRecipes } from '../services/recipe-store.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { parseStrictInt } from '../utils/parse-int-strict.js';
+import {
+	beginQuickMealAdd,
+	beginQuickMealAddPrefilled,
+	beginQuickMealEdit,
+} from './quick-meal-flow.js';
+import { logQuickMeal } from './quick-meal-log.js';
+import { beginTargetsFlow } from './targets-flow.js';
 
 // ─── Task 14: Ad-hoc dedup promotion pending state ──────────────────────────
 
@@ -129,14 +124,14 @@ export async function handleRecipeLogCallback(
 	if (!match) return false;
 
 	const recipeId = match[1]!;
-	const portion = parseFloat(match[2]!);
+	const portion = Number.parseFloat(match[2]!);
 	if (!Number.isFinite(portion) || portion <= 0) {
 		await services.telegram.send(userId, 'Invalid portion on that button.');
 		return true;
 	}
 
 	const recipes = await loadAllRecipes(sharedStore);
-	const recipe = recipes.find(r => r.id === recipeId);
+	const recipe = recipes.find((r) => r.id === recipeId);
 	if (!recipe) {
 		await services.telegram.send(userId, 'That recipe no longer exists.');
 		return true;
@@ -167,23 +162,24 @@ export async function handleRecipeLogCallback(
 	return true;
 }
 import {
-	loadMonthlyLog,
-	getDailyMacros,
-	computeProgress,
 	computeAdherence,
-	formatMacroSummary,
+	computeProgress,
 	formatAdherenceSummary,
-	logMealMacros,
+	formatMacroSummary,
+	getDailyMacros,
 	loadMacrosForPeriod,
+	loadMonthlyLog,
+	logMealMacros,
 } from '../services/macro-tracker.js';
-import { addDays, todayDate } from '../utils/date.js';
 import type { MacroTargets, MealMacroEntry } from '../types.js';
+import { addDays, todayDate } from '../utils/date.js';
 
 // ─── Intent Detection ────��──────────────────────────��─────────────────────────
 
 const NUTRITION_KEYWORDS = /\b(nutrition|macros?|calories?|calorie|protein|carbs?|intake|macro)\b/i;
 const NUTRITION_CONTEXT = /\b(track|show|summary|how|view|check|my|intake|this)\b/i;
-const NUTRITION_TODAY_PATTERNS = /\b(what have i eaten|what did i eat|what have i had.*today|show.*today.*nutrition|today.*macros?|today.*calories?|macros?.*today|calories?.*today)\b/i;
+const NUTRITION_TODAY_PATTERNS =
+	/\b(what have i eaten|what did i eat|what have i had.*today|show.*today.*nutrition|today.*macros?|today.*calories?|macros?.*today|calories?.*today)\b/i;
 
 // H12a: health-correlation phrasings overlap with NUTRITION_KEYWORDS + NUTRITION_CONTEXT
 // (e.g. "how does my nutrition affect my sleep"). Exclude them here so
@@ -201,8 +197,10 @@ export function isNutritionViewIntent(text: string): boolean {
 	// Health-correlation phrasings ("how does my nutrition affect my sleep")
 	// also overlap. Exclude them so isHealthCorrelationIntent handles them.
 	if (HEALTH_CORRELATION_GUARD.test(text)) return false;
-	return (NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower))
-		|| NUTRITION_TODAY_PATTERNS.test(lower);
+	return (
+		(NUTRITION_KEYWORDS.test(lower) && NUTRITION_CONTEXT.test(lower)) ||
+		NUTRITION_TODAY_PATTERNS.test(lower)
+	);
 }
 
 // ─── H11.w Task 15: Natural-language meal-log intent ────────────────────────
@@ -238,20 +236,24 @@ export function isLogMealNLIntent(text: string): boolean {
 // ─── H11.y: Targets-set and adherence NL intent detectors ───────────────────
 
 // Regex for "set my calorie targets", "change my macros", etc.
-const TARGETS_SET_KEYWORDS = /\b(set|change|update|edit|adjust|configure|raise|lower|bump)\b.*\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b/i;
-const TARGETS_SET_ALT = /\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b.*\b(set|change|update|edit|adjust|raise|lower)\b/i;
+const TARGETS_SET_KEYWORDS =
+	/\b(set|change|update|edit|adjust|configure|raise|lower|bump)\b.*\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b/i;
+const TARGETS_SET_ALT =
+	/\b(my\s+)?(calorie|macro|protein|carb|fat|fiber|nutrition)\s*(targets?|goals?)\b.*\b(set|change|update|edit|adjust|raise|lower)\b/i;
 
 export function isTargetsSetIntent(text: string): boolean {
 	return TARGETS_SET_KEYWORDS.test(text) || TARGETS_SET_ALT.test(text);
 }
 
 // Regex for "how am I doing on macros", "hitting my targets", "macro streak" etc.
-const ADHERENCE_KEYWORDS = /\b(adherence|hitting.*targets?|how.*doing.*macro|on track.*(macros?|calories?)|macro.*streak|streak.*macro|macros?.*adherence|sticking to.*targets?|meeting.*targets?)\b/i;
+const ADHERENCE_KEYWORDS =
+	/\b(adherence|hitting.*targets?|how.*doing.*macro|on track.*(macros?|calories?)|macro.*streak|streak.*macro|macros?.*adherence|sticking to.*targets?|meeting.*targets?)\b/i;
 
 export function isAdherenceIntent(text: string): boolean {
-	return ADHERENCE_KEYWORDS.test(text) || (
-		/\bmacros?\b/i.test(text) &&
-		/\b(how am i doing|am i hitting|on track|streak|sticking|meeting)\b/i.test(text)
+	return (
+		ADHERENCE_KEYWORDS.test(text) ||
+		(/\bmacros?\b/i.test(text) &&
+			/\b(how am i doing|am i hitting|on track|streak|sticking|meeting)\b/i.test(text))
 	);
 }
 
@@ -371,8 +373,10 @@ export async function handleNutritionCommand(
 			const day = log ? getDailyMacros(log, today) : null;
 
 			if (!day) {
-				await services.telegram.send(userId,
-					`No macro data tracked for today (${today}).\nLog meals with "Cooked!" on planned meals, or use \`/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]\`.`);
+				await services.telegram.send(
+					userId,
+					`No macro data tracked for today (${today}).\nLog meals with "Cooked!" on planned meals, or use \`/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]\`.`,
+				);
 				return;
 			}
 
@@ -395,7 +399,14 @@ export async function handleNutritionCommand(
 			const endDate = today;
 			const startDate = addDays(today, -30);
 
-			const summary = await generatePersonalSummary(services, userStore, userId, startDate, endDate, targets);
+			const summary = await generatePersonalSummary(
+				services,
+				userStore,
+				userId,
+				startDate,
+				endDate,
+				targets,
+			);
 			await services.telegram.send(userId, summary);
 			return;
 		}
@@ -406,12 +417,16 @@ export async function handleNutritionCommand(
 			if (!mealsSub || mealsSub === 'list') {
 				const list = await loadQuickMeals(userStore);
 				if (list.length === 0) {
-					await services.telegram.send(userId,
-						'No quick-meals saved yet. Use `/nutrition meals add` to create one.');
+					await services.telegram.send(
+						userId,
+						'No quick-meals saved yet. Use `/nutrition meals add` to create one.',
+					);
 					return;
 				}
 				const byKind: Record<'home' | 'restaurant' | 'other', typeof list> = {
-					home: [], restaurant: [], other: [],
+					home: [],
+					restaurant: [],
+					other: [],
 				};
 				for (const t of list) byKind[t.kind].push(t);
 				for (const k of Object.keys(byKind) as Array<keyof typeof byKind>) {
@@ -422,7 +437,9 @@ export async function handleNutritionCommand(
 					if (byKind[k].length === 0) continue;
 					lines.push('', `_${k}_`);
 					for (const t of byKind[k]) {
-						lines.push(`- **${escapeMarkdown(t.label)}** — ${t.estimatedMacros.calories ?? 0} cal (${t.usageCount}× used)`);
+						lines.push(
+							`- **${escapeMarkdown(t.label)}** — ${t.estimatedMacros.calories ?? 0} cal (${t.usageCount}× used)`,
+						);
 					}
 				}
 				await services.telegram.send(userId, lines.join('\n'));
@@ -441,11 +458,13 @@ export async function handleNutritionCommand(
 				let targetId: string | null = null;
 				try {
 					const slug = slugifyLabel(label);
-					if (all.some(t => t.id === slug)) targetId = slug;
-				} catch { /* ignore — fall through to label match */ }
+					if (all.some((t) => t.id === slug)) targetId = slug;
+				} catch {
+					/* ignore — fall through to label match */
+				}
 				if (!targetId) {
 					const needle = label.toLowerCase();
-					const byLabel = all.find(t => t.label.toLowerCase() === needle);
+					const byLabel = all.find((t) => t.label.toLowerCase() === needle);
 					if (byLabel) targetId = byLabel.id;
 				}
 				if (!targetId) {
@@ -470,14 +489,16 @@ export async function handleNutritionCommand(
 				}
 				// Try id (slug) first, then case-insensitive label match.
 				const all = await loadQuickMeals(userStore);
-				let existing: typeof all[number] | undefined;
+				let existing: (typeof all)[number] | undefined;
 				try {
 					const slug = slugifyLabel(label);
-					existing = all.find(t => t.id === slug);
-				} catch { /* ignore */ }
+					existing = all.find((t) => t.id === slug);
+				} catch {
+					/* ignore */
+				}
 				if (!existing) {
 					const needle = label.toLowerCase();
-					existing = all.find(t => t.label.toLowerCase() === needle);
+					existing = all.find((t) => t.label.toLowerCase() === needle);
 				}
 				if (!existing) {
 					await services.telegram.send(userId, `No quick-meal matches '${escapeMarkdown(label)}'.`);
@@ -487,8 +508,7 @@ export async function handleNutritionCommand(
 				return;
 			}
 
-			await services.telegram.send(userId,
-				'Unknown: `/nutrition meals <add|list|edit|remove>`');
+			await services.telegram.send(userId, 'Unknown: `/nutrition meals <add|list|edit|remove>`');
 			return;
 		}
 
@@ -517,9 +537,7 @@ export async function handleNutritionCommand(
 					}
 					rows.push(row);
 				}
-				rows.push([
-					{ text: 'Something else…', callbackData: 'app:food:nut:log:adhoc-prompt' },
-				]);
+				rows.push([{ text: 'Something else…', callbackData: 'app:food:nut:log:adhoc-prompt' }]);
 				await services.telegram.sendWithButtons(
 					userId,
 					'What did you eat? Pick a quick-meal or choose "Something else…":',
@@ -537,20 +555,20 @@ export async function handleNutritionCommand(
 			// attempting the numeric form (with a possible typo in one field) and
 			// should get per-field validation errors. If fewer than 2 are numeric the
 			// tokens are a multi-word food label — fall through to the smart-log path.
-			const looksNumericish = (t: string | undefined): boolean =>
-				t !== undefined && /\d/.test(t);
+			const looksNumericish = (t: string | undefined): boolean => t !== undefined && /\d/.test(t);
 			const numericHits = [args[2], args[3], args[4], args[5]].filter(looksNumericish).length;
 			const legacyNumericShape = args.length >= 6 && numericHits >= 2;
 			if (legacyNumericShape) {
 				const label = args[1];
 				if (!label) {
-					await services.telegram.send(userId,
-						'Usage: `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]`\nExample: `/nutrition log lunch 600 40 50 20 8`');
+					await services.telegram.send(
+						userId,
+						'Usage: `/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]`\nExample: `/nutrition log lunch 600 40 50 20 8`',
+					);
 					return;
 				}
 				if (label.length > 100) {
-					await services.telegram.send(userId,
-						'Invalid label: must be 100 characters or fewer.');
+					await services.telegram.send(userId, 'Invalid label: must be 100 characters or fewer.');
 					return;
 				}
 				type FieldSpec = { name: string; raw: string | undefined; optional?: boolean };
@@ -568,14 +586,18 @@ export async function handleNutritionCommand(
 							parsed[spec.name] = 0;
 							continue;
 						}
-						await services.telegram.send(userId,
-							`Invalid ${spec.name} value: ''. Must be a number between 0 and 99999.`);
+						await services.telegram.send(
+							userId,
+							`Invalid ${spec.name} value: ''. Must be a number between 0 and 99999.`,
+						);
 						return;
 					}
 					const val = parseStrictInt(spec.raw);
 					if (val === null || val < 0 || val > 99999) {
-						await services.telegram.send(userId,
-							`Invalid ${spec.name} value: '${escapeMarkdown(spec.raw)}'. Must be a number between 0 and 99999.`);
+						await services.telegram.send(
+							userId,
+							`Invalid ${spec.name} value: '${escapeMarkdown(spec.raw)}'. Must be a number between 0 and 99999.`,
+						);
 						return;
 					}
 					parsed[spec.name] = val;
@@ -595,8 +617,10 @@ export async function handleNutritionCommand(
 				};
 				const today = todayDate(services.timezone);
 				await logMealMacros(userStore, userId, entry, today);
-				await services.telegram.send(userId,
-					`Logged: **${escapeMarkdown(label)}** — ${calories} cal, ${protein}g protein`);
+				await services.telegram.send(
+					userId,
+					`Logged: **${escapeMarkdown(label)}** — ${calories} cal, ${protein}g protein`,
+				);
 				return;
 			}
 
@@ -606,11 +630,13 @@ export async function handleNutritionCommand(
 			// the legacy 6-arg numeric guard above.
 			const rawArgs = args.slice(1);
 			if (rawArgs.length === 0) {
-				await services.telegram.send(userId,
+				await services.telegram.send(
+					userId,
 					'Usage: `/nutrition log <meal name> [portion]`\n' +
-					'Examples:\n' +
-					'  `/nutrition log lasagna half`\n' +
-					'  `/nutrition log chicken curry 1.5`');
+						'Examples:\n' +
+						'  `/nutrition log lasagna half`\n' +
+						'  `/nutrition log chicken curry 1.5`',
+				);
 				return;
 			}
 
@@ -631,13 +657,11 @@ export async function handleNutritionCommand(
 				return;
 			}
 			if (labelText.length === 0) {
-				await services.telegram.send(userId,
-					'Usage: `/nutrition log <meal name> [portion]`');
+				await services.telegram.send(userId, 'Usage: `/nutrition log <meal name> [portion]`');
 				return;
 			}
 			if (labelText.length > 100) {
-				await services.telegram.send(userId,
-					'Invalid label: must be 100 characters or fewer.');
+				await services.telegram.send(userId, 'Invalid label: must be 100 characters or fewer.');
 				return;
 			}
 
@@ -647,26 +671,30 @@ export async function handleNutritionCommand(
 
 		if (subCommand === 'adherence') {
 			const targets = await loadTargets(services, userStore);
-			const hasTarget = [targets.calories, targets.protein, targets.carbs, targets.fat, targets.fiber].some(v => v && v > 0);
+			const hasTarget = [
+				targets.calories,
+				targets.protein,
+				targets.carbs,
+				targets.fat,
+				targets.fiber,
+			].some((v) => v && v > 0);
 			if (!hasTarget) {
-				await services.telegram.send(userId,
-					'No macro targets set. Use `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]` first.');
+				await services.telegram.send(
+					userId,
+					'No macro targets set. Use `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]` first.',
+				);
 				return;
 			}
 
 			// No day argument — show period picker buttons.
 			if (args[1] === undefined) {
-				await services.telegram.sendWithButtons(
-					userId,
-					'Which period?',
+				await services.telegram.sendWithButtons(userId, 'Which period?', [
 					[
-						[
-							{ text: 'Last 7 days', callbackData: 'app:food:nut:adh:7' },
-							{ text: 'Last 30 days', callbackData: 'app:food:nut:adh:30' },
-							{ text: 'Last 90 days', callbackData: 'app:food:nut:adh:90' },
-						],
+						{ text: 'Last 7 days', callbackData: 'app:food:nut:adh:7' },
+						{ text: 'Last 30 days', callbackData: 'app:food:nut:adh:30' },
+						{ text: 'Last 90 days', callbackData: 'app:food:nut:adh:90' },
 					],
-				);
+				]);
 				return;
 			}
 
@@ -681,7 +709,10 @@ export async function handleNutritionCommand(
 
 			const entries = await loadMacrosForPeriod(userStore, startDate, endDate);
 			if (entries.length === 0) {
-				await services.telegram.send(userId, `No macro data tracked in the last ${periodDays} days.`);
+				await services.telegram.send(
+					userId,
+					`No macro data tracked in the last ${periodDays} days.`,
+				);
 				return;
 			}
 			const adherence = computeAdherence(entries, targets);
@@ -706,8 +737,15 @@ export async function handleNutritionCommand(
 				const fat = parseStrictInt(args[5] ?? '0');
 				const fiber = args[6] !== undefined ? parseStrictInt(args[6]) : 0;
 
-				if ([calories, protein, carbs, fat, fiber].some(v => v === null || (v as number) < 0 || (v as number) > 99999)) {
-					await services.telegram.send(userId, 'Invalid targets. Values must be numbers between 0 and 99999.');
+				if (
+					[calories, protein, carbs, fat, fiber].some(
+						(v) => v === null || (v as number) < 0 || (v as number) > 99999,
+					)
+				) {
+					await services.telegram.send(
+						userId,
+						'Invalid targets. Values must be numbers between 0 and 99999.',
+					);
 					return;
 				}
 
@@ -719,8 +757,10 @@ export async function handleNutritionCommand(
 					fiber: fiber as number,
 				});
 
-				await services.telegram.send(userId,
-					`Macro targets updated:\nCalories: ${calories}\nProtein: ${protein}g\nCarbs: ${carbs}g\nFat: ${fat}g\nFiber: ${fiber}g`);
+				await services.telegram.send(
+					userId,
+					`Macro targets updated:\nCalories: ${calories}\nProtein: ${protein}g\nCarbs: ${carbs}g\nFat: ${fat}g\nFiber: ${fiber}g`,
+				);
 				return;
 			}
 
@@ -733,7 +773,9 @@ export async function handleNutritionCommand(
 			lines.push(`Fat: ${targets.fat ? `${targets.fat}g` : 'not set'}`);
 			lines.push(`Fiber: ${targets.fiber ? `${targets.fiber}g` : 'not set'}`);
 			lines.push('');
-			lines.push('Use `/nutrition targets set` to launch the guided setup, or `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]` as a shortcut.');
+			lines.push(
+				'Use `/nutrition targets set` to launch the guided setup, or `/nutrition targets set <cal> <protein> <carbs> <fat> [fiber]` as a shortcut.',
+			);
 			await services.telegram.send(userId, lines.join('\n'));
 			return;
 		}
@@ -744,12 +786,15 @@ export async function handleNutritionCommand(
 				// Show child selection buttons instead of raw usage text
 				const children = await loadAllChildren(sharedStore);
 				if (children.length === 0) {
-					await services.telegram.send(userId, 'No child profiles found. Use `/family add` to add a child first.');
+					await services.telegram.send(
+						userId,
+						'No child profiles found. Use `/family add` to add a child first.',
+					);
 					return;
 				}
-				const buttons: InlineButton[][] = children.map(c => ([
+				const buttons: InlineButton[][] = children.map((c) => [
 					{ text: c.profile.name, callbackData: `app:food:nut:ped:${c.profile.slug}` },
-				]));
+				]);
 				await services.telegram.sendWithButtons(
 					userId,
 					'Select a child for the pediatrician report:',
@@ -764,11 +809,14 @@ export async function handleNutritionCommand(
 			if (!childLog) {
 				const children = await loadAllChildren(sharedStore);
 				if (children.length === 0) {
-					await services.telegram.send(userId, 'No child profiles found. Use `/family add` to add a child first.');
+					await services.telegram.send(
+						userId,
+						'No child profiles found. Use `/family add` to add a child first.',
+					);
 				} else {
-					const buttons: InlineButton[][] = children.map(c => ([
+					const buttons: InlineButton[][] = children.map((c) => [
 						{ text: c.profile.name, callbackData: `app:food:nut:ped:${c.profile.slug}` },
-					]));
+					]);
 					await services.telegram.sendWithButtons(
 						userId,
 						`Child "${childName}" not found. Select one:`,
@@ -780,24 +828,33 @@ export async function handleNutritionCommand(
 
 			const recipes = await loadAllRecipes(sharedStore);
 			const today = todayDate(services.timezone);
-			const report = await generatePediatricianReport(sharedStore, userStore, childLog, recipes, periodDays, today);
+			const report = await generatePediatricianReport(
+				sharedStore,
+				userStore,
+				childLog,
+				recipes,
+				periodDays,
+				today,
+			);
 			await services.telegram.send(userId, report);
 			return;
 		}
 
 		// Unknown subcommand — show help
-		await services.telegram.send(userId,
+		await services.telegram.send(
+			userId,
 			'**Nutrition Commands:**\n' +
-			'`/nutrition` — Today\'s summary\n' +
-			'`/nutrition week` — Weekly macros\n' +
-			'`/nutrition month` — Monthly macros\n' +
-			'`/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]` — Manual macro entry\n' +
-			'`/nutrition log <meal name> [portion]` — Log a recipe or quick-meal\n' +
-			'`/nutrition meals list` — List saved quick-meals\n' +
-			'`/nutrition meals remove <label>` — Remove a saved quick-meal\n' +
-			'`/nutrition adherence [days]` — Adherence vs targets; pick a period or pass a day count\n' +
-			'`/nutrition targets` — View/set macro targets\n' +
-			'`/nutrition pediatrician <child> [days]` — Child nutrition report');
+				"`/nutrition` — Today's summary\n" +
+				'`/nutrition week` — Weekly macros\n' +
+				'`/nutrition month` — Monthly macros\n' +
+				'`/nutrition log <label> <cal> <protein> <carbs> <fat> [fiber]` — Manual macro entry\n' +
+				'`/nutrition log <meal name> [portion]` — Log a recipe or quick-meal\n' +
+				'`/nutrition meals list` — List saved quick-meals\n' +
+				'`/nutrition meals remove <label>` — Remove a saved quick-meal\n' +
+				'`/nutrition adherence [days]` — Adherence vs targets; pick a period or pass a day count\n' +
+				'`/nutrition targets` — View/set macro targets\n' +
+				'`/nutrition pediatrician <child> [days]` — Child nutrition report',
+		);
 	} catch (err) {
 		services.logger.error('handleNutritionCommand failed', err);
 		await services.telegram.send(userId, 'Unable to generate nutrition report. Please try again.');
@@ -842,22 +899,22 @@ async function dispatchSmartLog(
 		};
 		const today = todayDate(services.timezone);
 		await logMealMacros(userStore, userId, entry, today);
-		await services.telegram.send(userId,
-			`Logged: **${escapeMarkdown(r.title)}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`);
+		await services.telegram.send(
+			userId,
+			`Logged: **${escapeMarkdown(r.title)}** × ${scale} — ${scaled.calories} cal, ${scaled.protein}g protein`,
+		);
 		return;
 	}
 
 	if (match.kind === 'ambiguous') {
-		const buttons: InlineButton[][] = match.candidates.map(c => [{
-			text: c.title,
-			callbackData: `app:food:nut:log:recipe:${c.id}:${portionValue}`,
-		}]);
+		const buttons: InlineButton[][] = match.candidates.map((c) => [
+			{
+				text: c.title,
+				callbackData: `app:food:nut:log:recipe:${c.id}:${portionValue}`,
+			},
+		]);
 		buttons.push([{ text: 'None of these', callbackData: 'app:food:nut:log:none' }]);
-		await services.telegram.sendWithButtons(
-			userId,
-			`Which recipe did you mean?`,
-			buttons,
-		);
+		await services.telegram.sendWithButtons(userId, `Which recipe did you mean?`, buttons);
 		return;
 	}
 
@@ -1022,17 +1079,25 @@ export async function handleAdherencePeriodCallback(
 	const match = data.match(/^app:food:nut:adh:(\d+)$/);
 	if (!match) return;
 
-	const periodDays = parseInt(match[1]!, 10);
+	const periodDays = Number.parseInt(match[1]!, 10);
 	if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
 		await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
 		return;
 	}
 
 	const targets = await loadTargets(services, userStore);
-	const hasTarget = [targets.calories, targets.protein, targets.carbs, targets.fat, targets.fiber].some(v => v && v > 0);
+	const hasTarget = [
+		targets.calories,
+		targets.protein,
+		targets.carbs,
+		targets.fat,
+		targets.fiber,
+	].some((v) => v && v > 0);
 	if (!hasTarget) {
-		await services.telegram.send(userId,
-			'No macro targets set. Use `/nutrition targets set` first.');
+		await services.telegram.send(
+			userId,
+			'No macro targets set. Use `/nutrition targets set` first.',
+		);
 		return;
 	}
 

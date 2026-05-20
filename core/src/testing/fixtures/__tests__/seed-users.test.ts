@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { access, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtemp, readFile, access } from 'node:fs/promises';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { seedUsers } from '../seed-users.js';
 
@@ -102,7 +102,7 @@ describe('seedUsers', () => {
 		await expect(seedUsers({ dataDir, users: 2, households: -1 })).rejects.toThrow(
 			'seedUsers: households must be a positive integer',
 		);
-		await expect(seedUsers({ dataDir, users: 2, households: NaN })).rejects.toThrow(
+		await expect(seedUsers({ dataDir, users: 2, households: Number.NaN })).rejects.toThrow(
 			'seedUsers: households must be a positive integer',
 		);
 	});
@@ -114,7 +114,7 @@ describe('seedUsers', () => {
 		await expect(seedUsers({ dataDir, users: -1, households: 1 })).rejects.toThrow(
 			'seedUsers: users must be a positive integer',
 		);
-		await expect(seedUsers({ dataDir, users: NaN, households: 1 })).rejects.toThrow(
+		await expect(seedUsers({ dataDir, users: Number.NaN, households: 1 })).rejects.toThrow(
 			'seedUsers: users must be a positive integer',
 		);
 	});

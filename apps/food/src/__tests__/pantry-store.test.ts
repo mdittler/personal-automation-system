@@ -687,9 +687,7 @@ describe('pantry-store', () => {
 		// ── LLM output caps / parseStrictInt guards ─────────────────
 
 		it('caps LLM shelf-life at 365 days (9999 → 365)', async () => {
-			const items = [
-				makePantryItem({ name: 'Honey', category: 'Pantry & Dry Goods' }),
-			];
+			const items = [makePantryItem({ name: 'Honey', category: 'Pantry & Dry Goods' })];
 			// Override: Pantry & Dry Goods is non-perishable, use Produce instead
 			const perishableItems = [
 				makePantryItem({ name: 'Honey', category: 'Produce', addedDate: '2026-01-01' }),

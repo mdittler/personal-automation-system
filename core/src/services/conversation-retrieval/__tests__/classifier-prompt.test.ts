@@ -9,10 +9,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import {
-	buildClassifierPrompt,
-	classifyRecallIntent,
-} from '../recall-classifier.js';
+import { buildClassifierPrompt, classifyRecallIntent } from '../recall-classifier.js';
 
 describe('buildClassifierPrompt', () => {
 	it("substitutes today into the prompt: 'Today: 2026-05-05'", () => {

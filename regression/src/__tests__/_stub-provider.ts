@@ -41,7 +41,10 @@ export class StubLLMService implements Pick<LLMService, 'complete' | 'classify'>
 		return r;
 	}
 
-	async classify(_text: string, _categories: string[]): Promise<{ category: string; confidence: number }> {
+	async classify(
+		_text: string,
+		_categories: string[],
+	): Promise<{ category: string; confidence: number }> {
 		this.calls++;
 		const r = this.responses.shift();
 		if (r === undefined) {

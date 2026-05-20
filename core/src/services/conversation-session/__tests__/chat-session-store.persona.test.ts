@@ -11,21 +11,21 @@
  * I.4 — Multi-step end-to-end scenarios using real ChatSessionStore.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SystemConfig } from '../../../types/config.js';
 import type { AppManifest } from '../../../types/manifest.js';
 import type { MessageContext } from '../../../types/telegram.js';
-import { ManifestCache, type AppRegistry, type RegisteredApp } from '../../app-registry/index.js';
-import { Router } from '../../router/index.js';
-import type { FallbackHandler } from '../../router/fallback.js';
-import type { SystemConfig } from '../../../types/config.js';
-import { composeChatSessionStore } from '../compose.js';
-import { DataStoreServiceImpl } from '../../data-store/index.js';
-import { ChangeLog } from '../../data-store/change-log.js';
+import { type AppRegistry, ManifestCache, type RegisteredApp } from '../../app-registry/index.js';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
+import { ChangeLog } from '../../data-store/change-log.js';
+import { DataStoreServiceImpl } from '../../data-store/index.js';
+import type { FallbackHandler } from '../../router/fallback.js';
+import { Router } from '../../router/index.js';
+import { composeChatSessionStore } from '../compose.js';
 
 // ---------------------------------------------------------------------------
 // Router infrastructure (minimal inline setup for routing tests)
@@ -67,7 +67,11 @@ function buildRouter(conv: ReturnType<typeof makeConvSvc>) {
 	const registry = {
 		getApp: (id: string) =>
 			id === 'chatbot'
-				? ({ manifest: chatbotManifest, module: { init: vi.fn(), handleMessage: vi.fn() } as any, appDir: '/apps/chatbot' } as RegisteredApp)
+				? ({
+						manifest: chatbotManifest,
+						module: { init: vi.fn(), handleMessage: vi.fn() } as any,
+						appDir: '/apps/chatbot',
+					} as RegisteredApp)
 				: undefined,
 		getManifestCache: () => cache,
 		getLoadedAppIds: () => ['chatbot'],
@@ -81,7 +85,11 @@ function buildRouter(conv: ReturnType<typeof makeConvSvc>) {
 	};
 	const router = new Router({
 		registry,
-		llm: { complete: vi.fn().mockResolvedValue('ok'), classify: vi.fn(), extractStructured: vi.fn() } as any,
+		llm: {
+			complete: vi.fn().mockResolvedValue('ok'),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+		} as any,
 		telegram: telegram as any,
 		fallback: { handleUnrecognized: vi.fn() } as unknown as FallbackHandler,
 		config: createConfig(),

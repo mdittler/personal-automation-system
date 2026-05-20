@@ -8,8 +8,8 @@
 
 import type { CoreServices } from '@pas/core/types';
 import type { ChildProfile, KidAdaptation, Recipe } from '../types.js';
-import { parseJsonResponse } from './recipe-parser.js';
 import { sanitizeInput } from '../utils/sanitize.js';
+import { parseJsonResponse } from './recipe-parser.js';
 
 function buildPrompt(recipe: Recipe, child: ChildProfile, ageMonths: number): string {
 	const ageWarning =
@@ -75,10 +75,7 @@ export async function generateKidAdaptation(
 }
 
 export function formatKidAdaptation(adaptation: KidAdaptation): string {
-	const lines: string[] = [
-		`**Adaptation for ${adaptation.childName}:**`,
-		'',
-	];
+	const lines: string[] = [`**Adaptation for ${adaptation.childName}:**`, ''];
 
 	if (adaptation.allergenFlags.length > 0) {
 		lines.push('⚠️ **Allergen warnings:**');

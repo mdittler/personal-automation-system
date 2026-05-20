@@ -8,11 +8,11 @@
  * REQ-CONV-FLUSH-013..018.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { handleFlushMemory } from '../handle-flush-memory.js';
-import type { HandleFlushMemoryDeps } from '../handle-flush-memory.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageContext } from '../../../types/telegram.js';
 import type { ChatSessionStore } from '../../conversation-session/chat-session-store.js';
+import { handleFlushMemory } from '../handle-flush-memory.js';
+import type { HandleFlushMemoryDeps } from '../handle-flush-memory.js';
 import type { MemoryFlushSave } from '../memory-flush.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -58,7 +58,9 @@ describe('handleFlushMemory — happy path', () => {
 		expect(deps.summarizer).toHaveBeenCalledOnce();
 		expect(deps.flushSave).toHaveBeenCalledOnce();
 		const reply = getSentText(deps);
-		expect(reply).toMatch(/^Memory flushed: \d+ chars saved\.$|^Memory flushed: \d+ chars saved\.\s*$/);
+		expect(reply).toMatch(
+			/^Memory flushed: \d+ chars saved\.$|^Memory flushed: \d+ chars saved\.\s*$/,
+		);
 	});
 
 	it('reply contains the actual persistedLength returned by sanitizeSummaryOutput', async () => {
@@ -197,7 +199,9 @@ describe('handleFlushMemory — summarizer outcomes', () => {
 
 	it('flushSave throws → deferred reply', async () => {
 		const deps = makeDeps({
-			flushSave: vi.fn().mockRejectedValue(new Error('context store unavailable')) as unknown as MemoryFlushSave,
+			flushSave: vi
+				.fn()
+				.mockRejectedValue(new Error('context store unavailable')) as unknown as MemoryFlushSave,
 		});
 		await handleFlushMemory('', baseCtx(), deps);
 		expect(getSentText(deps)).toContain('deferred');
@@ -218,7 +222,10 @@ describe('handleFlushMemory — late-resolve guard', () => {
 		let resolveSummarizer!: (v: string) => void;
 		const deps = makeDeps({
 			summarizer: vi.fn().mockImplementation(
-				() => new Promise<string>((r) => { resolveSummarizer = r; }),
+				() =>
+					new Promise<string>((r) => {
+						resolveSummarizer = r;
+					}),
 			),
 			timeoutMs: 8_000,
 		});
@@ -251,7 +258,9 @@ describe('handleFlushMemory — security', () => {
 		const hostile = '<script>alert(1)</script>legitimate content here';
 		const deps = makeDeps({ summarizer: vi.fn().mockResolvedValue(hostile) });
 		await handleFlushMemory('', baseCtx(), deps);
-		const written = (deps.flushSave as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as string | undefined;
+		const written = (deps.flushSave as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as
+			| string
+			| undefined;
 		if (written !== undefined) {
 			expect(written).not.toContain('<script>');
 		}

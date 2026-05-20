@@ -81,7 +81,11 @@ function absoluteVerdict(on: string, query = 'topic'): string {
 	});
 }
 
-function windowVerdict(after: string | undefined, before: string | undefined, query = 'topic'): string {
+function windowVerdict(
+	after: string | undefined,
+	before: string | undefined,
+	query = 'topic',
+): string {
 	const timeAnchor: Record<string, unknown> = { type: 'window' };
 	if (after !== undefined) timeAnchor.after = after;
 	if (before !== undefined) timeAnchor.before = before;
@@ -104,16 +108,12 @@ function noRecallVerdict(): string {
 describe('TT-NL1 — Absolute anchor → exact-day UTC range (tz=UTC)', () => {
 	it('"what did we discuss last Friday" — anchor on 2026-05-01 → UTC range for that day', async () => {
 		const spy = vi.fn().mockResolvedValue({ hits: [] });
-		await runRecallPipeline(
-			'what did we discuss last Friday',
-			undefined,
-			{
-				llm: makeLLM(absoluteVerdict('2026-05-01', 'discuss')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('what did we discuss last Friday', undefined, {
+			llm: makeLLM(absoluteVerdict('2026-05-01', 'discuss')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBe('2026-05-01T00:00:00.000Z');
 		expect(arg?.messageBefore).toBe('2026-05-02T00:00:00.000Z');
@@ -121,16 +121,12 @@ describe('TT-NL1 — Absolute anchor → exact-day UTC range (tz=UTC)', () => {
 
 	it('"remind me of the conversation the day before yesterday" — anchor on 2026-05-03 → correct UTC range', async () => {
 		const spy = vi.fn().mockResolvedValue({ hits: [] });
-		await runRecallPipeline(
-			'remind me of the conversation the day before yesterday',
-			undefined,
-			{
-				llm: makeLLM(absoluteVerdict('2026-05-03', 'conversation')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('remind me of the conversation the day before yesterday', undefined, {
+			llm: makeLLM(absoluteVerdict('2026-05-03', 'conversation')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBe('2026-05-03T00:00:00.000Z');
 		expect(arg?.messageBefore).toBe('2026-05-04T00:00:00.000Z');
@@ -162,16 +158,12 @@ describe('TT-NL1 — Absolute anchor → exact-day UTC range (tz=UTC)', () => {
 describe('TT-NL2 — Window anchor → bounded UTC range (tz=UTC)', () => {
 	it('"earlier this month we discussed the budget" — window 2026-05-01 to 2026-05-05 → correct UTC bounds', async () => {
 		const spy = vi.fn().mockResolvedValue({ hits: [] });
-		await runRecallPipeline(
-			'earlier this month we discussed the budget',
-			undefined,
-			{
-				llm: makeLLM(windowVerdict('2026-05-01', '2026-05-05', 'budget')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('earlier this month we discussed the budget', undefined, {
+			llm: makeLLM(windowVerdict('2026-05-01', '2026-05-05', 'budget')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBe('2026-05-01T00:00:00.000Z');
 		expect(arg?.messageBefore).toBe('2026-05-06T00:00:00.000Z');
@@ -179,16 +171,12 @@ describe('TT-NL2 — Window anchor → bounded UTC range (tz=UTC)', () => {
 
 	it('"a couple weeks ago we talked about the trip" — window 2026-04-14 to 2026-04-28 → correct UTC bounds', async () => {
 		const spy = vi.fn().mockResolvedValue({ hits: [] });
-		await runRecallPipeline(
-			'a couple weeks ago we talked about the trip',
-			undefined,
-			{
-				llm: makeLLM(windowVerdict('2026-04-14', '2026-04-28', 'trip')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('a couple weeks ago we talked about the trip', undefined, {
+			llm: makeLLM(windowVerdict('2026-04-14', '2026-04-28', 'trip')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBe('2026-04-14T00:00:00.000Z');
 		expect(arg?.messageBefore).toBe('2026-04-29T00:00:00.000Z');
@@ -196,16 +184,12 @@ describe('TT-NL2 — Window anchor → bounded UTC range (tz=UTC)', () => {
 
 	it('"during March we planned the holiday" — window 2026-03-01 to 2026-03-31 → correct UTC bounds', async () => {
 		const spy = vi.fn().mockResolvedValue({ hits: [] });
-		await runRecallPipeline(
-			'during March we planned the holiday',
-			undefined,
-			{
-				llm: makeLLM(windowVerdict('2026-03-01', '2026-03-31', 'holiday')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('during March we planned the holiday', undefined, {
+			llm: makeLLM(windowVerdict('2026-03-01', '2026-03-31', 'holiday')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBe('2026-03-01T00:00:00.000Z');
 		expect(arg?.messageBefore).toBe('2026-04-01T00:00:00.000Z');
@@ -225,16 +209,12 @@ describe('TT-NL3 — Null anchor → no messageAfter / messageBefore', () => {
 			timeAnchor: null,
 			reason: 'no time reference',
 		});
-		await runRecallPipeline(
-			'what did we talk about the recipe?',
-			undefined,
-			{
-				llm: makeLLM(verdict),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('what did we talk about the recipe?', undefined, {
+			llm: makeLLM(verdict),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBeUndefined();
 		expect(arg?.messageBefore).toBeUndefined();
@@ -252,16 +232,12 @@ describe('TT-NL3 — Null anchor → no messageAfter / messageBefore', () => {
 			timeAnchor: null,
 			reason: 'vague time reference',
 		});
-		await runRecallPipeline(
-			'do you remember when we discussed budgets',
-			undefined,
-			{
-				llm: makeLLM(verdict),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('do you remember when we discussed budgets', undefined, {
+			llm: makeLLM(verdict),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy),
+			timezone: 'UTC',
+		});
 		const arg = spy.mock.calls[0]?.[0];
 		expect(arg?.messageAfter).toBeUndefined();
 		expect(arg?.messageBefore).toBeUndefined();
@@ -325,33 +301,27 @@ describe('TT-NL5 — Multi-step: consecutive NL queries produce independent anch
 		const retrieval2 = makeRetrieval(spy2);
 
 		// First query: absolute anchor
-		await runRecallPipeline(
-			'what did we say last Friday about the trip',
-			undefined,
-			{
-				llm: makeLLM(absoluteVerdict('2026-05-01', 'trip')),
-				logger: makeLogger(),
-				conversationRetrieval: retrieval1,
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('what did we say last Friday about the trip', undefined, {
+			llm: makeLLM(absoluteVerdict('2026-05-01', 'trip')),
+			logger: makeLogger(),
+			conversationRetrieval: retrieval1,
+			timezone: 'UTC',
+		});
 
 		// Second query: null anchor (different LLM verdict)
-		await runRecallPipeline(
-			'what did we discuss about the recipe',
-			undefined,
-			{
-				llm: makeLLM(JSON.stringify({
+		await runRecallPipeline('what did we discuss about the recipe', undefined, {
+			llm: makeLLM(
+				JSON.stringify({
 					shouldRecall: true,
 					query: 'recipe',
 					timeAnchor: null,
 					reason: 'no time reference',
-				})),
-				logger: makeLogger(),
-				conversationRetrieval: retrieval2,
-				timezone: 'UTC',
-			},
-		);
+				}),
+			),
+			logger: makeLogger(),
+			conversationRetrieval: retrieval2,
+			timezone: 'UTC',
+		});
 
 		// First call has date filters
 		const arg1 = spy1.mock.calls[0]?.[0];
@@ -368,27 +338,19 @@ describe('TT-NL5 — Multi-step: consecutive NL queries produce independent anch
 		const spy1 = vi.fn().mockResolvedValue({ hits: [] });
 		const spy2 = vi.fn().mockResolvedValue({ hits: [] });
 
-		await runRecallPipeline(
-			'earlier this month we talked about the budget',
-			undefined,
-			{
-				llm: makeLLM(windowVerdict('2026-05-01', '2026-05-05', 'budget')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy1),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('earlier this month we talked about the budget', undefined, {
+			llm: makeLLM(windowVerdict('2026-05-01', '2026-05-05', 'budget')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy1),
+			timezone: 'UTC',
+		});
 
-		await runRecallPipeline(
-			'a couple weeks ago we discussed the project',
-			undefined,
-			{
-				llm: makeLLM(windowVerdict('2026-04-14', '2026-04-28', 'project')),
-				logger: makeLogger(),
-				conversationRetrieval: makeRetrieval(spy2),
-				timezone: 'UTC',
-			},
-		);
+		await runRecallPipeline('a couple weeks ago we discussed the project', undefined, {
+			llm: makeLLM(windowVerdict('2026-04-14', '2026-04-28', 'project')),
+			logger: makeLogger(),
+			conversationRetrieval: makeRetrieval(spy2),
+			timezone: 'UTC',
+		});
 
 		const arg1 = spy1.mock.calls[0]?.[0];
 		expect(arg1?.messageAfter).toBe('2026-05-01T00:00:00.000Z');

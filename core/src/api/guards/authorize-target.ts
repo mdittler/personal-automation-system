@@ -14,10 +14,7 @@ import type { AuthenticatedActor } from '../../types/auth-actor.js';
  *
  * Bypassed for: isPlatformAdmin or authMethod === 'legacy-api-token'.
  */
-export function assertCallerIsTargetUser(
-	actor: AuthenticatedActor,
-	targetUserId: string,
-): boolean {
+export function assertCallerIsTargetUser(actor: AuthenticatedActor, targetUserId: string): boolean {
 	if (actor.isPlatformAdmin || actor.authMethod === 'legacy-api-token') return true;
 	return actor.userId === targetUserId;
 }

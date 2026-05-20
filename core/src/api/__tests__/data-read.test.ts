@@ -334,8 +334,9 @@ describe('API Data Read Route — household-aware read (C3/R2)', () => {
 
 	function createSpaceServiceWithKinds() {
 		return {
-			isMember: vi.fn((spaceId: string, userId: string) =>
-				['family', 'collab-1'].includes(spaceId) && userId === 'user1',
+			isMember: vi.fn(
+				(spaceId: string, userId: string) =>
+					['family', 'collab-1'].includes(spaceId) && userId === 'user1',
 			),
 			getSpace: vi.fn((spaceId: string) => {
 				if (spaceId === 'family') {
@@ -418,14 +419,7 @@ describe('API Data Read Route — household-aware read (C3/R2)', () => {
 	});
 
 	it('reads household-space file from households/<hh>/spaces/<s>/<app>/ path', async () => {
-		const spacePath = join(
-			dataDir,
-			'households',
-			'hh-alpha',
-			'spaces',
-			'family',
-			'notes',
-		);
+		const spacePath = join(dataDir, 'households', 'hh-alpha', 'spaces', 'family', 'notes');
 		await mkdir(spacePath, { recursive: true });
 		await writeFile(join(spacePath, 'shared.md'), 'Household space data');
 

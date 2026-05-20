@@ -5,11 +5,7 @@
  * cleanup() is a no-op required by ShutdownManager.
  */
 
-import type {
-	InlineButton,
-	SentMessage,
-	TelegramService,
-} from '../../types/telegram.js';
+import type { InlineButton, SentMessage, TelegramService } from '../../types/telegram.js';
 
 export interface RecordedMessage {
 	userId: string;

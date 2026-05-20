@@ -44,6 +44,10 @@ import type {
 	SessionControlResult,
 	detectSessionControl,
 } from '../conversation/session-control-classifier.js';
+import type {
+	SessionControlClassificationEntry,
+	SessionControlLogger,
+} from '../conversation/session-control-logger.js';
 import type { HouseholdService } from '../household/index.js';
 import type { InteractionContextService } from '../interaction-context/index.js';
 import type { InviteService } from '../invite/index.js';
@@ -61,7 +65,6 @@ import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import { PhotoClassifier } from './photo-classifier.js';
 import type { RouteVerifier, VerifyAction } from './route-verifier.js';
-import type { SessionControlLogger, SessionControlClassificationEntry } from '../conversation/session-control-logger.js';
 
 /** Default confidence threshold for intent classification. */
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
@@ -146,10 +149,7 @@ function groupCatalogForHelp(catalog: CommandCatalogEntry[]): HelpGroups {
 		}
 		// source === 'app' — suppress entries that duplicate a built-in
 		// (e.g. legacy chatbot manifest re-declaring /ask, /newchat, /title).
-		if (
-			conversationCanonicals.has(entry.canonical) ||
-			BUILTIN_COMMAND_NAMES.has(entry.canonical)
-		) {
+		if (conversationCanonicals.has(entry.canonical) || BUILTIN_COMMAND_NAMES.has(entry.canonical)) {
 			continue;
 		}
 		const appId = entry.appId ?? '__unknown';
@@ -175,9 +175,7 @@ function formatHelpLine(entry: CommandCatalogEntry): string {
 			? `${escapeMarkdown(entry.canonical)} ${escapeMarkdown(entry.argSignature)}`
 			: escapeMarkdown(entry.canonical);
 	const aliasSuffix =
-		entry.aliases.length > 0
-			? ` ${escapeMarkdown(`(alias: ${entry.aliases.join(', ')})`)}`
-			: '';
+		entry.aliases.length > 0 ? ` ${escapeMarkdown(`(alias: ${entry.aliases.join(', ')})`)}` : '';
 	return `${left} — ${escapeMarkdown(entry.description)}${aliasSuffix}`;
 }
 
@@ -961,7 +959,16 @@ export class Router {
 	 * can still use /ask, /edit, and /notes explicitly (by design; see plan).
 	 */
 	private async dispatchConversationCommand(
-		name: 'ask' | 'edit' | 'newchat' | 'title' | 'notes' | 'recall' | 'refresh-memory' | 'flush-memory' | 'settings',
+		name:
+			| 'ask'
+			| 'edit'
+			| 'newchat'
+			| 'title'
+			| 'notes'
+			| 'recall'
+			| 'refresh-memory'
+			| 'flush-memory'
+			| 'settings',
 		args: string[],
 		ctx: MessageContext,
 		opts?: { rawArgs?: string; isAdmin?: boolean },
@@ -1053,12 +1060,7 @@ export class Router {
 			groups.admin.length === 0 &&
 			groups.conversation.length === 0 &&
 			groups.app.size === 0;
-		if (
-			emptyHelp &&
-			!this.conversationService &&
-			!this.spaceService &&
-			!this.inviteService
-		) {
+		if (emptyHelp && !this.conversationService && !this.spaceService && !this.inviteService) {
 			lines.push('No commands available.');
 		}
 

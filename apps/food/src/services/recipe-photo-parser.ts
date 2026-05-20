@@ -4,8 +4,8 @@
 
 import type { CoreServices } from '@pas/core/types';
 import type { ParsedRecipe } from '../types.js';
-import { parseJsonResponse, attachCanonicalNames } from './recipe-parser.js';
 import { fenceCaption } from '../utils/sanitize.js';
+import { attachCanonicalNames, parseJsonResponse } from './recipe-parser.js';
 
 const PHOTO_RECIPE_PROMPT = `You are a recipe parser. Extract the recipe from this photo into a structured JSON format.
 The photo may be a cookbook page, a handwritten recipe card, or a screenshot.

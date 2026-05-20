@@ -8,12 +8,12 @@
  *  - Empty title is accepted (TitleService rejects upstream; this layer is dumb)
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChatTranscriptIndex } from '../index.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatTranscriptIndex } from '../chat-transcript-index.js';
+import { createChatTranscriptIndex } from '../index.js';
 
 describe('ChatTranscriptIndex.updateTitle', () => {
 	let dir: string;
