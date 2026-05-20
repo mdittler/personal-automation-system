@@ -14,13 +14,20 @@ FILE_PATH=$(extract_path) || FILE_PATH=""
 case "$FILE_PATH" in *.ts|*.tsx|*.js|*.jsx|*.json) ;; *) exit 0 ;; esac
 [ -f "$FILE_PATH" ] || exit 0
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-[ -n "$REPO_ROOT" ] && cd "$REPO_ROOT"
-OUTPUT=$(npx biome check --reporter=github "$FILE_PATH" 2>&1)
-ERRORS=$(echo "$OUTPUT" | grep '^::error' || true)
+[ -n "$REPO_ROOT" ] || exit 0
+cd "$REPO_ROOT" || exit 0
+# Lint via a repo-relative path. An absolute path can contain a `.claude`
+# segment (worktrees live under <repo>/.claude/worktrees/), which Biome's
+# files.ignore matches — silently skipping the file.
+REL="${FILE_PATH#"$REPO_ROOT"/}"
+BIOME="$REPO_ROOT/node_modules/.bin/biome"
+[ -x "$BIOME" ] || BIOME="npx biome"
+OUTPUT=$($BIOME check --reporter=github "$REL" 2>&1)
+ERRORS=$(grep '^::error' <<< "$OUTPUT" || true)
 [ -z "$ERRORS" ] && exit 0
-MSG="BIOME ERRORS in $FILE_PATH — fix now (errors block git push/merge):
+MSG="BIOME ERRORS in $REL — fix now (errors block git push/merge):
 $ERRORS
-Run: pnpm exec biome check --write '$FILE_PATH'"
+Run: pnpm exec biome check --write '$REL'"
 emit_json() {
   python3 -c "import json,sys; print(json.dumps({'hookSpecificOutput':{'hookEventName':'PostToolUse','additionalContext':sys.argv[1]}}))" "$MSG" 2>/dev/null && return
   python  -c "import json,sys; print(json.dumps({'hookSpecificOutput':{'hookEventName':'PostToolUse','additionalContext':sys.argv[1]}}))" "$MSG" 2>/dev/null && return
