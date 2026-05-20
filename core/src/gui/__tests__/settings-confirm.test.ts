@@ -448,11 +448,11 @@ describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 		// YAML on disk updated
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+		const sessions = ((parsed.chat as Record<string, unknown>)?.sessions ?? {}) as Record<
 			string,
 			unknown
 		>;
-		expect(sessions['auto_prune']).toBe(true);
+		expect(sessions.auto_prune).toBe(true);
 	});
 
 	it('correct phrase for reset (system dangerous) → redirect + key removed from YAML', async () => {
@@ -483,7 +483,7 @@ describe('POST /confirm — exact phrase match (REQ-SETTINGS-027)', () => {
 		// Key should be absent from YAML (reset to schema default)
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+		const sessions = ((parsed.chat as Record<string, unknown>)?.sessions ?? {}) as Record<
 			string,
 			unknown
 		>;
@@ -754,7 +754,7 @@ describe('Server-side re-validation at POST confirm time', () => {
 		// YAML unchanged
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+		const sessions = ((parsed.chat as Record<string, unknown>)?.sessions ?? {}) as Record<
 			string,
 			unknown
 		>;

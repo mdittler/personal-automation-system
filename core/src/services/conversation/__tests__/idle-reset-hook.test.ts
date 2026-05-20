@@ -381,7 +381,7 @@ describe('P8b: endActive CAS ordering', () => {
 	it('endActive runs BEFORE summarize (CAS-first ordering)', async () => {
 		const callOrder: string[] = [];
 		const deps = makeFlushDeps();
-		vi.mocked(deps.chatSessions.endActive).mockImplementation(async (...args) => {
+		vi.mocked(deps.chatSessions.endActive).mockImplementation(async (..._args) => {
 			callOrder.push('endActive');
 			return { endedSessionId: IDLE_SESSION.id };
 		});

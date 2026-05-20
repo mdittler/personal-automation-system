@@ -345,7 +345,7 @@ describe('SettingsWriter.writeBatch()', () => {
 		const chatbotCfg = makeAppConfig();
 		const foodCfg = makeAppConfig();
 		const { writer } = makeWriter(chatbotCfg, foodCfg);
-		const items: WriteRequest[] = [
+		const _items: WriteRequest[] = [
 			{ userId: 'u1', appId: 'chatbot', key: 'log_to_notes', rawValue: 'true', source: 'nl' },
 			{ userId: 'u1', appId: 'food', key: 'default_store', rawValue: 'bad_boolean', source: 'nl' },
 		];

@@ -1472,12 +1472,10 @@ describe('ConversationRetrievalServiceImpl — buildContextSnapshot settings fai
 
 	it('does NOT push "settings" to failures when reader succeeds', async () => {
 		const successReader = {
-			buildCatalog: vi
-				.fn()
-				.mockResolvedValue({
-					catalog: '## Your settings\n- Foo (a.b): ON',
-					trustedInstructions: '',
-				}),
+			buildCatalog: vi.fn().mockResolvedValue({
+				catalog: '## Your settings\n- Foo (a.b): ON',
+				trustedInstructions: '',
+			}),
 		} as never;
 		const systemInfo = {
 			isUserAdmin: vi.fn().mockReturnValue(false),

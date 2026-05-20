@@ -270,7 +270,7 @@ describe('Router built-in conversation commands', () => {
 	it('/ask bypasses chatbot toggle — still dispatches to ConversationService when chatbot is toggled off', async () => {
 		const appToggle: AppToggleStore = {
 			isEnabled: vi.fn().mockImplementation(
-				(userId: string, appId: string) => appId !== 'chatbot', // chatbot is OFF
+				(_userId: string, appId: string) => appId !== 'chatbot', // chatbot is OFF
 			),
 		} as unknown as AppToggleStore;
 
@@ -399,7 +399,9 @@ describe('Router /help with conversation built-ins', () => {
 
 	it('/help lists conversation commands for user with chatbot toggled OFF', async () => {
 		const appToggle: AppToggleStore = {
-			isEnabled: vi.fn().mockImplementation((userId: string, appId: string) => appId !== 'chatbot'),
+			isEnabled: vi
+				.fn()
+				.mockImplementation((_userId: string, appId: string) => appId !== 'chatbot'),
 		} as unknown as AppToggleStore;
 
 		const { telegram, router } = buildRouter({ conversationService: conv, appToggle });

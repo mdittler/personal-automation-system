@@ -24,10 +24,10 @@ describe('item-parser', () => {
 
 	describe('DEPARTMENT_MAP', () => {
 		it('maps common items to departments', () => {
-			expect(DEPARTMENT_MAP['milk']).toBe('Dairy & Eggs');
-			expect(DEPARTMENT_MAP['chicken']).toBe('Meat & Seafood');
-			expect(DEPARTMENT_MAP['bread']).toBe('Bakery');
-			expect(DEPARTMENT_MAP['spinach']).toBe('Produce');
+			expect(DEPARTMENT_MAP.milk).toBe('Dairy & Eggs');
+			expect(DEPARTMENT_MAP.chicken).toBe('Meat & Seafood');
+			expect(DEPARTMENT_MAP.bread).toBe('Bakery');
+			expect(DEPARTMENT_MAP.spinach).toBe('Produce');
 		});
 	});
 

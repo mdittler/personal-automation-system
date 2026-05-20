@@ -167,7 +167,7 @@ describe('freezer-handler', () => {
 					'freezer.yaml': makeFreezerYaml(items),
 					'waste-log.yaml': makeWasteYaml(),
 				}) as unknown as ScopedDataStore;
-				vi.mocked(store.write).mockImplementation(async (path: string, content: string) => {
+				vi.mocked(store.write).mockImplementation(async (path: string, _content: string) => {
 					if (path === 'waste-log.yaml') {
 						throw new Error('waste append failed');
 					}

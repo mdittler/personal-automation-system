@@ -154,10 +154,10 @@ function countVerdicts(results: readonly ManifestCaseResult[]): {
 	error: number;
 	budgetExceeded: number;
 } {
-	let pass = 0,
-		fail = 0,
-		error = 0,
-		budgetExceeded = 0;
+	let pass = 0;
+	let fail = 0;
+	let error = 0;
+	let budgetExceeded = 0;
 	for (const r of results) {
 		if (r.verdict === 'pass') pass++;
 		else if (r.verdict === 'fail') fail++;

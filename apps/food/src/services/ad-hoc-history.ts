@@ -89,7 +89,7 @@ async function read(store: ScopedDataStore): Promise<StoreFile> {
 async function preserveCorruptFile(
 	store: ScopedDataStore,
 	raw: string,
-	err: unknown,
+	_err: unknown,
 ): Promise<void> {
 	const ts = new Date().toISOString().replace(/[:.]/g, '-');
 	const corruptPath = `corrupt/${FILE.replace('.yaml', '')}-${ts}.yaml`;
@@ -98,11 +98,6 @@ async function preserveCorruptFile(
 	} catch {
 		// Best-effort.
 	}
-	// eslint-disable-next-line no-console
-	console.error(
-		`[ad-hoc-history] Corrupt YAML preserved as ${corruptPath}:`,
-		(err as Error)?.message ?? err,
-	);
 }
 
 async function write(store: ScopedDataStore, data: StoreFile): Promise<void> {

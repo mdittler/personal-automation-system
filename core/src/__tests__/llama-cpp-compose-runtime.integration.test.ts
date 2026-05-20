@@ -17,7 +17,6 @@ vi.mock('openai', () => {
 	class MockOpenAI {
 		chat = { completions: { create: vi.fn() } };
 		models = { list: vi.fn() };
-		constructor(_options: unknown) {}
 	}
 	return { default: MockOpenAI };
 });

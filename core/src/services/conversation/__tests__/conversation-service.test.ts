@@ -653,7 +653,7 @@ describe('ConversationService handleMessage', () => {
 	it('falls back to plain text when Telegram rejects a split chunk with Markdown error', async () => {
 		vi.mocked(services.config.getAll).mockResolvedValue({ auto_detect_pas: false });
 		// Long response that will be split
-		const longResponse = 'Section one.\n\n'.padEnd(4000, 'x') + '\n\nSection two.';
+		const longResponse = `${'Section one.\n\n'.padEnd(4000, 'x')}\n\nSection two.`;
 		vi.mocked(services.llm.complete).mockResolvedValueOnce(longResponse);
 		// First send call fails (Telegram Markdown error), subsequent calls succeed
 		vi.mocked(services.telegram.send)

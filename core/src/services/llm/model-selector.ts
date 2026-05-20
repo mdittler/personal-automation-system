@@ -293,8 +293,7 @@ export class ModelSelector {
 	private throwIfFrozen(tier: ModelTier, provider: string): void {
 		if (!this.transientOverrides.has(tier)) return;
 		throw new Error(
-			`Transient override for tier '${tier}' uses provider '${provider}' which is not available. ` +
-				`Register the provider (e.g. set OLLAMA_URL) or drop the override.`,
+			`Transient override for tier '${tier}' uses provider '${provider}' which is not available. Register the provider (e.g. set OLLAMA_URL) or drop the override.`,
 		);
 	}
 

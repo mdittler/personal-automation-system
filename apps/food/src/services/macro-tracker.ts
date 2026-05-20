@@ -36,7 +36,7 @@ const MACRO_FIELDS: Array<keyof MacroData & keyof MacroTargets> = [
 function nutritionPath(month: string): string {
 	// Validate YYYY-MM format to prevent path traversal
 	if (!/^\d{4}-\d{2}$/.test(month)) {
-		throw new Error(`Invalid month format: expected YYYY-MM`);
+		throw new Error('Invalid month format: expected YYYY-MM');
 	}
 	return `nutrition/${month}.yaml`;
 }
@@ -76,7 +76,7 @@ async function preserveCorruptFile(
 	store: ScopedDataStore,
 	raw: string,
 	month: string,
-	err: unknown,
+	_err: unknown,
 ): Promise<void> {
 	const ts = new Date().toISOString().replace(/[:.]/g, '-');
 	const corruptPath = `corrupt/nutrition-${month}-${ts}.yaml`;
@@ -85,11 +85,6 @@ async function preserveCorruptFile(
 	} catch {
 		// If we cannot preserve, swallow — surfacing this would obscure the original error.
 	}
-	// eslint-disable-next-line no-console
-	console.error(
-		`[macro-tracker] Corrupt YAML for ${month} preserved as ${corruptPath}:`,
-		(err as Error)?.message ?? err,
-	);
 }
 
 export function sumMacros(...entries: MacroData[]): MacroData {
@@ -191,11 +186,6 @@ export async function logMealMacros(
 	// M2: validate and normalize the entry before persisting
 	const parsed = MealMacroEntrySchema.safeParse(entry);
 	if (!parsed.success) {
-		// eslint-disable-next-line no-console
-		console.error(
-			'[macro-tracker] logMealMacros: invalid entry, skipping write:',
-			parsed.error.flatten(),
-		);
 		return;
 	}
 	const validEntry = parsed.data as MealMacroEntry;

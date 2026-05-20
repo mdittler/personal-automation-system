@@ -1479,11 +1479,11 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 				// Session-control confirmation callbacks (grey-zone NL /newchat).
 				// Callback data format: "sc:yes:<nonce>" or "sc:no:<nonce>".
 				// The nonce prevents a stale button from consuming a newer pending entry.
-				if (data.startsWith(SC_YES + ':') || data.startsWith(SC_NO + ':')) {
+				if (data.startsWith(`${SC_YES}:`) || data.startsWith(`${SC_NO}:`)) {
 					const parts = data.split(':');
 					// parts: ['sc', 'yes'/'no', '<nonce>']
 					const entryId = parts[2];
-					const isYes = data.startsWith(SC_YES + ':');
+					const isYes = data.startsWith(`${SC_YES}:`);
 					const scHouseholdId = householdService.getHouseholdForUser(userId) ?? undefined;
 
 					// Peek first to check the nonce without consuming

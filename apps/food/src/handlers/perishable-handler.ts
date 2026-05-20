@@ -51,7 +51,7 @@ function urgencyText(daysLeft: number): string {
 export async function handlePerishableCallback(
 	services: CoreServices,
 	action: string,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 	store: ScopedDataStore,
@@ -198,7 +198,7 @@ export async function handlePerishableCheckJob(
 				callbackData: `app:food:pa:toss:${idx}:${enc}`,
 			});
 			row.push({
-				text: `👍 Still good`,
+				text: '👍 Still good',
 				callbackData: `app:food:pa:ok:${idx}:${enc}`,
 			});
 		} else {
@@ -207,7 +207,7 @@ export async function handlePerishableCheckJob(
 				callbackData: `app:food:pa:freeze:${idx}:${enc}`,
 			});
 			row.push({
-				text: `👍 Still good`,
+				text: '👍 Still good',
 				callbackData: `app:food:pa:ok:${idx}:${enc}`,
 			});
 		}

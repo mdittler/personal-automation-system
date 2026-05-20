@@ -26,7 +26,7 @@ let casesDir: string;
 let cacheDir: string;
 let fixturesDir: string;
 
-const TYPES_PATH = join(process.cwd(), 'regression/src/shared/types.ts');
+const _TYPES_PATH = join(process.cwd(), 'regression/src/shared/types.ts');
 
 const oneRoutingCase = (id: string) => `
 const c = {

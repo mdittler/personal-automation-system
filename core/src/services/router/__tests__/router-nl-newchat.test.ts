@@ -345,10 +345,10 @@ describe('Router NL /newchat hook', () => {
 			const allButtons = (buttons as { text: string; callbackData: string }[][]).flat();
 			const callbackDatas = allButtons.map((b) => b.callbackData);
 			// Nonce-bearing: starts with SC_YES/SC_NO prefix followed by a colon + hex nonce
-			expect(callbackDatas.some((d) => d.startsWith(SC_YES + ':'))).toBe(true);
-			expect(callbackDatas.some((d) => d.startsWith(SC_NO + ':'))).toBe(true);
+			expect(callbackDatas.some((d) => d.startsWith(`${SC_YES}:`))).toBe(true);
+			expect(callbackDatas.some((d) => d.startsWith(`${SC_NO}:`))).toBe(true);
 			// Also verify the nonce is a non-empty hex string
-			const yesData = callbackDatas.find((d) => d.startsWith(SC_YES + ':'))!;
+			const yesData = callbackDatas.find((d) => d.startsWith(`${SC_YES}:`))!;
 			const nonce = yesData.split(':')[2];
 			expect(nonce).toMatch(/^[0-9a-f]+$/);
 		});

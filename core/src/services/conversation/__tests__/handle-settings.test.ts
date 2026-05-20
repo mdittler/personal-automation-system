@@ -195,9 +195,7 @@ function makeRegistry(): SettingsRegistry {
 // Mocked services
 // ---------------------------------------------------------------------------
 
-function makeAppConfig(
-	overrides: Record<string, unknown> | null = null,
-): AppConfigService & {
+function makeAppConfig(overrides: Record<string, unknown> | null = null): AppConfigService & {
 	updateOverrides: ReturnType<typeof vi.fn>;
 	removeOverride: ReturnType<typeof vi.fn>;
 } {

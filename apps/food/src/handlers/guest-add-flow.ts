@@ -88,21 +88,21 @@ function buildDietButtons(
 ): Array<Array<{ text: string; callbackData: string }>> {
 	const row1 = [
 		{
-			text: (selected.includes('vegetarian') ? '✓ ' : '') + 'Vegetarian',
+			text: `${selected.includes('vegetarian') ? '✓ ' : ''}Vegetarian`,
 			callbackData: 'app:food:host:gadd:diet:vegetarian',
 		},
 		{
-			text: (selected.includes('vegan') ? '✓ ' : '') + 'Vegan',
+			text: `${selected.includes('vegan') ? '✓ ' : ''}Vegan`,
 			callbackData: 'app:food:host:gadd:diet:vegan',
 		},
 	];
 	const row2 = [
 		{
-			text: (selected.includes('gluten-free') ? '✓ ' : '') + 'Gluten-free',
+			text: `${selected.includes('gluten-free') ? '✓ ' : ''}Gluten-free`,
 			callbackData: 'app:food:host:gadd:diet:gluten-free',
 		},
 		{
-			text: (selected.includes('dairy-free') ? '✓ ' : '') + 'Dairy-free',
+			text: `${selected.includes('dairy-free') ? '✓ ' : ''}Dairy-free`,
 			callbackData: 'app:food:host:gadd:diet:dairy-free',
 		},
 	];
@@ -213,7 +213,7 @@ export async function beginGuestAddFlow(services: CoreServices, userId: string):
  */
 export async function handleGuestAddReply(
 	services: CoreServices,
-	sharedStore: ScopedDataStore,
+	_sharedStore: ScopedDataStore,
 	userId: string,
 	text: string,
 ): Promise<boolean> {

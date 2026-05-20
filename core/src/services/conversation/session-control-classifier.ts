@@ -117,12 +117,12 @@ function fenceUntrusted(text: string): string {
 
 const CLASSIFIER_SYSTEM_PROMPT =
 	`You are a classifier. Determine if the user's message is requesting to start a new chat session, clear their conversation history, or begin fresh.\n\n` +
-	`Respond ONLY with valid JSON, no markdown fences, no explanation:\n` +
+	'Respond ONLY with valid JSON, no markdown fences, no explanation:\n' +
 	`{"intent":"new_session"|"continue"|"unclear","confidence":0.0-1.0,"reason":"brief reason"}\n\n` +
 	`- "new_session": user wants to start fresh, reset, begin a new conversation\n` +
 	`- "continue": user is continuing the current conversation (most messages)\n` +
 	`- "unclear": could go either way\n\n` +
-	`Examples:\n` +
+	'Examples:\n' +
 	`- "start fresh" → {"intent":"new_session","confidence":0.95,"reason":"explicit start-over phrasing"}\n` +
 	`- "what does /newchat do?" → {"intent":"continue","confidence":0.95,"reason":"meta-question about a command, not a session-reset request"}\n` +
 	`- "don't start over" → {"intent":"continue","confidence":0.9,"reason":"negation of reset"}`;

@@ -243,7 +243,7 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
 		const res = await app.inject({
 			method: 'GET',
-			url: `/gui/data/browse?scope=space&userId=sp-1`,
+			url: '/gui/data/browse?scope=space&userId=sp-1',
 			cookies,
 		});
 		expect(res.statusCode).toBe(200);
@@ -255,7 +255,7 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
 		const res = await app.inject({
 			method: 'GET',
-			url: `/gui/data/browse?scope=system`,
+			url: '/gui/data/browse?scope=system',
 			cookies,
 		});
 		expect(res.statusCode).toBe(403);
@@ -265,7 +265,7 @@ describe('D5b-5: data/browse actor-based authorization', () => {
 		const cookies = await loginAs(ADMIN_ID, ADMIN_PASSWORD);
 		const systemRes = await app.inject({
 			method: 'GET',
-			url: `/gui/data/browse?scope=system`,
+			url: '/gui/data/browse?scope=system',
 			cookies,
 		});
 		expect(systemRes.statusCode).toBe(200);
@@ -414,7 +414,7 @@ describe('D5b-5: data/browse space not-joined → 403', () => {
 
 		const res = await app.inject({
 			method: 'GET',
-			url: `/gui/data/browse?scope=space&userId=sp-x`,
+			url: '/gui/data/browse?scope=space&userId=sp-x',
 			cookies,
 		});
 		expect(res.statusCode).toBe(403);

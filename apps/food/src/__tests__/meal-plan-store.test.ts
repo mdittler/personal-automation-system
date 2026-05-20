@@ -92,7 +92,7 @@ describe('loadCurrentPlan', () => {
 
 	it('parses valid YAML with frontmatter', async () => {
 		const plan = makePlan();
-		const content = '---\ntitle: Meal Plan\ndate: 2026-03-31\n---\n' + stringify(plan);
+		const content = `---\ntitle: Meal Plan\ndate: 2026-03-31\n---\n${stringify(plan)}`;
 		const store = createMockScopedStore({
 			read: vi.fn().mockResolvedValue(content),
 		});

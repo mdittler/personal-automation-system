@@ -71,7 +71,7 @@ export function getTonightsMeal(plan: MealPlan, dateStr: string): PlannedMeal | 
 
 /** Format a date string (YYYY-MM-DD) as "Mon Mar 31" short form. */
 function formatShortDate(dateStr: string): string {
-	const d = new Date(dateStr + 'T00:00:00Z');
+	const d = new Date(`${dateStr}T00:00:00Z`);
 	return d.toLocaleDateString('en-US', {
 		weekday: 'short',
 		month: 'short',
@@ -82,8 +82,8 @@ function formatShortDate(dateStr: string): string {
 
 /** Format a date range for the plan header: "Mar 31 – Apr 6". */
 function formatDateRange(startDate: string, endDate: string): string {
-	const start = new Date(startDate + 'T00:00:00Z');
-	const end = new Date(endDate + 'T00:00:00Z');
+	const start = new Date(`${startDate}T00:00:00Z`);
+	const end = new Date(`${endDate}T00:00:00Z`);
 	const fmt = (d: Date) =>
 		d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 	return `${fmt(start)} – ${fmt(end)}`;
@@ -91,7 +91,7 @@ function formatDateRange(startDate: string, endDate: string): string {
 
 /** Get the day-of-week abbreviation for a date string: "Mon", "Tue", etc. */
 function dayAbbrev(dateStr: string): string {
-	const d = new Date(dateStr + 'T00:00:00Z');
+	const d = new Date(`${dateStr}T00:00:00Z`);
 	return d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
 }
 
@@ -195,7 +195,7 @@ export function formatTonightMessage(meal: PlannedMeal, recipe: Recipe | null): 
 		// Quick prep hint: first instruction step, truncated at 120 chars
 		const firstStep = recipe.instructions[0];
 		if (firstStep) {
-			const truncated = firstStep.length > 120 ? firstStep.slice(0, 119) + '…' : firstStep;
+			const truncated = firstStep.length > 120 ? `${firstStep.slice(0, 119)}…` : firstStep;
 			lines.push(`Quick prep: ${escapeMarkdown(truncated)}`);
 		}
 	} else if (meal.description) {

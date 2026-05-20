@@ -144,13 +144,11 @@ describe('/edit command (core handler)', () => {
 
 		it('sends ambiguous error as user-friendly message', async () => {
 			const editService = makeEditService({
-				proposeEdit: vi
-					.fn()
-					.mockResolvedValue({
-						kind: 'error',
-						action: 'ambiguous',
-						message: 'Multiple files match',
-					}),
+				proposeEdit: vi.fn().mockResolvedValue({
+					kind: 'error',
+					action: 'ambiguous',
+					message: 'Multiple files match',
+				}),
 			});
 			const deps = makeDeps(editService);
 			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
@@ -176,13 +174,11 @@ describe('/edit command (core handler)', () => {
 
 		it('sends generation_failed message verbatim', async () => {
 			const editService = makeEditService({
-				proposeEdit: vi
-					.fn()
-					.mockResolvedValue({
-						kind: 'error',
-						action: 'generation_failed',
-						message: 'LLM output too large.',
-					}),
+				proposeEdit: vi.fn().mockResolvedValue({
+					kind: 'error',
+					action: 'generation_failed',
+					message: 'LLM output too large.',
+				}),
 			});
 			const deps = makeDeps(editService);
 			await handleEdit(['fix something'], makeCtx('/edit fix something'), deps);
@@ -255,12 +251,10 @@ describe('/edit command (core handler)', () => {
 			const proposal = makeProposal();
 			const editService = makeEditService({
 				proposeEdit: vi.fn().mockResolvedValue(proposal),
-				confirmEdit: vi
-					.fn()
-					.mockResolvedValue({
-						ok: false,
-						reason: 'File was modified since the proposal was generated.',
-					}),
+				confirmEdit: vi.fn().mockResolvedValue({
+					ok: false,
+					reason: 'File was modified since the proposal was generated.',
+				}),
 			});
 			const deps = makeDeps(editService);
 			deps.telegram.sendOptions = vi.fn().mockResolvedValue('Confirm');

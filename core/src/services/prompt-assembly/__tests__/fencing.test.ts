@@ -84,9 +84,7 @@ describe('formatConversationHistory — photo-summary truncation exemption', () 
 	const ts = '2026-04-29T12:00:00Z';
 
 	it('exempts [Photo: receipt] pair from 500-char cap (renders assistant turn > 500 chars)', () => {
-		const longAssistant =
-			'🧾 Costco — 2026-04-29, 21 items, total $306.77\n' +
-			Array.from({ length: 21 }, (_, i) => `- Distinctive Item Name ${i} that exists`).join('\n');
+		const longAssistant = `🧾 Costco — 2026-04-29, 21 items, total $306.77\n${Array.from({ length: 21 }, (_, i) => `- Distinctive Item Name ${i} that exists`).join('\n')}`;
 		const out = formatConversationHistory([
 			{ role: 'user', content: '[Photo: receipt]', timestamp: ts },
 			{ role: 'assistant', content: longAssistant, timestamp: ts },

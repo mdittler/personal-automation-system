@@ -195,7 +195,7 @@ describe('ck:t — set timer', () => {
 		await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 		expect(session?.timerStepIndex).toBeUndefined();
 	});
 
@@ -210,7 +210,7 @@ describe('ck:t — set timer', () => {
 		expect(services.telegram.editMessage).not.toHaveBeenCalled();
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 	});
 
 	it('replaces existing timer when setting a new one', async () => {
@@ -264,11 +264,11 @@ describe('ck:tc — cancel timer', () => {
 		await handleCookCallback(services, 't', 'user1', 100, 456);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeDefined();
+		expect(session!.timerHandle).toBeDefined();
 
 		await handleCookCallback(services, 'tc', 'user1', 100, 456);
 
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 		expect(session?.timerStepIndex).toBeUndefined();
 	});
 
@@ -328,11 +328,11 @@ describe('auto-cancel on navigation', () => {
 		await handleCookCallback(services, 't', 'user1', 100, 456);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeDefined();
+		expect(session!.timerHandle).toBeDefined();
 
 		// Navigate next — should auto-cancel timer
 		await handleCookCallback(services, 'n', 'user1', 100, 456);
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 
 		// Timer should not fire
 		vi.mocked(services.telegram.sendWithButtons).mockClear();
@@ -350,10 +350,10 @@ describe('auto-cancel on navigation', () => {
 		await handleCookCallback(services, 't', 'user1', 100, 456);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeDefined();
+		expect(session!.timerHandle).toBeDefined();
 
 		await handleCookCallback(services, 'b', 'user1', 100, 456);
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 	});
 
 	it('auto-cancels timer when pressing done (ck:d)', async () => {
@@ -363,7 +363,7 @@ describe('auto-cancel on navigation', () => {
 		await handleCookCallback(services, 't', 'user1', 100, 456);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeDefined();
+		expect(session!.timerHandle).toBeDefined();
 
 		await handleCookCallback(services, 'd', 'user1', 100, 456);
 		// Session is now ended; timer was cleared
@@ -377,10 +377,10 @@ describe('auto-cancel on navigation', () => {
 		await handleCookCallback(services, 't', 'user1', 100, 456);
 
 		const session = getSession('user1');
-		expect(session?.timerHandle).toBeDefined();
+		expect(session!.timerHandle).toBeDefined();
 
 		await handleCookTextAction(services, 'next', makeCtx());
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 	});
 
 	it('auto-cancels timer on text "back"', async () => {
@@ -391,7 +391,7 @@ describe('auto-cancel on navigation', () => {
 
 		const session = getSession('user1');
 		await handleCookTextAction(services, 'back', makeCtx());
-		expect(session?.timerHandle).toBeUndefined();
+		expect(session!.timerHandle).toBeUndefined();
 	});
 
 	it('auto-cancels timer on text "done"', async () => {

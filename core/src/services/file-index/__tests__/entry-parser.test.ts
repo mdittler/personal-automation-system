@@ -188,7 +188,7 @@ Content`;
 	});
 
 	it('handles file with no frontmatter', () => {
-		const content = `# Just a heading\n\nSome content.`;
+		const content = '# Just a heading\n\nSome content.';
 		const result = parseFileContent(content);
 		expect(result.title).toBe('Just a heading');
 		expect(result.type).toBeNull();
@@ -237,19 +237,19 @@ Body.`;
 	});
 
 	it('rejects invalid month in date field (month 00)', () => {
-		const content = `---\ndate: 9999-00-01\n---\nBody.`;
+		const content = '---\ndate: 9999-00-01\n---\nBody.';
 		const result = parseFileContent(content);
 		expect(result.dates.earliest).toBeNull();
 	});
 
 	it('rejects invalid month in date field (month 13)', () => {
-		const content = `---\ndate: 2026-13-01\n---\nBody.`;
+		const content = '---\ndate: 2026-13-01\n---\nBody.';
 		const result = parseFileContent(content);
 		expect(result.dates.earliest).toBeNull();
 	});
 
 	it('rejects invalid day in date field (day 00)', () => {
-		const content = `---\ndate: 2026-04-00\n---\nBody.`;
+		const content = '---\ndate: 2026-04-00\n---\nBody.';
 		const result = parseFileContent(content);
 		expect(result.dates.earliest).toBeNull();
 	});

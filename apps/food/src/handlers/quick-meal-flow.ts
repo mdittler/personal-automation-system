@@ -148,7 +148,7 @@ export async function beginQuickMealAddPrefilled(
  */
 export async function handleQuickMealAddReply(
 	services: CoreServices,
-	userStore: ScopedDataStore,
+	_userStore: ScopedDataStore,
 	userId: string,
 	text: string,
 ): Promise<boolean> {
@@ -257,7 +257,7 @@ export async function handleQuickMealAddReply(
 			pending.delete(userId);
 			await services.telegram.send(
 				userId,
-				"Couldn't estimate macros: " + result.error + '. Try `/nutrition meals add` again.',
+				`Couldn't estimate macros: ${result.error}. Try \`/nutrition meals add\` again.`,
 			);
 			return true;
 		}
@@ -490,7 +490,7 @@ export async function beginQuickMealEdit(
  */
 export async function handleQuickMealEditReply(
 	services: CoreServices,
-	userStore: ScopedDataStore,
+	_userStore: ScopedDataStore,
 	userId: string,
 	text: string,
 ): Promise<boolean> {
@@ -561,7 +561,7 @@ export async function handleQuickMealEditReply(
 		if (!result.ok) {
 			await services.telegram.send(
 				userId,
-				"Couldn't estimate macros: " + result.error + '. Returning to the field picker.',
+				`Couldn't estimate macros: ${result.error}. Returning to the field picker.`,
 			);
 			state.step = 'picker';
 			touchEdit(userId, state);

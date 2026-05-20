@@ -175,7 +175,7 @@ describe('handleLeftoverCallback — freeze', () => {
 	});
 
 	it('withholds the frozen confirmation when the freezer write fails', async () => {
-		store.write.mockImplementation(async (path: string, content: string) => {
+		store.write.mockImplementation(async (path: string, _content: string) => {
 			if (path === 'freezer.yaml') {
 				throw new Error('freezer write failed');
 			}

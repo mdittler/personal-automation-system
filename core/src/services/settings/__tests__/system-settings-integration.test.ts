@@ -191,9 +191,7 @@ describe('admin-confirmed e2e write', () => {
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(180);
 
 		// Reader catalog reflects new value
@@ -217,9 +215,7 @@ describe('admin-confirmed e2e write', () => {
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['routing'] as Record<string, unknown>)['verification'] as Record<string, unknown>)[
-				'enabled'
-			],
+			((parsed.routing as Record<string, unknown>).verification as Record<string, unknown>).enabled,
 		).toBe(false);
 	});
 });

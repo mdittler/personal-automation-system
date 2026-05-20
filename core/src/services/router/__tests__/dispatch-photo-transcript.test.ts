@@ -219,7 +219,7 @@ describe('dispatchPhoto — pre-existing session', () => {
 
 	it('appends photo summary turns into the existing session (total 4 turns)', async () => {
 		const userId = 'u1';
-		const sessionKey = `agent:main:telegram:dm:${userId}`;
+		const _sessionKey = `agent:main:telegram:dm:${userId}`;
 
 		// Mint a session first with a setup exchange
 		const { sessionId: existingId } = await fixture.ensure({ userId });

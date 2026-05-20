@@ -30,7 +30,7 @@ const AGING_MONTHS = 3;
 export async function handleFreezerCallback(
 	services: CoreServices,
 	action: string,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 	store: ScopedDataStore,
@@ -41,7 +41,7 @@ export async function handleFreezerCallback(
 	const expectedName = parts.slice(2).join(':');
 	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
-	if ((verb !== 'thaw' && verb !== 'toss') || isNaN(index)) {
+	if ((verb !== 'thaw' && verb !== 'toss') || Number.isNaN(index)) {
 		return;
 	}
 

@@ -166,7 +166,7 @@ describe('transcript-codec', () => {
 
 		it('header with ASCII hyphen-minus is NOT recognized as a valid turn header', () => {
 			// Manually inject a hyphen-based header to confirm the parser ignores it
-			const raw = encodeNew(meta) + '\n### user - 2026-04-27T15:45:00Z\n````\nhello\n````\n';
+			const raw = `${encodeNew(meta)}\n### user - 2026-04-27T15:45:00Z\n\`\`\`\`\nhello\n\`\`\`\`\n`;
 			const { turns } = decode(raw);
 			expect(turns).toHaveLength(0);
 		});
@@ -179,9 +179,7 @@ describe('transcript-codec', () => {
 
 		it('missing closing fence throws CorruptTranscriptError', () => {
 			// Manually build a raw string with an unclosed fence
-			const raw =
-				encodeNew(meta) +
-				'\n### user — 2026-04-27T15:45:00Z\n````\ncontent without closing fence\n';
+			const raw = `${encodeNew(meta)}\n### user — 2026-04-27T15:45:00Z\n\`\`\`\`\ncontent without closing fence\n`;
 			expect(() => decode(raw)).toThrow(CorruptTranscriptError);
 		});
 	});

@@ -47,7 +47,7 @@ export class CronManager {
 			const data = JSON.parse(raw) as Record<string, string>;
 			for (const [key, dateStr] of Object.entries(data)) {
 				const parsed = new Date(dateStr);
-				if (!isNaN(parsed.getTime())) {
+				if (!Number.isNaN(parsed.getTime())) {
 					this.lastRunAt.set(key, parsed);
 				}
 			}

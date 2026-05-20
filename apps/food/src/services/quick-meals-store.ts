@@ -92,7 +92,7 @@ async function readFile(store: ScopedDataStore): Promise<StoreFile> {
 async function preserveCorruptFile(
 	store: ScopedDataStore,
 	raw: string,
-	err: unknown,
+	_err: unknown,
 ): Promise<void> {
 	const ts = new Date().toISOString().replace(/[:.]/g, '-');
 	const corruptPath = `corrupt/${QUICK_MEALS_FILE.replace('.yaml', '')}-${ts}.yaml`;
@@ -102,12 +102,6 @@ async function preserveCorruptFile(
 		// If we cannot even preserve, swallow — surfacing the original parse
 		// error to callers who didn't sign up for it would be worse.
 	}
-	// Best-effort breadcrumb in stderr; the store does not own a logger.
-	// eslint-disable-next-line no-console
-	console.error(
-		`[quick-meals-store] Corrupt YAML preserved as ${corruptPath}:`,
-		(err as Error)?.message ?? err,
-	);
 }
 
 async function writeFile(store: ScopedDataStore, data: StoreFile): Promise<void> {

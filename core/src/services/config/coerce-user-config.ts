@@ -14,7 +14,7 @@ export const BOOLEAN_FALSY = new Set(['false', '0', 'off']);
 
 export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): CoerceResult {
 	if (raw === null || raw === undefined) {
-		return { ok: false, reason: `value must not be null or undefined` };
+		return { ok: false, reason: 'value must not be null or undefined' };
 	}
 
 	switch (entry.type) {
@@ -58,7 +58,7 @@ export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): 
 			}
 			const trimmed = raw.trim();
 			if (trimmed === '' && entry.default !== '') {
-				return { ok: false, reason: `empty string not accepted for this setting` };
+				return { ok: false, reason: 'empty string not accepted for this setting' };
 			}
 			return { ok: true, coerced: trimmed };
 		}
@@ -76,7 +76,7 @@ export function coerceUserConfigValue(entry: ManifestUserConfig, raw: unknown): 
 				};
 			}
 			if (trimmed === '') {
-				return { ok: false, reason: `select value must not be empty` };
+				return { ok: false, reason: 'select value must not be empty' };
 			}
 			return { ok: true, coerced: trimmed };
 		}

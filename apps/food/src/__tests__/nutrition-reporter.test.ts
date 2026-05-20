@@ -253,7 +253,7 @@ describe('nutrition-reporter', () => {
 			];
 			const trends = detectTrends(entries);
 			const calTrend = trends.find((t) => t.field === 'calories');
-			expect(calTrend?.direction).toBe('increasing');
+			expect(calTrend!.direction).toBe('increasing');
 		});
 
 		it('formatTrendSummary handles empty trends', () => {
@@ -373,17 +373,7 @@ describe('nutrition-reporter', () => {
 				read: vi
 					.fn()
 					.mockResolvedValue(
-						`month: "2026-04"\nuserId: user1\ndays:\n` +
-							`  - date: "2026-04-01"\n` +
-							`    meals:\n` +
-							`      - recipeId: r1\n` +
-							`        recipeTitle: "${malicious}"\n` +
-							`        mealType: dinner\n` +
-							`        servingsEaten: 1\n` +
-							`        macros: { calories: 2000 }\n` +
-							`    totals: { calories: 2000, protein: 100, carbs: 200, fat: 70, fiber: 28 }\n` +
-							`  - date: "2026-04-02"\n    meals: []\n    totals: { calories: 2100, protein: 110, carbs: 210, fat: 75, fiber: 32 }\n` +
-							`  - date: "2026-04-03"\n    meals: []\n    totals: { calories: 2000, protein: 100, carbs: 200, fat: 70, fiber: 28 }`,
+						`month: "2026-04"\nuserId: user1\ndays:\n  - date: "2026-04-01"\n    meals:\n      - recipeId: r1\n        recipeTitle: "${malicious}"\n        mealType: dinner\n        servingsEaten: 1\n        macros: { calories: 2000 }\n    totals: { calories: 2000, protein: 100, carbs: 200, fat: 70, fiber: 28 }\n  - date: "2026-04-02"\n    meals: []\n    totals: { calories: 2100, protein: 110, carbs: 210, fat: 75, fiber: 32 }\n  - date: "2026-04-03"\n    meals: []\n    totals: { calories: 2000, protein: 100, carbs: 200, fat: 70, fiber: 28 }`,
 					),
 			});
 

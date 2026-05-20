@@ -29,84 +29,84 @@ const synthetic =
 	FRONTMATTER +
 	[
 		// 1) agree — regex and shadow both pick grocery_add
-		`## 2026-04-24 12:00:00`,
-		``,
+		'## 2026-04-24 12:00:00',
+		'',
 		`- **Message**: "add milk"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: grocery_add → "user wants to add items to the grocery list"`,
 		`- **Shadow**: {"action":"user wants to add items to the grocery list","confidence":0.95}`,
-		`- **Verdict**: agree`,
-		``,
-		``,
+		'- **Verdict**: agree',
+		'',
+		'',
 		// 2) one-side-none — regex missed, shadow found a label
-		`## 2026-04-24 12:01:00`,
-		``,
+		'## 2026-04-24 12:01:00',
+		'',
 		`- **Message**: "whats good"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: help_fallthrough → "none"`,
 		`- **Shadow**: {"action":"user has a food-related question","confidence":0.8}`,
-		`- **Verdict**: one-side-none`,
-		``,
-		``,
+		'- **Verdict**: one-side-none',
+		'',
+		'',
 		// 3) disagree — regex says grocery_add, shadow says food question
-		`## 2026-04-24 12:02:00`,
-		``,
+		'## 2026-04-24 12:02:00',
+		'',
 		`- **Message**: "add bread"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: grocery_add → "user wants to add items to the grocery list"`,
 		`- **Shadow**: {"action":"user has a food-related question","confidence":0.9}`,
-		`- **Verdict**: disagree`,
-		``,
-		``,
+		'- **Verdict**: disagree',
+		'',
+		'',
 		// 4) skipped — shadow_sample_rate=0 caused skipped-sample
-		`## 2026-04-24 12:03:00`,
-		``,
+		'## 2026-04-24 12:03:00',
+		'',
 		`- **Message**: "hi"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: help_fallthrough → "none"`,
-		`- **Shadow**: skipped-sample`,
-		`- **Verdict**: skipped`,
-		``,
-		``,
+		'- **Shadow**: skipped-sample',
+		'- **Verdict**: skipped',
+		'',
+		'',
 		// 5) shadow-dispatched (Chunk D) — must NOT count toward judgment total
-		`## 2026-04-24 12:04:00`,
-		``,
+		'## 2026-04-24 12:04:00',
+		'',
 		`- **Message**: "get eggs"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: (shadow-dispatched) → "none"`,
 		`- **Shadow**: {"action":"user wants to add items to the grocery list","confidence":0.95}`,
-		`- **Verdict**: shadow-dispatched`,
-		``,
-		``,
+		'- **Verdict**: shadow-dispatched',
+		'',
+		'',
 		// 6) agree + suppressedByThreshold (shadow fell through to regex but agreed)
-		`## 2026-04-24 12:05:00`,
-		``,
+		'## 2026-04-24 12:05:00',
+		'',
 		`- **Message**: "add juice"`,
-		`- **Kind**: text`,
-		`- **User**: u1`,
-		`- **Pending flow**: (none)`,
-		`- **Core route**: (absent)`,
+		'- **Kind**: text',
+		'- **User**: u1',
+		'- **Pending flow**: (none)',
+		'- **Core route**: (absent)',
 		`- **Regex winner**: grocery_add → "user wants to add items to the grocery list"`,
 		`- **Shadow**: {"action":"user wants to add items to the grocery list","confidence":0.5}`,
-		`- **Verdict**: agree`,
-		`- **ShadowSuppressedByThreshold**: true`,
-		``,
-		``,
+		'- **Verdict**: agree',
+		'- **ShadowSuppressedByThreshold**: true',
+		'',
+		'',
 	].join('\n');
 
 // ─── parseShadowLogEntry ──────────────────────────────────────────────────────
@@ -122,7 +122,7 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses an agree entry with JSON Shadow field', () => {
 		const blocks = synthetic.split('\n## ');
-		const entry = parseShadowLogEntry('## ' + blocks[1]!);
+		const entry = parseShadowLogEntry(`## ${blocks[1]!}`);
 		expect(entry).not.toBeNull();
 		expect(entry!.timestamp).toBe('2026-04-24 12:00:00');
 		expect(entry!.userId).toBe('u1');
@@ -138,7 +138,7 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses a sentinel Shadow field (skipped-sample)', () => {
 		const blocks = synthetic.split('\n## ');
-		const entry = parseShadowLogEntry('## ' + blocks[4]!); // skipped-sample entry
+		const entry = parseShadowLogEntry(`## ${blocks[4]!}`); // skipped-sample entry
 		expect(entry).not.toBeNull();
 		expect(entry!.shadowKind).toBe('skipped-sample');
 		expect(entry!.shadowAction).toBeUndefined();
@@ -148,7 +148,7 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses shadow-dispatched verdict and (shadow-dispatched) sentinel regex winner', () => {
 		const blocks = synthetic.split('\n## ');
-		const entry = parseShadowLogEntry('## ' + blocks[5]!); // shadow-dispatched entry
+		const entry = parseShadowLogEntry(`## ${blocks[5]!}`); // shadow-dispatched entry
 		expect(entry).not.toBeNull();
 		expect(entry!.verdict).toBe('shadow-dispatched');
 		expect(entry!.regexWinner).toBe('(shadow-dispatched)');
@@ -156,7 +156,7 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses ShadowSuppressedByThreshold=true when present', () => {
 		const blocks = synthetic.split('\n## ');
-		const entry = parseShadowLogEntry('## ' + blocks[6]!); // suppressed entry
+		const entry = parseShadowLogEntry(`## ${blocks[6]!}`); // suppressed entry
 		expect(entry).not.toBeNull();
 		expect(entry!.suppressedByThreshold).toBe(true);
 		expect(entry!.verdict).toBe('agree');
@@ -164,16 +164,16 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses llm-error:<category> Shadow sentinel', () => {
 		const block = [
-			`## 2026-04-24 12:10:00`,
-			``,
+			'## 2026-04-24 12:10:00',
+			'',
 			`- **Message**: "x"`,
-			`- **Kind**: text`,
-			`- **User**: u1`,
-			`- **Pending flow**: (none)`,
-			`- **Core route**: (absent)`,
+			'- **Kind**: text',
+			'- **User**: u1',
+			'- **Pending flow**: (none)',
+			'- **Core route**: (absent)',
 			`- **Regex winner**: help_fallthrough → "none"`,
-			`- **Shadow**: llm-error:rate-limit`,
-			`- **Verdict**: error`,
+			'- **Shadow**: llm-error:rate-limit',
+			'- **Verdict**: error',
 		].join('\n');
 		const e = parseShadowLogEntry(block);
 		expect(e).not.toBeNull();
@@ -183,16 +183,16 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses parse-failed Shadow sentinel', () => {
 		const block = [
-			`## 2026-04-24 12:11:00`,
-			``,
+			'## 2026-04-24 12:11:00',
+			'',
 			`- **Message**: "x"`,
-			`- **Kind**: text`,
-			`- **User**: u1`,
-			`- **Pending flow**: (none)`,
-			`- **Core route**: (absent)`,
+			'- **Kind**: text',
+			'- **User**: u1',
+			'- **Pending flow**: (none)',
+			'- **Core route**: (absent)',
 			`- **Regex winner**: help_fallthrough → "none"`,
 			`- **Shadow**: parse-failed (raw: "bad json")`,
-			`- **Verdict**: error`,
+			'- **Verdict**: error',
 		].join('\n');
 		const e = parseShadowLogEntry(block);
 		expect(e).not.toBeNull();
@@ -201,16 +201,16 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses skipped-pending-flow:<flow> sentinel', () => {
 		const block = [
-			`## 2026-04-24 12:12:00`,
-			``,
+			'## 2026-04-24 12:12:00',
+			'',
 			`- **Message**: "next"`,
-			`- **Kind**: text`,
-			`- **User**: u1`,
-			`- **Pending flow**: leftover-add`,
-			`- **Core route**: (absent)`,
+			'- **Kind**: text',
+			'- **User**: u1',
+			'- **Pending flow**: leftover-add',
+			'- **Core route**: (absent)',
 			`- **Regex winner**: pending_flow_consumed → "none"`,
-			`- **Shadow**: skipped-pending-flow:leftover-add`,
-			`- **Verdict**: skipped`,
+			'- **Shadow**: skipped-pending-flow:leftover-add',
+			'- **Verdict**: skipped',
 		].join('\n');
 		const e = parseShadowLogEntry(block);
 		expect(e).not.toBeNull();
@@ -220,16 +220,16 @@ describe('parseShadowLogEntry', () => {
 
 	it('parses core route field when present', () => {
 		const block = [
-			`## 2026-04-24 12:13:00`,
-			``,
+			'## 2026-04-24 12:13:00',
+			'',
 			`- **Message**: "what did you plan for tonight"`,
-			`- **Kind**: text`,
-			`- **User**: u1`,
-			`- **Pending flow**: (none)`,
+			'- **Kind**: text',
+			'- **User**: u1',
+			'- **Pending flow**: (none)',
 			`- **Core route**: food / user wants to know what's for dinner (confidence: 0.95, source: intent, verifier: agreed)`,
 			`- **Regex winner**: (route-dispatched) → "none"`,
-			`- **Shadow**: legacy-skipped`,
-			`- **Verdict**: legacy-skipped`,
+			'- **Shadow**: legacy-skipped',
+			'- **Verdict**: legacy-skipped',
 		].join('\n');
 		const e = parseShadowLogEntry(block);
 		expect(e).not.toBeNull();
@@ -318,18 +318,18 @@ describe('analyzeLog', () => {
 		const log =
 			FRONTMATTER +
 			[
-				`## 2026-04-24 12:00:00`,
-				``,
+				'## 2026-04-24 12:00:00',
+				'',
 				`- **Message**: "hi"`,
-				`- **Kind**: text`,
-				`- **User**: u1`,
-				`- **Pending flow**: (none)`,
-				`- **Core route**: (absent)`,
+				'- **Kind**: text',
+				'- **User**: u1',
+				'- **Pending flow**: (none)',
+				'- **Core route**: (absent)',
 				`- **Regex winner**: help_fallthrough → "none"`,
-				`- **Shadow**: skipped-sample`,
-				`- **Verdict**: skipped`,
-				``,
-				``,
+				'- **Shadow**: skipped-sample',
+				'- **Verdict**: skipped',
+				'',
+				'',
 			].join('\n');
 		const stats = analyzeLog(log);
 		expect(stats.total).toBe(1);
@@ -341,18 +341,18 @@ describe('analyzeLog', () => {
 		const log =
 			FRONTMATTER +
 			[
-				`## 2026-04-24 12:00:00`,
-				``,
+				'## 2026-04-24 12:00:00',
+				'',
 				`- **Message**: "xyz"`,
-				`- **Kind**: text`,
-				`- **User**: u1`,
-				`- **Pending flow**: (none)`,
-				`- **Core route**: (absent)`,
+				'- **Kind**: text',
+				'- **User**: u1',
+				'- **Pending flow**: (none)',
+				'- **Core route**: (absent)',
 				`- **Regex winner**: help_fallthrough → "none"`,
 				`- **Shadow**: {"action":"none","confidence":0.5}`,
-				`- **Verdict**: both-none`,
-				``,
-				``,
+				'- **Verdict**: both-none',
+				'',
+				'',
 			].join('\n');
 		const stats = analyzeLog(log);
 		expect(stats.total).toBe(1);

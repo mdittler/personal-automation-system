@@ -132,8 +132,8 @@ export function addFoodIntroduction(log: ChildFoodLog, entry: FoodIntroduction):
 
 function daysBetween(dateA: string, dateB: string): number {
 	// Normalize to noon UTC to avoid DST 23/25-hour day issues
-	const a = new Date(dateA + 'T12:00:00Z');
-	const b = new Date(dateB + 'T12:00:00Z');
+	const a = new Date(`${dateA}T12:00:00Z`);
+	const b = new Date(`${dateB}T12:00:00Z`);
 	return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
@@ -207,9 +207,5 @@ export function formatAllergenWarning(
 	daysSince: number,
 	waitDays: number,
 ): string {
-	return (
-		`⚠️ **Allergen wait period warning**\n` +
-		`Last new allergen was introduced on ${lastIntroDate} (${daysSince} days ago).\n` +
-		`Recommended wait period is ${waitDays} days. Consider waiting ${waitDays - daysSince} more day(s).`
-	);
+	return `⚠️ **Allergen wait period warning**\nLast new allergen was introduced on ${lastIntroDate} (${daysSince} days ago).\nRecommended wait period is ${waitDays} days. Consider waiting ${waitDays - daysSince} more day(s).`;
 }

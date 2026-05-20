@@ -62,7 +62,7 @@ describe('kid-adapter', () => {
 		it('calls LLM with correct prompt including child age and allergens', async () => {
 			vi.mocked(services.llm.complete).mockResolvedValue(VALID_LLM_RESPONSE);
 
-			const result = await generateKidAdaptation(services, makeRecipe(), makeChild(), 21);
+			const _result = await generateKidAdaptation(services, makeRecipe(), makeChild(), 21);
 
 			expect(services.llm.complete).toHaveBeenCalledOnce();
 			const prompt = vi.mocked(services.llm.complete).mock.calls[0][0];

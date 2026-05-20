@@ -338,13 +338,11 @@ describe('SystemLLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate denied → LLMRateLimitError{scope:household}; inner NOT called', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi
-				.fn()
-				.mockReturnValue({
-					allowed: false,
-					commit: vi.fn(),
-					limit: { maxRequests: 200, windowSeconds: 3600 },
-				}),
+			check: vi.fn().mockReturnValue({
+				allowed: false,
+				commit: vi.fn(),
+				limit: { maxRequests: 200, windowSeconds: 3600 },
+			}),
 		});
 		const { guard, inner } = makeGuardWithHH({ hhLimiter });
 		await expect(

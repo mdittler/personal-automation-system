@@ -997,7 +997,7 @@ describe('last_activity_at refresh on appendExchange', () => {
 		// Append a header line without a matching fence to trigger CorruptTranscriptError
 		await dataStore
 			.forUser(USER)
-			.write(path, raw + '\n### user — 2026-05-01T12:00:00.000Z\n[no fence here]\n');
+			.write(path, `${raw}\n### user — 2026-05-01T12:00:00.000Z\n[no fence here]\n`);
 
 		const now2 = new Date();
 		const userTurn: SessionTurn = {

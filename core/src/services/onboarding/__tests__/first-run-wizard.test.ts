@@ -191,10 +191,10 @@ describe('D5b-9a: First-run wizard', () => {
 		const raw = await readFile(filePath, 'utf-8');
 		const data = parse(raw) as Record<string, { digestPreference: string; completedAt: string }>;
 
-		expect(data['u1']?.digestPreference).toBe('yes');
-		expect(data['u2']?.digestPreference).toBe('no');
-		expect(data['u1']?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-		expect(data['u2']?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(data.u1?.digestPreference).toBe('yes');
+		expect(data.u2?.digestPreference).toBe('no');
+		expect(data.u1?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(data.u2?.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 	});
 
 	// ---- Test 9 (gap): stale button press after TTL expires is silently consumed ----

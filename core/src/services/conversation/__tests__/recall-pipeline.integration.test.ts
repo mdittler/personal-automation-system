@@ -66,7 +66,7 @@ describe('recall-pipeline integration — max_window_days config wiring', () => 
 
 		const { envPath, configPath } = await writeMinimalConfig(
 			tempDir,
-			`chat:\n  recall:\n    max_window_days: 30\n`,
+			'chat:\n  recall:\n    max_window_days: 30\n',
 		);
 
 		const cfg = await loadSystemConfig({ envPath, configPath });

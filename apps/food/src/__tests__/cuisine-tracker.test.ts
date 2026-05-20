@@ -196,10 +196,10 @@ describe('checkCuisineDiversity', () => {
 	function setupHouseholdAndPlan(hh: Household | null, plan: MealPlan | null) {
 		store.read.mockImplementation(async (path: string) => {
 			if (path === 'household.yaml' && hh) {
-				return `---\ntitle: ${hh.name}\n---\n` + stringify(hh);
+				return `---\ntitle: ${hh.name}\n---\n${stringify(hh)}`;
 			}
 			if (path === 'meal-plans/current.yaml' && plan) {
-				return `---\ntitle: Meal Plan\n---\n` + stringify(plan);
+				return `---\ntitle: Meal Plan\n---\n${stringify(plan)}`;
 			}
 			return null;
 		});

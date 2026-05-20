@@ -536,7 +536,7 @@ describe('Section-collector household path guard', () => {
 
 		const logger = makeLogger();
 
-		const result = await collectSection(
+		const _result = await collectSection(
 			{
 				type: 'app-data',
 				label: 'Pantry',

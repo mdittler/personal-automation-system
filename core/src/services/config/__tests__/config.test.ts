@@ -429,7 +429,7 @@ describe('loadSystemConfig', () => {
 		const config = await loadConfigFromYamlObj({
 			llm: { safeguards: { household_overrides: { h1: { monthly_cost_cap: 40 } } } },
 		});
-		expect(config.llm?.safeguards?.householdOverrides?.['h1']).toEqual({ monthlyCostCap: 40 });
+		expect(config.llm?.safeguards?.householdOverrides?.h1).toEqual({ monthlyCostCap: 40 });
 	});
 
 	it('household override with only rate_limit parses correctly', async () => {
@@ -440,7 +440,7 @@ describe('loadSystemConfig', () => {
 				},
 			},
 		});
-		expect(config.llm?.safeguards?.householdOverrides?.['h1']).toEqual({
+		expect(config.llm?.safeguards?.householdOverrides?.h1).toEqual({
 			rateLimit: { maxRequests: 400, windowSeconds: 3600 },
 		});
 	});

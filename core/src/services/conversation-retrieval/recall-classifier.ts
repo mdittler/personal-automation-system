@@ -127,7 +127,7 @@ function findLastWeekday(today: string, targetDow: number): string {
 
 /** Return 'YYYY-MM-01' for the first day of today's month. */
 function firstOfMonth(today: string): string {
-	return today.slice(0, 7) + '-01';
+	return `${today.slice(0, 7)}-01`;
 }
 
 /** Return 'YYYY-MM-01' for the first day of the prior calendar month. */
@@ -241,38 +241,7 @@ function buildExamples(today: string): string {
 	const lastSundayOfWeekend = findLastWeekday(today, 0);
 	const lastSaturdayOfWeekend = subtractDays(lastSundayOfWeekend, 1);
 
-	return (
-		`\nExamples (today = ${today}, ${dayName}):\n` +
-		`- "what did we say last Tuesday about the recipe"\n` +
-		`  → {"shouldRecall":true,"query":"recipe","timeAnchor":{"type":"absolute","on":"${lastTuesday}"},"reason":"specific past Tuesday"}\n` +
-		`- "remind me yesterday's plan"\n` +
-		`  → {"shouldRecall":true,"query":"plan","timeAnchor":{"type":"absolute","on":"${yesterday}"},"reason":"yesterday"}\n` +
-		`- "two weeks ago we talked about the trip"\n` +
-		`  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"${twoWeeksStart}","before":"${twoWeeksEnd}"},"reason":"~14 days ago, ±3-day spread"}\n` +
-		`- "what's the weather"\n` +
-		`  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}\n` +
-		// Batch 3 — vague-temporal negative examples (Chunk C evidence).
-		// "earlier", "last time", "before", "previously" are NOT time references
-		// unless followed by a calendar/weekday/duration. Without these examples
-		// Gemma 4 e4b adds a windowed timeAnchor; production schema expects null.
-		`- "what did we say about the leak earlier?"\n` +
-		`  → {"shouldRecall":true,"query":"leak","timeAnchor":null,"reason":"\\"earlier\\" alone is vague, not a date"}\n` +
-		`- "what did we decide last time"\n` +
-		`  → {"shouldRecall":true,"query":"decision","timeAnchor":null,"reason":"\\"last time\\" is vague, not a date"}\n` +
-		`\n<phrasing reference> (today = ${today}, ${dayName})\n` +
-		`- "last Friday" → ${lastFriday} (absolute)\n` +
-		`- "the day before yesterday" → ${dayBeforeYesterday} (absolute)\n` +
-		`- "earlier this month" → window ${thisMonthStart} to ${today}\n` +
-		`- "earlier last month" → window ${lastMonthStart} to ${lastMonthMid}\n` +
-		`- "in ${currentMonthName}" → window ${currentMonth.start} to ${currentMonth.end}\n` +
-		`- "during ${priorMonthName}" → window ${priorMonth.start} to ${priorMonth.end}\n` +
-		`- "a couple weeks ago" → window ${coupleWeeksAfter} to ${coupleWeeksBefore}\n` +
-		`- "around Christmas" → window ${xmas.start} to ${xmas.end}\n` +
-		`- "last weekend" → window ${lastSaturdayOfWeekend} to ${lastSundayOfWeekend}\n` +
-		`- "three weeks ago" → window ${threeWeeksAfter} to ${threeWeeksBefore}\n` +
-		`- "in ${novName}" → window ${nov.start} to ${nov.end}\n` +
-		`</phrasing reference>`
-	);
+	return `\nExamples (today = ${today}, ${dayName}):\n- "what did we say last Tuesday about the recipe"\n  → {"shouldRecall":true,"query":"recipe","timeAnchor":{"type":"absolute","on":"${lastTuesday}"},"reason":"specific past Tuesday"}\n- "remind me yesterday's plan"\n  → {"shouldRecall":true,"query":"plan","timeAnchor":{"type":"absolute","on":"${yesterday}"},"reason":"yesterday"}\n- "two weeks ago we talked about the trip"\n  → {"shouldRecall":true,"query":"trip","timeAnchor":{"type":"window","after":"${twoWeeksStart}","before":"${twoWeeksEnd}"},"reason":"~14 days ago, ±3-day spread"}\n- "what's the weather"\n  → {"shouldRecall":false,"query":null,"timeAnchor":null,"reason":"no recall intent"}\n- "what did we say about the leak earlier?"\n  → {"shouldRecall":true,"query":"leak","timeAnchor":null,"reason":"\\"earlier\\" alone is vague, not a date"}\n- "what did we decide last time"\n  → {"shouldRecall":true,"query":"decision","timeAnchor":null,"reason":"\\"last time\\" is vague, not a date"}\n\n<phrasing reference> (today = ${today}, ${dayName})\n- "last Friday" → ${lastFriday} (absolute)\n- "the day before yesterday" → ${dayBeforeYesterday} (absolute)\n- "earlier this month" → window ${thisMonthStart} to ${today}\n- "earlier last month" → window ${lastMonthStart} to ${lastMonthMid}\n- "in ${currentMonthName}" → window ${currentMonth.start} to ${currentMonth.end}\n- "during ${priorMonthName}" → window ${priorMonth.start} to ${priorMonth.end}\n- "a couple weeks ago" → window ${coupleWeeksAfter} to ${coupleWeeksBefore}\n- "around Christmas" → window ${xmas.start} to ${xmas.end}\n- "last weekend" → window ${lastSaturdayOfWeekend} to ${lastSundayOfWeekend}\n- "three weeks ago" → window ${threeWeeksAfter} to ${threeWeeksBefore}\n- "in ${novName}" → window ${nov.start} to ${nov.end}\n</phrasing reference>`;
 }
 
 /** Build the classifier system prompt with today's date and dynamic date examples. */

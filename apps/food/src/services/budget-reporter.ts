@@ -103,7 +103,7 @@ export function generateMonthlyReport(monthId: string, weeks: CostHistoryWeek[])
  * Aggregate month summaries into a yearly report.
  */
 export function generateYearlyReport(
-	year: string,
+	_year: string,
 	months: Array<{ monthLabel: string; totalCost: number; mealCount: number }>,
 ): { totalCost: number; avgPerMonth: number; months: typeof months } {
 	const totalCost = months.reduce((sum, m) => sum + m.totalCost, 0);
@@ -261,7 +261,7 @@ export async function saveWeeklyHistory(
 	});
 
 	const body = stringify(week);
-	await store.write(`${COST_HISTORY_DIR}/${week.weekId}.md`, fm + '\n' + body);
+	await store.write(`${COST_HISTORY_DIR}/${week.weekId}.md`, `${fm}\n${body}`);
 }
 
 // ─── loadWeeklyHistory ────────────────────────────────────────────────────────

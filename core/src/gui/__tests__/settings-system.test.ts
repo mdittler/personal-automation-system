@@ -373,9 +373,7 @@ describe('Admin system write via single-form POST', () => {
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(180);
 	});
 
@@ -529,7 +527,7 @@ describe('Reset endpoint', () => {
 		// YAML key removed
 		const raw = await readFile(setup.configPath, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
-		const sessions = ((parsed['chat'] as Record<string, unknown>)?.['sessions'] ?? {}) as Record<
+		const sessions = ((parsed.chat as Record<string, unknown>)?.sessions ?? {}) as Record<
 			string,
 			unknown
 		>;

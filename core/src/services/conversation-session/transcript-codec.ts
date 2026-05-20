@@ -6,7 +6,7 @@ import { CorruptTranscriptError } from './errors.js';
 const EM_DASH = '—';
 
 // Header pattern: ### role — ISO8601_UTC
-const HEADER_RE = new RegExp(
+const _HEADER_RE = new RegExp(
 	`^### (user|assistant) ${EM_DASH} (\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z)$`,
 	'm',
 );

@@ -56,7 +56,7 @@ export interface AuthOptions {
 // ---------------------------------------------------------------------------
 
 function isSecureCookie(): boolean {
-	return process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+	return process.env.NODE_ENV === 'production' || process.env.GUI_SECURE_COOKIES === 'true';
 }
 
 /** Compute the legacy HMAC cookie value (pre-D5b-3 format). */
@@ -139,9 +139,9 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 	// NODE_ENV=production so a stray VITEST env var on a production host can
 	// never weaken the contract.
 	const allowNonNumericIdLoginForTests =
-		process.env['NODE_ENV'] === 'production'
+		process.env.NODE_ENV === 'production'
 			? false
-			: (options.allowNonNumericIdLoginForTests ?? process.env['VITEST'] === 'true');
+			: (options.allowNonNumericIdLoginForTests ?? process.env.VITEST === 'true');
 
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
@@ -169,7 +169,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 					error: 'Too many login attempts. Please try again later.',
 				});
 			}
-			const submitted = body?.['token'] ?? '';
+			const submitted = body?.token ?? '';
 			const submittedBuf = Buffer.from(submitted);
 			const expectedBuf = Buffer.from(authToken);
 			const isValid =
@@ -190,7 +190,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		}
 
 		// --- Legacy token path (D5b-3 with full deps) ---
-		const legacyToken = body?.['legacyToken'];
+		const legacyToken = body?.legacyToken;
 		if (legacyToken !== undefined && legacyToken !== '') {
 			if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 				return reply.status(429).viewAsync('login', {
@@ -229,9 +229,9 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		}
 
 		// --- Password path ---
-		const submittedRaw = body?.['userId'] ?? '';
+		const submittedRaw = body?.userId ?? '';
 		const submitted = submittedRaw.trim();
-		const password = body?.['password'] ?? '';
+		const password = body?.password ?? '';
 
 		if (!submitted || !password) {
 			return renderError('Login and password are required.');

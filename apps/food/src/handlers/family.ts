@@ -151,7 +151,7 @@ export async function handleFamilyCommand(
 // ─── /family edit ────────────────────────────────────────────────
 
 async function handleFamilyEdit(
-	services: CoreServices,
+	_services: CoreServices,
 	args: string[],
 	store: ScopedDataStore,
 ): Promise<{ text: string }> {
@@ -181,20 +181,7 @@ async function handleFamilyEdit(
 
 	if (!field || !value) {
 		return {
-			text:
-				'What would you like to update?\n\n' +
-				'• `/family edit ' +
-				slug +
-				' stage early-introduction`\n' +
-				'• `/family edit ' +
-				slug +
-				' safe milk`\n' +
-				'• `/family edit ' +
-				slug +
-				' avoid peanuts`\n' +
-				'• `/family edit ' +
-				slug +
-				' notes Prefers soft textures`',
+			text: `What would you like to update?\n\n• \`/family edit ${slug} stage early-introduction\`\n• \`/family edit ${slug} safe milk\`\n• \`/family edit ${slug} avoid peanuts\`\n• \`/family edit ${slug} notes Prefers soft textures\``,
 		};
 	}
 
@@ -378,7 +365,7 @@ export async function handleKidAdaptIntent(
 export async function handleFoodIntroduction(
 	services: CoreServices,
 	text: string,
-	userId: string,
+	_userId: string,
 	store: ScopedDataStore,
 	waitDays: number,
 ): Promise<{ text: string; buttons?: InlineButton[][] }> {
@@ -406,9 +393,7 @@ export async function handleFoodIntroduction(
 	let food: string;
 	try {
 		const extractResult = await services.llm.complete(
-			`Extract the food name from this message about introducing food to a baby/child. ` +
-				`Return ONLY the food name, nothing else. No quotes, no punctuation.\n\n` +
-				`Message: "${text}"`,
+			`Extract the food name from this message about introducing food to a baby/child. Return ONLY the food name, nothing else. No quotes, no punctuation.\n\nMessage: "${text}"`,
 			{ tier: 'fast' },
 		);
 		food = extractResult.trim().replace(/^["']|["']$/g, '');
@@ -436,8 +421,7 @@ export async function handleFoodIntroduction(
 	if (allergenCategory) {
 		const waitCheck = checkAllergenWaitWindow(child, allergenCategory, today, waitDays);
 		if (!waitCheck.safe) {
-			warning =
-				'\n\n' + formatAllergenWarning(waitCheck.lastIntroDate!, waitCheck.daysSince!, waitDays);
+			warning = `\n\n${formatAllergenWarning(waitCheck.lastIntroDate!, waitCheck.daysSince!, waitDays)}`;
 		}
 	}
 
@@ -470,7 +454,7 @@ export async function handleFoodIntroduction(
 // ─── Child Approval Intent Handler ───────────────────────────────
 
 export async function handleChildApprovalIntent(
-	services: CoreServices,
+	_services: CoreServices,
 	text: string,
 	store: ScopedDataStore,
 	allRecipes: Recipe[],
@@ -551,10 +535,10 @@ export async function handleApprovalCallback(
 		}
 		const removed = await deleteChildProfile(store, slug);
 		if (!removed) {
-			await services.telegram.editMessage(chatId, messageId, `Child not found.`);
+			await services.telegram.editMessage(chatId, messageId, 'Child not found.');
 			return;
 		}
-		await services.telegram.editMessage(chatId, messageId, `Child profile removed and archived.`);
+		await services.telegram.editMessage(chatId, messageId, 'Child profile removed and archived.');
 		return;
 	}
 
@@ -564,7 +548,7 @@ export async function handleApprovalCallback(
 		await services.telegram.editMessage(
 			chatId,
 			messageId,
-			`Select allergen stage for this child:`,
+			'Select allergen stage for this child:',
 			[
 				[
 					{ text: 'Pre-solids', callbackData: `app:food:fa:ss:${slug}:pre-solids` },
@@ -618,7 +602,7 @@ export async function handleApprovalCallback(
 
 		const recipe = await loadRecipe(store, recipeId);
 		if (!recipe) {
-			await services.telegram.editMessage(chatId, messageId, `Recipe not found.`);
+			await services.telegram.editMessage(chatId, messageId, 'Recipe not found.');
 			return;
 		}
 
@@ -649,7 +633,7 @@ export async function handleApprovalCallback(
 export async function handleFoodIntroCallback(
 	services: CoreServices,
 	action: string,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 	store: ScopedDataStore,

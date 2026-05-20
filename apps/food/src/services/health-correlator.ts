@@ -71,12 +71,12 @@ export async function correlateHealth(
 			fiber_g: macro.totals.fiber ?? 0,
 		};
 		if (hasHealthData) {
-			row['sleep_h'] = health?.metrics.sleepHours ?? null;
-			row['weight_kg'] = health?.metrics.weightKg ?? null;
-			row['workout_min'] = health?.metrics.workoutMinutes ?? null;
+			row.sleep_h = health?.metrics.sleepHours ?? null;
+			row.weight_kg = health?.metrics.weightKg ?? null;
+			row.workout_min = health?.metrics.workoutMinutes ?? null;
 			// Limit notes to 50 chars to constrain injection surface (sanitizeInput neutralizes backticks)
 			const notes = health?.metrics.notes ? sanitizeInput(health.metrics.notes, 50) : null;
-			if (notes) row['notes'] = notes;
+			if (notes) row.notes = notes;
 		}
 		return row;
 	});
@@ -127,15 +127,15 @@ function isCorrelationInsight(x: unknown): x is CorrelationInsight {
 	if (!x || typeof x !== 'object') return false;
 	const v = x as Record<string, unknown>;
 	return (
-		typeof v['metric'] === 'string' &&
-		v['metric'].length > 0 &&
-		v['metric'].length <= 30 &&
-		typeof v['pattern'] === 'string' &&
-		v['pattern'].length > 0 &&
-		v['pattern'].length <= 400 &&
-		typeof v['confidence'] === 'number' &&
-		typeof v['disclaimer'] === 'string' &&
-		v['disclaimer'].length > 0 &&
-		v['disclaimer'].length <= 250
+		typeof v.metric === 'string' &&
+		v.metric.length > 0 &&
+		v.metric.length <= 30 &&
+		typeof v.pattern === 'string' &&
+		v.pattern.length > 0 &&
+		v.pattern.length <= 400 &&
+		typeof v.confidence === 'number' &&
+		typeof v.disclaimer === 'string' &&
+		v.disclaimer.length > 0 &&
+		v.disclaimer.length <= 250
 	);
 }

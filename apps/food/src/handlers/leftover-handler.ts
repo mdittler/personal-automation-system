@@ -56,7 +56,7 @@ export async function handleLeftoverCallback(
 	const expectedName = parts.slice(2).join(':'); // rejoin in case name had colons
 	const decodedName = expectedName ? decodeURIComponent(expectedName) : undefined;
 
-	if (!verb || isNaN(idx)) return;
+	if (!verb || Number.isNaN(idx)) return;
 
 	const today = todayDate(services.timezone);
 
@@ -333,7 +333,7 @@ export async function handleLeftoverCheckJob(
 				callbackData: `app:food:lo:freeze:${originalIdx}:${enc}`,
 			},
 			{
-				text: `✅ Got it`,
+				text: '✅ Got it',
 				callbackData: `app:food:lo:keep:${originalIdx}:${enc}`,
 			},
 		]);

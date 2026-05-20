@@ -76,7 +76,7 @@ class TextOnlyProvider extends BaseProvider {
 	// supportsVision defaults to false
 
 	protected async doComplete(
-		prompt: string,
+		_prompt: string,
 		_options?: LLMCompletionOptions,
 	): Promise<LLMCompletionResult> {
 		return {

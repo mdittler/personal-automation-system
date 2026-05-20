@@ -350,9 +350,9 @@ describe('endSession with timer', () => {
 	it('clears timerHandle when ending a session with active timer', () => {
 		const recipe = makeRecipe();
 		const session = createSession('user1', recipe, 4, [], null);
-		let fired = false;
+		let _fired = false;
 		session.timerHandle = setTimeout(() => {
-			fired = true;
+			_fired = true;
 		}, 100000) as ReturnType<typeof setTimeout>;
 		session.timerStepIndex = 0;
 		endSession('user1');

@@ -30,7 +30,7 @@ export function parseBirthDate(input: string): string | null {
 
 	// Already ISO format: 2024-06-15
 	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-		const d = new Date(trimmed + 'T00:00:00Z');
+		const d = new Date(`${trimmed}T00:00:00Z`);
 		if (Number.isNaN(d.getTime())) return null;
 		// Verify date didn't roll over (e.g., Feb 30 → Mar 2)
 		if (d.toISOString().slice(0, 10) !== trimmed) return null;
@@ -42,7 +42,7 @@ export function parseBirthDate(input: string): string | null {
 	if (usMatch) {
 		const [, month, day, year] = usMatch;
 		const iso = `${year}-${month!.padStart(2, '0')}-${day!.padStart(2, '0')}`;
-		const d = new Date(iso + 'T00:00:00Z');
+		const d = new Date(`${iso}T00:00:00Z`);
 		if (Number.isNaN(d.getTime())) return null;
 		if (d.toISOString().slice(0, 10) !== iso) return null;
 		return iso;

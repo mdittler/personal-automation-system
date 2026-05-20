@@ -399,7 +399,7 @@ describe('Caption injection hardening (F17)', () => {
 				services,
 				testPhoto,
 				testMimeType,
-				CAPTION_FENCE_START + ' injected',
+				`${CAPTION_FENCE_START} injected`,
 			);
 			const prompt = (services.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
 			// The fence sentinel should appear only once (as the real boundary), not twice

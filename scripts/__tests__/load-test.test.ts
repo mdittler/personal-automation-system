@@ -121,7 +121,7 @@ describe('createCapCapturingTransport', () => {
 		record: object,
 	): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const buf = Buffer.from(JSON.stringify(record) + '\n');
+			const buf = Buffer.from(`${JSON.stringify(record)}\n`);
 			stream.write(buf, 'utf8', (err) => (err ? reject(err) : resolve()));
 		});
 	}

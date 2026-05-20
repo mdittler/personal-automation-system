@@ -62,7 +62,7 @@ describe('PendingSettingsConfirmStore — attach', () => {
 
 	it('attach overwrites prior pending for same user', () => {
 		const store = makeStore();
-		const first = store.attach('u1', BASE_ENTRY);
+		const _first = store.attach('u1', BASE_ENTRY);
 		const second = store.attach('u1', { ...BASE_ENTRY, rawValue: "Trader Joe's" });
 
 		expect(second.id).toBe('id2');
@@ -351,7 +351,7 @@ describe('PendingSettingsConfirmStore — injectable clock and idGen', () => {
 	});
 
 	it('uses provided idGen for entry IDs', () => {
-		const ids: string[] = [];
+		const _ids: string[] = [];
 		let counter = 0;
 		const store = createPendingSettingsConfirmStore({
 			idGen: () => `custom-${++counter}`,

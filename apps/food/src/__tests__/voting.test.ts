@@ -46,27 +46,27 @@ describe('recordVote', () => {
 		const meal = makeMeal();
 		const result = recordVote(meal, 'u1', 'up');
 		expect(result).toBe(true);
-		expect(meal.votes['u1']).toBe('up');
+		expect(meal.votes.u1).toBe('up');
 	});
 
 	it('returns true and updates vote when prior vote is different', () => {
 		const meal = makeMeal({ votes: { u1: 'up' } });
 		const result = recordVote(meal, 'u1', 'down');
 		expect(result).toBe(true);
-		expect(meal.votes['u1']).toBe('down');
+		expect(meal.votes.u1).toBe('down');
 	});
 
 	it('returns false when vote is unchanged', () => {
 		const meal = makeMeal({ votes: { u1: 'up' } });
 		const result = recordVote(meal, 'u1', 'up');
 		expect(result).toBe(false);
-		expect(meal.votes['u1']).toBe('up');
+		expect(meal.votes.u1).toBe('up');
 	});
 
 	it('mutates the meal object in place', () => {
 		const meal = makeMeal();
 		recordVote(meal, 'u2', 'neutral');
-		expect(meal.votes['u2']).toBe('neutral');
+		expect(meal.votes.u2).toBe('neutral');
 	});
 
 	it('handles multiple users voting independently', () => {
@@ -74,16 +74,16 @@ describe('recordVote', () => {
 		recordVote(meal, 'u1', 'up');
 		recordVote(meal, 'u2', 'down');
 		recordVote(meal, 'u3', 'neutral');
-		expect(meal.votes['u1']).toBe('up');
-		expect(meal.votes['u2']).toBe('down');
-		expect(meal.votes['u3']).toBe('neutral');
+		expect(meal.votes.u1).toBe('up');
+		expect(meal.votes.u2).toBe('down');
+		expect(meal.votes.u3).toBe('neutral');
 	});
 
 	it('changing to neutral from up returns true', () => {
 		const meal = makeMeal({ votes: { u1: 'up' } });
 		const result = recordVote(meal, 'u1', 'neutral');
 		expect(result).toBe(true);
-		expect(meal.votes['u1']).toBe('neutral');
+		expect(meal.votes.u1).toBe('neutral');
 	});
 });
 

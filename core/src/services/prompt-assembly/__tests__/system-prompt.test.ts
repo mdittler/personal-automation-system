@@ -6,7 +6,7 @@ import {
 	appendUserContextSection,
 } from '../system-prompt.js';
 
-const NOW = new Date('2026-04-10T12:00:00Z');
+const _NOW = new Date('2026-04-10T12:00:00Z');
 
 function turn(role: 'user' | 'assistant', content: string): ConversationTurn {
 	return { role, content, timestamp: '2026-04-10T10:00:00Z' };

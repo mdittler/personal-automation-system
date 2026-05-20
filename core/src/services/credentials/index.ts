@@ -183,13 +183,13 @@ function isStoredCredential(v: unknown): v is StoredCredential {
 	if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
 	const c = v as Record<string, unknown>;
 	return (
-		c['version'] === 1 &&
-		c['algo'] === 'scrypt' &&
-		typeof c['salt'] === 'string' &&
-		typeof c['hash'] === 'string' &&
-		typeof c['sessionVersion'] === 'number' &&
-		typeof c['updatedAt'] === 'string' &&
-		isScryptParams(c['params'])
+		c.version === 1 &&
+		c.algo === 'scrypt' &&
+		typeof c.salt === 'string' &&
+		typeof c.hash === 'string' &&
+		typeof c.sessionVersion === 'number' &&
+		typeof c.updatedAt === 'string' &&
+		isScryptParams(c.params)
 	);
 }
 
@@ -197,9 +197,9 @@ function isScryptParams(v: unknown): boolean {
 	if (typeof v !== 'object' || v === null) return false;
 	const p = v as Record<string, unknown>;
 	return (
-		typeof p['N'] === 'number' &&
-		typeof p['r'] === 'number' &&
-		typeof p['p'] === 'number' &&
-		typeof p['keyLen'] === 'number'
+		typeof p.N === 'number' &&
+		typeof p.r === 'number' &&
+		typeof p.p === 'number' &&
+		typeof p.keyLen === 'number'
 	);
 }

@@ -79,7 +79,7 @@ export function buildPantrySummary(items: Array<{ name: string; quantity: string
 		.join('\n');
 	return {
 		userTurn: '[Photo: pantry]',
-		assistantTurn: `📸 Pantry updated: added ${count} items${itemList ? '\n' + itemList : ''}`,
+		assistantTurn: `📸 Pantry updated: added ${count} items${itemList ? `\n${itemList}` : ''}`,
 	};
 }
 
@@ -93,7 +93,7 @@ export function buildGrocerySummary(
 		.slice(0, 10)
 		.map((i) => `- ${sanitizeAppMessageField(i.name, PHOTO_FIELD_LEN)}`)
 		.join('\n');
-	let assistantTurn = `🛒 Grocery list updated: added ${itemCount} items${itemList ? '\n' + itemList : ''}`;
+	let assistantTurn = `🛒 Grocery list updated: added ${itemCount} items${itemList ? `\n${itemList}` : ''}`;
 	if (isRecipe && recipeTitle) {
 		assistantTurn += `\n📖 Also saved as recipe: ${sanitizeAppMessageField(recipeTitle, 100)}`;
 	}

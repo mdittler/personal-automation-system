@@ -783,7 +783,7 @@ describe('F8 — concurrent first turns produce byte-identical frozen snapshots'
 		// Find all chatbot system prompts (those with durable-memory block and our entry)
 		const blocksWithEntry = allPrompts
 			.map((p) => extractDurableMemoryBlock(p))
-			.filter((b): b is string => b !== null && b.includes('Concurrent entry value.'));
+			.filter((b): b is string => b?.includes('Concurrent entry value.'));
 
 		expect(blocksWithEntry.length).toBeGreaterThanOrEqual(2);
 

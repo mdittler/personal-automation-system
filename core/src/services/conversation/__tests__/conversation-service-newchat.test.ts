@@ -28,13 +28,11 @@ function makeChatSessions(
 		loadRecentTurns: vi.fn().mockResolvedValue(opts.loadRecentTurnsResult ?? []),
 		endActive: vi.fn().mockResolvedValue(opts.endActiveResult ?? { endedSessionId: null }),
 		readSession: vi.fn().mockResolvedValue(undefined),
-		ensureActiveSession: vi
-			.fn()
-			.mockResolvedValue({
-				sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id',
-				isNew: true,
-				snapshot: undefined,
-			}),
+		ensureActiveSession: vi.fn().mockResolvedValue({
+			sessionId: opts.appendExchangeResult?.sessionId ?? 'new-session-id',
+			isNew: true,
+			snapshot: undefined,
+		}),
 		peekSnapshot: vi.fn().mockResolvedValue(undefined),
 		setTitle: vi.fn().mockResolvedValue({ updated: false }),
 		rebuildMemorySnapshot: vi

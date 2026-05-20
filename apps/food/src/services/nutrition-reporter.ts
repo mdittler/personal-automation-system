@@ -84,7 +84,7 @@ export function formatTrendSummary(trends: MacroTrend[]): string {
 export async function generatePersonalSummary(
 	services: CoreServices,
 	store: ScopedDataStore,
-	userId: string,
+	_userId: string,
 	startDate: string,
 	endDate: string,
 	targets: MacroTargets,

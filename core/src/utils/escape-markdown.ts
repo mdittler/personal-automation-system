@@ -9,5 +9,5 @@
 const SPECIALS = /[*_`[\]()]/g;
 
 export function escapeMarkdown(text: string): string {
-	return text.replace(SPECIALS, (m) => '\\' + m);
+	return text.replace(SPECIALS, (m) => `\\${m}`);
 }

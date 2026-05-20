@@ -422,7 +422,7 @@ export async function handleCookCallback(
 				activeSession.timerStepIndex = undefined;
 				const stepNum = firedStepIndex + 1;
 				const stepText = activeSession.instructions[firedStepIndex] ?? '';
-				const brief = stepText.length > 80 ? stepText.slice(0, 77) + '...' : stepText;
+				const brief = stepText.length > 80 ? `${stepText.slice(0, 77)}...` : stepText;
 				const msg = `⏰ Timer done! Step ${stepNum}: ${brief}\n\nReady for the next step?`;
 				void services.telegram.sendWithButtons(userId, msg, [
 					[{ text: 'Next >', callbackData: 'app:food:ck:n' }],

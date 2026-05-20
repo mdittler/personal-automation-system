@@ -385,7 +385,7 @@ describe('Visibility matrix (REQ-SETTINGS-025, 028, 033)', () => {
 	const guiRows = MATRIX.filter((r) => r.surface === 'gui');
 	it.each(guiRows.map((r) => [r.qid, r.isAdmin, r.label, r.expected] as const))(
 		'GUI: %s isAdmin=%s → %s',
-		async (qid, isAdmin, label, expected) => {
+		async (_qid, isAdmin, label, expected) => {
 			const app = isAdmin ? fixture.adminApp : fixture.nonAdminApp;
 			const userId = isAdmin ? 'admin' : 'user';
 			const { body } = await loginAndGet(app, userId);
@@ -401,7 +401,7 @@ describe('Visibility matrix (REQ-SETTINGS-025, 028, 033)', () => {
 	const catalogRows = MATRIX.filter((r) => r.surface === 'catalog');
 	it.each(catalogRows.map((r) => [r.qid, r.isAdmin, r.label, r.expected] as const))(
 		'Catalog: %s isAdmin=%s → %s',
-		async (qid, isAdmin, label, expected) => {
+		async (_qid, isAdmin, label, expected) => {
 			const reader = isAdmin ? fixture.adminReader : fixture.nonAdminReader;
 			const { catalog } = await reader.buildCatalog({ userId: 'u1', isAdmin });
 			if (expected === 'visible') {

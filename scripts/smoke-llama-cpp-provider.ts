@@ -41,7 +41,7 @@ function fail(msg: string, detail?: unknown): never {
 }
 
 async function main() {
-	console.log(`LlamaCppProvider smoke test`);
+	console.log('LlamaCppProvider smoke test');
 	console.log(`  base URL: ${BASE_URL}`);
 	console.log(`  model:    ${MODEL}`);
 	console.log('');
@@ -66,9 +66,9 @@ async function main() {
 		pass(`providerId = ${provider.providerId}`);
 		if (provider.supportsVision !== false)
 			fail('supportsVision should be false', provider.supportsVision);
-		pass(`supportsVision = false (REQ-LLM-LLAMA-CPP-009)`);
+		pass('supportsVision = false (REQ-LLM-LLAMA-CPP-009)');
 		if (!isLocalProvider(provider.providerType)) fail('isLocalProvider should be true');
-		pass(`isLocalProvider(providerType) = true (REQ-LLM-LLAMA-CPP-006)`);
+		pass('isLocalProvider(providerType) = true (REQ-LLM-LLAMA-CPP-006)');
 		console.log('');
 
 		// --- 2. listModels ---
@@ -78,10 +78,10 @@ async function main() {
 		pass(`got ${models.length} model(s): ${models.map((m) => m.id).join(', ')}`);
 		const allLocal = models.every((m) => m.providerType === 'llama-cpp');
 		if (!allLocal) fail('every model should have providerType: llama-cpp');
-		pass(`every model tagged providerType = llama-cpp`);
+		pass('every model tagged providerType = llama-cpp');
 		const allFree = models.every((m) => m.pricing === null);
 		if (!allFree) fail('every model should have pricing: null (REQ-LLM-LLAMA-CPP-006)', models);
-		pass(`every model has pricing: null even when id collides with priced remote model`);
+		pass('every model has pricing: null even when id collides with priced remote model');
 		console.log('');
 
 		// --- 3. completeWithUsage (real chat round-trip) ---
@@ -134,7 +134,7 @@ async function main() {
 		const monthly = await costTracker.getMonthlyAppCosts();
 		const recorded = monthly.get('smoke-test') ?? 0;
 		if (recorded !== 0) fail(`CostTracker recorded ${recorded}, expected 0`);
-		pass(`CostTracker.record() → $0 for smoke-test app`);
+		pass('CostTracker.record() → $0 for smoke-test app');
 		console.log('');
 
 		// --- 5. JSON-mode plumbing ---
@@ -149,9 +149,9 @@ async function main() {
 			if (typeof parsed !== 'object' || parsed === null) {
 				fail('JSON parse succeeded but result was not an object', parsed);
 			}
-			pass(`parsed cleanly as JSON object (REQ-LLM-LLAMA-CPP-003)`);
+			pass('parsed cleanly as JSON object (REQ-LLM-LLAMA-CPP-003)');
 		} catch (err) {
-			fail(`JSON parse failed — response_format plumbing may be broken`, err);
+			fail('JSON parse failed — response_format plumbing may be broken', err);
 		}
 		console.log('');
 

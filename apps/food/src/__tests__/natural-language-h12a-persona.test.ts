@@ -327,8 +327,8 @@ describe('Persona — insight response is readable for a non-technical user', ()
 		// The handler uses extractPeriodDays() and includes the period in the response.
 		// Verify the source contains the template pattern rather than a hardcoded value,
 		// so the period always matches what the user asked for.
-		const fs = await import('fs/promises');
-		const { fileURLToPath } = await import('url');
+		const fs = await import('node:fs/promises');
+		const { fileURLToPath } = await import('node:url');
 		const handlerSource = await fs.readFile(
 			fileURLToPath(new URL('../handlers/health.ts', import.meta.url)),
 			'utf-8',

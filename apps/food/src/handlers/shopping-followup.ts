@@ -128,7 +128,7 @@ export async function handleShoppingFollowupJob(services: CoreServices): Promise
  */
 export async function handleShopFollowupClearCallback(
 	services: CoreServices,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 ): Promise<void> {
@@ -173,7 +173,7 @@ export async function handleShopFollowupClearCallback(
  */
 export async function handleShopFollowupKeepCallback(
 	services: CoreServices,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 ): Promise<void> {

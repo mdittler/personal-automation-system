@@ -345,7 +345,7 @@ export async function handleTargetsFlowCallback(
  */
 async function applyValueAndAdvance(
 	services: CoreServices,
-	userStore: ScopedDataStore,
+	_userStore: ScopedDataStore,
 	userId: string,
 	state: PendingTargetsFlow,
 	value: number,

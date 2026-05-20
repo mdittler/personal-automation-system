@@ -711,7 +711,7 @@ describe('family handler', () => {
 		it('clears approval on recipe for child', async () => {
 			store.read
 				.mockResolvedValueOnce(MARGOT_YAML)
-				.mockResolvedValueOnce(RECIPE_YAML + '\nchildApprovals:\n  margot: approved');
+				.mockResolvedValueOnce(`${RECIPE_YAML}\nchildApprovals:\n  margot: approved`);
 
 			await handleApprovalCallback(services, 'c:margot:rec-123', 'user1', 123, 456, store as any);
 

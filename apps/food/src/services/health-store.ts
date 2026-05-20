@@ -25,7 +25,7 @@ export interface MonthlyHealthLog {
 function healthPath(month: string): string {
 	// Validate YYYY-MM format to prevent path traversal (mirrors nutritionPath in macro-tracker.ts)
 	if (!/^\d{4}-\d{2}$/.test(month)) {
-		throw new Error(`Invalid month format: expected YYYY-MM`);
+		throw new Error('Invalid month format: expected YYYY-MM');
 	}
 	return `health/${month}.yaml`;
 }

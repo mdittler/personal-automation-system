@@ -819,7 +819,7 @@ function safeValidateAlert(
 ): { alert: AlertDefinition; errors: AlertValidationError[] } | null {
 	if (typeof data !== 'object' || data === null) return null;
 	const obj = data as Record<string, unknown>;
-	if (typeof obj['id'] !== 'string' || !obj['id']) return null;
+	if (typeof obj.id !== 'string' || !obj.id) return null;
 
 	const alert = data as AlertDefinition;
 	let errors: AlertValidationError[];

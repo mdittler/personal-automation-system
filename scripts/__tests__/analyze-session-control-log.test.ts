@@ -42,8 +42,8 @@ function makeClassificationBlock(opts: {
 	const ts = opts.ts ?? '2026-05-07 10:00:00';
 	const lines = [
 		`## ${ts}`,
-		``,
-		`- **Kind**: classification`,
+		'',
+		'- **Kind**: classification',
 		`- **User**: ${opts.userId ?? 'u1'}`,
 		`- **Message**: "${opts.message ?? 'start fresh'}"`,
 		`- **Pre-filter**: ${opts.preFilter ?? 'unmatched'}`,
@@ -51,8 +51,8 @@ function makeClassificationBlock(opts: {
 		`- **Zone**: ${opts.zone ?? 'grey-zone'}`,
 		...(opts.entryId ? [`- **Entry ID**: ${opts.entryId}`] : []),
 		`- **Latency**: ${opts.latency ?? '42ms'}`,
-		``,
-		``,
+		'',
+		'',
 	];
 	return lines.join('\n');
 }
@@ -66,14 +66,14 @@ function makeConfirmationBlock(opts: {
 }) {
 	return [
 		`## ${opts.ts ?? '2026-05-07 10:01:00'}`,
-		``,
-		`- **Kind**: confirmation`,
+		'',
+		'- **Kind**: confirmation',
 		`- **User**: ${opts.userId ?? 'u1'}`,
 		`- **Entry ID**: ${opts.entryId ?? 'abc123'}`,
 		`- **Outcome**: ${opts.outcome ?? 'confirmed'}`,
 		`- **Elapsed**: ${opts.elapsed ?? '3500ms'}`,
-		``,
-		``,
+		'',
+		'',
 	].join('\n');
 }
 
@@ -238,12 +238,12 @@ describe('analyzeSessionControlLog', () => {
 			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e_orphan' });
 		const stats = analyzeSessionControlLog(parseSessionControlLog(md));
 		// No grey-zone classifications → grey-zone entryId set empty → rate is NaN
-		expect(isNaN(stats.greyZoneConfirmationRate)).toBe(true);
+		expect(Number.isNaN(stats.greyZoneConfirmationRate)).toBe(true);
 	});
 
 	it('returns NaN confirmation rate when no confirmations', () => {
 		const stats = analyzeSessionControlLog([]);
-		expect(isNaN(stats.greyZoneConfirmationRate)).toBe(true);
+		expect(Number.isNaN(stats.greyZoneConfirmationRate)).toBe(true);
 	});
 
 	it('returns top declined messages linked by entryId', () => {
@@ -268,7 +268,7 @@ describe('analyzeSessionControlLog', () => {
 			makeConfirmationBlock({ outcome: 'confirmed', entryId: 'e2' });
 		const stats = analyzeSessionControlLog(parseSessionControlLog(md));
 		expect(stats.outcomeCounts['expired-or-stale']).toBe(1);
-		expect(stats.outcomeCounts['confirmed']).toBe(1);
+		expect(stats.outcomeCounts.confirmed).toBe(1);
 	});
 });
 

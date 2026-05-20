@@ -113,10 +113,12 @@ function buildTelegramSpy(): TelegramSpy {
 		spy.lastMessage = text;
 		spy.messages.push({ userId, text });
 	});
-	spy.sendWithButtons.mockImplementation(async (userId: string, text: string, buttons: unknown) => {
-		spy.lastMessage = text;
-		spy.lastButtons = buttons;
-	});
+	spy.sendWithButtons.mockImplementation(
+		async (_userId: string, text: string, buttons: unknown) => {
+			spy.lastMessage = text;
+			spy.lastButtons = buttons;
+		},
+	);
 	return spy;
 }
 

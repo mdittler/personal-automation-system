@@ -914,7 +914,7 @@ async function dispatchSmartLog(
 			},
 		]);
 		buttons.push([{ text: 'None of these', callbackData: 'app:food:nut:log:none' }]);
-		await services.telegram.sendWithButtons(userId, `Which recipe did you mean?`, buttons);
+		await services.telegram.sendWithButtons(userId, 'Which recipe did you mean?', buttons);
 		return;
 	}
 
@@ -1080,7 +1080,7 @@ export async function handleAdherencePeriodCallback(
 	if (!match) return;
 
 	const periodDays = Number.parseInt(match[1]!, 10);
-	if (isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
+	if (Number.isNaN(periodDays) || periodDays < 1 || periodDays > 365) {
 		await services.telegram.send(userId, 'Period must be between 1 and 365 days.');
 		return;
 	}

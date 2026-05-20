@@ -111,7 +111,7 @@ describe('generateDiff', () => {
 		const before = lines.join('\n');
 
 		// Modify alternating lines to create a large diff
-		const modifiedLines = lines.map((line, i) => (i % 2 === 0 ? line + ' modified' : line));
+		const modifiedLines = lines.map((line, i) => (i % 2 === 0 ? `${line} modified` : line));
 		const after = modifiedLines.join('\n');
 
 		const result = generateDiff(before, after, 'large.md');

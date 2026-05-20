@@ -485,13 +485,11 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate denied: no app rate slot committed on either', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi
-				.fn()
-				.mockReturnValue({
-					allowed: false,
-					commit: vi.fn(),
-					limit: { maxRequests: 200, windowSeconds: 3600 },
-				}),
+			check: vi.fn().mockReturnValue({
+				allowed: false,
+				commit: vi.fn(),
+				limit: { maxRequests: 200, windowSeconds: 3600 },
+			}),
 		});
 		const { guard } = makeGuardWithHH({ hhLimiter });
 		await expect(guard.complete('hi')).rejects.toThrow(LLMRateLimitError);
@@ -567,13 +565,11 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 
 	it('household rate error carries override limit metadata from check().limit', async () => {
 		const hhLimiter = createMockHouseholdLimiter({
-			check: vi
-				.fn()
-				.mockReturnValue({
-					allowed: false,
-					commit: vi.fn(),
-					limit: { maxRequests: 400, windowSeconds: 1800 },
-				}),
+			check: vi.fn().mockReturnValue({
+				allowed: false,
+				commit: vi.fn(),
+				limit: { maxRequests: 400, windowSeconds: 1800 },
+			}),
 		});
 		const { guard } = makeGuardWithHH({ hhLimiter });
 		const err = (await guard.complete('hi').catch((e: unknown) => e)) as LLMRateLimitError;

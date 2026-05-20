@@ -169,7 +169,7 @@ describe('classifySessionControl', () => {
 			confidence: 0.88,
 			reason: 'user wants fresh start',
 		});
-		const fenced = '```json\n' + payload + '\n```';
+		const fenced = `\`\`\`json\n${payload}\n\`\`\``;
 		const deps = makeDeps(fenced);
 		const result = await classifySessionControl('can we begin again?', deps);
 		expect(result.intent).toBe('new_session');

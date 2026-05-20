@@ -147,7 +147,7 @@ describe('formatReportForTelegram', () => {
 		// pushing the total past 4000 chars
 		const filler = 'x'.repeat(3990);
 		const sections: CollectedSection[] = [
-			{ label: 'S', content: filler + ' *end*', isEmpty: false },
+			{ label: 'S', content: `${filler} *end*`, isEmpty: false },
 		];
 
 		const result = formatReportForTelegram(

@@ -134,9 +134,7 @@ describe('SystemConfigWriter.write() — happy path', () => {
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(180);
 	});
 
@@ -161,9 +159,7 @@ describe('SystemConfigWriter.write() — happy path', () => {
 		const raw = await readFile(p, 'utf-8');
 		const parsed = parse(raw) as Record<string, unknown>;
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(45);
 	});
 
@@ -176,7 +172,7 @@ describe('SystemConfigWriter.write() — happy path', () => {
 		await writer.write('chat.sessions.auto_prune', true, config);
 
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
-		expect((parsed['n8n'] as Record<string, unknown>)['dispatch_url']).toBe('http://n8n');
+		expect((parsed.n8n as Record<string, unknown>).dispatch_url).toBe('http://n8n');
 	});
 
 	it('writes null for nullable auto_reset_idle_minutes', async () => {
@@ -190,11 +186,8 @@ describe('SystemConfigWriter.write() — happy path', () => {
 
 		expect(config.chat?.sessions?.auto_reset_idle_minutes).toBeNull();
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
-		const sessions = (parsed['chat'] as Record<string, unknown>)['sessions'] as Record<
-			string,
-			unknown
-		>;
-		expect(sessions['auto_reset_idle_minutes']).toBeNull();
+		const sessions = (parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>;
+		expect(sessions.auto_reset_idle_minutes).toBeNull();
 	});
 
 	it('writes routing.verification.upperBound via upper_bound key', async () => {
@@ -208,9 +201,8 @@ describe('SystemConfigWriter.write() — happy path', () => {
 		expect(config.routing?.verification?.upperBound).toBe(0.5);
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
 		expect(
-			((parsed['routing'] as Record<string, unknown>)['verification'] as Record<string, unknown>)[
-				'upper_bound'
-			],
+			((parsed.routing as Record<string, unknown>).verification as Record<string, unknown>)
+				.upper_bound,
 		).toBe(0.5);
 	});
 });
@@ -302,10 +294,10 @@ describe('SystemConfigWriter.resetToSchemaDefault()', () => {
 		expect(config.chat?.sessions?.retention_days).toBe(90);
 		// YAML key removed
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
-		const sessions = (parsed['chat'] as Record<string, unknown> | undefined)?.['sessions'] as
+		const sessions = (parsed.chat as Record<string, unknown> | undefined)?.sessions as
 			| Record<string, unknown>
 			| undefined;
-		expect(sessions?.['retention_days']).toBeUndefined();
+		expect(sessions?.retention_days).toBeUndefined();
 	});
 
 	it('is idempotent when value is already at default', async () => {
@@ -371,12 +363,9 @@ describe('SystemConfigWriter — concurrency', () => {
 		]);
 
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
-		const sessions = (parsed['chat'] as Record<string, unknown>)['sessions'] as Record<
-			string,
-			unknown
-		>;
-		expect(sessions['retention_days']).toBe(120);
-		expect(sessions['auto_prune']).toBe(true);
+		const sessions = (parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>;
+		expect(sessions.retention_days).toBe(120);
+		expect(sessions.auto_prune).toBe(true);
 	});
 
 	it('concurrent system write and users-sync both persist', async () => {
@@ -401,11 +390,9 @@ describe('SystemConfigWriter — concurrency', () => {
 		]);
 
 		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
-		expect((parsed['users'] as unknown[]).length).toBe(1);
+		expect((parsed.users as unknown[]).length).toBe(1);
 		expect(
-			((parsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((parsed.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(180);
 	});
 });

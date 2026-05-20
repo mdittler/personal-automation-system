@@ -95,7 +95,7 @@ export function parseSessionControlLogEntry(block: string): ParsedEntry | null {
 			llm: kv.get('LLM') ?? '',
 			zone: kv.get('Zone') ?? '',
 			entryId: kv.get('Entry ID') || undefined,
-			latencyMs: latencyMs !== undefined && !isNaN(latencyMs) ? latencyMs : undefined,
+			latencyMs: latencyMs !== undefined && !Number.isNaN(latencyMs) ? latencyMs : undefined,
 		};
 	}
 
@@ -108,7 +108,7 @@ export function parseSessionControlLogEntry(block: string): ParsedEntry | null {
 			userId: kv.get('User') ?? '',
 			entryId: kv.get('Entry ID') ?? '',
 			outcome: kv.get('Outcome') ?? '',
-			elapsedMs: elapsedMs !== undefined && !isNaN(elapsedMs) ? elapsedMs : undefined,
+			elapsedMs: elapsedMs !== undefined && !Number.isNaN(elapsedMs) ? elapsedMs : undefined,
 		};
 	}
 
@@ -236,11 +236,11 @@ async function main(): Promise<void> {
 			console.log(`  ${outcome.padEnd(20)}: ${count}`);
 		}
 
-		if (!isNaN(stats.greyZoneConfirmationRate)) {
+		if (!Number.isNaN(stats.greyZoneConfirmationRate)) {
 			console.log(
 				`\nGrey-zone confirmation rate: ${(stats.greyZoneConfirmationRate * 100).toFixed(1)}%` +
-					` (${stats.outcomeCounts['confirmed'] ?? 0} confirmed /` +
-					` ${(stats.outcomeCounts['confirmed'] ?? 0) + (stats.outcomeCounts['declined'] ?? 0)} resolved)`,
+					` (${stats.outcomeCounts.confirmed ?? 0} confirmed /` +
+					` ${(stats.outcomeCounts.confirmed ?? 0) + (stats.outcomeCounts.declined ?? 0)} resolved)`,
 			);
 		}
 	}

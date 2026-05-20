@@ -315,7 +315,7 @@ describe('handleVoteCallback', () => {
 
 	it('sends plan to all members when all have voted', async () => {
 		// Both members have already voted on 2026-04-02; user1 is voting on 2026-04-01 last
-		const plan = makePlan({
+		const _plan = makePlan({
 			status: 'voting',
 			votingStartedAt: new Date().toISOString(),
 			meals: [

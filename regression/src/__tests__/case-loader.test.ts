@@ -95,13 +95,13 @@ describe('loadCases', () => {
 
 	it('throws when .case.ts has no default export', async () => {
 		await mkdir(join(root, 'cases'), { recursive: true });
-		await writeFile(join(root, 'cases', 'a.case.ts'), `export const x = 1;`);
+		await writeFile(join(root, 'cases', 'a.case.ts'), 'export const x = 1;');
 		await expect(loadCases(join(root, 'cases'))).rejects.toThrow(/default export/i);
 	});
 
 	it('throws when index.ts does not export buildCases()', async () => {
 		await mkdir(join(root, 'cases'), { recursive: true });
-		await writeFile(join(root, 'cases', 'index.ts'), `export const x = 1;`);
+		await writeFile(join(root, 'cases', 'index.ts'), 'export const x = 1;');
 		await expect(loadCases(join(root, 'cases'))).rejects.toThrow(/buildCases/i);
 	});
 

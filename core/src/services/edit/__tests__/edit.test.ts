@@ -348,7 +348,7 @@ describe('EditServiceImpl', () => {
 			// Use junction on Windows, symlink on Unix
 			const isWin = platform() === 'win32';
 			await symlink(outsideFilePath, symlinkPath, isWin ? 'junction' : 'file');
-		} catch (err) {
+		} catch (_err) {
 			// Skip the test if symlinks not supported
 			return;
 		}
@@ -1069,14 +1069,14 @@ describe('EditServiceImpl', () => {
 
 		// File is larger than DataQuery's 4000-char limit
 		const frontmatter = '---\ntitle: Large Recipe\ntype: recipe\n---\n\n';
-		const bodyContent = 'ingredient: ' + 'x'.repeat(5000) + '\n';
+		const bodyContent = `ingredient: ${'x'.repeat(5000)}\n`;
 		const fullContent = frontmatter + bodyContent;
 		expect(fullContent.length).toBeGreaterThan(4000);
 
 		await writeFile(absolutePath, fullContent, 'utf-8');
 
 		// DataQuery returns truncated content (as it would in reality)
-		const truncatedContent = fullContent.slice(0, 400) + '... (truncated)';
+		const truncatedContent = `${fullContent.slice(0, 400)}... (truncated)`;
 		const dq = makeDataQueryService([
 			{ path: relativePath, appId: 'food', content: truncatedContent },
 		]);
@@ -1087,7 +1087,7 @@ describe('EditServiceImpl', () => {
 		});
 
 		// Capture what the LLM receives
-		const llmCompleteSpy = vi.fn().mockResolvedValue(fullContent + ' # edited');
+		const llmCompleteSpy = vi.fn().mockResolvedValue(`${fullContent} # edited`);
 		const llm: LLMService = {
 			complete: llmCompleteSpy,
 			classify: vi.fn(),

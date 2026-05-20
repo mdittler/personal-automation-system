@@ -235,15 +235,12 @@ describe('classifyRecallIntent — happy path', () => {
 	});
 
 	it('strips markdown code fences before parsing', async () => {
-		const raw =
-			'```json\n' +
-			JSON.stringify({
-				shouldRecall: true,
-				query: 'exercise routine',
-				timeAnchor: null,
-				reason: 'past discussion reference',
-			}) +
-			'\n```';
+		const raw = `\`\`\`json\n${JSON.stringify({
+			shouldRecall: true,
+			query: 'exercise routine',
+			timeAnchor: null,
+			reason: 'past discussion reference',
+		})}\n\`\`\``;
 		const deps = makeDeps(raw);
 		const result = await classifyRecallIntent('did we discuss exercise?', deps);
 		expect(result.shouldRecall).toBe(true);

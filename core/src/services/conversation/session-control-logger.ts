@@ -43,7 +43,8 @@ export interface SessionControlLoggerOptions {
 	enabled?: boolean;
 }
 
-const FRONTMATTER = `---\ntitle: Session Control Classifier Log\ntype: system-log\ntags: [pas/session-control-classifier]\n---\n\n`;
+const FRONTMATTER =
+	'---\ntitle: Session Control Classifier Log\ntype: system-log\ntags: [pas/session-control-classifier]\n---\n\n';
 const MAX_MSG = 200;
 
 // Bidi control character ranges:
@@ -134,7 +135,7 @@ export class SessionControlLogger {
 		const lines: Array<string | null> = [
 			`## ${fmtTs(e.timestamp)}`,
 			'',
-			`- **Kind**: classification`,
+			'- **Kind**: classification',
 			`- **User**: ${e.userId}`,
 			`- **Message**: "${text}"`,
 			`- **Pre-filter**: ${e.preFilter}`,
@@ -152,7 +153,7 @@ export class SessionControlLogger {
 		return [
 			`## ${fmtTs(e.timestamp)}`,
 			'',
-			`- **Kind**: confirmation`,
+			'- **Kind**: confirmation',
 			`- **User**: ${e.userId}`,
 			`- **Entry ID**: ${e.entryId}`,
 			`- **Outcome**: ${e.outcome}`,

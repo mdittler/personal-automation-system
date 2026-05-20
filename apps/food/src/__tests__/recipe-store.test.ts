@@ -514,7 +514,7 @@ describe('loadRecipe — frontmatter handling', () => {
 		const store = createMockScopedStore();
 		const recipe = makeSampleRecipe();
 		store.read.mockResolvedValue(
-			'---\ntitle: Chicken Stir Fry\ndate: 2026-01-01\n---\n' + stringify(recipe),
+			`---\ntitle: Chicken Stir Fry\ndate: 2026-01-01\n---\n${stringify(recipe)}`,
 		);
 		const loaded = await loadRecipe(store as any, recipe.id);
 		expect(loaded).toBeDefined();

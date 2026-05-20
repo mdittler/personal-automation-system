@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AlertDefinition } from '../../../types/alert.js';
 import { validateAlert } from '../alert-validator.js';
 
-const logger = pino({ level: 'silent' });
+const _logger = pino({ level: 'silent' });
 
 const mockUserManager = {
 	isRegistered: (id: string) => ['user1', 'user2'].includes(id),

@@ -443,10 +443,10 @@ describe('checkDefrostNeeded', () => {
 	function setupHouseholdAndFreezer(hh: Household | null, freezerItems: FreezerItem[]) {
 		store.read.mockImplementation(async (path: string) => {
 			if (path === 'household.yaml' && hh) {
-				return `---\ntitle: ${hh.name}\n---\n` + (await import('yaml')).stringify(hh);
+				return `---\ntitle: ${hh.name}\n---\n${(await import('yaml')).stringify(hh)}`;
 			}
 			if (path === 'freezer.yaml' && freezerItems.length > 0) {
-				return `---\ntitle: Freezer\n---\n` + (await import('yaml')).stringify(freezerItems);
+				return `---\ntitle: Freezer\n---\n${(await import('yaml')).stringify(freezerItems)}`;
 			}
 			return null;
 		});

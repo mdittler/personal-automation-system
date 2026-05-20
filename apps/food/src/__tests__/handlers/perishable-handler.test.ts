@@ -188,7 +188,7 @@ describe('handlePerishableCallback', () => {
 				'pantry.yaml': pantryYaml(pantryItems),
 				'freezer.yaml': null,
 			});
-			store.write.mockImplementation(async (path: string, content: string) => {
+			store.write.mockImplementation(async (path: string, _content: string) => {
 				if (path === 'freezer.yaml') {
 					throw new Error('freezer write failed');
 				}

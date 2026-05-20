@@ -105,19 +105,19 @@ describe('GUI Auth', () => {
 	});
 
 	describe('Secure cookie flag', () => {
-		const originalNodeEnv = process.env['NODE_ENV'];
-		const originalSecureCookies = process.env['GUI_SECURE_COOKIES'];
+		const originalNodeEnv = process.env.NODE_ENV;
+		const originalSecureCookies = process.env.GUI_SECURE_COOKIES;
 
 		afterEach(() => {
 			if (originalNodeEnv === undefined) {
 				delete process.env['NODE_ENV'];
 			} else {
-				process.env['NODE_ENV'] = originalNodeEnv;
+				process.env.NODE_ENV = originalNodeEnv;
 			}
 			if (originalSecureCookies === undefined) {
 				delete process.env['GUI_SECURE_COOKIES'];
 			} else {
-				process.env['GUI_SECURE_COOKIES'] = originalSecureCookies;
+				process.env.GUI_SECURE_COOKIES = originalSecureCookies;
 			}
 		});
 
@@ -132,7 +132,7 @@ describe('GUI Auth', () => {
 		}
 
 		it('sets Secure flag on pas_auth cookie when NODE_ENV=production', async () => {
-			process.env['NODE_ENV'] = 'production';
+			process.env.NODE_ENV = 'production';
 			const res = await app.inject({
 				method: 'POST',
 				url: '/gui/login',
@@ -145,7 +145,7 @@ describe('GUI Auth', () => {
 		});
 
 		it('sets Secure flag on pas_auth cookie when GUI_SECURE_COOKIES=true', async () => {
-			process.env['GUI_SECURE_COOKIES'] = 'true';
+			process.env.GUI_SECURE_COOKIES = 'true';
 			const res = await app.inject({
 				method: 'POST',
 				url: '/gui/login',
@@ -194,9 +194,9 @@ describe('GUI Auth', () => {
 	});
 
 	it('logout clearCookie includes Secure flag on pas_auth and pas_csrf in production', async () => {
-		const originalNodeEnv = process.env['NODE_ENV'];
+		const originalNodeEnv = process.env.NODE_ENV;
 		try {
-			process.env['NODE_ENV'] = 'production';
+			process.env.NODE_ENV = 'production';
 			// Login first
 			const loginRes = await app.inject({
 				method: 'POST',
@@ -225,13 +225,13 @@ describe('GUI Auth', () => {
 			if (originalNodeEnv === undefined) {
 				delete process.env['NODE_ENV'];
 			} else {
-				process.env['NODE_ENV'] = originalNodeEnv;
+				process.env.NODE_ENV = originalNodeEnv;
 			}
 		}
 	});
 
 	it('auth guard reissues cookie with Secure flag in production (pre-hardening upgrade)', async () => {
-		const originalNodeEnv = process.env['NODE_ENV'];
+		const originalNodeEnv = process.env.NODE_ENV;
 		try {
 			// Login without production flag (simulates pre-hardening cookie)
 			delete process.env['NODE_ENV'];
@@ -245,7 +245,7 @@ describe('GUI Auth', () => {
 			expect(authCookie).toBeDefined();
 
 			// Now switch to production and access a protected route
-			process.env['NODE_ENV'] = 'production';
+			process.env.NODE_ENV = 'production';
 			const res = await app.inject({
 				method: 'GET',
 				url: '/gui/dashboard',
@@ -262,15 +262,15 @@ describe('GUI Auth', () => {
 			if (originalNodeEnv === undefined) {
 				delete process.env['NODE_ENV'];
 			} else {
-				process.env['NODE_ENV'] = originalNodeEnv;
+				process.env.NODE_ENV = originalNodeEnv;
 			}
 		}
 	});
 
 	it('invalid-cookie clearCookie includes Secure flag on pas_auth in production', async () => {
-		const originalNodeEnv = process.env['NODE_ENV'];
+		const originalNodeEnv = process.env.NODE_ENV;
 		try {
-			process.env['NODE_ENV'] = 'production';
+			process.env.NODE_ENV = 'production';
 			// Access protected route with a tampered/invalid cookie
 			const res = await app.inject({
 				method: 'GET',
@@ -288,7 +288,7 @@ describe('GUI Auth', () => {
 			if (originalNodeEnv === undefined) {
 				delete process.env['NODE_ENV'];
 			} else {
-				process.env['NODE_ENV'] = originalNodeEnv;
+				process.env.NODE_ENV = originalNodeEnv;
 			}
 		}
 	});

@@ -106,8 +106,8 @@ function buildHunks(
 	matches: Array<[number, number]>,
 ): Hunk[] {
 	// Build a map of which before/after lines are part of the LCS
-	const matchedBefore = new Set(matches.map((m) => m[0]));
-	const matchedAfter = new Set(matches.map((m) => m[1]));
+	const _matchedBefore = new Set(matches.map((m) => m[0]));
+	const _matchedAfter = new Set(matches.map((m) => m[1]));
 
 	// Build operation list
 	const ops: Array<{ type: 'context' | 'remove' | 'add'; beforeIdx?: number; afterIdx?: number }> =
@@ -232,7 +232,7 @@ function formatHunk(hunk: Hunk): string {
 
 	for (const line of hunk.lines) {
 		const prefix = line.type === 'remove' ? '-' : line.type === 'add' ? '+' : ' ';
-		output += prefix + line.text + '\n';
+		output += `${prefix + line.text}\n`;
 	}
 
 	return output;

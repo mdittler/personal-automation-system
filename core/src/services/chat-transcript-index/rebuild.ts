@@ -162,8 +162,7 @@ export async function rebuildIndex(opts: {
 		let raw: string;
 		try {
 			raw = await readFile(sf.filePath, 'utf8');
-		} catch (err) {
-			console.warn(`[warn] Could not read ${sf.filePath}: ${String(err)} — skipping`);
+		} catch (_err) {
 			skipped++;
 			return;
 		}
@@ -173,7 +172,6 @@ export async function rebuildIndex(opts: {
 			decoded = decode(raw);
 		} catch (err) {
 			if (err instanceof CorruptTranscriptError) {
-				console.warn(`[warn] Corrupt transcript ${sf.filePath}: ${err.message} — skipping`);
 				skipped++;
 				return;
 			}
@@ -185,31 +183,19 @@ export async function rebuildIndex(opts: {
 		// only; a mismatch indicates a file moved or was tampered with.
 		const sessionId = basename(sf.filePath, '.md');
 		if (meta.id && meta.id !== sessionId) {
-			console.warn(
-				`[warn] Frontmatter id "${meta.id}" disagrees with filename "${sessionId}" in ${sf.filePath} — skipping`,
-			);
 			skipped++;
 			return;
 		}
 		if (meta.user_id && meta.user_id !== sf.userId) {
-			console.warn(
-				`[warn] Frontmatter user_id "${meta.user_id}" disagrees with path userId "${sf.userId}" in ${sf.filePath} — skipping`,
-			);
 			skipped++;
 			return;
 		}
 		if (meta.household_id && sf.householdId && meta.household_id !== sf.householdId) {
-			console.warn(
-				`[warn] Frontmatter household_id "${meta.household_id}" disagrees with path householdId "${sf.householdId}" in ${sf.filePath} — skipping`,
-			);
 			skipped++;
 			return;
 		}
 
 		if (dryRun) {
-			console.log(
-				`[dry-run] session ${sessionId}  user=${sf.userId}  household=${sf.householdId ?? '(none)'}  turns=${sessionTurns.length}`,
-			);
 			sessions++;
 			turns += sessionTurns.length;
 			return;

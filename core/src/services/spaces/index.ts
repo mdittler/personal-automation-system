@@ -536,18 +536,18 @@ function isValidSpaceEntry(key: string, value: unknown): boolean {
 	const v = value as Record<string, unknown>;
 
 	if (
-		typeof v['id'] !== 'string' ||
-		v['id'] !== key ||
-		typeof v['name'] !== 'string' ||
-		v['name'].length === 0 ||
-		!Array.isArray(v['members']) ||
-		typeof v['createdBy'] !== 'string'
+		typeof v.id !== 'string' ||
+		v.id !== key ||
+		typeof v.name !== 'string' ||
+		v.name.length === 0 ||
+		!Array.isArray(v.members) ||
+		typeof v.createdBy !== 'string'
 	) {
 		return false;
 	}
 
 	// If kind is present, it must be a known value
-	if (v['kind'] !== undefined && v['kind'] !== 'household' && v['kind'] !== 'collaboration') {
+	if (v.kind !== undefined && v.kind !== 'household' && v.kind !== 'collaboration') {
 		return false;
 	}
 

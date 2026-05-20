@@ -43,7 +43,7 @@ export function createRating(userId: string, score: number): Rating {
 
 /** Format a short day abbreviation for a YYYY-MM-DD date string (UTC). */
 function dayAbbrev(dateStr: string): string {
-	return new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', {
+	return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', {
 		weekday: 'short',
 		timeZone: 'UTC',
 	});

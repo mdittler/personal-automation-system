@@ -40,11 +40,11 @@ function paretoSample(p50Ms: number, p95Ms: number, capMs: number): number {
 	// Dividing: p50/p95 = (0.5/0.05)^(1/alpha) = 10^(1/alpha)
 	// alpha = log(10) / log(p95/p50)
 	const alpha = Math.log(10) / Math.log(p95Ms / p50Ms);
-	const xm = p50Ms / Math.pow(0.5, 1 / alpha);
+	const xm = p50Ms / 0.5 ** (1 / alpha);
 
 	// Inverse CDF: x = xm / U^(1/alpha)
 	const u = Math.random();
-	const sample = xm / Math.pow(u, 1 / alpha);
+	const sample = xm / u ** (1 / alpha);
 	return Math.min(sample, capMs);
 }
 

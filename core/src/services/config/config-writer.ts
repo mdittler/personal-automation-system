@@ -39,7 +39,7 @@ export async function syncUsersToConfig(
 	try {
 		// Happy path: file exists — go through the shared lock + mutator.
 		await mutatePasYaml(configPath, (parsed) => {
-			parsed['users'] = usersSnake;
+			parsed.users = usersSnake;
 			return parsed;
 		});
 	} catch (err) {

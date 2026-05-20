@@ -113,13 +113,13 @@ export class FoodShadowLogger {
 			`- **Pending flow**: ${e.pendingFlow ?? '(none)'}`,
 			e.coreRoute
 				? `- **Core route**: food / ${e.coreRoute.intent} (confidence: ${e.coreRoute.confidence}, source: ${e.coreRoute.source}, verifier: ${e.coreRoute.verifierStatus})`
-				: `- **Core route**: (absent)`,
+				: '- **Core route**: (absent)',
 			`- **Regex winner**: ${e.regexWinner} → "${e.regexWinnerLabel}"`,
 			`- **Shadow**: ${this.fmtShadow(e.shadow)}`,
 			`- **Verdict**: ${e.verdict}`,
 		];
 		if (e.shadowSuppressedByThreshold) {
-			lines.push(`- **ShadowSuppressedByThreshold**: true`);
+			lines.push('- **ShadowSuppressedByThreshold**: true');
 		}
 		lines.push('', '');
 		return lines.join('\n');

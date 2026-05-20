@@ -200,7 +200,7 @@ export function formatPediatricianReport(data: PediatricianReportData): string {
 }
 
 export async function generatePediatricianReport(
-	sharedStore: ScopedDataStore,
+	_sharedStore: ScopedDataStore,
 	userStore: ScopedDataStore,
 	childLog: ChildFoodLog,
 	recipes: Recipe[],

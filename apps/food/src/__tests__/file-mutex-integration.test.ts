@@ -171,7 +171,7 @@ describe('file-mutex food store integration', () => {
 		// Two operations that both need pantry + freezer locks.
 		// withMultiFileLock sorts keys, so both callers acquire in the same
 		// order, which should prevent deadlock.
-		const store = createMemoryStore();
+		const _store = createMemoryStore();
 
 		const results: string[] = [];
 

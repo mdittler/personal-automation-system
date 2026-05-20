@@ -19,7 +19,7 @@ import { sanitizeInput } from '../utils/sanitize.js';
 // ─── Intent Detection ─────────────────────────────────────────────────────────
 
 const HOSTING_KEYWORDS = /\b(hosting|host|dinner party|having.*over|guests? coming|entertain)\b/i;
-const HOSTING_PLAN = /\b(plan|menu|cook for|having \d+|invite)\b/i;
+const _HOSTING_PLAN = /\b(plan|menu|cook for|having \d+|invite)\b/i;
 
 export function isHostingIntent(text: string): boolean {
 	const lower = text.toLowerCase();

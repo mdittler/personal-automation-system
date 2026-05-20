@@ -25,7 +25,7 @@ import { loadHousehold } from '../utils/household-guard.js';
 
 /** Format a day name from a YYYY-MM-DD date string (UTC). */
 function formatDay(dateStr: string): string {
-	return new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', {
+	return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', {
 		weekday: 'long',
 		timeZone: 'UTC',
 	});
@@ -40,7 +40,7 @@ function formatDay(dateStr: string): string {
 export async function handleCookedCallback(
 	services: CoreServices,
 	mealDate: string,
-	userId: string,
+	_userId: string,
 	chatId: number,
 	messageId: number,
 ): Promise<void> {

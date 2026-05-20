@@ -98,16 +98,14 @@ describe.sequential(
 			// data/households/<hhId>/shared/food/ when invoked under requestContext.
 			const householdDir = join(tempDir, 'data', 'households', householdAId, 'shared', 'food');
 			await mkdir(householdDir, { recursive: true });
-			const householdYaml =
-				`---\ntitle: Solo\napp: food\n---\n` +
-				stringifyYaml({
-					id: 'solo',
-					name: 'Solo Family',
-					createdBy: USER_A,
-					members: [USER_A, USER_C],
-					joinCode: 'ABC123',
-					createdAt: '2026-01-01T00:00:00.000Z',
-				});
+			const householdYaml = `---\ntitle: Solo\napp: food\n---\n${stringifyYaml({
+				id: 'solo',
+				name: 'Solo Family',
+				createdBy: USER_A,
+				members: [USER_A, USER_C],
+				joinCode: 'ABC123',
+				createdAt: '2026-01-01T00:00:00.000Z',
+			})}`;
 			await writeFile(join(householdDir, 'household.yaml'), householdYaml, 'utf-8');
 
 			// Seed a per-user food data file so I2's alert condition can fire on a

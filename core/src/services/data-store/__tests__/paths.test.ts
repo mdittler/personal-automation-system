@@ -157,7 +157,7 @@ describe('findMatchingScope', () => {
 		const scopes: ManifestDataScope[] = [
 			{ path: 'grocery/', access: 'read-write', description: 'Grocery' },
 		];
-		const longPath = 'grocery/' + 'a'.repeat(1000) + '.md';
+		const longPath = `grocery/${'a'.repeat(1000)}.md`;
 		expect(findMatchingScope(longPath, scopes)).toEqual(scopes[0]);
 	});
 });

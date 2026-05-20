@@ -117,7 +117,7 @@ interface PasYamlConfig {
 }
 
 /** SAFE_SEGMENT — must match the same pattern used elsewhere in PAS. */
-const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+const _SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 /** Error thrown when strict-mode config validation finds missing required fields. */
 export class ConfigValidationError extends Error {
@@ -197,7 +197,7 @@ export async function loadSystemConfig(options?: {
 	const rawUsers: RegisteredUser[] = (yamlConfig?.users ?? []).map((u) => {
 		const ru = u as Record<string, unknown>;
 		const householdId =
-			typeof ru['household_id'] === 'string' && ru['household_id'] ? ru['household_id'] : undefined;
+			typeof ru.household_id === 'string' && ru.household_id ? ru.household_id : undefined;
 		return {
 			id: u.id,
 			name: u.name,
@@ -216,8 +216,7 @@ export async function loadSystemConfig(options?: {
 		if (mode === 'strict') {
 			const ids = usersWithoutHousehold.map((u) => u.id).join(', ');
 			throw new ConfigValidationError(
-				`Strict mode: the following users are missing householdId: ${ids}. ` +
-					`Run the household migration or load with mode='transitional'.`,
+				`Strict mode: the following users are missing householdId: ${ids}. Run the household migration or load with mode='transitional'.`,
 			);
 		}
 		// transitional mode — flag that migration is needed
@@ -383,14 +382,12 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 			// Validate that explicitly-configured tier providers are actually available
 			if (!available.has(fast.provider)) {
 				throw new Error(
-					`LLM tier 'fast' is pinned to provider '${fast.provider}' in pas.yaml, but that provider has no valid credentials. ` +
-						`Check the corresponding API key or remove the explicit tier assignment.`,
+					`LLM tier 'fast' is pinned to provider '${fast.provider}' in pas.yaml, but that provider has no valid credentials. Check the corresponding API key or remove the explicit tier assignment.`,
 				);
 			}
 			if (!available.has(standard.provider)) {
 				throw new Error(
-					`LLM tier 'standard' is pinned to provider '${standard.provider}' in pas.yaml, but that provider has no valid credentials. ` +
-						`Check the corresponding API key or remove the explicit tier assignment.`,
+					`LLM tier 'standard' is pinned to provider '${standard.provider}' in pas.yaml, but that provider has no valid credentials. Check the corresponding API key or remove the explicit tier assignment.`,
 				);
 			}
 			tiers = {
@@ -400,8 +397,7 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 			if (yamlLLM.tiers.reasoning) {
 				if (!available.has(yamlLLM.tiers.reasoning.provider)) {
 					throw new Error(
-						`LLM tier 'reasoning' is pinned to provider '${yamlLLM.tiers.reasoning.provider}' in pas.yaml, but that provider has no valid credentials. ` +
-							`Check the corresponding API key or remove the explicit tier assignment.`,
+						`LLM tier 'reasoning' is pinned to provider '${yamlLLM.tiers.reasoning.provider}' in pas.yaml, but that provider has no valid credentials. Check the corresponding API key or remove the explicit tier assignment.`,
 					);
 				}
 				tiers.reasoning = {

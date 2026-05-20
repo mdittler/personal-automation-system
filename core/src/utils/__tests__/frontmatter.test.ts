@@ -382,7 +382,7 @@ describe('parseFrontmatter — D2a enrichment roundtrip', () => {
 			tags: ['pas/recipe', 'pas/food'],
 		};
 		const generated = generateFrontmatter(meta);
-		const parsed = parseFrontmatter(generated + '\nBody content');
+		const parsed = parseFrontmatter(`${generated}\nBody content`);
 		expect(parsed.meta.title).toBe('Chicken Tacos');
 		expect(parsed.meta.type).toBe('recipe');
 		expect(parsed.meta.app).toBe('food');

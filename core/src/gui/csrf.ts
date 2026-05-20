@@ -79,7 +79,7 @@ export async function registerCsrfProtection(server: FastifyInstance): Promise<v
 
 		// Always reissue cookie with current secure policy (upgrades pre-hardening cookies)
 		const isSecure =
-			process.env['NODE_ENV'] === 'production' || process.env['GUI_SECURE_COOKIES'] === 'true';
+			process.env.NODE_ENV === 'production' || process.env.GUI_SECURE_COOKIES === 'true';
 		reply.setCookie(CSRF_COOKIE, token, {
 			path: '/gui',
 			httpOnly: false, // Must be readable by htmx via meta tag

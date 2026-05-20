@@ -45,11 +45,11 @@ describe('mutatePasYaml', () => {
 	it('applies mutator and writes back', async () => {
 		const p = await writeConfig('foo: bar\nbaz: 42\n');
 		await mutatePasYaml(p, (parsed) => {
-			parsed['baz'] = 99;
+			parsed.baz = 99;
 			return parsed;
 		});
 		const result = await readParsed();
-		expect(result['baz']).toBe(99);
+		expect(result.baz).toBe(99);
 	});
 
 	it('preserves unrelated top-level keys parse-equivalently (not byte-equal)', async () => {
@@ -70,11 +70,11 @@ n8n:
 
 		await mutatePasYaml(p, (parsed) => {
 			// Only touch a system key
-			const chat = (parsed['chat'] as Record<string, unknown> | undefined) ?? {};
-			const sessions = (chat['sessions'] as Record<string, unknown> | undefined) ?? {};
-			sessions['retention_days'] = 180;
-			chat['sessions'] = sessions;
-			parsed['chat'] = chat;
+			const chat = (parsed.chat as Record<string, unknown> | undefined) ?? {};
+			const sessions = (chat.sessions as Record<string, unknown> | undefined) ?? {};
+			sessions.retention_days = 180;
+			chat.sessions = sessions;
+			parsed.chat = chat;
 			return parsed;
 		});
 
@@ -82,29 +82,26 @@ n8n:
 		const originalParsed = parse(original) as Record<string, unknown>;
 
 		// Unrelated keys parse-equivalent
-		expect(resultParsed['defaults']).toEqual(originalParsed['defaults']);
-		expect(resultParsed['n8n']).toEqual(originalParsed['n8n']);
+		expect(resultParsed.defaults).toEqual(originalParsed.defaults);
+		expect(resultParsed.n8n).toEqual(originalParsed.n8n);
 		// users array parse-equivalent
-		expect(resultParsed['users']).toEqual(originalParsed['users']);
+		expect(resultParsed.users).toEqual(originalParsed.users);
 		// New key present
 		expect(
-			((resultParsed['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((resultParsed.chat as Record<string, unknown>).sessions as Record<string, unknown>)
+				.retention_days,
 		).toBe(180);
 	});
 
 	it('creates nested paths when intermediate keys are absent', async () => {
 		const p = await writeConfig('defaults:\n  log_level: info\n');
 		await mutatePasYaml(p, (parsed) => {
-			parsed['chat'] = { sessions: { retention_days: 90 } };
+			parsed.chat = { sessions: { retention_days: 90 } };
 			return parsed;
 		});
 		const result = await readParsed();
 		expect(
-			((result['chat'] as Record<string, unknown>)['sessions'] as Record<string, unknown>)[
-				'retention_days'
-			],
+			((result.chat as Record<string, unknown>).sessions as Record<string, unknown>).retention_days,
 		).toBe(90);
 	});
 
@@ -135,7 +132,7 @@ n8n:
 			}),
 		).rejects.toThrow('mutator error');
 		const result = await readParsed();
-		expect(result['foo']).toBe('bar');
+		expect(result.foo).toBe('bar');
 	});
 
 	// ---------------------------------------------------------------------------
@@ -147,18 +144,18 @@ n8n:
 
 		await Promise.all([
 			mutatePasYaml(p, (parsed) => {
-				parsed['key_a'] = 'value_a';
+				parsed.key_a = 'value_a';
 				return parsed;
 			}),
 			mutatePasYaml(p, (parsed) => {
-				parsed['key_b'] = 'value_b';
+				parsed.key_b = 'value_b';
 				return parsed;
 			}),
 		]);
 
 		const result = await readParsed();
-		expect(result['key_a']).toBe('value_a');
-		expect(result['key_b']).toBe('value_b');
+		expect(result.key_a).toBe('value_a');
+		expect(result.key_b).toBe('value_b');
 	});
 
 	it('mixed users-sync and system-write both persist', async () => {
@@ -177,15 +174,15 @@ n8n:
 		await Promise.all([
 			syncUsersToConfig(p, users),
 			mutatePasYaml(p, (parsed) => {
-				const chat = (parsed['chat'] as Record<string, unknown> | undefined) ?? {};
-				chat['log_to_notes'] = true;
-				parsed['chat'] = chat;
+				const chat = (parsed.chat as Record<string, unknown> | undefined) ?? {};
+				chat.log_to_notes = true;
+				parsed.chat = chat;
 				return parsed;
 			}),
 		]);
 
 		const result = await readParsed();
-		expect((result['users'] as unknown[]).length).toBe(1);
-		expect(((result['chat'] as Record<string, unknown>) ?? {})['log_to_notes']).toBe(true);
+		expect((result.users as unknown[]).length).toBe(1);
+		expect((result.chat as Record<string, unknown>)?.log_to_notes).toBe(true);
 	});
 });

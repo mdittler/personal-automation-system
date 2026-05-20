@@ -45,10 +45,10 @@ function isHealthDailyMetrics(value: unknown): value is HealthDailyMetricsPayloa
 	if (!value || typeof value !== 'object') return false;
 	const v = value as Record<string, unknown>;
 	return (
-		typeof v['userId'] === 'string' &&
-		typeof v['date'] === 'string' &&
-		typeof v['source'] === 'string' &&
-		typeof v['metrics'] === 'object' &&
-		v['metrics'] !== null
+		typeof v.userId === 'string' &&
+		typeof v.date === 'string' &&
+		typeof v.source === 'string' &&
+		typeof v.metrics === 'object' &&
+		v.metrics !== null
 	);
 }

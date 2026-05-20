@@ -221,30 +221,9 @@ export async function classifyPASMessage(
 	const appHint = appNames ? ` Installed apps: ${appNames}.` : '';
 
 	// Append recent context when available — helps resolve follow-up queries
-	const contextHint =
-		recentContext && recentContext.trim() ? ` Recent user actions: ${recentContext}.` : '';
+	const contextHint = recentContext?.trim() ? ` Recent user actions: ${recentContext}.` : '';
 
-	const systemPrompt =
-		`You are a classifier. Determine if a message is related to a personal automation system (PAS).` +
-		` PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info.` +
-		` DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons.` +
-		` SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint}` +
-		` Reply with space-separated tokens (any order). Token format:\n` +
-		`  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n` +
-		`  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n` +
-		`  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n` +
-		`  NO_PAS                        — not PAS-related\n` +
-		`Examples mapping input → tokens (Batch 3 — Gemma-friendly):\n` +
-		`  "change my fast model"             → YES_PAS YES_SETTINGS NO_DATA\n` +
-		`  "set my timezone to UTC"           → YES_PAS YES_SETTINGS NO_DATA\n` +
-		`  "what is my current standard model"→ YES_PAS YES_SETTINGS NO_DATA\n` +
-		`  "show me my system logs"           → YES_PAS NO_SETTINGS YES_DATA\n` +
-		`  "list my scheduled alerts"         → YES_PAS NO_SETTINGS YES_DATA\n` +
-		`  "what apps do I have installed"    → YES_PAS NO_SETTINGS NO_DATA\n` +
-		`  "what's in my pantry right now"    → YES_PAS NO_SETTINGS YES_DATA\n` +
-		`  "what's the weather"               → NO_PAS\n` +
-		`Backward-compat: bare YES/NO/YES_DATA tokens are also accepted.` +
-		contextHint;
+	const systemPrompt = `You are a classifier. Determine if a message is related to a personal automation system (PAS). PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info. DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons. SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint} Reply with space-separated tokens (any order). Token format:\n  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n  NO_PAS                        — not PAS-related\nExamples mapping input → tokens (Batch 3 — Gemma-friendly):\n  "change my fast model"             → YES_PAS YES_SETTINGS NO_DATA\n  "set my timezone to UTC"           → YES_PAS YES_SETTINGS NO_DATA\n  "what is my current standard model"→ YES_PAS YES_SETTINGS NO_DATA\n  "show me my system logs"           → YES_PAS NO_SETTINGS YES_DATA\n  "list my scheduled alerts"         → YES_PAS NO_SETTINGS YES_DATA\n  "what apps do I have installed"    → YES_PAS NO_SETTINGS NO_DATA\n  "what's in my pantry right now"    → YES_PAS NO_SETTINGS YES_DATA\n  "what's the weather"               → NO_PAS\nBackward-compat: bare YES/NO/YES_DATA tokens are also accepted.${contextHint}`;
 
 	try {
 		const response = await deps.llm.complete(sanitizeInput(text), {

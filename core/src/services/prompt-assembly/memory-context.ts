@@ -115,14 +115,14 @@ const VALID_STATUSES = new Set<string>(['ok', 'empty', 'degraded']);
 export function parseMemorySnapshotFrontmatter(value: unknown): MemorySnapshot | undefined {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
 	const obj = value as Record<string, unknown>;
-	if (typeof obj['content'] !== 'string') return undefined;
-	if (typeof obj['status'] !== 'string' || !VALID_STATUSES.has(obj['status'])) return undefined;
-	if (typeof obj['built_at'] !== 'string') return undefined;
-	if (typeof obj['entry_count'] !== 'number') return undefined;
+	if (typeof obj.content !== 'string') return undefined;
+	if (typeof obj.status !== 'string' || !VALID_STATUSES.has(obj.status)) return undefined;
+	if (typeof obj.built_at !== 'string') return undefined;
+	if (typeof obj.entry_count !== 'number') return undefined;
 	return {
-		content: obj['content'],
-		status: obj['status'] as MemorySnapshot['status'],
-		builtAt: obj['built_at'],
-		entryCount: obj['entry_count'],
+		content: obj.content,
+		status: obj.status as MemorySnapshot['status'],
+		builtAt: obj.built_at,
+		entryCount: obj.entry_count,
 	};
 }

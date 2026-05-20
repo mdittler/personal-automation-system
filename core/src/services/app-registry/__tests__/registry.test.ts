@@ -262,7 +262,7 @@ describe('AppRegistry', () => {
 		await writeFile(join(appDir1, 'manifest.yaml'), validManifestYaml);
 		await writeFile(
 			join(appDir1, 'index.ts'),
-			`export default { async init() {}, async handleMessage() {} };`,
+			'export default { async init() {}, async handleMessage() {} };',
 		);
 
 		const appDir2 = join(tempDir, 'echo-second');
@@ -271,7 +271,7 @@ describe('AppRegistry', () => {
 		await writeFile(join(appDir2, 'manifest.yaml'), validManifestYaml);
 		await writeFile(
 			join(appDir2, 'index.ts'),
-			`export default { async init() {}, async handleMessage() {} };`,
+			'export default { async init() {}, async handleMessage() {} };',
 		);
 
 		const registry = new AppRegistry({ appsDir: tempDir, config, logger });
