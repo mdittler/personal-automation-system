@@ -1373,11 +1373,11 @@ EOF
 
 Before merging Phase 1 to main:
 
-- [ ] **Step 1: Run the full suite.** `pnpm test`, `pnpm lint`, `pnpm build`. Zero failures, clean.
-- [ ] **Step 2: Manual smoke via Telegram.** Send `/ask How do I invite someone?` and `How do I invite someone to my household?` (no slash). Confirm both responses describe `/invite`. Repeat for `/recall`, `/edit`, `/flushmemory`.
-- [ ] **Step 3: Route through Codex review** per `feedback_codex_plan_review.md`. Apply Critical/Important corrections in-place with a change table; defer the implementation to a fresh subagent for each non-trivial correction. Re-run the full suite after each round.
-- [ ] **Step 4: Open PR** from `pas-w1-command-awareness` to `main`. PR body: link the spec section, the change table from Codex review, and call out the `/notes → /listnotes` user-facing change.
-- [ ] **Step 5: Merge** once review is clean.
+- [ ] **Step 1: Run the full suite.** `pnpm test`, `pnpm lint`, `pnpm build`. Zero failures, clean. — _Left unchecked: `pnpm lint` is not clean (pre-existing repo-wide Biome debt). `pnpm test` passed 2026-05-20 (534 files / 11,764 tests) and build + typecheck pass; the one observed full-suite failure — `app-outbound-bridge` I1, an unrelated phase — is a rare intermittent flake (passes in isolation and on reruns)._
+- [ ] **Step 2: Manual smoke via Telegram.** Send `/ask How do I invite someone?` and `How do I invite someone to my household?` (no slash). Confirm both responses describe `/invite`. Repeat for `/recall`, `/edit`, `/flushmemory`. — _Not independently verified in this session._
+- [x] **Step 3: Route through Codex review** per `feedback_codex_plan_review.md`. Apply Critical/Important corrections in-place with a change table; defer the implementation to a fresh subagent for each non-trivial correction. Re-run the full suite after each round.
+- [x] **Step 4: Open PR** from `pas-w1-command-awareness` to `main` — PR #35. PR body: link the spec section, the change table from Codex review, and call out the `/notes → /listnotes` user-facing change.
+- [x] **Step 5: Merge** once review is clean. — merged 2026-05-18 (PR #35).
 
 ---
 
@@ -2101,18 +2101,18 @@ EOF
 
 ### Phase 2 review checkpoint
 
-- [ ] **Step 1: Full suite, lint, build clean.** Zero failures.
-- [ ] **Step 2: Codex review** per `feedback_codex_plan_review.md`. Apply Critical/Important corrections in-place. Subagent per non-trivial correction.
-- [ ] **Step 3: Open PR** from `pas-w2-user-identity` to `main`. Body links the spec, the change table from Codex review, and notes the contract change (display names now unique + accepted at login).
-- [ ] **Step 4: Merge** once review is clean.
+- [ ] **Step 1: Full suite, lint, build clean.** Zero failures. — _Left unchecked: `pnpm lint` is not clean (pre-existing repo-wide Biome debt). `pnpm test` passed 2026-05-20 (534 files / 11,764 tests) and build + typecheck pass; the one observed full-suite failure — `app-outbound-bridge` I1, an unrelated phase — is a rare intermittent flake (passes in isolation and on reruns)._
+- [x] **Step 2: Codex review** per `feedback_codex_plan_review.md`. Apply Critical/Important corrections in-place. Subagent per non-trivial correction. — two pre-merge rounds; a post-merge Codex review (2026-05-20) applied four further corrections (see implementation-phases.md W2 post-merge note).
+- [x] **Step 3: Open PR** from `pas-w2-user-identity` to `main` — PR #34. Body links the spec, the change table from Codex review, and notes the contract change (display names now unique + accepted at login).
+- [x] **Step 4: Merge** once review is clean. — merged 2026-05-18 (PR #34).
 
 ---
 
 ## Post-merge cleanup
 
-- [ ] **Step 1: URS entries.** Add `REQ-CHATBOT-CATALOG-001..NNN` (Phase 1) and `REQ-USER-IDENTITY-001..NNN` (Phase 2) entries to `docs/urs.md` covering each batch's testable claims. One requirement per assertion that a test enforces.
-- [ ] **Step 2: Implementation status update.** Add one bullet to `CLAUDE.md`'s Implementation Status list (per the anti-bloat rule — single line, demote oldest bullet if list exceeds ~8). Detailed batch breakdown goes into `docs/implementation-phases.md`.
-- [ ] **Step 3: Open-items cleanup.** Move the entry under "Confirmed Phases" to the "completed" form (strikethrough `~~...~~` ✓ Complete (YYYY-MM-DD)) and verify the 5 deferred items in Proposals still make sense.
+- [ ] **Step 1: URS entries.** Add `REQ-CHATBOT-CATALOG-001..NNN` (Phase 1) and `REQ-USER-IDENTITY-001..NNN` (Phase 2) entries to `docs/urs.md` covering each batch's testable claims. One requirement per assertion that a test enforces. — _Deferred: W2 shipped four entries under the `REQ-USER-009..012` namespace (not the planned `REQ-USER-IDENTITY-*`); W1 has no `REQ-CHATBOT-CATALOG-*` entries. Tracked as a follow-up in `docs/open-items.md` → Unfinished Corrections._
+- [x] **Step 2: Implementation status update.** Add one bullet to `CLAUDE.md`'s Implementation Status list (per the anti-bloat rule — single line, demote oldest bullet if list exceeds ~8). Detailed batch breakdown goes into `docs/implementation-phases.md`.
+- [ ] **Step 3: Open-items cleanup.** Move the entry under "Confirmed Phases" to the "completed" form (strikethrough `~~...~~` ✓ Complete (YYYY-MM-DD)) and verify the 5 deferred items in Proposals still make sense. — _Partial: the stale "in review" status was corrected to "Merged; follow-up open" and a traceability follow-up entry was added under "Unfinished Corrections". The full completed form (`~~...~~ ✓ Complete`) is intentionally NOT applied while W1/W2 URS reconciliation + the W1 phase-doc section remain open; the Proposals re-verification is also still pending._
 
 ---
 

@@ -161,7 +161,13 @@
         <tbody>
           <% for (const u of it.perUser) { %>
             <tr>
-              <td><%= u.userId %></td>
+              <td>
+                <% if (u.userName) { %>
+                  <%= u.userName %> <small><code><%= u.userId %></code></small>
+                <% } else { %>
+                  <code><%= u.userId %></code>
+                <% } %>
+              </td>
               <td><%= u.callCount.toLocaleString() %></td>
               <td><%= u.totalCost.toFixed(6) %></td>
             </tr>

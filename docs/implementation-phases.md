@@ -3310,7 +3310,7 @@ The following Previous Priority blocks moved here from CLAUDE.md during slimming
 
 ## Phase 2026-05-18 — User Identity Clarity (W2)
 
-**Status:** In review on `worktree-pas-w2-user-identity`
+**Status:** ✅ Merged 2026-05-18 (PR #34). Post-merge Codex review corrections applied 2026-05-20 — see "Post-merge corrections" below.
 **Depends on:** Phase 29 (User Management), Phase D5b-3 (per-user GUI auth)
 
 ### Goal
@@ -3348,6 +3348,17 @@ Phase 2 went through two Codex review rounds. Round 1: 7 findings (non-numeric I
 ### Tests
 
 `@pas/core` 7388 → 7454 (+66 new tests across the 7 new test files plus extensions to `user-manager.test.ts`). Build + typecheck clean. URS: 4 new requirements (REQ-USER-009 through REQ-USER-012).
+
+### Post-merge corrections (2026-05-20)
+
+A post-merge Codex review of the merged W2 work surfaced four corrections, applied on branch `worktree-w2-codex-review-fixes`:
+
+- **`registerUser` duplicate-id guard** (P1) — `UserMutationService.registerUser` now resolves the incoming id against `UserManager` before `addUser`: an identical record is an idempotent no-op, a divergent one is rejected. The W2 name-collision check skipped same-id users in anticipation of an "idempotent retry path", but `UserManager.addUser` pushes unconditionally, so a same-id re-registration would have persisted a duplicate user block to `pas.yaml`.
+- **`InviteService.knownUsers` contract** (P2) — the option was typed required but two dead `if (this.knownUsers)` runtime branches and an "omitted knownUsers" test still treated it as optional. The branches are removed, a constructor guard fails fast for untyped callers, and the test now asserts the required contract.
+- **Locale-dependent lowercasing** (P2) — the unknown-user login rate-limit key in `auth.ts` used `toLocaleLowerCase()`; switched to locale-independent `toLowerCase()`, consistent with `normalizeDisplayName`.
+- **LLM-usage per-user breakdown** (P1) — the `/gui/llm` per-user table rendered a bare numeric id (this template was outside Batch 2B's enumerated GUI surfaces). `userManager` is now injected into the LLM-usage route; the table leads with the display name and keeps the id in `<small>`, matching the rest of the W2 GUI work.
+
+Deferred and tracked in `docs/open-items.md`: the W1 `implementation-phases.md` section is still missing, and URS traceability needs a backfill (`REQ-CHATBOT-CATALOG-*` for W1; reconcile W2's `REQ-USER-009..012` against the plan's intended `REQ-USER-IDENTITY-*` namespace).
 
 ---
 
