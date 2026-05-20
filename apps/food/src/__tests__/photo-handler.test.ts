@@ -1101,6 +1101,7 @@ describe('Photo Handler', () => {
 		it('sanitizePhotoField strips ASCII control chars', () => {
 			const hostile = 'Salmon\x00\x07\x1bdo evil';
 			const result = sanitizePhotoField(hostile);
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization check
 			expect(result).not.toMatch(/[\x00-\x1f\x7f]/);
 		});
 
@@ -1153,6 +1154,7 @@ describe('Photo Handler', () => {
 			// Newlines (\n) are valid structural separators in the summary — only non-newline
 			// control chars (NUL, ESC, etc.) must be absent.
 			const withoutNewlines = out.assistantTurn.replace(/\n/g, '');
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization check
 			expect(withoutNewlines).not.toMatch(/[\x00-\x1f\x7f]/);
 		});
 

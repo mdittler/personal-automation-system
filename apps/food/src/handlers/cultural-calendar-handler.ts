@@ -114,7 +114,7 @@ export async function handleCulturalCalendarMessage(
 			(h) => h.enabled && lowerText.includes(h.name.toLowerCase()),
 		);
 
-		let upcoming;
+		let upcoming: ReturnType<typeof getUpcomingHolidays>;
 		if (namedHolidays.length > 0) {
 			// Use the named holiday(s) — resolve dates for the next 365 days
 			const results: Array<{ holiday: (typeof calendar.holidays)[0]; date: string }> = [];

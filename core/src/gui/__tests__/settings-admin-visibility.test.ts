@@ -152,11 +152,14 @@ async function buildVisibilityFixture(): Promise<VisibilityFixture> {
 				await registerAuth(gui, {
 					authToken: AUTH_TOKEN,
 					credentialService: credService,
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
 				});
 				await registerCsrfProtection(gui);
 				await registerViewLocals(gui, {
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
 				});
 				registerSettingsRoutes(gui, {

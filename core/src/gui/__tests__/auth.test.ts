@@ -110,12 +110,14 @@ describe('GUI Auth', () => {
 
 		afterEach(() => {
 			if (originalNodeEnv === undefined) {
-				delete process.env['NODE_ENV'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.NODE_ENV;
 			} else {
 				process.env.NODE_ENV = originalNodeEnv;
 			}
 			if (originalSecureCookies === undefined) {
-				delete process.env['GUI_SECURE_COOKIES'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.GUI_SECURE_COOKIES;
 			} else {
 				process.env.GUI_SECURE_COOKIES = originalSecureCookies;
 			}
@@ -158,8 +160,10 @@ describe('GUI Auth', () => {
 		});
 
 		it('does NOT set Secure flag in development', async () => {
-			delete process.env['NODE_ENV'];
-			delete process.env['GUI_SECURE_COOKIES'];
+			// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+			delete process.env.NODE_ENV;
+			// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+			delete process.env.GUI_SECURE_COOKIES;
 			const res = await app.inject({
 				method: 'POST',
 				url: '/gui/login',
@@ -223,7 +227,8 @@ describe('GUI Auth', () => {
 			expect(csrfClear).toMatch(/(^|;\s*)Secure(;|$)/i);
 		} finally {
 			if (originalNodeEnv === undefined) {
-				delete process.env['NODE_ENV'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.NODE_ENV;
 			} else {
 				process.env.NODE_ENV = originalNodeEnv;
 			}
@@ -234,7 +239,8 @@ describe('GUI Auth', () => {
 		const originalNodeEnv = process.env.NODE_ENV;
 		try {
 			// Login without production flag (simulates pre-hardening cookie)
-			delete process.env['NODE_ENV'];
+			// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+			delete process.env.NODE_ENV;
 			const loginRes = await app.inject({
 				method: 'POST',
 				url: '/gui/login',
@@ -260,7 +266,8 @@ describe('GUI Auth', () => {
 			expect(reissuedAuth).toMatch(/(^|;\s*)Secure(;|$)/i);
 		} finally {
 			if (originalNodeEnv === undefined) {
-				delete process.env['NODE_ENV'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.NODE_ENV;
 			} else {
 				process.env.NODE_ENV = originalNodeEnv;
 			}
@@ -286,7 +293,8 @@ describe('GUI Auth', () => {
 			expect(authClear).toMatch(/(^|;\s*)Secure(;|$)/i);
 		} finally {
 			if (originalNodeEnv === undefined) {
-				delete process.env['NODE_ENV'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.NODE_ENV;
 			} else {
 				process.env.NODE_ENV = originalNodeEnv;
 			}

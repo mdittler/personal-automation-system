@@ -254,8 +254,9 @@ function extractDeliveryCbLabels(html: string): Array<{ checkboxValue: string; t
 	// Match each <label> whose contents include an <input class="delivery-cb" ... value="...">,
 	// capturing the value and the post-input label text.
 	const labelRegex = /<label[^>]*>([\s\S]*?)<\/label>/g;
-	let m: RegExpExecArray | null;
-	while ((m = labelRegex.exec(html)) !== null) {
+	for (;;) {
+		const m = labelRegex.exec(html);
+		if (m === null) break;
 		const inner = m[1];
 		if (!/class="[^"]*delivery-cb[^"]*"/.test(inner)) continue;
 		const valueMatch = inner.match(/<input[^>]*value="([^"]*)"/);
@@ -280,12 +281,14 @@ function extractOptionsForSelect(
 		'g',
 	);
 	const results: Array<{ value: string; text: string }> = [];
-	let sm: RegExpExecArray | null;
-	while ((sm = selectRegex.exec(html)) !== null) {
+	for (;;) {
+		const sm = selectRegex.exec(html);
+		if (sm === null) break;
 		const inner = sm[1];
 		const optRegex = /<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g;
-		let om: RegExpExecArray | null;
-		while ((om = optRegex.exec(inner)) !== null) {
+		for (;;) {
+			const om = optRegex.exec(inner);
+			if (om === null) break;
 			results.push({ value: om[1], text: om[2].trim() });
 		}
 	}

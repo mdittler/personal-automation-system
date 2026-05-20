@@ -200,7 +200,8 @@ describe('D39: Alert form space_id round-trip', () => {
 				ds_space_id_0: 'family',
 			});
 			// Remove user_id from payload (space mode doesn't submit it)
-			delete (payload as any)['ds_user_id_0'];
+			// biome-ignore lint/performance/noDelete: removes key from form payload so server sees no field (undefined value would still serialize)
+			delete (payload as any).ds_user_id_0;
 
 			const res = await app.inject({
 				method: 'POST',
@@ -278,8 +279,10 @@ describe('D39: Alert form space_id round-trip', () => {
 
 			// No ds_scope_0, only ds_space_id_0
 			const payload = { ...makeValidAlertPayload(), _csrf: csrfToken, ds_space_id_0: 'household' };
-			delete (payload as any)['ds_scope_0'];
-			delete (payload as any)['ds_user_id_0'];
+			// biome-ignore lint/performance/noDelete: removes key from form payload so server sees no field (undefined value would still serialize)
+			delete (payload as any).ds_scope_0;
+			// biome-ignore lint/performance/noDelete: removes key from form payload so server sees no field (undefined value would still serialize)
+			delete (payload as any).ds_user_id_0;
 
 			const res = await app.inject({
 				method: 'POST',

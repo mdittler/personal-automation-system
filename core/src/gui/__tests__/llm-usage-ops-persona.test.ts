@@ -178,7 +178,9 @@ async function buildPersonaApp(options: BuildOptions = {}) {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
+				// biome-ignore format: esbuild cannot parse import type assertions split across lines
 				userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
+				// biome-ignore format: esbuild cannot parse import type assertions split across lines
 				householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
 			});
 			await registerCsrfProtection(gui);
@@ -188,6 +190,7 @@ async function buildPersonaApp(options: BuildOptions = {}) {
 				modelCatalog: makeModelCatalog(),
 				providerRegistry: makeProviderRegistry(),
 				logger,
+				// biome-ignore format: esbuild cannot parse import type assertions split across lines
 				costTracker: costTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
 				householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
 				messageRateTracker: options.messageRateTracker,
@@ -321,7 +324,9 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 				await registerAuth(gui, {
 					authToken: AUTH_TOKEN,
 					credentialService: credService,
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
 				});
 				await registerCsrfProtection(gui);
@@ -331,6 +336,7 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 					modelCatalog: makeModelCatalog(),
 					providerRegistry: makeProviderRegistry(),
 					logger,
+					// biome-ignore format: esbuild cannot parse import type assertions split across lines
 					costTracker: dynamicCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
 					householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
 				});

@@ -67,7 +67,7 @@ export async function loadCases(rootDir: string): Promise<LoadedCase[]> {
 }
 
 async function walk(dir: string, visit: (path: string) => Promise<void>): Promise<void> {
-	let entries;
+	let entries: import('node:fs').Dirent[];
 	try {
 		entries = await readdir(dir, { withFileTypes: true });
 	} catch (err) {

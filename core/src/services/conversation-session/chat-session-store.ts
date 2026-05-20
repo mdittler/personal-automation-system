@@ -194,6 +194,7 @@ function validateParentSessionId(input: unknown, sessionId: string, logger: Logg
 function sanitizeTitle(input: string): string | null {
 	const cleaned = input
 		.replace(/[\r\n\t]+/g, ' ')
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
 		.replace(/[\u0000-\u001F\u007F]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();

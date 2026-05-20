@@ -215,6 +215,7 @@ describe('MessageRateTracker', () => {
 				...args: Parameters<typeof setInterval>
 			) => {
 				const timer = (origSetInterval as typeof setInterval)(...args);
+				// biome-ignore lint/performance/noDelete: removes .unref so the test can verify missing-method resilience; setting to undefined would leave the key present
 				delete (timer as unknown as Record<string, unknown>).unref;
 				return timer;
 			};

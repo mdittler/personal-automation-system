@@ -47,9 +47,9 @@ describe('{{APP_NAME}}', () => {
 
 		it('should handle the command', async () => {
 			const ctx = createTestMessageContext();
-			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on app module
 			// The router strips the leading slash before dispatch — handleCommand
 			// receives the bare command name (e.g. '{{APP_COMMAND}}', not '/{{APP_COMMAND}}').
+			// biome-ignore lint/style/noNonNullAssertion: handleCommand is defined on app module
 			await app.handleCommand!('{{APP_COMMAND}}', ['test'], ctx);
 			expect(services.telegram.send).toHaveBeenCalledWith('test-user', 'test');
 		});

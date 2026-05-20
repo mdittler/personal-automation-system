@@ -1022,6 +1022,7 @@ describe('buildAppAwareSystemPrompt — command catalog injection', () => {
 		const closeCount = (prompt.match(/<\/reference-data>/g) ?? []).length;
 		expect(closeCount).toBe(1);
 		// Control chars (excluding tab/LF/CR which are normal whitespace) should be gone.
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization check
 		expect(prompt).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
 	});
 

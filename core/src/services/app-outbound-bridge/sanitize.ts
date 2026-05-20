@@ -14,6 +14,7 @@ export function sanitizeAppMessageField(
 	if (!input) return '';
 	let s = String(input);
 	// Strip ASCII control chars (0x00–0x1f, 0x7f)
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
 	s = s.replace(/[\x00-\x1f\x7f]/g, ' ');
 	// Strip Unicode zero-width / bidi / BOM chars.
 	// U+200B–U+200F: zero-width space through RLM

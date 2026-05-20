@@ -155,11 +155,14 @@ function getModelLabels(deps: PromptBuilderDeps): { standardModel: string; fastM
 
 /** Strip control chars and fence-escape tokens from app-supplied catalog text. */
 function sanitizeCatalogField(s: string): string {
-	return s
-		.replace(/[\x00-\x1F\x7F]+/g, ' ')
-		.replace(/<\/?reference-data[^>]*>/gi, '')
-		.replace(/\s+/g, ' ')
-		.trim();
+	return (
+		s
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
+			.replace(/[\x00-\x1F\x7F]+/g, ' ')
+			.replace(/<\/?reference-data[^>]*>/gi, '')
+			.replace(/\s+/g, ' ')
+			.trim()
+	);
 }
 
 /**

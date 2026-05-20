@@ -187,6 +187,7 @@ describe('summarizeSession', () => {
 			deps = mkDeps('{"summary": "text\\u0000with\\u001Fcontrols\\u007F"}');
 			const out = await summarizeSession([turn('user', 'hi'), turn('assistant', 'hello')], deps);
 			expect(out).not.toBeNull();
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization check
 			expect(out).not.toMatch(/[\x00-\x1F\x7F]/);
 		});
 
@@ -237,6 +238,7 @@ describe('sanitizeSummaryOutput', () => {
 
 	it('replaces control characters with spaces', () => {
 		const out = sanitizeSummaryOutput('a\x00b\x1Fc');
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization check
 		expect(out).not.toMatch(/[\x00-\x1F\x7F]/);
 	});
 

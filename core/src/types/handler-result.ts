@@ -7,4 +7,5 @@
  *
  * Legacy apps that return void are treated as handled (no fallback).
  */
+// biome-ignore lint/suspicious/noConfusingVoidType: void is required here so apps returning Promise<void> satisfy Promise<HandlerResult>
 export type HandlerResult = void | { handled: boolean };

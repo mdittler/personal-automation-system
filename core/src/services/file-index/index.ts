@@ -46,7 +46,7 @@ export class FileIndexService {
 	}
 
 	private async scanDirectory(dirPath: string, prefix: string): Promise<void> {
-		let dirEntries;
+		let dirEntries: import('node:fs').Dirent[];
 		try {
 			dirEntries = await readdir(dirPath, { withFileTypes: true });
 		} catch {

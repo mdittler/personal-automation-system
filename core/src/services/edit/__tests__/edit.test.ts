@@ -1358,8 +1358,7 @@ describe('withFileLock integration — sequential confirms', () => {
 	it('cleans up the lock Map after sequential acquisitions on the same path', async () => {
 		// confirms on the same path are serialized via the shared FileMutex
 		const relativePath = 'users/matt/food/recipes/lock-test.yaml';
-		let dataDir: string;
-		dataDir = makeTmpDir();
+		const dataDir = makeTmpDir();
 		await mkdir(dataDir, { recursive: true });
 		await mkdir(join(dataDir, 'system'), { recursive: true });
 

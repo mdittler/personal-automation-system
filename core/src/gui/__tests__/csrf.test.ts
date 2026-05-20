@@ -254,12 +254,14 @@ describe('CSRF Protection', () => {
 
 		afterEach(() => {
 			if (originalNodeEnv === undefined) {
-				delete process.env['NODE_ENV'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.NODE_ENV;
 			} else {
 				process.env.NODE_ENV = originalNodeEnv;
 			}
 			if (originalSecureCookies === undefined) {
-				delete process.env['GUI_SECURE_COOKIES'];
+				// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+				delete process.env.GUI_SECURE_COOKIES;
 			} else {
 				process.env.GUI_SECURE_COOKIES = originalSecureCookies;
 			}
@@ -295,8 +297,10 @@ describe('CSRF Protection', () => {
 
 		it('reissues existing CSRF cookie with Secure flag in production', async () => {
 			// First GET without production — creates cookie without Secure
-			delete process.env['NODE_ENV'];
-			delete process.env['GUI_SECURE_COOKIES'];
+			// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+			delete process.env.NODE_ENV;
+			// biome-ignore lint/performance/noDelete: must unset env var; assigning undefined would set the string "undefined"
+			delete process.env.GUI_SECURE_COOKIES;
 			const res1 = await app.inject({ method: 'GET', url: '/gui/page' });
 			const csrfCookie = extractCsrfCookie(res1);
 			expect(csrfCookie).toBeDefined();

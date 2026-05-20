@@ -1144,7 +1144,7 @@ async function validateModelsAgainstLiveCatalog(
 	}
 	if (submitted.size === 0) return null;
 
-	let catalog;
+	let catalog: Awaited<ReturnType<typeof modelCatalog.getModels>>;
 	try {
 		catalog = await modelCatalog.getModels();
 	} catch (err) {

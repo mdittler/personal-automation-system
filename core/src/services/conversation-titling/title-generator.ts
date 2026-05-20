@@ -28,6 +28,7 @@ function sanitizeOutput(raw: string): string | null {
 	const cleaned = raw
 		.replace(/[`#*_>\[\]()!]/g, '')
 		.replace(/[\r\n\t]+/g, ' ')
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char sanitization
 		.replace(/[\x00-\x1F\x7F]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
